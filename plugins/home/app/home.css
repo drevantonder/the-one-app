@@ -1,0 +1,235 @@
+/* The home pages: a strip of pages to swipe between, and under them the page's name and the dots. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.home {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  /* A little light behind the apps, so the page is a place and not a blank sheet. */
+  background: radial-gradient(ellipse 85% 26% at 50% 20%, color-mix(in oklab, var(--muted) 70%, transparent), transparent 72%);
+}
+.strip {
+  display: flex;
+  min-height: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+/* A page has no title at its top, and keeps the gap a phone's own home screen has. Its parts size themselves by
+   the room it has, not by the window. */
+.page {
+  box-sizing: border-box;
+  flex: 0 0 100%;
+  min-width: 0;
+  padding: 3.5rem 1.25rem 1.5rem;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  container-type: inline-size;
+}
+/* A grid of cells, four across on a phone and as many as fit where there's more room, each as big as a phone's:
+   an app takes one, and a widget a phone's own sizes, 2×2, 4×2 and 4×4. What's small fills the gaps the large
+   leave. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: 5.5rem;
+  grid-auto-flow: row dense;
+  gap: 1rem 0.75rem;
+}
+@container (min-width: 26rem) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, 5.25rem);
+    justify-content: center;
+  }
+}
+/* What's let go settles where it belongs quickly. While it's held it is the finger, with nothing easing it. */
+.cell {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  transition: translate var(--move-settle) var(--ease-settle), scale var(--move-quick) var(--ease-quick);
+  -webkit-touch-callout: none;
+}
+.cell[data-size] {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+.cell[data-size="4x2"],
+.cell[data-size="4x4"] {
+  grid-column: span 4;
+}
+.cell[data-size="4x4"] {
+  grid-row: span 4;
+}
+/* What's held lifts, and where it would go shows. */
+.cell.lifted {
+  z-index: 1;
+  scale: 1.06;
+  opacity: 0.9;
+  transition: scale var(--move-quick) var(--ease-quick);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell,
+  .dots i {
+    transition: none;
+  }
+}
+.cell.target {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: 1.375rem;
+}
+.tile {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 0.4375rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  /* As small as a phone's own labels, so most names fit under an icon. */
+  font-size: 0.75rem;
+  line-height: 1.25;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tile img {
+  width: var(--tile, 3.75rem);
+  height: var(--tile, 3.75rem);
+  border-radius: 22.5%;
+  transition: scale var(--move-quick) var(--ease-quick), opacity var(--move-quick) var(--ease-quick);
+}
+.tile:active img {
+  scale: 0.94;
+  opacity: 0.85;
+  transition-duration: 0s;
+}
+.tile:focus-visible {
+  outline: none;
+}
+.tile:focus-visible img {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.tile span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A page's name is small above the dots, with whose network it's in, and the dots are a centred capsule, between
+   the search and the cog for Settings. */
+footer {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.25rem 1rem;
+}
+footer p {
+  display: flex;
+  gap: 0.375rem;
+  max-width: 100%;
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.25;
+}
+.network {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dots {
+  display: flex;
+  align-items: center;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--accent);
+  touch-action: none;
+}
+.dots button {
+  display: grid;
+  place-items: center;
+  height: 2rem;
+  padding: 0 0.3125rem;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 1rem;
+  cursor: pointer;
+}
+.dots button:not(.dot) {
+  padding: 0 0.5rem;
+}
+.dots button[aria-current] {
+  color: var(--foreground);
+}
+.dots i {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.4;
+  transition: width var(--move-settle) var(--ease-settle);
+}
+.dots [aria-current] i {
+  width: 1rem;
+  opacity: 1;
+}
+.dots button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: 999px;
+}
+/* The search: what's typed, then each page's apps and Settings, a section each that folds. */
+.find {
+  display: grid;
+  gap: var(--gap);
+}
+.find summary {
+  padding: 0 0 0.375rem;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.find img {
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 22.5%;
+}
+/* Under a finger the dots, the search and the cog are each a fingertip tall. */
+@media (pointer: coarse) {
+  .dots button {
+    height: 2.75rem;
+    padding: 0 0.375rem;
+  }
+  .dots button:not(.dot) {
+    padding: 0 0.625rem;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .dots button:hover {
+    color: var(--foreground);
+  }
+}
+/* An empty page's one grey line is in its middle. */
+.page > .ui-state {
+  justify-items: center;
+  text-align: center;
+}

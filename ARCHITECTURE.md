@@ -129,7 +129,12 @@
 - MCP Apps are supported from the start.
 - An app is free in what it shows. A widget is as free as the platform it sits on allows, and we pass on as much of that
   freedom as we can.
-- Home pages are a plugin. How they split between a server and the UI the clients share isn't worked out.
+- Home pages are a plugin. A page is what's added for whoever it belongs to, so nothing keeps which apps a page has:
+  the plugin keeps only how each is arranged, as an artifact that's the page's owner's. What draws the pages is
+  the plugin's app, which a client shows first and under every other, and which opens the rest.
+- A widget is a tool call, drawn: its plugin's tool answers the layout, and a client asks again as it would for any
+  tool that only reads.
+- A part of Settings is an app of a plugin that says it's one. Settings is no more than those.
 - Adding an app to a home page puts it on the clients of everyone who sees that page.
 - An app opened from a group's home page works with the group's artifacts.
 - Insights is a plugin. It keeps what every tool, service and server did and how long it took, in OpenTelemetry's

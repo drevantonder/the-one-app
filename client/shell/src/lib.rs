@@ -1,14 +1,15 @@
-//! The app: a window on the client's Rust half. Its own page (`page`) is the home screen. A device that isn't in its
-//! network yet is shown the network's sign-in page instead, with the code it's let in by, until its person has. Each app is a page of its
-//! plugin's, drawn in a frame of its own, which reaches nothing here but the bridge the home screen's page gives it:
-//! what an app asks comes to `ask`, as what the home screen asks does.
+//! The app: a window on the client's Rust half. Its own page (`page`) draws nothing of its own but a problem: it
+//! holds the frames. A device that isn't in its network yet is shown the network's sign-in page instead, with the
+//! code it's let in by, until its person has. Each app is a page of its plugin's, drawn in a frame of its own, which
+//! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The home pages
+//! are an app too, the plugin `home`'s, which the window shows first and under every other.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use client::{Client, NotIn, NotLetIn, Shown};
+use ::client::{Client, NotIn, NotLetIn, Shown};
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
 use tauri::ipc::{InvokeBody, Request};
@@ -23,7 +24,7 @@ const APP_MAY_LOAD: &str = "default-src 'none'; script-src 'self' 'unsafe-inline
                             img-src 'self' data:; media-src 'self' data:; font-src 'self' data:; connect-src 'none'; \
                             frame-src 'none'; object-src 'none'; base-uri 'self'";
 
-/// The views in the window, by name: the home screen (`home`) and each app that's open, by its plugin's name.
+/// The views in the window, by name: the window's own page (`client`) and each app that's open.
 struct Views {
     client: Arc<Client>,
     app: AppHandle,
@@ -55,9 +56,11 @@ impl Views {
         }
     }
 
-    /// The files of every plugin a server lists, as MCP lists resources.
-    async fn listed(&self) -> anyhow::Result<Value> {
-        self.shown("home").ask("resources/list", json!({})).await
+    /// The files of every plugin a server lists for `who`, a group or the network, or for this client's user, as MCP
+    /// lists resources.
+    async fn listed(&self, who: Option<&str>) -> anyhow::Result<Value> {
+        let asked = who.map_or(json!({}), |who| json!({"_meta": {"for": who}}));
+        self.shown("client").ask("resources/list", asked).await
     }
 
     /// One file a server listed: what kind it is, and its text. A set of a plugin's files never changes, so a file
@@ -74,8 +77,9 @@ impl Views {
     }
 
     /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the newest files of
-    /// `plugin` this client knows of. One a server didn't list, as a page loads none of them (a sourcemap), is read
-    /// by name from the same version.
+    /// `plugin` this client knows of. An app opened for a group or the network says so after its name, last part
+    /// first (`notes.family.groups.localhost`), and its files are the ones listed for them. One a server didn't
+    /// list, as a page loads none of them (a sourcemap), is read by name from the same version.
     async fn file(&self, address: &Uri) -> anyhow::Result<(String, Vec<u8>)> {
         let file = address.path().trim_start_matches('/');
         // A large file a tool answered with, which the client keeps, at the address the answer gave an app for it.
@@ -84,27 +88,31 @@ impl Views {
         }
         let none = || anyhow::anyhow!("no plugin here has {file}");
         let (plugin, path) = file.split_once('/').ok_or_else(none)?;
-        let listed = self.listed().await?;
+        let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
+        // Android's and Windows' web views name the app after the scheme, in a host's name.
+        let app = app.strip_prefix("oneapp.").unwrap_or(app);
+        let who: Vec<&str> = app.split('.').skip(1).collect();
+        let who = (!who.is_empty()).then(|| who.into_iter().rev().collect::<Vec<_>>().join("/"));
+        let listed = self.listed(who.as_deref()).await?;
         let mut versions = resources(&listed).filter_map(parts).filter(|(of, ..)| *of == plugin);
         let (_, code, _) = versions.next().ok_or_else(none)?;
         let resource = format!("ui://{plugin}/{code}/{path}");
         if resources(&listed).any(|listed| listed == resource) {
-            let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
-            // Android's and Windows' web views name the app after the scheme, in a host's name.
-            let app = app.strip_prefix("oneapp.").unwrap_or(app);
             self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.clone());
         }
         let (kind, text) = self.read(&resource).await?;
         Ok((kind, text.into_bytes()))
     }
 
-    /// The open apps that loaded a file a server no longer lists: one of their plugins has a new version. They
-    /// have loaded nothing once this has named them.
-    fn outdated(&self, listed: &Value) -> Vec<String> {
+    /// The open apps for `who` that loaded a file a server no longer lists: one of their plugins has a new version.
+    /// They have loaded nothing once this has named them.
+    fn outdated(&self, who: Option<&str>, listed: &Value) -> Vec<String> {
         let listed: HashSet<&str> = resources(listed).collect();
+        let whose = who.map(|who| who.split('/').rev().collect::<Vec<_>>().join("."));
         let mut loaded = self.loaded.lock().expect("no view panics");
         let outdated: Vec<String> = loaded
             .iter()
+            .filter(|(app, _)| app.split_once('.').map(|(_, whose)| whose) == whose.as_deref())
             .filter(|(_, files)| files.iter().any(|file| !listed.contains(file.as_str())))
             .map(|(app, _)| app.clone())
             .collect();
@@ -124,14 +132,14 @@ fn parts(resource: &str) -> Option<(&str, &str, &str)> {
     Some((parts.next()?, parts.next()?, parts.next()?))
 }
 
-/// The apps on the home screen: the files a server lists, of which an app is a page, and with them the open apps
-/// that are `outdated` and load again. Every file listed is kept behind this, so with no server up an app opens
-/// whole, even one that was never opened, or whose plugins have changed since.
+/// The files a server lists for `who`, a group or the network, or for this client's user, and with them the open
+/// apps that are `outdated` and load again, each as its address names it. Every file listed is kept behind this, so
+/// with no server up an app opens whole, even one that was never opened, or whose plugins have changed since.
 #[tauri::command]
-async fn apps(app: AppHandle, views: State<'_, Views>) -> Result<Value, String> {
+async fn apps(app: AppHandle, views: State<'_, Views>, who: Option<String>) -> Result<Value, String> {
     // A person is told what went wrong, and not what was behind it.
-    let mut listed = views.listed().await.map_err(|error| error.to_string())?;
-    listed["outdated"] = views.outdated(&listed).into();
+    let mut listed = views.listed(who.as_deref()).await.map_err(|error| error.to_string())?;
+    listed["outdated"] = views.outdated(who.as_deref(), &listed).into();
     let keep = listed.clone();
     tauri::async_runtime::spawn(async move {
         for resource in resources(&keep) {
@@ -155,10 +163,10 @@ async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
     Ok(())
 }
 
-/// The network's address, if it has one: whose network this client is in.
+/// This device's key, as its network knows it, and the network's address, if it has one.
 #[tauri::command]
-fn network(views: State<'_, Views>) -> Option<String> {
-    views.client.address()
+fn client(views: State<'_, Views>) -> Value {
+    json!({"device": views.client.key(), "network": views.client.address()})
 }
 
 /// Says whether the window is on screen. While it is, its views ask again when something changed.
@@ -201,7 +209,6 @@ async fn recover(views: State<'_, Views>, key: String) -> Result<(), String> {
 #[tauri::command]
 fn close(views: State<'_, Views>, view: String) {
     views.shown.lock().expect("no view panics").remove(&view);
-    views.loaded.lock().expect("no view panics").remove(&view);
 }
 
 /// Opens the client again, which couldn't be as the app started, and sends the window where it starts now.
@@ -244,7 +251,7 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
     #[cfg(mobile)]
     let home = app.path().app_data_dir()?;
     #[cfg(desktop)]
-    let home = client::home()?;
+    let home = ::client::home()?;
     let client = match Client::open(home).await {
         Ok(client) => client,
         Err(error) => {
@@ -404,7 +411,7 @@ pub fn run() {
             upload,
             recovery_key,
             recover,
-            network,
+            client,
             shown,
             close,
             enter,

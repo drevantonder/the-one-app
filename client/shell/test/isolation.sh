@@ -73,22 +73,21 @@ for plugin in kept prober; do echo '<svg xmlns="http://www.w3.org/2000/svg"/>' >
 
 say "A network whose first two apps are Kept and Prober"
 start a
-# The home screen lists apps by their plugins' names, so these two come before any the network started with.
 ONE_HOME=$folder/client "$one" deploy --name a-kept --files-from "$folder/kept"
 ONE_HOME=$folder/client "$one" deploy --name a-prober --files-from "$folder/prober"
 
-say "The app, on a screen of its own: Kept is started behind the home screen, and Prober is opened"
+say "The app, on a screen of its own: Kept is started behind the home pages, and Prober is opened"
 ONE_HOME=$folder/client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
   "$0" 2>"$1/app.log" &
   app=$!
   # The home screen says when it has drawn.
   grep -q -m1 "home opened" <(tail -f --pid=$app -n +1 "$1/app.log")
   window=$(xdotool search --sync --onlyvisible --name "The One App" | head -1)
-  # An app starts as a finger lands on its icon, and shows only if the finger lifts there. The five icons are in
-  # the middle of the window, 120 apart, the first 272 in and all 92 down. The screen takes a moment to pass each
-  # move on, which is waited.
-  xdotool mousemove --window "$window" 272 92 sleep 0.5 mousedown 1 sleep 0.5 mousemove --window "$window" 600 600 sleep 0.5 mouseup 1
-  xdotool mousemove --window "$window" 392 92 sleep 0.5 click 1
+  # An app starts as a finger lands on its icon, and shows only if the finger lifts there. The page is the one the
+  # first owner has, with these two apps: its icons start at the left of a grid in the middle of the window, 96
+  # apart, the first 80 in and both 86 down. The screen takes a moment to pass each move on, which is waited.
+  xdotool mousemove --window "$window" 80 86 sleep 0.5 mousedown 1 sleep 0.5 mousemove --window "$window" 600 600 sleep 0.5 mouseup 1
+  xdotool mousemove --window "$window" 176 86 sleep 0.5 click 1
   # If Prober got out of its frame, nothing is left to tell its plugin, and this gives up.
   timeout 60 env ONE_HOME=$1/client "$0" a-prober wait >"$1/found.json" || echo "{}" >"$1/found.json"
   kill $app

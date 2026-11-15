@@ -30,7 +30,7 @@ await attempt("Tauri's object in this frame", () => window.__TAURI__ && "it's th
 await attempt("Tauri's IPC from this frame", () => window.__TAURI_INTERNALS__?.invoke("ask", { view: "home", method: "tools/list", params: {} }).then(() => "answered"))
 await attempt("Tauri's IPC over its own protocol", () => fetched("ipc://localhost/ask", { method: "POST", body: "{}" }))
 await attempt("Tauri's IPC as a web address", () => fetched("http://ipc.localhost/ask", { method: "POST", body: "{}" }))
-await attempt("the shell's own files", () => fetched("tauri://localhost/home.js"))
+await attempt("the shell's own files", () => fetched("tauri://localhost/client.js"))
 await attempt("the internet", () => fetched("https://example.com/"))
 
 // The other app. Its files are the network's to read, as every plugin's are. What it holds while it runs is its own.
