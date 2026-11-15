@@ -11,6 +11,9 @@ defmodule OneCore.Service do
   @doc "What the service needs of a machine, for its owner to read before installing it."
   @callback needs() :: String.t()
 
+  @doc "What the service is called, in words its owner reads: its plugin's name, and what it is of it."
+  @callback called() :: String.t()
+
   @doc """
   Calls a function of a service of this call's plugin, on a machine that runs it, and gives its answer. The
   function is called with the service's process and then `arguments`. Arguments and answer are what JSON can hold,

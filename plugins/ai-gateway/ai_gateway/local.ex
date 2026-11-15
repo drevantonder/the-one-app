@@ -18,6 +18,9 @@ defmodule AiGateway.Local do
   @lists_within 3_000
 
   @impl OneCore.Service
+  def called, do: "AI Gateway's models on this machine"
+
+  @impl OneCore.Service
   def needs,
     do:
       "A model server running on the machine with models in it: Ollama, llama.cpp's llama-server or LM Studio, on its usual port"

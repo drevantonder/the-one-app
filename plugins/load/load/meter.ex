@@ -9,6 +9,9 @@ defmodule Load.Meter do
   @behaviour OneCore.Service
 
   @impl OneCore.Service
+  def called, do: "Device Activity's meter"
+
+  @impl OneCore.Service
   def needs, do: "Rust's compiler, rustc, on the machine, to build the program that measures it. Linux or Mac."
 
   @doc "This machine's processors, its load over the last 1, 5 and 15 minutes, and since when it's measured."

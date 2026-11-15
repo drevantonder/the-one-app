@@ -92,6 +92,9 @@ defmodule Proof.Stuck do
   @behaviour OneCore.Service
 
   @impl OneCore.Service
+  def called, do: "Nothing much"
+
+  @impl OneCore.Service
   def needs, do: "Nothing"
 
   def version(service), do: "Its service is at version #{GenServer.call(service, :version)}."
@@ -243,6 +246,9 @@ end
 defmodule Echo.Hello do
   use GenServer
   @behaviour OneCore.Service
+
+  @impl OneCore.Service
+  def called, do: "Nothing much"
 
   @impl OneCore.Service
   def needs, do: "Nothing"

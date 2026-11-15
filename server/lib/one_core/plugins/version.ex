@@ -24,8 +24,8 @@ defmodule OneCore.Plugins.Version do
   it's a part of Settings. `widgets` lists its widgets: each one's `name`, the `tool` that answers its layout, and
   the `sizes` it comes in.
 
-  `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
-  `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
+  `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
+  `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
   which whatever loaded it says.
   """
@@ -219,11 +219,15 @@ defmodule OneCore.Plugins.Version do
              "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are: " <>
                Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ")}
 
-          not Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()))) ->
-            {:error, "A service says `use GenServer`, and its needs/0 gives what it needs of a machine, as text"}
+          not Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) ->
+            {:error,
+             "A service says `use GenServer`, its needs/0 gives what it needs of a machine, and its called/0 what " <>
+               "it's called, each as text"}
 
           true ->
-            services = for module <- services, do: %{name: own_name(module), needs: module.needs()}
+            services =
+              for module <- services, do: %{name: own_name(module), called: module.called(), needs: module.needs()}
+
             # What each tool takes is read once here, as the schema its inputs are checked against on every call.
             tools =
               for tool <- tools,
@@ -241,7 +245,8 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, uses/0, hooks/0, jobs/0 or a service's needs/0 raised: " <> Exception.message(error)}
+       "tools/0, apps/0, widgets/0, uses/0, hooks/0, jobs/0 or a service's needs/0 or called/0 raised: " <>
+         Exception.message(error)}
   end
 
   # A scheduled job calls one of the plugin's tools with inputs the tool takes, so one that could never run is

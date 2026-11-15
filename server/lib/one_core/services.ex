@@ -35,15 +35,16 @@ defmodule OneCore.Services do
 
   @doc """
   The services of the plugins something that runs for `who` finds, as the bucket has them now: each one's
-  `plugin`, its `service` name, what it `needs` of a machine, and the `servers` that run it.
+  `plugin`, its `service` name, what it's `called` where a person reads it, what it `needs` of a machine, and the
+  `servers` that run it.
   """
   def list(who) do
     Servers.forget()
     acting = Servers.acting(owner(who))
 
-    for {plugin, version} <- Enum.sort(Plugins.running(who)), %{name: name, needs: needs} <- version.services do
-      servers = Enum.filter(acting, &({version.artifact, name} in Servers.installed(&1)))
-      %{plugin: plugin, service: name, needs: needs, servers: servers}
+    for {plugin, version} <- Enum.sort(Plugins.running(who)), service <- version.services do
+      servers = Enum.filter(acting, &({version.artifact, service.name} in Servers.installed(&1)))
+      %{plugin: plugin, service: service.name, called: service.called, needs: service.needs, servers: servers}
     end
   end
 

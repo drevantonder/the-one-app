@@ -1,5 +1,5 @@
-// Devices: everything that acts as whoever's looking, and the servers that run their apps, each with the build it's
-// on. One that's behind the newest is updated here, and all of them at once; this device becomes a server and
+// Devices: everything that acts as whoever's looking, and the servers that run their apps, each saying whether an
+// update is ready for it: the build itself is for agents, in `builds`. One that's behind the newest is updated here, and all of them at once; this device becomes a server and
 // stops being one; a server's services are switched on and off; and a device is taken out, or this one signs out.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
@@ -48,9 +48,7 @@ changed(() => refresh(mine))
 
 /// Whether something is on, or when it was last: nothing for one never seen. This device says only that it's this one.
 const presence = (thing) => (thing.here ? "This device" : thing.seen === "on" ? "Online" : thing.seen ? seen(thing.seen) : undefined)
-/// A build as people see it: the start of the commit it was built from.
-const short = (build) => build?.slice(0, 7)
-/// A device's or a server's grey line: whether it's on, and the build it's on, or that a newer one is out.
+/// A device's or a server's grey line: whether it's on, and that an update is ready for it.
 function about(thing) {
   const what = {
     app: () => presence(thing) ?? `Let in ${on(thing.added)}`,
@@ -58,7 +56,7 @@ function about(thing) {
     browser: () => (thing.here ? "This device" : `A browser, signed in ${on(thing.added)}`),
     server: () => presence(thing),
   }[thing.kind ?? "server"]()
-  return [what, thing.build && (thing.behind ? `${short(thing.build)}, update ready` : short(thing.build))].filter(Boolean).join(" · ")
+  return [what, thing.behind && "Update ready"].filter(Boolean).join(" · ")
 }
 
 /// Does something, says why if it couldn't be done, and shows everything as it is after. → whether it was done.
@@ -102,7 +100,7 @@ const press = (thing, does) => async () => {
   setWorking()
 }
 
-/// A device or a server, opened: its build and Update, this device's server, its services, and taking it out.
+/// A device or a server, opened: Update when one's ready, this device's server, its services, and taking it out.
 function Detail(props) {
   const thing = () => props.thing
   const server = () => (thing().kind ? props.all.servers.find((server) => server.here && thing().here) : thing())
@@ -110,15 +108,16 @@ function Detail(props) {
   return (
     <Screen heading={thing().name ?? "Server"} back>
       <List>
-        <Row
-          heading={thing().build ? `Build ${short(thing().build)}` : "Build not known yet"}
-          text={thing().behind ? "A newer build is ready." : thing().behind === false ? "The newest build." : undefined}
-          end={
-            <Show when={thing().behind && (!thing().kind || thing().here)}>
-              <Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>
-            </Show>
-          }
-        />
+        <Show when={thing().behind}>
+          <Row
+            heading="Update ready"
+            end={
+              <Show when={!thing().kind || thing().here}>
+                <Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>
+              </Show>
+            }
+          />
+        </Show>
         <Show when={thing().here && thing().kind === "app"}>
           <Row heading="Server" text="Runs your apps from this device whenever it's on." end={<Switch aria-label="Server" checked={!!props.all.here.server} onChange={(event) => serve(event.target.checked)} />} />
         </Show>
@@ -129,11 +128,11 @@ function Detail(props) {
             <For each={server().services} keyed={(service) => `${service.plugin}/${service.service}`}>
               {(service) => (
                 <Row
-                  heading={service().service}
+                  heading={service().called}
                   text={service().needs}
                   end={
                     <Switch
-                      aria-label={service().service}
+                      aria-label={service().called}
                       checked={service().on}
                       onChange={(event) => doing(() => call(event.target.checked ? "install_service" : "remove_service", { plugin: service().plugin, service: service().service, server: server().id }, { for: server().for }))}
                     />

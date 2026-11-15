@@ -253,11 +253,14 @@ defmodule OneCore.Plugin do
 
   A service is a part of the plugin that runs only on the machines that have what it needs, and keeps running
   between calls: to watch for something, hold a connection open or keep a program going. It's a module of the
-  plugin that is a GenServer, and says what it needs of a machine:
+  plugin that is a GenServer, and says what it's called where a person reads it, and what it needs of a machine:
 
       defmodule Hello.Door do
         use GenServer
         @behaviour OneCore.Service
+
+        @impl OneCore.Service
+        def called, do: "Hello's doorbell"
 
         @impl OneCore.Service
         def needs, do: "A doorbell plugged into the machine, which writes a line to /dev/ttyUSB0 when it's pressed"

@@ -27,6 +27,9 @@ defmodule OneCore.ServicesTest do
       @behaviour OneCore.Service
 
       @impl OneCore.Service
+      def called, do: "Nothing much"
+
+      @impl OneCore.Service
       def needs, do: "Nothing"
 
       def add(service), do: GenServer.call(service, :add)

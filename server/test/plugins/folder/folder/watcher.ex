@@ -12,6 +12,9 @@ defmodule Folder.Watcher do
   @every 1_000
 
   @impl OneCore.Service
+  def called, do: "Folder's watcher"
+
+  @impl OneCore.Service
   def needs, do: "A folder on the machine that files arrive in. The watch tool says which one."
 
   @doc "Watches `folder` for `who` from now on, and gives its whole path. Raises if this machine has no such folder."

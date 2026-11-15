@@ -8,6 +8,9 @@ defmodule Backups.Disk do
   @behaviour OneCore.Service
 
   @impl OneCore.Service
+  def called, do: "Backups to a disk"
+
+  @impl OneCore.Service
   def needs,
     do: "A folder on this machine to back up to, as on a disk plugged into it, which whoever runs the server may write"
 
