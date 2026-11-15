@@ -265,9 +265,18 @@ defmodule AiGateway do
         do: model
   end
 
+  # A machine that's off says when it was last seen, which its screen says in its grey line, and isn't asked.
   defp machine(call, server) do
     place = %{name: Service.name(server), kind: "machine", server: server}
 
+    with at when is_integer(at) <- Service.seen(server) do
+      Map.merge(place, %{up: false, models: [], seen: at})
+    else
+      _ -> models(call, server, place)
+    end
+  end
+
+  defp models(call, server, place) do
     try do
       case Service.call(call, Local, :models, [], server) do
         %{"running" => []} ->

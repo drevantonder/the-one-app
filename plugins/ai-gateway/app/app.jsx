@@ -3,7 +3,7 @@
 // Pressing a job chooses its models.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Section, Sheet, Skeleton, toast } from "ui"
+import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, toast } from "ui"
 import "./app.css"
 
 const models = createMemo(() => call("ai-gateway_models").then(JSON.parse))
@@ -86,7 +86,7 @@ render(
             <For each={models().places}>
               {(place) => (
                 <Section heading={place.name}>
-                  <Show when={place.up} fallback={<Problem warn heading="Isn't answering" text={place.problem} />}>
+                  <Show when={place.up} fallback={place.seen ? <Empty>{seen(place.seen)}</Empty> : <Problem warn heading="Isn't answering" text={place.problem} />}>
                     <Show when={place.models.length} fallback={<Empty>It has no models.</Empty>}>
                       <List>
                         <For each={place.models}>{(model) => <Row heading={model.name} text={does(model)} />}</For>

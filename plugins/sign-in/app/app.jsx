@@ -3,7 +3,7 @@
 // stops being one; a server's services are switched on and off; and a device is taken out, or this one signs out.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, leave, List, Problem, Row, Screen, Section, Skeleton, Split, Switch, toast } from "ui"
+import { Button, call, changed, client, confirm, Empty, leave, List, Problem, Row, Screen, Section, seen, Skeleton, Split, Switch, toast } from "ui"
 import { on } from "./mine.jsx"
 import "./app.css"
 
@@ -46,14 +46,6 @@ const mine = createMemo(async () => {
 })
 changed(() => refresh(mine))
 
-const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
-/// How long ago `at` was, in the largest unit that's whole: "Seen 2 minutes ago".
-function seen(at) {
-  const minutes = Math.round((new Date(at) - Date.now()) / 60_000)
-  if (minutes > -60) return `Seen ${ago.format(Math.min(minutes, -1), "minute")}`
-  if (minutes > -48 * 60) return `Seen ${ago.format(Math.round(minutes / 60), "hour")}`
-  return `Seen ${ago.format(Math.round(minutes / (24 * 60)), "day")}`
-}
 /// Whether something is on, or when it was last: nothing for one never seen. This device says only that it's this one.
 const presence = (thing) => (thing.here ? "This device" : thing.seen === "on" ? "Online" : thing.seen ? seen(thing.seen) : undefined)
 /// A build as people see it: the start of the commit it was built from.

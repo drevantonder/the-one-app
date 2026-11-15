@@ -12,7 +12,7 @@
 /// plugin's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
 /// (ark-ui.com/llms-solid.txt); the rest are the kit's own.
 export { call, changed, client, leave, open, showRecoveryKey, upload, useRecoveryKey } from "./bridge.js"
-export { share, words } from "./kit.js"
+export { seen, share, words } from "./kit.js"
 export { Button, Icon, Spinner } from "./button.jsx"
 export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.jsx"
 export { NumberInput } from "./number-input.jsx"
