@@ -59,7 +59,7 @@ defmodule OneCore.App do
   # The kit's build, with what it builds with installed: a folder on this server for each set of those files,
   # made whole beside it and moved in, so a folder that's there is ready.
   defp builder(bun, kit) do
-    files = for {path, hash} <- Enum.sort(kit.hashes), String.starts_with?(path, @build), do: {path, hash}
+    files = for {path, hash} <- Enum.sort(Version.hashes(kit)), String.starts_with?(path, @build), do: {path, hash}
     folder = Path.join([Server.home(), "kits", binary_part(Version.code(files), 0, 16)])
 
     cond do

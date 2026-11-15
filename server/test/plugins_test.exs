@@ -1,7 +1,7 @@
 defmodule OneCore.PluginsTest do
   use ExUnit.Case
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Added, Calls, Deploy, Kept}
+  alias OneCore.Plugins.{Added, Calls, Deploy, Kept, Version}
 
   # A plugin of two modules. Its tool waits to be told to finish, then asks its other module which version it is.
   defp slow(number) do
@@ -99,9 +99,9 @@ defmodule OneCore.PluginsTest do
 
     version = Plugins.running("network")["notes"]
     # A client is listed what a page loads, and nothing else of the plugin.
-    assert "app/index.html" in version.files and Enum.any?(version.files, &(&1 =~ ~r{^app/assets/.*\.js$}))
-    assert Enum.all?(version.files, &(Path.extname(&1) in ~w(.html .js .css .svg)))
-    refute "icon.svg" in version.files
+    assert "app/index.html" in Version.files(version) and Enum.any?(Version.files(version), &(&1 =~ ~r{^app/assets/.*\.js$}))
+    assert Enum.all?(Version.files(version), &(Path.extname(&1) in ~w(.html .js .css .svg)))
+    refute "icon.svg" in Version.files(version)
     {:ok, built} = Kept.file(version.artifact, version.code, "app/index.html")
     assert built =~ "/ui/app/ui.css"
     assert Kept.source(version.artifact, version.code) == source

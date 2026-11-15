@@ -1,7 +1,7 @@
 defmodule OneCore.McpTest do
   use ExUnit.Case
   alias OneCore.{Mcp, Plugins}
-  alias OneCore.Plugins.{Added, Deploy}
+  alias OneCore.Plugins.{Added, Deploy, Version}
 
   # What a client's Rust and an app's JavaScript read of a plugin, as the server's Elixir says it.
   @plugin """
@@ -183,7 +183,7 @@ defmodule OneCore.McpTest do
 
     assert %{"uri" => ^voice_uri, "resources" => [%{"uri" => ^voice_uri}, %{"uri" => ^words, "size" => 7}]} = voice
     assert %{"contents" => [%{"text" => "Say it."}]} = ask("resources/read", %{uri: words}, alice)
-    refute Enum.any?(Plugins.running("users/alice")["notes"].files, &String.starts_with?(&1, "skills/"))
+    refute Enum.any?(Version.files(Plugins.running("users/alice")["notes"]), &String.starts_with?(&1, "skills/"))
 
     # A skill is found by the name its plugin is added by, so neither another plugin by the same own name nor one
     # named as One Core's own skill takes its place.

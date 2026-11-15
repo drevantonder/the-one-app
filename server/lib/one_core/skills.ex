@@ -20,7 +20,7 @@ defmodule OneCore.Skills do
   another's.
   """
   alias OneCore.{Plugin, Plugins}
-  alias OneCore.Plugins.Kept
+  alias OneCore.Plugins.{Kept, Version}
 
   @own "building-plugins"
 
@@ -121,7 +121,7 @@ defmodule OneCore.Skills do
     {:ok, own} = read(@own, Plugin.skill())
 
     plugins =
-      for {added, version} <- Enum.sort(Plugins.running(who)), skill <- version.skills do
+      for {added, version} <- Enum.sort(Plugins.running(who)), skill <- Version.skills(version) do
         path = Enum.join([added, Path.basename(version.artifact) | Path.split(skill.at)], "/")
         {path, skill, {version.artifact, version.code}}
       end

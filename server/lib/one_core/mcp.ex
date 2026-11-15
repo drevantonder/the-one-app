@@ -185,7 +185,7 @@ defmodule OneCore.Mcp do
           do: %{uri: uri, name: name, description: description, mimeType: "text/markdown"}
 
     resources =
-      for {plugin, version} <- Enum.sort(Plugins.running(who)), path <- version.files do
+      for {plugin, version} <- Enum.sort(Plugins.running(who)), path <- Version.files(version) do
         resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
 
         case Enum.find(version.apps, &(&1.page == path)) do

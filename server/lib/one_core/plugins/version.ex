@@ -7,15 +7,17 @@ defmodule OneCore.Plugins.Version do
   file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
   so a server that's updated for years makes no more names than it ever ran versions at once.
 
-  What of a version runs in a client is its folder `app/`. `files` are what a page loads from there, by their paths:
-  its pages, scripts, stylesheets and pictures, which a client is listed and keeps. The rest of `app/`, a
+  What of a version runs in a client is its folder `app/`. `files/1` are what a page loads from there, by their
+  paths: its pages, scripts, stylesheets and pictures, which a client is listed and keeps. The rest of `app/`, a
   sourcemap, is read by name. `code` names the whole set, so a client can tell one version's files from the next's.
-  `hashes` names each file that isn't Elixir or a skill by what's in it, so a service can tell whether a program it
-  brings changed.
+  `hashes/1` names each file that isn't Elixir or a skill by what's in it, so a service can tell whether a program
+  it brings changed. `skills/1` are its skills, as `OneCore.Skills.found/2` gives them.
+
+  Those three grow with a plugin's files, and every call is handed the versions it runs on, from another process.
+  So they're kept apart from the struct, where reading them copies nothing (`:persistent_term`), and a call costs
+  the same however many files a plugin has.
 
   `kit` is the code of the kit its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
-
-  `skills` are its skills, as `OneCore.Skills.found/2` gives them.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
   `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
@@ -24,23 +26,8 @@ defmodule OneCore.Plugins.Version do
   """
   alias OneCore.{App, Hooks, Server, Skills}
 
-  @enforce_keys [:under, :plugin, :tools, :skills, :apps, :uses, :services, :hooks, :jobs, :code, :files, :hashes]
-  defstruct [
-    :under,
-    :plugin,
-    :tools,
-    :skills,
-    :apps,
-    :uses,
-    :services,
-    :hooks,
-    :jobs,
-    :code,
-    :files,
-    :hashes,
-    :kit,
-    :artifact
-  ]
+  @enforce_keys [:under, :plugin, :tools, :apps, :uses, :services, :hooks, :jobs, :code]
+  defstruct [:under, :plugin, :tools, :apps, :uses, :services, :hooks, :jobs, :code, :kit, :artifact]
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096
@@ -70,7 +57,10 @@ defmodule OneCore.Plugins.Version do
     with {:ok, skills} <- Skills.found(name, skills),
          {:ok, modules, warnings} <- compile(under, sources),
          {:ok, version} <- describe(under, modules, rest) do
-      {:ok, %{version | code: code(files), skills: skills, kit: App.kit(files)}, warnings}
+      hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
+      served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
+      :persistent_term.put({__MODULE__, under}, %{files: served, hashes: hashes, skills: skills})
+      {:ok, %{version | code: code(files), kit: App.kit(files)}, warnings}
     else
       {:error, why} ->
         unload(under)
@@ -78,10 +68,21 @@ defmodule OneCore.Plugins.Version do
     end
   end
 
+  @doc "What a page of a version's app loads, by its paths in `app/`."
+  def files(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).files
+
+  @doc "Each of a version's files that isn't Elixir or a skill, by its path, as the hash of what's in it."
+  def hashes(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).hashes
+
+  @doc "A version's skills, as `OneCore.Skills.found/2` gives them."
+  def skills(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).skills
+
   @doc "Removes a version's modules from the VM."
   def unload(%__MODULE__{under: under}), do: unload(under)
 
   def unload(under) do
+    :persistent_term.erase({__MODULE__, under})
+
     for {module, _} <- :code.all_loaded(), under?(module, under) do
       :code.delete(module)
       :code.purge(module)
@@ -257,15 +258,12 @@ defmodule OneCore.Plugins.Version do
       under: under,
       plugin: plugin,
       tools: tools,
-      skills: [],
       apps: apps,
       uses: [],
       services: services,
       hooks: [],
       jobs: [],
-      code: nil,
-      files: Enum.sort(for(path <- Map.keys(rest), loaded?(path), do: path)),
-      hashes: Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
+      code: nil
     }
   end
 
