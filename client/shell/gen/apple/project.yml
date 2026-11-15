@@ -65,6 +65,8 @@ targets:
       path: shell_iOS/shell_iOS.entitlements
       properties:
         com.apple.security.application-groups: [group.$(PRODUCT_BUNDLE_IDENTIFIER)]
+        # Without it iOS gives the app no APNs token. An App Store build is signed for production as it's exported.
+        aps-environment: development
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full

@@ -70,12 +70,13 @@ And for iPhone on a Mac, with Xcode, `xcodegen` and Rust's iOS targets, signed b
     cd client/shell
     APPLE_DEVELOPMENT_TEAM=<team> cargo tauri ios build --export-method debugging
 
-Their projects are `client/shell/gen/android` and `client/shell/gen/apple`. `xcrun devicectl device install app` puts
-what's built in `gen/apple/build/arm64` on a paired iPhone, and `--target aarch64-sim --debug` builds it for the
-simulator. A phone's client is kept in the app's own folder, and is told its network's address by a `network` file put
-there (`{"address": "https://..."}`), as `mix network` writes one for a network with an address. An app built with
-`TAURI_ONE_ADDRESS=https://...` set, on any system, starts on that network with no file there. It starts on that
-network's sign-in page.
+Their projects are `client/shell/gen/android` and `client/shell/gen/apple`. The iPhone's is `gen/apple/project.yml`:
+`xcodegen generate` there makes `shell.xcodeproj` from it, which the build uses as it's committed. `xcrun devicectl
+device install app` puts what's built in `gen/apple/build/arm64` on a paired iPhone, and `--target aarch64-sim --debug`
+builds it for the simulator. A phone's client is kept in the app's own folder, on an iPhone the one it shares with its
+notification extension, and is told its network's address by a `network` file put there (`{"address": "https://..."}`),
+as `mix network` writes one for a network with an address. An app built with `TAURI_ONE_ADDRESS=https://...` set, on any
+system, starts on that network with no file there. It starts on that network's sign-in page.
 
 A workplace's own app, with its own name, identifier and icon, is a Tauri config of its own merged over
 `client/shell/tauri.conf.json`, as Tauri merges one:
