@@ -134,7 +134,7 @@ function Detail(props) {
                     <Switch
                       aria-label={service().called}
                       checked={service().on}
-                      onChange={(event) => doing(() => call(event.target.checked ? "install_service" : "remove_service", { plugin: service().plugin, service: service().service, server: server().id }, { for: server().for }))}
+                      onChange={(event) => doing(() => call(event.target.checked ? "install_service" : "uninstall_service", { plugin: service().plugin, service: service().service, server: server().id }, { for: server().for }))}
                     />
                   }
                 />

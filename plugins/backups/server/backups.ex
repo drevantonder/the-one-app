@@ -155,7 +155,7 @@ defmodule Backups do
 
   @impl true
   def call("opened_by", _inputs, call) do
-    %{owner: "network", servers: OneCore.Servers.acting(call.added)}
+    %{owner: "network", servers: OneCore.Servers.acting(call.installed)}
   end
 
   def call("due", _inputs, call) do

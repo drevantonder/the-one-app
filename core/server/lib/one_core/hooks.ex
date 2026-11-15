@@ -12,13 +12,13 @@ defmodule OneCore.Hooks do
     every plugin that changes is handed the same thing, and every plugin that decides has to agree.
   - What a plugin changed is said, with its name, to the plugins that decide and hear the same moment.
 
-  A plugin hooks into the moments of whoever it was added for. So a moment that runs for someone is hooked into
-  by the plugins added for them and by the ones added for the network, and by nobody else's: what one user adds
+  A plugin hooks into the moments of whoever it was installed for. So a moment that runs for someone is hooked into
+  by the plugins installed for them and by the ones installed for the network, and by nobody else's: what one user installs
   decides nothing for another.
 
   A plugin that can't answer, because it raised, its server couldn't be reached or it took longer than ten seconds
   (`within/3`), has refused: nothing is let through for want of an answer. So a plugin that breaks blocks what it changes or decides, for whoever it was
-  added for and nobody else, until it's removed or deployed again, and it has no say in either: a call that
+  installed for and nobody else, until it's removed or deployed again, and it has no say in either: a call that
   removes a plugin or deploys over it isn't that plugin's to change or decide.
 
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
@@ -84,7 +84,7 @@ defmodule OneCore.Hooks do
      """
      A device asks, and One Core is about to say whose it is. It's about the `device`, by its key, and `who`, which
      is nobody: `nil`. The answer is `who`: the user whose device it is, as `users/<name>`. With no plugin
-     answering, the device is nobody's, and nobody is refused everything. It's asked of the plugins added for the
+     answering, the device is nobody's, and nobody is refused everything. It's asked of the plugins installed for the
      network, since nobody is asking yet, and what's answered is kept until a tool of the plugin is called that
      doesn't only read.
      """},
@@ -114,14 +114,14 @@ defmodule OneCore.Hooks do
      """},
     {"measured", :hears,
      """
-     A client said what it measured of itself. It's heard by the plugins added for the network, and it's about the `device`'s key, the
+     A client said what it measured of itself. It's heard by the plugins installed for the network, and it's about the `device`'s key, the
      `client`'s operating system, the views it `opened`, each as its `view` and how many `ms` it took from a tap to
      its first drawing, and the calls that `failed` before a server answered, each as its `tool` and `why`.
      """},
     {"joined", :hears,
      """
      A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the
-     server that added it.
+     server that installed it.
      """}
   ]
 
@@ -193,16 +193,16 @@ defmodule OneCore.Hooks do
   defp forgotten(hook), do: :ets.lookup_element(@allowed, {:forgotten, hook}, 2, 0)
 
   @doc """
-  The plugins that hook into `hook` for a moment that runs for `who`: each as who it was added for, and its name
-  there. Which hook into what is kept by `OneCore.Plugins`, by who they were added for, as it looks at them.
+  The plugins that hook into `hook` for a moment that runs for `who`: each as who it was installed for, and its name
+  there. Which hook into what is kept by `OneCore.Plugins`, by who they were installed for, as it looks at them.
   """
   def hooking(hook, who) do
-    for at <- Plugins.chain(who), name <- Map.get(added(at), hook, []), do: {at, name}
+    for at <- Plugins.chain(who), name <- Map.get(installed(at), hook, []), do: {at, name}
   end
 
-  # The hooks that the plugins added for an owner hook into, each with those plugins' names. An owner this server
+  # The hooks that the plugins installed for an owner hook into, each with those plugins' names. An owner this server
   # hasn't looked at is looked at first.
-  defp added(owner) do
+  defp installed(owner) do
     with [] <- :ets.lookup(__MODULE__, owner),
          _ = Plugins.reload(owner),
          [] <- :ets.lookup(__MODULE__, owner) do
@@ -213,7 +213,7 @@ defmodule OneCore.Hooks do
   end
 
   @doc """
-  Whether a plugin added for `owner` hooks into `hook`, as this server last looked at them: asking costs a lookup,
+  Whether a plugin installed for `owner` hooks into `hook`, as this server last looked at them: asking costs a lookup,
   and never looks.
   """
   def hooked?(hook, owner) do
@@ -269,11 +269,11 @@ defmodule OneCore.Hooks do
   @doc """
   Asks each plugin that changes `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
-  say. `apart` is a plugin that isn't asked, as who it was added for and its name there.
+  say. `apart` is a plugin that isn't asked, as who it was installed for and its name there.
   """
   def change(hook, about, {_by, who} = asked, apart \\ nil) do
-    Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = added, {:ok, changes, by} ->
-      with {:ok, changed} <- answered(added, hook, about, asked),
+    Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, changes, by} ->
+      with {:ok, changed} <- answered(installed, hook, about, asked),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
         {:cont, {:ok, Map.merge(changes, changed), by}}
@@ -289,7 +289,7 @@ defmodule OneCore.Hooks do
 
   @doc """
   Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to
-  refuse. `apart` is a plugin that isn't asked, as who it was added for and its name there. Where no plugin
+  refuse. `apart` is a plugin that isn't asked, as who it was installed for and its name there. Where no plugin
   decides `reach` for them, a call or a reach is the network's first owner's alone.
   """
   def decide(hook, about, {by, who} = asked, apart \\ nil) do
@@ -305,8 +305,8 @@ defmodule OneCore.Hooks do
 
       decided =
         with :ok <- if(undecided, do: undecided(by), else: :ok) do
-          Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = added ->
-            case answered(added, hook, about, asked) do
+          Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = installed ->
+            case answered(installed, hook, about, asked) do
               {:ok, "ok"} ->
                 nil
 

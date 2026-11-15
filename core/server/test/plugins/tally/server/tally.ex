@@ -1,5 +1,5 @@
 defmodule Tally do
-  @moduledoc "Notes added one at a time to the plugin's database, for the tests that write and read one."
+  @moduledoc "Notes installed one at a time to the plugin's database, for the tests that write and read one."
   @behaviour OneCore.Plugin
 
   @schema ["create table notes (id integer primary key, note text not null)"]
@@ -25,7 +25,7 @@ defmodule Tally do
 
     database.transaction(call, @schema, fn db ->
       database.query(db, "insert into notes (note) values (?)", [note])
-      "Added."
+      "Installed."
     end)
   end
 

@@ -23,8 +23,8 @@ const [managing, setManaging] = createSignal()
 /// Puts an app on a page or takes it off, which is adding or removing its plugin for whoever's page it is.
 async function put(page, app, there) {
   try {
-    if (there) await call("add", { plugin: app.plugin }, { for: page.for })
-    else await call("remove", { name: on(page, app).app.split("/")[0] }, { for: page.for })
+    if (there) await call("install", { plugin: app.plugin }, { for: page.for })
+    else await call("uninstall", { name: on(page, app).app.split("/")[0] }, { for: page.for })
   } catch (error) {
     toast(error.message)
   }

@@ -4,8 +4,8 @@ defmodule OneCore.Plugin do
   as One Core: its Elixir in `server/`, what runs in a client in `client/`, and its edge part, if it has one, in
   `edge/`. Its skill is at its top. Deploying it (the `deploy` tool) hands the server those files: it compiles its
   Elixir, says what's wrong if it doesn't compile, and otherwise runs it at once, with no restart. The plugin is
-  whoever's deployed it, and is added for them: a user, or the group or the network they asked for. Someone else
-  has it too once it's added for them (the `add` tool), and what's added for the network is everyone's. A plugin is
+  whoever's deployed it, and is installed for them: a user, or the group or the network they asked for. Someone else
+  has it too once it's installed for them (the `install` tool), and what's installed for the network is everyone's. A plugin is
   updated by deploying it again. Calls already running finish on the version they started on, and the next call
   gets the new one. A plugin a program ships with can have native code that the clients are built with, in
   `client/native/`, which is never deployed, and nor is its `test/`.
@@ -59,8 +59,8 @@ defmodule OneCore.Plugin do
     file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
   - A `SKILL.md` at the root of the folder, if the plugin has one, is its skill: text for agents on when and how
     to use its tools, which an agent reads when it needs it, at `skill://hello/hello/SKILL.md`, and `one hello`
-    shows with the plugin's tools. Its address starts with the name the plugin is added by, which is where an
-    agent finds it: added as `greeter`, it's `skill://greeter/hello/SKILL.md`. It's an Agent Skill (agentskills.io):
+    shows with the plugin's tools. Its address starts with the name the plugin is installed by, which is where an
+    agent finds it: installed as `greeter`, it's `skill://greeter/hello/SKILL.md`. It's an Agent Skill (agentskills.io):
     it starts with the skill's `name`, which is the plugin's, and its `description`, one line saying when an agent
     should read it, as YAML between two lines of `---`:
 
@@ -71,7 +71,7 @@ defmodule OneCore.Plugin do
 
         Use `greet` when someone arrives, once for each of them.
   - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the plugin's own artifact for whoever it was
-    added for, which only this plugin reaches: one added for a user keeps that user's, and one added for the network
+    installed for, which only this plugin reaches: one installed for a user keeps that user's, and one installed for the network
     keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok,
     data, tag}` or `:absent`, `write/3` writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that
     tag, replaces only if unchanged and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's
@@ -97,12 +97,12 @@ defmodule OneCore.Plugin do
   - `OneCore.Call.owns?(call)` says whether whoever asked owns whoever the call runs for: themselves, or the
     group or the network as its `owner`. A tool that changes what's a group's as a whole asks it.
   - `OneCore.Call.plugins(call)` lists the plugins whoever the call runs for finds, theirs and the network's,
-    each with who it was added for, its apps and its widgets. A home page is drawn from it.
+    each with who it was installed for, its apps and its widgets. A home page is drawn from it.
   - `OneCore.Call.deployed(call)` lists every plugin anyone in the network has deployed, with its apps, whether or
-    not it's added for anyone now: an app store is drawn from it.
+    not it's installed for anyone now: an app store is drawn from it.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
-  - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added for, or
+  - `uses/0`, if the plugin has one, names the other plugins it uses, as they're installed for whoever it's installed for, or
     for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call,
     "database")` gives one of them: its module, whose functions take the call and run as this plugin, for whoever it
     runs for. A plugin that keeps more than a few blobs uses `database`, whose skill says how. What whoever
@@ -149,7 +149,7 @@ defmodule OneCore.Plugin do
   - A job names one of the plugin's `tool`s, the `inputs` to call it with if it takes any, and `every`: how many
     seconds apart. It's due at each whole multiple of that since 1970 in UTC, so `every: 3600` is on the hour and
     `every: 86_400` is at midnight UTC, and first at the next one after it's deployed.
-  - The call is made on one server, for whoever the plugin was added for, when a server is up: once for each of
+  - The call is made on one server, for whoever the plugin was installed for, when a server is up: once for each of
     them, with `call.for` the user, the group or the network, and `call.by` nobody. Times that
     passed with none up are made up for with one call when one is back.
   - A plugin with jobs uses `database`, which keeps when each last ran in the plugin's database, and has the
@@ -158,7 +158,7 @@ defmodule OneCore.Plugin do
     the plugin whose jobs they are, on every server, each time one of them is due, with the jobs and a function
     that makes a job's call on the server it's called on: `fire.(job)`. It's what has one server call it once.
 
-  What a plugin does shows in Insights, where it's added, in Settings and to agents through its tools. Every tool
+  What a plugin does shows in Insights, where it's installed, in Settings and to agents through its tools. Every tool
   call is a span there already, with whose it was, how long it took and how it ended, and so is every warning, error
   and crash said to `Logger`: Logger's info and debug aren't kept, so they can say more. A plugin records more by
   calling Insights' tool `record`, whose skill says how.
@@ -178,8 +178,8 @@ defmodule OneCore.Plugin do
   - `hook/3` is called with the hook's name, what the moment is about, a map with string keys, and an
     `OneCore.Call`: it runs as this plugin, for whoever the moment is about, with the plugin's own artifact. A
     hook gives a plugin nothing it couldn't already reach.
-  - A plugin hooks into the moments of whoever it was added for: one added for a user decides only what runs for
-    that user, and one added for the network decides for everyone.
+  - A plugin hooks into the moments of whoever it was installed for: one installed for a user decides only what runs for
+    that user, and one installed for the network decides for everyone.
   #{OneCore.Hooks.listed()}
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
@@ -219,7 +219,7 @@ defmodule OneCore.Plugin do
     how an app asks and hears, done.
   - The UI library's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
     For something the UI library lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
-    https://ark-ui.com/llms-solid.txt: an app adds `@zag-js/<component>` to its package.json, at the version of
+    https://ark-ui.com/llms-solid.txt: an app installs `@zag-js/<component>` to its package.json, at the version of
     Zag the UI library's `build/package.json` names, and draws the component as Zag says, styling it with the UI library's
     custom properties. Zag's Solid adapter, `@zag-js/solid`, is the UI library's, as Solid is. Zag's docs import from
     `solid-js/web`, which is `@solidjs/web`; and Zag's props set `id`, so one written before them is replaced.
@@ -318,8 +318,8 @@ defmodule OneCore.Plugin do
   - A plugin that uses this one calls its functions with its own call, and they reach this plugin's services as
     they would from its own tools.
   - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
-    `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was added for that
-    this server acts for, or one the plugin passed it, as `call.added` or `call.for`. That function has the call, so
+    `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was installed for that
+    this server acts for, or one the plugin passed it, as `call.installed` or `call.for`. That function has the call, so
     it's where a service keeps anything in the plugin's artifact or its database. In a function of the service,
     `service` goes where `self()` does. Whoever its server is for comes first in `acts_for()`, so a service
     that's for one person at a time, whoever's machine it's on, takes the first.
@@ -351,7 +351,7 @@ defmodule OneCore.Plugin do
   - It keeps what it needs in storage of its own, which its `wrangler.jsonc` binds, and is given three bindings
     besides. `env.OWN.write(name, data)` writes a blob of the plugin's own artifact for the network, only if
     there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server part reads what this
-    part has to tell it, as `call.own` of the plugin added for the network. `env.NETWORK.servers(of)` gives the
+    part has to tell it, as `call.own` of the plugin installed for the network. `env.NETWORK.servers(of)` gives the
     keys of the servers acting for a user, a group or the network, by their prefix (`users/alice/`).
     `env.RELAY.forward(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if
     that server isn't up, and `env.RELAY.notify(message)` tells every server a notification.

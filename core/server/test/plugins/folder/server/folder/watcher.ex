@@ -1,6 +1,6 @@
 defmodule Folder.Watcher do
   @moduledoc """
-  Watches a folder on the machine it runs on, for each one its plugin was added for that its server acts for, and
+  Watches a folder on the machine it runs on, for each one its plugin was installed for that its server acts for, and
   tells the plugin each file that arrives.
 
   It holds, between calls, the names it has seen in each folder, which is how it knows a new one.

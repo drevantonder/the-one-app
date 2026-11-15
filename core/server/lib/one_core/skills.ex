@@ -13,10 +13,10 @@ defmodule OneCore.Skills do
   with each file's digest and size. Whoever asks sees One Core's own, and those of the plugins that run for them.
 
   A skill's path ends with its name, as the extension has it, and what comes before is the plugin's, as it's found
-  where it runs: the name it's added by there, then the plugin's own name, as its folder is. So a plugin's skill is
-  `skill://<added by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
-  `skill://<added by>/<own name>/skills/<name>/SKILL.md`. One Core's own is `skill://building-plugins/SKILL.md`,
-  the only skill whose path is its name alone. No two plugins are added by one name, so no skill's address is
+  where it runs: the name it's installed by there, then the plugin's own name, as its folder is. So a plugin's skill is
+  `skill://<installed by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
+  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own is `skill://building-plugins/SKILL.md`,
+  the only skill whose path is its name alone. No two plugins are installed by one name, so no skill's address is
   another's.
   """
   alias OneCore.{Plugin, Plugins}
@@ -116,13 +116,13 @@ defmodule OneCore.Skills do
     end
   end
 
-  # Each skill by its path, with where its files are: One Core's own, then the plugins' by the names they're added by.
+  # Each skill by its path, with where its files are: One Core's own, then the plugins' by the names they're installed by.
   defp found(who) do
     {:ok, own} = read(@own, Plugin.skill())
 
     plugins =
-      for {added, version} <- Enum.sort(Plugins.running(who)), skill <- Version.skills(version) do
-        path = Enum.join([added, Path.basename(version.artifact) | Path.split(skill.at)], "/")
+      for {installed, version} <- Enum.sort(Plugins.running(who)), skill <- Version.skills(version) do
+        path = Enum.join([installed, Path.basename(version.artifact) | Path.split(skill.at)], "/")
         {path, skill, {version.artifact, version.code}}
       end
 

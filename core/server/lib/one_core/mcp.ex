@@ -1,7 +1,7 @@
 defmodule OneCore.Mcp do
   @moduledoc """
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
-  whatever reaches it, and the tools it lists are One Core's own and those of the plugins added for whoever asks
+  whatever reaches it, and the tools it lists are One Core's own and those of the plugins installed for whoever asks
   and for the network.
 
   Every request is from someone and for someone, which `OneCore.User.asking/2` says, and a plugin's tool runs for
@@ -96,7 +96,7 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"added" => at, "plugin" => plugin} = params, _from, asked, forwarded) do
+  defp result("plugins/call", %{"installed" => at, "plugin" => plugin} = params, _from, asked, forwarded) do
     function = fn -> Calls.function(at, plugin, params["function"], params["arguments"], asked, true) end
 
     with {:ok, result} <- between(forwarded, function) do
@@ -105,11 +105,11 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("plugins/schedule", %{"added" => at, "plugin" => plugin}, _from, _asked, forwarded) do
+  defp result("plugins/schedule", %{"installed" => at, "plugin" => plugin}, _from, _asked, forwarded) do
     between(forwarded, fn -> Calls.schedule(at, plugin, true) end)
   end
 
-  defp result("hooks/call", %{"added" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, forwarded) do
+  defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, forwarded) do
     between(forwarded, fn -> Calls.hook(at, plugin, hook, params["about"], asked, true) end)
   end
 

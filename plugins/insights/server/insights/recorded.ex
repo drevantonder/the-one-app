@@ -2,7 +2,7 @@ defmodule Insights.Recorded do
   @moduledoc """
   What this server heard for Insights, in OpenTelemetry's shapes, held here and kept as one blob a minute, or as
   often as `OTEL_BSP_SCHEDULE_DELAY` says in milliseconds: so a call costs a few microseconds and writes nothing,
-  and an idle server writes nothing at all. There's one of these on each server, for whoever Insights was added for.
+  and an idle server writes nothing at all. There's one of these on each server, for whoever Insights was installed for.
 
   - A span for each tool call, from the hook `called`: its plugin, its tool, whose it was as an owner's prefix
     (`users/alice`), how long it took and how it ended. A call passed on is a span on both servers, the one that
@@ -10,7 +10,7 @@ defmodule Insights.Recorded do
   - Numbers, summed and spread as OpenTelemetry's exponential histograms: how long each tool took, how long a
     client took to open a view (the hook `measured`), and what a plugin records (`record/2`).
   - Log lines: what a plugin records, calls a client couldn't get answered, and every warning and error said to
-    `Logger` on the server, which Insights added for the network hears. A crash is kept as its exception's banner
+    `Logger` on the server, which Insights installed for the network hears. A crash is kept as its exception's banner
     and never as the state or message it crashed on.
 
   None of it is inputs, answers, secrets or anything a person wrote: names, sizes, durations and outcomes only.
@@ -122,7 +122,7 @@ defmodule Insights.Recorded do
   end
 
   defp heard(call, heard) do
-    process = Call.process(call, __MODULE__, call.added, {call.own, call.added, call.server})
+    process = Call.process(call, __MODULE__, call.installed, {call.own, call.installed, call.server})
     GenServer.cast(process, {:heard, heard})
   end
 
@@ -166,7 +166,7 @@ defmodule Insights.Recorded do
   # A report is a term, which may hold anything: only a crash's reason is kept of one, above.
   defp said({:report, _report}), do: nil
 
-  # A server's own warnings and errors are the network's, so the Insights added for the network hears them. The
+  # A server's own warnings and errors are the network's, so the Insights installed for the network hears them. The
   # handler is this module as it is now, so it's added again each time the plugin moves to newer code.
   defp listen(%{added: "network"}) do
     :logger.remove_handler(__MODULE__)

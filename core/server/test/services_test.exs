@@ -67,7 +67,7 @@ defmodule OneCore.ServicesTest do
   @tag :tmp_dir
   test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
     assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 1]}
-    # The plugin was added for the network, so that's who its service has it run for.
+    # The plugin was installed for the network, so that's who its service has it run for.
     assert_receive {:counted, "network", 1}
     service = Plugins.Process.whereis("network/plugins/counter", "Counter.Store")
 
@@ -99,7 +99,7 @@ defmodule OneCore.ServicesTest do
     stranger = String.duplicate("ab", 32)
     said = %{who: OneCore.Test.owner(), for: OneCore.Test.owner(), forwarded: true}
     service = %{plugin: "network/plugins/counter", service: "Counter.Store", function: "add", arguments: [], _meta: said}
-    plugin = %{added: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
+    plugin = %{installed: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
 
     # A client asks neither, whoever it is.
     OneCore.Test.being_built()

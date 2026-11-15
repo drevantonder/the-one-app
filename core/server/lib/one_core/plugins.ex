@@ -1,15 +1,15 @@
 defmodule OneCore.Plugins do
   @moduledoc """
   Runs a network's plugins on this server, while it keeps running: which versions run, and for whom. Deploying one
-  is `OneCore.Plugins.Deploy`, adding and removing one `OneCore.Plugins.Added`, calling one
+  is `OneCore.Plugins.Deploy`, adding and removing one `OneCore.Plugins.Installed`, calling one
   `OneCore.Plugins.Calls`, and what the bucket keeps of one `OneCore.Plugins.Store`.
 
   A call runs on the version that was newest when it began. That version stays loaded until its last call ends,
   however many versions follow it. A plugin's processes hold a version the same way, and move to the newest
   (`OneCore.Plugins.Process`).
 
-  A server looks in the bucket at what's added for the network and for whoever it acts for when it starts, and at
-  what's added for anyone else when it's first asked for them. Only a server acting for whoever a plugin was added for
+  A server looks in the bucket at what's installed for the network and for whoever it acts for when it starts, and at
+  what's installed for anyone else when it's first asked for them. Only a server acting for whoever a plugin was installed for
   runs it for them: another passes the call on to one that does. It looks again when it's told to, when it's asked for
   a plugin it doesn't run, when it comes back (`OneCore.Server.reconnected/0`), and behind a request for someone it
   last looked at more than five minutes ago: the request runs on what the server has, and the look is for what it
@@ -18,7 +18,7 @@ defmodule OneCore.Plugins do
   use GenServer
   require Logger
   alias OneCore.{App, Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Added, Deploy, Store, Version}
+  alias OneCore.Plugins.{Installed, Deploy, Store, Version}
 
   @network "network"
 
@@ -38,7 +38,7 @@ defmodule OneCore.Plugins do
   def chain(who), do: Enum.uniq(List.wrap(User.owner(who)) ++ [@network])
 
   @doc """
-  Runs `fun` with who a plugin was added for and the newest version of it and of each plugin it uses, by their
+  Runs `fun` with who a plugin was installed for and the newest version of it and of each plugin it uses, by their
   names. The plugin is the first that `name` is for one of `owners`. Those versions stay loaded until `fun`
   returns. Gives what `fun` does, or `{:error, why}` with what it raised, as its caller is told it.
   """
@@ -98,7 +98,7 @@ defmodule OneCore.Plugins do
   @doc "The plugins something that runs for `who` finds, by name: each one's `Version`, which holds its tools, its skill and its apps."
   def running(who), do: versions(chain(who))
 
-  @doc "The plugins added for `owners`, by name, the first's found first. One this server hasn't looked at is first."
+  @doc "The plugins installed for `owners`, by name, the first's found first. One this server hasn't looked at is first."
   def versions(owners) do
     with :unknown <- ask({:running, owners}) do
       Enum.each(owners, &reload/1)
@@ -106,7 +106,7 @@ defmodule OneCore.Plugins do
     end
   end
 
-  @doc "The plugin that `name` is for `owner`, as its artifact's name, or `nil` if none is added for them by that name."
+  @doc "The plugin that `name` is for `owner`, as its artifact's name, or `nil` if none is installed for them by that name."
   def plugin(owner, name) do
     case versions([owner]) do
       %{^name => version} -> version.artifact
@@ -114,24 +114,24 @@ defmodule OneCore.Plugins do
     end
   end
 
-  @doc "Who a plugin was added for and its name there, as something that runs for `who` finds the plugin `artifact`, or `nil`."
-  def added(who, artifact) do
+  @doc "Who a plugin was installed for and its name there, as something that runs for `who` finds the plugin `artifact`, or `nil`."
+  def installed(who, artifact) do
     Enum.find_value(chain(who), fn at ->
       Enum.find_value(versions([at]), fn {name, version} -> if version.artifact == artifact, do: {at, name} end)
     end)
   end
 
-  @doc "Everyone this server has looked at that the plugin `artifact` is added for."
-  def added_for(artifact), do: ask({:added_for, artifact})
+  @doc "Everyone this server has looked at that the plugin `artifact` is installed for."
+  def installed_for(artifact), do: ask({:installed_for, artifact})
 
   @doc "The version running here of the plugin `artifact`, or `nil`."
   def version(artifact), do: ask({:version, artifact})
 
-  @doc "Every plugin this server has looked at that has scheduled jobs: who it was added for, its name there, and the jobs."
+  @doc "Every plugin this server has looked at that has scheduled jobs: who it was installed for, its name there, and the jobs."
   def scheduled, do: ask(:scheduled)
 
-  @doc "What's added for everyone this server has looked at, by who: each plugin's name there, with the plugin."
-  def added, do: ask(:added)
+  @doc "What's installed for everyone this server has looked at, by who: each plugin's name there, with the plugin."
+  def installed, do: ask(:installed)
 
   @doc """
   The versions running here of the plugins `names` and of each plugin they use, by their names, as `owner` finds
@@ -149,23 +149,23 @@ defmodule OneCore.Plugins do
   end
 
   # Whose plugins a server runs whether or not it's asked for them: the network's, those of whoever it acts for, and
-  # the plugins whose services it runs, which are added for whoever's they are.
+  # the plugins whose services it runs, which are installed for whoever's they are.
   defp here(key) do
     services = for {plugin, _service} <- Servers.installed(key), do: Store.whose(plugin)
     Enum.uniq([@network | Servers.acts_for(key)] ++ services)
   end
 
   @doc """
-  Looks in the bucket at what's added for `owner`, and runs each plugin's newest version. Gives whether anything
+  Looks in the bucket at what's installed for `owner`, and runs each plugin's newest version. Gives whether anything
   changed. `loaded` are versions already loaded here, each as `OneCore.Plugins.Store.newer/2` gives one. A plugin
   whose newest version took over has its processes follow it, and its services installed here that weren't
   running start.
   """
   def reload(owner, loaded \\ []) do
-    {added, _tag} = Added.read(owner)
+    {installed, _tag} = Installed.read(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
-    newer = Store.newer(Enum.uniq(Map.values(added)) -- known, ask(:newest))
-    {changed, any} = ask({:looked, owner, added, loaded ++ newer})
+    newer = Store.newer(Enum.uniq(Map.values(installed)) -- known, ask(:newest))
+    {changed, any} = ask({:looked, owner, installed, loaded ++ newer})
 
     for artifact <- changed do
       # A process whose own code brought the newer version in is the one that can't wait for itself.
@@ -194,7 +194,7 @@ defmodule OneCore.Plugins do
          {:absent, missing} <- ask({:begin, owners, name}) do
       if missing == name,
         do: {:error, "There's no plugin named #{name}"},
-        else: {:error, "#{name} needs #{missing}, which isn't added for #{Enum.join(owners, " or ")} or the network"}
+        else: {:error, "#{name} needs #{missing}, which isn't installed for #{Enum.join(owners, " or ")} or the network"}
     end
   end
 
@@ -205,13 +205,13 @@ defmodule OneCore.Plugins do
   # of it is answered once they're there.
   defp ask(message), do: GenServer.call(__MODULE__, message, :infinity)
 
-  # A server starts with the newest version of every plugin it runs whether or not it's asked for them. `added` is
-  # what's added for each owner it has looked at, and `looked` when it last did; `running` and `newest` are by
+  # A server starts with the newest version of every plugin it runs whether or not it's asked for them. `installed` is
+  # what's installed for each owner it has looked at, and `looked` when it last did; `running` and `newest` are by
   # plugin, and `calls` are the versions each call holds.
   @impl true
   def init(nil) do
     Hooks.keep()
-    {:ok, %{added: %{}, reloaded: %{}, running: %{}, newest: %{}, calls: %{}}, {:continue, :start}}
+    {:ok, %{installed: %{}, reloaded: %{}, running: %{}, newest: %{}, calls: %{}}, {:continue, :start}}
   end
 
   @impl true
@@ -221,9 +221,9 @@ defmodule OneCore.Plugins do
     state =
       for owner <- here(key), reduce: state do
         state ->
-          {added, _tag} = Added.read(owner)
-          newer = Store.newer(Enum.uniq(Map.values(added)), state.newest)
-          {state, _changed, _any} = took_over(state, owner, added, newer)
+          {installed, _tag} = Installed.read(owner)
+          newer = Store.newer(Enum.uniq(Map.values(installed)), state.newest)
+          {state, _changed, _any} = took_over(state, owner, installed, newer)
           state
       end
 
@@ -235,26 +235,26 @@ defmodule OneCore.Plugins do
   @impl true
   def handle_call(:started, _from, state), do: {:reply, :ok, state}
 
-  def handle_call({:looked, owner, added, loaded}, _from, state) do
-    {state, changed, any} = took_over(state, owner, added, loaded)
+  def handle_call({:looked, owner, installed, loaded}, _from, state) do
+    {state, changed, any} = took_over(state, owner, installed, loaded)
     {:reply, {changed, any}, state}
   end
 
   def handle_call(:newest, _from, state), do: {:reply, state.newest, state}
   def handle_call(:refresh, _from, state), do: {:reply, :ok, %{state | reloaded: %{}}}
-  def handle_call(:added, _from, state), do: {:reply, state.added, state}
+  def handle_call(:installed, _from, state), do: {:reply, state.installed, state}
   def handle_call({:version, artifact}, _from, state), do: {:reply, state.running[artifact], state}
 
-  def handle_call({:added_for, artifact}, _from, state) do
-    {:reply, for({owner, added} <- state.added, artifact in Map.values(added), do: owner), state}
+  def handle_call({:installed_for, artifact}, _from, state) do
+    {:reply, for({owner, installed} <- state.installed, artifact in Map.values(installed), do: owner), state}
   end
 
   def handle_call({:running, owners}, _from, state) do
     state = behind(state, owners)
 
-    if Enum.all?(owners, &is_map_key(state.added, &1)) do
+    if Enum.all?(owners, &is_map_key(state.installed, &1)) do
       # Their own are found before the network's.
-      {:reply, running(state, Enum.reduce(Enum.reverse(owners), %{}, &Map.merge(&2, state.added[&1]))), state}
+      {:reply, running(state, Enum.reduce(Enum.reverse(owners), %{}, &Map.merge(&2, state.installed[&1]))), state}
     else
       {:reply, :unknown, state}
     end
@@ -262,8 +262,8 @@ defmodule OneCore.Plugins do
 
   def handle_call(:scheduled, _from, state) do
     scheduled =
-      for {owner, added} <- state.added,
-          {name, artifact} <- added,
+      for {owner, installed} <- state.installed,
+          {name, artifact} <- installed,
           %Version{jobs: [_ | _] = jobs} <- [state.running[artifact]],
           do: {owner, name, jobs}
 
@@ -312,7 +312,7 @@ defmodule OneCore.Plugins do
 
     stale =
       for owner <- Enum.uniq(owners ++ [@network]),
-          is_map_key(state.added, owner),
+          is_map_key(state.installed, owner),
           Map.get(state.reloaded, owner, now - @looks_after) <= now - @looks_after,
           do: owner
 
@@ -320,11 +320,11 @@ defmodule OneCore.Plugins do
     %{state | reloaded: Map.merge(state.reloaded, Map.new(stale, &{&1, now}))}
   end
 
-  # What's added for `owner` is `added` now, and each version in `loaded` takes over from its plugin's if it's
+  # What's installed for `owner` is `installed` now, and each version in `loaded` takes over from its plugin's if it's
   # newer: deploys that finish out of order still leave the one with the highest number, as the bucket has it. A
-  # version that doesn't compile here leaves the one before it running. A plugin that's added for nobody this
+  # version that doesn't compile here leaves the one before it running. A plugin that's installed for nobody this
   # server has looked at no longer runs here. Gives the plugins whose version changed, and whether anything did.
-  defp took_over(state, owner, added, loaded) do
+  defp took_over(state, owner, installed, loaded) do
     {state, changed, stale} =
       Enum.reduce(loaded, {state, [], []}, fn {artifact, number, loaded}, {state, changed, stale} ->
         version = with {:ok, version} <- loaded, do: version
@@ -342,10 +342,10 @@ defmodule OneCore.Plugins do
         end
       end)
 
-    any = changed != [] or state.added[owner] != added
-    state = %{state | added: Map.put(state.added, owner, added)}
+    any = changed != [] or state.installed[owner] != installed
+    state = %{state | installed: Map.put(state.installed, owner, installed)}
     state = put_in(state.reloaded[owner], System.monotonic_time(:millisecond))
-    kept = for {_owner, added} <- state.added, {_name, artifact} <- added, into: MapSet.new(), do: artifact
+    kept = for {_owner, installed} <- state.installed, {_name, artifact} <- installed, into: MapSet.new(), do: artifact
     {running, dropped} = Map.split_with(state.running, fn {artifact, _version} -> artifact in kept end)
 
     state = %{
@@ -357,9 +357,9 @@ defmodule OneCore.Plugins do
     changed = Enum.uniq(changed ++ Map.keys(dropped))
 
     # Which of each owner's plugins hooks into what is kept for every call to find without asking.
-    for {at, added} <- state.added, at == owner or Enum.any?(added, fn {_name, artifact} -> artifact in changed end) do
+    for {at, installed} <- state.installed, at == owner or Enum.any?(installed, fn {_name, artifact} -> artifact in changed end) do
       hooking =
-        for {name, artifact} <- Enum.sort(added),
+        for {name, artifact} <- Enum.sort(installed),
             %Version{hooks: hooks} <- [running[artifact]],
             hook <- hooks,
             reduce: %{} do
@@ -372,17 +372,17 @@ defmodule OneCore.Plugins do
     {unload_unused(state, stale ++ Map.values(dropped)), changed, any}
   end
 
-  # The versions running of the plugins `added`, by their names there.
-  defp running(state, added) do
-    for {name, artifact} <- added, version = state.running[artifact], into: %{}, do: {name, version}
+  # The versions running of the plugins `installed`, by their names there.
+  defp running(state, installed) do
+    for {name, artifact} <- installed, version = state.running[artifact], into: %{}, do: {name, version}
   end
 
-  # Who the plugin `name` was added for and the plugin, as the first of `owners` that has one by that name finds
+  # Who the plugin `name` was installed for and the plugin, as the first of `owners` that has one by that name finds
   # it. One of them this server hasn't looked at yet is looked at first.
   defp found(_state, [], name), do: {:absent, name}
 
   defp found(state, [owner | owners], name) do
-    case state.added do
+    case state.installed do
       %{^owner => %{^name => artifact}} -> {owner, artifact}
       %{^owner => _added} -> found(state, owners, name)
       _ -> {:absent, name}

@@ -20,17 +20,17 @@ const NETWORK = "network/";
 const SERVER = /^servers\/([0-9a-f]{64})\//;
 /**
  * What every server of the network reads, whoever's it is: a plugin's code, which is open to everyone in the
- * network, what's added for whom, which servers act for whom, who the network's first owner is, the builds its
+ * network, what's installed for whom, which servers act for whom, who the network's first owner is, the builds its
  * machines take, and what each owner has deployed. That's how a server runs a plugin someone else deployed, finds
  * the server to pass a call on to, knows who may do anything where no plugin decides who may, updates, and lists
  * every app there is.
  */
-const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|added|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
+const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
 /**
- * That a user, a group or the network added a plugin is a blob under the plugin, `added/<who>`, which a server
+ * That a user, a group or the network installed a plugin is a blob under the plugin, `installed/<who>`, which a server
  * acting for them writes and removes, whoever's the plugin is: a deploy of it tells their servers.
  */
-const ADDED = /^(?:(?:users|groups)\/[^/]+\/|network\/)plugins\/[^/]+\/added\/((?:users|groups)\/[^/]+|network)$/;
+const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)plugins\/[^/]+\/installed\/((?:users|groups)\/[^/]+|network)$/;
 /**
  * That a user, a group or the network deployed a plugin is a blob of the network's, `deployed/<who>/<name>`, with
  * the plugin's apps, which a server acting for them writes as it deploys: so every app there is is listed in one
@@ -151,9 +151,9 @@ async function sign(env, by, token, body) {
   const server = SERVER.exec(key)?.[1];
   const reads = ask.read !== undefined || ask.list !== undefined;
   const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await admits(env, by, token));
-  const adder = ((ask.write !== undefined || ask.remove !== undefined) && ADDED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
-  const added = adder && (await list(env, adder + "/"))?.includes(by);
-  if (!listed && !first && !open && !added) return refuse(403, "You aren't on its list of servers");
+  const installer = ((ask.write !== undefined || ask.remove !== undefined) && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
+  const installed = installer && (await list(env, installer + "/"))?.includes(by);
+  if (!listed && !first && !open && !installed) return refuse(403, "You aren't on its list of servers");
 
   const url = new URL(env.BUCKET);
   const headers = {};

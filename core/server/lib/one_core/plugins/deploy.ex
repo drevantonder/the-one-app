@@ -5,12 +5,12 @@ defmodule OneCore.Plugins.Deploy do
   (`OneCore.Plugins.Store`) and runs at once.
 
   Deploying or adding a plugin brings along the ones it uses that the server ships with: its `:shipped` setting,
-  each one's folder by its name. Those are added for the network.
+  each one's folder by its name. Those are installed for the network.
   """
   require Logger
   alias OneCore.{App, Bucket, Folder, Server, Servers}
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Added, Calls, Store, Version}
+  alias OneCore.Plugins.{Installed, Calls, Store, Version}
 
   @network "network"
   # What each owner has deployed, as the network keeps it: `deployed/<owner>/<name>`.
@@ -18,7 +18,7 @@ defmodule OneCore.Plugins.Deploy do
 
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
-  if there's none it's a new plugin of theirs, added for them. Its app, if it has one, is built first
+  if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
   (`OneCore.App`). Gives its version's number and the compiler's warnings.
   """
   def deploy(owner, name, files) do
@@ -31,10 +31,10 @@ defmodule OneCore.Plugins.Deploy do
 
       with :ok <- fits(owner, name, version),
            {:ok, number} <- Store.keep(artifact, name, kept, files),
-           :ok <- Added.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
+           :ok <- Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         listed(owner, name, version)
         Plugins.reload(owner, [{artifact, number, {:ok, version}}])
-        Server.notify_servers(Enum.uniq([owner | Added.added_for(artifact)]))
+        Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
         {:ok, number, warnings}
       else
         {:error, why} ->
@@ -168,7 +168,7 @@ defmodule OneCore.Plugins.Deploy do
     do: with(sources when is_list(sources) <- JSON.decode!(said), do: sources, else: (_ -> []))
 
   @doc """
-  Whether a plugin fits whoever it's added for: the plugins it uses are there for them, and one with scheduled jobs
+  Whether a plugin fits whoever it's installed for: the plugins it uses are there for them, and one with scheduled jobs
   uses a plugin that keeps them. `:ok`, or `{:error, why}`.
   """
   def fits(owner, name, version) do
@@ -224,8 +224,8 @@ defmodule OneCore.Plugins.Deploy do
   whoever the plugin is, as they would deploy it again.
   """
   def rebuild do
-    for {owner, added} <- Plugins.added(),
-        {name, artifact} <- added,
+    for {owner, installed} <- Plugins.installed(),
+        {name, artifact} <- installed,
         %Version{ui: built_with} = version <- [Plugins.version(artifact)],
         built_with != nil,
         ui = Plugins.running(owner)["ui"],
@@ -238,8 +238,8 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # The plugins a plugin uses are added before it is: the ones missing, and the ones running from files a server
-  # shipped before this one's, come from what the server ships with, and are added for the network, by a server
+  # The plugins a plugin uses are installed before it is: the ones missing, and the ones running from files a server
+  # shipped before this one's, come from what the server ships with, and are installed for the network, by a server
   # acting for it. Shipping goes by name, so a plugin can come before one it uses that's still to be shipped.
   defp bring(owner, name, uses) do
     shipped =
@@ -252,11 +252,11 @@ defmodule OneCore.Plugins.Deploy do
 
       [missing] ->
         {:error,
-         "#{name} uses #{missing}, which isn't added for #{owner} or the network. Add it for them first, or deploy it."}
+         "#{name} uses #{missing}, which isn't installed for #{owner} or the network. Add it for them first, or deploy it."}
 
       missing ->
         {:error,
-         "#{name} uses #{Enum.join(missing, ", ")}, which aren't added for #{owner} or the network. " <>
+         "#{name} uses #{Enum.join(missing, ", ")}, which aren't installed for #{owner} or the network. " <>
            "Add them for them first, or deploy them."}
     end
   end
@@ -274,8 +274,8 @@ defmodule OneCore.Plugins.Deploy do
 
   defp check(name, files) do
     cond do
-      Added.named(name) != :ok ->
-        Added.named(name)
+      Installed.named(name) != :ok ->
+        Installed.named(name)
 
       not (is_map(files) and map_size(files) > 0 and
                Enum.all?(files, fn {path, text} -> path?(path) and is_binary(text) end)) ->

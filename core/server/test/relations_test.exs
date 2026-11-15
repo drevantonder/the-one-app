@@ -2,7 +2,7 @@ defmodule OneCore.RelationsTest do
   @moduledoc "Who may do what, as the relation tuples plugin decides it from its tuples."
   use ExUnit.Case
   alias OneCore.{Server, User}
-  alias OneCore.Plugins.{Added, Calls, Deploy}
+  alias OneCore.Plugins.{Installed, Calls, Deploy}
 
   # Notes, each an artifact made for whoever wrote it. `Peek` is the same plugin under another name, which made
   # none of them.
@@ -82,7 +82,7 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = unshare(note, "viewer", @bob, @alice)
     assert not reads?(note, @bob) and reads?(note, @carol)
 
-    # An editor shares up to their own relation, a viewer shares nothing, and only an owner adds an owner.
+    # An editor shares up to their own relation, a viewer shares nothing, and only an owner installs an owner.
     assert {:ok, _} = share(note, "viewer", @bob, @carol)
     assert {:error, "users/bob isn't an editor of" <> _} = share(note, "viewer", "users/dave", @bob)
     assert {:error, "users/carol isn't an owner of" <> _} = share(note, "owner", @carol, @carol)
@@ -153,7 +153,7 @@ defmodule OneCore.RelationsTest do
     assert {:ok, {@carol, "groups/family"}, false} = for_family.(@carol)
 
     assert for_family.(@bob) ==
-             {:error, "users/bob isn't a member of groups/family. Whoever owns it adds them, with relations_share."}
+             {:error, "users/bob isn't a member of groups/family. Whoever owns it installs them, with relations_share."}
 
     assert {:ok, {@bob, "network"}, false} = OneCore.User.asking(nil, %{"as" => "bob", "for" => "network"})
 
@@ -211,20 +211,20 @@ defmodule OneCore.RelationsTest do
 
     # Without the relation tuples plugin nothing is shared, and nobody does anything but the network's first
     # owner, who is how it's put back.
-    assert :ok = Added.remove("network", "relations")
+    assert :ok = Installed.uninstall("network", "relations")
     assert not reads?(note, @alice) and not reads?(note, @bob, "peek")
     assert reads?(note, OneCore.Test.owner(), "peek")
   end
 
   @tag :tmp_dir
-  test "One Core's own tools are whoever's may: a plugin's editor deploys over it, a viewer adds it, and an owner changes what's added" do
+  test "One Core's own tools are whoever's may: a plugin's editor deploys over it, a viewer installs it, and an owner changes what's installed" do
     tool = fn name, inputs, asked -> OneCore.Tools.call(name, inputs, asked) end
     files = %{"files" => %{"server/diary.ex" => String.replace(@notes, "Notes", "Diary")}}
     diary = "users/alice/plugins/diary"
     assert {:ok, "groups/family"} = call("relations_group", %{"name" => "family"}, @alice)
     assert {:ok, _} = share("groups/family", "member", @bob, @alice)
 
-    # Anyone deploys a plugin of their own, and it's theirs alone: nobody deploys over it, adds it or removes it.
+    # Anyone deploys a plugin of their own, and it's theirs alone: nobody deploys over it, installs it or removes it.
     assert {:ok, "diary is running, at version 1."} = tool.("deploy", Map.put(files, "name", "diary"), {@alice, @alice})
     assert {:ok, _name} = call("diary_write", %{"id" => "1"}, @alice)
     assert {:error, "There's no plugin named diary"} = call("diary_write", %{"id" => "1"}, @bob)
@@ -233,7 +233,7 @@ defmodule OneCore.RelationsTest do
              {:error, "users/bob isn't a viewer of #{diary}. Whoever owns it shares it, with relations_share."}
 
     assert {:ok, _} = share(diary, "viewer", @bob, @alice)
-    assert {:ok, "#{diary} is added for users/bob, as diary."} == tool.("add", %{"plugin" => diary}, {@bob, @bob})
+    assert {:ok, "#{diary} is installed for users/bob, as diary."} == tool.("add", %{"plugin" => diary}, {@bob, @bob})
     assert {:ok, "users/bob/made/diary/1"} = call("diary_write", %{"id" => "1"}, @bob)
 
     assert {:error, "users/bob isn't an editor of users/alice/plugins/diary" <> _} =
@@ -242,7 +242,7 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = share(diary, "editor", @bob, @alice)
     assert {:ok, "diary is running, at version 2."} = tool.("deploy", Map.put(files, "name", "diary"), {@bob, @bob})
 
-    # What's added for a group is its owner's to change, not its members', and what's added for the network is
+    # What's installed for a group is its owner's to change, not its members', and what's installed for the network is
     # the network's owner's: its members don't deploy over relations, or remove it.
     assert {:error, "users/bob isn't an owner of groups/family" <> _} =
              tool.("add", %{"plugin" => diary}, {@bob, "groups/family"})
@@ -309,7 +309,7 @@ defmodule OneCore.RelationsTest do
     # The network's owner does all of it, and so recovers anything.
     assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {OneCore.Test.owner(), "groups/family"})
 
-    assert {:ok, "relations is removed from what's added for network."} =
+    assert {:ok, "relations is removed from what's installed for network."} =
              tool.("remove", %{"name" => "relations"}, {OneCore.Test.owner(), "network"})
   end
 

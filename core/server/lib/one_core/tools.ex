@@ -1,13 +1,13 @@
 defmodule OneCore.Tools do
   @moduledoc """
-  One Core's own tools: what adds, updates and removes plugins, servers and services.
+  One Core's own tools: what installs, updates and removes plugins, servers and services.
 
   They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.Calls.tool/6`): the plugins that
   change a call's inputs change theirs, the ones that decide a call decide theirs, and the ones that hear are
   told. What each changes it reaches as a plugin reaches an artifact, so the plugins that decide `reach` say
-  whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` reads its code and adds it, and
-  so does a `member` of the group or the network it's whoever's or added for, since what's in use is open to
-  everyone it's in use for, and only an `owner` of a user, a group or the network changes what's added for them
+  whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` reads its code and installs it, and
+  so does a `member` of the group or the network it's whoever's or installed for, since what's in use is open to
+  everyone it's in use for, and only an `owner` of a user, a group or the network changes what's installed for them
   and which servers act for them. A server is its owner's: who it was started for, and only their `owner` says
   who else it acts for and what it runs. Nothing is asked about what's whoever's asked, which is what their name
   starts. With no plugin deciding, they're the network's first owner's alone.
@@ -16,7 +16,7 @@ defmodule OneCore.Tools do
   the call on to.
   """
   alias OneCore.{Artifact, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Added, Calls, Deploy, Store}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Store}
 
   @tools [
     %{
@@ -26,7 +26,7 @@ defmodule OneCore.Tools do
       The server builds its apps from their source in client/, compiles its Elixir in server/ and runs the plugin at
       once, with its tools listed and called as <name>_<tool>. If either fails, it says why, and the version already
       running stays.
-      The skill `building-plugins` says how to write a plugin. It's yours, and is added for you: asked for a group
+      The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
       or for the network, it's theirs.
       """,
       inputs: %{
@@ -68,12 +68,12 @@ defmodule OneCore.Tools do
       }
     },
     %{
-      name: "add",
+      name: "install",
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
-      It's the same plugin, at its newest version, with an artifact of its own for whoever it's added for. One in
+      It's the same plugin, at its newest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
-      with you first, as a viewer. The plugins it uses are added for you first.
+      with you first, as a viewer. The plugins it uses are installed for you first.
       """,
       inputs: %{
         type: "object",
@@ -85,8 +85,8 @@ defmodule OneCore.Tools do
       }
     },
     %{
-      name: "remove",
-      description: "Removes a plugin from what's added for you. It stays whoever's it is, and what it kept stays.",
+      name: "uninstall",
+      description: "Removes a plugin from what's installed for you. It stays whoever's it is, and what it kept stays.",
       inputs: %{
         type: "object",
         properties: %{name: %{type: "string", description: "The plugin's name"}},
@@ -110,8 +110,8 @@ defmodule OneCore.Tools do
       name: "add_server",
       description: """
       Lets a server act for you: asked for a group or for the network, for them.
-      It then reads and writes what's yours, runs the plugins added for you, and takes over when another of your
-      servers stops. A new server is its owner's alone, who adds it first. Someone else's acts for you once its
+      It then reads and writes what's yours, runs the plugins installed for you, and takes over when another of your
+      servers stops. A new server is its owner's alone, who installs it first. Someone else's acts for you once its
       owner chose you, with `add_member`, and you add it.
       """,
       inputs: %{
@@ -174,7 +174,7 @@ defmodule OneCore.Tools do
       }
     },
     %{
-      name: "remove_service",
+      name: "uninstall_service",
       description: "Stops running a plugin's service on a server.",
       inputs: %{
         type: "object",
@@ -280,7 +280,7 @@ defmodule OneCore.Tools do
         forward = &Call.forward({"tools/call", %{name: name, arguments: inputs}}, asked, forwarded, &1)
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
-        apart = if name in ["deploy", "remove"], do: {User.owner(elem(asked, 1)), inputs["name"]}
+        apart = if name in ["deploy", "uninstall"], do: {User.owner(elem(asked, 1)), inputs["name"]}
 
         Calls.tool(tool, about, asked, nil, &run(name, &1, asked, forward), apart)
     end
@@ -289,7 +289,7 @@ defmodule OneCore.Tools do
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
 
-  # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is added for whoever it's
+  # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
   # deployed for.
   defp run("deploy", %{"name" => name, "files" => files}, {_by, who} = asked, forward) do
     case Plugins.plugin(who, name) do
@@ -315,30 +315,30 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("add", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
+  defp run("install", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
     at(who, forward)
     opens!(asked, plugin)
     reaches!(asked, who, "owner")
-    with {:error, why} <- Added.add(who, name, plugin), do: raise(why)
-    "#{plugin} is added for #{who}, as #{name}."
+    with {:error, why} <- Installed.install(who, name, plugin), do: raise(why)
+    "#{plugin} is installed for #{who}, as #{name}."
   end
 
-  defp run("remove", %{"name" => name}, {_by, who} = asked, forward) do
+  defp run("uninstall", %{"name" => name}, {_by, who} = asked, forward) do
     at(who, forward)
     reaches!(asked, who, "owner")
-    with {:error, why} <- Added.remove(who, name), do: raise(why)
-    "#{name} is removed from what's added for #{who}."
+    with {:error, why} <- Installed.uninstall(who, name), do: raise(why)
+    "#{name} is removed from what's installed for #{who}."
   end
 
-  # A file sent this way lands in the plugin's own artifact, for whoever it was added for, under a name nobody
+  # A file sent this way lands in the plugin's own artifact, for whoever it was installed for, under a name nobody
   # could guess.
   defp run("upload", %{"plugin" => plugin}, {_by, who}, forward) do
     with %{^plugin => version} <- Plugins.running(who),
-         {added, ^plugin} <- Plugins.added(who, version.artifact) do
-      at(added, forward)
+         {installed, ^plugin} <- Plugins.installed(who, version.artifact) do
+      at(installed, forward)
       name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-      own = %Artifact{prefix: "#{added}/own/#{plugin}/"}
+      own = %Artifact{prefix: "#{installed}/own/#{plugin}/"}
       JSON.encode!(Map.put(Artifact.link(own, name, :write), :upload, name))
     else
       _ -> raise "There's no plugin named #{plugin}"
@@ -346,7 +346,7 @@ defmodule OneCore.Tools do
   end
 
   # Whoever a server acts for put it on their list, and its owner chose them. A server with no members yet is a
-  # new one, which whoever adds it first is bringing.
+  # new one, which whoever installs it first is bringing.
   defp run("add_server", %{"key" => key}, {_by, who} = asked, forward) do
     at(who, forward)
     reaches!(asked, who, "owner")
@@ -399,8 +399,8 @@ defmodule OneCore.Tools do
     end)
   end
 
-  defp run("remove_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _pass) do
-    on(inputs["server"], "remove_service", inputs, asked, fn ->
+  defp run("uninstall_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _pass) do
+    on(inputs["server"], "uninstall_service", inputs, asked, fn ->
       reaches!(asked, owner(), "owner")
       with {:error, why} <- Services.remove(plugin(who, name), service), do: raise(why)
       "#{service} no longer runs on #{here()}."
@@ -456,14 +456,14 @@ defmodule OneCore.Tools do
   end
 
   # Raises unless whoever asked may read a plugin's code and add it: a `viewer` of it, or a member of a group or
-  # the network that it's whoever's or added for, as the plugins that decide `reach` say. That's VISION's "what's
+  # the network that it's whoever's or installed for, as the plugins that decide `reach` say. That's VISION's "what's
   # made is open to everyone inside once it's in use": what only its author has is theirs and whoever they share
   # it with, and taking it away from a group takes it away from them. Only its code is opened: what it keeps for
   # anyone is never the plugin's artifact, and is reached as ever.
   defp opens!({by, _who} = asked, plugin) do
     with {:refuse, why} <- reaches(asked, plugin, "viewer") do
       in_use =
-        for of <- [User.owner(plugin) | Added.added_for(plugin)], of == "network" or match?("groups/" <> _, of), do: of
+        for of <- [User.owner(plugin) | Installed.installed_for(plugin)], of == "network" or match?("groups/" <> _, of), do: of
 
       member = &(Hooks.decide("reach", %{"who" => by, "relation" => "member", "artifact" => &1}, {by, &1}) == :ok)
       if not Enum.any?(Enum.uniq(in_use), member), do: raise(why)

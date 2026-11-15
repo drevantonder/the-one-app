@@ -2,19 +2,19 @@ defmodule OneCore.Call do
   @moduledoc """
   What a tool is called with besides its inputs.
 
-  - `own`: the plugin's own `OneCore.Artifact` for whoever it was added for. Only this plugin reaches it.
-  - `added`: who the plugin was added for, whose `own` is: a user, a group or the network. It's who the plugin
+  - `own`: the plugin's own `OneCore.Artifact` for whoever it was installed for. Only this plugin reaches it.
+  - `installed`: who the plugin was installed for, whose `own` is: a user, a group or the network. It's who the plugin
     runs for with nobody there, as a scheduled job and a service do.
-  - `folder`: a folder on the machine running this call that is the plugin's own for whoever it was added for, for what
+  - `folder`: a folder on the machine running this call that is the plugin's own for whoever it was installed for, for what
     it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
   - `for`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
     or the group or the network they asked for. What it makes is theirs, and it reaches what they may. A
-    scheduled job runs for whoever its plugin was added for.
+    scheduled job runs for whoever its plugin was installed for.
   - `by`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
     job is called by the clock, so by nobody: `nil`.
 
-  The rest is One Core's: the plugin's name where it was added and the plugin as a who, what was asked of it, the
+  The rest is One Core's: the plugin's name where it was installed and the plugin as a who, what was asked of it, the
   plugins it uses, and whether another server passed it on.
 
   A call is passed between servers at most twice, so none goes round. A server that can't run it has one that can
@@ -24,8 +24,8 @@ defmodule OneCore.Call do
   alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
   alias OneCore.Plugins.{Calls, Version}
 
-  @enforce_keys [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
-  defstruct [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
+  @enforce_keys [:own, :installed, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
+  defstruct [:own, :installed, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), for: String.t()}
 
@@ -43,7 +43,7 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  Calls a tool of another plugin, added for whoever this call runs for or for the network, as they would call it
+  Calls a tool of another plugin, installed for whoever this call runs for or for the network, as they would call it
   themselves: the same inputs are checked, the same hooks asked, and it runs as that plugin, with its own artifact.
   Gives its answer as it would reach a client over JSON, or raises with what that plugin said.
 
@@ -152,7 +152,7 @@ defmodule OneCore.Call do
 
   @doc """
   Whether whoever asked owns whoever this call runs for: themselves, or the group or the network they asked for,
-  as its `owner`. It's who changes what's added for them, so a plugin asks it before changing what's a group's
+  as its `owner`. It's who changes what's installed for them, so a plugin asks it before changing what's a group's
   or the network's as a whole, where being a member isn't enough.
   """
   def owns?(%__MODULE__{for: who, by: who}), do: true
@@ -163,20 +163,20 @@ defmodule OneCore.Call do
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
-  `plugin` it is, as its artifact's name, who it was `added` for, its `apps` and its `widgets`. A home page is
+  `plugin` it is, as its artifact's name, who it was `installed` for, its `apps` and its `widgets`. A home page is
   drawn from these.
   """
   def plugins(%__MODULE__{for: who}) do
     for at <- Enum.reverse(Plugins.chain(who)), {name, version} <- Plugins.versions([at]), into: %{} do
-      {name, %{name: name, plugin: version.artifact, added: at, apps: version.apps, widgets: version.widgets}}
+      {name, %{name: name, plugin: version.artifact, installed: at, apps: version.apps, widgets: version.widgets}}
     end
     |> Map.values()
   end
 
   @doc """
-  Every plugin anyone in the network has deployed, whether or not it's added for anyone now: each one's `plugin`,
+  Every plugin anyone in the network has deployed, whether or not it's installed for anyone now: each one's `plugin`,
   as its artifact's name, and its `apps` as its newest version has them. An app store is drawn from it. Whoever
-  may see one reads and adds it, and so does everyone in a group or the network it's in use for (`OneCore.Tools`).
+  may see one reads and installs it, and so does everyone in a group or the network it's in use for (`OneCore.Tools`).
   """
   def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()
 
@@ -198,7 +198,7 @@ defmodule OneCore.Call do
 
   @doc """
   Has a server acting for `owner` run this call instead, since this one doesn't act for them. The call ends here
-  with that server's answer, and raises if none of them is up, or none acts for whoever the plugin was added for
+  with that server's answer, and raises if none of them is up, or none acts for whoever the plugin was installed for
   too.
 
   With servers' keys in `owner`'s place, it's one of those that runs it, for a plugin that knows which can: the

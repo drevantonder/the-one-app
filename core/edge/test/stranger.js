@@ -40,7 +40,7 @@ async function ask(method, path, body) {
 }
 await ask("POST", "/signer/sign", JSON.stringify({ read: `${list}servers` }));
 await ask("POST", "/signer/sign", JSON.stringify({ write: `${list}own/tally/stolen` }));
-await ask("POST", "/signer/sign", JSON.stringify({ remove: `${list}added` }));
+await ask("POST", "/signer/sign", JSON.stringify({ remove: `${list}installed` }));
 await ask("POST", "/signer/sign", JSON.stringify({ write: `servers/${key}/address` }));
 await ask("POST", "/signer/sign", JSON.stringify({ write: "network/servers" }));
 await ask("GET", `/signer/servers?of=${list}`);

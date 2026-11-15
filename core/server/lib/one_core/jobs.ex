@@ -4,9 +4,9 @@ defmodule OneCore.Jobs do
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
   telling another. At each of those times, and when this server starts or a plugin's version changes, the plugin is
-  asked to have what's due called (`OneCore.Plugins.Calls.schedule/2`), for each one it was added for. Every server asks,
+  asked to have what's due called (`OneCore.Plugins.Calls.schedule/2`), for each one it was installed for. Every server asks,
   and the plugin keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
-  plugin was added for: a time that passed with no server up is made up for by the first that's back.
+  plugin was installed for: a time that passed with no server up is made up for by the first that's back.
   """
   use GenServer
   alias OneCore.{Plugins, Servers}
@@ -34,10 +34,10 @@ defmodule OneCore.Jobs do
   defp asked(%{at: at, timer: timer}) do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
-    scheduled = for {added, _name, _jobs} = scheduled <- Plugins.scheduled(), Servers.here?(added), do: scheduled
+    scheduled = for {installed, _name, _jobs} = scheduled <- Plugins.scheduled(), Servers.here?(installed), do: scheduled
 
-    for {added, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
-      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(added, name) end)
+    for {installed, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(installed, name) end)
     end
 
     next = for {_added, _name, jobs} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every

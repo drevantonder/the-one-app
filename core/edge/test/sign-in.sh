@@ -383,7 +383,7 @@ kill -9 "$spare"
 say "A server that's off is known to be, by the relay, so a call to it isn't waited for and says when it was last seen"
 spare_key=$(key_of "$folder/spare")
 began=$(now)
-ONE_FOR=network refused device laptop remove_service --plugin sign-in --service none --server "$spare_key"
+ONE_FOR=network refused device laptop uninstall_service --plugin sign-in --service none --server "$spare_key"
 echo "  in $((($(now) - began) / 1000)) ms, where reaching a server takes up to 3000"
 echo "  and alice's devices say which is on: $(device laptop sign-in devices | grep -o '"seen":"[^"]*"' | sed -E 's/"seen":"(on|[^"]*)"/\1/; s/^2.*/a time/' | sort | uniq -c | tr -s ' \n' ' ')"
 

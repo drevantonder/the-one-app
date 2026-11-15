@@ -1,7 +1,7 @@
 defmodule OneCore.PluginsTest do
   use ExUnit.Case
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Added, Calls, Deploy, Store, Version}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Store, Version}
 
   # A plugin of two modules. Its tool waits to be told to finish, then asks its other module which version it is.
   defp slow(number) do
@@ -58,17 +58,17 @@ defmodule OneCore.PluginsTest do
     send(first_call, :finish)
     assert Task.await(first) == {:ok, 1}
 
-    # A plugin is added for someone once the plugins it uses are there for them, as when it's deployed.
+    # A plugin is installed for someone once the plugins it uses are there for them, as when it's deployed.
     uses = ~s(defmodule Uses do\n  @behaviour OneCore.Plugin\n  @impl true\n  def uses, do: ["thing"]\nend)
     assert {:ok, 1, ""} = Deploy.deploy("users/alice", "thing", %{"client/thing.js" => "1"})
     assert {:ok, 1, ""} = Deploy.deploy("users/alice", "uses", %{"server/uses.ex" => uses})
 
-    assert Added.add("users/bob", "uses", "users/alice/plugins/uses") ==
+    assert Installed.install("users/bob", "uses", "users/alice/plugins/uses") ==
              {:error,
-              "uses uses thing, which isn't added for users/bob or the network. Add it for them first, or deploy it."}
+              "uses uses thing, which isn't installed for users/bob or the network. Add it for them first, or deploy it."}
 
-    assert :ok = Added.add("users/bob", "thing", "users/alice/plugins/thing")
-    assert :ok = Added.add("users/bob", "uses", "users/alice/plugins/uses")
+    assert :ok = Installed.install("users/bob", "thing", "users/alice/plugins/thing")
+    assert :ok = Installed.install("users/bob", "uses", "users/alice/plugins/uses")
     assert length(loaded()) == 1
 
     # A server starting on the same bucket runs what was deployed.

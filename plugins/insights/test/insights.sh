@@ -280,13 +280,13 @@ timed() {
   median "$times"
 }
 on=$(timed on)
-may as_owner remove --name insights
+may as_owner uninstall --name insights
 off=$(timed off)
 echo "  with Insights: $on ms. Without it, recording nothing: $off ms."
 
 if [[ -n $shots ]]; then
   say "Pictures of Insights in Settings, into $shots"
-  may as_owner add --plugin network/plugins/insights
+  may as_owner install --plugin network/plugins/insights
   for _ in 1 2 3; do as probe slow >/dev/null; as probe echo --text "$marker" >/dev/null; done
   handed_on
   (cd "$root/core/edge" && ONE_AS=owner bun "$root/clients/app/test/window.js" "$shots" "$root/plugins/insights/test/shots.js")

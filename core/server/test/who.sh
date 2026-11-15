@@ -3,7 +3,7 @@
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
-# user, group and the network it's added for, and its skill is seen by whoever it's added for. Its code is open to
+# user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
@@ -214,7 +214,7 @@ defmodule Diary do
   @impl true
   def tools do
     text = %{type: "object", properties: %{text: %{type: "string", description: "What to write"}}, required: ["text"]}
-    [%{name: "write", description: "Writes an entry in the diary of whoever this is added for", inputs: text}]
+    [%{name: "write", description: "Writes an entry in the diary of whoever this is installed for", inputs: text}]
   end
 
   @impl true
@@ -326,7 +326,7 @@ may as alice relations share --artifact "$note" --relation viewer --who network/
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
 
-say "A plugin's skill is listed for whoever the plugin is added for, with One Core's own, and a link's holder sees none"
+say "A plugin's skill is listed for whoever the plugin is installed for, with One Core's own, and a link's holder sees none"
 may as alice deploy --name diary --files-from "$folder/diary"
 link=$(as alice relations link --artifact "$note" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
 may as link "$link" notes read --note "$note"
@@ -346,61 +346,61 @@ said=$(as bob building-plugins)
 said="${said%%$'\n'*} ..." shown "may    " as bob building-plugins
 refused as link "$link" building-plugins
 
-say "A plugin is whoever's deployed it, and has an artifact of its own for each one it's added for"
+say "A plugin is whoever's deployed it, and has an artifact of its own for each one it's installed for"
 may as alice diary write --text "Dear diary"
 refused as bob diary write --text "Dear diary"
-refused as bob add --plugin users/alice/plugins/diary
+refused as bob install --plugin users/alice/plugins/diary
 may as alice relations share --artifact users/alice/plugins/diary --relation viewer --who everyone
-may as bob add --plugin users/alice/plugins/diary
+may as bob install --plugin users/alice/plugins/diary
 may as bob diary write --text "Mine"
 listed=$(skills as bob)
 echo "  bob is listed its skill now: $listed"
 [[ " $listed " == *" diary "* ]]
-may as alice for groups/family add --plugin users/alice/plugins/diary
+may as alice for groups/family install --plugin users/alice/plugins/diary
 may as carol for groups/family diary write --text "Ours"
 refused as dave for groups/family diary write --text "Theirs"
-may as owner for network add --plugin users/alice/plugins/diary --name journal
+may as owner for network install --plugin users/alice/plugins/diary --name journal
 may as dave journal write --text "Everyone's"
 refused as alice reader read --note users/bob/own/diary
-may as bob remove --name diary
+may as bob uninstall --name diary
 refused as bob diary write --text "Mine again"
 may as alice diary write --text "Still here"
-may as bob add --plugin users/alice/plugins/diary
+may as bob install --plugin users/alice/plugins/diary
 
 say "A plugin's code is open to everyone it's in use for, and to nobody else, and what it keeps stays whoever's it is"
 may as alice deploy --name recipes --files-from "$folder/notes"
 recipe=$(as alice recipes write --id soup --text "Leek and potato")
 echo "  alice wrote $recipe with it"
 may as alice code --name recipes
-refused as carol add --plugin users/alice/plugins/recipes
-may as alice for groups/family add --plugin users/alice/plugins/recipes
+refused as carol install --plugin users/alice/plugins/recipes
+may as alice for groups/family install --plugin users/alice/plugins/recipes
 may as carol for groups/family code --name recipes
 refused as dave for groups/family code --name recipes
-refused as dave add --plugin users/alice/plugins/recipes
-may as carol add --plugin users/alice/plugins/recipes
+refused as dave install --plugin users/alice/plugins/recipes
+may as carol install --plugin users/alice/plugins/recipes
 may as carol code --name recipes
 refused as carol recipes read --note "$recipe"
 refused as carol relations shared --artifact users/alice/plugins/recipes
-may as alice for groups/family remove --name recipes
+may as alice for groups/family uninstall --name recipes
 refused as carol code --name recipes
-refused as carol add --plugin users/alice/plugins/recipes --name again
-may as owner for network add --plugin users/alice/plugins/recipes
+refused as carol install --plugin users/alice/plugins/recipes --name again
+may as owner for network install --plugin users/alice/plugins/recipes
 may as dave code --name recipes
-may as dave add --plugin users/alice/plugins/recipes --name mine
+may as dave install --plugin users/alice/plugins/recipes --name mine
 refused as dave recipes read --note "$recipe"
-may as owner for network remove --name recipes
+may as owner for network uninstall --name recipes
 refused as dave code --name mine
-may as dave remove --name mine
-may as carol remove --name recipes
+may as dave uninstall --name mine
+may as carol uninstall --name recipes
 
 say "One Core's own tools are whoever's may, decided by the same hooks"
 refused as bob deploy --name diary --files-from "$folder/diary"
-refused as carol for groups/family remove --name diary
+refused as carol for groups/family uninstall --name diary
 refused as bob for network deploy --name notes --files-from "$folder/notes"
-refused as bob for network remove --name relations
+refused as bob for network uninstall --name relations
 refused as bob for network add_server --key "$(printf 'ab%.0s' {1..32})"
 refused as bob install_service --plugin load --service Load.Meter
-may as alice for groups/family remove --name diary
+may as alice for groups/family uninstall --name diary
 
 say "Anyone brings a server, which is theirs alone until they choose who else it acts for, and each agrees"
 start_for alices users/alice
@@ -412,8 +412,8 @@ grep -q "A server is running" "$folder/alices.log" && echo "  started again, it'
 may via alices as alice diary write --text "At home"
 may via alices as alice journal write --text "With everyone"
 may as owner relations share --artifact network/plugins/reader --relation viewer --who users/alice
-may via alices as alice add --plugin network/plugins/reader --name mine
-may via alices as alice remove --name mine
+may via alices as alice install --plugin network/plugins/reader --name mine
+may via alices as alice uninstall --name mine
 refused via alices as bob diary write --text "At alice's"
 refused as bob add_server --key "${key[alices]}"
 refused as bob add_member --server "${key[alices]}" --who users/bob
@@ -436,9 +436,9 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
         refused in OneCore.Bucket.Refused -> String.replace(refused.message, ~r/^.*refused: /, "refused by the signer: ")
       end
       IO.puts("    #{blob}: #{said}")
-    end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/added users/bob/own/diary/1 \
+    end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
     users/bob/made/notes/list/text network/own/relations/log/0000000000000001 groups/family/own/diary/1 \
-    users/bob/added network/plugins/notes/newest 2>&1 | grep -v "^$")
+    users/bob/installed network/plugins/notes/newest 2>&1 | grep -v "^$")
 else
   echo "  (on a folder nothing stands between a server and the bucket: with --edge, the signer refuses it the rest)"
 fi
@@ -454,7 +454,7 @@ as owner for network deploy --name gate --files-from "$folder/gate" >/dev/null
 echo "  gate is deployed for the network, and decides every call"
 refused as alice notes write --id secrets --text "My password is hunter2"
 may as alice notes write --id plans --text "Go for a walk"
-as owner for network remove --name gate >/dev/null
+as owner for network uninstall --name gate >/dev/null
 
 say "Who may approve is whoever a tuple says"
 as owner for network deploy --name approvals --files-from "$folder/approvals" >/dev/null
@@ -494,19 +494,19 @@ for server in server spare; do
   echo "    $(timed $server bob reader_read "$reads")  bob reads it with reader: a check of reader too, asked once"
 done
 
-say "A plugin that decides and breaks has refused, for whoever it was added for, and has no say in its own removal"
+say "A plugin that decides and breaks has refused, for whoever it was installed for, and has no say in its own removal"
 may as alice deploy --name stuck --files-from "$folder/stuck"
 refused as alice notes read --note "$note"
-refused as alice remove --name diary
+refused as alice uninstall --name diary
 may as bob notes read --note "$note"
-may as alice remove --name stuck
+may as alice uninstall --name stuck
 may as alice notes read --note "$note"
 
 say "When what broke is what says who may, whoever runs a server for them starts it without that plugin"
 may as owner for network deploy --name lost --files-from "$folder/lost"
 refused as bob notes read --note "$note"
 may as alice notes read --note "$note"
-refused as owner for network remove --name lost
+refused as owner for network uninstall --name lost
 pkill -9 -f "network $folder server "
 (cd "$root/core/server" && exec mix network "$folder" server --development "${at_address[@]}" --without lost) >"$folder/server.log" 2>&1 &
 started+=($!)

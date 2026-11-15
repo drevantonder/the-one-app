@@ -1,7 +1,7 @@
 defmodule Notifications do
   @moduledoc """
   Notifications: what a plugin or an agent tells a person, kept in their inbox and shown on their devices. It's
-  added for the network, so one database keeps everyone's, a row for each person a notification went to.
+  installed for the network, so one database keeps everyone's, a row for each person a notification went to.
 
   A running app on a computer hears that something changed and asks `inbox` for what's new, which it shows as the
   system's own notification: one that isn't running shows nothing, and its person sees the inbox when they open
@@ -308,7 +308,7 @@ defmodule Notifications do
     end)
   end
 
-  # What a person sees each plugin's app called, by the plugin's name, of the ones added for them. One with no app
+  # What a person sees each plugin's app called, by the plugin's name, of the ones installed for them. One with no app
   # is called by its name.
   defp names(user) do
     Map.new(OneCore.Plugins.running(user), fn {plugin, version} ->

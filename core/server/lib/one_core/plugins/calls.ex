@@ -3,7 +3,7 @@ defmodule OneCore.Plugins.Calls do
   Calling a plugin: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having
   its scheduled jobs called. A call runs on the version of the plugin that was newest when it began, and the ones
   it uses, which stay loaded until it ends (`OneCore.Plugins.run/3`). It runs on a server acting for whoever the
-  plugin was added for: this one, or one it's passed on to.
+  plugin was installed for: this one, or one it's passed on to.
   """
   require Logger
   alias ExJsonSchema.Validator.Error
@@ -53,7 +53,7 @@ defmodule OneCore.Plugins.Calls do
   `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
   inputs are what the tool takes, the plugins that change a call's inputs are asked and the ones that decide it,
   and the ones that hear are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
-  told, or what `call/5` does where another server ran it. `apart` is the plugin the call removes or deploys over, as who it was added for and its name there, which
+  told, or what `call/5` does where another server ran it. `apart` is the plugin the call removes or deploys over, as who it was installed for and its name there, which
   isn't asked.
   """
   def tool(tool, about, asked, version \\ nil, fun, apart \\ nil) do
@@ -64,8 +64,8 @@ defmodule OneCore.Plugins.Calls do
     end
   end
 
-  # A plugin is added for users and groups. A sharing link's holder is neither, and calls only a tool that says
-  # they may, of the plugins added for whoever the link leads to: one that keeps to what the link reaches.
+  # A plugin is installed for users and groups. A sharing link's holder is neither, and calls only a tool that says
+  # they may, of the plugins installed for whoever the link leads to: one that keeps to what the link reaches.
   defp open_to(tool, about, {by, _for}) do
     name = Enum.join(List.wrap(about["plugin"]) ++ [tool.name], "_")
 
@@ -205,7 +205,7 @@ defmodule OneCore.Plugins.Calls do
           {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
 
         function ->
-          ask = {"plugins/call", %{added: at, plugin: name, function: function, arguments: arguments}}
+          ask = {"plugins/call", %{installed: at, plugin: name, function: function, arguments: arguments}}
           {:ok, apply(plugin, function, [called(at, name, versions, ask, asked, forwarded) | arguments])}
       end
     end)
@@ -228,7 +228,7 @@ defmodule OneCore.Plugins.Calls do
           at,
           name,
           versions,
-          {"hooks/call", %{added: at, plugin: name, hook: hook, about: about}},
+          {"hooks/call", %{installed: at, plugin: name, hook: hook, about: about}},
           asked,
           forwarded
         )
@@ -247,14 +247,14 @@ defmodule OneCore.Plugins.Calls do
   @doc """
   Has the scheduled jobs that are due called, of the plugin that `name` is for `at`: the plugin it uses that
   keeps schedules is given its jobs, as the plugin, and a function that makes one's call here. That plugin has one
-  server make each call, once. The call runs for whoever the plugin was added for, asked by nobody, and is never
+  server make each call, once. The call runs for whoever the plugin was installed for, asked by nobody, and is never
   passed on: it's made where the schedule is kept.
   """
   def schedule(at, name, forwarded \\ false) do
     clock = {nil, at}
 
     Plugins.run([at], name, fn at, versions ->
-      asked = called(at, name, versions, {"plugins/schedule", %{added: at, plugin: name}}, clock, forwarded)
+      asked = called(at, name, versions, {"plugins/schedule", %{installed: at, plugin: name}}, clock, forwarded)
 
       fire = fn job ->
         with {:error, why} <- call(name, job.tool, job.inputs, clock, true),
@@ -284,14 +284,14 @@ defmodule OneCore.Plugins.Calls do
   end
 
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. The
-  # plugin's own artifact is the one for whoever it was added for, so the call is run by a server acting for them:
+  # plugin's own artifact is the one for whoever it was installed for, so the call is run by a server acting for them:
   # this one, or one that it's passed on to.
   defp called(at, name, versions, ask, {by, who}, forwarded) do
     own = "#{at}/own/#{name}"
 
     call = %Call{
       own: %Artifact{prefix: own <> "/"},
-      added: at,
+      installed: at,
       folder: Path.join(Server.home(), own),
       server: Server.key(),
       for: who,

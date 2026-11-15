@@ -69,7 +69,7 @@ defmodule Encryption do
       artifact: Artifact.name(artifact),
       epoch: epoch(artifact),
       servers: servers(artifact),
-      may: for(server <- OneCore.Servers.acting(call.added), do: %{key: server, name: OneCore.Servers.name(server)})
+      may: for(server <- OneCore.Servers.acting(call.installed), do: %{key: server, name: OneCore.Servers.name(server)})
     }
   end
 
@@ -119,7 +119,7 @@ defmodule Encryption do
   # Has each of `servers` look at what it's handed of an artifact now, so one that was taken off lets go of its
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
   defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
-    {at, plugin} = OneCore.Plugins.added(call.for, encryption)
+    {at, plugin} = OneCore.Plugins.installed(call.for, encryption)
     said = %{who: nil, for: User.owner(name), forwarded: true}
     ask = %{added: at, plugin: plugin, function: "looked", arguments: [name], _meta: said}
     for server <- servers -- [call.server], do: Server.request(server, "plugins/call", ask)

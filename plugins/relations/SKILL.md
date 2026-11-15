@@ -11,7 +11,7 @@ plugin deciding, nobody but the network's first owner does anything.
   `users/alice/made/notes/7` is alice's, `groups/family/made/notes/2` is the group's. A plugin's tool that
   makes something answers with its name. A group is the artifact `groups/<name>`, and the network `network`.
   A plugin is whoever's deployed it, `users/alice/plugins/<name>`, and its own artifact is whoever's it was
-  added for, `users/alice/own/<name>`: the ones The One App ships with are the network's,
+  installed for, `users/alice/own/<name>`: the ones The One App ships with are the network's,
   `network/plugins/<name>` and `network/own/<name>`.
 - Who is a user (`users/alice`), a group, meaning its members (`groups/family`), `everyone` in the network, a
   plugin by its artifact's name, or a sharing link's holder (`users/alice/links/...`).

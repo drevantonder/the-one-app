@@ -3,7 +3,7 @@ defmodule OneCore.Servers do
   Which servers act for whom. One Core keeps, for each user and group, the list of servers that act for them,
   under their prefix: the blob `servers`, of the servers' keys. The network's list is the same blob under
   `network/`, and a server on it acts for everyone in the network. A list's first server is written by a server
-  acting for the network, and only if there's no list. A server on a list adds another.
+  acting for the network, and only if there's no list. A server on a list installs another.
 
   A server's own blobs sit under `servers/<its key>/`, and only it writes them. Its `address` is how to reach it,
   and its `name` what its machine is called, which it writes each time it starts, since it may start somewhere
@@ -99,7 +99,7 @@ defmodule OneCore.Servers do
 
   @doc """
   Whether the server whose key is `key`, started for `owner`, is one of theirs: it's on their list, which a
-  server acting for them added it to (`add/3`), or it's for the network, which had no server, and is now its
+  server acting for them installed it to (`add/3`), or it's for the network, which had no server, and is now its
   first.
   """
   def joined?(key, owner) do
@@ -144,7 +144,7 @@ defmodule OneCore.Servers do
 
     case wrote do
       :ok -> :ok
-      :refused -> {:error, "The first server to act for #{owner} is added by one acting for the network"}
+      :refused -> {:error, "The first server to act for #{owner} is installed by one acting for the network"}
       _changed -> add(key, owner)
     end
   end

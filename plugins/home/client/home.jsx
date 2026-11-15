@@ -161,7 +161,7 @@ function Offers(props) {
   const off = done(async () => {
     const plugin = item().app.split("/")[0]
     if (!(await confirm({ heading: `Remove ${item().name} from ${page().name}?`, text: "What it kept stays, and comes back with it.", action: "Remove", destructive: true }))) return
-    await call("remove", { name: plugin }, { for: page().for }).catch((error) => toast(error.message))
+    await call("uninstall", { name: plugin }, { for: page().for }).catch((error) => toast(error.message))
     refresh(home)
   })
   return (

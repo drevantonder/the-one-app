@@ -66,16 +66,16 @@ defmodule OneCore.Service do
   Calls a function of the service's plugin, for the user or group `who`, asked by nobody, and gives its answer.
   `service` is the
   service's process: `self()` in its callbacks, and what its functions are called with. The function is called
-  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for whoever the plugin was added for.
+  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for whoever the plugin was installed for.
   """
   def plugin(service, who, function, arguments \\ []) when is_pid(service) and is_list(arguments) do
     {plugin, _name, _version} = which(service)
 
-    {added, name} =
-      Plugins.added(who, plugin) || raise "#{plugin} isn't added for #{who}, or for the network"
+    {installed, name} =
+      Plugins.installed(who, plugin) || raise "#{plugin} isn't installed for #{who}, or for the network"
 
     answer =
-      case Calls.function(added, name, "#{function}", json(arguments), {nil, who}) do
+      case Calls.function(installed, name, "#{function}", json(arguments), {nil, who}) do
         {:ok, answer} -> json(answer)
         {:forwarded, %{"answer" => answer}} -> answer
         {:error, why} -> raise why
@@ -86,7 +86,7 @@ defmodule OneCore.Service do
   end
 
   @doc """
-  Who the service that asks runs for on its server, each as `plugin/4` takes it: everyone its plugin was added
+  Who the service that asks runs for on its server, each as `plugin/4` takes it: everyone its plugin was installed
   for, a user, a group or the network, that its server acts for. Whoever the server is for comes first, as its
   owner chose them, so a service that's for one of them at a time, its machine's person, takes the first.
   """
@@ -95,7 +95,7 @@ defmodule OneCore.Service do
     members = Servers.members(Server.key())
 
     Enum.sort_by(
-      Enum.filter(Plugins.added_for(plugin), &Servers.here?/1),
+      Enum.filter(Plugins.installed_for(plugin), &Servers.here?/1),
       &(Enum.find_index(members, fn member -> member == &1 end) || length(members))
     )
   end

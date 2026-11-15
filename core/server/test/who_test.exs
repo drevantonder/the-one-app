@@ -2,7 +2,7 @@ defmodule OneCore.WhoTest do
   @moduledoc "Who may do what: who a request is from, and what One Core lets them reach by itself."
   use ExUnit.Case
   alias OneCore.{Mcp, Plugins, Server, User}
-  alias OneCore.Plugins.{Added, Calls, Deploy}
+  alias OneCore.Plugins.{Installed, Calls, Deploy}
 
   # A plugin whose tool says who it runs for.
   @plugin """
@@ -201,7 +201,7 @@ defmodule OneCore.WhoTest do
     # a device that's removed is nobody's from the next call on.
     assert {:ok, :ok} = call("placer_remove", %{"device" => stranger}, OneCore.Test.owner())
     assert ask(%{}, stranger) == nobody
-    # Only a plugin added for the network says whose a device is, and only a user's.
+    # Only a plugin installed for the network says whose a device is, and only a user's.
     assert {:ok, 1, ""} =
              Deploy.deploy("users/bob", "mine", %{
                "server/mine.ex" => String.replace(OneCore.Test.placer(), "Placer", "Mine")
@@ -223,14 +223,14 @@ defmodule OneCore.WhoTest do
     assert "links/" <> name = ask(%{link: "a-secret"})
     refute name =~ "a-secret"
     assert ask(%{link: "another"}) != "links/" <> name
-    # A plugin is added for users, so a link's holder calls only the tools that say they may, and none of One Core's.
+    # A plugin is installed for users, so a link's holder calls only the tools that say they may, and none of One Core's.
     assert {:refused, "asked_members isn't a tool that a sharing link's holder calls"} =
              ask(%{link: "a-secret"}, nil, "asked_members")
 
     assert {:refused, "services isn't a tool" <> _} = ask(%{link: "a-secret"}, nil, "services")
 
     # A link starts with whose it leads to, and its holder is named after them: they're answered by the servers
-    # acting for them, with the plugins added for them, and told of no tool but the ones a holder may call.
+    # acting for them, with the plugins installed for them, and told of no tool but the ones a holder may call.
     assert "users/alice/links/" <> _ = holder = ask(%{link: "users/alice/a-secret"})
     assert User.owner(holder) == "users/alice" and User.link?(holder) and not User.link?("users/alice")
 
@@ -355,7 +355,7 @@ defmodule OneCore.WhoTest do
   end
 
   @tag :tmp_dir
-  test "a plugin is whoever's deployed it, and runs for whoever it's added for, with an artifact of its own for each" do
+  test "a plugin is whoever's deployed it, and runs for whoever it's installed for, with an artifact of its own for each" do
     Process.register(self(), :who_test)
     OneCore.Test.being_built()
     {alice, bob, family} = {"users/alice", "users/bob", "groups/family"}
@@ -364,20 +364,20 @@ defmodule OneCore.WhoTest do
     assert Plugins.plugin(alice, "counts") == "users/alice/plugins/counts"
     assert call("counts_count", %{}, alice) == {:ok, "users/alice/own/counts: 1 for users/alice"}
 
-    # Nobody else has it until it's added for them: the same plugin, with another artifact of its own.
+    # Nobody else has it until it's installed for them: the same plugin, with another artifact of its own.
     assert call("counts_count", %{}, bob) == {:error, "There's no plugin named counts"}
-    assert :ok = Added.add(bob, "counts", "users/alice/plugins/counts")
-    assert :ok = Added.add(family, "counts", "users/alice/plugins/counts")
+    assert :ok = Installed.install(bob, "counts", "users/alice/plugins/counts")
+    assert :ok = Installed.install(family, "counts", "users/alice/plugins/counts")
     assert call("counts_count", %{}, bob) == {:ok, "users/bob/own/counts: 1 for users/bob"}
     assert call("counts_count", %{}, alice) == {:ok, "users/alice/own/counts: 2 for users/alice"}
     assert call("counts_count", %{}, {alice, family}) == {:ok, "groups/family/own/counts: 1 for groups/family"}
 
-    # What's added for the network is everyone's, with one artifact of its own.
-    assert :ok = Added.add("network", "tally", "users/alice/plugins/counts")
+    # What's installed for the network is everyone's, with one artifact of its own.
+    assert :ok = Installed.install("network", "tally", "users/alice/plugins/counts")
     assert call("tally_count", %{}, "users/carol") == {:ok, "network/own/tally: 1 for users/carol"}
     assert call("tally_count", %{}, bob) == {:ok, "network/own/tally: 2 for users/bob"}
 
-    assert Added.add("network", "tally", "users/bob/plugins/nothing") ==
+    assert Installed.install("network", "tally", "users/bob/plugins/nothing") ==
              {:error, "There's no plugin users/bob/plugins/nothing"}
 
     # Another plugin's own artifact is never reached, whoever asks, even with nothing deciding who reaches what.
@@ -390,7 +390,7 @@ defmodule OneCore.WhoTest do
     assert call("counts_count", %{}, bob) == {:ok, "users/bob/own/counts: 2 now users/bob"}
     assert call("tally_count", %{}, bob) == {:ok, "network/own/tally: 3 now users/bob"}
 
-    # A scheduled job runs for each one its plugin was added for, asked by nobody.
+    # A scheduled job runs for each one its plugin was installed for, asked by nobody.
     start_supervised!({Task.Supervisor, name: OneCore.Asks})
     start_supervised!(OneCore.Jobs)
 
@@ -403,22 +403,22 @@ defmodule OneCore.WhoTest do
 
     stop_supervised!(OneCore.Jobs)
 
-    # A plugin hooks into the moments of whoever it was added for, and of nobody else.
+    # A plugin hooks into the moments of whoever it was installed for, and of nobody else.
     assert {:ok, 1, ""} = Deploy.deploy(bob, "shut", %{"server/shut.ex" => @shut})
     assert call("counts_count", %{}, bob) == {:error, "Shut to users/bob."}
     assert call("tally_count", %{}, bob) == {:error, "Shut to users/bob."}
     assert {:ok, _} = call("tally_count", %{}, alice)
-    assert :ok = Added.add("network", "shut", "users/bob/plugins/shut")
+    assert :ok = Installed.install("network", "shut", "users/bob/plugins/shut")
     assert call("tally_count", %{}, alice) == {:error, "Shut to users/alice."}
-    assert :ok = Added.remove("network", "shut")
+    assert :ok = Installed.uninstall("network", "shut")
     assert {:ok, _} = call("tally_count", %{}, alice)
 
     # Removing it for someone leaves it whoever's it is, with what it kept.
-    assert :ok = Added.remove(bob, "shut")
-    assert :ok = Added.remove(bob, "counts")
+    assert :ok = Installed.uninstall(bob, "shut")
+    assert :ok = Installed.uninstall(bob, "counts")
     assert call("counts_count", %{}, bob) == {:error, "There's no plugin named counts"}
     assert {:ok, _} = call("counts_count", %{}, alice)
     assert ["users/bob/own/counts/0", "users/bob/own/counts/1" | _] = OneCore.Bucket.list("users/bob/own/counts/")
-    assert Added.remove(bob, "counts") == {:error, "No plugin named counts is added for users/bob"}
+    assert Installed.uninstall(bob, "counts") == {:error, "No plugin named counts is installed for users/bob"}
   end
 end

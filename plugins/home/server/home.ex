@@ -2,8 +2,8 @@ defmodule Home do
   @moduledoc """
   Home pages: where apps and widgets sit. A user has one, and so does each group and the network.
 
-  A page is what's added for whoever it belongs to: each plugin's apps, and the widgets its plugins have. So
-  adding an app to a page is adding its plugin for them (One Core's `add`), which is what puts it on the clients
+  A page is what's installed for whoever it belongs to: each plugin's apps, and the widgets its plugins have. So
+  adding an app to a page is adding its plugin for them (One Core's `install`), which is what puts it on the clients
   of everyone who sees that page, and nothing here keeps which apps a page has. What this keeps is how a page is
   arranged: the order of its apps, and the widgets put on it, each at a size. That's the page's owner's, an
   artifact made for them.
@@ -45,7 +45,7 @@ defmodule Home do
         description: """
         Arranges your home page: its apps and widgets, in the order given. Asked for a group or for the network,
         it arranges theirs, which their owners do. A widget not given is taken off the page, and an app not given
-        goes after the rest: `remove` is what takes an app off a page, and `add` puts one on.
+        goes after the rest: `uninstall` is what takes an app off a page, and `install` puts one on.
         """,
         inputs: %{
           type: "object",
@@ -86,7 +86,7 @@ defmodule Home do
 
   @impl true
   def call("page", _inputs, call) do
-    here = for plugin <- Call.plugins(call), plugin.added == call.for, do: plugin
+    here = for plugin <- Call.plugins(call), plugin.installed == call.for, do: plugin
 
     apps =
       for plugin <- here, app <- plugin.apps, not app.settings do

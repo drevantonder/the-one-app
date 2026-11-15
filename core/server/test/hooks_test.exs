@@ -1,7 +1,7 @@
 defmodule OneCore.HooksTest do
   use ExUnit.Case
   alias OneCore.User
-  alias OneCore.Plugins.{Added, Calls, Deploy}
+  alias OneCore.Plugins.{Installed, Calls, Deploy}
 
   @echo """
   defmodule Echo do
@@ -113,7 +113,7 @@ defmodule OneCore.HooksTest do
     end
     """
 
-    for name <- ["upper", "lower"], do: assert(:ok = Added.remove("network", name))
+    for name <- ["upper", "lower"], do: assert(:ok = Installed.uninstall("network", name))
     assert {:ok, 1, ""} = Deploy.deploy("network", "refused", %{"server/refused.ex" => refused})
 
     assert OneCore.Tools.call("deploy", %{"name" => "more", "files" => %{}}, {anyone, anyone}) ==
@@ -122,8 +122,8 @@ defmodule OneCore.HooksTest do
     assert OneCore.Tools.call("deploy", %{"name" => 7}, {anyone, anyone}) ==
              {:error, "name is text, not a whole number.\nfiles is needed."}
 
-    assert OneCore.Tools.call("remove", %{"name" => "ECHO"}, {anyone, "network"}) ==
-             {:ok, "echo is removed from what's added for network."}
+    assert OneCore.Tools.call("uninstall", %{"name" => "ECHO"}, {anyone, "network"}) ==
+             {:ok, "echo is removed from what's installed for network."}
 
     assert_receive {:called,
                     %{"plugin" => nil, "tool" => "remove", "changed" => %{"name" => "refused"}, "error" => nil}, _}
@@ -135,7 +135,7 @@ defmodule OneCore.HooksTest do
 
     assert OneCore.Tools.call("nothing", %{}, {anyone, anyone}) == :none
 
-    # A plugin that breaks has refused, for whoever it was added for and nobody else, and One Core's own tools
+    # A plugin that breaks has refused, for whoever it was installed for and nobody else, and One Core's own tools
     # with the rest. It has no say in its own removal or in being deployed over, which is how it's undone.
     broken = fn what ->
       """
@@ -151,7 +151,7 @@ defmodule OneCore.HooksTest do
       """
     end
 
-    assert :ok = Added.remove("network", "refused")
+    assert :ok = Installed.uninstall("network", "refused")
     OneCore.Test.being_built()
     assert {:ok, 1, ""} = Deploy.deploy("users/alice", "echo", %{"server/echo.ex" => @echo})
 
@@ -164,7 +164,7 @@ defmodule OneCore.HooksTest do
              {:error, "refused couldn't decide it: Broken."}
 
     assert OneCore.Tools.call("services", %{}, alice) == {:error, "refused couldn't decide it: Broken."}
-    assert OneCore.Tools.call("remove", %{"name" => "echo"}, alice) == {:error, "refused couldn't decide it: Broken."}
+    assert OneCore.Tools.call("uninstall", %{"name" => "echo"}, alice) == {:error, "refused couldn't decide it: Broken."}
     assert {:ok, 1, ""} = Deploy.deploy("users/bob", "echo", %{"server/echo.ex" => @echo})
     assert Calls.call("echo", "say", %{"word" => "hi"}, "users/bob") == {:ok, "hi"}
 
@@ -183,7 +183,7 @@ defmodule OneCore.HooksTest do
     {took, refused} = :timer.tc(fn -> Calls.call("echo", "say", %{"word" => "hi"}, "users/alice") end, :second)
     assert refused == {:error, "refused couldn't decide it: refused didn't answer call within 10 seconds"}
     assert took == 10
-    assert {:ok, _} = OneCore.Tools.call("remove", %{"name" => "refused"}, alice)
+    assert {:ok, _} = OneCore.Tools.call("uninstall", %{"name" => "refused"}, alice)
     assert Calls.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:ok, "hi"}
   end
 end

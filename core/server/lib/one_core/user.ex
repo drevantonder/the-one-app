@@ -181,7 +181,7 @@ defmodule OneCore.User do
   @doc """
   Whose `who` is, or who they are: the user, the group or the network that an artifact's name, or a who's, starts
   with. A sharing link's holder is whoever's the link leads to: their servers answer the holder, with the plugins
-  added for them. `nil` for a name that starts with nobody's.
+  installed for them. `nil` for a name that starts with nobody's.
   """
   def owner(who) do
     case String.split(who, "/") do
@@ -203,6 +203,6 @@ defmodule OneCore.User do
     Enum.join(List.wrap(owner(link)) ++ ["links", Base.encode16(:crypto.hash(:sha256, link), case: :lower)], "/")
   end
 
-  @doc "Whether `who` is the holder of a sharing link, who is in no network: nothing is theirs, and nothing is added for them."
+  @doc "Whether `who` is the holder of a sharing link, who is in no network: nothing is theirs, and nothing is installed for them."
   def link?(who), do: match?(["links", _name], Enum.take(String.split(who, "/"), -2))
 end

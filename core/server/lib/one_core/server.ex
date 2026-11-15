@@ -89,7 +89,7 @@ defmodule OneCore.Server do
 
   @doc """
   Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
-  and the services it runs, and what's added for them, running the newest version of each plugin. Looking at the
+  and the services it runs, and what's installed for them, running the newest version of each plugin. Looking at the
   network forgets whose each device is too, which the network's plugins say. Its clients are told if a plugin
   changed.
 

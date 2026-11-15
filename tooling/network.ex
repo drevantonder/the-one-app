@@ -44,7 +44,7 @@ defmodule Mix.Tasks.Network do
 
       mix network <folder> <server> --without <plugin>
 
-  starts a server after removing that plugin from what's added for whoever the server is for. It's the way back
+  starts a server after removing that plugin from what's installed for whoever the server is for. It's the way back
   for whoever runs one of their servers, when a plugin that decides who may do what has broken and so refuses
   its own removal: nothing is asked of any plugin. With none left deciding, nobody does anything but the
   network's first owner, who puts it back.
@@ -53,7 +53,7 @@ defmodule Mix.Tasks.Network do
   """
   use Mix.Task
   alias OneCore.{Edge, Iroh, Server, Servers, User}
-  alias OneCore.Plugins.Added
+  alias OneCore.Plugins.Installed
 
   @root Path.expand("..", __DIR__)
 
@@ -111,8 +111,8 @@ defmodule Mix.Tasks.Network do
     end
 
     if without = options[:without] do
-      case Added.remove(options[:for] || "network", without) do
-        :ok -> Mix.shell().info("#{without} is removed from what's added for #{options[:for] || "the network"}.")
+      case Installed.uninstall(options[:for] || "network", without) do
+        :ok -> Mix.shell().info("#{without} is removed from what's installed for #{options[:for] || "the network"}.")
         {:error, why} -> Mix.shell().error("#{without} wasn't removed: #{why}")
       end
     end
