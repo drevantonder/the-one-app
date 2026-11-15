@@ -728,19 +728,15 @@ impl Client {
         let (fills, failed) = (std::sync::Mutex::default(), std::sync::Mutex::default());
         let client =
             Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering, fills, failed });
-        // A pass that has ended is renewed before anything is asked with it. One that's about to end, or that a new
-        // build hasn't renewed yet, is renewed behind what's asked, which it's still good for, so opening waits on
-        // nothing over the network. Then the next while this runs.
+        // A pass that's about to end is renewed before anything is asked with it, and so is one a new build hasn't
+        // renewed yet, and the next while this runs.
         if renews {
-            let left = if client.network().ends() <= SystemTime::now() {
-                match client.renew().await {
+            let left = match client.network().left() {
+                left if !left.is_zero() && said => left,
+                _ => match client.renew().await {
                     Err(error) if error.is::<NotIn>() => return Err(error),
                     renewed => renewed.unwrap_or(AGAIN),
-                }
-            } else if said {
-                client.network().left()
-            } else {
-                Duration::ZERO
+                },
             };
             tokio::spawn(renewing(Arc::downgrade(&client), left));
         }
