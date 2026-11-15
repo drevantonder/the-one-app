@@ -1,10 +1,10 @@
 {
-  "name": "one-sign-in",
+  "name": "network-sign-in",
   "main": "worker.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them.
-  "d1_databases": [{ "binding": "DB", "database_name": "one-sign-in" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in" }],
   // The sign-in page as it's built (`page/`, an app's page built against the kit), which the Worker hands out
   // itself: every request comes to it first.
   "assets": { "directory": "files", "binding": "ASSETS", "run_worker_first": true }

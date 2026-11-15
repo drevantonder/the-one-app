@@ -1,5 +1,5 @@
 {
-  "name": "one-web",
+  "name": "network-web",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   "assets": { "directory": "files" }

@@ -77,7 +77,7 @@ answered() {
 key_of() { (cd "$root/server" && mix run --no-start -e 'IO.puts(elem(OneCore.Iroh.key(hd(System.argv())), 1))' "$1/key" | tail -1); }
 # Ends a device's code, as half an hour would.
 ends() {
-  (cd "$root/address" && bun x wrangler d1 execute one-sign-in --local --persist-to "$folder/address" -c parts/sign-in/wrangler.jsonc \
+  (cd "$root/address" && bun x wrangler d1 execute network-sign-in --local --persist-to "$folder/address" -c parts/sign-in/wrangler.jsonc \
     --command "update deviceCode set expiresAt = '2000-01-01T00:00:00.000Z' where userCode = '${1//-/}'") >/dev/null
 }
 # Stops the network's server, and starts it again as it was started with whatever else is given.

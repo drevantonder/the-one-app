@@ -1,10 +1,10 @@
 {
-  "name": "one-way-in",
+  "name": "network-way-in",
   "main": "way-in.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   "services": [
-    { "binding": "RELAY", "service": "one-relay" },
-    { "binding": "NETWORK", "service": "one-signer", "entrypoint": "Network" }
+    { "binding": "RELAY", "service": "network-relay" },
+    { "binding": "NETWORK", "service": "network-signer", "entrypoint": "Network" }
   ]
 }

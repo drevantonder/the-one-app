@@ -30,10 +30,10 @@ const PIECES = {
   link: "WAY_IN",
 };
 const services = [
-  { binding: "RELAY", service: "one-relay" },
-  { binding: "SIGNER", service: "one-signer" },
-  { binding: "WAY_IN", service: "one-way-in" },
-  { binding: "WEB", service: "one-web" },
+  { binding: "RELAY", service: "network-relay" },
+  { binding: "SIGNER", service: "network-signer" },
+  { binding: "WAY_IN", service: "network-way-in" },
+  { binding: "WEB", service: "network-web" },
 ];
 
 // The web client's files have the kit among them, as every client has it: a page here is built against it, as
@@ -62,14 +62,14 @@ for (const config of new Glob("*/address/wrangler.jsonc").scanSync(`${here}/../p
   services.push({ binding, service: worker.name });
   worker.services = [
     ...(worker.services ?? []),
-    { binding: "OWN", service: "one-signer", entrypoint: "Own", props: { plugin } },
-    { binding: "NETWORK", service: "one-signer", entrypoint: "Network" },
-    { binding: "RELAY", service: "one-relay" },
+    { binding: "OWN", service: "network-signer", entrypoint: "Own", props: { plugin } },
+    { binding: "NETWORK", service: "network-signer", entrypoint: "Network" },
+    { binding: "RELAY", service: "network-relay" },
   ];
   await Bun.write(`${part}/wrangler.jsonc`, JSON.stringify(worker, null, 2));
   parts.push(`parts/${plugin}/wrangler.jsonc`);
 }
-const gateway = { name: "one-gateway", main: "../gateway/gateway.js", compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
+const gateway = { name: "network-gateway", main: "../gateway/gateway.js", compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
 await Bun.write(`${here}/parts/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, stdio: ["inherit", "inherit", "inherit"] }).exited;
