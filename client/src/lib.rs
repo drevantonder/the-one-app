@@ -114,21 +114,95 @@ struct Told {
     who: Option<String>,
 }
 
-/// Why a client that knows its network isn't in it: its device is nobody's there yet.
+/// Why a client that knows its network isn't in it: its device is nobody's there yet. It has asked the network's
+/// address for a code to be let in by, as Better Auth's device authorization has it (`plugins/sign-in/address`),
+/// naming its key and signing what it asks with it, so the code is only ever for this key.
 #[derive(Debug)]
 pub struct NotIn {
-    /// Where its person makes it theirs: a page at the network's address.
-    pub sign_in: String,
+    /// Where its person lets it in: a page at the network's address, carrying the code.
+    pub link: String,
+    /// The code, as it's shown: WDJB-MJHT.
+    pub code: String,
+    address: String,
+    key: SecretKey,
+    /// What the device asks for its answer with, which only it was given.
+    device_code: String,
+    /// How long it waits between asks.
+    interval: Duration,
 }
 
 impl std::fmt::Display for NotIn {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let how = "This device isn't in your network yet. Open this on it, or on any device of yours, and sign in:";
-        write!(f, "{how}\n{}", self.sign_in)
+        let how = "This device isn't in your network yet. Open this where you sign in, and check it shows";
+        write!(f, "{how} {}:\n{}", self.code, self.link)
     }
 }
 
 impl std::error::Error for NotIn {}
+
+impl NotIn {
+    /// Asks the network's address at `address` for a code to let the device with `key` in by, under this
+    /// machine's name.
+    async fn asked(address: &str, key: &SecretKey) -> Result<Self> {
+        let name = gethostname::gethostname().to_string_lossy().into_owned();
+        let ask = json!({"client_id": key.public().to_string(), "name": name});
+        let (given, said) = ask_address(address, key, "/sign-in/auth/device/code", ask).await?;
+        let (true, Some(link), Some(code), Some(device_code)) = (
+            given,
+            said["verification_uri_complete"].as_str(),
+            said["user_code"].as_str(),
+            said["device_code"].as_str(),
+        ) else {
+            bail!("{}", said["error_description"].as_str().unwrap_or("the network's address gave this device no code"))
+        };
+        let halves: Vec<String> = code.as_bytes().chunks(4).map(|half| String::from_utf8_lossy(half).into()).collect();
+        Ok(Self {
+            link: link.to_owned(),
+            code: halves.join("-"),
+            address: address.to_owned(),
+            key: key.clone(),
+            device_code: device_code.to_owned(),
+            interval: Duration::from_secs(said["interval"].as_u64().unwrap_or(5)),
+        })
+    }
+
+    /// Waits for this device's person to answer, asking the network's address as often as it allows. It's an
+    /// error if they stopped it, or its code ended first.
+    pub async fn answered(mut self) -> Result<()> {
+        loop {
+            sleep(self.interval).await;
+            let ask = json!({
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "device_code": self.device_code,
+                "client_id": self.key.public().to_string(),
+            });
+            let (given, said) = ask_address(&self.address, &self.key, "/sign-in/auth/device/token", ask).await?;
+            match said["error"].as_str() {
+                _ if given => return Ok(()),
+                Some("authorization_pending") => {}
+                Some("slow_down") => self.interval += Duration::from_secs(5),
+                Some("access_denied") => bail!("It was stopped where you signed in."),
+                Some("expired_token") => bail!("Its code ended before it was let in. Try again."),
+                _ => bail!("{}", said["error_description"].as_str().unwrap_or("the network's address didn't answer")),
+            }
+        }
+    }
+}
+
+/// Asks the network's address at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
+async fn ask_address(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {
+    let body = body.to_string();
+    let network = Network { address: address.to_owned(), pass: String::new() };
+    let mut asked = web()?
+        .post(format!("{}{path}", address.trim_end_matches('/')))
+        .timeout(CONNECT * 3)
+        .header("content-type", "application/json");
+    for (name, value) in network.signed(key, path, &body)? {
+        asked = asked.header(name, value);
+    }
+    let answer = asked.body(body).send().await?;
+    Ok((answer.status().is_success(), answer.json().await?))
+}
 
 impl Told {
     /// How long the pass this client has lasts before it's renewed, by when it says it ends: nothing if it has none.
@@ -141,23 +215,17 @@ impl Told {
     }
 
     /// Asks the network's address for this device's pass, signed with its key, and keeps it in `home` with whose
-    /// device it is (`took`). A device that's nobody's there is told where its person makes it theirs, and keeps
-    /// nothing of whoever's it was: the next person on it sees none of it.
+    /// device it is (`took`). A device that's nobody's there asks for a code to be let in by, and keeps nothing of
+    /// whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
-        let name = gethostname::gethostname().to_string_lossy().into_owned();
-        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"name": name}}).to_string();
-        let network = Network { address: self.address.clone(), pass: String::new() };
-        let mut asked = web()?.post(format!("{}/mcp", self.address.trim_end_matches('/'))).timeout(CONNECT * 3);
-        for (name, value) in network.signed(key, "/mcp", &ask)? {
-            asked = asked.header(name, value);
-        }
-        let answer: Value = asked.body(ask).send().await?.json().await?;
-        if let Some(sign_in) = answer["error"]["data"]["sign_in"].as_str() {
+        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {}});
+        let (_, answer) = ask_address(&self.address, key, "/mcp", ask).await?;
+        if answer["error"]["code"] == NOBODY {
             if self.who.is_some() {
                 (self.pass, self.who) = (None, None);
                 self.keep(home)?;
             }
-            bail!(NotIn { sign_in: sign_in.to_owned() })
+            bail!(NotIn::asked(&self.address, key).await?)
         }
         if answer["result"].is_null() {
             bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's address gave this device no pass"))
@@ -427,8 +495,8 @@ impl Client {
             Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
-        // A device with no pass yet asks for one at the network's address, which says where its person signs in for
-        // it while it's nobody's.
+        // A device with no pass yet asks for one at the network's address, and while it's nobody's, for a code to
+        // be let in by.
         let key = key(&home.join("key"))?;
         let (network, who) = match told {
             Some(mut told) => {

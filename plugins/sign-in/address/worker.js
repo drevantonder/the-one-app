@@ -12,8 +12,7 @@ const NETWORK = "network/";
 /** The JSON-RPC error a server answers a device that's nobody's (`OneCore.Mcp`). */
 const NOBODY = -32003;
 
-const refuse = (status, why, more) =>
-  Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why, ...more } }, { status });
+const refuse = (status, why) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
 
 export default {
   async fetch(request) {
@@ -33,17 +32,13 @@ async function mcp(request, auth, url) {
   // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
 
-  // One of the network's own devices signs what it asks with its key. One that's nobody's is told where its
-  // person makes it theirs.
+  // One of the network's own devices signs what it asks with its key. One that's nobody's is told so by the
+  // server, and asks for a code to be let in by (`auth.js`).
   if (request.headers.has("one-key")) {
     const body = await request.text();
     const device = await signer(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    const answer = await pass(body, device, [NETWORK]);
-    if (!(await nobodys(answer))) return answer;
-    const name = String(JSON.parse(body).params?.name ?? "");
-    const sign_in = `${url.origin}/sign-in/#${new URLSearchParams({ device, name })}`;
-    return refuse(401, "This device is nobody's here. Sign in on it, or let it in from a device that's yours.", { data: { sign_in } });
+    return pass(body, device, [NETWORK]);
   }
 
   // An assistant somewhere else shows the token it was given when a person let it in. One they've since removed

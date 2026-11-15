@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Proves signing in, on a whole network on this machine that people sign in to (`./network <folder> --address
-# --owner alice`), with nothing deployed. Two people join with a passkey, in a real browser each, and each sees
-# only their own. A device is nobody's until its person signs in for it, a second one is let in from where they're
-# already signed in with nothing typed, and one that's removed is refused the next thing it asks, by every server. A stranger who
-# knows a server's key and where it is, and dials it with a key of their own, is refused. An assistant somewhere
-# else is let in at /mcp as MCP's authorization says, acts as whoever let it in, and is one of their devices. A
-# network without the plugin that decides who may is its first owner's alone, and one without the plugin that
-# signs people in answers nobody. It says what a call costs once a device is someone's.
+# --owner alice`), with nothing deployed. People join with a passkey, in a real browser each, and each sees only
+# their own. A new device shows a code and a link that carries it, and is nobody's until its person opens that
+# where they sign in and says the code they're shown matches: with nothing more where they're signed in already,
+# and after their passkey where they aren't. Saying stop refuses it, and the device is told. A link a stranger
+# sends shows the stranger's code, and lets in nothing unless it's said to match. A code that has ended, one
+# someone else opened first, too many wrong ones, and a key asking on a code that isn't its own are refused. One
+# that's removed is refused the next thing it asks, by every server. A stranger who knows a server's key and where
+# it is, and dials it with a key of their own, is refused. An assistant somewhere else is let in at /mcp as MCP's
+# authorization says, acts as whoever let it in, and is one of their devices. A network without the plugin that
+# decides who may is its first owner's alone, and one without the plugin that signs people in answers nobody. It
+# says what a call costs once a device is someone's.
 #
 #     mise exec -- address/proof/sign-in.sh
 #
@@ -28,7 +32,7 @@ address=$(grep -o -m1 'http://localhost:[0-9]*' "$folder/network.log")
 say() { printf '\n== %s\n' "$*"; }
 now() { echo "${EPOCHREALTIME/[.,]/}"; }
 # What's printed names no folder, key or link of this run.
-plain() { sed -E -e "s|$folder|<folder>|g" -e "s|$root/||g" -e "s|$address|<address>|g" -e 's/[0-9a-f]{64}/<key>/g' -e 's/(invite=)[0-9a-f]+/\1…/' -e 's/"added":"[^"]*"/"added":"…"/g'; }
+plain() { sed -E -e "s|$folder|<folder>|g" -e "s|$root/||g" -e "s|$address|<address>|g" -e 's/[0-9a-f]{64}/<key>/g' -e 's/(invite=)[0-9a-f]+/\1…/' -e 's/"added":"[^"]*"/"added":"…"/g' -e "s/$(hostname)/<this machine>/g"; }
 
 # People, each in a browser of their own with a passkey of their own: `browser alice <address>` has alice open it
 # and answer the one question the page asks.
@@ -36,9 +40,9 @@ mkfifo "$folder/to-people" "$folder/from-people"
 (cd "$root/address" && exec bun proof/people.js <"$folder/to-people" >"$folder/from-people") &
 exec {to_people}>"$folder/to-people" {from_people}<"$folder/from-people"
 browser() {
-  echo "$1 $2" >&"$to_people"
+  echo "$*" >&"$to_people"
   read -r said <&"$from_people"
-  echo "  $1 opens $(plain <<<"$2")"
+  echo "  $1 ${3:+(${3}) }opens $(plain <<<"$2")"
   echo "           -> $(plain <<<"$said")"
 }
 # A device, by the name of its home here: a new one knows the network's address and nothing else.
@@ -53,8 +57,29 @@ stranger() { ONE_HOME=$folder/only-server "$one" "$@"; }
 shown() { echo "  $1  ${*:2}" | plain && echo "           -> $(plain <<<"$said" | tr '\n' ' ')"; }
 may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
 refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
-# Where a device that isn't in says to let it in.
-let_in() { { device "$1" sign-in devices 2>&1 || true; } | grep -o 'http://[^ ]*'; }
+# A device that isn't in asks something, and says its code and its link, and waits for its person's answer:
+# `asks laptop sign-in devices` starts it, and `link` and `code` are what it showed. `answered laptop` waits for it
+# to end, and shows what it said after.
+asks() {
+  device "$@" >"$folder/$1.said" 2>&1 &
+  asking=$!
+  grep -q -m1 "user_code=" <(tail -f --pid="$asking" -n +1 "$folder/$1.said")
+  link=$(grep -o -m1 'http://[^ ]*user_code=[A-Z0-9]*' "$folder/$1.said")
+  code=$(grep -o -m1 'shows [A-Z0-9-]*' "$folder/$1.said" | cut -d' ' -f2)
+  echo "  $1, which isn't in, is asked: one ${*:2}"
+  echo "           -> $(plain <"$folder/$1.said" | tr '\n' ' ')"
+}
+answered() {
+  wait "$asking" && echo "  $1 is let in, and answers:" || echo "  $1 isn't let in, and says:"
+  echo "           -> $(tail -n +3 "$folder/$1.said" | plain | tr '\n' ' ')"
+}
+# Whose key a device's home holds, as servers name it.
+key_of() { (cd "$root/server" && mix run --no-start -e 'IO.puts(elem(OneCore.Iroh.key(hd(System.argv())), 1))' "$1/key" | tail -1); }
+# Ends a device's code, as half an hour would.
+ends() {
+  (cd "$root/address" && bun x wrangler d1 execute one-sign-in --local --persist-to "$folder/address" -c parts/sign-in/wrangler.jsonc \
+    --command "update deviceCode set expiresAt = '2000-01-01T00:00:00.000Z' where userCode = '${1//-/}'") >/dev/null
+}
 # Stops the network's server, and starts it again as it was started with whatever else is given.
 restart() {
   local server
@@ -70,23 +95,34 @@ restart() {
 }
 
 say "Nobody is anybody yet: the network's first owner joins with a passkey, by the link its first server gave"
-refused device laptop sign-in devices
 joins=$(grep -o -m1 "http://[^ ]*invite=[0-9a-f]*" "$folder/server.log")
 browser alice "$joins"
 browser mallory "$joins"
 
-say "A device is nobody's until its person signs in for it, in their browser, with nothing typed"
-link=$(let_in laptop)
-browser alice "$link"
-may device laptop sign-in devices
+say "A new device shows a code, and its person lets it in where they're signed in, by saying the code matches"
+asks laptop sign-in devices
+browser alice "$link" matches
+answered laptop
 
 say "Someone else joins by an invitation, and each sees only their own"
-refused device bobs-phone sign-in devices
 invited=$(device laptop sign-in invite --name bob)
 echo "  alice invites bob from her laptop: $(plain <<<"$invited")"
 browser bob "$(grep -o "http://[^ ]*" <<<"$invited")"
-browser bob "$(let_in bobs-phone)"
-echo "  each has a plugin of their own to keep notes with, deployed from their own device:"
+asks bobs-phone sign-in devices
+phones=$link phone=$code phone_asking=$asking
+
+say "A stranger sends bob a link made for the stranger's own device: it shows the stranger's code, not his phone's, and lets nothing in unless he says it matches"
+asks strangers-laptop sign-in devices
+echo "  bob's phone shows $phone, and the stranger's laptop $code"
+browser bob "$link" look
+kill -0 "$asking" && echo "  the stranger's laptop, having been shown to bob, still waits, nobody's"
+browser bob "$link" stop
+answered strangers-laptop
+link=$phones asking=$phone_asking
+browser bob "$link" matches
+answered bobs-phone
+
+say "Each has a plugin of their own to keep notes with, deployed from their own device"
 may device laptop deploy --name tally --files-from "$root/server/test/plugins/tally"
 may device laptop tally add --note "Alice's"
 refused device bobs-phone tally list
@@ -99,11 +135,11 @@ echo "  what each is told of their own devices and passkeys:"
 may device laptop sign-in devices
 may device bobs-phone sign-in devices
 
-say "A second device is let in from where its person is already signed in"
-refused device desktop sign-in devices
-link=$(let_in desktop)
-browser alice "$link"
-may device desktop sign-in devices
+say "Where its person isn't signed in, they answer their passkey first, and then see the code"
+browser alice signs-out
+asks desktop sign-in devices
+browser alice "$link" matches
+answered desktop
 
 say "A device's pass to the relay lasts an hour, and the next is asked of a server before it ends"
 # How many minutes a device's pass has left, by when it says it ends. Ending it here is saying it ended earlier,
@@ -115,12 +151,35 @@ bun -e 'const file = Bun.file(process.argv[1]), told = await file.json(), pass =
 may device desktop sign-in devices
 echo "  once it has ended, desktop is given the next, which ends in $(left desktop) minutes"
 
-say "The app starts on the same sign-in page, and shows its person's home screen once they've signed in for it"
-# A web view has no passkeys, so the page's button there hands the page to the device's own browser. What stands
+say "Someone else who's signed in can't answer a code that was opened first by another"
+asks shared-tv sign-in devices
+browser alice "$link" look
+browser bob "$link" force
+
+say "A link whose code has ended is refused, and so is the device that showed it"
+# The TV is asleep while its code ends, so that what the link says is seen before the TV asks again.
+kill -STOP -- "-$asking"
+ends "$code"
+echo "  the TV is asleep, and its code ends"
+browser bob "$link" matches
+kill -CONT -- "-$asking"
+answered shared-tv
+
+say "Too many wrong codes are refused, as Better Auth's device authorization limits them"
+invited=$(device laptop sign-in invite --name carol)
+browser carol "$(grep -o "http://[^ ]*" <<<"$invited")"
+for guess in 1 2 3 4 5 6; do browser carol "$address/sign-in/?user_code=WRONG00$guess"; done
+
+say "A key is let in only on a code it asked for itself, and that its person answered"
+(cd "$root/address" && bun proof/keys.js "$address") | sed 's/^/  /'
+
+say "The app starts on the same sign-in page with its code, and shows its person's home screen once they've said it matches"
+# A web view has no passkeys, so the page's button there hands its link to the device's own browser. What stands
 # in for that browser here writes down what it was asked to open, and alice opens that in hers.
 mkdir "$folder/tablet" "$folder/browser" && printf '{"address":"%s"}' "$address" >"$folder/tablet/network"
 printf '#!/bin/sh\necho "$1" >"%s"\n' "$folder/opened" >"$folder/browser/xdg-open" && chmod +x "$folder/browser/xdg-open"
 : >"$folder/screen" >"$folder/app.log" >"$folder/opened"
+before=$(wc -l <"$folder/address.log")
 PATH=$folder/browser:$PATH ONE_HOME=$folder/tablet dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
   echo "DISPLAY=$DISPLAY XAUTHORITY=$XAUTHORITY" >"$1/screen"
   exec "$0" 2>"$1/app.log"' "$one" "$folder" >/dev/null 2>&1 &
@@ -131,19 +190,18 @@ grep -q -m1 DISPLAY <(tail -f --pid="$app" -n +1 "$folder/screen")
 window() { env $(cat "$folder/screen") xdotool search --sync --onlyvisible --name "The One App" "$@" >/dev/null; }
 window
 echo "  the app's window is open on a device that isn't in, and its home screen has opened $(grep -c "home opened" "$folder/app.log") times"
-# The page takes a moment to draw, and its one button is in the middle of the window, 447 down.
-sleep 4
-env $(cat "$folder/screen") xdotool mousemove 512 447 sleep 0.5 click 1
+# The page has drawn once it asks for the mark it shows, and its one button is its only link, which Tab reaches first.
+grep -q -m1 "mark.png" <(tail -f -n +$((before + 1)) "$folder/address.log")
+window windowfocus --sync key --delay 300 Tab Return
 grep -q -m1 "sign-in" <(tail -f -n +1 "$folder/opened")
 echo "  its button is pressed, and it asks the device's browser to open $(plain <"$folder/opened")"
-browser alice "$(cat "$folder/opened")"
-window windowfocus
+browser alice "$(cat "$folder/opened")" matches
 timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
-echo "  alice comes back to the window, and it says: $(grep -o -m1 "home opened" "$folder/app.log")"
+echo "  without being touched again, the window says: $(grep -o -m1 "home opened" "$folder/app.log")"
 kill -- "-$app"
 
 say "A device that's removed is refused the next thing it asks, and keeps nothing of its person's"
-may device laptop sign-in remove_device --device "$(grep -o 'device=[0-9a-f]*' <<<"$link" | cut -d= -f2)"
+may device laptop sign-in remove_device --device "$(key_of "$folder/desktop")"
 refused device desktop sign-in devices
 kept=$({ find "$folder/desktop/kept" "$folder/desktop/files" -type f 2>/dev/null || true; } | wc -l)
 [[ $kept == 0 ]] || { echo "the removed device still keeps $kept of what alice was answered" && exit 1; }
@@ -195,8 +253,11 @@ end
 EOF
 mkdir "$folder/ping" && mv "$folder/ping.ex" "$folder/ping/"
 ONE_FOR=network device laptop deploy --name ping --files-from "$folder/ping" >/dev/null
-direct=$(cd "$root/server" && mix run --no-start -e 'IO.puts(elem(OneCore.Iroh.key(hd(System.argv())), 1))' "$folder/only-server/key" | tail -1)
-browser alice "$address/sign-in#device=$direct&name=direct"
+direct=$(key_of "$folder/only-server")
+mkdir "$folder/direct" && cp "$folder/only-server/key" "$folder/direct/" && printf '{"address":"%s"}' "$address" >"$folder/direct/network"
+asks direct sign-in devices >/dev/null
+browser alice "$link" matches >/dev/null
+answered direct >/dev/null
 coproc MCP { ONE_HOME=$folder/only-server "$one" mcp; }
 for _ in $(seq 300); do
   began=$(now)

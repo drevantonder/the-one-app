@@ -11,7 +11,8 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **What sits at a network's address is Cloudflare Workers**, and a plugin's part there is one more: an ordinary
   Worker in the plugin's folder, deployed with the address's own.
 - **Signing in is Better Auth, in a Worker with a D1 database of its own**: the sign-in plugin's part at the
-  address. It keeps passkeys, and is the OAuth provider that MCP's authorization asks for.
+  address. It keeps passkeys, lets a new device in with its Device Authorization plugin (RFC 8628), and is the
+  OAuth provider that MCP's authorization asks for.
 - **An app's UI is Solid 2.0, built by a server with Vite**, which Bun runs. Its components' behaviour is Zag's,
   in Ark UI's shape until Ark runs on Solid 2.0, when they import Ark's instead.
 

@@ -46,6 +46,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 ## Signing in and joining
 
 - No consent screen: signing in with the passkey is the only question.
+- The one exception is a new device (15 Nov): it shows a short code, and where you sign in asks whether it matches, with nothing typed.
 - The sign-in screen and the pages the auth Worker serves are one component.
 - The logo is the mark alone, with no tile; the tile is for the OS's icons.
 - Words are bare: a title and a button. Warnings about who will act as you stay.

@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
-use crate::{Client, mcp};
+use crate::{Client, NotIn, mcp};
 
 pub fn main() -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio starts");
@@ -22,7 +22,16 @@ pub fn main() -> ExitCode {
 }
 
 async fn run(args: Vec<String>) -> Result<ExitCode> {
-    let client = Client::open(crate::home()?).await?;
+    // A device that isn't in its network yet says its code and where it's let in, and carries on once it is.
+    let client = match Client::open(crate::home()?).await {
+        Err(error) if error.is::<NotIn>() => {
+            let not_in = error.downcast::<NotIn>()?;
+            eprintln!("{not_in}");
+            not_in.answered().await?;
+            Client::open(crate::home()?).await?
+        }
+        opened => opened?,
+    };
     let code = if args == ["mcp"] {
         mcp::serve(client.clone()).await?;
         ExitCode::SUCCESS

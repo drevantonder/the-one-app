@@ -3,22 +3,24 @@ import { Button, Icon } from "./button.jsx"
 
 /// `<SignIn mark={<img src="mark.png" alt="" />} heading="Sign in" button="Sign in" onSignIn={passkey} />`: the one
 /// screen someone signs in on, wherever it's shown: the `mark` of whose it is, a `heading` and one `button`.
-/// `onSignIn` asks them, and what it throws is shown above the button to try again. A `warning` says who will act
-/// as them if they do, and stays until they have. `done` is the one line that's left once they have. With `href`
-/// the button is a link to where signing in happens, for a screen that can't ask itself.
+/// `onSignIn` asks them, and what it throws is shown above the button to try again, as a `problem` given is. A
+/// `code` is shown big, under a grey `note` that says what to do with it. A `warning` says who will act as them if
+/// they do, and stays until they have. `stop` is a second button, for saying no, which `onStop` does. `done` is
+/// the one line that's left once they've answered. With `href` the button is a link to where signing in happens,
+/// for a screen that can't ask itself.
 export function SignIn(props) {
-  const [working, setWorking] = createSignal(false)
+  const [working, setWorking] = createSignal()
   const [problem, setProblem] = createSignal()
 
-  const signIn = async () => {
+  const answer = (which, does) => async () => {
     setProblem()
-    setWorking(true)
+    setWorking(which)
     try {
-      await props.onSignIn()
+      await does()
     } catch (error) {
       setProblem(error.message)
     } finally {
-      setWorking(false)
+      setWorking()
     }
   }
 
@@ -29,22 +31,44 @@ export function SignIn(props) {
       </Show>
       <h1>{props.heading}</h1>
       <Show when={!props.done} fallback={<p class="done">{props.done}</p>}>
+        <Show when={props.code}>
+          <div class="code">
+            <p>{props.note}</p>
+            <p class="shown">{props.code}</p>
+          </div>
+        </Show>
         <Show when={props.warning}>
           <p class="warning">
             <Icon name="warning-circle" />
             <span>{props.warning}</span>
           </p>
         </Show>
-        <Show when={problem()}>
+        <Show when={problem() ?? props.problem}>
           <p class="problem" role="alert">
             <Icon name="warning-circle" />
-            <span>{problem()}</span>
+            <span>{problem() ?? props.problem}</span>
           </p>
         </Show>
-        <Show when={props.href} fallback={<Button loading={working()} onClick={signIn}>{props.button}</Button>}>
-          <a class="ui-button press ring" data-variant="default" href={props.href}>
-            {props.button}
-          </a>
+        <Show when={props.button}>
+          <div class="answers">
+            <Show
+              when={props.href}
+              fallback={
+                <Button loading={working() === "sign-in"} disabled={!!working()} onClick={answer("sign-in", () => props.onSignIn())}>
+                  {props.button}
+                </Button>
+              }
+            >
+              <a class="ui-button press ring" data-variant="default" href={props.href}>
+                {props.button}
+              </a>
+            </Show>
+            <Show when={props.stop}>
+              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onClick={answer("stop", () => props.onStop())}>
+                {props.stop}
+              </Button>
+            </Show>
+          </div>
         </Show>
       </Show>
     </main>

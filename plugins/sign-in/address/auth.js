@@ -1,16 +1,16 @@
 // Who signs in to a network, and what they let act as them: Better Auth, kept in this Worker's own database. A
-// person signs in with a passkey and nothing else. A device or an assistant becomes theirs when they answer that
-// one question for it, and each is then a line in this plugin's own artifact, `devices/<device>`, saying whose it
-// is: that's where a server reads it, so no call asks anything here.
+// person signs in with a passkey and nothing else. An assistant becomes theirs when they answer that one question
+// for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
+// device authorization has it. Each is then a line in this plugin's own artifact, `devices/<device>`, saying whose
+// it is: that's where a server reads it, so no call asks anything here.
 import { env } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthEndpoint, createAuthMiddleware, freshSessionMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
-import { jwt } from "better-auth/plugins";
+import { deviceAuthorization, jwt } from "better-auth/plugins";
 import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import Bowser from "bowser";
-import * as z from "zod";
 
 /** How long ago someone may have answered the passkey question for it to count as them saying yes now, in seconds. */
 const FRESH = 5 * 60;
@@ -19,7 +19,6 @@ const INVITED_FOR = 7 * 24 * 60 * 60 * 1000;
 
 const hex = (bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
-const isKey = (key) => typeof key === "string" && /^[0-9a-f]{64}$/.test(key);
 
 /** What a browser is called, from what it says of itself: "Chrome on Linux". */
 function browser(agent) {
@@ -69,7 +68,17 @@ async function invited(adapter, link) {
   return invite;
 }
 
-/** Devices, and the invitations people join by, beside what Better Auth keeps. */
+/** Where a device asks for a code and for its answer, each naming its key as `client_id`. */
+const ASKS_BY_KEY = ["/sign-in/auth/device/code", "/sign-in/auth/device/token"];
+
+/** A device's code as Better Auth looks it up: its letters and digits, in capitals. */
+const plain = (code) => String(code).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+
+/**
+ * Devices, the invitations people join by, and what ties a device's code to its key, beside what Better Auth
+ * keeps. A device asks for its code with its key as `client_id`, signed with that key, so a code is only ever for
+ * the key that asked for it, and the key is that device's once its person says the code matches.
+ */
 const devices = () => ({
   id: "devices",
   schema: {
@@ -83,19 +92,21 @@ const devices = () => ({
       },
     },
     invite: { fields: { userId: { type: "string", references: { model: "user", field: "id" } }, expiresAt: { type: "date" } } },
+    // What a device that asked to be let in calls itself, which its person is shown with its code.
+    deviceCode: { fields: { name: { type: "string", required: false } } },
   },
-  endpoints: {
-    /** Whoever just answered the passkey question lets a device act as them: the one whose key the page was opened with. */
-    addDevice: createAuthEndpoint(
-      "/device/add",
-      { method: "POST", use: [freshSessionMiddleware], body: z.object({ device: z.string(), name: z.string().max(100) }) },
-      async (ctx) => {
-        const { device, name } = ctx.body;
-        if (!isKey(device)) throw new APIError("BAD_REQUEST", { message: "That isn't a device's key." });
-        await place(ctx.context.adapter, device, "app", name.trim() || "A device", ctx.context.session.user);
-        return ctx.json({ who: who(ctx.context.session.user) });
-      },
-    ),
+  // Whatever names a key as `client_id` is signed with it (`address/ask.js`).
+  async onRequest(request) {
+    if (!ASKS_BY_KEY.includes(new URL(request.url).pathname)) return;
+    const body = await request.clone().text();
+    let client;
+    try {
+      client = JSON.parse(body).client_id;
+    } catch {}
+    const key = await env.NETWORK.asker(request.url, Object.fromEntries(request.headers), body);
+    if (key && key === client) return;
+    const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within a minute of the right time" };
+    return { response: Response.json(refused, { status: 401 }) };
   },
   hooks: {
     before: [
@@ -110,6 +121,40 @@ const devices = () => ({
       },
     ],
     after: [
+      {
+        // A device's code keeps what the device calls itself.
+        matcher: (ctx) => ctx.path === "/device/code" && !(ctx.context.returned instanceof Error),
+        handler: createAuthMiddleware(async (ctx) => {
+          const name = String(ctx.body.name ?? "").trim().slice(0, 100) || "A device";
+          await ctx.context.adapter.update({ model: "deviceCode", where: [{ field: "deviceCode", value: ctx.context.returned.device_code }], update: { name } });
+        }),
+      },
+      {
+        // Whoever the code is shown to is told what it's for.
+        matcher: (ctx) => ctx.path === "/device" && ctx.context.returned?.client_id,
+        handler: createAuthMiddleware(async (ctx) => {
+          const code = await ctx.context.adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.query.user_code) }] });
+          return ctx.json({ ...ctx.context.returned, name: code.name });
+        }),
+      },
+      {
+        // A device whose code its person said matches is theirs from then on: the key that asked for that code.
+        matcher: (ctx) => ctx.path === "/device/approve" && !(ctx.context.returned instanceof Error),
+        handler: createAuthMiddleware(async (ctx) => {
+          const { adapter } = ctx.context;
+          const code = await adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.body.userCode) }] });
+          const { user } = await getSessionFromCtx(ctx);
+          await place(adapter, code.clientId, "app", code.name, user);
+        }),
+      },
+      {
+        // The device connects by its key, so the session Better Auth makes for it when it learns its answer would
+        // only be listed as a browser that isn't one.
+        matcher: (ctx) => ctx.path === "/device/token" && ctx.context.newSession,
+        handler: createAuthMiddleware(async (ctx) => {
+          await ctx.context.internalAdapter.deleteSession(ctx.context.newSession.session.token);
+        }),
+      },
       {
         // An assistant that was just let in is one of that person's devices from then on.
         matcher: (ctx) => ctx.path === "/oauth2/consent" && ctx.body?.accept === true && !(ctx.context.returned instanceof Error),
@@ -135,6 +180,9 @@ async function made(origin) {
     // The JWT plugin signs the tokens an assistant is given, and hands out none of its own.
     disabledPaths: ["/token"],
     session: { freshAge: FRESH },
+    // Better Auth limits how often an address asks only where NODE_ENV says production, which a Worker's doesn't,
+    // and counts in memory, which each copy of a Worker has its own of.
+    rateLimit: { enabled: true, storage: "database" },
     // Cloudflare says where a request came from in a header of its own.
     advanced: { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
     plugins: [
@@ -169,6 +217,9 @@ async function made(origin) {
         // Who the token's holder acts as, so that asking for their servers asks nothing of the database.
         customAccessTokenClaims: ({ user }) => ({ who: who(user) }),
       }),
+      // A new device shows a code, and its link carries it. Its person opens that where they sign in, and says
+      // whether the code they're shown matches.
+      deviceAuthorization({ verificationUri: "/sign-in/" }),
       devices(),
     ],
   });

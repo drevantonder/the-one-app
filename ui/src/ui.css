@@ -1395,9 +1395,19 @@ button.ui-box {
 .ui-sign-in :where(.warning, .problem) .ui-icon {
   margin-top: 0.1875rem;
 }
-.ui-sign-in .done {
+.ui-sign-in :where(.done, .code p) {
   margin: 0;
   color: var(--muted-foreground);
+}
+.ui-sign-in .code .shown {
+  margin-top: 0.25rem;
+  color: var(--foreground);
+  font: 650 var(--text-title) / 1.15 ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+  letter-spacing: 0.08em;
+}
+.ui-sign-in .answers {
+  display: grid;
+  gap: 0.5rem;
 }
 .ui-sign-in .ui-button {
   min-width: 12rem;
