@@ -11,6 +11,7 @@ mod backups;
 pub mod cipher;
 pub mod cli;
 mod encrypts;
+pub mod git;
 mod kept;
 pub mod mcp;
 #[cfg(unix)]

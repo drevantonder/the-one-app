@@ -15,7 +15,17 @@ use crate::{Client, NotIn, mcp};
 
 pub fn main() -> ExitCode {
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio starts");
-    runtime.block_on(run(env::args().skip(1).collect())).unwrap_or_else(|error| {
+    let args: Vec<String> = env::args().skip(1).collect();
+    // Run by git as its remote helper, it's that, under the name git found it by.
+    let named = env::args().next().map(|program| Path::new(&program).file_name().map(|name| name.to_owned()));
+    let answered = if named.flatten().is_some_and(|name| name == crate::git::HELPER) {
+        runtime.block_on(crate::git::helper(&args))
+    } else {
+        #[cfg(unix)]
+        crate::git::beside();
+        runtime.block_on(run(args))
+    };
+    answered.unwrap_or_else(|error| {
         eprintln!("{error:#}");
         ExitCode::FAILURE
     })

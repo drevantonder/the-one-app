@@ -1,0 +1,278 @@
+/* A repo's page, as GitHub lays one out: whose it is, then its tabs, a bar with the branch and where in it, and
+   boxes of files, a file, a commit or the README, each a bordered card the readable width. */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--gap) / 2);
+}
+
+.whose,
+.count {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap);
+  margin-block: var(--gap);
+  max-width: var(--readable);
+}
+
+.branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  fill: currentColor;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.crumb {
+  all: unset;
+  cursor: pointer;
+  color: var(--foreground);
+}
+
+.slash,
+.here {
+  color: var(--muted-foreground);
+}
+
+.here {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.box {
+  max-width: var(--readable);
+  margin-block-end: var(--gap);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.latest {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--muted);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.latest .who {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.latest .subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+
+.latest .when {
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.files li + li {
+  border-top: 1px solid var(--border);
+}
+
+.file {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+}
+
+.file .ui-icon {
+  color: var(--muted-foreground);
+  flex: none;
+}
+
+.file .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file .size {
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .file:hover,
+  .latest:hover {
+    background: var(--accent);
+  }
+  .crumb:hover {
+    text-decoration: underline;
+  }
+}
+
+.file:focus-visible,
+.latest:focus-visible,
+.crumb:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.head {
+  margin: 0;
+  padding: 0.625rem 1rem;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.code {
+  overflow-x: auto;
+  font: 0.8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.code ol {
+  margin: 0;
+  padding: 0.5rem 0 0.5rem 4rem;
+}
+
+.code li {
+  padding-inline-end: 1rem;
+  white-space: pre;
+}
+
+.code li::marker {
+  color: var(--muted-foreground);
+}
+
+.diff {
+  min-width: max-content;
+  padding-block: 0.5rem;
+}
+
+.diff > div {
+  padding-inline: 1rem;
+  white-space: pre;
+}
+
+.diff .add {
+  background: var(--diff-add);
+}
+
+.diff .del {
+  background: var(--diff-del);
+}
+
+.diff .hunk,
+.diff .meta {
+  color: var(--muted-foreground);
+}
+
+.readme-name {
+  margin: 0;
+  padding: 0.625rem 1rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown {
+  padding: 0.5rem 1.5rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.markdown pre,
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.markdown code {
+  padding: 0.125rem 0.25rem;
+}
+
+.markdown pre {
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown img {
+  max-width: 100%;
+}
+
+.plain {
+  margin: 0;
+  padding: 1rem;
+  white-space: pre-wrap;
+  font: 0.8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.commit-subject {
+  margin: 0;
+  padding: 1rem 1rem 0.5rem;
+  font-size: var(--text-lg);
+}
+
+.commit-subject + .plain {
+  padding-block-start: 0;
+}
+
+.folder {
+  fill: currentColor;
+}
+
+.markdown h1,
+.markdown h2 {
+  padding-block-end: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown :is(h1, h2, h3) {
+  margin-block: 1.25rem 0.75rem;
+}

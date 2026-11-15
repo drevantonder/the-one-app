@@ -17,6 +17,10 @@ gethostname = "1"
 # One key from another: an artifact's from its owner's (RFC 5869).
 hkdf = "0.13"
 # Encrypting to a machine's key (RFC 9180): X25519, HKDF-SHA256 and ChaCha20-Poly1305.
+# What carries git's HTTP transport to a server (`git`).
+http-body-util = "0.1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 hpke = { version = "0.15", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
 # Reading a folder as git would keep it, leaving out what its .gitignore files do, with no git needed.
 ignore = "0.4"

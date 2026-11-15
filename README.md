@@ -16,6 +16,8 @@ over when the first stops, and `--address` runs the network's address here as we
 where nobody signs in and a command says who it acts as. With `--address --owner <name>` it's one people sign in
 to, with a passkey, and it says where its first owner joins.
 
+A server needs `git` for Repos, which has git do git's own work.
+
 Without `ONE_HOME`, a client is kept where the system keeps an app's data. Where there's no desktop, as under
 `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't
 there.
@@ -28,7 +30,9 @@ scheduled job across a takeover, on a folder or with `--address` through the sig
 `server/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
 tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
 `server/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
-restores it from each with the recovery key, `address/proof/proof.sh` runs a whole address with nothing deployed,
+restores it from each with the recovery key, `server/test/repos.sh` clones, pushes and suggests changes with real
+git as several people, through the address and two servers, one killed partway through a push,
+`address/proof/proof.sh` runs a whole address with nothing deployed,
 `address/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
 try everything it mustn't reach, and `server/test/install.sh` has a machine with nothing on it but `one` install a
