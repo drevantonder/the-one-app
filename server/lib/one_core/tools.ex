@@ -31,7 +31,22 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{
           name: %{type: "string", description: "The plugin's name: lowercase letters, digits and hyphens"},
-          files: %{type: "object", description: "The plugin's files: each one's text, by its path in the plugin"}
+          files: %{
+            type: "object",
+            description:
+              "The plugin's files by their paths in it: each one's text, or {\"base64\": ...} for one that isn't text",
+            additionalProperties: %{
+              anyOf: [
+                %{type: "string"},
+                %{
+                  type: "object",
+                  properties: %{base64: %{type: "string", contentEncoding: "base64"}},
+                  required: ["base64"],
+                  additionalProperties: false
+                }
+              ]
+            }
+          }
         },
         required: ["name", "files"]
       }
@@ -274,7 +289,7 @@ defmodule OneCore.Tools do
       plugin -> at(User.owner(plugin), pass) && reaches!(asked, plugin, "editor")
     end
 
-    case Deploy.deploy(who, name, files) do
+    case Deploy.deploy(who, name, Kept.received(files)) do
       {:ok, number, ""} -> "#{name} is running, at version #{number}."
       {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
       {:error, why} -> raise why
@@ -286,7 +301,7 @@ defmodule OneCore.Tools do
     case Plugins.running(who) do
       %{^name => version} ->
         reaches!(asked, version.artifact, "viewer")
-        JSON.encode!(Kept.source(version.artifact, version.code))
+        JSON.encode!(Kept.sent(Kept.source(version.artifact, version.code)))
 
       _ ->
         raise "There's no plugin named #{name}"

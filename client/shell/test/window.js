@@ -90,7 +90,8 @@ for (const [size, viewport] of Object.entries(sizes)) {
       const version = resources.find(({ uri }) => uri.startsWith(`ui://${plugin}/`))?.uri.split("/")[3];
       try {
         const { contents } = await ask("resources/read", { uri: `ui://${plugin}/${version}/${path.join("/")}`, ...said(who) });
-        route.fulfill({ contentType: contents[0].mimeType.replace(";profile=mcp-app", ""), body: contents[0].text });
+        const [{ mimeType, text, blob }] = contents;
+        route.fulfill({ contentType: mimeType.replace(";profile=mcp-app", ""), body: blob ? Buffer.from(blob, "base64") : text });
       } catch {
         route.fulfill({ status: 404, body: "" });
       }

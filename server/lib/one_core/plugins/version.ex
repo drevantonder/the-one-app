@@ -8,12 +8,13 @@ defmodule OneCore.Plugins.Version do
   so a server that's updated for years makes no more names than it ever ran versions at once.
 
   What of a version runs in a client is its folder `app/`. `files/1` are what a page loads from there, by their
-  paths: its pages, scripts, stylesheets and pictures, which a client is listed and keeps. The rest of `app/`, a
-  sourcemap, is read by name. `code` names the whole set, so a client can tell one version's files from the next's.
+  paths: its pages, scripts, stylesheets, pictures and fonts, which a client is listed and keeps. The rest of `app/`,
+  a sourcemap, is read by name. `code` names the whole set, so a client can tell one version's files from the next's.
   `hashes/1` names each file that isn't Elixir or a skill by what's in it, so a service can tell whether a program
-  it brings changed. `skills/1` are its skills, as `OneCore.Skills.found/2` gives them.
+  it brings changed. `skills/1` are its skills, as `OneCore.Skills.found/2` gives them. `own/2` reads one of its
+  other files, outside `app/`, for its own code: a template, say.
 
-  Those three grow with a plugin's files, and every call is handed the versions it runs on, from another process.
+  Those grow with a plugin's files, and every call is handed the versions it runs on, from another process.
   So they're kept apart from the struct, where reading them copies nothing (`:persistent_term`), and a call costs
   the same however many files a plugin has.
 
@@ -66,7 +67,8 @@ defmodule OneCore.Plugins.Version do
          {:ok, version} <- describe(under, modules, rest) do
       hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
-      :persistent_term.put({__MODULE__, under}, %{files: served, hashes: hashes, skills: skills})
+      own = Map.reject(rest, fn {path, _} -> client?(path) end)
+      :persistent_term.put({__MODULE__, under}, %{files: served, hashes: hashes, skills: skills, own: own})
       {:ok, %{version | code: code(files), kit: App.kit(files)}, warnings}
     else
       {:error, why} ->
@@ -80,6 +82,12 @@ defmodule OneCore.Plugins.Version do
 
   @doc "Each of a version's files that isn't Elixir or a skill, by its path, as the hash of what's in it."
   def hashes(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).hashes
+
+  @doc """
+  One of the files of the version that `module` is a module of, by its path: one that isn't Elixir, a skill or in
+  `app/`, as it was deployed. `nil` if it has no such file.
+  """
+  def own(module, path), do: :persistent_term.get({__MODULE__, under(module)}).own[path]
 
   @doc "A version's skills, as `OneCore.Skills.found/2` gives them."
   def skills(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).skills
@@ -289,20 +297,20 @@ defmodule OneCore.Plugins.Version do
   def client?(path), do: String.starts_with?(path, "app/")
 
   # Whether a page loads `path`: a client may load nothing it isn't served (`client/shell`'s `APP_MAY_LOAD`), and
-  # is served pages, scripts, stylesheets and pictures.
-  defp loaded?(path), do: client?(path) and Path.extname(path) in ~w(.html .js .css .svg)
+  # is served pages, scripts, stylesheets, pictures, sounds, videos and fonts.
+  defp loaded?(path) do
+    client?(path) and
+      (Path.extname(path) in ~w(.html .js .css) or
+         String.starts_with?(MIME.from_path(path), ~w(image/ audio/ video/ font/)))
+  end
 
   @doc "What kind of file `path` is, as a web view is told it."
   def kind(path) do
     case Path.extname(path) do
       # What MCP Apps calls a page of an app.
       ".html" -> "text/html;profile=mcp-app"
-      ".js" -> "text/javascript"
-      ".css" -> "text/css"
-      ".svg" -> "image/svg+xml"
-      ".json" -> "application/json"
       ".map" -> "application/json"
-      _ -> "text/plain"
+      _ -> MIME.from_path(path)
     end
   end
 

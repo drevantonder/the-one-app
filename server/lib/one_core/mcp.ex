@@ -217,8 +217,10 @@ defmodule OneCore.Mcp do
     with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
          true <- Version.client?(path),
          %{^plugin => version} <- Plugins.running(who),
-         {:ok, text} <- Kept.file(version.artifact, code, path) do
-      {:ok, %{contents: [%{uri: uri, mimeType: Version.kind(path), text: text}]}}
+         {:ok, data} <- Kept.file(version.artifact, code, path) do
+      # A file that isn't text, such as a picture or a font, is base64 as MCP's `blob`.
+      content = if String.valid?(data), do: %{text: data}, else: %{blob: Base.encode64(data)}
+      {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content)]}}
     else
       _ -> {:error, -32002, "There's nothing at #{uri}"}
     end

@@ -167,4 +167,32 @@ defmodule OneCore.PluginsTest do
     assert Deploy.ship() == []
     assert which.() == {:ok, 30}
   end
+
+  @tag :tmp_dir
+  test "a file that isn't text is kept as it is, read by the plugin's own code, and given back as deploy takes it",
+       %{tmp_dir: folder} do
+    OneCore.Test.server(folder)
+    form = :crypto.strong_rand_bytes(4096) <> <<0xFF, 0xFE>>
+
+    plugin = """
+    defmodule Forms do
+      @behaviour OneCore.Plugin
+      @impl true
+      def tools, do: [%{name: "blank", description: "The blank form's size", inputs: %{}}]
+      @impl true
+      def call("blank", _inputs, _call), do: byte_size(OneCore.Plugin.file(__MODULE__, "templates/form.xlsx"))
+    end
+    """
+
+    deployed = Kept.sent(%{"forms.ex" => plugin, "templates/form.xlsx" => form})
+    assert %{"base64" => _} = deployed["templates/form.xlsx"]
+    assert {:ok, 1, ""} = Deploy.deploy("network", "forms", Kept.received(JSON.decode!(JSON.encode!(deployed))))
+
+    # A server starting on the same bucket reads the same bytes.
+    stop_supervised!(Plugins)
+    start_supervised!(Plugins)
+    assert Calls.call("forms", "blank", %{}, OneCore.Test.owner()) == {:ok, byte_size(form)}
+    version = Plugins.running("network")["forms"]
+    assert Kept.sent(Kept.source(version.artifact, version.code)) == deployed
+  end
 end

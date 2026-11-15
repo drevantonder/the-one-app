@@ -218,8 +218,9 @@ async fn inputs(client: &Client, tool: &Value, flags: &[String]) -> Result<Value
     Ok(Value::Object(inputs))
 }
 
-/// A file's text, or a folder as its files' text by their paths in it, as `crate::files` reads a folder. A file
-/// for an input that says it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
+/// A file's text, or a folder as its files by their paths in it, as `crate::files` reads a folder: each one's text,
+/// or `{"base64": ...}` for one that isn't text, as `deploy` takes a plugin's files. A file for an input that says
+/// it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
 fn read(path: &Path, base64: bool) -> Result<Value> {
     let couldnt = || format!("couldn't read {}", path.display());
     if base64 {
@@ -230,8 +231,12 @@ fn read(path: &Path, base64: bool) -> Result<Value> {
     }
     let mut into = Map::new();
     for file in crate::files(path).with_context(couldnt)? {
-        let text = read(&path.join(&file), false)?;
-        into.insert(file, text);
+        let data = fs::read(path.join(&file)).with_context(couldnt)?;
+        let value = match String::from_utf8(data) {
+            Ok(text) => Value::String(text),
+            Err(data) => json!({"base64": BASE64.encode(data.as_bytes())}),
+        };
+        into.insert(file, value);
     }
     Ok(Value::Object(into))
 }

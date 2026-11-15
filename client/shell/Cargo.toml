@@ -19,6 +19,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 anyhow.workspace = true
 client = { path = ".." }
+data-encoding = "2"
 serde_json.workspace = true
 tokio.workspace = true
 # `custom-protocol` builds the app with its page inside it, however it's built.

@@ -110,6 +110,10 @@ defmodule OneCore.Plugin do
     must run on particular machines is a service.
   - Every module is a `defmodule` at the top of a file, and a plugin can have as many files and modules as it
     likes. The code is free to use the machine it runs on.
+  - A plugin's files can be anything: a template, a picture, a font. Its code reads one of its own by its path,
+    as this version was deployed with it: `OneCore.Plugin.file(__MODULE__, "templates/form.xlsx")` gives what's
+    in it. `deploy` takes a file that isn't text as `{"base64": "..."}` in place of its text, as `code` gives it
+    back, and `one deploy --files-from <folder>` sends each file as it is.
 
   A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
 
@@ -326,6 +330,16 @@ defmodule OneCore.Plugin do
     the address serves at `/ui/` as every client has it. `sign-in` does all of this.
   """
   @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
+
+  @doc """
+  One of a plugin's own files, by its path among the files it was deployed with, from any module of the plugin:
+  `OneCore.Plugin.file(__MODULE__, "templates/claim.xlsx")`. It's the file as the version running that module was
+  deployed with, and one that isn't Elixir, a skill or in `app/`. Raises if the plugin has no such file.
+  """
+  def file(module, path) do
+    OneCore.Plugins.Version.own(module, path) ||
+      raise "#{OneCore.Plugins.Version.own_name(module)}'s plugin has no file #{path} outside app/"
+  end
 
   @doc "One Core's own skill, `building-plugins`, as its `SKILL.md`: how to write a plugin, which is this module's."
   def skill do

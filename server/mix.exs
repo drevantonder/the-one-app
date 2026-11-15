@@ -8,6 +8,7 @@ defmodule OneCore.MixProject do
       elixir: "~> 1.20",
       deps: [
         {:ex_json_schema, "~> 0.11"},
+        {:mime, "~> 2.0"},
         {:req, "~> 0.5"},
         {:rustler, "~> 0.38", runtime: false},
         {:yaml_elixir, "~> 2.12"}

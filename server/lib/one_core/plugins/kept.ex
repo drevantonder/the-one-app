@@ -19,6 +19,24 @@ defmodule OneCore.Plugins.Kept do
     with {:ok, text, _tag} <- Bucket.read("#{artifact}/code/#{code}/#{path}"), do: {:ok, text}
   end
 
+  @doc """
+  A plugin's files as JSON holds them, as `deploy` takes them and `code` gives them: each one's text, or
+  `%{"base64" => ...}` for one that isn't text.
+  """
+  def sent(files) do
+    Map.new(files, fn {path, data} ->
+      {path, if(String.valid?(data), do: data, else: %{"base64" => Base.encode64(data)})}
+    end)
+  end
+
+  @doc "A plugin's files from what `sent/1` gives."
+  def received(files) do
+    Map.new(files, fn
+      {path, %{"base64" => data}} -> {path, Base.decode64!(data)}
+      {path, text} -> {path, text}
+    end)
+  end
+
   @doc "The files the plugin `artifact`'s set of files named `code` was deployed with: its source."
   def source(artifact, code) do
     case files(artifact, code, "source") do

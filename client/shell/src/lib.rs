@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use ::client::{Client, NotIn, NotLetIn, Shown};
+use data_encoding::BASE64;
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
 use tauri::ipc::{InvokeBody, Request};
@@ -63,17 +64,21 @@ impl Views {
         self.shown("client").ask("resources/list", asked).await
     }
 
-    /// One file a server listed: what kind it is, and its text. A set of a plugin's files never changes, so a file
-    /// that's kept is never asked for again.
-    async fn read(&self, resource: &str) -> anyhow::Result<(String, String)> {
+    /// One file a server listed: what kind it is, and what's in it, which is its text or, for a picture or a font,
+    /// base64 as MCP's `blob`. A set of a plugin's files never changes, so a file that's kept is never asked for
+    /// again.
+    async fn read(&self, resource: &str) -> anyhow::Result<(String, Vec<u8>)> {
         let asked = json!({"uri": resource});
         let read = match self.client.kept("resources/read", &asked) {
             Some(read) => read,
             None => self.client.fresh("resources/read", &asked).await?,
         };
         let file = &read["contents"][0];
-        let text = |part: &str| file[part].as_str().unwrap_or_default().to_owned();
-        Ok((text("mimeType"), text("text")))
+        let kind = file["mimeType"].as_str().unwrap_or_default().to_owned();
+        match file["blob"].as_str() {
+            Some(blob) => Ok((kind, BASE64.decode(blob.as_bytes())?)),
+            None => Ok((kind, file["text"].as_str().unwrap_or_default().as_bytes().to_vec())),
+        }
     }
 
     /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the newest files of
@@ -100,8 +105,7 @@ impl Views {
         if resources(&listed).any(|listed| listed == resource) {
             self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.clone());
         }
-        let (kind, text) = self.read(&resource).await?;
-        Ok((kind, text.into_bytes()))
+        self.read(&resource).await
     }
 
     /// The open apps for `who` that loaded a file a server no longer lists: one of their plugins has a new version.
