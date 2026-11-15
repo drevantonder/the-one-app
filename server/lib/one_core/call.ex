@@ -203,7 +203,7 @@ defmodule OneCore.Call do
       :unreachable -> :no_answer
       # A hook may be asked more than once for one moment, so one a server stopped answering is asked again.
       :stopped when method == "hooks/call" -> :no_answer
-      :stopped -> raise Server.said(:stopped)
+      :stopped -> raise Server.said(:stopped, server)
     end
   end
 end

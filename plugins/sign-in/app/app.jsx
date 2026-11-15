@@ -8,11 +8,19 @@ const mine = createMemo(() => call("sign-in_devices").then(JSON.parse))
 changed(() => refresh(mine))
 
 const on = (added) => new Date(added).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
-/// What a device is, and since when, in one grey line.
+const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+/// How long ago `at` was, in the largest unit that's whole: "2 minutes ago".
+function seen(at) {
+  const minutes = Math.round((new Date(at) - Date.now()) / 60_000)
+  if (minutes > -60) return `Seen ${ago.format(Math.min(minutes, -1), "minute")}`
+  if (minutes > -48 * 60) return `Seen ${ago.format(Math.round(minutes / 60), "hour")}`
+  return `Seen ${ago.format(Math.round(minutes / (24 * 60)), "day")}`
+}
+/// What a device is, and whether it's on or since when it's been in, in one grey line.
 const about = {
-  app: (added) => `Let in ${on(added)}`,
-  assistant: (added) => `An assistant, let in ${on(added)}`,
-  browser: (added) => `A browser, signed in ${on(added)}`,
+  app: (device) => (device.seen === "on" ? "Online" : device.seen ? seen(device.seen) : `Let in ${on(device.added)}`),
+  assistant: (device) => `An assistant, let in ${on(device.added)}`,
+  browser: (device) => `A browser, signed in ${on(device.added)}`,
 }
 
 /// Takes something out once its person has said so, and says what the server said if it wouldn't.
@@ -44,7 +52,7 @@ render(
                   {(device) => (
                     <Row
                       heading={device.name}
-                      text={about[device.kind](device.added)}
+                      text={about[device.kind](device)}
                       end={
                         <Remove
                           name={device.name}

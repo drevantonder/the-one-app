@@ -21,7 +21,7 @@ defmodule OneCore.Mcp do
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Address, Artifact, Builds, Hooks, Plugins, Server, Services, Skills, Tools, User}
+  alias OneCore.{Address, Artifact, Builds, Hooks, Plugins, Server, Servers, Services, Skills, Tools, User}
   alias OneCore.Plugins.{Calls, Kept, Version}
 
   # What a server speaks of MCP is the same in each of these.
@@ -50,6 +50,11 @@ defmodule OneCore.Mcp do
       # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.
       {:ok, %{"method" => "notifications/one/watch"} = said} when from != nil ->
         Server.watch(from, said["params"]["address"])
+        ""
+
+      # The relay at the network's address saying one of its servers came or went.
+      {:ok, %{"method" => "notifications/one/seen"}} ->
+        Servers.seen_again()
         ""
 
       # Another server, or a plugin's part at the network's address, saying that what this one kept of some hooks

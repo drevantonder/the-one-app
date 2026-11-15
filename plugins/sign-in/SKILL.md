@@ -12,7 +12,7 @@ that one question for it, and a new device when they also say the code it shows 
   week, and a new one for them ends it, so pass on the newest. Inviting someone who's already in gives them a way back when
   they've lost every passkey.
 - `devices` lists your devices, the assistants you let in and the browsers you're signed in on, and your
-  passkeys. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a
+  passkeys. An app's `seen` is `on` while it's connected, or when it last was. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a
   passkey, but never your last.
 - A device that isn't in yet shows a code, and a link at the network's address, and waits. Its person opens the
   link where they sign in, on the device or any device of theirs, and says whether the code there matches. Pass

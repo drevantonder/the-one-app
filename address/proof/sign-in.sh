@@ -8,11 +8,11 @@
 # through a browser or a tool, and a key asking on a code that isn't its own are refused. One that's removed is refused
 # the next thing it asks, by every server, and is let in again as someone else's at once. A stranger who knows a
 # server's key and where it is, and dials it with a key of their own, is refused. A first owner who has joined is given
-# no link to join by again. An assistant somewhere else is let in at /mcp as MCP's authorization says, acts as whoever
-# let it in, and is one of their devices. A network without the plugin that decides who may is its first owner's alone,
-# and one without the plugin that signs people in answers nobody. It says what a call costs once a device is someone's.
-# A device or assistant of a person's lets in their next by its code, with no browser; given by someone else's, it's
-# theirs; and only a server acting for that person says so.
+# no link to join by again. A server that's off is known to be, and isn't waited for. An assistant somewhere else is let
+# in at /mcp as MCP's authorization says, acts as whoever let it in, and is one of their devices. A network without the
+# plugin that decides who may is its first owner's alone, and one without the plugin that signs people in answers
+# nobody. It says what a call costs once a device is someone's. A device or assistant of a person's lets in their next
+# by its code, with no browser; given by someone else's, it's theirs; and only a server acting for that person says so.
 #
 #     mise exec -- address/proof/sign-in.sh
 #
@@ -372,6 +372,13 @@ may device laptop sign-in remove_device --device "$direct"
 refused through server ping ping
 refused through spare ping ping
 kill -9 "$spare"
+
+say "A server that's off is known to be, by the relay, so a call to it isn't waited for and says when it was last seen"
+spare_key=$(key_of "$folder/spare")
+began=$(now)
+ONE_FOR=network refused device laptop remove_service --plugin sign-in --service none --server "$spare_key"
+echo "  in $((($(now) - began) / 1000)) ms, where reaching a server takes up to 3000"
+echo "  and alice's devices say which is on: $(device laptop sign-in devices | grep -o '"seen":"[^"]*"' | sed -E 's/"seen":"(on|[^"]*)"/\1/; s/^2.*/a time/' | sort | uniq -c | tr -s ' \n' ' ')"
 
 say "Five codes no device shows, and the next is refused for a quarter of an hour, whatever it is"
 for wrong in NOPE-1235 NOPE-1236 NOPE-1237 NOPE-1238; do device bobs-phone sign-in let_in --code "$wrong" >/dev/null 2>&1 || true; done

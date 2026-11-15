@@ -16,7 +16,7 @@ defmodule OneCore.Servers do
   What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
   (`look/1`) or forgets it all (`forget/0`).
   """
-  alias OneCore.{Bucket, Builds, Server}
+  alias OneCore.{Address, Bucket, Builds, Server}
 
   @network "network"
 
@@ -54,6 +54,43 @@ defmodule OneCore.Servers do
 
   @doc "What the machine the server whose key is `key` runs on is called, as it said when it last started."
   def name(key), do: kept({:name, key}, fn -> read("servers/#{key}/name", nil) end)
+
+  @doc """
+  Whether the server whose key is `key` is on: `:on` while it's connected to the network's address, the time its
+  machine was last on there, in milliseconds since 1970, if it isn't, or `nil` where that isn't known: a network
+  with no address, or a server never seen. The relay at the address keeps it, and tells servers when one comes or
+  goes (`seen_again/0`), so a server that's known to be off isn't waited for.
+  """
+  def seen(key) do
+    if at = Application.get_env(:one_core, :address) do
+      kept({:seen, key}, fn ->
+        path = "/relay/seen"
+        answer = Address.send!(method: :get, url: at <> path, params: [keys: key], headers: Address.signed(path, ""))
+        if answer.status == 200, do: on(answer.body[key]), else: nil
+      end)
+    end
+  end
+
+  defp on("on"), do: :on
+  defp on(at), do: at
+
+  @doc "What was kept of who's on is read again, once one of the network's servers came or went."
+  def seen_again do
+    if :ets.whereis(__MODULE__) != :undefined,
+      do: Enum.each(:ets.match(__MODULE__, {{:seen, :"$1"}, :_, :_}), fn [key] -> again({:seen, key}) end)
+
+    :ok
+  end
+
+  @doc "How long ago `at`, in milliseconds since 1970, was, as a person would say it short: `2 min ago`."
+  def ago(at) do
+    case div(System.system_time(:millisecond) - at, 60_000) do
+      minutes when minutes < 1 -> "less than a minute ago"
+      minutes when minutes < 120 -> "#{minutes} min ago"
+      minutes when minutes < 48 * 60 -> "#{div(minutes, 60)} h ago"
+      minutes -> "#{div(minutes, 24 * 60)} days ago"
+    end
+  end
 
   @doc "How to reach a server, as the JSON a client is told it in."
   def address(key) do

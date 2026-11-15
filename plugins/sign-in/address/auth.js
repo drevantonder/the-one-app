@@ -295,9 +295,12 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
       internalAdapter.listSessions(user.id),
       adapter.findMany({ model: "passkey", where: mine }),
     ]);
+    // An app is on while it's connected to the relay, which says when it was last seen otherwise.
+    const seen = await env.RELAY.seen(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
+    const when = (id) => (seen[id] === "on" ? { seen: "on" } : seen[id] ? { seen: new Date(seen[id]) } : {});
     return {
       devices: [
-        ...devices.map(({ id, kind, name, createdAt }) => ({ id, kind, name, added: createdAt })),
+        ...devices.map(({ id, kind, name, createdAt }) => ({ id, kind, name, added: createdAt, ...when(id) })),
         // A browser that's signed in is a device too, named by what it says it is.
         ...browsers.map(({ id, userAgent, createdAt }) => ({ id, kind: "browser", name: browser(userAgent), added: createdAt })),
       ],

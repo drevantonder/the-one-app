@@ -46,6 +46,13 @@ defmodule OneCore.Service do
   @doc "What the machine a server runs on is called, by the server's key: its name, which the server says as it starts."
   def name(server), do: Servers.name(server)
 
+  @doc """
+  Whether the machine a server runs on is on, by the server's key: `:on`, the time it was last on in milliseconds
+  since 1970, or `nil` where that isn't known. `call/5` doesn't wait for one that's known to be off, and says when
+  it was last seen.
+  """
+  def seen(server), do: Servers.seen(server)
+
   # The plugin whose service it is: this call's, or one it uses, whose function this call is running.
   defp whose(%Call{who: plugin, uses: uses}, service) do
     under = Version.under(service)
@@ -151,20 +158,23 @@ defmodule OneCore.Service do
   defp json(term), do: JSON.decode!(JSON.encode!(term))
 
   # Asks each server in turn until one is up. A server that couldn't be reached was asked nothing.
-  defp ask([], _here, %{plugin: plugin, service: service}) do
-    {:error, "The server that runs #{plugin}'s #{service} isn't up"}
+  defp ask(servers, here, ask, down \\ [])
+
+  defp ask([], _here, %{plugin: plugin, service: service}, down) do
+    {:error,
+     "No server that runs #{plugin}'s #{service} is up: " <> Enum.map_join(down, ", ", &Server.said(:unreachable, &1))}
   end
 
-  defp ask([here | _], here, %{plugin: plugin, service: service, function: function, arguments: arguments}) do
+  defp ask([here | _], here, %{plugin: plugin, service: service, function: function, arguments: arguments}, _down) do
     with {:ok, answer} <- Services.run(plugin, service, function, arguments), do: {:ok, json(answer)}
   end
 
-  defp ask([server | servers], here, ask) do
+  defp ask([server | servers], here, ask, down) do
     case Server.request(server, "services/call", ask) do
       {:ok, %{"answer" => answer}} -> {:ok, answer}
       {:error, _code, why} -> {:error, why}
-      :unreachable -> ask(servers, here, ask)
-      :stopped -> {:error, "The server that runs #{ask.plugin}'s #{ask.service}: " <> Server.said(:stopped)}
+      :unreachable -> ask(servers, here, ask, down ++ [server])
+      :stopped -> {:error, Server.said(:stopped, server)}
     end
   end
 end

@@ -12,6 +12,11 @@
 // It also passes a call that came in at the address over the web to a server, and tells every server what a piece
 // here has to say: a server holds one more connection here for those (`/relay/outside`), since nothing else at the
 // address holds one.
+//
+// And it knows who's on: a server or a device is on while it's connected here, through any run of its client, and
+// otherwise was last seen when its last connection ended, which the Durable Object keeps. A connection that says
+// nothing for longer than iroh's pings allow has ended, as a machine that sleeps or loses its network says nothing.
+// Servers are told when one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { asker, hex, signedBy } from "../ask.js";
@@ -28,6 +33,10 @@ const CLIENT_TO_RELAY_DATAGRAM = 4;
 const CLIENT_TO_RELAY_DATAGRAM_BATCH = 5;
 const PING = 9;
 const PONG = 10;
+/** How long an endpoint may say nothing before it's taken as gone: iroh pings its relay every 15 seconds. */
+const SILENT = 45_000;
+/** What a server is told when one of the network's servers comes or goes: to ask who's on again. */
+const SEEN = JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/seen" });
 
 const utf8 = new TextEncoder();
 const refuse = (status, why) => new Response(why, { status });
@@ -37,6 +46,7 @@ export default class extends WorkerEntrypoint {
     const url = new URL(request.url);
     // iroh times this to learn how far away the relay is. An endpoint with no answer has no relay.
     if (url.pathname === "/ping") return new Response(null, { status: 200 });
+    if (url.pathname === "/relay/seen") return this.asked(request, url);
     if (request.headers.get("upgrade") !== "websocket") return refuse(url.pathname.startsWith("/relay") ? 426 : 404, "The relay is a WebSocket at /relay");
     if (url.pathname === "/relay") return this.endpoint(request, url);
     if (url.pathname === "/relay/outside") return this.relay().fetch(request);
@@ -55,7 +65,16 @@ export default class extends WorkerEntrypoint {
     ours.binaryType = "arraybuffer";
     // What it sends before it's joined waits for that, in the order it was sent.
     let joined;
+    let heard = Date.now();
+    const quiet = setInterval(async () => {
+      if (Date.now() - heard < SILENT) return;
+      clearInterval(quiet);
+      ours.close(1001, "It went quiet");
+      (await joined)?.relay.close(1001, "It went quiet");
+    }, SILENT / 3);
+    ours.addEventListener("close", () => clearInterval(quiet));
     ours.addEventListener("message", async ({ data }) => {
+      heard = Date.now();
       if (typeof data === "string") return ours.close(1003, "The relay takes binary frames");
       const frame = new Uint8Array(data);
       if (!joined) return void (joined = this.join(ours, challenge, pass, frame));
@@ -93,7 +112,10 @@ export default class extends WorkerEntrypoint {
       ours.send(Uint8Array.of(SERVER_DENIES_AUTH, why.length, ...why));
       return void ours.close(1008, "Not one of this network's");
     }
-    const { webSocket: relay } = await this.relay().fetch(`https://relay/endpoint?key=${key}`, { headers: { upgrade: "websocket" } });
+    // A run of a client is on for the device it runs for, which its pass names, and a server for itself.
+    const [, device = key] = (pass ?? "").split(".");
+    const on = new URLSearchParams({ key, device, ...(admitted.until === undefined && { server: "yes" }) });
+    const { webSocket: relay } = await this.relay().fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } });
     relay.accept();
     relay.binaryType = "arraybuffer";
     relay.addEventListener("message", ({ data }) => ours.send(data));
@@ -125,6 +147,22 @@ export default class extends WorkerEntrypoint {
     await this.relay().fetch("https://relay/tell", { method: "POST", body: message });
   }
 
+  /**
+   * Who's on, of `keys`, servers' and devices': `"on"` for one connected here now, when the last one that was left
+   * (milliseconds since 1970), or `null` for one never seen.
+   */
+  seen(keys) {
+    return this.relay().seen(keys);
+  }
+
+  /** A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. */
+  async asked(request, url) {
+    const key = await asker(request, "");
+    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
+    const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
+    return Response.json(await this.seen(keys.slice(0, 1000)));
+  }
+
   /** A network has one relay. */
   relay() {
     return this.env.RELAY.get(this.env.RELAY.idFromName("relay"));
@@ -139,7 +177,7 @@ export class Relay extends DurableObject {
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === "/endpoint") return this.endpoint(url.searchParams.get("key"));
+    if (url.pathname === "/endpoint") return this.endpoint(url.searchParams);
     if (url.pathname === "/relay/outside") return this.server(request);
     if (url.pathname === "/tell") return this.tell(await request.text());
     return this.call(url.searchParams.get("to"));
@@ -147,14 +185,28 @@ export class Relay extends DurableObject {
 
   /**
    * An endpoint that proved its key is joined: what it sends another comes over this connection, and what another
-   * sends it goes back over it. One that connects again has left its old connection behind.
+   * sends it goes back over it. One that connects again has left its old connection behind. It's on for its
+   * `device`, and a `server` that comes is told to the others.
    */
-  endpoint(key) {
+  endpoint(said) {
+    const [key, device, server] = [said.get("key"), said.get("device"), said.has("server")];
     for (const before of this.ctx.getWebSockets(`endpoint ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
-    this.ctx.acceptWebSocket(ours, [`endpoint ${key}`]);
-    ours.serializeAttachment({ key });
+    this.ctx.acceptWebSocket(ours, [`endpoint ${key}`, `on ${device}`]);
+    ours.serializeAttachment({ key, device, server });
+    if (server) this.tell(SEEN);
     return new Response(null, { status: 101, webSocket: theirs });
+  }
+
+  /** Who's on, of `keys`, as the relay's `seen` says. */
+  async seen(keys) {
+    const left = await this.ctx.storage.get(keys.map((key) => `seen ${key}`));
+    return Object.fromEntries(keys.map((key) => [key, this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null)]));
+  }
+
+  /** Whether `device` has a connection here, other than `leaving`. */
+  on(device, leaving) {
+    return this.ctx.getWebSockets(`on ${device}`).some((ws) => ws !== leaving);
   }
 
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
@@ -212,12 +264,21 @@ export class Relay extends DurableObject {
     to.send(frame);
   }
 
-  webSocketClose(ws) {
-    const { outside } = ws.deserializeAttachment() ?? {};
+  async webSocketClose(ws) {
+    const { outside, device, server } = ws.deserializeAttachment() ?? {};
+    // The last connection a device or server had here ends, so it was last seen now.
+    if (device && !this.on(device, ws)) {
+      await this.ctx.storage.put(`seen ${device}`, Date.now());
+      if (server) this.tell(SEEN);
+    }
     // A server that left answers nothing, so the calls waiting on it are told.
     if (!outside || this.ctx.getWebSockets(`outside ${outside}`).some((other) => other !== ws)) return;
     for (const waiting of this.ctx.getWebSockets()) {
       if (waiting.deserializeAttachment()?.to === outside) waiting.close(1011, "That server left");
     }
+  }
+
+  webSocketError(ws) {
+    return this.webSocketClose(ws);
   }
 }

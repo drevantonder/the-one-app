@@ -444,7 +444,7 @@ defmodule OneCore.Tools do
       case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: by, for: who}}) do
         {:ok, result} -> throw({Call, {:passed_on, result}})
         {:error, _code, why} -> raise why
-        down -> raise Server.said(down)
+        down -> raise Server.said(down, server)
       end
     end
   end

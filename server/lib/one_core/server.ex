@@ -40,11 +40,12 @@ defmodule OneCore.Server do
 
   @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
-  `:unreachable` if it couldn't be reached, so it was asked nothing; or `:stopped` if it stopped answering after it
-  was asked, so it may have done what was asked.
+  `:unreachable` if it couldn't be reached, or is known to be off, so it was asked nothing; or `:stopped` if it
+  stopped answering after it was asked, so it may have done what was asked.
   """
   def request(server, method, params) do
-    with {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
+    with true <- Servers.seen(server) in [:on, nil] or :unreachable,
+         {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
       case JSON.decode!(answer) do
         %{"result" => result} -> {:ok, result}
         %{"error" => %{"code" => code, "message" => why}} -> {:error, code, why}
@@ -52,9 +53,18 @@ defmodule OneCore.Server do
     end
   end
 
-  @doc "What whoever asked is told of a server that didn't answer `request/3`."
-  def said(:unreachable), do: "That server isn't up"
-  def said(:stopped), do: "That server stopped answering after it was asked, so this may or may not have been done"
+  @doc "What whoever asked is told of the server `server` that didn't answer `request/3`, by its machine's name."
+  def said(:unreachable, server) do
+    case Servers.seen(server) do
+      at when is_integer(at) -> "#{named(server)} was last seen #{Servers.ago(at)}"
+      _ -> "#{named(server)} isn't answering"
+    end
+  end
+
+  def said(:stopped, server),
+    do: "#{named(server)} stopped answering after it was asked, so this may or may not have been done"
+
+  defp named(server), do: Servers.name(server) || "That server"
 
   @doc """
   Tells the other servers acting for `owners` that there's something new of theirs in the bucket to `look` for: a
