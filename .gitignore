@@ -6,14 +6,13 @@ node_modules/
 erl_crash.dump
 .DS_Store
 # The server's Rust NIFs as Rustler builds them, and its tests' folders
-/core/priv/native/
-/core/tmp/
+/core/server/priv/native/
+/core/server/tmp/
 # What Tauri writes as it builds
-/client/shell/gen/schemas/
+/clients/shell/gen/schemas/
 # What `wrangler dev` keeps, the secrets of the signer and of a plugin's edge part as whoever deploys an
-# edge writes them, and each plugin's edge part as it's built
+# edge writes them, and the web client as it's built (each plugin's edge part is built in target/)
 .wrangler/
-/edge/signer/secrets
+/core/edge/signer/secrets
 /plugins/*/edge/secrets
-/edge/parts/
-/edge/web/files/ui/
+/clients/web/dist/

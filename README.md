@@ -22,31 +22,31 @@ Without `ONE_HOME`, a client is kept where the system keeps an app's data. Where
 `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't
 there.
 
-`cd core && mix test` runs the tests. The proofs run real servers and the real app and say what happened:
-`core/test/takeover.sh` stops servers in the middle of writes, `core/test/services.sh` runs services on one of
+`cd core/server && mix test` runs the tests, the shipped plugins' too. The proofs run real servers and the real app and say what happened:
+`core/server/test/takeover.sh` stops servers in the middle of writes, `core/server/test/services.sh` runs services on one of
 two servers, with one that picks up what it wasn't told and a network nobody uses reading nothing,
-`core/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
+`core/server/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
 scheduled job across a takeover, on a folder or with `--edge` through the signer,
-`core/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
+`plugins/vault/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
 tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
-`core/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
-restores it from each with the recovery key, `core/test/repos.sh` clones, pushes and suggests changes with real
+`plugins/backups/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
+restores it from each with the recovery key, `plugins/repos/test/repos.sh` clones, pushes and suggests changes with real
 git as several people, through the edge and two servers, one killed partway through a push,
-`edge/proof/proof.sh` runs a whole edge with nothing deployed,
-`edge/proof/sign-in.sh` has people sign in
-with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
-try everything it mustn't reach, and `core/test/install.sh` has a machine with nothing on it but `one` install a
+`core/edge/proof/proof.sh` runs a whole edge with nothing deployed,
+`core/edge/proof/sign-in.sh` has people sign in
+with passkeys in real browsers and let in devices and an assistant, and `clients/shell/test/isolation.sh` has an app
+try everything it mustn't reach, and `core/server/test/install.sh` has a machine with nothing on it but `one` install a
 server, update it, go back from a build that can't start, and remove it.
 
 To put a network's edge on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
-secrets to `edge/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
+secrets to `core/edge/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
 (`https://<account>.r2.cloudflarestorage.com/<bucket>`), `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, and `FIRST_SERVER`,
 which you make up (`openssl rand -hex 16`). The network's address is a name on a zone of that Cloudflare account,
 which deploying attaches to the gateway. Then:
 
     cd ui && bun install && bun build.js
-    cd ../edge && bun install && bun run deploy https://<the network's address>
-    cd ../core && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
+    cd ../core/edge && bun install && bun run deploy https://<the network's address>
+    cd ../server && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
 
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
 nothing after. `--owner` names the network's first owner, and the server says where they join: a link they open to
@@ -63,15 +63,15 @@ tool says which build each server and device is on.
 
 The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an Android SDK and its NDK:
 
-    cd client/shell
+    cd clients/shell
     ANDROID_HOME=~/Android/Sdk NDK_HOME=~/Android/Sdk/ndk/<version> cargo tauri android build --debug --apk
 
 And for iPhone on a Mac, with Xcode, `xcodegen` and Rust's iOS targets, signed by an Apple team:
 
-    cd client/shell
+    cd clients/shell
     APPLE_DEVELOPMENT_TEAM=<team> cargo tauri ios build --export-method debugging
 
-Their projects are `client/shell/gen/android` and `client/shell/gen/apple`. The iPhone's is `gen/apple/project.yml`:
+Their projects are `clients/shell/gen/android` and `clients/shell/gen/apple`. The iPhone's is `gen/apple/project.yml`:
 `./generate` there makes `shell.xcodeproj` from it with `xcodegen`, which the build uses as it's committed. `xcrun devicectl
 device install app` puts what's built in `gen/apple/build/arm64` on a paired iPhone, and `--target aarch64-sim --debug`
 builds it for the simulator. A phone's client is kept in the app's own folder, on an iPhone the one it shares with its
@@ -80,7 +80,7 @@ as `mix network` writes one for a network with an address. An app built with `TA
 system, starts on that network with no file there. It starts on that network's sign-in page.
 
 A workplace's own app, with its own name, identifier and icon, is a Tauri config of its own merged over
-`client/shell/tauri.conf.json`, as Tauri merges one:
+`clients/shell/tauri.conf.json`, as Tauri merges one:
 
     {"productName": "The PTC App", "identifier": "app.ptcau.client", "bundle": {"icon": ["/path/to/icon.png"]}}
 
@@ -92,14 +92,17 @@ App Group are named after its identifier too. Android's project names The One Ap
 `strings.xml`, the folder of `MainActivity`), so a workplace's Android app is made from its own `cargo tauri android
 init` for now.
 
-- `core`: One Core, in Elixir, with its Rust NIFs in `core/nif`.
-- `client`: the client's Rust half, which is the CLI and MCP.
-- `client/shell`: the app, a window on that half, and the one program both are.
+- `core`: One Core, in three parts as a plugin has: `core/server`, in Elixir, with its Rust NIFs in
+  `core/server/nif`; `core/client`, what every client and every plugin's client part stands on, in Rust; and
+  `core/edge`, what sits at a network's address, each a Cloudflare Worker: the gateway, the relay, the signer, what
+  serves the web client's files and the way in for a sharing link's holder. `edge.js` runs or deploys them, with
+  each plugin's edge part.
+- `clients/cli`: the CLI and MCP, on `core/client`.
+- `clients/shell`: the app, a window on `core/client`, and the one program it and the CLI are.
+- `clients/web`: the web client's files, which the edge serves.
 - `ui`: the kit an app's UI is written with.
-- `edge`: what sits at a network's address, each a Cloudflare Worker: the gateway, the relay, the signer, the web
-  client's files and the way in for a sharing link's holder. `edge.js` runs or deploys them, with each plugin's
-  edge part.
-- `plugins`: the plugins The One App ships with, each a folder of its own.
+- `plugins`: the plugins The One App ships with, each a folder of its own: `server/`, `client/` and `edge/`, as One
+  Core has, with what's built into the programs in `server/nif/` and `client/native/`, and its proofs in `test/`.
 
 ## Reading it
 

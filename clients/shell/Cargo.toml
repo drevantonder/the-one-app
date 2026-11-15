@@ -1,0 +1,68 @@
+[package]
+name = "shell"
+description = "The app: a window on One Core in a client, and with no window its CLI and MCP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# A phone starts the app from this library, and a computer from the program.
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "one"
+path = "src/main.rs"
+
+# The window, which is all of the program but its CLI and MCP. A Linux machine with no screen has a build without
+# it (`cargo build --no-default-features`), which needs none of GTK or WebKitGTK there.
+[features]
+default = ["window"]
+window = [
+  "dep:tauri-build",
+  "dep:anyhow",
+  "dep:data-encoding",
+  "dep:serde_json",
+  "dep:tokio",
+  "dep:tauri",
+  "dep:tauri-plugin-opener",
+  "dep:tauri-plugin-notification",
+  "dep:tauri-plugin-notifications",
+  "dep:encryption_client",
+  "dep:notifications_client",
+  "cli/window",
+]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [], optional = true }
+
+[dependencies]
+anyhow = { workspace = true, optional = true }
+cli = { path = "../cli" }
+client = { path = "../../core/client" }
+data-encoding = { version = "2", optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+# `custom-protocol` builds the app with its page inside it, however it's built.
+tauri = { version = "2", features = ["custom-protocol"], optional = true }
+# Opens the sign-in page in the device's own browser, where a passkey works.
+tauri-plugin-opener = { version = "2", optional = true }
+
+# The native code of the plugins it ships with that only the window uses, beside the CLI's, which is never deployed
+# (`client::files`).
+encryption_client = { path = "../../plugins/encryption/client/native", optional = true }
+notifications_client = { path = "../../plugins/notifications/client/native", optional = true }
+
+# The notification plugins Notifications' client part uses, which Tauri gives the window's page permissions of only
+# where the app names them itself (`capabilities/phone.json`).
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-notification = { version = "2.8", optional = true }
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+# libc after 0.2.189 has no `in6_ifreq` on iOS, which netdev 0.46, through iroh, uses there.
+[target.'cfg(target_os = "ios")'.dependencies]
+libc = "=0.2.189"

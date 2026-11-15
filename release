@@ -8,8 +8,8 @@
 # the network's owner. On Linux it builds a server for linux-x86_64 and linux-aarch64, and `one` for this
 # machine; on a Mac, both for macos-aarch64. Naming kinds of machine builds those servers alone.
 #
-# A server is an Erlang release of One Core (`core/mix.exs`) that needs nothing else on its machine: the VM and
-# OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), its
+# A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
+# and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), its
 # Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships with
 # and the kit's build, and the Bun it builds apps with named by its SHA-256, which it downloads the first time
 # (`OneCore.App`). The builds are in target/builds/<build>.
@@ -51,7 +51,7 @@ fetched() {
 }
 
 (cd ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
-(cd core && mix deps.get --only prod >/dev/null)
+(cd core/server && mix deps.get --only prod >/dev/null)
 bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
 
 for kind in "${kinds[@]}"; do
@@ -81,7 +81,7 @@ for kind in "${kinds[@]}"; do
   [[ ! -x $vm/Install || -e $vm/bin/erl ]] || (cd "$vm" && ./Install -minimal "$vm" >/dev/null)
 
   # Its Rust NIFs, One Core's and those of the plugins it ships with, for that machine.
-  crates=($(basename -a core/nif/*/ plugins/*/nif/*/))
+  crates=($(basename -a core/server/nif/*/ plugins/*/server/nif/*/))
   if [[ $kind == linux-* ]]; then
     cargo zigbuild --release --target "$triple.2.35" "${crates[@]/#/-p}"
     native=$target/$triple/release
@@ -92,7 +92,7 @@ for kind in "${kinds[@]}"; do
 
   release=$target/release-builds/$kind
   rm -rf "$release"
-  (cd core && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix release --overwrite --quiet --path "$release")
+  (cd core/server && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix release --overwrite --quiet --path "$release")
   # The NIFs of OTP's own applications as they're built for that machine. Their code runs on any.
   for app in "$release"/lib/*; do
     [[ ! -d $vm/lib/$(basename "$app")/priv ]] || { rm -rf "$app/priv" && cp -R "$vm/lib/$(basename "$app")/priv" "$app/priv"; }
@@ -105,9 +105,10 @@ for kind in "${kinds[@]}"; do
   beam=$(echo "$release"/erts-*/bin/beam.smp)
   "$objcopy" --strip-all "$beam"
 
-  # What it ships with, without the plugins' NIFs, which are built in above, and the Bun it builds apps with.
+  # What it ships with, which it deploys as a folder is (`client::files`), so not the plugins' native code, built
+  # in above, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
-  git archive HEAD plugins ':!plugins/*/nif/*' | tar -x -C "$release/shipped" --strip-components=1
+  git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
   cp -R ui/dist "$release/shipped/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 

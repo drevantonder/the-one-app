@@ -13,7 +13,7 @@
 #
 # --spare starts a second server, which takes over when the first stops. Each server is called after its folder,
 #   `server` and `spare`, as two machines would be called what each is.
-# --edge runs the network's edge here too (`edge/`): its Workers in `wrangler dev`, with a local S3 store
+# --edge runs the network's edge here too (`core/edge/`): its Workers in `wrangler dev`, with a local S3 store
 #   as the bucket. Servers then keep their blobs through the signer there, and whoever holds a sharing link has a
 #   way in.
 # --owner <name>, with --edge, starts a network people sign in to instead: that user is its first owner, it says
@@ -46,7 +46,7 @@ one=$root/target/release/one
 
 (cd "$root" && cargo build --release)
 (cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
-(cd "$root/core" && mix deps.get && mix compile)
+(cd "$root/core/server" && mix deps.get && mix compile)
 
 started=()
 trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait' EXIT
@@ -59,7 +59,7 @@ random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 
 at_address=()
 if [[ -n $edge ]]; then
-  (cd "$root/edge" && bun install --frozen-lockfile)
+  (cd "$root/core/edge" && bun install --frozen-lockfile)
   # The bucket's credentials are made up for this run, and only the signer is given them, with the secret a
   # network's first server shows.
   access=$(random 8) secret=$(random 24) first=$(random 16)
@@ -68,13 +68,13 @@ if [[ -n $edge ]]; then
   RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
   started+=($!)
   curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/"
-  (cd "$root/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
+  (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
     import { AwsClient } from "aws4fetch";
     const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
     const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
     if (!made.ok && made.status !== 409) throw new Error(`the bucket answered ${made.status}`);')
   # `wrangler dev` gives the signer its secrets from the environment.
-  (cd "$root/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
+  (cd "$root/core/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
     WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
     --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
   started+=($!)
@@ -86,7 +86,7 @@ fi
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/core" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/core/server" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }

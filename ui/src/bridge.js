@@ -97,7 +97,7 @@ export function changed(listener) {
 export const leave = () => greet().then(() => tell("ui/notifications/request-teardown"))
 
 /// `open("claims")`: shows another app over this one, by its plugin's name, as tapping its icon or a notification
-/// from it does. `open("notes/app/index.html", { for: "groups/family" })` names a page of the plugin's that isn't
+/// from it does. `open("notes/client/index.html", { for: "groups/family" })` names a page of the plugin's that isn't
 /// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a home page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
 /// without. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an

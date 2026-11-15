@@ -296,6 +296,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "backups_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "client",
+ "data-encoding",
+ "encryption_client",
+ "futures-util",
+ "rusty-s3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "url",
+]
+
+[[package]]
 name = "base16ct"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -667,36 +683,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "backups_client",
+ "client",
+ "data-encoding",
+ "dirs 6.0.0",
+ "encryption_client",
+ "iroh",
+ "libc",
+ "repos_client",
+ "reqwest",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+]
+
+[[package]]
 name = "client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "chacha20poly1305",
  "data-encoding",
  "dirs 6.0.0",
  "dispatch2",
  "futures-util",
  "gethostname",
- "hkdf",
- "hpke",
- "http-body-util",
- "hyper",
- "hyper-util",
  "ignore",
  "iroh",
  "jni 0.21.1",
- "libc",
  "ndk-context",
  "objc2-ui-kit",
  "reqwest",
- "rusty-s3",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "tokio",
- "url",
- "zeroize",
 ]
 
 [[package]]
@@ -1336,8 +1361,27 @@ name = "encryption"
 version = "0.1.0"
 dependencies = [
  "client",
+ "encryption_client",
  "iroh",
  "rustler",
+]
+
+[[package]]
+name = "encryption_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chacha20poly1305",
+ "client",
+ "data-encoding",
+ "futures-util",
+ "hkdf",
+ "hpke",
+ "iroh",
+ "serde_json",
+ "sha2 0.11.1",
+ "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -3508,6 +3552,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "notifications_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "client",
+ "data-encoding",
+ "encryption_client",
+ "jni 0.21.1",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-notification",
+ "tauri-plugin-notifications",
+ "tokio",
+]
+
+[[package]]
 name = "notify-rust"
 version = "4.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4485,6 +4545,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "repos_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "client",
+ "data-encoding",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "iroh",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5135,16 +5210,19 @@ name = "shell"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cli",
  "client",
  "data-encoding",
- "jni 0.21.1",
+ "encryption_client",
  "libc",
+ "notifications_client",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
  "tauri-plugin-notifications",
  "tauri-plugin-opener",
+ "tempfile",
  "tokio",
 ]
 

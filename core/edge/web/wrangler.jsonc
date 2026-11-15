@@ -1,0 +1,7 @@
+{
+  "name": "network-web",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  // The web client as `edge.js` builds it, from its own folder and the kit.
+  "assets": { "directory": "../../../clients/web/dist" }
+}

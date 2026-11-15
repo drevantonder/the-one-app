@@ -1,0 +1,28 @@
+[package]
+name = "notifications_client"
+description = "Notifications' client part that's built into the app: showing them on this device, and a phone's push."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+client = { path = "../../../../core/client" }
+encryption_client = { path = "../../../encryption/client/native" }
+serde_json.workspace = true
+tauri = "2"
+tokio.workspace = true
+
+# A computer shows a notification while the app runs, as the system's own, and hears it tapped.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-notification = "2.8"
+
+# A phone is woken by its push service, Apple's or Google's, which it gives the network its token for. Tauri's own
+# notification plugin has no push; this one does.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"] }
+
+# Android's messaging service asks the app's Rust to open each notification.
+[target.'cfg(target_os = "android")'.dependencies]
+data-encoding = "2"
+jni = "0.21"

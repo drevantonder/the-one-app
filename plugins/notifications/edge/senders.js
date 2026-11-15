@@ -2,7 +2,7 @@
 // Push). Each makes the one request its service documents, with `fetch` given, so a test sees each request as it
 // would go out. The keys are the Worker's secrets (README.md); a service whose keys aren't there fails, saying so.
 //
-// What a device shows is encrypted to it by the server that sent it (`client/src/cipher.rs`, `seal_notification`),
+// What a device shows is encrypted to it by the server that sent it (`plugins/encryption/client/native/src/cipher.rs`, `seal_notification`),
 // as `sealed`, and that's all that goes: the push service carries it and reads nothing. On an iPhone, the app's
 // notification extension opens it before it shows (`mutable-content`), so Apple has only a fixed line; on Android
 // it's a data message, which the app opens and shows itself.

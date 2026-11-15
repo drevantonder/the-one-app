@@ -1,0 +1,37 @@
+[package]
+name = "client"
+description = "One Core in a client: the device's key, reaching a server by key and asking it, what servers answered, and what an app's page is answered through."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+data-encoding = "2"
+dirs = "6"
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# What this device is called, which its person is shown before they let it in.
+gethostname = "1"
+# Reading a folder as git would keep it, leaving out what its .gitignore files do, with no git needed.
+ignore = "0.4"
+iroh.workspace = true
+# Asking the signer at a network's address, with the TLS iroh reaches the relay there with.
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.11"
+# Names the key file without replacing one that's there, on every system, a phone included.
+tempfile = "3"
+tokio.workspace = true
+
+[build-dependencies]
+serde_json.workspace = true
+
+# What a phone is called, which only its system says (`name` in `src/lib.rs`).
+[target.'cfg(target_os = "ios")'.dependencies]
+dispatch2 = "0.3"
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIDevice"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

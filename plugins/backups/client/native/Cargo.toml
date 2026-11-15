@@ -1,0 +1,19 @@
+[package]
+name = "backups_client"
+description = "Backups' client part that's built into a client: restoring a whole network from a backup, `one restore`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+client = { path = "../../../../core/client" }
+data-encoding = "2"
+encryption_client = { path = "../../../encryption/client/native" }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# Restoring from a backup in S3-compatible storage: requests signed here, and sent with reqwest.
+rusty-s3 = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.11"
+url = "2"

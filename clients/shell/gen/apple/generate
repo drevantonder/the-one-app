@@ -1,0 +1,13 @@
+#!/bin/sh
+# Makes shell.xcodeproj from project.yml for the app a Tauri config names, which is The One App's own
+# (`clients/shell/tauri.conf.json`), or a workplace's, as `cargo tauri ios build --config <its file>` merges it:
+#
+#     ./generate [<its file>]
+#
+# Its identifier names the app, its notification extension and the App Group they share, so they line up.
+set -e
+here=$(cd "$(dirname "$0")" && pwd)
+named() { plutil -extract identifier raw -o - "$1" 2>/dev/null; }
+ONE_IDENTIFIER=$( { [ -n "${1-}" ] && named "$1"; } || named "$here/../../tauri.conf.json")
+export ONE_IDENTIFIER
+cd "$here" && xcodegen generate

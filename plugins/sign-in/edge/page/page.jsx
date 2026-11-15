@@ -23,7 +23,7 @@ const another = opened.get("passkey")
 /// The code a new device shows, which its link carries.
 const code = asked.get("user_code")
 const app = asked.has("app")
-/// Why the app shows a new code, in the words the device says it in (`NotLetIn` in `client/src/lib.rs`).
+/// Why the app shows a new code, in the words the device says it in (`NotLetIn` in `core/client/src/lib.rs`).
 const why = app && { stopped: "It was stopped where you signed in.", ended: "Its code ended before it was let in. Try again." }[asked.get("why")]
 /// A code as it's shown, in two halves: WDJB-MJHT.
 const shown = code && code.replace(/(.{4})(?=.)/g, "$1-")

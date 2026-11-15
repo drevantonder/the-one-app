@@ -1,4 +1,4 @@
-// Builds the kit into dist, which is the plugin `ui`. What runs in a client is in app/, as every plugin's is: ui.css
+// Builds the kit into dist, which is the plugin `ui`. What runs in a client is in client/, as every plugin's is: ui.css
 // is the one stylesheet, ui.js every component, solid.js and web.js are Solid, and zag.js is Zag's Solid adapter,
 // which the kit and every app share (app.js leaves them out of an app). SKILL.md is the kit's skill, and skills/ are Solid's, as the version apps are
 // built with has them. build/ is how an app is built against it: app.js, with what it needs to run, which a server
@@ -20,7 +20,7 @@ await build({
   logLevel: "warn",
   plugins: [solid()],
   build: {
-    outDir: "dist/app",
+    outDir: "dist/client",
     sourcemap: true,
     rolldownOptions: {
       input: { ui: here("src/index.js"), solid: "solid-js", web: "@solidjs/web", zag: "@zag-js/solid" },
@@ -32,7 +32,7 @@ await build({
 })
 
 const css = text("src/tokens.css") + text("src/ui.css")
-writeFileSync(here("dist/app/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
+writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 
 /// The kit's skill: every `///` comment that starts with an example, from index.js and then from each file it
 /// exports from, in its order.
