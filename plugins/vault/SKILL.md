@@ -60,7 +60,9 @@ A plugin uses an account by using this plugin, and never keeps a secret itself:
   service's own: where it signs in (`authorize`), where it gives tokens (`token`), its `scopes`, the sites its
   tokens are sent to (`hosts`), anything more its sign-in page is asked with (`params`), and `client`, the
   item that holds the `client_id` the service gave whoever registered the plugin with it, and its
-  `client_secret` if it has one. A network without an address has nowhere to be sent back to.
+  `client_secret` if it has one. A network without an address has nowhere to be sent back to. An item's name
+  that says `{{<claim>}}` is filled in from who signed in, as the service's OpenID Connect ID token says:
+  `"Google {{email}}"`, with `openid` and `email` among the scopes, is an item for each account.
 - `fetch(call, item, request)` makes a web request with the item's fields filled in where `{{<field>}}` is
   written, and gives `%{status: ..., headers: ..., body: ...}`. A secret goes only to one of the item's sites.
   A signed-in item's `access_token` is renewed when it has ended, or when the service says it has.
@@ -69,5 +71,8 @@ A plugin uses an account by using this plugin, and never keeps a secret itself:
 - `keep(call, item, fields)` keeps secrets the plugin made itself or an outside service handed it, such as the
   key a session it holds is encrypted with, in an item it makes, switched on for it. `remove(call, item)` removes
   one, as when that account is signed out.
+- `items(call)` lists the items switched on for the plugin, each with the service whose sign-in made it:
+  `[%{name: "Google a@example.com", sign_in: "Google"}]`. `stop_using(call, item)` switches one off for it, as
+  signing out does, and leaves it to whatever else uses it.
 - `fetch` and `value` raise unless the item is switched on for the plugin, which its person does in the Vault's
   app or with `use`, or which `keep` did.

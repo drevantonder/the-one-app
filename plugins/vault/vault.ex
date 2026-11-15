@@ -13,6 +13,7 @@ defmodule Vault do
   A plugin that uses the Vault calls its functions: `fetch/3` makes a web request with an item's fields filled
   in, `value/3` gives one field to hand to a program, `sign_in/3` starts an OAuth sign-in whose tokens become an
   item (`Vault.OAuth`), which `fetch/3` then keeps fresh, and `keep/4` keeps secrets the plugin made itself.
+  `items/1` lists what it may use, and `stop_using/2` switches one off for it.
   """
   @behaviour OneCore.Plugin
   alias OneCore.{Artifact, Call, Plugins, Server, User}
@@ -331,7 +332,9 @@ defmodule Vault do
   their browser. `service` is the service's own: `%{name: "Fake", authorize: url, token: url, scopes: [...],
   hosts: [...], client: "Fake client"}`, where `client` names the item that holds the plugin's `client_id` there,
   and its `client_secret` if it has one, and `params`, if given, is more to ask the service's sign-in page with.
-  The tokens become the item `item`, switched on for this plugin, and `fetch/3` renews them when they end.
+  The tokens become the item `item`, switched on for this plugin, and `fetch/3` renews them when they end. Where
+  `item` says `{{<claim>}}`, it's filled in from who the service says signed in, its OpenID Connect ID token, so
+  each account is an item of its own: `"Google {{email}}"`, with `openid` and `email` among `scopes`.
   """
   def sign_in(%Call{} = call, service, item \\ nil) do
     address = address()
@@ -367,6 +370,39 @@ defmodule Vault do
 
       OAuth.link(service, client["client_id"], address <> "/vault/back", state, verifier)
     end)
+  end
+
+  @doc """
+  The items switched on for the plugin that calls this, each with the service whose sign-in made it, if one did:
+  `[%{name: "Google a@example.com", sign_in: "Google"}]`, by name. None before anything is.
+  """
+  def items(%Call{} = call) do
+    if Call.reaches?(call, theirs(call), "editor") do
+      transaction(call, reached(call), fn db ->
+        used =
+          "select items.name, items.oauth from items join uses on uses.item = items.id where uses.plugin = ? order by items.name collate nocase"
+
+        for item <- query(db, used, [call.who]),
+            do: %{name: item["name"], sign_in: item["oauth"] && JSON.decode!(item["oauth"])["name"]}
+      end)
+    else
+      []
+    end
+  end
+
+  @doc """
+  Switches an item off for the plugin that calls this, as signing out of it does. Whatever else it's switched on
+  for still uses it, and a sign-in for this plugin switches it on again.
+  """
+  def stop_using(%Call{} = call, name) do
+    unused =
+      transaction(call, reached(call), fn db ->
+        query(db, "delete from uses where item = ? and plugin = ?", [item!(db, name)["id"], call.who])
+        not used?(db, call.who)
+      end)
+
+    if unused, do: share(call, "unshare", theirs(call), call.who)
+    :ok
   end
 
   @impl true
@@ -661,20 +697,33 @@ defmodule Vault do
         if why = inputs["error"], do: raise("#{service["name"]} didn't sign you in: #{why}.")
         code = inputs["code"] || raise "#{service["name"]} sent no code back."
         tokens = OAuth.exchange(service, sign_in["client"], code, sign_in["verifier"], address() <> "/vault/back")
+        name = signed_in(sign_in["item"], service, tokens)
 
         transaction(call, artifact, fn db ->
           if query(db, "delete from sign_ins where state = ? returning state", [state]) != [] do
-            item = item(db, sign_in["item"]) || new(db, sign_in["item"], service["hosts"])
+            item = item(db, name) || new(db, name, service["hosts"])
             keep_tokens(db, item, service, tokens)
             query(db, "insert or ignore into uses (item, plugin) values (?, ?)", [item["id"], sign_in["plugin"]])
           end
         end)
 
-        "Signed in to #{service["name"]}. It's kept in your Vault as #{sign_in["item"]}."
+        "Signed in to #{service["name"]}. It's kept in your Vault as #{name}."
       end)
     else
       _ -> raise "This sign-in isn't one this network began."
     end
+  end
+
+  # The item a sign-in's tokens become: its name, with any {{<claim>}} filled in from who the service says signed in.
+  defp signed_in(name, service, tokens) do
+    claims = OAuth.claims(tokens["id_token"])
+
+    Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, name, fn _all, claim ->
+      case claims[claim] do
+        value when is_binary(value) and value != "" -> value
+        _ -> raise "#{service["name"]} didn't say who signed in. Sign in again."
+      end
+    end)
   end
 
   # An item's fields filled into a request, for what may use it. Its tokens are renewed first if they've ended,

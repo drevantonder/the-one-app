@@ -27,13 +27,19 @@ defmodule OneCore.VaultTest do
     def uses, do: ["vault"]
 
     @impl true
-    def tools, do: [%{name: "digest", description: "The SHA-256 of an item's field", inputs: %{type: "object"}}]
+    def tools do
+      for {name, description} <- [digest: "The SHA-256 of an item's field", items: "Its items", stop: "Stops using one"],
+          do: %{name: "\#{name}", description: description, inputs: %{type: "object"}}
+    end
 
     @impl true
     def call("digest", %{"item" => item, "field" => field}, call) do
       secret = OneCore.Call.plugin(call, "vault").value(call, item, field)
       Base.encode16(:crypto.hash(:sha256, secret), case: :lower)
     end
+
+    def call("items", _inputs, call), do: OneCore.Call.plugin(call, "vault").items(call)
+    def call("stop", %{"item" => item}, call), do: OneCore.Call.plugin(call, "vault").stop_using(call, item)
   end
   """
 
@@ -207,7 +213,7 @@ defmodule OneCore.VaultTest do
   end
 
   @tag :tmp_dir
-  test "a plugin is handed an item's secret only while it's switched on for that item",
+  test "a plugin is handed an item's secret, and lists it, only while it's switched on for that item",
        %{server: server, keys: keys} do
     assert {:ok, 1, ""} = Deploy.deploy("network", "reader", %{"reader.ex" => @reader})
     assert {:ok, _} = grant([server], keys, 0)
@@ -224,7 +230,9 @@ defmodule OneCore.VaultTest do
 
     assert {:error, why} = call("reader_digest", digest, @alice)
     assert why =~ "isn't an editor of #{@vault}"
+    assert {:ok, []} = call("reader_items", %{}, @alice)
     assert {:ok, _} = call("vault_use", %{"item" => "GitHub", "plugin" => "reader"}, @alice)
+    assert {:ok, [%{name: "GitHub", sign_in: nil}]} = call("reader_items", %{}, @alice)
     assert call("reader_digest", digest, @alice) == {:ok, Base.encode16(:crypto.hash(:sha256, secret), case: :lower)}
     assert {:error, why} = call("reader_digest", %{digest | "item" => "Other"}, @alice)
     assert why =~ "Other isn't switched on for reader"
@@ -232,8 +240,10 @@ defmodule OneCore.VaultTest do
     assert {:ok, %{items: [%{plugins: ["reader"]}, %{plugins: []}], plugins: ["reader"]}} =
              call("vault_list", %{}, @alice)
 
-    assert {:ok, _} = call("vault_use", %{"item" => "GitHub", "plugin" => "reader", "on" => false}, @alice)
+    assert {:ok, _} = call("reader_stop", %{"item" => "GitHub"}, @alice)
     assert {:error, _} = call("reader_digest", digest, @alice)
+    assert {:ok, []} = call("reader_items", %{}, @alice)
+    assert {:ok, %{items: [%{plugins: []}, %{plugins: []}]}} = call("vault_list", %{}, @alice)
     # Agents use one only once its person said so.
     assert {:error, why} = call("vault_fetch", %{"item" => "GitHub", "url" => "https://nowhere.example/"}, @alice)
     assert why =~ "isn't one agents may use"

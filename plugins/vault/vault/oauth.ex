@@ -60,6 +60,22 @@ defmodule Vault.OAuth do
   end
 
   @doc """
+  Who an OpenID Connect ID token says signed in: its claims, or none without one. It came straight from the
+  service's token address over TLS, which vouches for it in place of its signature (OpenID Connect Core 3.1.3.7).
+  """
+  def claims(nil), do: %{}
+
+  def claims(id_token) do
+    with [_head, payload, _signature] <- String.split(id_token, "."),
+         {:ok, json} <- Base.url_decode64(payload, padding: false),
+         {:ok, claims} when is_map(claims) <- JSON.decode(json) do
+      claims
+    else
+      _ -> raise "The ID token isn't one."
+    end
+  end
+
+  @doc """
   Makes a web request with `{{<field>}}` filled in from `fields` wherever it's written: in the URL, a header or
   the body. `secret` names the fields that are secret, which are filled in only for one of `hosts`, and blotted
   out of what the site answers. Gives `%{status: ..., headers: ..., body: ...}`. A redirect is answered as it is,
