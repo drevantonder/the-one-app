@@ -18,7 +18,7 @@ defmodule OneCore.McpTest do
     end
 
     @impl true
-    def apps, do: [%{name: "Notes", page: "app.html", icon: "icon.svg"}]
+    def apps, do: [%{name: "Notes", page: "app/index.html", icon: "icon.svg"}]
 
     @impl true
     def call("photo", _inputs, _call), do: {:blob, "image/png", <<137, 80>>}
@@ -36,26 +36,47 @@ defmodule OneCore.McpTest do
   defp ask(method, params, said \\ %{as: "owner"}), do: answer(method, params, said)["result"]
 
   @tag :tmp_dir
-  test "a plugin's app and its other client files are resources, and its tools say which only read", %{tmp_dir: folder} do
+  test "what a plugin's app loads is listed, the rest of app/ is read by name, and its tools say which only read", %{
+    tmp_dir: folder
+  } do
     OneCore.Test.server(folder)
     OneCore.Test.being_built()
-    files = %{"notes.ex" => @plugin, "app.html" => "<p>Notes</p>", "app.js" => "1", "icon.svg" => "<svg/>"}
+    Application.put_env(:one_core, :kit, Path.expand("../ui"))
+    on_exit(fn -> Application.delete_env(:one_core, :kit) end)
+    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", %{"app/ui.js" => "export const kit = 1"})
+
+    page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.js"></script>)
+
+    files = %{
+      "notes.ex" => @plugin,
+      "app/index.html" => page,
+      "app/app.js" => "document.title = 1",
+      "icon.svg" => "<svg/>"
+    }
+
     assert {:ok, 1, ""} = Plugins.deploy("network", "notes", files)
 
-    assert [%{"uri" => "skill://" <> _}, app, script, icon] = ask("resources/list", %{})["resources"]
+    resources = for %{"uri" => "ui://notes/" <> _} = resource <- ask("resources/list", %{})["resources"], do: resource
+    assert [script, app] = resources
     assert %{"name" => "Notes", "mimeType" => "text/html;profile=mcp-app", "icons" => [%{"src" => src}]} = app
     assert src == "data:image/svg+xml;base64," <> Base.encode64("<svg/>")
-    assert ["ui:", "", "notes", version, "app.html"] = String.split(app["uri"], "/")
-    assert script["uri"] == "ui://notes/#{version}/app.js"
-    assert %{"mimeType" => "text/javascript"} = script
-    assert %{"mimeType" => "image/svg+xml"} = icon
+    assert ["ui:", "", "notes", version, "app", "index.html"] = String.split(app["uri"], "/")
+    assert %{"mimeType" => "text/javascript", "uri" => "ui://notes/" <> _} = script
 
-    assert %{"contents" => [%{"text" => "<p>Notes</p>", "mimeType" => "text/html;profile=mcp-app"}]} =
+    assert %{"contents" => [%{"text" => "<!doctype html>" <> _, "mimeType" => "text/html;profile=mcp-app"}]} =
              ask("resources/read", %{uri: app["uri"]})
 
+    # A sourcemap, which no page loads, is read by name, and nothing outside app/ is a resource.
+    assert %{"contents" => [%{"mimeType" => "application/json"}]} =
+             ask("resources/read", %{uri: script["uri"] <> ".map"})
+
+    assert %{"error" => %{"code" => -32002}} =
+             answer("resources/read", %{uri: "ui://notes/#{version}/notes.ex"}, %{as: "owner"})
+
     # A version that's been replaced is still read by a client that's showing it.
-    assert {:ok, 2, ""} = Plugins.deploy("network", "notes", %{files | "app.js" => "2"})
-    assert %{"contents" => [%{"text" => "1"}]} = ask("resources/read", %{uri: script["uri"]})
+    assert {:ok, 2, ""} = Plugins.deploy("network", "notes", %{files | "app/app.js" => "document.title = 2"})
+    assert %{"contents" => [%{"text" => text}]} = ask("resources/read", %{uri: script["uri"]})
+    assert text =~ "document.title=1" or text =~ "document.title = 1"
     assert Enum.all?(ask("resources/list", %{})["resources"], &(not String.contains?(&1["uri"], version)))
 
     tools = ask("tools/list", %{})["tools"]

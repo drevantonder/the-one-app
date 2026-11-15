@@ -39,8 +39,8 @@ if (!others.length) found["this proof"] = { reached: true, said: "no other app w
 await attempt("another app's page", () => others.map((frame) => frame.document.body.textContent).join())
 await attempt("another app's storage", () => others.map((frame) => frame.localStorage.getItem("secret")).join())
 await attempt("another app's storage, from here", () => localStorage.getItem("secret") ?? undefined)
-await attempt("another app's address, asked from here", () => fetched(`${location.protocol}//${location.host.replace("a-prober", "a-kept")}/a-kept/app.html`))
-await attempt("another app's address, as a script here", () => loaded(`${location.protocol}//${location.host.replace("a-prober", "a-kept")}/a-kept/app.html`))
+await attempt("another app's address, asked from here", () => fetched(`${location.protocol}//${location.host.replace("a-prober", "a-kept")}/a-kept/app/app.html`))
+await attempt("another app's address, as a script here", () => loaded(`${location.protocol}//${location.host.replace("a-prober", "a-kept")}/a-kept/app/app.html`))
 
 // Its own tool, through the bridge, which is what it does reach, once the shell has had time to be sent elsewhere.
 await new Promise((later) => setTimeout(later, 500))

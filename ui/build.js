@@ -1,7 +1,8 @@
-// Builds the kit into dist, which is the plugin `ui`: what a server hands to clients. ui.css is the one stylesheet,
-// ui.js every component, solid.js and web.js are Solid, which the kit and every app share (app.js leaves them out
-// of an app). SKILL.md is the kit's skill, and skills/ are Solid's, as the version apps are built with has them.
-import { cpSync, readFileSync, writeFileSync } from "node:fs"
+// Builds the kit into dist, which is the plugin `ui`. What runs in a client is in app/, as every plugin's is: ui.css
+// is the one stylesheet, ui.js every component, solid.js and web.js are Solid, which the kit and every app share
+// (app.js leaves them out of an app). SKILL.md is the kit's skill, and skills/ are Solid's, as the version apps are
+// built with has them.
+import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
@@ -9,6 +10,7 @@ import { build } from "vite"
 const here = (path) => new URL(path, import.meta.url).pathname
 const text = (path) => readFileSync(here(path), "utf8")
 
+rmSync(here("dist"), { recursive: true, force: true })
 await build({
   configFile: false,
   root: here("."),
@@ -17,8 +19,7 @@ await build({
   logLevel: "warn",
   plugins: [solid()],
   build: {
-    outDir: "dist",
-    emptyOutDir: true,
+    outDir: "dist/app",
     sourcemap: true,
     rolldownOptions: {
       input: { ui: here("src/index.js"), solid: "solid-js", web: "@solidjs/web" },
@@ -30,7 +31,7 @@ await build({
 })
 
 const css = text("src/tokens.css") + text("src/ui.css")
-writeFileSync(here("dist/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
+writeFileSync(here("dist/app/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 
 /// The kit's skill: every `///` comment that starts with an example, from index.js and then from each file it
 /// exports from, in its order.

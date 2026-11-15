@@ -12,16 +12,16 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 source "$here/../../../server/test/servers.sh"
 
-mkdir "$folder/kept" "$folder/prober"
+mkdir -p "$folder/kept/app" "$folder/prober/app"
 cat >"$folder/kept/kept.ex" <<'PLUGIN'
 defmodule Kept do
   @behaviour OneCore.Plugin
 
   @impl true
-  def apps, do: [%{name: "Kept", page: "app.html", icon: "icon.svg"}]
+  def apps, do: [%{name: "Kept", page: "app/app.html", icon: "icon.svg"}]
 end
 PLUGIN
-cat >"$folder/kept/app.html" <<'PAGE'
+cat >"$folder/kept/app/app.html" <<'PAGE'
 <!doctype html>
 <title>Kept</title>
 <p id="secret">only Kept reads this</p>
@@ -34,7 +34,7 @@ defmodule Prober do
   @behaviour OneCore.Plugin
 
   @impl true
-  def apps, do: [%{name: "Prober", page: "app.html", icon: "icon.svg"}]
+  def apps, do: [%{name: "Prober", page: "app/app.html", icon: "icon.svg"}]
 
   @impl true
   def tools do
@@ -67,8 +67,8 @@ defmodule Prober.Held do
   def handle_call(:wait, _from, held), do: {:reply, held.found, held}
 end
 PLUGIN
-cp "$here/prober.html" "$folder/prober/app.html"
-cp "$here/prober.js" "$folder/prober/app.js"
+cp "$here/prober.html" "$folder/prober/app/app.html"
+cp "$here/prober.js" "$folder/prober/app/app.js"
 for plugin in kept prober; do echo '<svg xmlns="http://www.w3.org/2000/svg"/>' >"$folder/$plugin/icon.svg"; done
 
 say "A network whose first two apps are Kept and Prober"

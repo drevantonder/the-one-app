@@ -10,12 +10,11 @@ import { build, parseAst } from "vite"
 const [source, out] = process.argv.slice(2)
 
 // What an app imports that the plugin `ui` serves, by where it's served (ui/build.js).
-const shared = { "solid-js": "/ui/solid.js", "@solidjs/web": "/ui/web.js", ui: "/ui/ui.js" }
+const shared = { "solid-js": "/ui/app/solid.js", "@solidjs/web": "/ui/app/web.js", ui: "/ui/app/ui.js" }
 
 const pages = readdirSync(source, { recursive: true }).filter((path) => path.endsWith(".html") && !path.split("/").includes("node_modules"))
 
 try {
-  if (!pages.length) throw new Error("An app has a page: an .html file, such as index.html, whose script is the app's.")
   await build({
     configFile: false,
     root: source,
@@ -25,7 +24,7 @@ try {
     plugins: [
       solid(),
       // Every page has the kit's look before any of it has run.
-      { name: "kit", transformIndexHtml: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "/ui/ui.css" }, injectTo: "head-prepend" }] },
+      { name: "kit", transformIndexHtml: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "/ui/app/ui.css" }, injectTo: "head-prepend" }] },
     ],
     build: {
       outDir: out,

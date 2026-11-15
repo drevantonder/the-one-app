@@ -12,9 +12,9 @@ defmodule OneCore.Mcp do
   call into its plugin (`plugins/call`), of a plugin's hook (`hooks/call`) or of having a plugin's scheduled jobs
   called (`plugins/schedule`).
 
-  The parts of a plugin that run in a client are MCP resources: `ui://<plugin>/<code>/<path>`, where `code` names
-  the set of files a version runs, so a file at an address never changes. A plugin's app is one of them, as an MCP
-  App is.
+  What of a plugin runs in a client, its folder `app/`, is MCP resources: `ui://<plugin>/<code>/<path>`, where
+  `code` names the set of files a version runs, so a file at an address never changes. What a page loads is listed,
+  a plugin's app among it as an MCP App is, and the rest of `app/` is read by name.
 
   Skills are served as MCP's Skills Extension says (SEP-2640), in the shapes it gives for the protocol versions a
   server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each of a skill's files is
@@ -201,6 +201,7 @@ defmodule OneCore.Mcp do
 
   defp resources("resources/read", %{"uri" => uri}, who) do
     with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
+         true <- Version.client?(path),
          %{^plugin => version} <- Plugins.running(who),
          {:ok, text} <- Plugins.file(version.artifact, code, path) do
       {:ok, %{contents: [%{uri: uri, mimeType: Version.kind(path), text: text}]}}

@@ -7,9 +7,11 @@ defmodule OneCore.Plugins.Version do
   file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
   so a server that's updated for years makes no more names than it ever ran versions at once.
 
-  A version's files that aren't Elixir or its skills are its parts that run in a client (`files`, by their paths), and
-  `code` names the whole set, so a client can tell one version's files from the next's. `hashes` names each of those
-  files by what's in it, so a service can tell whether a program it brings changed.
+  What of a version runs in a client is its folder `app/`. `files` are what a page loads from there, by their paths:
+  its pages, scripts, stylesheets and pictures, which a client is listed and keeps. The rest of `app/`, a
+  sourcemap, is read by name. `code` names the whole set, so a client can tell one version's files from the next's.
+  `hashes` names each file that isn't Elixir or a skill by what's in it, so a service can tell whether a program it
+  brings changed.
 
   `kit` is the code of the kit its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
@@ -60,14 +62,14 @@ defmodule OneCore.Plugins.Version do
     free = Enum.find(1..@names, &(:atomics.compare_exchange(names, &1, 0, 1) == :ok))
     if free == nil, do: raise("#{@names} versions of plugins are loaded, which is as many as a server runs at once")
     under = Module.concat(OneCore.Plugins, "Load#{free}")
-    {sources, client} = Enum.split_with(files, fn {path, _} -> String.ends_with?(path, ".ex") end)
+    {sources, rest} = Enum.split_with(files, fn {path, _} -> String.ends_with?(path, ".ex") end)
 
-    {skills, client} =
-      Map.split_with(Map.new(client), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
+    {skills, rest} =
+      Map.split_with(Map.new(rest), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
 
     with {:ok, skills} <- Skills.found(name, skills),
          {:ok, modules, warnings} <- compile(under, sources),
-         {:ok, version} <- describe(under, modules, client) do
+         {:ok, version} <- describe(under, modules, rest) do
       {:ok, %{version | code: code(files), skills: skills, kit: App.kit(files)}, warnings}
     else
       {:error, why} ->
@@ -164,11 +166,11 @@ defmodule OneCore.Plugins.Version do
   def own_names(text, %__MODULE__{under: under}), do: own_names(text, under)
   def own_names(text, under), do: String.replace(text, inspect(under) <> ".", "")
 
-  # A plugin with no Elixir has only parts that run in a client: it provides no tools and names no apps.
-  defp describe(under, modules, client) do
+  # `rest` is the files that aren't Elixir or skills. A plugin with no Elixir provides no tools and names no apps.
+  defp describe(under, modules, rest) do
     case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
       [] when modules == [] ->
-        {:ok, version(under, nil, [], [], [], client)}
+        {:ok, version(under, nil, [], [], [], rest)}
 
       [plugin] ->
         tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
@@ -182,8 +184,9 @@ defmodule OneCore.Plugins.Version do
           not (is_list(tools) and Enum.all?(tools, &tool?/1)) ->
             {:error, "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}"}
 
-          not (is_list(apps) and Enum.all?(apps, &app?(&1, client))) ->
-            {:error, "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page and icon are files here"}
+          not (is_list(apps) and Enum.all?(apps, &app?(&1, rest))) ->
+            {:error,
+             "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of app/ and icon a file here"}
 
           not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
             {:error, "uses/0 gives a list of plugins' names"}
@@ -204,7 +207,7 @@ defmodule OneCore.Plugins.Version do
               for tool <- tools,
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
-            version = version(under, plugin, tools, apps, Enum.sort(services), client)
+            version = version(under, plugin, tools, apps, Enum.sort(services), rest)
 
             with {:ok, jobs} <- jobs(jobs, tools),
                  do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), jobs: jobs}}
@@ -244,10 +247,10 @@ defmodule OneCore.Plugins.Version do
   defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
-  defp version(under, plugin, tools, apps, services, client) do
+  defp version(under, plugin, tools, apps, services, rest) do
     apps =
       for %{name: name, page: page, icon: icon} <- apps do
-        %{name: name, page: page, icon: "data:#{kind(icon)};base64,#{Base.encode64(client[icon])}"}
+        %{name: name, page: page, icon: "data:#{kind(icon)};base64,#{Base.encode64(rest[icon])}"}
       end
 
     %__MODULE__{
@@ -261,10 +264,17 @@ defmodule OneCore.Plugins.Version do
       hooks: [],
       jobs: [],
       code: nil,
-      files: Enum.sort(Map.keys(client)),
-      hashes: Map.new(client, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
+      files: Enum.sort(for(path <- Map.keys(rest), loaded?(path), do: path)),
+      hashes: Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
     }
   end
+
+  @doc "Whether `path` is of what runs in a client: the folder `app/`."
+  def client?(path), do: String.starts_with?(path, "app/")
+
+  # Whether a page loads `path`: a client may load nothing it isn't served (`client/shell`'s `APP_MAY_LOAD`), and
+  # is served pages, scripts, stylesheets and pictures.
+  defp loaded?(path), do: client?(path) and Path.extname(path) in ~w(.html .js .css .svg)
 
   @doc "What kind of file `path` is, as a web view is told it."
   def kind(path) do
@@ -275,12 +285,13 @@ defmodule OneCore.Plugins.Version do
       ".css" -> "text/css"
       ".svg" -> "image/svg+xml"
       ".json" -> "application/json"
+      ".map" -> "application/json"
       _ -> "text/plain"
     end
   end
 
-  defp app?(%{name: name, page: page, icon: icon}, client) when is_binary(name),
-    do: Path.extname(page) == ".html" and is_map_key(client, page) and is_map_key(client, icon)
+  defp app?(%{name: name, page: page, icon: icon}, rest) when is_binary(name),
+    do: client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page) and is_map_key(rest, icon)
 
   defp app?(_, _), do: false
 

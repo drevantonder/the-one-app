@@ -139,9 +139,9 @@ defmodule OneCore.Plugin do
     that user, and one added for the network decides for everyone.
   #{OneCore.Hooks.listed()}
 
-  A plugin's files that aren't Elixir or its skills reach each client from the server: they are its parts that
-  run in a client, and the source of any program a service of its brings. `apps/0`, if the plugin has one, names
-  its apps:
+  What of a plugin runs in a client is its folder `app/`, as the server built it, which reaches each client from the
+  server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
+  and its part at the network's address. `apps/0`, if the plugin has one, names its apps:
 
       @impl true
       def apps, do: [%{name: "Hello", page: "app/index.html", icon: "icon.svg"}]
@@ -157,9 +157,10 @@ defmodule OneCore.Plugin do
         app/package.json  packages of its own, if it needs any, under "dependencies"
 
   - The source is what's deployed, and the server builds it (`OneCore.App`): what a client is served at `app/` is
-    what it built, with sourcemaps. The `code` tool gives the source back, to change and deploy again. A build
-    that fails fails the deploy, which answers with the compiler's words, a problem to a line: `app.jsx:3:30:
-    Unexpected token`, then the lines around it with a `^` under the place.
+    what it built. A client keeps what a page loads, and reads a sourcemap only when something asks for it. The
+    `code` tool gives the source back, to change and deploy again. A build that fails fails the deploy, which
+    answers with the compiler's words, a problem to a line: `app.jsx:3:30: Unexpected token`, then the lines
+    around it with a `^` under the place.
   - Solid and the kit are on the server and every client already, so an app leaves them out and is small; an app
     that needs nothing more installs nothing. Packages of its own are installed as it's built.
   - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`

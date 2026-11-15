@@ -2,7 +2,8 @@ defmodule OneCore.App do
   @moduledoc """
   Builds a plugin's app from its source, which is what's deployed: the folder `app/` of the plugin's files, an app
   written in Solid with the kit. A server builds it with the kit's own build (`ui/app.js`), which Bun runs, and
-  what a client is served at `app/` is what that built, with the code of the kit it was built against, `app/kit`.
+  what a client is served at `app/` is what that built. The code of the kit it was built against is kept there too,
+  as `app/kit`, which no page loads.
   The files deployed are kept beside the plugin's code as they were (`OneCore.Plugins`), to change and deploy again.
 
   The kit's folder on this server, with what it builds with installed, is its `:kit` setting. An app that names
@@ -14,8 +15,11 @@ defmodule OneCore.App do
   @app "app/"
   @kit "app/kit"
 
-  @doc "Whether a plugin's files hold an app's source to build."
-  def app?(files), do: Enum.any?(Map.keys(files), &String.starts_with?(&1, @app))
+  @doc """
+  Whether a plugin's files hold an app's source to build: a page in `app/`. One whose `app/` has none was built
+  already, as the kit's is.
+  """
+  def app?(files), do: Enum.any?(Map.keys(files), &(String.starts_with?(&1, @app) and Path.extname(&1) == ".html"))
 
   @doc """
   The files of a plugin with an app as a server keeps them, from the files deployed and the code of the kit that's

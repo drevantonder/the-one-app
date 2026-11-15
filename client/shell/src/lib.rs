@@ -70,25 +70,27 @@ impl Views {
     }
 
     /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the newest files of
-    /// `plugin` this client knows of.
+    /// `plugin` this client knows of. One a server didn't list, as a page loads none of them (a sourcemap), is read
+    /// by name from the same version.
     async fn file(&self, address: &Uri) -> anyhow::Result<(String, Vec<u8>)> {
         let file = address.path().trim_start_matches('/');
         // A large file a tool answered with, which the client keeps, at the address the answer gave an app for it.
         if let Some(kept) = file.strip_prefix(".file/") {
             return self.client.file(kept).ok_or_else(|| anyhow::anyhow!("this client keeps no such file"));
         }
+        let none = || anyhow::anyhow!("no plugin here has {file}");
+        let (plugin, path) = file.split_once('/').ok_or_else(none)?;
         let listed = self.listed().await?;
-        let resource = resources(&listed).find(|resource| {
-            let mut parts = resource.trim_start_matches("ui://").splitn(3, '/');
-            let (plugin, _version, path) = (parts.next(), parts.next(), parts.next());
-            plugin.zip(path).is_some_and(|(plugin, path)| file.strip_prefix(plugin) == Some(&format!("/{path}")))
-        });
-        let resource = resource.ok_or_else(|| anyhow::anyhow!("no plugin here has {file}"))?;
-        let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
-        // Android's and Windows' web views name the app after the scheme, in a host's name.
-        let app = app.strip_prefix("oneapp.").unwrap_or(app);
-        self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.to_owned());
-        let (kind, text) = self.read(resource).await?;
+        let mut versions = resources(&listed).filter_map(parts).filter(|(of, ..)| *of == plugin);
+        let (_, code, _) = versions.next().ok_or_else(none)?;
+        let resource = format!("ui://{plugin}/{code}/{path}");
+        if resources(&listed).any(|listed| listed == resource) {
+            let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
+            // Android's and Windows' web views name the app after the scheme, in a host's name.
+            let app = app.strip_prefix("oneapp.").unwrap_or(app);
+            self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.clone());
+        }
+        let (kind, text) = self.read(&resource).await?;
         Ok((kind, text.into_bytes()))
     }
 
@@ -110,6 +112,12 @@ impl Views {
 /// The address of each file in a list of them.
 fn resources(listed: &Value) -> impl Iterator<Item = &str> {
     listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str())
+}
+
+/// A plugin's file by its address, `ui://<plugin>/<code>/<path>`: its plugin, the version's code, and its path.
+fn parts(resource: &str) -> Option<(&str, &str, &str)> {
+    let mut parts = resource.strip_prefix("ui://")?.splitn(3, '/');
+    Some((parts.next()?, parts.next()?, parts.next()?))
 }
 
 /// The apps on the home screen: the files a server lists, of which an app is a page, and with them the open apps

@@ -37,10 +37,9 @@ const services = [
 ];
 
 // The web client's files have the kit among them, as every client has it: a page here is built against it, as
-// an app is (`ui/app.js`), and finds it at `/ui/`.
+// an app is (`ui/app.js`), and finds it at `/ui/app/`.
 rmSync(`${here}/web/files/ui`, { recursive: true, force: true });
-mkdirSync(`${here}/web/files/ui`);
-for (const file of new Glob("*.{js,css,map}").scanSync(`${here}/../ui/dist`)) cpSync(`${here}/../ui/dist/${file}`, `${here}/web/files/ui/${file}`);
+cpSync(`${here}/../ui/dist/app`, `${here}/web/files/ui/app`, { recursive: true });
 
 rmSync(`${here}/parts`, { recursive: true, force: true });
 mkdirSync(`${here}/parts`);
