@@ -236,3 +236,67 @@ iframe[inert] {
 @keyframes new {
   from { translate: calc(var(--new-from) * var(--toward-end)) 0; }
 }
+
+/* A person's recovery key, shown or typed over whatever app asked: the client's own, as the kit's sheet looks. */
+#recovery {
+  box-sizing: border-box;
+  width: min(100% - 2rem, 26rem);
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  color: var(--foreground);
+}
+#recovery::backdrop {
+  background: color-mix(in oklab, black 50%, transparent);
+}
+#recovery form {
+  display: grid;
+  gap: 0.75rem;
+}
+#recovery strong {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+#recovery p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+#recovery .key,
+#recovery .entry {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: 500 var(--text-base) / 1.6 var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  resize: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+#recovery .wrong {
+  color: var(--destructive);
+}
+#recovery .wrong:empty,
+#recovery[data-typed="true"] .shown,
+#recovery[data-typed="false"] .typed {
+  display: none;
+}
+#recovery button {
+  height: var(--control);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font: 500 var(--text-sm) var(--font-sans);
+  cursor: pointer;
+}
+#recovery button.main {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}

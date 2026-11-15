@@ -94,7 +94,7 @@ impl Client {
         if answer["isError"] == true {
             bail!("{said}")
         }
-        serde_json::from_str(said).with_context(|| format!("{name} didn't answer what a device fills in from"))
+        Ok(serde_json::from_str(said).unwrap_or_else(|_| said.into()))
     }
 
     /// What the plugin's tool that an input names says of the artifact it's kept in: its name, its epoch, and the
@@ -187,5 +187,10 @@ impl Client {
     /// device that holds the key gives it, and only its window asks: no command or tool answers with one.
     pub async fn recovery_key(&self) -> Result<String> {
         Ok(cipher::recovery(&self.owner_key().await?.0))
+    }
+
+    /// Lets this device in with the recovery key its person typed in its window.
+    pub async fn recover(&self, recovery_key: &str) -> Result<()> {
+        self.tool("encryption_let_in", json!({"key": recovery_key})).await.map(drop)
     }
 }

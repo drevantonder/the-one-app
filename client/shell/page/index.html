@@ -25,5 +25,18 @@
       <div id="dots"><i aria-current="true"></i></div>
     </footer>
   </main>
+  <dialog id="recovery" aria-labelledby="recovery-heading">
+    <form class="form">
+      <strong id="recovery-heading">Recovery Key</strong>
+      <p class="about shown">Write it down, and keep it off your devices. It lets a new device in when every device that holds your key is gone.</p>
+      <p class="about typed">Type it as you wrote it down. This device will hold your key.</p>
+      <output class="key shown"></output>
+      <textarea class="entry typed" rows="3" aria-labelledby="recovery-heading" autocapitalize="characters" autocomplete="off" spellcheck="false"></textarea>
+      <p class="wrong" role="alert"></p>
+      <button class="typed main">Let This Device In</button>
+      <button class="typed" value="cancel" formnovalidate>Cancel</button>
+      <button class="shown main">Done</button>
+    </form>
+  </dialog>
 </body>
 </html>

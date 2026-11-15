@@ -135,6 +135,36 @@ function opened(view) {
   }))
 }
 
+/// Shows this device's person their recovery key, or with `typed`, asks them for it and lets the device in with
+/// it. → `{ done }`: whether they saw it, or the device is in now. It's over whatever app asked, and the app is
+/// told only that.
+function recoveryKey(typed) {
+  const dialog = document.getElementById("recovery")
+  const [key, entry, problem, form] = ["key", "entry", "wrong", "form"].map((part) => dialog.querySelector(`.${part}`))
+  dialog.dataset.typed = typed
+  entry.value = key.textContent = problem.textContent = ""
+  if (!typed) invoke("recovery_key").then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
+  dialog.showModal()
+  return new Promise((answered) => {
+    form.onsubmit = async (event) => {
+      event.preventDefault()
+      if (typed && event.submitter?.value !== "cancel") {
+        try {
+          await invoke("recover", { key: entry.value })
+        } catch (error) {
+          return void (problem.textContent = `${error}`)
+        }
+      }
+      dialog.returnValue = event.submitter?.value === "cancel" ? "" : "done"
+      dialog.close()
+    }
+    dialog.onclose = () => {
+      entry.value = key.textContent = ""
+      answered({ done: dialog.returnValue === "done" })
+    }
+  })
+}
+
 const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc: "2.0", ...message }, "*")
 
 /// What this page answers an app itself. The rest is the client's to answer.
@@ -160,6 +190,8 @@ async function answer(view, method, params) {
   if (method === "ui/request-display-mode") return { mode: "fullscreen" }
   // A file too large to go in a call: the client sends it where the network keeps it, for a tool of the app's plugin.
   if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { plugin: view.plugin } })
+  // A person's recovery key is shown and typed on this page, which is the client's own: no app's page is handed one.
+  if (method === "one/recovery-key") return recoveryKey(params.typed === true)
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   return invoke("ask", { view: view.plugin, method, params })
 }

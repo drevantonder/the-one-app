@@ -178,6 +178,21 @@ async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, 
     sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
 }
 
+/// The recovery key of this device's person, for the home screen to show them. It's the client's own page that
+/// shows it, so no app's page is handed one.
+#[tauri::command]
+async fn recovery_key(views: State<'_, Views>) -> Result<String, String> {
+    views.client.recovery_key().await.map_err(|error| error.to_string())
+}
+
+/// Lets this device in with the recovery key its person typed on the home screen, and has every view ask again.
+#[tauri::command]
+async fn recover(views: State<'_, Views>, key: String) -> Result<(), String> {
+    views.client.recover(&key).await.map_err(|error| error.to_string())?;
+    views.again().await;
+    Ok(())
+}
+
 /// Forgets what a view was answered: its page is gone, or loading again.
 #[tauri::command]
 fn close(views: State<'_, Views>, view: String) {
@@ -372,7 +387,19 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, network, watch, close, enter, opened])
+        .invoke_handler(tauri::generate_handler![
+            apps,
+            ask,
+            again,
+            upload,
+            recovery_key,
+            recover,
+            network,
+            watch,
+            close,
+            enter,
+            opened
+        ])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }

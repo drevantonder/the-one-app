@@ -69,6 +69,15 @@ export async function call(tool, inputs = {}) {
 /// plugin. → the name that tool takes for it, in the input its plugin says is an upload.
 export const upload = (file) => greet().then(() => ask("one/upload", { file })).then(({ upload }) => upload)
 
+/// `await showRecoveryKey()`: has the client show its person their recovery key, over the app. The app is told
+/// only that they've seen it: no app's page is handed one. → whether it was shown, which only a device that
+/// holds their key can.
+export const showRecoveryKey = () => greet().then(() => ask("one/recovery-key")).then(({ done }) => done)
+
+/// `await useRecoveryKey()`: has the client ask its person for their recovery key, and let this device in with
+/// it. → whether the device holds their key now.
+export const useRecoveryKey = () => greet().then(() => ask("one/recovery-key", { typed: true })).then(({ done }) => done)
+
 /// `changed(() => refresh(notes))`: runs what it's given whenever what this page was answered has changed, to ask
 /// again and draw it. → the function that stops it.
 export function changed(listener) {
