@@ -64,7 +64,10 @@ defmodule OneCore.Test do
     Application.put_env(:one_core, :home, Path.join(folder, "server"))
     {:ok, key} = OneCore.Iroh.key(OneCore.Server.key_file())
     true = OneCore.Servers.joined?(key, "network")
-    for child <- [OneCore.Plugins, OneCore.Server, OneCore.Services], do: ExUnit.Callbacks.start_supervised!(child)
+
+    for child <- [OneCore.Plugins.Deploy, OneCore.Plugins, OneCore.Server, OneCore.Services],
+        do: ExUnit.Callbacks.start_supervised!(child)
+
     :ok = OneCore.User.make_first_owner(owner())
     key
   end

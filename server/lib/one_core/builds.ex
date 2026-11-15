@@ -120,7 +120,8 @@ defmodule OneCore.Builds do
   @doc """
   Which build each of `owner`'s servers runs, with what its machine is called and whether it's on, and which each
   of `by`'s devices last said it is, and the newest for each kind of machine: what shows whether everything is on
-  the same build.
+  the same build. `shipping` says which of the plugins it ships the server asked is still deploying for the
+  network, or failed to, and why (`OneCore.Plugins.Deploy.shipping/0`).
   """
   def list(by, owner) do
     servers =
@@ -139,7 +140,14 @@ defmodule OneCore.Builds do
         Map.put(JSON.decode!(said), "device", Path.basename(blob))
       end
 
-    %{asked: Server.key(), build: build(), newest: newest(), servers: servers, devices: devices}
+    %{
+      asked: Server.key(),
+      build: build(),
+      newest: newest(),
+      servers: servers,
+      devices: devices,
+      shipping: OneCore.Plugins.Deploy.shipping()
+    }
   end
 
   # Whether a server is on, as `"on"`, or when it was last, in milliseconds since 1970, or `nil` if that isn't known.

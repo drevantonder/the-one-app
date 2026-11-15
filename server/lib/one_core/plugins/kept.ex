@@ -5,7 +5,8 @@ defmodule OneCore.Plugins.Kept do
   some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `newest` says
   which set it runs now, with that version's number. A deploy replaces `newest` only if it's unchanged, so two
   deploys at once can't both be the plugin's next version, and first writes the version it replaces to
-  `versions/<number>`, so a plugin keeps its history.
+  `versions/<number>`, so a plugin keeps its history. `newest` names the files it was deployed from too, by their
+  hash, its `source`.
   """
   require Logger
   alias OneCore.Bucket
@@ -58,6 +59,11 @@ defmodule OneCore.Plugins.Kept do
     end
   end
 
+  @doc "The hash of the files the plugin `artifact`'s newest version was deployed from, or `nil` if there's none."
+  def newest_source(artifact) do
+    with {:ok, newest, _tag} <- Bucket.read("#{artifact}/newest"), do: JSON.decode!(newest)["source"], else: (_ -> nil)
+  end
+
   @doc """
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
@@ -72,7 +78,7 @@ defmodule OneCore.Plugins.Kept do
 
     was = newest(artifact)
     number = if was, do: elem(was, 0) + 1, else: 1
-    next = JSON.encode!(%{number: number, code: code})
+    next = JSON.encode!(%{number: number, code: code, source: Version.code(deployed)})
 
     wrote =
       with {before, code, tag} <- was do
@@ -104,9 +110,11 @@ defmodule OneCore.Plugins.Kept do
     end)
   end
 
-  # A set of files of a plugin, by their paths. Read at once: a bucket at an address is asked for each over the
-  # internet.
-  defp files(artifact, code, kept \\ "code") do
+  @doc """
+  A set of files of a plugin, by their paths: the files the server keeps, or with `"source"` the ones they were
+  built from. Read at once: a bucket at an address is asked for each over the internet.
+  """
+  def files(artifact, code, kept \\ "code") do
     paths = Bucket.list("#{artifact}/#{kept}/#{code}/")
 
     paths

@@ -166,6 +166,19 @@ defmodule OneCore.PluginsTest do
     ships(shipped, 4)
     assert Deploy.ship() == []
     assert which.() == {:ok, 30}
+
+    # Someone deploys the very files a server shipped once, and an updated server takes it over again.
+    ships(shipped, 1)
+    {:ok, 4, _} = Deploy.deploy("network", "said", %{"said.ex" => File.read!(Path.join(shipped, "said.ex"))})
+    ships(shipped, 4)
+    assert [{"said", {:ok, 5, _}}] = Deploy.ship()
+    assert which.() == {:ok, 4}
+    assert Deploy.shipping() == %{}
+
+    # One that fails to ship says why.
+    File.write!(Path.join(shipped, "said.ex"), "defmodule Said do")
+    assert [{"said", {:error, why}}] = Deploy.ship()
+    assert %{"said" => ^why} = Deploy.shipping()
   end
 
   @tag :tmp_dir
