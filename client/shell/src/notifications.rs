@@ -111,6 +111,13 @@ pub async fn hear(app: AppHandle, client: Arc<Client>) {
     }
 }
 
+/// The app a notification tapped on a phone opens, by its plugin's name, as its push plugin says of the tap
+/// (`notificationClicked`): its `data` is what the notification carried, which the app's notification extension or
+/// messaging service put there as it opened it, `{"app": "claims"}`.
+pub fn opens(tapped: &Value) -> Option<&str> {
+    tapped["data"]["app"].as_str().filter(|app| !app.is_empty())
+}
+
 /// Asks its person whether this phone may show notifications, and gives the plugin the token its push service
 /// reaches it by: Apple's on an iPhone and Google's on Android. An app built without push (no Firebase config, or no
 /// Push Notifications capability) says why it isn't woken, and still shows the inbox.
@@ -161,5 +168,18 @@ pub extern "system" fn Java_app_theone_client_Notifications_open<'local>(
             eprintln!("a notification didn't open: {error:#}");
             std::ptr::null_mut()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tap opens the app the notification came from, as a phone's push plugin says it, and nothing else.
+    #[test]
+    fn a_tap_opens_its_app() {
+        assert_eq!(opens(&json!({"id": -1, "data": {"app": "claims", "n": "sealed"}})), Some("claims"));
+        assert_eq!(opens(&json!({"id": -1, "data": {"app": ""}})), None);
+        assert_eq!(opens(&json!({"id": -1})), None);
     }
 }

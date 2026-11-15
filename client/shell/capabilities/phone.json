@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "phone",
+  "description": "On a phone, the app's own page hears a tap on a notification from the push plugin.",
+  "windows": ["main"],
+  "platforms": ["iOS", "android"],
+  "permissions": ["notifications:allow-register-listener", "notifications:allow-set-click-listener-active"]
+}

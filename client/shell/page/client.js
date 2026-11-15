@@ -34,7 +34,7 @@ let unlisted
 /// Where the window starts, which it asks as it opens: here, or on the page its device is let in by while it's
 /// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
 /// answer. Then that's all the window says, until trying again opens it.
-const { signIn, unreached = null } = await invoke("start")
+const { signIn, unreached = null, taps } = await invoke("start")
 if (signIn) location.replace(signIn)
 
 /// Light or dark, as Settings › Appearance has it on this device, or as the device is.
@@ -282,6 +282,12 @@ function go(app, who, behind) {
 
 // A notification from an app was tapped.
 listen("open", ({ payload: plugin }) => go(plugin))
+/// A phone's push plugin says a notification was tapped, even the tap that started the app, once this page hears
+/// it, which is once there are apps to open.
+async function hearTaps() {
+  await window.__TAURI__.core.addPluginListener("notifications", "notificationClicked", (tapped) => invoke("tapped", { tapped }))
+  await invoke("plugin:notifications|set_click_listener_active", { active: true })
+}
 
 listen("changed", ({ payload: view }) => {
   if (view === "client") for (const who of listed) list(who)
@@ -346,4 +352,5 @@ if (unreached !== null) problem()
 else if (!signIn) {
   await start()
   invoke("shown", { onScreen: !document.hidden })
+  if (taps) hearTaps()
 }

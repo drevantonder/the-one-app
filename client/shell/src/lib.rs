@@ -257,7 +257,8 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     let mut opened = app.state::<Start>().0.subscribe();
     let opened = opened.wait_for(Option::is_some).await.map_err(drop)?.clone();
     Ok(match opened.expect("it waited for one") {
-        Opened::In => json!({}),
+        // A phone hears a tap on a notification through its push plugin, which the page listens to.
+        Opened::In => json!({"taps": cfg!(mobile)}),
         Opened::NotIn(link) => json!({"signIn": link.as_str()}),
         Opened::Unreached(why) => json!({"unreached": why}),
     })
@@ -269,6 +270,15 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
 fn hear(app: AppHandle, views: State<'_, Views>) {
     if !views.hearing.swap(true, Ordering::Relaxed) {
         tauri::async_runtime::spawn(notifications::hear(app, views.client.clone()));
+    }
+}
+
+/// A notification was tapped on a phone, which its push plugin said to the window's page (`notificationClicked`), so
+/// the window opens the app it's from, as a tap on a computer's does.
+#[tauri::command]
+fn tapped(app: AppHandle, tapped: Value) {
+    if let Some(plugin) = notifications::opens(&tapped) {
+        drop(app.emit("open", plugin));
     }
 }
 
@@ -491,6 +501,7 @@ pub fn run() {
             enter,
             start,
             hear,
+            tapped,
             opened
         ])
         .run(tauri::generate_context!())
