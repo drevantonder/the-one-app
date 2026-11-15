@@ -85,6 +85,9 @@ export function changed(listener) {
   return () => listeners.delete(listener)
 }
 
+/// `open("claims")`: opens another app, by its plugin's name, as tapping a notification from it does.
+export const open = (app) => greet().then(() => ask("ui/open-link", { url: `one:${app}` }))
+
 /// `<Screen heading="Notes" back onBack={leave}>`: tells the client the user went back out of the app, from its
 /// first screen.
 export const leave = () => greet().then(() => tell("ui/notifications/request-teardown"))

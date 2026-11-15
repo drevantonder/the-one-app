@@ -43,8 +43,8 @@ type Clients = Arc<Mutex<HashMap<String, Connection>>>;
 /// This server's connection to each other server, by its key, with the address it was made to.
 type Servers = Mutex<HashMap<String, (String, Option<Arc<client::Reached>>)>>;
 
-/// A client with an app on screen: where it said a server reaches it, and the connection this server made to it
-/// there to tell it something, while that's open. One thing at a time is said over it, so that many things to say
+/// A client that wants to hear what changes: where it said a server reaches it, and the connection this server made
+/// to it there to tell it something, while that's open. One thing at a time is said over it, so that many things to say
 /// at once make one connection.
 #[derive(Clone)]
 struct Watcher {
@@ -157,8 +157,8 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients) {
     }
 }
 
-/// Keeps where the client whose key is `client` says a server reaches it while it has an app on screen, the JSON a
-/// client is told an address in, or with none, forgets it. A client says only where it is itself.
+/// Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes, the
+/// JSON a client is told an address in, or with none, forgets it. A client says only where it is itself.
 #[rustler::nif]
 fn watch(reached: ResourceArc<Reached>, client: String, address: Option<String>) -> Atom {
     let address = address.and_then(|address| serde_json::from_str::<EndpointAddr>(&address).ok());

@@ -1,0 +1,7 @@
+/* What's unread stands out by its weight alone. */
+.inbox .heading {
+  font-weight: 400;
+}
+.inbox .unread {
+  font-weight: 600;
+}

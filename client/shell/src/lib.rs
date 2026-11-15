@@ -4,6 +4,7 @@
 //! what an app asks comes to `ask`, as what the home screen asks does.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -13,6 +14,8 @@ use tauri::http::{Response, StatusCode, Uri, header};
 use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
+
+mod notifications;
 
 /// What an app's page may load, which is what an MCP App may by default: its own plugin's files and the files of
 /// the plugins it uses, which are all at its own address, and nothing from anywhere else.
@@ -28,6 +31,8 @@ struct Views {
     /// The files each open app's page has loaded, by the app's name.
     loaded: Mutex<HashMap<String, HashSet<String>>>,
     started: Instant,
+    /// Whether the window is on screen, so its views ask again when something changed.
+    on_screen: AtomicBool,
 }
 
 impl Views {
@@ -156,11 +161,10 @@ fn network(views: State<'_, Views>) -> Option<String> {
     views.client.address()
 }
 
-/// Says whether the window is on screen. While it is, servers tell this client when something changed.
+/// Says whether the window is on screen. While it is, its views ask again when something changed.
 #[tauri::command]
-async fn watch(views: State<'_, Views>, watching: bool) -> Result<(), ()> {
-    views.client.watch(watching).await;
-    Ok(())
+fn shown(views: State<'_, Views>, on_screen: bool) {
+    views.on_screen.store(on_screen, Ordering::Relaxed);
 }
 
 /// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
@@ -260,6 +264,7 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
         shown: Mutex::default(),
         loaded: Mutex::default(),
         started: *app.state::<Instant>(),
+        on_screen: AtomicBool::new(true),
     });
 
     // The home screen says when no server is answering, which is what the last thing asked found.
@@ -271,17 +276,21 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
         }
     });
 
-    // A server said something changed, so every view asks again.
+    // A server said something changed, so every view on screen asks again. Servers tell this client for as long as
+    // it runs, so a notification reaches it with its window hidden.
     let handle = app.clone();
+    let mut told = client.told();
     tauri::async_runtime::spawn(async move {
-        let mut told = client.told();
         while let Ok(message) = told.recv().await {
-            if message["method"] == "notifications/one/changed" {
+            let views = handle.state::<Views>();
+            if message["method"] == "notifications/one/changed" && views.on_screen.load(Ordering::Relaxed) {
                 eprintln!("a server said something changed");
-                handle.state::<Views>().again().await
+                views.again().await
             }
         }
     });
+    tauri::async_runtime::spawn(notifications::hear(app.clone(), client.clone()));
+    tauri::async_runtime::spawn(async move { client.watch(true).await });
     Ok(None)
 }
 
@@ -355,6 +364,7 @@ pub fn run() {
     let started = Instant::now();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(notifications::plugin())
         .setup(move |app| {
             app.manage(Start(Mutex::default()));
             app.manage(started);
@@ -395,7 +405,7 @@ pub fn run() {
             recovery_key,
             recover,
             network,
-            watch,
+            shown,
             close,
             enter,
             opened

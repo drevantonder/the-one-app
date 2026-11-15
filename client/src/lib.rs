@@ -4,8 +4,8 @@
 //!
 //! A client asks a server in MCP's JSON-RPC: one message on a stream of its own, and the answer back on that stream.
 //! A server tells a client something the same way, on a stream the server opens. No connection is kept open for
-//! that: a client with an app on screen says it's watching, and a server connects to it when there's something to
-//! say.
+//! that: a client that wants to hear, as the app does while it runs, says it's watching, and a server connects to it
+//! when there's something to say.
 
 pub mod cipher;
 pub mod cli;
@@ -506,7 +506,7 @@ pub struct Client {
     /// whose holder asks, `ONE_AS` names a user to act as, which only a server of a network being built allows, and
     /// `ONE_FOR` names the group it's for (`groups/family`), or `network`.
     says: Vec<(&'static str, String)>,
-    /// Whether an app of this client's is on screen, so its servers are to tell it what changes.
+    /// Whether this client is to hear what changes, so its servers are to tell it.
     watching: AtomicBool,
     /// Whether a server answered the last thing asked.
     answering: watch::Sender<bool>,
@@ -647,9 +647,9 @@ impl Client {
         self.answering.subscribe()
     }
 
-    /// Says whether an app of this client's is on screen. While one is, every server acting for its user tells it
-    /// when something changed. A server that isn't up now is told when it's next asked anything, and one that
-    /// isn't told the app has gone finds out when it next has something to say.
+    /// Says whether this client is to hear what changes, as the app does while it runs. While it is, every server
+    /// acting for its user tells it when something changed. A server that isn't up now is told when it's next asked
+    /// anything, and one that isn't told the app has gone finds out when it next has something to say.
     pub async fn watch(&self, watching: bool) {
         if self.watching.swap(watching, Ordering::Relaxed) == watching {
             return;

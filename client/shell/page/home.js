@@ -192,6 +192,11 @@ async function answer(view, method, params) {
   if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { plugin: view.plugin } })
   // A person's recovery key is shown and typed on this page, which is the client's own: no app's page is handed one.
   if (method === "one/recovery-key") return recoveryKey(params.typed === true)
+  // Another app, by its plugin's name, as a notification from it opens.
+  if (method === "ui/open-link" && params.url?.startsWith("one:")) {
+    if (!go(params.url.slice("one:".length))) throw new Error("That app isn't on this device")
+    return {}
+  }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   return invoke("ask", { view: view.plugin, method, params })
 }
@@ -217,6 +222,19 @@ addEventListener("message", async ({ source, data }) => {
   view.drawn = true
   if (!view.frame.inert) opened(view)
 })
+
+/// Opens the app of the plugin named, over whatever's showing. → whether there is one here.
+function go(plugin) {
+  const app = apps.get(plugin)
+  if (!app) return false
+  load(app)
+  if (history.state !== plugin) open.get(plugin).loaded.then(() => history.pushState(plugin, ""))
+  move(() => show(plugin, performance.now()))
+  return true
+}
+
+// A notification from an app was tapped.
+listen("open", ({ payload: plugin }) => go(plugin))
 
 listen("changed", ({ payload: view }) => {
   if (view === "home") list()
@@ -252,11 +270,11 @@ document.getElementById("retry").addEventListener("click", () =>
   unreached !== null ? invoke("enter") : unlisted ? list() : invoke("again", { view: "home" }),
 )
 
-/// The user returned to the window, so what's showing asks again. While the window is on screen, servers say when
-/// something changed.
+/// The user returned to the window, so what's showing asks again. While the window is on screen, what's showing
+/// asks again when a server says something changed.
 function returned() {
   if (unreached !== null) return
-  invoke("watch", { watching: !document.hidden })
+  invoke("shown", { onScreen: !document.hidden })
   if (document.hidden) return
   if (unlisted) list()
   invoke("again", { view: "home" })
@@ -270,7 +288,7 @@ else {
   // Whose network this is: where its address is, or with none, the machine it's kept on.
   invoke("network").then((address) => (document.getElementById("network").textContent = address ? `at ${new URL(address).host}` : "on this computer"))
   await list()
-  invoke("watch", { watching: !document.hidden })
+  invoke("shown", { onScreen: !document.hidden })
   show(history.state)
   requestAnimationFrame(() => requestAnimationFrame(() => invoke("opened", { view: "home", ms: Math.round(performance.now()) })))
 }

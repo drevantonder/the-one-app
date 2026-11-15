@@ -18,8 +18,8 @@ defmodule OneCore.Server do
   end
 
   @doc """
-  Keeps that the client whose key is `client` has an app on screen, and is reached at `address` to be told what
-  changes. With no address, it no longer has. A client that can't be reached there is forgotten.
+  Keeps that the client whose key is `client` wants to hear what changes, and is reached at `address` to be told
+  it. With no address, it no longer does. A client that can't be reached there is forgotten.
   """
   def watch(client, address) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)

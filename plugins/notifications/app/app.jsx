@@ -1,0 +1,78 @@
+// Notifications: what you've been told, newest first. Tapping one marks it read and opens the app it's from.
+import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
+import { render } from "@solidjs/web"
+import { call, changed, confirm, Empty, leave, List, Menu, open, Problem, Row, Screen, Section, Skeleton, toast } from "ui"
+import "./app.css"
+
+const inbox = createMemo(() => call("notifications_inbox").then(JSON.parse))
+changed(() => refresh(inbox))
+
+/// How long ago, as a person says it: "now", "5 min", "3 h", then the day.
+function ago(at) {
+  const minutes = Math.round((Date.now() - new Date(at)) / 60_000)
+  if (minutes < 1) return "now"
+  if (minutes < 60) return `${minutes} min`
+  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h`
+  return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+}
+
+/// Does something to the inbox, and says what the server said if it wouldn't.
+async function change(tool, input = {}) {
+  try {
+    await call(tool, input)
+  } catch (error) {
+    toast(error.message)
+  }
+  refresh(inbox)
+}
+
+function tapped(notification) {
+  if (!notification.read) change("notifications_read", { id: notification.id })
+  if (notification.app) open(notification.app)
+}
+
+async function clearAll() {
+  const question = { heading: "Clear all notifications?", text: "They're gone from every device of yours.", action: "Clear All", destructive: true }
+  if (await confirm(question)) change("notifications_clear")
+}
+
+const More = () => (
+  <Menu.Root onSelect={({ value }) => (value === "read" ? change("notifications_read") : clearAll())}>
+    <Menu.Trigger />
+    <Menu.Positioner>
+      <Menu.Content>
+        <Menu.Item value="read">Mark All Read</Menu.Item>
+        <Menu.Separator />
+        <Menu.Item value="clear" destructive>Clear All</Menu.Item>
+      </Menu.Content>
+    </Menu.Positioner>
+  </Menu.Root>
+)
+
+render(
+  () => (
+    <Screen heading="Notifications" back onBack={leave} action={<Show when={inbox()?.notifications.length}><More /></Show>}>
+      <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={String(error().message ?? error())} />}>
+        <Loading fallback={<Skeleton rows={4} />}>
+          <Section>
+            <Show when={inbox().notifications.length} fallback={<Empty>No notifications.</Empty>}>
+              <List class="inbox">
+                <For each={inbox().notifications}>
+                  {(notification) => (
+                    <Row
+                      heading={<span class={{ unread: !notification.read }}>{notification.title}</span>}
+                      text={[notification.from, notification.text].filter(Boolean).join(" · ")}
+                      end={ago(notification.at)}
+                      onClick={() => tapped(notification)}
+                    />
+                  )}
+                </For>
+              </List>
+            </Show>
+          </Section>
+        </Loading>
+      </Errored>
+    </Screen>
+  ),
+  document.body,
+)

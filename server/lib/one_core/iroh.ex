@@ -17,8 +17,8 @@ defmodule OneCore.Iroh do
   def start(_key_file, _network, _asked), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
-  Keeps where the client whose key is `client` says a server reaches it while it has an app on screen: `address`,
-  the JSON a client is told one in. With `nil`, forgets it.
+  Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes:
+  `address`, the JSON a client is told one in. With `nil`, forgets it.
   """
   def watch(_endpoint, _client, _address), do: :erlang.nif_error(:nif_not_loaded)
 
