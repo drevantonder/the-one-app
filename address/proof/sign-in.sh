@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Proves signing in, on a whole network on this machine that people sign in to (`./network <folder> --address
-# --owner alice`), with nothing deployed. People join with a passkey, in a real browser each, and each sees only
-# their own. A new device shows a code and a link that carries it, and is nobody's until its person opens that
-# where they sign in and says the code they're shown matches: with nothing more where they're signed in already,
-# and after their passkey where they aren't. Saying stop refuses it, and the device is told. A link a stranger
-# sends shows the stranger's code, and lets in nothing unless it's said to match. A code that has ended, one
-# someone else opened first, too many wrong ones, and a key asking on a code that isn't its own are refused. One
-# that's removed is refused the next thing it asks, by every server. A stranger who knows a server's key and where
-# it is, and dials it with a key of their own, is refused. An assistant somewhere else is let in at /mcp as MCP's
-# authorization says, acts as whoever let it in, and is one of their devices. A network without the plugin that
-# decides who may is its first owner's alone, and one without the plugin that signs people in answers nobody. It
-# says what a call costs once a device is someone's.
+# Proves signing in, on a whole network on this machine that people sign in to (`./network <folder> --address --owner
+# alice`), with nothing deployed. People join with a passkey, in a real browser each, and each sees only their own. A
+# new device shows a code and a link that carries it, and is nobody's until its person opens that where they sign in
+# and says the code they're shown matches: with nothing more where they're signed in already, and after their passkey
+# where they aren't. Saying stop refuses it, and the device is told. A link a stranger sends shows the stranger's
+# code, and lets in nothing unless it's said to match. A code that has ended, one someone else opened first, too many
+# wrong ones, and a key asking on a code that isn't its own are refused. One that's removed is refused the next thing
+# it asks, by every server, and is let in again as someone else's at once. A stranger who knows a server's key and
+# where it is, and dials it with a key of their own, is refused. An assistant somewhere else is let in at /mcp as
+# MCP's authorization says, acts as whoever let it in, and is one of their devices. A network without the plugin that
+# decides who may is its first owner's alone, and one without the plugin that signs people in answers nobody. It says
+# what a call costs once a device is someone's.
 #
 #     mise exec -- address/proof/sign-in.sh
 #
@@ -201,13 +201,23 @@ echo "  without being touched again, the window says: $(grep -o -m1 "home opened
 kill -- "-$app"
 
 say "A device that's removed is refused the next thing it asks, and keeps nothing of its person's"
+kept() { { find "$folder/$1/kept" "$folder/$1/files" -type f 2>/dev/null || true; } | wc -l; }
+echo "  desktop keeps $(kept desktop) answers it was given for alice"
 may device laptop sign-in remove_device --device "$(key_of "$folder/desktop")"
 refused device desktop sign-in devices
-kept=$({ find "$folder/desktop/kept" "$folder/desktop/files" -type f 2>/dev/null || true; } | wc -l)
-[[ $kept == 0 ]] || { echo "the removed device still keeps $kept of what alice was answered" && exit 1; }
+[[ $(kept desktop) == 0 ]] || { echo "the removed device still keeps $(kept desktop) of what alice was answered" && exit 1; }
 ! grep -q '"pass"' "$folder/desktop/network" || { echo "the removed device still keeps its pass" && exit 1; }
 echo "  it keeps none of what it was answered for alice, nor its pass"
 may device laptop sign-in devices
+
+say "Let in as someone else's, it's theirs the moment they say its code matches"
+invited=$(device laptop sign-in invite --name dave)
+browser dave "$(grep -o "http://[^ ]*" <<<"$invited")"
+asks desktop sign-in devices
+browser dave "$link" matches
+answered desktop
+grep -q '"who":"users/dave"' "$folder/desktop/network" || { echo "desktop doesn't know it's dave's" && exit 1; }
+echo "  without its pass being renewed, desktop knows it's dave's, and its answer above is his devices"
 
 say "A stranger who knows a server's key and where it is, and dials it with a key of their own, is refused"
 echo "  the stranger knows $(plain <"$folder/only-server/servers" | cut -c1-90)…"
