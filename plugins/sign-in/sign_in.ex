@@ -14,7 +14,12 @@ defmodule SignIn do
   alias OneCore.{Address, Artifact, Call}
 
   @impl true
-  def apps, do: [%{name: "Devices", page: "app/index.html", icon: "icon.svg"}]
+  def apps do
+    [
+      %{name: "Devices", page: "app/index.html", icon: "icon.svg", settings: true},
+      %{name: "Passkeys", page: "app/passkeys.html", icon: "passkeys.svg", settings: true}
+    ]
+  end
 
   @impl true
   def tools do

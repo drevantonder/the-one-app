@@ -52,7 +52,7 @@ defmodule Vault do
   def uses, do: ["encryption", "database"]
 
   @impl true
-  def apps, do: [%{name: "Vault", page: "app/index.html", icon: "icon.svg"}]
+  def apps, do: [%{name: "Vault", page: "app/index.html", icon: "icon.svg", settings: true}]
 
   @impl true
   def tools do
