@@ -238,12 +238,15 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # The plugins a plugin uses are added before it is: the ones missing come from what the server ships with, and
-  # are added for the network, by a server acting for it.
+  # The plugins a plugin uses are added before it is: the ones missing, and the ones running from files a server
+  # shipped before this one's, come from what the server ships with, and are added for the network, by a server
+  # acting for it. Shipping goes by name, so a plugin can come before one it uses that's still to be shipped.
   defp bring(owner, name, uses) do
-    shipped = &(Servers.here?(@network) and shipped(&1) != %{} and match?({:ok, _, _}, ship(&1)))
+    shipped =
+      &(Servers.here?(@network) and shipped(&1) != %{} and ship?(&1, Version.code(shipped(&1))) and
+          match?({:ok, _, _}, ship(&1)))
 
-    case Enum.reject(uses, &(is_map_key(Plugins.running(owner), &1) or shipped.(&1))) do
+    case Enum.reject(uses, &(shipped.(&1) or is_map_key(Plugins.running(owner), &1))) do
       [] ->
         :ok
 
