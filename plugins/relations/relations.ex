@@ -24,6 +24,7 @@ defmodule Relations do
   # parents.
   @groups "select artifact as next from tuples where relation = 'member' and who = ?"
   @parents "select who as next from tuples where relation = 'parent' and artifact = ?"
+  @members "select who as next from tuples where relation = 'member' and artifact = ?"
   @tuple "select 1 from tuples where artifact = ? and who = ? and relation in (?, ?, ?) limit 1"
 
   @impl true
@@ -64,6 +65,16 @@ defmodule Relations do
             who: Map.put(who, :description, "Who. You, if left out")
           },
           required: ["artifact"]
+        }
+      },
+      %{
+        name: "members",
+        read_only: true,
+        description: "Lists the users in a group, through the groups in it, or every user the network's tuples name",
+        inputs: %{
+          type: "object",
+          properties: %{of: %{type: "string", description: "groups/<name>, or network"}},
+          required: ["of"]
         }
       },
       %{
@@ -153,6 +164,30 @@ defmodule Relations do
       %{who: who, relation: relation, artifact: artifact, may: may?(db, who, relation, artifact)}
     end)
   end
+
+  # Every user is in the network, so its members are every user a tuple names, as who or as whose an artifact is.
+  def call("members", %{"of" => "network"}, call) do
+    if not user?(call.for), do: raise("Only a user lists the network's users.")
+
+    transaction(call, fn db ->
+      named = query(db, "select distinct who as name from tuples union select distinct artifact from tuples", [])
+
+      Enum.sort(
+        Enum.uniq(for %{"name" => name} <- named, owner <- [OneCore.User.owner(name)], owner, user?(owner), do: owner)
+      )
+    end)
+  end
+
+  def call("members", %{"of" => "groups/" <> _ = group}, call) do
+    transaction(call, fn db ->
+      if not (member?(db, call.for, group) or may?(db, call.for, "viewer", group)),
+        do: raise("#{call.for} isn't in #{group}, so doesn't see who is.")
+
+      Enum.sort(Enum.filter(followed(db, @members, [group], []), &user?/1))
+    end)
+  end
+
+  def call("members", %{"of" => of}, _call), do: raise("#{of} isn't a group or the network.")
 
   def call("group", %{"name" => name}, call) do
     if not (name =~ ~r/^[a-z][a-z0-9-]*$/), do: raise("A group's name is lowercase letters, digits and hyphens.")
