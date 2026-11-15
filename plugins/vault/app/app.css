@@ -1,0 +1,5 @@
+/* What a request says of itself, above what's typed for it. */
+.about {
+  margin: 0;
+  color: var(--muted-foreground);
+}
