@@ -1,6 +1,6 @@
 // How a piece of the edge knows which key is asking: a server or client signs what it asks with its key (Ed25519,
-// the key it's reached by). The server signs the same bytes in `server/lib/one_core/edge.ex`, and its add-on in
-// `server/native/one_core_iroh/src/outside.rs`.
+// the key it's reached by). The server signs the same bytes in `core/lib/one_core/edge.ex`, and its NIF in
+// `core/nif/one_core_iroh/src/outside.rs`.
 
 export const hex = {
   encode: (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(""),

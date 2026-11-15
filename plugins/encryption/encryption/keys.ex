@@ -1,7 +1,7 @@
 defmodule Encryption.Keys do
   @moduledoc """
   One encrypted artifact's keys on this server, for as long as it's chosen to open it. They're what the artifact's
-  blob `keys/<this server>` hands it, opened once with the server's own key and held in the add-on (`Cipher`),
+  blob `keys/<this server>` hands it, opened once with the server's own key and held in the NIF (`Cipher`),
   where nothing reads them. The server that records a choice tells the others to look at the blob at once
   (`Encryption.choose/3`), so one that was taken off lets go of its keys, and one that's handed a new epoch's
   takes them. One that wasn't reached then looks every few seconds while the artifact is in use. A server that

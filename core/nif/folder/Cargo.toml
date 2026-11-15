@@ -1,0 +1,16 @@
+[package]
+name = "folder"
+description = "The server's NIF for reading a folder as a client deploys one, leaving out what git ignores."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# A NIF has no tests of its own: it's only whole inside the VM that loads it, where the server's tests use it.
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+client = { path = "../../../client" }
+rustler = "0.39"

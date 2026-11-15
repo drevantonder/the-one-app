@@ -1,5 +1,5 @@
-//! What encryption is made of, for a client and for a server's add-on (`server/native/encryption`), so both do the same
-//! thing with the same code. Nothing here is a construction of our own:
+//! What encryption is made of, for a client and for a server's NIF (`plugins/encryption/nif/encryption`), so
+//! both do the same thing with the same code. Nothing here is a construction of our own:
 //!
 //! - **To a machine's key** (`seal`, `open`): HPKE (RFC 9180) in its base mode, with X25519, HKDF-SHA256 and
 //!   ChaCha20-Poly1305. Every server and client has an Ed25519 key, the one it's reached by, and what's encrypted to

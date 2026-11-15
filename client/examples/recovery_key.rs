@@ -1,4 +1,4 @@
-//! Stands in for the app's window in a proof (`server/test/vault.sh`): the window is the only thing that shows a
+//! Stands in for the app's window in a proof (`core/test/vault.sh`): the window is the only thing that shows a
 //! person their recovery key, and a proof has none. It writes the recovery key of whoever the client in `ONE_HOME`
 //! asks for (`ONE_FOR`, or `ONE_AS`) to the file it's given, which the proof then hands to another device as that person would type it.
 //!

@@ -15,7 +15,7 @@ root=$(dirname "$edge")
 if [[ ${1-} != inside ]]; then
   (cd "$root" && cargo build --release)
   (cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
-  (cd "$root/server" && mix deps.get && mix compile)
+  (cd "$root/core" && mix deps.get && mix compile)
   (cd "$edge" && bun install --frozen-lockfile)
   # The rest runs as root of namespaces of its own, and everything it starts ends with it.
   exec unshare --user --map-root-user --net --mount --pid --fork --kill-child --mount-proc "$0" inside
@@ -85,7 +85,7 @@ export ONE_AS=owner
 start_server() {
   local name=$1
   shift
-  (cd "$root/server" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" "$name" "$@" --development --owner owner --address $at_address) >"$work/$name.log" 2>&1 &
+  (cd "$root/core" && exec setsid nsenter --net=/run/netns/server mix network "$work/network" "$name" "$@" --development --owner owner --address $at_address) >"$work/$name.log" 2>&1 &
   wait_for "A server is running|isn't one of the network's" "$work/$name.log"
 }
 # The client that calls: the network's first, until the app is open as that one, and then a second.
@@ -97,12 +97,12 @@ say "The edge serves the web client's files"
 at client curl -s http://10.0.0.1:8787/ | grep '<p>'
 
 say "A server and a client that each reach the edge, and not each other"
-echo "a server that doesn't show the secret the edge was started with: $(cd "$root/server" && at server mix network "$work/unknown" --address $at_address 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
+echo "a server that doesn't show the secret the edge was started with: $(cd "$root/core" && at server mix network "$work/unknown" --address $at_address 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
 start_server server --first "$first"
 at client ping -c1 -W1 10.1.0.2 >/dev/null && echo "the client reaches the server" || echo "the client can't reach the server at 10.1.0.2"
 echo "the server is told the address and the first server's secret, and nothing of the bucket's credentials. Its client is told the address and no server: its home holds $(ls "$work/network/client" | tr '\n' ' ')"
 
-ONE_FOR=network one deploy --name tally --files-from "$root/server/test/plugins/tally" >/dev/null
+ONE_FOR=network one deploy --name tally --files-from "$root/core/test/plugins/tally" >/dev/null
 
 say "A tool call through the relay, which can't read it"
 note=relayed-$(random 8)
@@ -120,7 +120,7 @@ mkdir "$work/stranger"
 printf '{"address":"%s","pass":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/stranger/network"
 echo "a client with a pass no server signed, asking which servers to reach:"
 ONE_HOME=$work/stranger at client "$root/target/release/one" tally list 2>&1 || true
-echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/server" && at server mix network "$work/stranger-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
+echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/core" && at server mix network "$work/stranger-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
 
 say "A spare is let in by one step, as on a folder: started, it says how, and started again, it acts"
 start_server spare
@@ -130,7 +130,7 @@ start_server spare
 one services | grep -o '"servers":\[[^]]*\]' | tail -1
 
 say "A server with no bucket credentials writes and reads through signed access"
-(cd "$root/server" && at server mix run --no-start -e "
+(cd "$root/core" && at server mix run --no-start -e "
   Application.put_env(:one_core, :home, \"$work/network/server\")
   Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, \"$at_address\"})
   Code.eval_file(\"$here/bucket.exs\")")
@@ -162,7 +162,7 @@ wait_for "home opened" "$work/app.log"
 window() { at client env $(cat "$work/screen") xdotool search --name "The One App" "$@" >/dev/null; }
 # A second client of the network, which a server gives a pass as it gave the first: two programs can't be one
 # client at the relay, and the app is the first.
-(cd "$root/server" && at server mix run --no-start -e "
+(cd "$root/core" && at server mix run --no-start -e "
   Application.put_env(:one_core, :home, \"$work/network/server\")
   {:ok, key} = OneCore.Iroh.key(\"$work/network/elsewhere/key\")
   pass = OneCore.Edge.pass(key)

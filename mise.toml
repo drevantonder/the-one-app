@@ -4,6 +4,6 @@ erlang = "29.1.2"
 elixir = "1.20.5-otp-29"
 bun = "1.4.4"
 rustfs = "1.0.5"
-# What `./release` builds a server for another kind of machine with: its Rust add-ons, for an older glibc too.
+# What `./release` builds a server for another kind of machine with: its Rust NIFs, for an older glibc too.
 zig = "0.15.2"
 "github:rust-cross/cargo-zigbuild" = "0.24.1"

@@ -77,7 +77,7 @@ answered() {
   echo "           -> $(tail -n +3 "$folder/$1.said" | plain | tr '\n' ' ')"
 }
 # Whose key a device's home holds, as servers name it.
-key_of() { (cd "$root/server" && mix run --no-start -e 'IO.puts(elem(OneCore.Iroh.key(hd(System.argv())), 1))' "$1/key" | tail -1); }
+key_of() { (cd "$root/core" && mix run --no-start -e 'IO.puts(elem(OneCore.Iroh.key(hd(System.argv())), 1))' "$1/key" | tail -1); }
 # Changes what the edge keeps of a device's code: `recode <code> <change>`.
 recode() {
   (cd "$root/edge" && bun x wrangler d1 execute network-sign-in --local --persist-to "$folder/edge" -c parts/sign-in/wrangler.jsonc \
@@ -91,7 +91,7 @@ restart() {
   server=$(pgrep -f "mix network $folder server " | head -1)
   kill -9 "$server"
   tail --pid="$server" -f /dev/null
-  (cd "$root/server" && exec mix network "$folder" server --address "$address" "$@") >"$folder/server.log" 2>&1 &
+  (cd "$root/core" && exec mix network "$folder" server --address "$address" "$@") >"$folder/server.log" 2>&1 &
   server=$!
   started+=("$server")
   # It's stopped by its number from here on, and the shell says nothing of it.
@@ -128,10 +128,10 @@ browser bob "$link" matches
 answered bobs-phone
 
 say "Each has a plugin of their own to keep notes with, deployed from their own device"
-may device laptop deploy --name tally --files-from "$root/server/test/plugins/tally"
+may device laptop deploy --name tally --files-from "$root/core/test/plugins/tally"
 may device laptop tally add --note "Alice's"
 refused device bobs-phone tally list
-may device bobs-phone deploy --name tally --files-from "$root/server/test/plugins/tally"
+may device bobs-phone deploy --name tally --files-from "$root/core/test/plugins/tally"
 may device bobs-phone tally add --note "Bob's"
 may device bobs-phone tally list
 may device laptop tally list
@@ -234,7 +234,7 @@ say "A stranger who knows a server's key and where it is, and dials it with a ke
 echo "  the stranger knows $(plain <"$folder/only-server/servers" | cut -c1-90)…"
 refused stranger sign-in devices
 ONE_AS=alice refused stranger sign-in devices
-ONE_FOR=network refused stranger deploy --name mine --files-from "$root/server/test/plugins/tally"
+ONE_FOR=network refused stranger deploy --name mine --files-from "$root/core/test/plugins/tally"
 
 say "An assistant somewhere else is let in at /mcp as MCP's authorization says, by the person it then acts as"
 echo "  asked with no token, the edge answers:"
@@ -362,7 +362,7 @@ say "With a second server, a device that's removed is nobody's at both, the next
 # The spare is let in as any server is, by the network's owner from a device of hers, and started again. The
 # device alice just let in is asked through each server alone: the same key, told where one server is.
 spare() {
-  (cd "$root/server" && exec mix network "$folder" spare --address "$address") >"$folder/spare.log" 2>&1 &
+  (cd "$root/core" && exec mix network "$folder" spare --address "$address") >"$folder/spare.log" 2>&1 &
   spare=$!
   started+=("$spare")
   disown "$spare"

@@ -8,9 +8,9 @@
 # the network's owner. On Linux it builds a server for linux-x86_64 and linux-aarch64, and `one` for this
 # machine; on a Mac, both for macos-aarch64. Naming kinds of machine builds those servers alone.
 #
-# A server is an Erlang release of One Core (`server/mix.exs`) that needs nothing else on its machine: the VM and
+# A server is an Erlang release of One Core (`core/mix.exs`) that needs nothing else on its machine: the VM and
 # OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), its
-# Rust add-ons built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships with
+# Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships with
 # and the kit's build, and the Bun it builds apps with named by its SHA-256, which it downloads the first time
 # (`OneCore.App`). The builds are in target/builds/<build>.
 set -euo pipefail
@@ -51,7 +51,7 @@ fetched() {
 }
 
 (cd ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
-(cd server && mix deps.get --only prod >/dev/null)
+(cd core && mix deps.get --only prod >/dev/null)
 bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
 
 for kind in "${kinds[@]}"; do
@@ -80,34 +80,34 @@ for kind in "${kinds[@]}"; do
   # Hex's builds are made whole where they're put by their own script.
   [[ ! -x $vm/Install || -e $vm/bin/erl ]] || (cd "$vm" && ./Install -minimal "$vm" >/dev/null)
 
-  # Its Rust add-ons, for that machine.
-  crates=(-p one_core_iroh -p sqlite -p folder)
+  # Its Rust NIFs, One Core's and those of the plugins it ships with, for that machine.
+  crates=($(basename -a core/nif/*/ plugins/*/nif/*/))
   if [[ $kind == linux-* ]]; then
-    cargo zigbuild --release --target "$triple.2.35" "${crates[@]}"
+    cargo zigbuild --release --target "$triple.2.35" "${crates[@]/#/-p}"
     native=$target/$triple/release
   else
-    cargo build --release "${crates[@]}"
+    cargo build --release "${crates[@]/#/-p}"
     native=$target/release
   fi
 
   release=$target/release-builds/$kind
   rm -rf "$release"
-  (cd server && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix release --overwrite --quiet --path "$release")
-  # The add-ons of OTP's own applications as they're built for that machine. Their code runs on any.
+  (cd core && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix release --overwrite --quiet --path "$release")
+  # The NIFs of OTP's own applications as they're built for that machine. Their code runs on any.
   for app in "$release"/lib/*; do
     [[ ! -d $vm/lib/$(basename "$app")/priv ]] || { rm -rf "$app/priv" && cp -R "$vm/lib/$(basename "$app")/priv" "$app/priv"; }
   done
   priv=$(echo "$release"/lib/one_core-*/priv/native)
   rm -rf "$priv" && mkdir -p "$priv"
-  for crate in one_core_iroh sqlite folder; do
+  for crate in "${crates[@]}"; do
     cp "$native/lib$crate".so "$priv/$crate.so" 2>/dev/null || cp "$native/lib$crate.dylib" "$priv/$crate.so"
   done
   beam=$(echo "$release"/erts-*/bin/beam.smp)
   "$objcopy" --strip-all "$beam"
 
-  # What it ships with, and the Bun it builds apps with.
+  # What it ships with, without the plugins' NIFs, which are built in above, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
-  git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
+  git archive HEAD plugins ':!plugins/*/nif/*' | tar -x -C "$release/shipped" --strip-components=1
   cp -R ui/dist "$release/shipped/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 

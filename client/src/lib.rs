@@ -409,7 +409,7 @@ fn hex(bytes: &[u8]) -> String {
 /// An endpoint holding `key`. It reaches others, and is reached, by key: straight to the addresses it's told and the
 /// ones it finds, and otherwise through the relay at its network's address, which is also the only thing it times.
 /// With no other relay and no address lookup, nothing about a network goes to anyone outside it. A network on one
-/// machine has no address, and so no relay. A server's add-on binds this same endpoint.
+/// machine has no address, and so no relay. A server's NIF binds this same endpoint.
 pub async fn endpoint(key: SecretKey, network: Option<&Network>) -> Result<Endpoint> {
     let mut probes = NetReportConfig::minimal();
     let relay = match network {
@@ -1114,11 +1114,16 @@ async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
 }
 
 /// The files of `folder`, by their paths in it, as a folder is deployed: names starting with a dot are left out,
-/// and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not. A
-/// server reads the plugins it ships with this way too (`server/native/folder`).
+/// and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not. So
+/// is its `nif/`, which holds a plugin's NIFs: those are built into the server program (`core/mix.exs`), and
+/// never deployed. A server reads the plugins it ships with this way too (`core/nif/folder`).
 pub fn files(folder: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
-    for entry in ignore::WalkBuilder::new(folder).require_git(false).build() {
+    let walk = ignore::WalkBuilder::new(folder)
+        .require_git(false)
+        .filter_entry(|entry| !(entry.depth() == 1 && entry.file_name() == "nif"))
+        .build();
+    for entry in walk {
         let entry = entry?;
         if entry.file_type().is_some_and(|kind| kind.is_file()) {
             let path = entry.path().strip_prefix(folder)?;

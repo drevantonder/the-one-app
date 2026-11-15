@@ -22,20 +22,20 @@ Without `ONE_HOME`, a client is kept where the system keeps an app's data. Where
 `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a minute for a desktop that isn't
 there.
 
-`cd server && mix test` runs the tests. The proofs run real servers and the real app and say what happened:
-`server/test/takeover.sh` stops servers in the middle of writes, `server/test/services.sh` runs services on one of
+`cd core && mix test` runs the tests. The proofs run real servers and the real app and say what happened:
+`core/test/takeover.sh` stops servers in the middle of writes, `core/test/services.sh` runs services on one of
 two servers, with one that picks up what it wasn't told and a network nobody uses reading nothing,
-`server/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
+`core/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
 scheduled job across a takeover, on a folder or with `--edge` through the signer,
-`server/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
+`core/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
 tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
-`server/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
-restores it from each with the recovery key, `server/test/repos.sh` clones, pushes and suggests changes with real
+`core/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
+restores it from each with the recovery key, `core/test/repos.sh` clones, pushes and suggests changes with real
 git as several people, through the edge and two servers, one killed partway through a push,
 `edge/proof/proof.sh` runs a whole edge with nothing deployed,
 `edge/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
-try everything it mustn't reach, and `server/test/install.sh` has a machine with nothing on it but `one` install a
+try everything it mustn't reach, and `core/test/install.sh` has a machine with nothing on it but `one` install a
 server, update it, go back from a build that can't start, and remove it.
 
 To put a network's edge on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
@@ -46,7 +46,7 @@ which deploying attaches to the gateway. Then:
 
     cd ui && bun install && bun build.js
     cd ../edge && bun install && bun run deploy https://<the network's address>
-    cd ../server && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
+    cd ../core && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
 
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
 nothing after. `--owner` names the network's first owner, and the server says where they join: a link they open to
@@ -92,7 +92,7 @@ App Group are named after its identifier too. Android's project names The One Ap
 `strings.xml`, the folder of `MainActivity`), so a workplace's Android app is made from its own `cargo tauri android
 init` for now.
 
-- `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
+- `core`: One Core, in Elixir, with its Rust NIFs in `core/nif`.
 - `client`: the client's Rust half, which is the CLI and MCP.
 - `client/shell`: the app, a window on that half, and the one program both are.
 - `ui`: the kit an app's UI is written with.

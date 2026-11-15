@@ -31,7 +31,7 @@ exists and what was set aside is in `PRIOR-ART.md`.
 
 - A plugin's author writes two languages: Elixir on the server and JavaScript in the client.
 - Solid 2.0, Zag 2.0 and Vite 8 are pre-releases, pinned to versions tried together.
-- A crash in a Rust add-on ends the VM. Rust panics are caught, and what's left is rare.
+- A crash in a Rust NIF ends the VM. Rust panics are caught, and what's left is rare.
 - The VM takes up to a second to start, which a cloud server started on demand pays each time.
 - No official build of the Erlang VM for Windows on ARM was found. The x64 build likely runs there emulated.
 
@@ -39,7 +39,7 @@ exists and what was set aside is in `PRIOR-ART.md`.
 
 None of this was run. About a week in all.
 
-1. iroh through a Rust add-on on Windows: 1 day.
+1. iroh through a Rust NIF on Windows: 1 day.
 2. An app in Tauri's web view on a mid-priced Android phone, opening, scrolling and going back: 2 to 3 days.
 3. A phone on mobile data reaching a home server: how often directly, and how long the first connection takes: 1 day.
 4. How long a write to the bucket takes from a home connection: 1 hour.

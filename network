@@ -46,7 +46,7 @@ one=$root/target/release/one
 
 (cd "$root" && cargo build --release)
 (cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
-(cd "$root/server" && mix deps.get && mix compile)
+(cd "$root/core" && mix deps.get && mix compile)
 
 started=()
 trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait' EXIT
@@ -86,7 +86,7 @@ fi
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/server" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/core" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }

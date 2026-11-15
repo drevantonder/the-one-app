@@ -5,9 +5,9 @@ node_modules/
 *.beam
 erl_crash.dump
 .DS_Store
-# The server's Rust add-ons as Rustler builds them, and its tests' folders
-/server/priv/native/
-/server/tmp/
+# The server's Rust NIFs as Rustler builds them, and its tests' folders
+/core/priv/native/
+/core/tmp/
 # What Tauri writes as it builds
 /client/shell/gen/schemas/
 # What `wrangler dev` keeps, the secrets of the signer and of a plugin's edge part as whoever deploys an

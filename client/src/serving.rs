@@ -371,7 +371,7 @@ impl Here {
     }
 
     /// Downloads the build `build`, unpacks it and has it say which it is, which starts its VM and loads its
-    /// add-ons: a build that can't do that here goes. Gives its name. One that's here already is taken as it is.
+    /// NIFs: a build that can't do that here goes. Gives its name. One that's here already is taken as it is.
     async fn take(&self, build: &Value) -> Result<String> {
         let name = build["build"].as_str().context("a build says which it is")?.to_owned();
         let builds = self.folder.join("builds");

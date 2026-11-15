@@ -10,7 +10,7 @@
 # session bus of its own, and its icons are pressed there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-source "$here/../../../server/test/servers.sh"
+source "$here/../../../core/test/servers.sh"
 
 mkdir -p "$folder/kept/app" "$folder/prober/app"
 cat >"$folder/kept/kept.ex" <<'PLUGIN'
