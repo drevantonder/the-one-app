@@ -131,7 +131,7 @@ defmodule AiGateway do
     end)
     |> case do
       %{} = answer -> answer
-      why -> raise "No model answered. " <> Enum.join(why, "; ") <> "."
+      why -> raise "No model answered. " <> Enum.map_join(why, "; ", &String.trim_trailing(&1, ".")) <> "."
     end
   end
 
