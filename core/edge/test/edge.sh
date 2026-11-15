@@ -55,7 +55,7 @@ wire() {
 wire edge server 10.1.0 && at server ip route add default via 10.1.0.1
 wire edge client 10.2.0 && at client ip route add default via 10.2.0.1
 
-# The bucket, with credentials made up for this run. Only the signer is given them, with the secret the network's
+# The bucket, with credentials made up for this run. Only the presigner is given them, with the secret the network's
 # first server shows.
 access=$(random 8) secret=$(random 24) first=$(random 16)
 mkdir "$work/bucket"
@@ -69,7 +69,7 @@ at edge curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 http:
 
 stamped() { while IFS= read -r line; do printf '%(%T)T %s\n' -1 "$line"; done; }
 
-# The edge: its Workers. The signer's secrets are in the environment, which only `wrangler dev` reads them from.
+# The edge: its Workers. The presigner's secrets are in the environment, which only `wrangler dev` reads them from.
 (cd "$edge" && BUCKET=http://10.0.0.1:9000/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
   WRANGLER_SEND_METRICS=false exec setsid nsenter --net=/run/netns/edge \
   bun run dev --ip 0.0.0.0 --port 8787 --persist-to "$work/edge") > >(stamped >"$work/edge.log") 2>&1 &
@@ -115,18 +115,18 @@ one tally list
 say "A machine on no list"
 # The list a real client's token names, which the stranger says it's on too.
 on_list=$(bun -e 'const { token } = await Bun.file(process.argv[1]).json(); console.log(JSON.parse(atob(token.replace(/-/g, "+").replace(/_/g, "/"))).list)' "$work/network/client/network")
-(cd "$edge" && at client bun test/stranger.js $at_address "$on_list")
-mkdir "$work/stranger"
-printf '{"address":"%s","token":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/stranger/network"
+(cd "$edge" && at client bun test/anonymous.js $at_address "$on_list")
+mkdir "$work/anonymous"
+printf '{"address":"%s","token":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/anonymous/network"
 echo "a client with a token no server signed, asking which servers to reach:"
-ONE_HOME=$work/stranger at client "$root/target/release/one" tally list 2>&1 || true
-echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/core/server" && at server mix network "$work/stranger-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
+ONE_HOME=$work/anonymous at client "$root/target/release/one" tally list 2>&1 || true
+echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/core/server" && at server mix network "$work/anonymous-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
 
-say "A spare is let in by one step, as on a folder: started, it says how, and started again, it acts"
-start_server spare
-let_in=$(grep -o 'add_server --key [0-9a-f]*' "$work/spare.log")
+say "A standby is let in by one step, as on a folder: started, it says how, and started again, it acts"
+start_server standby
+let_in=$(grep -o 'add_server --key [0-9a-f]*' "$work/standby.log")
 ONE_FOR=network one $let_in
-start_server spare
+start_server standby
 one services | grep -o '"servers":\[[^]]*\]' | tail -1
 
 say "A server with no bucket credentials writes and reads through signed access"

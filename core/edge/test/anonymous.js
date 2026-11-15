@@ -1,4 +1,4 @@
-// A machine that's on no list asks the relay and the signer at `address`, as iroh's endpoint and a server would,
+// A machine that's on no list asks the relay and the presigner at `address`, as iroh's endpoint and a server would,
 // and prints what each tells it. Its key is real and it proves it: it's refused for whose it isn't. `list` is the
 // list of servers it says it's on.
 import { blake3 } from "@noble/hashes/blake3.js";
@@ -32,15 +32,15 @@ async function ask(method, path, body) {
   const signature = hex.encode(await sign(new TextEncoder().encode(`one/ask/1\n${path.split("?")[0]}\n${at}\n${body ?? ""}`)));
   const headers = { "one-key": key, "one-at": at, "one-signature": signature, "one-token": token };
   const answer = await fetch(address + path, { method, headers, body });
-  if (!answer.ok) return console.log(`the signer, asked to ${method} ${path} ${body ?? ""}: ${answer.status} ${await answer.text()}`);
+  if (!answer.ok) return console.log(`the presigner, asked to ${method} ${path} ${body ?? ""}: ${answer.status} ${await answer.text()}`);
   const signed = await answer.json();
   const put = await fetch(signed.url, { method: signed.method, headers: signed.headers, body: JSON.stringify([key]) });
   const code = /<Code>(.*?)<\/Code>/.exec(await put.text())?.[1];
-  console.log(`the signer, asked to ${method} ${path} ${body}: signs it, and the bucket answers ${put.status} ${code}`);
+  console.log(`the presigner, asked to ${method} ${path} ${body}: signs it, and the bucket answers ${put.status} ${code}`);
 }
-await ask("POST", "/signer/sign", JSON.stringify({ read: `${list}servers` }));
-await ask("POST", "/signer/sign", JSON.stringify({ write: `${list}own/tally/stolen` }));
-await ask("POST", "/signer/sign", JSON.stringify({ remove: `${list}installed` }));
-await ask("POST", "/signer/sign", JSON.stringify({ write: `servers/${key}/address` }));
-await ask("POST", "/signer/sign", JSON.stringify({ write: "network/servers" }));
-await ask("GET", `/signer/servers?of=${list}`);
+await ask("POST", "/presigner/sign", JSON.stringify({ read: `${list}servers` }));
+await ask("POST", "/presigner/sign", JSON.stringify({ write: `${list}own/tally/stolen` }));
+await ask("POST", "/presigner/sign", JSON.stringify({ remove: `${list}installed` }));
+await ask("POST", "/presigner/sign", JSON.stringify({ write: `servers/${key}/address` }));
+await ask("POST", "/presigner/sign", JSON.stringify({ write: "network/servers" }));
+await ask("GET", `/presigner/servers?of=${list}`);

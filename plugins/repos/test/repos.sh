@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Tests Repos with real git, on a whole network with a spare and its edge on this machine (`tooling/network <folder>
-# --spare --edge`), whose bucket is an S3 store reached only through the signer there. As alice, bob and carol,
+# Tests Repos with real git, on a whole network with a standby and its edge on this machine (`tooling/network <folder>
+# --standby --edge`), whose bucket is an S3 store reached only through the presigner there. As alice, bob and carol,
 # and the group family: alice clones, commits, pushes and fetches from two devices; a 50 MB repo with history is
 # pushed, then one small commit, with what each wrote to the bucket; two pushes to one branch at once, through the
 # two servers, where one wins and the other is told to fetch, and nothing is lost; carol is refused clone and push;
 # bob suggests changes, which alice takes and declines; bob pushes to the family's repo as one of its members; a
-# server is killed in the middle of a push, which is pushed again through the spare and lands once; and the spare
+# server is killed in the middle of a push, which is pushed again through the standby and lands once; and the standby
 # serves what the first server took. It says how long each took.
 #
 #     cargo build --release && mise exec -- plugins/repos/test/repos.sh
@@ -14,7 +14,7 @@ set -m # The network is a job with a process group of its own.
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/tooling/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" --standby --edge >"$folder/network.log" 2>&1 &
 network=$!
 trap 'kill -- "-$network" 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
@@ -35,7 +35,7 @@ took() { echo "$((($(now) - $1) / 1000)) ms"; }
 bucket() { du -sb "$folder/bucket" | cut -f1; }
 mb() { awk -v bytes="$1" 'BEGIN { printf "%.1f MB", bytes / 1e6 }'; }
 # A command as someone, on one of their devices: `client`, which reaches the network through its edge, or
-# `only-server` and `only-spare`, which each reach that server straight.
+# `only-server` and `only-standby`, which each reach that server straight.
 as() {
   local who=$1 device=$2
   shift 2
@@ -78,8 +78,8 @@ before=$(bucket) began=$(now)
 as alice client git -C big push -q 2>&1
 echo "pushed one small commit in $(took "$began"): the bucket grew $(($(bucket) - before)) bytes"
 began=$(now)
-as alice only-spare git clone -q one::users/alice/made/repos/big big-again 2>&1
-echo "cloned it whole through the spare in $(took "$began"): $(git -C big-again rev-list --count HEAD) commits, $(git -C big-again fsck --no-progress 2>&1 | wc -l) problems"
+as alice only-standby git clone -q one::users/alice/made/repos/big big-again 2>&1
+echo "cloned it whole through the standby in $(took "$began"): $(git -C big-again rev-list --count HEAD) commits, $(git -C big-again fsck --no-progress 2>&1 | wc -l) problems"
 
 say "Two pushes to one branch at once, one through each server"
 as alice client git clone -q one::users/alice/made/repos/notes one
@@ -88,7 +88,7 @@ echo one >one/one.txt && commit one alice "From one"
 echo two >two/two.txt && commit two alice "From two"
 (as alice only-server git -C one push 2>&1 | sed 's/^/  one: /') &
 first=$!
-(as alice only-spare git -C two push 2>&1 | sed 's/^/  two: /') &
+(as alice only-standby git -C two push 2>&1 | sed 's/^/  two: /') &
 # One of them is refused, whichever lost: that is what this shows, and it is handled below.
 wait $first $! || true
 for side in one two; do
@@ -132,7 +132,7 @@ echo "- dishes" >chores/list.md && commit chores bob "Start the chores"
 as bob client git -C chores push -q -u origin main 2>&1 && echo "bob pushed to groups/family/made/repos/chores"
 refused as carol client git clone -q one::groups/family/made/repos/chores carols-chores
 
-say "A server killed in the middle of a push, and the push made again through the spare"
+say "A server killed in the middle of a push, and the push made again through the standby"
 for number in $(seq 4); do head -c 5000000 /dev/urandom >"big/more-$number.bin"; done
 commit big alice "Add 20 MB more"
 pushing=$(git -C big rev-parse HEAD)
@@ -145,7 +145,7 @@ echo "the first server was killed as it took the push"
 wait $push || true
 began=$(now)
 as alice client git -C big push -q 2>&1
-echo "pushed again through the spare in $(took "$began")"
-as alice only-spare git -C big-again pull -q 2>&1
-echo "the spare serves it: $(git -C big-again rev-parse HEAD | grep -c "$pushing") head as pushed, $(git -C big-again rev-list --count HEAD) commits, $(git -C big-again fsck --no-progress 2>&1 | wc -l) problems"
-as alice only-spare one repos log --repo users/alice/made/repos/big | grep -o '"subject":"[^"]*"' | head -3 | paste -sd' '
+echo "pushed again through the standby in $(took "$began")"
+as alice only-standby git -C big-again pull -q 2>&1
+echo "the standby serves it: $(git -C big-again rev-parse HEAD | grep -c "$pushing") head as pushed, $(git -C big-again rev-list --count HEAD) commits, $(git -C big-again fsck --no-progress 2>&1 | wc -l) problems"
+as alice only-standby one repos log --repo users/alice/made/repos/big | grep -o '"subject":"[^"]*"' | head -3 | paste -sd' '

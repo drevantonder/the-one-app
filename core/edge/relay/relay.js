@@ -6,7 +6,7 @@
 // and iroh's question every 15 seconds, whether the relay is still there, is answered. Once proved, it's joined to
 // the one Durable Object that knows every endpoint, which passes on what one sends another. That object sleeps with
 // its connections open (hibernation), and is woken only by something to pass on: nothing an idle network says
-// reaches it. It admits only the network's own, by asking the signer about each key once that key has proved
+// reaches it. It admits only the network's own, by asking the presigner about each key once that key has proved
 // itself.
 //
 // It also passes a call that came in at the address over the web to a server, and tells every server what a piece
@@ -19,7 +19,7 @@
 // Servers are told when one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
-import { asker, hex, signedBy } from "../ask.js";
+import { verifiedKey, hex, signedBy } from "../ask.js";
 
 const PROTOCOL = "iroh-relay-v2";
 /** What an endpoint signs to prove its key: a key derived from the relay's challenge under this name. */
@@ -157,7 +157,7 @@ export default class extends WorkerEntrypoint {
 
   /** A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. */
   async asked(request, url) {
-    const key = await asker(request, "");
+    const key = await verifiedKey(request, "");
     if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
     return Response.json(await this.seen(keys.slice(0, 1000)));
@@ -211,7 +211,7 @@ export class Relay extends DurableObject {
 
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
   async server(request) {
-    const key = await asker(request, "");
+    const key = await verifiedKey(request, "");
     if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     for (const before of this.ctx.getWebSockets(`outside ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());

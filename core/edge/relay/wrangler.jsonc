@@ -3,7 +3,7 @@
   "main": "relay.js",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
-  "services": [{ "binding": "NETWORK", "service": "network-signer", "entrypoint": "Network" }],
+  "services": [{ "binding": "NETWORK", "service": "network-presigner", "entrypoint": "Network" }],
   "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "Relay" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }]
 }

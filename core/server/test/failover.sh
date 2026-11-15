@@ -3,7 +3,7 @@
 # writing it. Writes go through a test plugin's database while servers are stopped with `kill -9`, frozen and started again, and
 # after each of those every write that was answered must be there, once.
 #
-#     cargo build --release && mise exec -- core/server/test/takeover.sh
+#     cargo build --release && mise exec -- core/server/test/failover.sh
 #
 source "$(dirname "$0")/servers.sh"
 answered=$folder/answered
@@ -75,8 +75,8 @@ echo "a ran the first write, so it holds the lease"
 say "How long a write takes until it's answered, over one connection"
 stream only-a 100 "$folder/at-holder"
 echo "$(median "$folder/at-holder") at the server holding the lease"
-stream only-b 100 "$folder/at-spare"
-echo "$(median "$folder/at-spare") at the spare, which passes it on"
+stream only-b 100 "$folder/at-standby"
+echo "$(median "$folder/at-standby") at the standby, which passes it on"
 
 say "kill -9 of the server holding the lease, in the middle of a stream of writes"
 for _ in $(seq 10); do write client; done
@@ -107,7 +107,7 @@ for _ in $(seq 5); do write only-b; done
 said a b
 check only-b
 
-say "Two spares take over at once"
+say "Two standbys take over at once"
 start c
 write only-b
 write only-c

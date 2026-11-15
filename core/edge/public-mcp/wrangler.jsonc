@@ -1,0 +1,10 @@
+{
+  "name": "network-public-mcp",
+  "main": "public-mcp.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "services": [
+    { "binding": "RELAY", "service": "network-relay" },
+    { "binding": "NETWORK", "service": "network-presigner", "entrypoint": "Network" }
+  ]
+}

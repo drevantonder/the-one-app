@@ -1,6 +1,6 @@
 {
   "name": "edge",
-  "description": "A network's edge: the gateway, the relay, the signer, the web client's files, the way in for a sharing link's holder, and each plugin's part there.",
+  "description": "A network's edge: the gateway, the relay, the presigner, the web client's files, the public MCP endpoint for a sharing link's holder, and each plugin's part there.",
   "private": true,
   "type": "module",
   "dependencies": {

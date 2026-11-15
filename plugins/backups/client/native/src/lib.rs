@@ -23,7 +23,7 @@ use encryption_client::cipher;
 const USAGE: &str = "one restore --from <place> --to <bucket> --key-from <file> [--backup <name>]\n\n\
     Restores a whole network from a backup into an empty bucket, with no network running. A place or a bucket is a\n\
     folder, or S3-compatible storage as https://<endpoint>/<bucket>[/<folder>], whose keys are in the file\n\
-    --from-keys or --to-keys names, as ACCESS_KEY_ID=... and SECRET_ACCESS_KEY=... lines (the signer's `secrets`\n\
+    --from-keys or --to-keys names, as ACCESS_KEY_ID=... and SECRET_ACCESS_KEY=... lines (the presigner's `secrets`\n\
     has them). --key-from is a file holding the recovery key of whoever added the place. --backup names one of\n\
     the place's backups, the newest if left out, and with --list the place's backups are listed instead.";
 

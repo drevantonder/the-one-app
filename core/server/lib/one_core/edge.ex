@@ -1,7 +1,7 @@
 defmodule OneCore.Edge do
   @moduledoc """
   A server at its network's edge: it signs what it asks there with its key, and shows a token that says why it's
-  one of the network's own. The pieces of the edge check both (`core/edge/ask.js`, `core/edge/signer/signer.js`).
+  one of the network's own. The pieces of the edge check both (`core/edge/ask.js`, `core/edge/presigner/presigner.js`).
   """
   alias OneCore.{Iroh, Server}
 

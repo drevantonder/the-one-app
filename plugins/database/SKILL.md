@@ -40,4 +40,4 @@ artifact for whoever it runs for, so each user and each group has their own.
   transaction, so what it wrote and its having run are kept together or not at all: a server that takes over
   makes the call again only if neither was. So a job does its work in one transaction, in the process its
   tool is called in, and what reaches outside after `transaction` returns, which then happens at most once.
-  A job that makes no transaction is marked when its call ends, and may be called again after a takeover.
+  A job that makes no transaction is marked when its call ends, and may be called again after a failover.

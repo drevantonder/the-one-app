@@ -1,11 +1,11 @@
 defmodule OneCore.Bucket.S3 do
   @moduledoc """
   A bucket that speaks S3, such as Cloudflare R2, used with no credentials of its own. For each request the server
-  asks the signer at the network's address, which signs that one request if this server is on the list of whoever
+  asks the presigner at the network's address, which signs that one request if this server is on the list of whoever
   the blob belongs to, and the server sends what was signed. The address is `where`.
 
-  The signer signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
-  tag is its ETag. What the signer won't sign for this server raises `OneCore.Bucket.Refused`, and a signer or
+  The presigner signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
+  tag is its ETag. What the presigner won't sign for this server raises `OneCore.Bucket.Refused`, and a presigner or
   bucket that can't be reached `OneCore.Edge.Unreachable`.
   """
   @behaviour OneCore.Bucket
@@ -24,7 +24,7 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  # Each read is two trips across the internet, to the signer and then to the bucket, so they're made at once. One
+  # Each read is two trips across the internet, to the presigner and then to the bucket, so they're made at once. One
   # that couldn't be made is raised as it would be alone.
   @impl true
   def read_all(address, keys) do
@@ -110,37 +110,37 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  # A link is one request to the bucket as the signer signs it, which works for a minute.
+  # A link is one request to the bucket as the presigner signs it, which works for a minute.
   @impl true
   def link(address, key, mode) do
     %{"method" => method, "url" => url, "headers" => headers} = signed(address, %{mode => key})
     %{method: method, url: url, headers: headers}
   end
 
-  # Has the signer sign `ask`, and sends what it signed.
+  # Has the presigner sign `ask`, and sends what it signed.
   defp request(address, ask, data \\ nil) do
     %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask)
     sent(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
   end
 
   # A sign changes nothing, so one the internet lost or held up is asked for again, as Req asks a read again. The
-  # signer answers well within a second, so one that hasn't come in this many milliseconds is taken as lost.
+  # presigner answers well within a second, so one that hasn't come in this many milliseconds is taken as lost.
   @signs_within 5_000
 
   defp signed(address, ask) do
     ask = JSON.encode!(ask)
-    url = address <> "/signer/sign"
-    headers = Edge.signed("/signer/sign", ask)
+    url = address <> "/presigner/sign"
+    headers = Edge.signed("/presigner/sign", ask)
 
     case sent(method: :post, url: url, body: ask, headers: headers, retry: :transient, receive_timeout: @signs_within) do
       %{status: 200, body: %{"method" => _method} = signed} ->
         signed
 
       %{status: 403, body: %{"error" => why}} ->
-        raise OneCore.Bucket.Refused, "The signer at #{address} refused: #{why}"
+        raise OneCore.Bucket.Refused, "The presigner at #{address} refused: #{why}"
 
       %{body: %{"error" => why}} ->
-        raise "The signer at #{address} refused: #{why}"
+        raise "The presigner at #{address} refused: #{why}"
 
       refused ->
         raise refusal(refused)

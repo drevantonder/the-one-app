@@ -1,4 +1,4 @@
-// The way in for whoever holds a sharing link: they call a tool here over the web, as MCP over HTTP, and the call is
+// The public MCP endpoint for whoever holds a sharing link: they call a tool here over the web, as MCP over HTTP, and the call is
 // passed through the relay to a server acting for whoever the link leads to, by that server's key. Everyone else
 // outside signs in, which is a plugin's edge part.
 

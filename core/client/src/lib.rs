@@ -60,7 +60,7 @@ pub const LIMIT: usize = 64 << 20;
 pub const CONNECT: Duration = Duration::from_secs(3);
 /// How long a server that's there takes, at most, to say so. Nothing is sent over a connection that's asked nothing,
 /// so a server that has gone is found out by asking it, and this soon. A server taken for gone that wasn't is only
-/// asked again over a new connection, or has its lease taken by a spare, and neither loses anything.
+/// asked again over a new connection, or has its lease taken by a standby, and neither loses anything.
 pub const THERE: Duration = Duration::from_secs(1);
 /// How long a connection that's asked nothing stays open. To keep one open, something has to be said over it every
 /// few seconds, and through a relay each of those wakes the relay. So a connection is let go once it's idle, and
@@ -99,24 +99,24 @@ impl Network {
         Self { address: self.address.clone(), token: format!("{}.{}.{attestation}", self.token, device.public()) }
     }
 
-    /// The servers acting for `of`, a user's or a group's prefix, as the signer at the address says: the ones on their
+    /// The servers acting for `of`, a user's or a group's prefix, as the presigner at the address says: the ones on their
     /// list and then the ones acting for the network, which act for everyone. Each is its key, reached through the
     /// relay there until a straighter path is found.
     async fn servers(&self, key: &SecretKey, of: &str) -> Result<Vec<EndpointAddr>> {
         let mut ask = web()?
-            .get(format!("{}/signer/servers", self.address.trim_end_matches('/')))
+            .get(format!("{}/presigner/servers", self.address.trim_end_matches('/')))
             .timeout(CONNECT)
             .query(&[("of", of)]);
-        for (name, value) in self.signed(key, "/signer/servers", "")? {
+        for (name, value) in self.signed(key, "/presigner/servers", "")? {
             ask = ask.header(name, value);
         }
         let answer = ask.send().await?;
         let (status, said): (_, Value) = (answer.status(), answer.json().await?);
         if !status.is_success() {
-            bail!("{}", said["error"].as_str().unwrap_or("the signer refused"))
+            bail!("{}", said["error"].as_str().unwrap_or("the presigner refused"))
         }
         let relay: RelayUrl = self.address.parse().with_context(|| format!("{} isn't an address", self.address))?;
-        let keys = said["servers"].as_array().context("the signer listed no servers")?;
+        let keys = said["servers"].as_array().context("the presigner listed no servers")?;
         keys.iter()
             .map(|key| {
                 let key: EndpointId = key.as_str().unwrap_or_default().parse().context("that isn't a server's key")?;
@@ -391,7 +391,7 @@ impl Told {
     }
 }
 
-/// What asks over the web: the signer at a network's address, and the bucket by a link. Its TLS is the one iroh
+/// What asks over the web: the presigner at a network's address, and the bucket by a link. Its TLS is the one iroh
 /// reaches the relay with.
 pub fn web() -> Result<reqwest::Client> {
     let tls = iroh::tls::CaTlsConfig::default().client_config(iroh::tls::default_provider())?;
@@ -628,7 +628,7 @@ pub struct Client {
 /// once, the app, each agent's MCP and every command, and iroh reaches one endpoint by a key, as the relay does: two
 /// with one key take each other's place there, and neither is answered. So each run is its own endpoint, and what it
 /// shows the relay and says to a server names the device it runs for, with the attestation (`Network::shown`, `say`).
-/// The signer at the address and a server check it (`core/edge/signer`, `OneCore.User`).
+/// The presigner at the address and a server check it (`core/edge/presigner`, `OneCore.User`).
 #[derive(Clone)]
 struct Link {
     endpoint: Endpoint,
@@ -1023,8 +1023,8 @@ const NOBODY: i64 = -32003;
 /// What a client tells a server to be told what changes, at the `address` it gives, or with none, no longer.
 const WATCH: &str = "notifications/one/watch";
 
-/// What the servers the signer listed are kept as.
-const SERVERS: &str = "signer/servers";
+/// What the servers the presigner listed are kept as.
+const SERVERS: &str = "presigner/servers";
 
 /// A server with something to say connects to this client to say it, at `endpoint`, until it closes. Only one of the
 /// network's own reaches a client, and all it can make one do is ask again.

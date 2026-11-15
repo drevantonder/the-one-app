@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests, on a whole network with a spare (`tooling/network <folder> --spare`), who may do what and that the clock calls
+# Tests, on a whole network with a standby (`tooling/network <folder> --standby`), who may do what and that the clock calls
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
@@ -7,19 +7,19 @@
 # whoever it's in use for, and what it keeps isn't. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
-# a tuple, and a job that's being called when the server calling it is killed is called once by the spare. It says
+# a tuple, and a job that's being called when the server calling it is killed is called once by the standby. It says
 # what a check costs a call.
 #
 #     mise exec -- core/server/test/who.sh [--edge]
 #
 # With --edge the network has its edge on this machine too, so its servers reach the bucket only through the
-# signer there, which is what refuses a server the blobs of someone it doesn't act for.
+# presigner there, which is what refuses a server the blobs of someone it doesn't act for.
 set -euo pipefail
 set -m # The network is a job with a process group of its own, and so is each server started here.
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/tooling/network" "$folder" --spare "$@" >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" --standby "$@" >"$folder/network.log" 2>&1 &
 network=$!
 started=("$network")
 # `tooling/network` stops what it started when it's stopped.
@@ -54,7 +54,7 @@ via() { home=$folder/only-$1 "${@:2}"; }
 declare -A key
 key_of() { key[$1]=$(grep -o -E "(running in [^ ]*: |add_server --key )[0-9a-f]{64}" "$folder/$1.log" | head -1 | grep -o -E "[0-9a-f]{64}$"); }
 named() { local names=() server; for server in "${!key[@]}"; do names+=(-e "s/${key[$server]}/the $server/g"); done; sed "${names[@]}"; }
-key_of server && key_of spare
+key_of server && key_of standby
 # Starts a server that is someone's own, and returns once it's running or has said it isn't theirs yet.
 start_for() {
   (cd "$root/core/server" && exec mix network "$folder" "$1" --for "$2" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
@@ -419,7 +419,7 @@ refused as bob add_server --key "${key[alices]}"
 refused as bob add_member --server "${key[alices]}" --who users/bob
 refused as bob install_service --plugin load --service Load.Meter --server "${key[alices]}"
 if [[ ${#at_address[@]} -gt 0 ]]; then
-  echo "  alice's server has no credentials for the bucket, and asks the signer for each of these:"
+  echo "  alice's server has no credentials for the bucket, and asks the presigner for each of these:"
   (cd "$root/core/server" && mix run --no-start -e '
     [folder, address | blobs] = System.argv()
     Application.put_env(:one_core, :home, Path.join(folder, "alices"))
@@ -433,14 +433,14 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
           :absent -> "allowed, and there is none"
         end
       rescue
-        refused in OneCore.Bucket.Refused -> String.replace(refused.message, ~r/^.*refused: /, "refused by the signer: ")
+        refused in OneCore.Bucket.Refused -> String.replace(refused.message, ~r/^.*refused: /, "refused by the presigner: ")
       end
       IO.puts("    #{blob}: #{said}")
     end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
     users/bob/made/notes/list/text network/own/relations/log/0000000000000001 groups/family/own/diary/1 \
     users/bob/installed network/plugins/notes/latest 2>&1 | grep -v "^$")
 else
-  echo "  (on a folder nothing stands between a server and the bucket: with --edge, the signer refuses it the rest)"
+  echo "  (on a folder nothing stands between a server and the bucket: with --edge, the presigner refuses it the rest)"
 fi
 may as alice add_member --server "${key[alices]}" --who users/bob
 may as bob add_server --key "${key[alices]}"
@@ -483,7 +483,7 @@ timed() {
   median "$times"
 }
 reads="{\"note\":\"$note\"}"
-for server in server spare; do
+for server in server standby; do
   if grep -q "own/relations/: holds its lease" "$folder/$server.log"; then where="writes the tuples' database"; else where="passes each check on"; fi
   echo "  through the $server, which $where:"
   # Something else is shared, so what either server kept of who may is forgotten.
@@ -514,16 +514,16 @@ grep -q -m1 "A server is running" <(tail -F --pid=$! -n +1 "$folder/server.log")
 echo "  the server is killed and started again with --without lost, and says: $(grep -o "lost is removed.*" "$folder/server.log")"
 may as bob notes read --note "$note"
 
-say "A scheduled job is called once across a takeover"
+say "A scheduled job is called once across a failover"
 # The job is due every 5 seconds, and its call takes a second. The server making the calls is killed in the middle
 # of one, so that call wrote nothing.
 ticks() { ONE_AS=owner ONE_HOME=$folder/client "$one" ticker ticks | tr '}' '\n' | sed -n 's/.*"at":"\([^"]*\)","due":"\([^"]*\)","server":"\([0-9a-f]*\)".*/\2 \1 \3/p'; }
-named() { sed -e "s/${key[server]}/server/" -e "s/${key[spare]}/spare/"; }
+named() { sed -e "s/${key[server]}/server/" -e "s/${key[standby]}/standby/"; }
 # The clock has to pass: until the job has been called a few times, and then until just after it's next due.
 sleep 11
 sleep "$(awk -v now="$(now)" 'BEGIN { printf "%.3f", (5000000 - now % 5000000 + 400000) / 1000000 }')"
 calling=$(ticks | tail -1 | cut -d' ' -f3)
-[[ $calling == "${key[server]}" ]] && killed=server || killed=spare
+[[ $calling == "${key[server]}" ]] && killed=server || killed=standby
 pkill -9 -f "network $folder $killed "
 echo "  the $killed, which was making the calls, is killed at $(date -u +%H:%M:%S) with kill -9, in the middle of one"
 sleep 16

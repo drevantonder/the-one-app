@@ -55,7 +55,7 @@ device() {
 }
 # A stranger: a client with a key of its own that's told where the server is and nothing of the address, so it
 # reaches the server directly. `mix network` leaves one, `only-server`.
-stranger() { ONE_HOME=$folder/only-server "$one" "$@"; }
+anonymous() { ONE_HOME=$folder/only-server "$one" "$@"; }
 # What a command says is shown with it. `may` is one that has to be answered, and `refused` one that mustn't be.
 shown() { echo "  $1  ${*:2}" | plain && echo "           -> $(plain <<<"$said" | tr '\n' ' ')"; }
 may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
@@ -117,12 +117,12 @@ asks bobs-phone sign-in devices
 phones=$link phone=$code phone_asking=$asking
 
 say "A stranger sends bob a link made for the stranger's own device: it shows the stranger's code, not his phone's, and lets nothing in unless he says it matches"
-asks strangers-laptop sign-in devices
+asks anonymous-laptop sign-in devices
 echo "  bob's phone shows $phone, and the stranger's laptop $code"
 browser bob "$link" look
 kill -0 "$asking" && echo "  the stranger's laptop, having been shown to bob, still waits, nobody's"
 browser bob "$link" stop
-answered strangers-laptop
+answered anonymous-laptop
 link=$phones asking=$phone_asking
 browser bob "$link" matches
 answered bobs-phone
@@ -232,9 +232,9 @@ echo "  without its token being renewed, desktop knows it's dave's, and its answ
 
 say "A stranger who knows a server's key and where it is, and dials it with a key of their own, is refused"
 echo "  the stranger knows $(plain <"$folder/only-server/servers" | cut -c1-90)…"
-refused stranger sign-in devices
-ONE_AS=alice refused stranger sign-in devices
-ONE_FOR=network refused stranger deploy --name mine --files-from "$root/core/server/test/plugins/tally"
+refused anonymous sign-in devices
+ONE_AS=alice refused anonymous sign-in devices
+ONE_FOR=network refused anonymous deploy --name mine --files-from "$root/core/server/test/plugins/tally"
 
 say "An assistant somewhere else is let in at /mcp as MCP's authorization says, by the person it then acts as"
 echo "  asked with no token, the edge answers:"
@@ -284,10 +284,10 @@ ends "$code"
 refused device laptop sign-in let_in --code "$code"
 kill -CONT -- "-$asking"
 answered old-tablet
-asks spare-phone sign-in devices
+asks standby-phone sign-in devices
 browser alice "$link" stop
 refused device laptop sign-in let_in --code "$code"
-answered spare-phone
+answered standby-phone
 asks hall-tv sign-in devices
 kill -STOP -- "-$asking"
 may device laptop sign-in let_in --code "$code"
@@ -306,9 +306,9 @@ answered guest-pc
 refused device laptop sign-in let_in --code NOPE-1234
 
 say "Only a server acting for a person tells the edge to let a device in as them"
-acting() { (cd "$root/core/edge" && bun test/acting.js "$address" "$folder/server-key" "$@"); }
-server_key=$(acting)
-told() { echo "  $4: $(acting "$1" "$2" "$3" | plain)"; }
+unlisted_server() { (cd "$root/core/edge" && bun test/unlisted-server.js "$address" "$folder/server-key" "$@"); }
+server_key=$(unlisted_server)
+told() { echo "  $4: $(unlisted_server "$1" "$2" "$3" | plain)"; }
 asks lab-pc sign-in devices
 told unsigned users/alice "$code" "signing nothing, for alice"
 told signed users/alice "$code" "signed by a key that's on no list, for alice"
@@ -359,31 +359,31 @@ wait "$MCP_PID"
 echo "  $(sort -n "$folder/times" | awk '{ all[NR] = $1 } END { printf "%.3f ms", all[int((NR + 1) / 2)] / 1000 }')  a tool that does nothing, called by a device that signed in"
 
 say "With a second server, a device that's removed is nobody's at both, the next thing it asks of each"
-# The spare is let in as any server is, by the network's owner from a device of hers, and started again. The
+# The standby is let in as any server is, by the network's owner from a device of hers, and started again. The
 # device alice just let in is asked through each server alone: the same key, told where one server is.
-spare() {
-  (cd "$root/core/server" && exec mix network "$folder" spare --address "$address") >"$folder/spare.log" 2>&1 &
-  spare=$!
-  started+=("$spare")
-  disown "$spare"
-  grep -q -m1 -E "A server is running|isn't one of" <(tail -F --pid="$spare" -n +1 "$folder/spare.log" 2>/dev/null)
+standby() {
+  (cd "$root/core/server" && exec mix network "$folder" standby --address "$address") >"$folder/standby.log" 2>&1 &
+  standby=$!
+  started+=("$standby")
+  disown "$standby"
+  grep -q -m1 -E "A server is running|isn't one of" <(tail -F --pid="$standby" -n +1 "$folder/standby.log" 2>/dev/null)
 }
-spare
-ONE_FOR=network may device laptop $(grep -o 'add_server --key [0-9a-f]*' "$folder/spare.log")
-spare
-cp "$folder/only-server/key" "$folder/only-spare/key"
+standby
+ONE_FOR=network may device laptop $(grep -o 'add_server --key [0-9a-f]*' "$folder/standby.log")
+standby
+cp "$folder/only-server/key" "$folder/only-standby/key"
 through() { ONE_HOME=$folder/only-$1 "$one" "${@:2}"; }
 may through server ping ping
-may through spare ping ping
+may through standby ping ping
 may device laptop sign-in remove_device --device "$direct"
 refused through server ping ping
-refused through spare ping ping
-kill -9 "$spare"
+refused through standby ping ping
+kill -9 "$standby"
 
 say "A server that's off is known to be, by the relay, so a call to it isn't waited for and says when it was last seen"
-spare_key=$(key_of "$folder/spare")
+standby_key=$(key_of "$folder/standby")
 began=$(now)
-ONE_FOR=network refused device laptop uninstall_service --plugin sign-in --service none --server "$spare_key"
+ONE_FOR=network refused device laptop uninstall_service --plugin sign-in --service none --server "$standby_key"
 echo "  in $((($(now) - began) / 1000)) ms, where reaching a server takes up to 3000"
 echo "  and alice's devices say which is on: $(device laptop sign-in devices | grep -o '"seen":"[^"]*"' | sed -E 's/"seen":"(on|[^"]*)"/\1/; s/^2.*/a time/' | sort | uniq -c | tr -s ' \n' ' ')"
 
@@ -413,4 +413,4 @@ restart --without sign-in
 echo "  the server is killed and started again with --without sign-in, and says: $(grep -o "sign-in is removed.*" "$folder/server.log")"
 refused device laptop sign-in devices
 refused device bobs-phone sign-in devices
-refused stranger sign-in devices
+refused anonymous sign-in devices

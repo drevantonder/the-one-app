@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests, on a whole network with a spare (`tooling/network <folder> --spare`), what Insights promises: tool calls, a tool
+# Tests, on a whole network with a standby (`tooling/network <folder> --standby`), what Insights promises: tool calls, a tool
 # that fails, a service that crashes, a slow tool, an app opening on a client and an AI Gateway call through a fake
 # model are recorded by the servers and kept by Insights, whose tools answer with the right counts and quantiles; a
 # call passed from one server to the other reads back as one trace; what's older than 14 days is let go and an
@@ -20,7 +20,7 @@ export ONE_HOME=$folder/client
 shots=
 [[ ${1:-} == --shots ]] && shots=$(mkdir -p "$2" && cd "$2" && pwd)
 # Insights keeps what each server heard every second, not every minute, so the test needn't wait.
-OTEL_BSP_SCHEDULE_DELAY=1000 "$root/tooling/network" "$folder" --spare >"$folder/network.log" 2>&1 &
+OTEL_BSP_SCHEDULE_DELAY=1000 "$root/tooling/network" "$folder" --standby >"$folder/network.log" 2>&1 &
 started=($!)
 stop() {
   local left
@@ -40,7 +40,7 @@ random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
 declare -A key
 key_of() { key[$1]=$(grep -o -E "running in [^ ]*: [0-9a-f]{64}" "$folder/$1.log" | head -1 | grep -o -E "[0-9a-f]{64}$"); }
-key_of server && key_of spare
+key_of server && key_of standby
 
 # What's given, answered and kept secret carries a marker. Nothing prints it: what Insights kept is searched for it.
 marker=insights-test-$(random 8)
@@ -171,7 +171,7 @@ echo "  probe nothing, a tool that isn't there, refused"
 for _ in $(seq 5); do as probe slow >/dev/null; done
 echo "  probe slow, 5 times"
 may as via server probe count
-refused as via spare probe count --fail
+refused as via standby probe count --fail
 may as_owner install_service --plugin probe --service Probe.Bomb --server "${key[server]}"
 may as probe bomb --text "$marker"
 
@@ -222,18 +222,18 @@ may as insights errors
 said=$(pick 'x["where"] == "probe count"')
 trace=$(of .trace)
 
-say "A call passed from the spare to the server holding the lease reads back as one trace"
+say "A call passed from the standby to the server holding the lease reads back as one trace"
 may as insights trace --id "$trace"
 holds python3 -I -c '
 import json, sys
 spans = json.loads(sys.argv[1])["spans"]
-assert {s["server"] for s in spans} == {"server", "spare"}, spans
-spare = next(s for s in spans if s["server"] == "spare")
+assert {s["server"] for s in spans} == {"server", "standby"}, spans
+standby = next(s for s in spans if s["server"] == "standby")
 server = next(s for s in spans if s["server"] == "server")
-assert server["parent"] == spare["span"] and server["depth"] == 1, spans
+assert server["parent"] == standby["span"] and server["depth"] == 1, spans
 assert server["outcome"] == "error" and server["message"] == "Count refused on purpose", server
 ' "$said"
-echo "  its spans are on both servers, the server's under the spare's, which passed it on"
+echo "  its spans are on both servers, the server's under the standby's, which passed it on"
 
 say "What AI used, from AI Gateway's calls"
 may as insights spending

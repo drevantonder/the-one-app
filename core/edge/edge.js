@@ -33,13 +33,13 @@ const PIECES = {
   // iroh's own two paths: its relay protocol, and the probe that times how far away the relay is.
   relay: "RELAY",
   ping: "RELAY",
-  signer: "SIGNER",
-  link: "WAY_IN",
+  presigner: "PRESIGNER",
+  link: "PUBLIC_MCP",
 };
 const services = [
   { binding: "RELAY", service: "network-relay" },
-  { binding: "SIGNER", service: "network-signer" },
-  { binding: "WAY_IN", service: "network-way-in" },
+  { binding: "PRESIGNER", service: "network-presigner" },
+  { binding: "PUBLIC_MCP", service: "network-public-mcp" },
   { binding: "WEB", service: "network-web" },
 ];
 
@@ -72,8 +72,8 @@ for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins
   services.push({ binding, service: worker.name });
   worker.services = [
     ...(worker.services ?? []),
-    { binding: "OWN", service: "network-signer", entrypoint: "Own", props: { plugin } },
-    { binding: "NETWORK", service: "network-signer", entrypoint: "Network" },
+    { binding: "OWN", service: "network-presigner", entrypoint: "Own", props: { plugin } },
+    { binding: "NETWORK", service: "network-presigner", entrypoint: "Network" },
     { binding: "RELAY", service: "network-relay" },
   ];
   await Bun.write(`${part}/wrangler.jsonc`, JSON.stringify(worker, null, 2));
@@ -85,13 +85,13 @@ await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, stdio: ["inherit", "inherit", "inherit"] }).exited;
-const pieces = ["relay", "signer", "way-in", "web"].map((piece) => `${piece}/wrangler.jsonc`);
+const pieces = ["relay", "presigner", "public-mcp", "web"].map((piece) => `${piece}/wrangler.jsonc`);
 if (what === "dev") {
   process.exit(await wrangler("dev", ...[gatewayConfig, ...pieces, ...parts].flatMap((config) => ["-c", config]), ...rest));
 }
 // A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
-// its `wrangler.jsonc`, which only it holds, such as the signer's and a plugin's part's keys to an outside service.
-for (const config of ["web/wrangler.jsonc", "signer/wrangler.jsonc", "relay/wrangler.jsonc", ...parts, "way-in/wrangler.jsonc", gatewayConfig]) {
+// its `wrangler.jsonc`, which only it holds, such as the presigner's and a plugin's part's keys to an outside service.
+for (const config of ["web/wrangler.jsonc", "presigner/wrangler.jsonc", "relay/wrangler.jsonc", ...parts, "public-mcp/wrangler.jsonc", gatewayConfig]) {
   const file = `${dirname(config)}/secrets`;
   const secrets = existsSync(`${here}/${file}`) ? ["--secrets-file", file] : [];
   const failed = await wrangler("deploy", "-c", config, ...secrets);

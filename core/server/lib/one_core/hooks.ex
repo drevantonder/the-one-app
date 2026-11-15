@@ -140,8 +140,8 @@ defmodule OneCore.Hooks do
 
   # How long a plugin has to answer a hook, in milliseconds. A check is answered in well under a millisecond, and
   # the slowest answer is one whose plugin's server has just gone: finding that out and taking over from it
-  # takes about three seconds (`core/server/test/takeover.sh`), and more where the bucket is far away. This is that
-  # with room to spare, and still short of a person giving up on what they asked.
+  # takes about three seconds (`core/server/test/failover.sh`), and more where the bucket is far away. This is that
+  # with room to standby, and still short of a person giving up on what they asked.
   @answers_within 10_000
 
   @doc """

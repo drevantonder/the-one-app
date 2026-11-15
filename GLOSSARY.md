@@ -10,7 +10,7 @@
   and is a who.
 - **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks a
   server, keeps what servers answered, and keeps secrets safe on its device.
-- **Signer**: the only holder of the bucket's credentials. It hands a server short-lived access to the blobs of those it
+- **Presigner**: the only holder of the bucket's credentials. It hands a server short-lived access to the blobs of those it
   acts for.
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
   built on top of one: files, a database, a git repo. Avoid: space.
@@ -36,7 +36,7 @@
   between calls. It and the rest of its plugin call each other's functions, which nothing else can call. The plugin
   decides which instance it calls.
 - **Edge**: what of a network is always on and faces the internet, at the network's address: the gateway,
-  the signer, the relay, the web client's files, the way in for a sharing link's holder, and each plugin's edge part.
+  the presigner, the relay, the web client's files, the public MCP endpoint for a sharing link's holder, and each plugin's edge part.
 - **Edge part**: a part of a plugin that runs at the network's address, for what comes in over the web: a
   page people sign in on, a call from an outside service. One runs for the whole network, with storage of its own
   there, and whoever sets up the edge puts it there with the edge's other pieces.

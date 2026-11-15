@@ -1,6 +1,6 @@
 // A server's key, which is on no list until someone adds it, telling sign-in's edge part to let
-// a device in as someone, as a server does (`SignIn`). `bun acting.js <address> <file>` makes the key, keeps it in
-// the file and prints it; `bun acting.js <address> <file> signed|unsigned <who> <code>` asks with it, and prints
+// a device in as someone, as a server does (`SignIn`). `bun unlisted-server.js <address> <file>` makes the key, keeps it in
+// the file and prints it; `bun unlisted-server.js <address> <file> signed|unsigned <who> <code>` asks with it, and prints
 // what it's answered.
 import { hex } from "../ask.js";
 

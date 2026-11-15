@@ -31,7 +31,7 @@ const FRESH = 60_000;
  * The key that signed `request`, whose body is `body`, or null. An ask carries `one-key`, `one-at` (ms) and
  * `one-signature`, over its path, when it was made and its body.
  */
-export async function asker(request, body) {
+export async function verifiedKey(request, body) {
   const key = request.headers.get("one-key");
   const at = request.headers.get("one-at");
   if (!(Math.abs(Date.now() - Number(at)) <= FRESH)) return null;

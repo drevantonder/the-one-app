@@ -14,7 +14,7 @@ export default {
       return Response.json({ error: "Notifications are sent at /notifications/send" }, { status: 404 });
     }
     const body = await request.text();
-    const server = await env.NETWORK.asker(request.url, Object.fromEntries(request.headers), body);
+    const server = await env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
     if (!server || !(await env.NETWORK.servers(NETWORK)).includes(server)) {
       return Response.json({ error: "Only a server acting for the network sends notifications" }, { status: 403 });
     }

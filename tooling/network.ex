@@ -27,7 +27,7 @@ defmodule Mix.Tasks.Network do
 
       mix network <folder> --address <address> --first <secret>
 
-  starts a server of a network that has an edge (`edge/`). Its bucket is the one the signer there signs
+  starts a server of a network that has an edge (`edge/`). Its bucket is the one the presigner there signs
   for, and it and its client reach each other through the relay there when they can't directly. `--first` is the
   secret the edge was deployed with, which a network's first server shows the first time it starts.
 

@@ -158,7 +158,7 @@ defmodule OneCore.WhoTest do
   @tag :tmp_dir
   test "a request is from whoever's device it came from, and from nobody where nothing places it, unless a link is shown, a server acting here says who, or the network is being built" do
     Process.register(self(), :who_test)
-    {stranger, other} = {String.duplicate("ab", 32), String.duplicate("cd", 32)}
+    {anonymous, other} = {String.duplicate("ab", 32), String.duplicate("cd", 32)}
     deploy("door", decides("Door", "users/bob"))
 
     list = fn method, said, from ->
@@ -169,22 +169,22 @@ defmodule OneCore.WhoTest do
     # connection proved, and whatever it says of itself.
     nobody = {:refused, "This device is nobody's here. Sign in on it, or let it in from a device that's yours."}
     assert ask(%{}) == nobody
-    assert ask(%{}, stranger) == nobody
-    assert ask(%{device: stranger}) == nobody
-    assert ask(%{for: "network"}, stranger) == nobody
-    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("tools/list", %{}, stranger)
-    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("resources/list", %{}, stranger)
+    assert ask(%{}, anonymous) == nobody
+    assert ask(%{device: anonymous}) == nobody
+    assert ask(%{for: "network"}, anonymous) == nobody
+    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("tools/list", %{}, anonymous)
+    assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("resources/list", %{}, anonymous)
     assert %{"error" => %{"message" => "This device is nobody's here" <> _}} = list.("initialize", %{}, nil)
 
     # A plugin that signs users in says whose a device is: the key a connection proved, or the device the
     # network's edge says a request over the web is from. A device doesn't say it's another.
     deploy("placer", OneCore.Test.placer())
-    assert {:ok, :ok} = call("placer_place", %{"device" => stranger, "who" => "users/alice"}, OneCore.Test.owner())
-    assert ask(%{}, stranger) == "users/alice"
-    assert ask(%{device: stranger}) == "users/alice"
-    assert ask(%{device: stranger}, other) == nobody
+    assert {:ok, :ok} = call("placer_place", %{"device" => anonymous, "who" => "users/alice"}, OneCore.Test.owner())
+    assert ask(%{}, anonymous) == "users/alice"
+    assert ask(%{device: anonymous}) == "users/alice"
+    assert ask(%{device: anonymous}, other) == nobody
     assert ask(%{}, other) == nobody
-    assert %{"result" => %{"tools" => [_, _ | _]}} = list.("tools/list", %{}, stranger)
+    assert %{"result" => %{"tools" => [_, _ | _]}} = list.("tools/list", %{}, anonymous)
 
     # A run of a client has a key of its own, and is from the device that signed it, and only that one.
     {device, signing} = :crypto.generate_key(:eddsa, :ed25519)
@@ -194,13 +194,13 @@ defmodule OneCore.WhoTest do
     assert ask(%{device: device, attestation: attestation.(run)}, run) == "users/alice"
     assert ask(%{device: device, attestation: attestation.(other)}, run) == nobody
     assert ask(%{device: device, attestation: String.duplicate("00", 64)}, run) == nobody
-    assert ask(%{device: stranger, attestation: attestation.(run)}, run) == nobody
+    assert ask(%{device: anonymous, attestation: attestation.(run)}, run) == nobody
     assert ask(%{device: device}, run) == nobody
 
     # Whose it is is kept, so a call asks nothing, until a tool of that plugin is called that doesn't only read:
     # a device that's removed is nobody's from the next call on.
-    assert {:ok, :ok} = call("placer_remove", %{"device" => stranger}, OneCore.Test.owner())
-    assert ask(%{}, stranger) == nobody
+    assert {:ok, :ok} = call("placer_remove", %{"device" => anonymous}, OneCore.Test.owner())
+    assert ask(%{}, anonymous) == nobody
     # Only a plugin installed for the network says whose a device is, and only a user's.
     assert {:ok, 1, ""} =
              Deploy.deploy("users/bob", "mine", %{
@@ -245,7 +245,7 @@ defmodule OneCore.WhoTest do
     assert ask(%{who: nil, for: "groups/family"}, Server.key()) == " for groups/family"
 
     assert {:refused, "Only a server acting for users/alice says it asks for them"} =
-             ask(%{who: "users/alice", for: "users/alice"}, stranger)
+             ask(%{who: "users/alice", for: "users/alice"}, anonymous)
 
     assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"})
     # What it passes on it has decided, so a group's member isn't asked about again, nor a link's holder refused.

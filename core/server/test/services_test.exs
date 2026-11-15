@@ -96,7 +96,7 @@ defmodule OneCore.ServicesTest do
 
   @tag :tmp_dir
   test "only a server acting for whoever it asks for calls a service's functions and the functions it calls" do
-    stranger = String.duplicate("ab", 32)
+    anonymous = String.duplicate("ab", 32)
     said = %{who: OneCore.Test.owner(), for: OneCore.Test.owner(), forwarded: true}
     service = %{plugin: "network/plugins/counter", service: "Counter.Store", function: "add", arguments: [], _meta: said}
     plugin = %{installed: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
@@ -107,8 +107,8 @@ defmodule OneCore.ServicesTest do
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", %{service | _meta: client}, nil)
     assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", %{plugin | _meta: client}, nil)
 
-    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, stranger)
-    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, stranger)
+    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("services/call", service, anonymous)
+    assert %{"error" => %{"message" => "Only a server" <> _}} = ask("plugins/call", plugin, anonymous)
     refute_received {:counted, _, _}
 
     assert %{"result" => %{"answer" => [1, 1]}} = ask("services/call", service, Server.key())
@@ -117,6 +117,6 @@ defmodule OneCore.ServicesTest do
 
     # Neither is a tool, so nothing else reaches them.
     tool = %{name: "counter_counted", arguments: %{}, _meta: client}
-    assert %{"result" => %{"isError" => true}} = ask("tools/call", tool, stranger)
+    assert %{"result" => %{"isError" => true}} = ask("tools/call", tool, anonymous)
   end
 end

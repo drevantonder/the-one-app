@@ -3,7 +3,7 @@ defmodule OneCore.Bucket.Folder do
   A folder as a bucket, for a network on one machine. A blob is a file at its key. No part of a key starts with a
   dot, which keeps keys inside the folder and leaves dot names for this module's own files.
 
-  A folder has no signer to make links to its blobs, so the server answers them itself, to this machine alone,
+  A folder has no presigner to make links to its blobs, so the server answers them itself, to this machine alone,
   which is where a network kept in a folder is. A link says what it's to and when it ends, signed with a secret
   made when the server first gives one.
   """
@@ -12,7 +12,7 @@ defmodule OneCore.Bucket.Folder do
 
   Record.defrecordp(:asked, :mod, Record.extract(:mod, from_lib: "inets/include/httpd.hrl"))
 
-  # How long a link works for, in seconds, as the signer's does.
+  # How long a link works for, in seconds, as the presigner's does.
   @linked_for 60
 
   @impl true

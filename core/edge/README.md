@@ -1,6 +1,6 @@
 # Putting a network's edge on Cloudflare
 
-Make an R2 bucket and an S3 API token for it, and write the signer's secrets to `signer/secrets`, a line each:
+Make an R2 bucket and an S3 API token for it, and write the presigner's secrets to `presigner/secrets`, a line each:
 `BUCKET`, the bucket's S3 address with its name on the end (`https://<account>.r2.cloudflarestorage.com/<bucket>`),
 `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, and `FIRST_SERVER`, which you make up (`openssl rand -hex 16`). The network's
 address is a name on a zone of that Cloudflare account, which deploying attaches to the gateway. Then, from the repo's

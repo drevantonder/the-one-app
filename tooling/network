@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a whole network on this machine, to build or test with, and says how to use it:
 #
-#     tooling/network <folder> [--spare] [--edge] [--owner <name>]
+#     tooling/network <folder> [--standby] [--edge] [--owner <name>]
 #
 # It needs what `mise install` and `rustup` install, and on Linux WebKitGTK (`libwebkit2gtk-4.1-dev`), which the
 # app's window is built on.
@@ -14,10 +14,10 @@
 # command acts as that user, and ONE_FOR=groups/<name> or ONE_FOR=network has it run for a group or the network.
 # Its first owner is the user `owner`.
 #
-# --spare starts a second server, which takes over when the first stops. Each server is called after its folder,
-#   `server` and `spare`, as two machines would be called what each is.
+# --standby starts a second server, which takes over when the first stops. Each server is called after its folder,
+#   `server` and `standby`, as two machines would be called what each is.
 # --edge runs the network's edge here too (`core/edge/`): its Workers in `wrangler dev`, with a local S3 store
-#   as the bucket. Servers then keep their blobs through the signer there, and whoever holds a sharing link has a
+#   as the bucket. Servers then keep their blobs through the presigner there, and whoever holds a sharing link has a
 #   way in.
 # --owner <name>, with --edge, starts a network people sign in to instead: that user is its first owner, it says
 #   where they join, with a passkey, and nobody acts as anyone by saying so.
@@ -31,11 +31,11 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # The tools this needs are the ones `mise.toml` names.
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 
-usage="tooling/network <folder> [--spare] [--edge] [--owner <name>]"
-folder= spare= edge= owner=
+usage="tooling/network <folder> [--standby] [--edge] [--owner <name>]"
+folder= standby= edge= owner=
 while (($#)); do
   case $1 in
-    --spare) spare=yes ;;
+    --standby) standby=yes ;;
     --edge) edge=yes ;;
     --owner) owner=${2-} && shift ;;
     -*) echo "$usage" >&2 && exit 1 ;;
@@ -43,8 +43,8 @@ while (($#)); do
   esac
   shift
 done
-# People sign in at an address, and a spare is let in by a client, which there is someone's signed-in device.
-[[ -n $folder && (-z $owner || (-n $edge && -z $spare)) ]] || { echo "$usage" >&2 && exit 1; }
+# People sign in at an address, and a standby is let in by a client, which there is someone's signed-in device.
+[[ -n $folder && (-z $owner || (-n $edge && -z $standby)) ]] || { echo "$usage" >&2 && exit 1; }
 if [[ -n $owner ]]; then as=(--owner "$owner"); else as=(--development --owner owner); fi
 mkdir -p "$folder"
 folder=$(cd "$folder" && pwd)
@@ -66,7 +66,7 @@ random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 at_address=()
 if [[ -n $edge ]]; then
   (cd "$root/core/edge" && bun install --frozen-lockfile)
-  # The bucket's credentials are made up for this run, and only the signer is given them, with the secret a
+  # The bucket's credentials are made up for this run, and only the presigner is given them, with the secret a
   # network's first server shows.
   access=$(random 8) secret=$(random 24) first=$(random 16)
   bucket=127.0.0.1:$(free_port) gateway=$(free_port)
@@ -79,7 +79,7 @@ if [[ -n $edge ]]; then
     const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
     const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
     if (!made.ok && made.status !== 409) throw new Error(`the bucket answered ${made.status}`);')
-  # `wrangler dev` gives the signer its secrets from the environment.
+  # `wrangler dev` gives the presigner its secrets from the environment.
   (cd "$root/core/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
     WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
     --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
@@ -101,7 +101,7 @@ start() {
   fi
 }
 start server
-[[ -z $spare ]] || start spare
+[[ -z $standby ]] || start standby
 
 # The program as whoever started this would type it.
 one=${one#"$PWD/"}

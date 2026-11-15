@@ -120,7 +120,7 @@ const devices = () => ({
     try {
       client = JSON.parse(body).client_id;
     } catch {}
-    const key = await env.NETWORK.asker(request.url, Object.fromEntries(request.headers), body);
+    const key = await env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
     if (key && key === client) return;
     const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within a minute of the right time" };
     return { response: Response.json(refused, { status: 401 }) };

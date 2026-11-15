@@ -15,7 +15,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   redesign's database and lease. Not chosen as the server. Its limits: one application per fleet, unencrypted traffic between
   nodes, no Windows, clients only query a node, and upgrades that need every node stopped. Its ideas are being merged
   into open-source workerd, unreleased as of 14 November 2026, so workerd may matter more later.
-- **Litestream**: ships a SQLite database's log to a bucket. One writer, no takeover, and no check before an upload, so
+- **Litestream**: ships a SQLite database's log to a bucket. One writer, no failover, and no check before an upload, so
   by itself it doesn't stop a server that lost its turn from writing.
 - **Zanzibar**: where relation tuples and the relations' names come from. SpiceDB and OpenFGA are services that
   implement it; we keep the tuples ourselves and run neither.

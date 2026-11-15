@@ -151,7 +151,7 @@ defmodule OneCore.Servers do
 
   @doc """
   Takes a server off `owner`'s list, which only this server, acting for them, may: it no longer acts for them,
-  and the signer hands it nothing of theirs. The network keeps a server, since its list is only ever begun once.
+  and the presigner hands it nothing of theirs. The network keeps a server, since its list is only ever begun once.
   """
   def remove(key, owner) do
     blob = "#{owner}/servers"

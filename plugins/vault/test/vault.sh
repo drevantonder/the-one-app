@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests, on a whole network with a spare and its edge on this machine (`tooling/network <folder> --spare --edge`),
+# Tests, on a whole network with a standby and its edge on this machine (`tooling/network <folder> --standby --edge`),
 # what encryption and the Vault promise, by trying each, for a person, a group and the network. What's typed on a device is encrypted there, and the
 # bytes in the bucket hold none of it, for a blob and for a database. A server that wasn't chosen can't open
 # either and takes no lease; a chosen one can, and stops when it's taken off. The network's owner writes every
@@ -17,7 +17,7 @@ set -m # The network is a job with a process group of its own, and so is each se
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/tooling/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" --standby --edge >"$folder/network.log" 2>&1 &
 network=$!
 started=("$network")
 # `tooling/network` stops what it started when it's stopped. The bucket's store writes as it stops, so the folder goes
@@ -53,15 +53,15 @@ holding() { { grep -r -a -l -F -e "$marker" "$@" 2>/dev/null || true; } | wc -l;
 # Each server's key by its name, which is how it's said here.
 declare -A key
 key_of() { key[$1]=$(grep -o -E "(running in [^ ]*: |add_server --key )[0-9a-f]{64}" "$folder/$1.log" | head -1 | grep -o -E "[0-9a-f]{64}$"); }
-key_of server && key_of spare
+key_of server && key_of standby
 named() { local names=() name; for name in "${!key[@]}"; do names+=(-e "s/${key[$name]}/<the $name>/g"); done; sed "${names[@]}"; }
 
 # A device is a client with a key of its own, in a home of its own. It's told where the network's servers are, and
 # asks whichever answers first, or with `via <server>`, that one and no other.
 reached() { sed -e 's/^\[//' -e 's/\]$//' "$folder/only-$1/servers"; }
-device() { mkdir -p "$folder/devices/$1" && printf '[%s,%s]' "$(reached server)" "$(reached spare)" >"$folder/devices/$1/servers"; }
+device() { mkdir -p "$folder/devices/$1" && printf '[%s,%s]' "$(reached server)" "$(reached standby)" >"$folder/devices/$1/servers"; }
 # A command on a device, as a user, and for a group or the network if it says: `on phone as alice vault list`,
-# `on desk via spare as owner for network deploy ...`. Everything any of them is answered is kept, to search.
+# `on desk via standby as owner for network deploy ...`. Everything any of them is answered is kept, to search.
 on() {
   local home=$folder/devices/$1 only= asked=
   shift
@@ -69,7 +69,7 @@ on() {
   local who=$2
   shift 2
   [[ $1 == for ]] && asked=$2 && shift 2
-  if [[ -n $only ]]; then printf '[%s]' "$(reached "$only")" >"$home/servers"; else printf '[%s,%s]' "$(reached server)" "$(reached spare)" >"$home/servers"; fi
+  if [[ -n $only ]]; then printf '[%s]' "$(reached "$only")" >"$home/servers"; else printf '[%s,%s]' "$(reached server)" "$(reached standby)" >"$home/servers"; fi
   ${asked:+env ONE_FOR=$asked} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/said"
 }
 shown() {
@@ -165,38 +165,38 @@ note=$(sha256sum <"$folder/secrets/note" | cut -d' ' -f1)
 [[ $said == *"\"blob\":\"$note\""* && $said == *"\"rows\":[\"$note\"]"* ]] && echo "  which is the SHA-256 of the note she typed, both times: the server she chose opened the blob and the row"
 
 say "A server that wasn't chosen can't open them, and doesn't take the database's lease"
-may on phone via spare as alice vault list
-echo "  the spare passed that on to the server. With the server gone, it has nobody to pass it to:"
+may on phone via standby as alice vault list
+echo "  the standby passed that on to the server. With the server gone, it has nobody to pass it to:"
 down server
 refused on phone as alice vault list
 refused on phone as alice locker read
-echo "  the spare reads the same bytes, as a server of the network reads any, and its own key opens nothing:"
+echo "  the standby reads the same bytes, as a server of the network reads any, and its own key opens nothing:"
 (cd "$root/core/server" && mix run --no-start -e '
   [folder, address, artifact, chosen] = System.argv()
-  Application.put_env(:one_core, :home, Path.join(folder, "spare"))
+  Application.put_env(:one_core, :home, Path.join(folder, "standby"))
   Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, address})
   Application.ensure_all_started(:req)
   {:ok, paths} = OneCore.Folder.files("../../plugins/encryption")
   {:ok, _, _} = OneCore.Plugins.Version.load("encryption", Map.new(paths, &{&1, File.read!("../../plugins/encryption/" <> &1)}))
   {:ok, own} = Cipher.key(OneCore.Server.key_file())
-  {:ok, spare} = Cipher.public(own)
+  {:ok, standby} = Cipher.public(own)
   {:ok, slot, _tag} = OneCore.Bucket.read("#{artifact}/keys/#{chosen}")
   {:ok, entry, _tag} = OneCore.Bucket.read("#{artifact}/log/0000000000000002")
-  IO.puts("    #{artifact}/keys/<the server>: read, #{byte_size(slot)} bytes; opened with the spare'"'"'s key: #{inspect(Cipher.open_keys(own, "one/encryption/1/keys\n#{artifact}\n#{spare}", slot))}")
+  IO.puts("    #{artifact}/keys/<the server>: read, #{byte_size(slot)} bytes; opened with the standby'"'"'s key: #{inspect(Cipher.open_keys(own, "one/encryption/1/keys\n#{artifact}\n#{standby}", slot))}")
   IO.puts("    #{artifact}/log/0000000000000002: read, #{byte_size(entry)} bytes; as a log entry: #{try do :erlang.binary_to_term(entry, [:safe]); "read" rescue _ -> "not one it can read" end}")
 ' "$folder" "$address" "$vault" "${key[server]}" 2>&1 | grep -v "^$")
-echo "  log entries of her Vault's database written by the spare: $(grep -c "$vault/: taking its lease" "$folder/spare.log" || true)"
-! grep -q "$vault/: taking its lease" "$folder/spare.log"
+echo "  log entries of her Vault's database written by the standby: $(grep -c "$vault/: taking its lease" "$folder/standby.log" || true)"
+! grep -q "$vault/: taking its lease" "$folder/standby.log"
 up server
 
 say "A chosen server can, and stops when it's taken off"
-may on phone as alice vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
-may on phone as alice locker grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+may on phone as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
+may on phone as alice locker grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 down server
 may on phone as alice vault list
 may on phone as alice locker read
-[[ $said == *"\"blob\":\"$note\""* && $said == *"${key[spare]}"* ]]
-echo "  the spare took the lease of her Vault's database: $(grep -o "$vault/: taking its lease at [0-9]*: ok" "$folder/spare.log" | tail -1)"
+[[ $said == *"\"blob\":\"$note\""* && $said == *"${key[standby]}"* ]]
+echo "  the standby took the lease of her Vault's database: $(grep -o "$vault/: taking its lease at [0-9]*: ok" "$folder/standby.log" | tail -1)"
 up server
 may on phone as alice vault grant --servers "$(servers "${key[server]}")"
 may on phone as alice locker grant --servers "$(servers "${key[server]}")"
@@ -206,8 +206,8 @@ down server
 refused on phone as alice vault list
 refused on phone as alice locker read
 up server
-may on phone as alice vault set --item GitHub --field note --value "kept after the spare was taken off" --secret false
-echo "  what's written since is under a new epoch's key, which the spare was never handed"
+may on phone as alice vault set --item GitHub --field note --value "kept after the standby was taken off" --secret false
+echo "  what's written since is under a new epoch's key, which the standby was never handed"
 
 say "The network's owner writes any relation tuple, and reads nothing of hers"
 refused on desk as owner for users/alice vault list
@@ -215,13 +215,13 @@ may on desk as owner relations share --artifact users/alice --relation member --
 may on desk as owner relations share --artifact $vault --relation owner --who users/owner
 refused on desk as owner for users/alice vault list
 refused on desk as owner for users/alice encryption key
-refused on desk as owner for users/alice vault grant --servers "$(servers "${key[spare]}")"
-may on desk as owner relations share --artifact $vault --relation editor --who "servers/${key[spare]}"
-echo "  a tuple names the spare now, which the owner wrote. No device of his holds her key, so it was handed none:"
+refused on desk as owner for users/alice vault grant --servers "$(servers "${key[standby]}")"
+may on desk as owner relations share --artifact $vault --relation editor --who "servers/${key[standby]}"
+echo "  a tuple names the standby now, which the owner wrote. No device of his holds her key, so it was handed none:"
 down server
 refused on phone as alice vault list
 up server
-may on desk as owner relations unshare --artifact $vault --relation editor --who "servers/${key[spare]}"
+may on desk as owner relations unshare --artifact $vault --relation editor --who "servers/${key[standby]}"
 
 say "An agent keeps what's pasted, asks its person for the rest, and uses it without seeing it"
 service=$(free_port)
@@ -290,23 +290,23 @@ may on laptop as alice vault fetch --item Fake --url "http://127.0.0.1:$service/
 [[ $said == *'[secret]'* ]] && echo "  the service said her token back, and the answer has it blotted out"
 
 say "A new device is let in by one that holds her key, and with every device gone, by her recovery key"
-refused on laptop as alice vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+refused on laptop as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on laptop as alice encryption ask
 asking=$(on phone as alice encryption key | grep -o '"asking":\[[^]]*\]' | grep -o '[0-9a-f]\{64\}')
 key[laptop]=$asking
 may on phone as alice encryption let_in --device "$asking" --name laptop
-may on laptop as alice vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+may on laptop as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on laptop as alice vault grant --servers "$(servers "${key[server]}")"
 rm -rf "$folder/devices/phone" "$folder/devices/laptop"
 echo "  her phone and her laptop are gone, with their keys. On a tablet she signs in on:"
 may on tablet as alice vault list
 [[ $said == *GitHub* && $said == *Fake* ]]
 may on tablet as alice fake me
-refused on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+refused on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 printf '%s' "AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-IIII-JJJJ-KKKK-LLLL-MMMQ" >"$folder/secrets/guess"
 refused on tablet as alice encryption let_in --key-from "$folder/secrets/guess"
 may on tablet as alice encryption let_in --key-from "$folder/secrets/recovery"
-may on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+may on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 down server
 may on tablet as alice vault list
 [[ $said == *GitHub* && $said == *Fake* && $said == *Stripe* ]]
@@ -314,7 +314,7 @@ up server
 echo "  someone with the whole bucket, and a key of their own making:"
 (cd "$root/core/server" && mix run --no-start -e '
   [folder, address, artifact | chosen] = System.argv()
-  Application.put_env(:one_core, :home, Path.join(folder, "spare"))
+  Application.put_env(:one_core, :home, Path.join(folder, "standby"))
   Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, address})
   Application.ensure_all_started(:req)
   slots = for server <- chosen, {:ok, slot, _tag} <- [OneCore.Bucket.read("#{artifact}/keys/#{server}")], do: slot
@@ -326,7 +326,7 @@ echo "  someone with the whole bucket, and a key of their own making:"
   {:ok, stranger} = Cipher.public(own)
   opened = for slot <- slots, match?({:ok, _keys}, Cipher.open_keys(own, "one/encryption/1/keys\n#{artifact}\n#{stranger}", slot)), do: slot
   IO.puts("    of the #{length(slots)} copies of her Vault'"'"'s keys in the bucket, each encrypted to a server she chose, theirs opens #{length(opened)}")
-' "$folder" "$address" "$vault" "${key[server]}" "${key[spare]}" 2>&1 | grep -v "^$")
+' "$folder" "$address" "$vault" "${key[server]}" "${key[standby]}" 2>&1 | grep -v "^$")
 echo "  and no file of the bucket holds the marker, as below"
 
 say "A group's Vault and the network's, each set up and opened by an owner, and the network's by its recovery key"
@@ -337,7 +337,7 @@ may on den as alice for groups/family vault grant --servers "$(servers "${key[se
 may on den as alice for groups/family vault set --item Wifi --field password --value-from "$folder/secrets/wifi"
 may on den as alice for groups/family vault list
 [[ $said == *Wifi* ]]
-refused on bobs as bob for groups/family vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+refused on bobs as bob for groups/family vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 refused on bobs as bob for groups/family encryption let_in
 may on den as owner for network encryption let_in
 ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/devices/den "$root/target/release/examples/recovery_key" "$folder/secrets/network-recovery"
@@ -346,9 +346,9 @@ may on den as owner for network vault grant --servers "$(servers "${key[server]}
 may on den as owner for network vault set --item Storage --field secret_key --value-from "$folder/secrets/storage"
 rm -rf "$folder/devices/den"
 echo "  the den is gone, with its keys. On the attic, the network's owner:"
-refused on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+refused on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on attic as owner for network encryption let_in --key-from "$folder/secrets/network-recovery"
-may on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+may on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on attic as owner for network vault list
 [[ $said == *Storage* && $said != *Wifi* && $said != *GitHub* ]]
 
@@ -382,4 +382,4 @@ timed() {
 echo "    $(timed locker_ping "{}")  a tool that does nothing"
 echo "    $(timed vault_list "{}")  the Vault's list: an encrypted database, which the server holds open"
 echo "    $(timed fake_digest '{"item":"Fake","field":"access_token"}')  a plugin is handed one of an item's secrets, and runs a program on it"
-echo "    $(timed locker_read "{}")  an encrypted blob read from the bucket, through the signer, and a row of an encrypted database"
+echo "    $(timed locker_read "{}")  an encrypted blob read from the bucket, through the presigner, and a row of an encrypted database"

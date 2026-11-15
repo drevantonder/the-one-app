@@ -1,4 +1,4 @@
-// The signer: the only holder of the bucket's credentials. A server asks it to sign one request to the bucket, and
+// The presigner: the only holder of the bucket's credentials. A server asks it to sign one request to the bucket, and
 // it does if that server is on the list of whoever the blob belongs to. It never signs a write without a condition
 // (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
 // signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
@@ -7,7 +7,7 @@
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
-import { asker, isKey, signedBy } from "../ask.js";
+import { verifiedKey, isKey, signedBy } from "../ask.js";
 
 /** How long a signed request works for, in seconds. */
 const SIGNED_FOR = 60;
@@ -71,16 +71,16 @@ export default {
   async fetch(request, env) {
     const { pathname, searchParams } = new URL(request.url);
     const body = await request.text();
-    const by = await asker(request, body);
+    const by = await verifiedKey(request, body);
     if (!by) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    if (pathname === "/signer/sign" && request.method === "POST") return sign(env, by, request.headers.get("one-token"), body);
-    if (pathname === "/signer/servers" && request.method === "GET") {
+    if (pathname === "/presigner/sign" && request.method === "POST") return sign(env, by, request.headers.get("one-token"), body);
+    if (pathname === "/presigner/servers" && request.method === "GET") {
       if (!(await admits(env, by, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
       // Whoever's servers are asked for, the ones acting for the network act for them too.
       const acting = [...(await servers(env, searchParams.get("of"))), ...(await servers(env, NETWORK))];
       return Response.json({ servers: [...new Set(acting)] });
     }
-    return refuse(404, "The signer signs at /signer/sign and lists servers at /signer/servers");
+    return refuse(404, "The presigner signs at /presigner/sign and lists servers at /presigner/servers");
   },
 };
 
@@ -97,8 +97,8 @@ export class Network extends WorkerEntrypoint {
   }
 
   /** The key that signed what was asked at `url` with `body`, by the `one-` headers it came with, or null. */
-  asker(url, headers, body) {
-    return asker(new Request(url, { headers }), body);
+  verifiedKey(url, headers, body) {
+    return verifiedKey(new Request(url, { headers }), body);
   }
 }
 

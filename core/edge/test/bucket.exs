@@ -1,5 +1,5 @@
 # As the server whose home `:home` is, with no credentials but its key: writes and reads a blob through what the
-# signer signs, shows the bucket itself refusing a second write and a write whose condition was dropped, and times
+# presigner signs, shows the bucket itself refusing a second write and a write whose condition was dropped, and times
 # a write. Run with `mix run --no-start`.
 Application.ensure_all_started(:req)
 {_, address} = Application.fetch_env!(:one_core, :bucket)
@@ -16,10 +16,10 @@ IO.puts("list: #{inspect(Bucket.list(key))}")
 IO.puts("remove: #{inspect(Bucket.remove(key))}, and then read: #{inspect(Bucket.read(key))}")
 :ok = Bucket.write(key, "third")
 
-# What the signer hands back for a write, used as its holder might try to.
+# What the presigner hands back for a write, used as its holder might try to.
 ask = JSON.encode!(%{write: key})
 %{body: %{"url" => url, "headers" => headers}} =
-  Req.post!(address <> "/signer/sign", body: ask, headers: Edge.signed("/signer/sign", ask))
+  Req.post!(address <> "/presigner/sign", body: ask, headers: Edge.signed("/presigner/sign", ask))
 
 put = fn url, headers -> Req.put!(url, headers: headers, body: "overwritten", decode_body: false, retry: false) end
 said = fn %{status: status, body: body} -> "#{status} #{Regex.run(~r/<Code>(.*?)<\/Code>/, body, capture: :all_but_first)}" end
@@ -36,6 +36,6 @@ IO.puts("the blob is still #{inspect(data)}")
 blob = :crypto.strong_rand_bytes(4096)
 time = fn work -> :timer.tc(work) |> elem(0) end
 writes = for n <- 1..20, do: time.(fn -> :ok = Bucket.write("#{key}/#{n}", blob) end)
-signs = for _ <- 1..20, do: time.(fn -> Req.post!(address <> "/signer/sign", body: ask, headers: Edge.signed("/signer/sign", ask)) end)
+signs = for _ <- 1..20, do: time.(fn -> Req.post!(address <> "/presigner/sign", body: ask, headers: Edge.signed("/presigner/sign", ask)) end)
 middle = fn times -> Float.round(Enum.at(Enum.sort(times), 10) / 1000, 1) end
-IO.puts("\na 4 KB write through signed access: middle #{middle.(writes)} ms of 20, of which asking the signer is #{middle.(signs)} ms")
+IO.puts("\na 4 KB write through signed access: middle #{middle.(writes)} ms of 20, of which asking the presigner is #{middle.(signs)} ms")
