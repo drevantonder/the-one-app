@@ -32,9 +32,18 @@ defmodule OneCore.Builds do
     end
   end
 
-  @doc "What this server says of itself as it starts: its build, its kind of machine and the device it's on, if any."
+  @doc """
+  What this server says of itself as it starts: its build, its kind of machine, the device it's on, if any, and
+  whether it was installed with `one serve on`, which is what takes the newest builds when it's asked to update.
+  """
   def started(key) do
-    said = %{build: build(), target: target(), device: Application.get_env(:one_core, :device)}
+    said = %{
+      build: build(),
+      target: target(),
+      device: Application.get_env(:one_core, :device),
+      installed: Application.get_env(:one_core, :installed, false)
+    }
+
     Servers.say("servers/#{key}/build", JSON.encode!(said))
   end
 

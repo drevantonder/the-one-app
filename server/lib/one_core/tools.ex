@@ -389,7 +389,7 @@ defmodule OneCore.Tools do
     on(inputs["server"], "install_service", inputs, asked, fn ->
       reaches!(asked, owner(), "owner")
       with {:error, why} <- Services.install(plugin(who, name), service), do: raise(why)
-      "#{service} is running on the server #{Server.key()}."
+      "#{service} is running on #{here()}."
     end)
   end
 
@@ -397,7 +397,7 @@ defmodule OneCore.Tools do
     on(inputs["server"], "remove_service", inputs, asked, fn ->
       reaches!(asked, owner(), "owner")
       with {:error, why} <- Services.remove(plugin(who, name), service), do: raise(why)
-      "#{service} no longer runs on the server #{Server.key()}."
+      "#{service} no longer runs on #{here()}."
     end)
   end
 
@@ -424,12 +424,15 @@ defmodule OneCore.Tools do
       reaches!(asked, owner(), "owner")
 
       if not Application.get_env(:one_core, :installed, false),
-        do: raise("The server #{Server.key()} wasn't installed with `one serve on`, so it doesn't update itself.")
+        do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
 
       IO.puts(Release.update_asked())
-      "The server #{Server.key()} is taking the newest builds, and answers again once it has."
+      "#{here()} is taking the newest builds, and answers again once it has."
     end)
   end
+
+  # This server, as a person picks it: what its machine is called, or its key where it has no name.
+  defp here, do: Servers.name(Server.key()) || Server.key()
 
   # Whose this server is: who it was started for.
   defp owner, do: hd(Servers.members(Server.key()))

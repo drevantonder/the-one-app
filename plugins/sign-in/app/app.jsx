@@ -37,7 +37,9 @@ const mine = createMemo(async () => {
     for (const server of list?.servers ?? []) {
       if (servers.has(server.server)) continue
       const runs = (theirs?.services ?? []).map((service) => ({ ...service, on: service.servers.includes(server.server) }))
-      servers.set(server.server, { ...server, id: server.server, for: who, here: server.server === here.server, behind: behind("server", server), services: runs })
+      // Only a server that was installed takes the newest build when it's asked.
+      const updates = server.installed ? behind("server", server) : undefined
+      servers.set(server.server, { ...server, id: server.server, for: who, here: server.server === here.server, behind: updates, services: runs })
     }
   }
   return { devices: rows, servers: [...servers.values()].toSorted((a, b) => b.here - a.here), here }

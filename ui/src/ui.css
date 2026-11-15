@@ -864,6 +864,8 @@ button.ui-box {
   flex: 1;
   min-width: 0;
   line-height: 1.35;
+  /* A name with nowhere to break, as a key or a link is, breaks where it reaches the edge. */
+  overflow-wrap: anywhere;
 }
 .ui-toast button {
   flex: none;
