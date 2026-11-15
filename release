@@ -92,7 +92,8 @@ for kind in "${kinds[@]}"; do
 
   release=$target/release-builds/$kind
   rm -rf "$release"
-  (cd core/server && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix release --overwrite --quiet --path "$release")
+  # The build's name is in the app's environment (`mix.exs`), which Mix writes again only when Elixir changed.
+  (cd core/server && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix do compile + compile.app --force + release --overwrite --quiet --path "$release")
   # The NIFs of OTP's own applications as they're built for that machine. Their code runs on any.
   for app in "$release"/lib/*; do
     [[ ! -d $vm/lib/$(basename "$app")/priv ]] || { rm -rf "$app/priv" && cp -R "$vm/lib/$(basename "$app")/priv" "$app/priv"; }
