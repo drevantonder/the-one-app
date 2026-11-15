@@ -25,6 +25,8 @@ there.
 two servers, with one that picks up what it wasn't told and a network nobody uses reading nothing,
 `server/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
 scheduled job across a takeover, on a folder or with `--address` through the signer,
+`server/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
+tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
 `address/proof/proof.sh` runs a whole address with nothing deployed, `address/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
 try everything it mustn't reach.
