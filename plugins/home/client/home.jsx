@@ -3,7 +3,7 @@
 // Touch and hold, or right-click, for what an app or a widget offers; hold and move to put it somewhere else.
 import { createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, client, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
+import { call, changed, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 
 const SIZES = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
@@ -213,13 +213,10 @@ function Adding() {
 function Home(props) {
   let strip
   const [at, setAt] = createSignal(0)
-  const [network, setNetwork] = createSignal("")
   const names = () => [...props.home.pages.map((page) => page.name), "Settings"]
   const go = (to, smooth = true) => strip.scrollTo({ left: Math.max(0, Math.min(names().length - 1, to)) * strip.clientWidth * (document.dir === "rtl" ? -1 : 1), behavior: smooth ? "smooth" : "instant" })
 
   onSettled(() => {
-    // Whose network this is: where its address is, or with none, the machine it's kept on.
-    client().then(({ network }) => setNetwork(network ? `at ${new URL(network).host}` : "on this computer"))
     const keys = (event) => {
       if (event.target.closest?.("input, textarea, dialog")) return
       if (event.key === "ArrowRight") go(at() + 1)
@@ -265,7 +262,7 @@ function Home(props) {
         </section>
       </div>
       <footer>
-        <p><span>{names()[at()]}</span><span class="network">{network()}</span></p>
+        <p>{names()[at()]}</p>
         <nav class="dots" onPointerDown={slide} aria-label="Pages">
           <For each={props.home.pages} keyed={(page) => page.who}>
             {(page, index) => <button type="button" class="dot" aria-label={page().name} aria-current={at() === index() ? "page" : undefined} onClick={press(() => go(index()))}><i /></button>}

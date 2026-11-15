@@ -128,34 +128,23 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A page's name is small above the dots, with whose network it's in, and the dots are a centred capsule, ending
-   in the cog for Settings. */
+/* A page's name is small above the dots, and the dots are a centred capsule, ending in the cog for Settings. */
 footer {
   display: grid;
   justify-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1.25rem 1rem;
 }
+/* A long name ends in an ellipsis. */
 footer p {
-  display: flex;
-  gap: 0.375rem;
   max-width: 100%;
   margin: 0;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  line-height: 1.25;
-}
-/* A long name ends in an ellipsis, once whose network it's in has given up its room. */
-footer p span {
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.network {
-  flex-shrink: 1000;
-  color: var(--muted-foreground);
-  font-weight: 400;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.25;
 }
 .dots {
   display: flex;
