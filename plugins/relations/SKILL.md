@@ -24,6 +24,8 @@ plugin deciding, nobody but the network's first owner does anything.
 - `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
   adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
   and `check` says whether someone may reach it.
+- `forget` removes every tuple that names someone taken out of the network, so whoever joins by their name next
+  inherits nothing. Taking someone out (`sign-in_remove_person`) calls it, and it refuses anyone still in.
 - `groups` lists the groups whoever asks is in, each with what it's called, its members and owners.
 - `group` makes a group called what it's given (The Smiths is `groups/the-smiths`), with whoever asks as its
   owner and first member. A member has a call run for the group, with the group's artifacts:

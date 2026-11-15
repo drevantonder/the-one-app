@@ -97,6 +97,17 @@ defmodule Relations do
         inputs: %{type: "object", properties: %{}}
       },
       %{
+        name: "forget",
+        description:
+          "Removes every tuple naming someone taken out of the network as who: the groups they were in, and what " <>
+            "was shared with them. Taking someone out calls it",
+        inputs: %{
+          type: "object",
+          properties: %{who: %{type: "string", pattern: "^users/[a-z][a-z0-9-]*$", description: "Who: users/<name>"}},
+          required: ["who"]
+        }
+      },
+      %{
         name: "link",
         description: "Makes a sharing link to an artifact. Whoever holds it reaches the artifact without signing in",
         inputs: %{
@@ -199,6 +210,18 @@ defmodule Relations do
 
   def call("members", %{"of" => of}, _call), do: raise("#{of} isn't a group or the network.")
 
+  # Someone out of the network is in nothing, so their name is free for someone new to join by and inherits none
+  # of it. Who's in the network is the plugin that signs people in's to say, so it's asked: it took them out first.
+  def call("forget", %{"who" => who}, call) do
+    if Enum.any?(OneCore.Call.tool(call, "sign-in", "everyone", %{}), &(&1["who"] == who)),
+      do: raise("#{who} is in the network. Taking them out with sign-in_remove_person forgets them here too.")
+
+    transaction(call, fn db ->
+      forgotten = query(db, "delete from tuples where who = ? returning artifact", [who])
+      "#{who} is in nothing now: #{length(forgotten)} tuples named them."
+    end)
+  end
+
   # A group is named after what it's called, in lowercase letters, digits and hyphens: The Smiths is
   # groups/the-smiths, and Wiśniewski groups/wisniewski.
   def call("group", %{"name" => called}, call) do
@@ -225,8 +248,10 @@ defmodule Relations do
       for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.for], []) -- [call.for]) do
         having = &for %{"who" => who} <- query(db, @having, [group, &1]), do: who
         # A group that sharing with it made, and not `group`, is called what it's named.
-        called = with [%{"called" => called}] <- query(db, "select called from names where artifact = ?", [group]),
-                      do: called, else: (_ -> String.replace_prefix(group, "groups/", ""))
+        called =
+          with [%{"called" => called}] <- query(db, "select called from names where artifact = ?", [group]),
+               do: called,
+               else: (_ -> String.replace_prefix(group, "groups/", ""))
 
         %{group: group, called: called, members: having.("member"), owners: having.("owner")}
       end

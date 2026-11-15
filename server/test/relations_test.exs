@@ -98,6 +98,34 @@ defmodule OneCore.RelationsTest do
   end
 
   @tag :tmp_dir
+  test "someone taken out of the network is in no group, and their name brings nothing to whoever joins by it next" do
+    # Signing in, as it says who's in the network: alice still is, and bob was taken out.
+    signing_in = """
+    defmodule SigningIn do
+      @behaviour OneCore.Plugin
+      @impl true
+      def tools, do: [%{name: "everyone", read_only: true, description: "everyone", inputs: %{type: "object"}}]
+      @impl true
+      def call("everyone", _inputs, _call), do: [%{"who" => "users/alice"}]
+    end
+    """
+
+    assert {:ok, 1, ""} = Deploy.deploy("network", "sign-in", %{"signing_in.ex" => signing_in})
+    note = write("1", @alice)
+    assert {:ok, "groups/family"} = call("relations_group", %{"name" => "family"}, @alice)
+    assert {:ok, _} = share("groups/family", "member", @bob, @alice)
+    assert {:ok, _} = share(note, "editor", @bob, @alice)
+
+    assert {:error, "users/alice is in the network." <> _} = call("relations_forget", %{"who" => @alice}, @alice)
+
+    assert {:ok, "users/bob is in nothing now: 2 tuples named them."} =
+             call("relations_forget", %{"who" => @bob}, @alice)
+
+    assert {:ok, [@alice]} = call("relations_members", %{"of" => "groups/family"}, @alice)
+    assert not reads?(note, @bob)
+  end
+
+  @tag :tmp_dir
   test "a group's members, a parent's relations and a sharing link's holder reach what a tuple names them for" do
     note = write("1", @alice)
 

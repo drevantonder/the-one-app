@@ -18,7 +18,7 @@ that one question for it, and a new device when they also say the code it shows 
 - `people` says who people are: the name each goes by, chosen as they joined, and their email where signing in
   has one. `name` changes the name your person goes by, when they ask. `everyone` lists everyone in the network
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their
-  devices, assistants and passkeys stop working, and what they made stays. Whoever invites does it.
+  devices, assistants and passkeys stop working, they're in no group and shared nothing, and what they made stays. Whoever invites does it.
 - A device that isn't in yet shows a code, and a link at the network's address, and waits. Its person opens the
   link where they sign in, on the device or any device of theirs, and says whether the code there matches. Pass
   both on as they are: the code is what keeps a stranger's device out.

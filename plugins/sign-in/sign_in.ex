@@ -166,6 +166,7 @@ defmodule SignIn do
     Call.reach(call, Artifact.name(call.own), "editor")
     if who == call.by, do: raise("You can't take yourself out of the network.")
     %{"removed" => name} = ask(%{ask: "remove_person", who: who})
+    Call.tool(call, "relations", "forget", %{"who" => who})
     "#{name} is out of the network. What they made stays."
   end
 
