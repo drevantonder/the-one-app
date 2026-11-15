@@ -18,7 +18,16 @@ defmodule OneCore.MixProject do
       aliases: [test: "test --no-start"],
       # A server installed on a machine (`one serve on`) is this, as `./release` builds it for each kind of machine:
       # the VM it runs on, ERTS, is the one `ONE_ERTS` names when it's built for another kind of machine than this.
-      releases: [one_core: [include_executables_for: [:unix], include_erts: System.get_env("ONE_ERTS") || true]],
+      # It runs with no distribution (`rel/env.sh.eex`): nothing reaches it as an Erlang node, so no cookie guards
+      # anything, and the one Mix puts on its command line, where every user of the machine sees it, is a word
+      # rather than a secret.
+      releases: [
+        one_core: [
+          include_executables_for: [:unix],
+          include_erts: System.get_env("ONE_ERTS") || true,
+          cookie: "no-distribution"
+        ]
+      ],
       # The plugins the proofs deploy are files to deploy, not tests.
       test_ignore_filters: [~r{^test/plugins/}]
     ]

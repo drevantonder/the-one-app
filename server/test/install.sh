@@ -2,10 +2,11 @@
 # Proves a server installs on a machine as one thing, with the one command, and updates in place. On a network
 # with its address on this machine (`./network --address`), a second machine, a home folder of its own whose PATH
 # has no Erlang, Elixir, Rust or Bun on it, and with only `one` from a build: turns itself into a server of the
-# network's (`one serve on`), which a real systemd user unit keeps running; runs a call and deploys an app through
-# that server alone; is killed and started again by systemd; takes a newer build when it's asked, while the
-# network's other server answers; goes back by itself from a build that can't start; and is removed, leaving
-# nothing behind. The builds are made by `./release` from this repo's commit and two made on top of it.
+# network's (`one serve on`), which a real systemd user unit keeps running; shows other users of the machine no
+# secret and listens as no Erlang node; runs a call and deploys an app through that server alone; is killed and
+# started again by systemd; takes a newer build when it's asked, while the network's other server answers; goes
+# back by itself from a build that can't start; and is removed, leaving nothing behind. The builds are made by
+# `./release` from this repo's commit and two made on top of it.
 #
 #     cargo build --release && mise exec -- server/test/install.sh
 #
@@ -101,6 +102,18 @@ unit=one-server-${server:0:12}.service
 echo "in $(since "$began"); systemd says it's $(systemctl --user is-active "$unit"), and enabled: $(systemctl --user is-enabled "$unit")"
 echo "it answers by its key, as build $(build_of "$server")"
 owner builds | grep -o "\"server\":\"$server\"" >/dev/null && echo "it's on the network's list of servers"
+
+say "What other users of the machine see of it"
+procs=$(cat "/sys/fs/cgroup$(systemctl --user show -p ControlGroup --value "$unit")/cgroup.procs" | paste -sd,)
+# Every process of the unit, as ps shows it to anyone: its cookie is the word the release names, never a secret.
+ps -o pid=,args= -p "$procs" | grep -o -- "-setcookie [^ ]*" | sort -u | sed 's/^/  /'
+ps -o args= -p "$procs" | grep -o -- "-setcookie [^ ]*" | grep -qv -- "-setcookie no-distribution$" &&
+  { echo "a cookie that isn't the release's word is on a command line" && exit 1; }
+# It reaches others by its key over UDP, and nothing listens as an Erlang node: no epmd, no distribution port.
+listening=$(ss -Htlnp | grep -E "pid=(${procs//,/|})," || true)
+[[ -z $listening ]] || { echo "it listens on TCP: $listening" && exit 1; }
+ps -o comm= -p "$procs" | grep -q epmd && { echo "epmd runs with it" && exit 1; }
+echo "  it listens on no TCP port, and no epmd runs with it"
 
 say "Through it alone: the network's other server is frozen"
 frozen=$(pgrep -f -- "network $folder/network server ")
