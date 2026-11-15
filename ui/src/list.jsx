@@ -55,7 +55,10 @@ function leave(list, row, before = null) {
 /// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, one grey line of
 /// `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With `href`
 /// it's a link to what it opens, with a chevron; with `onClick` the whole row is pressed and opens in place.
-/// `current` marks the one that's open beside the list, in a split.
+/// `current` marks the one that's open beside the list, in a split. `control` is a control before all of it,
+/// pressed apart from the row, as a checkbox that picks rows is: `control={<input type="checkbox" aria-label="On
+/// this claim" checked={...} onChange={...} />}`. It's drawn as the kit's, and the row's whole height in front of
+/// the row is its to press.
 export function Row(props) {
   const inside = () => (
     <>
@@ -78,6 +81,9 @@ export function Row(props) {
   )
   return (
     <div class="ui-row" role="listitem" data-current={props.current ? "" : undefined}>
+      <Show when={props.control}>
+        <label class="ui-choice control">{props.control}</label>
+      </Show>
       <Show when={props.href} fallback={
         <Show when={props.onClick} fallback={<div class="row">{inside()}</div>}>
           <button type="button" class="row press" aria-current={props.current ? "true" : undefined} onClick={(event) => props.onClick(event)}>{inside()}</button>

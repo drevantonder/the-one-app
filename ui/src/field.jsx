@@ -214,11 +214,19 @@ async function drawn(file, side) {
   return canvas
 }
 
-/// A photo as a JPEG no bigger than `side` pixels either way. Anything that isn't a picture, or can't be drawn,
-/// is as it was.
-async function fitted(file, side) {
+/// `const sent = await fitted(file, 2000)`: a photo as a JPEG no bigger than `side` pixels either way, before it's
+/// uploaded: a phone's photo is many times what reading one needs. A JPEG that's that small already, anything
+/// that isn't a picture, and one this device can't draw are as they were. `File`'s `fit` does this to what's
+/// chosen.
+export async function fitted(file, side) {
   if (!file.type.startsWith("image/")) return file
   try {
+    if (file.type === "image/jpeg") {
+      const image = await createImageBitmap(file)
+      const small = Math.max(image.width, image.height) <= side
+      image.close()
+      if (small) return file
+    }
     const canvas = await drawn(file, side)
     const photo = await new Promise((made) => canvas.toBlob(made, "image/jpeg", 0.8))
     return new File([photo], file.name.replace(/\.[^.]*$/, "") + ".jpg", { type: photo.type, lastModified: file.lastModified })

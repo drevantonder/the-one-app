@@ -129,13 +129,14 @@ html:has(.ui-dialog[open]) {
 }
 
 /* Where the keyboard is: a ring, red on what's wrong or can't be undone (`--ring-color`). */
-.ring {
+/* A row's control is the app's own input, and has it too. */
+:is(.ring, .ui-row > .control input) {
   outline: 3px solid transparent;
   transition-property: opacity, color, background-color, border-color, outline-color, box-shadow;
   transition-duration: var(--move-quick);
   transition-timing-function: var(--ease-quick);
 }
-.ring:focus-visible {
+:is(.ring, .ui-row > .control input):focus-visible {
   border-color: var(--ring-color, var(--ring));
   outline-color: color-mix(in oklab, var(--ring-color, var(--ring)) 50%, transparent);
 }
@@ -208,7 +209,9 @@ html:has(.ui-dialog[open]) {
   background: var(--accent);
   color: var(--accent-foreground);
 }
-@media (hover: hover) {
+/* Hovering shows only under a mouse or a trackpad: a touch screen says it hovers too, and leaves what was tapped
+   looking hovered. Every hover in the kit is behind this same query. */
+@media (hover: hover) and (pointer: fine) {
   .ui-button:hover:not(:disabled) {
     background: color-mix(in oklab, var(--primary) 90%, transparent);
   }
@@ -354,7 +357,7 @@ button.ui-box {
   border-radius: var(--radius-md);
   color: var(--muted-foreground);
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .ui-search > button:hover {
     color: var(--foreground);
   }
@@ -564,7 +567,7 @@ button.ui-box {
 .ui-file .native::file-selector-button {
   cursor: pointer;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .ui-file li button:hover:not(:disabled) {
     background: var(--accent);
     color: var(--accent-foreground);
@@ -871,7 +874,7 @@ button.ui-box {
   font-size: var(--text-base);
   font-weight: 500;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .ui-toast button:hover {
     background: var(--accent);
   }
@@ -901,6 +904,21 @@ button.ui-box {
 .ui-row + .ui-row {
   border-top: 1px solid var(--border);
 }
+/* A row with a control before it: the control's part is the row's whole height, pressed apart from the rest. */
+.ui-row:has(> .control) {
+  display: flex;
+}
+.ui-row > .control {
+  flex: none;
+  justify-content: center;
+  min-width: var(--control);
+  padding-inline-start: 0.25rem;
+}
+.ui-row > .control + .row {
+  flex: 1;
+  min-width: 0;
+  padding-inline-start: 0;
+}
 .ui-row > .row {
   display: flex;
   align-items: center;
@@ -917,7 +935,7 @@ button.ui-box {
 .ui-row > :is(a, button).row {
   cursor: pointer;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .ui-row > :is(a, button).row:hover {
     background: color-mix(in oklab, var(--accent) 50%, transparent);
   }
@@ -997,7 +1015,7 @@ button.ui-box {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .ui-screen > header > .back:hover {
     background: var(--accent);
   }
@@ -1190,7 +1208,7 @@ button.ui-box {
   border-radius: var(--radius-md);
   color: var(--muted-foreground);
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .ui-dialog header button:hover {
     background: var(--accent);
     color: var(--accent-foreground);

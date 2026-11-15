@@ -7,13 +7,14 @@
 /// it draws with from the kit: `import { Screen, List, Row, call } from "ui"`. The kit looks the same in every
 /// app, light and dark, under a finger and with a mouse, and right to left on `<html dir="rtl">`; an app lays out
 /// what's its own with its own CSS, from the kit's custom properties (`--foreground`, `--muted-foreground`,
-/// `--border`, `--warning`, `--radius`, `--gap`). A page shows pictures only from `data:` addresses and its
+/// `--border`, `--warning`, `--radius`, `--gap`), with any hover of its own behind `@media (hover: hover) and
+/// (pointer: fine)`, as the kit's is: a touch screen leaves what was tapped looking hovered. A page shows pictures only from `data:` addresses and its
 /// plugin's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
 /// (ark-ui.com/llms-solid.txt); the rest are the kit's own.
 export { call, changed, client, leave, open, showRecoveryKey, upload, useRecoveryKey } from "./bridge.js"
 export { words } from "./kit.js"
 export { Button, Icon, Spinner } from "./button.jsx"
-export { Checkbox, Field, File, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.jsx"
+export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.jsx"
 export { NumberInput } from "./number-input.jsx"
 export { createListCollection } from "./collection.js"
 export { Select } from "./select.jsx"
