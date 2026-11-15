@@ -321,10 +321,11 @@ async fn starts(app: &AppHandle, why: Option<NotLetIn>) -> (Url, Option<NotIn>) 
     }
 }
 
-/// Sends the window to `to`.
+/// Sends the window to `to`, in place of where it was: what it leaves (a code that's been answered, a network that
+/// didn't answer) is gone, so the device's own back doesn't lead there.
 fn go(app: &AppHandle, to: Url) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.navigate(to);
+        let _ = window.eval(format!("location.replace({})", Value::from(to.as_str())));
     }
 }
 
