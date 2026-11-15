@@ -1,0 +1,13 @@
+{
+  "name": "notifications",
+  "description": "Notifications' part at a network's address: it wakes phones and browsers through Apple's, Google's and the browsers' push services, whose keys only it holds.",
+  "private": true,
+  "type": "module",
+  "paths": [
+    "notifications"
+  ],
+  "dependencies": {
+    "@block65/webcrypto-web-push": "2.0.0",
+    "jose": "6.2.17"
+  }
+}

@@ -13,8 +13,8 @@
 // - `OWN` writes and removes blobs of its plugin's own artifact for the network, where its plugin's servers read.
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
 // - `RELAY` passes a call to a server and gives its answer, or tells every server something.
-import { cpSync, mkdirSync, rmSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { $, Glob } from "bun";
 
 const here = import.meta.dir;
@@ -77,9 +77,11 @@ const pieces = ["relay", "signer", "way-in", "web"].map((piece) => `${piece}/wra
 if (what === "dev") {
   process.exit(await wrangler("dev", ...["parts/gateway.jsonc", ...pieces, ...parts].flatMap((config) => ["-c", config]), ...rest));
 }
-// A Worker is deployed after the ones it's bound to, and the signer with its secrets, which only it holds.
+// A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
+// its `wrangler.jsonc`, which only it holds, such as the signer's and a plugin's part's keys to an outside service.
 for (const config of ["web/wrangler.jsonc", "signer/wrangler.jsonc", "relay/wrangler.jsonc", ...parts, "way-in/wrangler.jsonc", "parts/gateway.jsonc"]) {
-  const secrets = basename(dirname(config)) === "signer" ? ["--secrets-file", "signer/secrets"] : [];
+  const file = `${dirname(config)}/secrets`;
+  const secrets = existsSync(`${here}/${file}`) ? ["--secrets-file", file] : [];
   const failed = await wrangler("deploy", "-c", config, ...secrets);
   if (failed) process.exit(failed);
 }

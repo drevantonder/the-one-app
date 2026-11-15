@@ -13,6 +13,9 @@ exists and what was set aside is in `PRIOR-ART.md`.
 - **Signing in is Better Auth, in a Worker with a D1 database of its own**: the sign-in plugin's part at the
   address. It keeps passkeys, lets a new device in with its Device Authorization plugin (RFC 8628), and is the
   OAuth provider that MCP's authorization asks for.
+- **A notification reaches a computer through Tauri's notification plugin** while the app runs, and a phone
+  through APNs or FCM, whose token the app gets from `tauri-plugin-notifications`, since Tauri's own has no push.
+  The notifications plugin's part at the address sends there, and to browsers with Web Push.
 - **An app's UI is Solid 2.0, built by a server with Vite**, which Bun runs. Its components' behaviour is Zag's,
   in Ark UI's shape until Ark runs on Solid 2.0, when they import Ark's instead.
 

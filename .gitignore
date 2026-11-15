@@ -10,9 +10,10 @@ erl_crash.dump
 /server/tmp/
 # What Tauri writes as it builds
 /client/shell/gen/schemas/
-# What `wrangler dev` keeps, the signer's secrets as whoever deploys an address writes them, and each plugin's
-# part at the address as it's built
+# What `wrangler dev` keeps, the secrets of the signer and of a plugin's part at the address as whoever deploys an
+# address writes them, and each plugin's part at the address as it's built
 .wrangler/
 /address/signer/secrets
+/plugins/*/address/secrets
 /address/parts/
 /address/web/files/ui/

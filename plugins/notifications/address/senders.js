@@ -1,0 +1,115 @@
+// The push services a notification wakes a device through: Apple's (APNs), Google's (FCM) and a browser's (Web
+// Push). Each makes the one request its service documents, with `fetch` given, so a test sees each request as it
+// would go out. The keys are the Worker's secrets (README.md); a service whose keys aren't there fails, saying so.
+import { buildPushPayload } from "@block65/webcrypto-web-push";
+import { importPKCS8, SignJWT } from "jose";
+
+/**
+ * Wakes each of `devices` (`{ via, token }`, as the plugin keeps them) with `notification` (`{ title, text, app }`).
+ * Gives the tokens whose service says they're gone, which the plugin forgets, and why each failure failed.
+ */
+export async function send(fetch, env, devices, notification) {
+  const gone = [];
+  const failed = [];
+  await Promise.all(
+    devices.map(async ({ via, token }) => {
+      let outcome;
+      try {
+        outcome = await SENDERS[via](fetch, env, token, notification);
+      } catch (error) {
+        outcome = { failed: error.message };
+      }
+      if (outcome.gone) gone.push(token);
+      if (outcome.failed) failed.push({ token, why: outcome.failed });
+    }),
+  );
+  return { gone, failed };
+}
+
+// A sign-in each service gives, kept while it lasts, by whose it is.
+const kept = new Map();
+async function token(whose, make) {
+  const had = kept.get(whose);
+  if (had && had.until > Date.now()) return had.token;
+  const { token, lasts } = await make();
+  kept.set(whose, { token, until: Date.now() + lasts });
+  return token;
+}
+
+/**
+ * APNs, with a token from the team's .p8 key: an ES256 JWT, which Apple takes for up to an hour and refuses to
+ * have made more often than every 20 minutes, so it's kept 50.
+ */
+async function apns(fetch, env, device, { title, text, app }) {
+  if (!env.APNS_KEY) return { failed: "APNs isn't set up for this network" };
+  const bearer = await token("apns", async () => ({
+    token: await new SignJWT({ iss: env.APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) })
+      .setProtectedHeader({ alg: "ES256", kid: env.APNS_KEY_ID })
+      .sign(await importPKCS8(env.APNS_KEY, "ES256")),
+    lasts: 50 * 60_000,
+  }));
+  const host = env.APNS_SANDBOX ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  const answer = await fetch(`https://${host}/3/device/${device}`, {
+    method: "POST",
+    headers: {
+      authorization: `bearer ${bearer}`,
+      "apns-topic": env.APNS_TOPIC,
+      "apns-push-type": "alert",
+      "apns-priority": "10",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ aps: { alert: { title, ...(text && { body: text }) }, sound: "default" }, ...(app && { app }) }),
+  });
+  if (answer.ok) return {};
+  const { reason = "" } = await answer.json().catch(() => ({}));
+  if (answer.status === 410 || ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"].includes(reason)) return { gone: true };
+  if (["ExpiredProviderToken", "InvalidProviderToken"].includes(reason)) kept.delete("apns");
+  return { failed: `APNs answered ${answer.status} ${reason}`.trim() };
+}
+
+/** FCM's HTTP v1 API, with an OAuth token for the Firebase service account, from its RS256 JWT. */
+async function fcm(fetch, env, device, { title, text, app }) {
+  if (!env.FCM_ACCOUNT) return { failed: "FCM isn't set up for this network" };
+  const account = JSON.parse(env.FCM_ACCOUNT);
+  const bearer = await token("fcm", async () => {
+    const at = account.token_uri ?? "https://oauth2.googleapis.com/token";
+    const assertion = await new SignJWT({ scope: "https://www.googleapis.com/auth/firebase.messaging" })
+      .setProtectedHeader({ alg: "RS256", typ: "JWT" })
+      .setIssuer(account.client_email)
+      .setAudience(at)
+      .setIssuedAt()
+      .setExpirationTime("1h")
+      .sign(await importPKCS8(account.private_key, "RS256"));
+    const grant = { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion };
+    const answer = await fetch(at, { method: "POST", body: new URLSearchParams(grant) });
+    const given = await answer.json().catch(() => ({}));
+    if (!given.access_token) throw new Error(`Google gave FCM no token: ${given.error_description ?? answer.status}`);
+    return { token: given.access_token, lasts: (given.expires_in - 300) * 1000 };
+  });
+  const message = { token: device, notification: { title, ...(text && { body: text }) }, ...(app && { data: { app } }) };
+  const answer = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (answer.ok) return {};
+  const { error = {} } = await answer.json().catch(() => ({}));
+  const code = error.details?.find((detail) => detail.errorCode)?.errorCode ?? error.status ?? "";
+  if (answer.status === 404 || code === "UNREGISTERED") return { gone: true };
+  if (answer.status === 401) kept.delete("fcm");
+  return { failed: `FCM answered ${answer.status} ${code}`.trim() };
+}
+
+/** Web Push: RFC 8291's encryption to the browser's subscription, which is the token, and RFC 8292's VAPID. */
+async function webpush(fetch, env, device, notification) {
+  if (!env.VAPID_PRIVATE_KEY) return { failed: "Web Push isn't set up for this network" };
+  const subscription = JSON.parse(device);
+  const vapid = { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
+  const message = { data: JSON.stringify(notification), options: { ttl: 86_400, urgency: "high" } };
+  const answer = await fetch(subscription.endpoint, await buildPushPayload(message, subscription, vapid));
+  if (answer.ok) return {};
+  if (answer.status === 404 || answer.status === 410) return { gone: true };
+  return { failed: `the browser's push service answered ${answer.status}` };
+}
+
+const SENDERS = { apns, fcm, webpush };
