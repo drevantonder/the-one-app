@@ -685,6 +685,7 @@ dependencies = [
  "ignore",
  "iroh",
  "jni 0.21.1",
+ "libc",
  "ndk-context",
  "objc2-ui-kit",
  "reqwest",

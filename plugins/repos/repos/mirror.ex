@@ -218,6 +218,12 @@ defmodule Repos.Mirror do
     end
   end
 
+  # Where this server finds git, or a sentence that says it can't.
+  defp git_program do
+    System.find_executable("git") ||
+      raise "This server can't find git, which Repos needs: install it, then run `one serve on` again on its machine."
+  end
+
   @doc "Runs git as `git!/3` does, and gives what it printed and how it ended."
   def git(folder, args, options \\ []) do
     env = [{"GIT_CONFIG_NOSYSTEM", "1"}, {"GIT_CONFIG_GLOBAL", "/dev/null"}, {"GIT_TERMINAL_PROMPT", "0"}]
@@ -225,7 +231,7 @@ defmodule Repos.Mirror do
 
     case {options[:input], options[:from]} do
       {nil, nil} ->
-        System.cmd("git", args, cd: folder, env: env, stderr_to_stdout: !options[:binary])
+        System.cmd(git_program(), args, cd: folder, env: env, stderr_to_stdout: !options[:binary])
 
       {input, from} ->
         file = from || Path.join(System.tmp_dir!(), "repos-" <> Base.encode16(:crypto.strong_rand_bytes(8)))
@@ -233,7 +239,7 @@ defmodule Repos.Mirror do
         redirect = if options[:binary], do: "", else: " 2>&1"
 
         try do
-          System.cmd("sh", ["-c", ~s(exec git "$@" < "$0"#{redirect}), file | args], cd: folder, env: env)
+          System.cmd("sh", ["-c", ~s(exec "#{git_program()}" "$@" < "$0"#{redirect}), file | args], cd: folder, env: env)
         after
           if input, do: File.rm(file)
         end

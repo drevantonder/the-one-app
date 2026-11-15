@@ -39,6 +39,10 @@ url = "2"
 # Keys are wiped from memory when they're let go of.
 zeroize = "1"
 
+# Who's running this, and their login shell (`serving`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [build-dependencies]
 serde_json.workspace = true
 

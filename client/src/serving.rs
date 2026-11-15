@@ -56,11 +56,11 @@ pub async fn on(client: &Client) -> Result<String> {
         let build = here.take(build).await?;
         here.point("current", &build)?;
     }
-    // The server runs with what this was run with: the programs on its PATH, and the client it updates by.
+    // The server runs with the client it updates by, and finds programs where its person's terminal does.
     let mut said = vec![
         ("ONE_HOME", crate::home()?.display().to_string()),
         ("ONE_FOR", who.clone()),
-        ("PATH", env::var("PATH").unwrap_or_default()),
+        ("PATH", login_path().await?),
     ];
     // A network being built has a command say who it acts as, and so does what runs here for it.
     if let Ok(name) = env::var("ONE_AS") {
@@ -69,6 +69,33 @@ pub async fn on(client: &Client) -> Result<String> {
     system::start(&here, &key, &env::current_exe()?, &said)?;
     tool(client, "builds", json!({"server": key})).await.context("The server started, and didn't answer")?;
     Ok(format!("This device is a server for {who} now, and starts whenever it does. Its key: {key}\n{address}"))
+}
+
+/// The PATH its person has in a terminal on this machine, which their login shell sets, read as `serve on` runs, and
+/// again each time it's run. A server's services run programs a person installed (`git`, `go`, `rustc`, `swiftc`)
+/// wherever their shell finds them, which isn't on the bare PATH that ssh, or an app opened from the Dock, gives.
+/// It's read the way editors that run a person's tools read it (VS Code's shell environment): the shell started as a
+/// login and interactive one, its PATH printed between two marks, past whatever its startup files print.
+async fn login_path() -> Result<String> {
+    // The shell the system says is theirs, whatever started this.
+    let shell = unsafe {
+        let user = libc::getpwuid(libc::getuid());
+        ensure!(!user.is_null(), "this machine says nothing of who's running this");
+        std::ffi::CStr::from_ptr((*user).pw_shell).to_string_lossy().into_owned()
+    };
+    const MARK: &str = "one-path-6f0c";
+    let asked = Command::new(&shell)
+        .args(["-i", "-l", "-c", &format!("printf '%s%s%s' {MARK} \"$PATH\" {MARK}")])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let said = timeout(Duration::from_secs(10), asked)
+        .await
+        .with_context(|| format!("Your login shell, {shell}, didn't say its PATH within 10 seconds"))??;
+    let said = String::from_utf8_lossy(&said.stdout);
+    let path = said.split(MARK).nth(1).filter(|path| !path.is_empty());
+    Ok(path.with_context(|| format!("Your login shell, {shell}, didn't say its PATH"))?.to_owned())
 }
 
 /// Stops this device's server, takes it off the list of whoever it was for, which another of their servers does,
