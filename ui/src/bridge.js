@@ -105,7 +105,10 @@ export const leave = () => greet().then(() => tell("ui/notifications/request-tea
 export const open = (app, who = {}) =>
   greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, for: who.for, behind: who.behind }))
 
-/// `const { device, network } = await client()`: this device's key, as Devices lists it, and the network's
-/// address, if it has one. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
-/// `null` as the device is, and `client({ leave: true })` starts the client again once its device has been taken out.
+/// `const { device, network, build, server } = await client()`: this device's key, as Devices lists it, the
+/// network's address, if it has one, the build it's on, and its server's key if it's a server. `await client({
+/// theme: "dark" })` has every app drawn dark, or `"light"`, or with `null` as the device is, and `client({ leave:
+/// true })` starts the client again once its device has been taken out. `client({ serve: true })` makes this device
+/// a server of its person's and `false` stops it being one, and `client({ update: true })` has it take the newest
+/// builds: each answers `{ said }`, what it did, or throws why it couldn't.
 export const client = (change = {}) => greet().then(() => ask("one/client", change))

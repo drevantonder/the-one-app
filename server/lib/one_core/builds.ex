@@ -109,16 +109,20 @@ defmodule OneCore.Builds do
   def seen(_by, _device, _said), do: :ok
 
   @doc """
-  Which build each of `owner`'s servers runs and each of `by`'s devices last said it is, and the newest for each
-  kind of machine: what shows whether everything is on the same build.
+  Which build each of `owner`'s servers runs, with what its machine is called and whether it's on, and which each
+  of `by`'s devices last said it is, and the newest for each kind of machine: what shows whether everything is on
+  the same build.
   """
   def list(by, owner) do
     servers =
       for key <- Servers.acting(owner) do
-        case Bucket.read("servers/#{key}/build") do
-          {:ok, said, _tag} -> Map.put(JSON.decode!(said), "server", key)
-          :absent -> %{"server" => key}
-        end
+        said =
+          case Bucket.read("servers/#{key}/build") do
+            {:ok, said, _tag} -> JSON.decode!(said)
+            :absent -> %{}
+          end
+
+        Map.merge(said, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
       end
 
     devices =
@@ -128,4 +132,7 @@ defmodule OneCore.Builds do
 
     %{asked: Server.key(), build: build(), newest: newest(), servers: servers, devices: devices}
   end
+
+  # Whether a server is on, as `"on"`, or when it was last, in milliseconds since 1970, or `nil` if that isn't known.
+  defp seen(key), do: with(:on <- Servers.seen(key), do: "on")
 end

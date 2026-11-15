@@ -57,7 +57,8 @@ for (const [size, viewport] of Object.entries(sizes)) {
     await page.exposeFunction("asksWindow", async (command, args) => {
       if (command === "apps") return { ...(await ask("resources/list", said(args.who))), outdated: [] };
       if (command === "start") return {};
-      if (command === "client") return { device: "this-device", network: null };
+      // This device, as the proof that runs this says it is: ONE_DEVICE, its key, and ONE_NETWORK, its address.
+      if (command === "client") return { device: process.env.ONE_DEVICE ?? "this-device", network: process.env.ONE_NETWORK ?? null, build: process.env.ONE_BUILD ?? null, server: null };
       if (command === "ask") return ask(args.method, args.params);
       // Whether a tool only reads, as the server lists it: one that doesn't may have changed what a view was answered.
       if (command === "reads") return (reads ??= (await ask("tools/list")).tools.filter((tool) => tool.annotations.readOnlyHint).map((tool) => tool.name));

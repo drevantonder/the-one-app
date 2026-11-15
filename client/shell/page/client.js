@@ -221,6 +221,9 @@ async function answer(view, method, params) {
   // What an app is told of its client, and the few things one changes of it.
   if (method === "one/client") {
     if (params.leave) return invoke("enter")
+    // This device becomes a server of its person's, or stops being one, or takes the newest builds.
+    if ("serve" in params) return { said: await invoke("serve", { on: params.serve === true }) }
+    if (params.update) return { said: await invoke("update") }
     if ("theme" in params) {
       if (params.theme) localStorage.setItem("theme", params.theme)
       else localStorage.removeItem("theme")

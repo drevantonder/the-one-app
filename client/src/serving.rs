@@ -103,6 +103,13 @@ pub async fn update(client: &Client) -> Result<String> {
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
 }
 
+/// This device's server's key, if it's a server.
+pub fn server() -> Option<String> {
+    let here = Here::of(&crate::home().ok()?);
+    here.current().ok()?;
+    here.key().ok()
+}
+
 /// Keeps this device's server running, as the system runs it: tries a build there's one to try, starts the
 /// server, and takes the newest builds when it's asked. It ends when the server stops, for the system to start it
 /// again.

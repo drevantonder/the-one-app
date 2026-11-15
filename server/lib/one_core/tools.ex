@@ -186,8 +186,9 @@ defmodule OneCore.Tools do
       name: "builds",
       read_only: true,
       description: """
-      Lists the build each of your servers runs and each of your devices last said it is, and the newest for each
-      kind of machine, so it says whether everything is on the same build.
+      Lists the build each of your servers runs, with what its machine is called and whether it's on, and the
+      build each of your devices last said it is, and the newest for each kind of machine, so it says whether
+      everything is on the same build.
       A build is the commit it was built from. With `server`, that server answers, saying its own.
       """,
       inputs: %{

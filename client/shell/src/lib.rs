@@ -169,10 +169,30 @@ async fn again(views: State<'_, Views>, view: String) -> Result<(), ()> {
     Ok(())
 }
 
-/// This device's key, as its network knows it, and the network's address, if it has one.
+/// This device's key, as its network knows it, the network's address, if it has one, the build it's on, and its
+/// server's key, if it's a server.
 #[tauri::command]
 fn client(views: State<'_, Views>) -> Value {
-    json!({"device": views.client.key(), "network": views.client.address()})
+    json!({
+        "device": views.client.key(),
+        "network": views.client.address(),
+        "build": ::client::BUILD,
+        "server": ::client::serving::server(),
+    })
+}
+
+/// Makes this device a server of its person's, or with `on` false, no longer one, as `one serve on` and `one serve
+/// off` do. Gives what they say.
+#[tauri::command]
+async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
+    let done = if on { ::client::serving::on(&views.client).await } else { ::client::serving::off(&views.client).await };
+    done.map_err(|error| format!("{error:#}"))
+}
+
+/// Takes the newest builds for this device, as `one update` does. Gives what it says.
+#[tauri::command]
+async fn update(views: State<'_, Views>) -> Result<String, String> {
+    ::client::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))
 }
 
 /// Says whether the window is on screen. While it is, its views ask again when something changed.
@@ -443,6 +463,8 @@ pub fn run() {
             recovery_key,
             recover,
             client,
+            serve,
+            update,
             shown,
             close,
             enter,

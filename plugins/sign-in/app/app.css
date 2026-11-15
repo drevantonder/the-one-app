@@ -1,0 +1,6 @@
+/* What isn't a list stops at the width a list does, so a button or a prompt isn't a line across a wide window. */
+.readable {
+  display: grid;
+  gap: var(--gap);
+  max-width: var(--readable);
+}
