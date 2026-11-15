@@ -152,13 +152,13 @@ asks desktop sign-in devices
 browser alice "$link" matches
 answered desktop
 
-say "A device's pass to the relay lasts an hour, and the next is asked of a server before it ends"
-# How many minutes a device's pass has left, by when it says it ends. Ending it here is saying it ended earlier,
-# which the client believes of its own pass.
-left() { bun -e 'const { pass } = await Bun.file(process.argv[1]).json(); console.log(Math.round((JSON.parse(Buffer.from(pass, "base64url")).until - Date.now()) / 60000))' "$folder/$1/network"; }
+say "A device's token to the relay lasts an hour, and the next is asked of a server before it ends"
+# How many minutes a device's token has left, by when it says it ends. Ending it here is saying it ended earlier,
+# which the client believes of its own token.
+left() { bun -e 'const { token } = await Bun.file(process.argv[1]).json(); console.log(Math.round((JSON.parse(Buffer.from(token, "base64url")).until - Date.now()) / 60000))' "$folder/$1/network"; }
 echo "  desktop's ends in $(left desktop) minutes"
-bun -e 'const file = Bun.file(process.argv[1]), told = await file.json(), pass = JSON.parse(Buffer.from(told.pass, "base64url"))
-  await Bun.write(file, JSON.stringify({ ...told, pass: Buffer.from(JSON.stringify({ ...pass, until: Date.now() })).toString("base64url") }))' "$folder/desktop/network"
+bun -e 'const file = Bun.file(process.argv[1]), told = await file.json(), token = JSON.parse(Buffer.from(told.token, "base64url"))
+  await Bun.write(file, JSON.stringify({ ...told, token: Buffer.from(JSON.stringify({ ...token, until: Date.now() })).toString("base64url") }))' "$folder/desktop/network"
 may device desktop sign-in devices
 echo "  once it has ended, desktop is given the next, which ends in $(left desktop) minutes"
 
@@ -217,8 +217,8 @@ echo "  desktop keeps $(kept desktop) answers it was given for alice"
 may device laptop sign-in remove_device --device "$(key_of "$folder/desktop")"
 refused device desktop sign-in devices
 [[ $(kept desktop) == 0 ]] || { echo "the removed device still keeps $(kept desktop) of what alice was answered" && exit 1; }
-! grep -q '"pass"' "$folder/desktop/network" || { echo "the removed device still keeps its pass" && exit 1; }
-echo "  it keeps none of what it was answered for alice, nor its pass"
+! grep -q '"token"' "$folder/desktop/network" || { echo "the removed device still keeps its token" && exit 1; }
+echo "  it keeps none of what it was answered for alice, nor its token"
 may device laptop sign-in devices
 
 say "Let in as someone else's, it's theirs the moment they say its code matches"
@@ -228,7 +228,7 @@ asks desktop sign-in devices
 browser dave "$link" matches
 answered desktop
 grep -q '"who":"users/dave"' "$folder/desktop/network" || { echo "desktop doesn't know it's dave's" && exit 1; }
-echo "  without its pass being renewed, desktop knows it's dave's, and its answer above is his devices"
+echo "  without its token being renewed, desktop knows it's dave's, and its answer above is his devices"
 
 say "A stranger who knows a server's key and where it is, and dials it with a key of their own, is refused"
 echo "  the stranger knows $(plain <"$folder/only-server/servers" | cut -c1-90)…"

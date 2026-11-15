@@ -1,6 +1,6 @@
 defmodule OneCore.Edge do
   @moduledoc """
-  A server at its network's edge: it signs what it asks there with its key, and shows a pass that says why it's
+  A server at its network's edge: it signs what it asks there with its key, and shows a token that says why it's
   one of the network's own. The pieces of the edge check both (`core/edge/ask.js`, `core/edge/signer/signer.js`).
   """
   alias OneCore.{Iroh, Server}
@@ -38,36 +38,36 @@ defmodule OneCore.Edge do
               __STACKTRACE__
   end
 
-  @doc "The headers of an ask of `path` there, with `body`: this server's signature of it, and its pass."
+  @doc "The headers of an ask of `path` there, with `body`: this server's signature of it, and its token."
   def signed(path, body) do
     at = Integer.to_string(System.system_time(:millisecond))
     signature = sign("one/ask/1\n#{path}\n#{at}\n#{body}")
-    [{"one-key", key()}, {"one-at", at}, {"one-signature", signature}, {"one-pass", pass()}]
+    [{"one-key", key()}, {"one-at", at}, {"one-signature", signature}, {"one-token", token()}]
   end
 
   @doc """
-  This server's pass: the list of servers it's on. A network's first server shows the secret its edge was
+  This server's token: the list of servers it's on. A network's first server shows the secret its edge was
   deployed with too, the server's `:first` setting, which is what lets it write the network's first list.
   """
-  def pass do
+  def token do
     case Application.get_env(:one_core, :first) do
       nil -> encode(%{list: list()})
       first -> encode(%{list: list(), first: first})
     end
   end
 
-  # How long a client's pass lasts, in milliseconds. A client asks a server for the next half an hour before it
+  # How long a client's token lasts, in milliseconds. A client asks a server for the next half an hour before it
   # ends (`RENEW` in `core/client/src/lib.rs`), and one that's taken out of its network is given none: so it uses the
   # relay for an hour at most after that.
   @lasts :timer.hours(1)
 
-  @doc "A pass for the client whose key is `client`: this server's word for it, for an hour."
-  def pass(client) do
+  @doc "A token for the client whose key is `client`: this server's word for it, for an hour."
+  def token(client) do
     until = System.system_time(:millisecond) + @lasts
-    encode(%{list: list(), by: key(), until: until, signature: sign("one/pass/1\n#{client}\n#{list()}\n#{until}")})
+    encode(%{list: list(), by: key(), until: until, signature: sign("one/token/1\n#{client}\n#{list()}\n#{until}")})
   end
 
-  defp encode(pass), do: Base.url_encode64(JSON.encode!(pass), padding: false)
+  defp encode(token), do: Base.url_encode64(JSON.encode!(token), padding: false)
 
   defp key do
     {:ok, key} = Iroh.key(Server.key_file())

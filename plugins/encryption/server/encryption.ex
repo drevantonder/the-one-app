@@ -34,7 +34,7 @@ defmodule Encryption do
         # A server that's no longer chosen lets go of the keys it held, whatever still holds them.
         with {:refuse, _why} <- refused, do: GenServer.call(keys, :forget)
         chosen = servers(artifact)
-        :no_answer = Call.pass_to(call, chosen)
+        :no_answer = Call.forward(call, chosen)
 
         if chosen == [],
           do:
@@ -120,7 +120,7 @@ defmodule Encryption do
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
   defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
     {at, plugin} = OneCore.Plugins.added(call.for, encryption)
-    said = %{who: nil, for: User.owner(name), passed_on: true}
+    said = %{who: nil, for: User.owner(name), forwarded: true}
     ask = %{added: at, plugin: plugin, function: "looked", arguments: [name], _meta: said}
     for server <- servers -- [call.server], do: Server.request(server, "plugins/call", ask)
   end
@@ -137,8 +137,8 @@ defmodule Encryption do
 
     case Calls.call("relations", tool, inputs, {call.by, call.for}) do
       {:ok, _said} -> :ok
-      {:passed_on, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
-      {:passed_on, _result} -> :ok
+      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
+      {:forwarded, _result} -> :ok
       {:error, why} -> raise why
     end
   end

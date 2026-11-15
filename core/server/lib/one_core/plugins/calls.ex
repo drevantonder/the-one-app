@@ -13,14 +13,14 @@ defmodule OneCore.Plugins.Calls do
   @doc """
   Calls a plugin's tool for `asked`: who asked and who it's for, `{by, for}`, or one who that is both. Gives
   `{:ok, answer}`, or `{:error, why}` with what the caller is told. A call another server ran instead gives
-  `{:passed_on, result}`, that server's result. `passed_on` says another server passed this call on to this one,
-  and `:passed_back` that this one would pass it on in turn.
+  `{:forwarded, result}`, that server's result. `forwarded` says another server passed this call on to this one,
+  and `:forwarding_loop` that this one would pass it on in turn.
   """
-  def call(name, tool, inputs, asked, passed_on \\ false) do
-    run(name, tool, inputs, asked(asked), passed_on)
+  def call(name, tool, inputs, asked, forwarded \\ false) do
+    run(name, tool, inputs, asked(asked), forwarded)
   end
 
-  defp run(name, tool, inputs, {_by, who} = asked, passed_on) do
+  defp run(name, tool, inputs, {_by, who} = asked, forwarded) do
     Plugins.run(Plugins.chain(who), name, fn at, versions ->
       version = versions[name]
 
@@ -37,7 +37,7 @@ defmodule OneCore.Plugins.Calls do
           kept = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           try do
-            call = called(at, name, versions, ask, asked, passed_on)
+            call = called(at, name, versions, ask, asked, forwarded)
             answered = tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
             if kept != [], do: Server.tell_servers(Enum.uniq([at | Plugins.chain(who)]), "decided", kept)
             answered
@@ -111,16 +111,16 @@ defmodule OneCore.Plugins.Calls do
 
         case ended do
           {:ok, _answer} ->
-            Hooks.heard("called", Map.merge(about, %{"error" => nil, "passed_on" => false}), asked)
+            Hooks.heard("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), asked)
 
           {:error, why} ->
-            Hooks.heard("called", Map.merge(about, %{"error" => why, "passed_on" => false}), asked)
+            Hooks.heard("called", Map.merge(about, %{"error" => why, "forwarded" => false}), asked)
 
-          {:passed_on, result} ->
-            Hooks.heard("called", Map.merge(about, %{"error" => passed(result), "passed_on" => true}), asked)
+          {:forwarded, result} ->
+            Hooks.heard("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), asked)
 
           # It would have been passed on again, so the server that passed it here hears it.
-          :passed_back ->
+          :forwarding_loop ->
             :ok
         end
 
@@ -194,7 +194,7 @@ defmodule OneCore.Plugins.Calls do
   Calls a function of the plugin that `name` is for `at`, for a service of its own, with a call for `asked` and
   then `arguments`. Gives what `call/5` does.
   """
-  def function(at, name, function, arguments, asked, passed_on \\ false) do
+  def function(at, name, function, arguments, asked, forwarded \\ false) do
     asked = asked(asked)
 
     Plugins.run([at], name, fn at, versions ->
@@ -206,7 +206,7 @@ defmodule OneCore.Plugins.Calls do
 
         function ->
           ask = {"plugins/call", %{added: at, plugin: name, function: function, arguments: arguments}}
-          {:ok, apply(plugin, function, [called(at, name, versions, ask, asked, passed_on) | arguments])}
+          {:ok, apply(plugin, function, [called(at, name, versions, ask, asked, forwarded) | arguments])}
       end
     end)
   end
@@ -217,7 +217,7 @@ defmodule OneCore.Plugins.Calls do
   that no longer hooks into it has nothing to say. A hook gives no access of its own: a plugin that hears of an
   artifact changing is told only if it could already reach it, and isn't told what it changed itself.
   """
-  def hook(at, name, hook, about, asked, passed_on \\ false) do
+  def hook(at, name, hook, about, asked, forwarded \\ false) do
     asked = asked(asked)
 
     Plugins.run([at], name, fn at, versions ->
@@ -230,7 +230,7 @@ defmodule OneCore.Plugins.Calls do
           versions,
           {"hooks/call", %{added: at, plugin: name, hook: hook, about: about}},
           asked,
-          passed_on
+          forwarded
         )
 
       if hook in version.hooks and hears?(call, about),
@@ -250,11 +250,11 @@ defmodule OneCore.Plugins.Calls do
   server make each call, once. The call runs for whoever the plugin was added for, asked by nobody, and is never
   passed on: it's made where the schedule is kept.
   """
-  def schedule(at, name, passed_on \\ false) do
+  def schedule(at, name, forwarded \\ false) do
     clock = {nil, at}
 
     Plugins.run([at], name, fn at, versions ->
-      asked = called(at, name, versions, {"plugins/schedule", %{added: at, plugin: name}}, clock, passed_on)
+      asked = called(at, name, versions, {"plugins/schedule", %{added: at, plugin: name}}, clock, forwarded)
 
       fire = fn job ->
         with {:error, why} <- call(name, job.tool, job.inputs, clock, true),
@@ -286,7 +286,7 @@ defmodule OneCore.Plugins.Calls do
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. The
   # plugin's own artifact is the one for whoever it was added for, so the call is run by a server acting for them:
   # this one, or one that it's passed on to.
-  defp called(at, name, versions, ask, {by, who}, passed_on) do
+  defp called(at, name, versions, ask, {by, who}, forwarded) do
     own = "#{at}/own/#{name}"
 
     call = %Call{
@@ -300,10 +300,10 @@ defmodule OneCore.Plugins.Calls do
       who: versions[name].artifact,
       ask: ask,
       uses: for({used, version} <- versions, used != name, into: %{}, do: {used, {version.artifact, version.plugin}}),
-      passed_on: passed_on
+      forwarded: forwarded
     }
 
-    if Servers.here?(at), do: call, else: Call.pass_to(call, at)
+    if Servers.here?(at), do: call, else: Call.forward(call, at)
   end
 
   # Who asked and who for: one who is both.

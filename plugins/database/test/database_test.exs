@@ -105,7 +105,7 @@ defmodule OneCore.DatabaseTest do
 
     # What a server is asked each time a job is due. Its call can be made to wait before it writes.
     ask = fn server, now, wait ->
-      call = %{call(simulated, server) | passed_on: true}
+      call = %{call(simulated, server) | forwarded: true}
 
       fire = fn _job ->
         if wait do
@@ -391,7 +391,7 @@ defmodule OneCore.DatabaseTest do
       who: "network/plugins/simulated",
       ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},
       uses: %{"database" => {"network/plugins/database", run.database}},
-      passed_on: false
+      forwarded: false
     }
   end
 

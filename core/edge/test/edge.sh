@@ -108,17 +108,17 @@ say "A tool call through the relay, which can't read it"
 note=relayed-$(random 8)
 before=$(carried) woke=$(woken)
 one tally add --note "$note"
-echo "the relay was woken $(($(woken) - woke)) times to pass that on"
+echo "the relay was woken $(($(woken) - woke)) times to token that on"
 echo "the note in the call ($note) is in $(tail -c +$((before + 1)) "$work/wire" | grep -a -c "$note" || true) lines of the $(($(carried) - before)) bytes the wire to the edge carried meanwhile"
 one tally list
 
 say "A machine on no list"
-# The list a real client's pass names, which the stranger says it's on too.
-on_list=$(bun -e 'const { pass } = await Bun.file(process.argv[1]).json(); console.log(JSON.parse(atob(pass.replace(/-/g, "+").replace(/_/g, "/"))).list)' "$work/network/client/network")
+# The list a real client's token names, which the stranger says it's on too.
+on_list=$(bun -e 'const { token } = await Bun.file(process.argv[1]).json(); console.log(JSON.parse(atob(token.replace(/-/g, "+").replace(/_/g, "/"))).list)' "$work/network/client/network")
 (cd "$edge" && at client bun test/stranger.js $at_address "$on_list")
 mkdir "$work/stranger"
-printf '{"address":"%s","pass":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/stranger/network"
-echo "a client with a pass no server signed, asking which servers to reach:"
+printf '{"address":"%s","token":"%s"}' $at_address "$(printf '{"list":"%s"}' "$on_list" | base64 -w0)" >"$work/stranger/network"
+echo "a client with a token no server signed, asking which servers to reach:"
 ONE_HOME=$work/stranger at client "$root/target/release/one" tally list 2>&1 || true
 echo "a server with a key of its own, starting on this network with the first server's secret: $(cd "$root/core/server" && at server mix network "$work/stranger-server" --address $at_address --first "$first" 2>&1 | grep -m1 -o "This server isn't one of the network's yet" || true)"
 
@@ -160,13 +160,13 @@ ONE_HOME=$work/network/client at client dbus-run-session -- xvfb-run -a -s "-scr
 ' "$root/target/release/one" "$work" >/dev/null 2>&1 &
 wait_for "home opened" "$work/app.log"
 window() { at client env $(cat "$work/screen") xdotool search --name "The One App" "$@" >/dev/null; }
-# A second client of the network, which a server gives a pass as it gave the first: two programs can't be one
+# A second client of the network, which a server gives a token as it gave the first: two programs can't be one
 # client at the relay, and the app is the first.
 (cd "$root/core/server" && at server mix run --no-start -e "
   Application.put_env(:one_core, :home, \"$work/network/server\")
   {:ok, key} = OneCore.Iroh.key(\"$work/network/elsewhere/key\")
-  pass = OneCore.Edge.pass(key)
-  File.write!(\"$work/network/elsewhere/network\", JSON.encode!(%{address: \"$at_address\", pass: pass}))")
+  token = OneCore.Edge.token(key)
+  File.write!(\"$work/network/elsewhere/network\", JSON.encode!(%{address: \"$at_address\", token: token}))")
 calls=$work/network/elsewhere
 sleep 5
 echo "with the app open and on screen, and nothing changing: $(hourly)"

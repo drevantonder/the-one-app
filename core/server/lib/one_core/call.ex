@@ -18,14 +18,14 @@ defmodule OneCore.Call do
   plugins it uses, and whether another server passed it on.
 
   A call is passed between servers at most twice, so none goes round. A server that can't run it has one that can
-  run it instead (`pass_to/2`): `passed_on` is then `:to`. That one may still hand it to the one server that holds
-  what it needs (`pass_on/2`): `passed_on` is then `true`, and it goes no further.
+  run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
+  what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
   alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
   alias OneCore.Plugins.{Calls, Version}
 
-  @enforce_keys [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
-  defstruct [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :passed_on]
+  @enforce_keys [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
+  defstruct [:own, :added, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), for: String.t()}
 
@@ -53,8 +53,8 @@ defmodule OneCore.Call do
     case Calls.call(plugin, tool, inputs, {by, who}) do
       {:ok, answer} when is_binary(answer) -> answer
       {:ok, answer} -> JSON.decode!(JSON.encode!(answer))
-      {:passed_on, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
-      {:passed_on, %{"content" => [%{"text" => text} | _]}} -> decoded(text)
+      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
+      {:forwarded, %{"content" => [%{"text" => text} | _]}} -> decoded(text)
       {:error, why} -> raise why
     end
   end
@@ -99,7 +99,7 @@ defmodule OneCore.Call do
     if why = refused(call, name, relation), do: raise(why)
     # Its blobs are whoever's it is, whom this server may not act for. One that does runs the call.
     owner = User.owner(name) || "network"
-    if not Servers.here?(owner), do: pass_to(call, owner)
+    if not Servers.here?(owner), do: forward(call, owner)
     %Artifact{prefix: name <> "/", reached: {call.who, {by, who}, relation}}
   end
 
@@ -204,43 +204,43 @@ defmodule OneCore.Call do
   With servers' keys in `owner`'s place, it's one of those that runs it, for a plugin that knows which can: the
   ones that hold a key, say. `:no_answer` then means none of them ran it.
   """
-  def pass_to(%__MODULE__{passed_on: false} = call, servers) when is_list(servers) do
+  def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
     for server <- servers -- [Server.key()], do: :no_answer = asks(call.ask, {call.by, call.for}, server, "to")
     :no_answer
   end
 
-  def pass_to(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :passed_back})
-  def pass_to(%__MODULE__{} = call, owner), do: pass_to(call.ask, {call.by, call.for}, call.passed_on, owner)
+  def forward(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :forwarding_loop})
+  def forward(%__MODULE__{} = call, owner), do: forward(call.ask, {call.by, call.for}, call.forwarded, owner)
 
   @doc """
-  Has a server acting for `owner` run what was asked of this one instead, as `pass_to/2` does for a call: `ask` is
+  Has a server acting for `owner` run what was asked of this one instead, as `forward/2` does for a call: `ask` is
   its method and what it was asked with, for `asked`.
   """
-  def pass_to(ask, asked, passed_on, owner) do
-    if passed_on, do: throw({__MODULE__, :passed_back})
+  def forward(ask, asked, forwarded, owner) do
+    if forwarded, do: throw({__MODULE__, :forwarding_loop})
     for server <- Servers.acting(owner) -- [Server.key()], do: :no_answer = asks(ask, asked, server, "to")
     raise "No server acting for #{owner} answered"
   end
 
   @doc """
   Asks another server to run this call instead, for when what it needs is there. If that server runs it, the call
-  ends here with its answer, and nothing after `pass_on` runs.
+  ends here with its answer, and nothing after `forward_to` runs.
 
   `:no_answer` means it didn't run there: that server couldn't be reached, or would have passed it on in turn. A
   server that stops answering after it was asked raises, since it may have run.
   """
-  def pass_on(%__MODULE__{passed_on: true}, _server), do: throw({__MODULE__, :passed_back})
+  def forward_to(%__MODULE__{forwarded: true}, _server), do: throw({__MODULE__, :forwarding_loop})
 
-  def pass_on(%__MODULE__{ask: ask, for: who, by: by}, server), do: asks(ask, {by, who}, server, true)
+  def forward_to(%__MODULE__{ask: ask, for: who, by: by}, server), do: asks(ask, {by, who}, server, true)
 
-  # `passed_on` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
+  # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
-  defp asks({method, params}, {by, who}, server, passed_on) do
-    passed_back = Server.passed_back()
+  defp asks({method, params}, {by, who}, server, forwarded) do
+    forwarding_loop = Server.forwarding_loop()
 
-    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: passed_on, who: by, for: who})) do
-      {:ok, result} -> throw({__MODULE__, {:passed_on, result}})
-      {:error, ^passed_back, _why} -> :no_answer
+    case Server.request(server, method, Map.put(params, :_meta, %{forwarded: forwarded, who: by, for: who})) do
+      {:ok, result} -> throw({__MODULE__, {:forwarded, result}})
+      {:error, ^forwarding_loop, _why} -> :no_answer
       {:error, _code, why} -> raise why
       :unreachable -> :no_answer
       # A hook may be asked more than once for one moment, so one a server stopped answering is asked again.

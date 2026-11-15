@@ -36,7 +36,7 @@ defmodule OneCore.Server do
   def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
 
   @doc "The JSON-RPC error a server answers a call that was passed on to it and that it would pass on in turn."
-  def passed_back, do: -32001
+  def forwarding_loop, do: -32001
 
   @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
@@ -152,7 +152,7 @@ defmodule OneCore.Server do
 
   @impl true
   def init(nil) do
-    network = if at = Application.get_env(:one_core, :address), do: {at, Edge.pass()}
+    network = if at = Application.get_env(:one_core, :address), do: {at, Edge.token()}
     {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})

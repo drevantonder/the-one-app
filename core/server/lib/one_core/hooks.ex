@@ -96,7 +96,7 @@ defmodule OneCore.Hooks do
     {"called", :hears,
      """
      A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
-     which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `passed_on`
+     which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `forwarded`
      to another server to run, and its `trace`: its `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A
      call passed on is heard on both servers.
      """},
@@ -373,7 +373,7 @@ defmodule OneCore.Hooks do
   defp answered({at, plugin}, hook, about, asked) do
     case Calls.hook(at, plugin, hook, about, asked) do
       {:ok, answer} -> {:ok, answer}
-      {:passed_on, %{"answer" => answer}} -> {:ok, answer}
+      {:forwarded, %{"answer" => answer}} -> {:ok, answer}
       {:error, why} -> {:error, why}
     end
   end

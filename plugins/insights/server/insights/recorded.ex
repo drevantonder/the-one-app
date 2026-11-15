@@ -33,7 +33,7 @@ defmodule Insights.Recorded do
     attributes = %{"one.plugin" => plugin, "one.tool" => about["tool"]}
     now = System.os_time(:nanosecond)
     error = about["error"]
-    passed_on = about["passed_on"] == true
+    forwarded = about["forwarded"] == true
 
     span =
       Map.merge(trace, %{
@@ -43,14 +43,14 @@ defmodule Insights.Recorded do
         "end" => now,
         "attributes" =>
           Map.merge(attributes, %{"one.for" => User.owner(call.for) || "link"})
-          |> Map.merge(if(passed_on, do: %{"one.passed_on" => true}, else: %{})),
+          |> Map.merge(if(forwarded, do: %{"one.forwarded" => true}, else: %{})),
         "status" => %{"code" => if(error, do: "error", else: "ok"), "message" => short(error || "")},
         "events" => []
       })
 
     # A call passed on is measured where it ran.
     numbers =
-      if passed_on,
+      if forwarded,
         do: [],
         else: [
           {"one.tool.duration", Map.put(attributes, "one.outcome", if(error, do: "error", else: "ok")), took / 1000}

@@ -29,7 +29,7 @@ defmodule Database do
       # The call ends here if the server holding the lease runs it. If that one doesn't answer, this one takes
       # the lease.
       {:held_by, server} ->
-        :no_answer = Call.pass_on(call, server)
+        :no_answer = Call.forward_to(call, server)
         :ok = GenServer.call(lease, {:take_over, server}, :infinity)
         transaction(call, schema, fun)
     end
@@ -53,7 +53,7 @@ defmodule Database do
         schedule(call, jobs, fire)
 
       {:held_by, server} ->
-        :no_answer = Call.pass_on(call, server)
+        :no_answer = Call.forward_to(call, server)
         :ok = GenServer.call(lease, {:take_over, server}, :infinity)
         schedule(call, jobs, fire)
     end

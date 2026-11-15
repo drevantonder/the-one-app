@@ -353,7 +353,7 @@ defmodule OneCore.Plugin do
     there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server part reads what this
     part has to tell it, as `call.own` of the plugin added for the network. `env.NETWORK.servers(of)` gives the
     keys of the servers acting for a user, a group or the network, by their prefix (`users/alice/`).
-    `env.RELAY.pass(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if
+    `env.RELAY.forward(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if
     that server isn't up, and `env.RELAY.tell(message)` tells every server a notification.
   - The plugin's server part asks it over the web, signing what it asks as its server does at the edge
     (`OneCore.Edge.signed/2`). `env.NETWORK.asker(url, headers, body)` gives the key that signed it, or `null`.

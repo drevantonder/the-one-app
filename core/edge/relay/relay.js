@@ -57,8 +57,8 @@ export default class extends WorkerEntrypoint {
   endpoint(request, url) {
     const speaks = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((protocol) => protocol.trim());
     if (!speaks.includes(PROTOCOL)) return refuse(400, `The relay speaks ${PROTOCOL}`);
-    // iroh shows its pass as a bearer token, and in the URL from a browser, which can't set a header.
-    const pass = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? url.searchParams.get("token");
+    // iroh shows its token as a bearer token, and in the URL from a browser, which can't set a header.
+    const token = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? url.searchParams.get("token");
     const challenge = crypto.getRandomValues(new Uint8Array(16));
     const [theirs, ours] = Object.values(new WebSocketPair());
     ours.accept();
@@ -77,10 +77,10 @@ export default class extends WorkerEntrypoint {
       heard = Date.now();
       if (typeof data === "string") return ours.close(1003, "The relay takes binary frames");
       const frame = new Uint8Array(data);
-      if (!joined) return void (joined = this.join(ours, challenge, pass, frame));
+      if (!joined) return void (joined = this.join(ours, challenge, token, frame));
       const { relay, until } = (await joined) ?? {};
       if (!relay) return;
-      if (until < Date.now()) return ours.close(1008, "Its pass ended");
+      if (until < Date.now()) return ours.close(1008, "Its token expired");
       if (frame[0] === PING) {
         frame[0] = PONG;
         ours.send(frame);
@@ -96,9 +96,9 @@ export default class extends WorkerEntrypoint {
   /**
    * The answer to a challenge: the endpoint's key, and its signature of the challenge. One of the network's own is
    * joined to the relay: `{relay, until}`, the connection there that its datagrams are passed over, and when its
-   * pass ends if it does.
+   * token expires if it does.
    */
-  async join(ours, challenge, pass, frame) {
+  async join(ours, challenge, token, frame) {
     // The frame is postcard's: the type, the key's 32 bytes, then the signature as bytes with their length before.
     const key = hex.encode(frame.subarray(1, 33));
     const proved =
@@ -106,14 +106,14 @@ export default class extends WorkerEntrypoint {
       frame[0] === CLIENT_AUTH &&
       frame[33] === 64 &&
       (await signedBy(key, hex.encode(frame.subarray(34)), blake3(challenge, { context: utf8.encode(CHALLENGE) })));
-    const admitted = proved && (await this.env.NETWORK.admits(key, pass));
+    const admitted = proved && (await this.env.NETWORK.admits(key, token));
     if (!admitted) {
       const why = utf8.encode("This network doesn't know you");
       ours.send(Uint8Array.of(SERVER_DENIES_AUTH, why.length, ...why));
       return void ours.close(1008, "Not one of this network's");
     }
-    // A run of a client is on for the device it runs for, which its pass names, and a server for itself.
-    const [, device = key] = (pass ?? "").split(".");
+    // A run of a client is on for the device it runs for, which its token names, and a server for itself.
+    const [, device = key] = (token ?? "").split(".");
     const on = new URLSearchParams({ key, device, ...(admitted.until === undefined && { server: "yes" }) });
     const { webSocket: relay } = await this.relay().fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } });
     relay.accept();
@@ -130,8 +130,8 @@ export default class extends WorkerEntrypoint {
    * server isn't here. The wait is this Worker's, on a connection the relay holds asleep, so nothing is billed
    * for it.
    */
-  async pass(server, message) {
-    const { webSocket } = await this.relay().fetch(`https://relay/pass?to=${server}`, { headers: { upgrade: "websocket" } });
+  async forward(server, message) {
+    const { webSocket } = await this.relay().fetch(`https://relay/token?to=${server}`, { headers: { upgrade: "websocket" } });
     if (!webSocket) return null;
     webSocket.accept();
     const answered = new Promise((resolve) => {
@@ -158,7 +158,7 @@ export default class extends WorkerEntrypoint {
   /** A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. */
   async asked(request, url) {
     const key = await asker(request, "");
-    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
+    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
     return Response.json(await this.seen(keys.slice(0, 1000)));
   }
@@ -212,7 +212,7 @@ export class Relay extends DurableObject {
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
   async server(request) {
     const key = await asker(request, "");
-    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
+    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     for (const before of this.ctx.getWebSockets(`outside ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`outside ${key}`]);

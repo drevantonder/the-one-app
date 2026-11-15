@@ -45,7 +45,7 @@ defmodule Insights.Read do
   """
   def errors(batches, shown) do
     spans =
-      for span <- Enum.flat_map(batches, & &1["spans"]), failed?(span), span["attributes"]["one.passed_on"] != true do
+      for span <- Enum.flat_map(batches, & &1["spans"]), failed?(span), span["attributes"]["one.forwarded"] != true do
         %{
           where: span["name"],
           message: span["status"]["message"],

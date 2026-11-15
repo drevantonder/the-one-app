@@ -189,12 +189,12 @@ defmodule OneCore.WhoTest do
     # A run of a client has a key of its own, and is from the device that signed it, and only that one.
     {device, signing} = :crypto.generate_key(:eddsa, :ed25519)
     {device, run} = {Base.encode16(device, case: :lower), String.duplicate("ef", 32)}
-    vouch = &Base.encode16(:crypto.sign(:eddsa, :none, "one/run/1\n" <> &1, [signing, :ed25519]), case: :lower)
+    attestation = &Base.encode16(:crypto.sign(:eddsa, :none, "one/run/1\n" <> &1, [signing, :ed25519]), case: :lower)
     assert {:ok, :ok} = call("placer_place", %{"device" => device, "who" => "users/alice"}, OneCore.Test.owner())
-    assert ask(%{device: device, vouch: vouch.(run)}, run) == "users/alice"
-    assert ask(%{device: device, vouch: vouch.(other)}, run) == nobody
-    assert ask(%{device: device, vouch: String.duplicate("00", 64)}, run) == nobody
-    assert ask(%{device: stranger, vouch: vouch.(run)}, run) == nobody
+    assert ask(%{device: device, attestation: attestation.(run)}, run) == "users/alice"
+    assert ask(%{device: device, attestation: attestation.(other)}, run) == nobody
+    assert ask(%{device: device, attestation: String.duplicate("00", 64)}, run) == nobody
+    assert ask(%{device: stranger, attestation: attestation.(run)}, run) == nobody
     assert ask(%{device: device}, run) == nobody
 
     # Whose it is is kept, so a call asks nothing, until a tool of that plugin is called that doesn't only read:
@@ -249,7 +249,7 @@ defmodule OneCore.WhoTest do
 
     assert {:refused, "Only a server" <> _} = ask(%{who: "users/alice", for: "users/alice"})
     # What it passes on it has decided, so a group's member isn't asked about again, nor a link's holder refused.
-    assert ask(%{who: "users/bob", for: "groups/family", passed_on: true}, Server.key()) ==
+    assert ask(%{who: "users/bob", for: "groups/family", forwarded: true}, Server.key()) ==
              "users/bob for groups/family"
 
     assert ask(%{who: User.link("a-secret"), for: User.link("a-secret")}, Server.key()) == User.link("a-secret")

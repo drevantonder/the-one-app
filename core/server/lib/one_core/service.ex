@@ -33,7 +33,7 @@ defmodule OneCore.Service do
       raise "No server runs #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
-    said = %{who: call.by, for: call.for, passed_on: true}
+    said = %{who: call.by, for: call.for, forwarded: true}
     ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: said}
 
     case ask(servers, call.server, ask) do
@@ -77,7 +77,7 @@ defmodule OneCore.Service do
     answer =
       case Calls.function(added, name, "#{function}", json(arguments), {nil, who}) do
         {:ok, answer} -> json(answer)
-        {:passed_on, %{"answer" => answer}} -> answer
+        {:forwarded, %{"answer" => answer}} -> answer
         {:error, why} -> raise why
       end
 

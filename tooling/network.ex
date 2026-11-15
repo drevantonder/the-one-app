@@ -126,8 +126,8 @@ defmodule Mix.Tasks.Network do
       end
     end
 
-    # A client of a network with an address asks there which servers to reach, and gets its pass by signing in:
-    # one of a network being built is given its pass here, since nobody signs in to that. A server's pass for a
+    # A client of a network with an address asks there which servers to reach, and gets its token by signing in:
+    # one of a network being built is given its token here, since nobody signs in to that. A server's token for a
     # client says the server's list, so the one a network's own server gives lets a client in whoever its user
     # is. Without an address, a client is told here where the servers acting for the network are.
     client = Path.join(folder, "client")
@@ -139,7 +139,7 @@ defmodule Mix.Tasks.Network do
 
       address && options[:development] ->
         {:ok, key} = Iroh.key(Path.join(client, "key"))
-        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, pass: Edge.pass(key)}))
+        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, token: Edge.token(key)}))
 
       address ->
         File.write(Path.join(client, "network"), JSON.encode!(%{address: address}), [:exclusive])

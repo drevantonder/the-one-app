@@ -21,14 +21,14 @@ defmodule OneCore.User do
   def nobody, do: -32003
 
   @doc """
-  Who a request is by and who it's for: `{:ok, {by, for}, passed_on}`, or `{:error, why}`. `from` is the key of
+  Who a request is by and who it's for: `{:ok, {by, for}, forwarded}`, or `{:error, why}`. `from` is the key of
   whatever sent it, which its connection proved, or `nil` for what came in at the network's address over the
   web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a plugin's hook: a
   moment on any of the network's servers is about whoever it's about, so each of them is believed about that,
   where only one acting for someone is believed about what they asked for.
 
   - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on
-    what it was asked, having decided it, and `passed_on` says so: `:to` from a server that couldn't run it, and
+    what it was asked, having decided it, and `forwarded` says so: `:to` from a server that couldn't run it, and
     `true` from one that handed it to this one for what it holds (`OneCore.Call`). A scheduled job is asked by
     nobody, so its `who` is `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
@@ -36,7 +36,7 @@ defmodule OneCore.User do
     in, and is refused unless the server's `:development` setting is on.
   - `device`, in what came in at the network's address, is the device the edge says it's from: it proved
     that there, as a connection proves a key here. Over a connection, it's the device a run of a client runs for,
-    with `vouch` (`device/2`).
+    with `attestation` (`device/2`).
   - `for` names who else the request is for: a group, or the network.
 
   Otherwise it's from whoever's device `from` is.
@@ -51,7 +51,7 @@ defmodule OneCore.User do
         {:error, "Only a server acting for #{whose} says it asks for them"}
 
       is_binary(said["for"]) ->
-        {:ok, {by, said["for"]}, if(said["passed_on"] == "to", do: :to, else: said["passed_on"] == true)}
+        {:ok, {by, said["for"]}, if(said["forwarded"] == "to", do: :to, else: said["forwarded"] == true)}
 
       true ->
         {:error, "A server says who it asks for too"}
@@ -93,14 +93,14 @@ defmodule OneCore.User do
   there over the web, and otherwise the key the connection proved. A run of a client has a key of its own, since
   a device runs many at once and each is reached by its key, and a request from one names the device it runs for
   with that device's signature of `one/run/1`, a line, and the run's key (`core/client/src/lib.rs`). A run whose device
-  doesn't vouch for it is nobody's.
+  doesn't attestation for it is nobody's.
   """
   def device(nil, %{"device" => device}) when is_binary(device), do: device
 
-  def device(from, %{"device" => device, "vouch" => vouch}) when is_binary(from) do
-    with true <- is_binary(device) and is_binary(vouch),
+  def device(from, %{"device" => device, "attestation" => attestation}) when is_binary(from) do
+    with true <- is_binary(device) and is_binary(attestation),
          {:ok, key} <- Base.decode16(device, case: :lower),
-         {:ok, signature} <- Base.decode16(vouch, case: :lower),
+         {:ok, signature} <- Base.decode16(attestation, case: :lower),
          true <- byte_size(key) == 32 and byte_size(signature) == 64,
          true <- :crypto.verify(:eddsa, :none, "one/run/1\n" <> from, signature, [key, :ed25519]) do
       device

@@ -270,31 +270,31 @@ defmodule OneCore.Tools do
   Calls one of One Core's own tools for `asked`, who asked and who for. Gives what `OneCore.Plugins.Calls.call/5` does,
   or `:none` if `name` isn't one.
   """
-  def call(name, inputs, asked, passed_on \\ false) do
+  def call(name, inputs, asked, forwarded \\ false) do
     case Enum.find(@taking, &(&1.name == name)) do
       nil ->
         :none
 
       tool ->
         # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
-        pass = &Call.pass_to({"tools/call", %{name: name, arguments: inputs}}, asked, passed_on, &1)
+        forward = &Call.forward({"tools/call", %{name: name, arguments: inputs}}, asked, forwarded, &1)
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in ["deploy", "remove"], do: {User.owner(elem(asked, 1)), inputs["name"]}
 
-        Calls.tool(tool, about, asked, nil, &run(name, &1, asked, pass), apart)
+        Calls.tool(tool, about, asked, nil, &run(name, &1, asked, forward), apart)
     end
   end
 
-  # Has a server acting for `owner` run this call, if this one doesn't act for them: `pass` ends it here.
-  defp at(owner, pass), do: Servers.here?(owner) || pass.(owner)
+  # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
+  defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
 
   # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is added for whoever it's
   # deployed for.
-  defp run("deploy", %{"name" => name, "files" => files}, {_by, who} = asked, pass) do
+  defp run("deploy", %{"name" => name, "files" => files}, {_by, who} = asked, forward) do
     case Plugins.plugin(who, name) do
-      nil -> at(who, pass) && reaches!(asked, who, "owner")
-      plugin -> at(User.owner(plugin), pass) && reaches!(asked, plugin, "editor")
+      nil -> at(who, forward) && reaches!(asked, who, "owner")
+      plugin -> at(User.owner(plugin), forward) && reaches!(asked, plugin, "editor")
     end
 
     case Deploy.deploy(who, name, Store.received(files)) do
@@ -315,17 +315,17 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("add", %{"plugin" => plugin} = inputs, {_by, who} = asked, pass) do
+  defp run("add", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
-    at(who, pass)
+    at(who, forward)
     opens!(asked, plugin)
     reaches!(asked, who, "owner")
     with {:error, why} <- Added.add(who, name, plugin), do: raise(why)
     "#{plugin} is added for #{who}, as #{name}."
   end
 
-  defp run("remove", %{"name" => name}, {_by, who} = asked, pass) do
-    at(who, pass)
+  defp run("remove", %{"name" => name}, {_by, who} = asked, forward) do
+    at(who, forward)
     reaches!(asked, who, "owner")
     with {:error, why} <- Added.remove(who, name), do: raise(why)
     "#{name} is removed from what's added for #{who}."
@@ -333,10 +333,10 @@ defmodule OneCore.Tools do
 
   # A file sent this way lands in the plugin's own artifact, for whoever it was added for, under a name nobody
   # could guess.
-  defp run("upload", %{"plugin" => plugin}, {_by, who}, pass) do
+  defp run("upload", %{"plugin" => plugin}, {_by, who}, forward) do
     with %{^plugin => version} <- Plugins.running(who),
          {added, ^plugin} <- Plugins.added(who, version.artifact) do
-      at(added, pass)
+      at(added, forward)
       name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
       own = %Artifact{prefix: "#{added}/own/#{plugin}/"}
       JSON.encode!(Map.put(Artifact.link(own, name, :write), :upload, name))
@@ -347,8 +347,8 @@ defmodule OneCore.Tools do
 
   # Whoever a server acts for put it on their list, and its owner chose them. A server with no members yet is a
   # new one, which whoever adds it first is bringing.
-  defp run("add_server", %{"key" => key}, {_by, who} = asked, pass) do
-    at(who, pass)
+  defp run("add_server", %{"key" => key}, {_by, who} = asked, forward) do
+    at(who, forward)
     reaches!(asked, who, "owner")
 
     Servers.forget()
@@ -364,8 +364,8 @@ defmodule OneCore.Tools do
   end
 
   # The server taken off is told too, so that it stops acting for them at once.
-  defp run("remove_server", %{"key" => key}, {_by, who} = asked, pass) do
-    at(who, pass)
+  defp run("remove_server", %{"key" => key}, {_by, who} = asked, forward) do
+    at(who, forward)
     reaches!(asked, who, "owner")
     acting = Servers.acting(who)
     with {:error, why} <- Servers.remove(key, who), do: raise(why)
@@ -414,8 +414,8 @@ defmodule OneCore.Tools do
   defp run("download", %{"target" => target}, _asked, _pass), do: JSON.encode!(Builds.download(target))
 
   # What the network's servers run is the network's.
-  defp run("publish", %{"builds" => builds}, asked, pass) do
-    at("network", pass)
+  defp run("publish", %{"builds" => builds}, asked, forward) do
+    at("network", forward)
     reaches!(asked, "network", "owner")
 
     case Builds.publish(builds) do
@@ -485,7 +485,7 @@ defmodule OneCore.Tools do
       here.()
     else
       case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: by, for: who}}) do
-        {:ok, result} -> throw({Call, {:passed_on, result}})
+        {:ok, result} -> throw({Call, {:forwarded, result}})
         {:error, _code, why} -> raise why
         down -> raise Server.said(down, server)
       end

@@ -55,7 +55,7 @@ async function mcp(request, auth, url) {
     const body = await request.text();
     const device = await signer(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    return pass(body, device, [NETWORK]);
+    return forward(body, device, [NETWORK]);
   }
 
   // An assistant somewhere else shows the token it was given when a person let it in. One they've since removed
@@ -64,7 +64,7 @@ async function mcp(request, auth, url) {
   const let_in = requireMcpAuth(
     auth,
     async (request, claims) => {
-      const answer = await pass(await request.text(), await assistant(claims.azp, claims.sub), [`${claims.who}/`, NETWORK]);
+      const answer = await forward(await request.text(), await assistant(claims.azp, claims.sub), [`${claims.who}/`, NETWORK]);
       if (!(await nobodys(answer))) return answer;
       const challenge = `Bearer error="invalid_token", resource_metadata="${url.origin}/.well-known/oauth-protected-resource/mcp"`;
       return new Response(null, { status: 401, headers: { "www-authenticate": challenge } });
@@ -78,7 +78,7 @@ async function mcp(request, auth, url) {
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `device`, and answers what the server
  * did. What's asked says which device it's from and who it's for, and nothing else of itself.
  */
-async function pass(message, device, of) {
+async function forward(message, device, of) {
   let call;
   try {
     call = JSON.parse(message);
@@ -91,7 +91,7 @@ async function pass(message, device, of) {
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
   const servers = new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat());
   for (const server of servers) {
-    const answer = await env.RELAY.pass(server, message);
+    const answer = await env.RELAY.forward(server, message);
     if (answer === null) continue;
     // A notification has no answer.
     if (answer === "") return new Response(null, { status: 202 });

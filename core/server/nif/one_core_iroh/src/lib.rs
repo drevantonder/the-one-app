@@ -83,7 +83,7 @@ fn sign(key_file: String, message: Binary) -> Result<String, String> {
 }
 
 /// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
-/// `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, its address and the pass
+/// `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, its address and the token
 /// shown there, it's reached through the relay at that address too, and hears what outsiders ask there, whose `from`
 /// is `nil`. It gives the endpoint once it's connected there, since until then the network's other servers know it as
 /// off and don't pass it what they're asked: its address, as the JSON a client is told it in, and the endpoint.
@@ -94,7 +94,7 @@ fn start(
     asked: LocalPid,
 ) -> Result<(ResourceArc<Reached>, String), String> {
     RUNTIME.block_on(async {
-        let network = network.map(|(address, pass)| Network { address, pass });
+        let network = network.map(|(address, token)| Network { address, token });
         let key = client::key(Path::new(&key_file)).map_err(|error| format!("{error:#}"))?;
         let endpoint = client::endpoint(key, network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;

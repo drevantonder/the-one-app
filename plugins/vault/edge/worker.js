@@ -33,7 +33,7 @@ async function back(asked) {
   const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call });
   const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers(NETWORK))]);
   for (const server of servers) {
-    const answer = await env.RELAY.pass(server, message);
+    const answer = await env.RELAY.forward(server, message);
     if (answer === null) continue;
     const { result, error } = JSON.parse(answer);
     const text = result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened.";

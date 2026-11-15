@@ -32,7 +32,7 @@ export default {
     // Whose a request is, is a server's to say: one acting for whoever the link leads to, or for the network.
     const servers = new Set([...(await env.NETWORK.servers(of)), ...(await env.NETWORK.servers(NETWORK))]);
     for (const server of servers) {
-      const answer = await env.RELAY.pass(server, message);
+      const answer = await env.RELAY.forward(server, message);
       if (answer === null) continue;
       // A notification has no answer.
       if (answer === "") return new Response(null, { status: 202 });

@@ -111,12 +111,12 @@ mkdir -p "$machine/home" "$machine/bin"
 gzip -dc "$CARGO_TARGET_DIR/builds/$a/one-$kind.gz" >"$machine/bin/one"
 chmod +x "$machine/bin/one"
 home=$machine/home/$data/app.theone.client
-# It's one of the network's devices: a network being built gives its device a pass as it's started, as `mix
+# It's one of the network's devices: a network being built gives its device a token as it's started, as `mix
 # network` gives its own client one.
 key=$(cd "$root/core/server" && mix run --no-start -e "
   {:ok, key} = OneCore.Iroh.key(\"$home/key\")
   Application.put_env(:one_core, :home, \"$folder/network/server\")
-  File.write!(\"$home/network\", JSON.encode!(%{address: \"$(grep -o '"address":"[^"]*"' "$client/network" | cut -d'"' -f4)\", pass: OneCore.Edge.pass(key)}))
+  File.write!(\"$home/network\", JSON.encode!(%{address: \"$(grep -o '"address":"[^"]*"' "$client/network" | cut -d'"' -f4)\", token: OneCore.Edge.token(key)}))
   IO.puts(key)")
 # Each command there is given five minutes.
 on_machine() {

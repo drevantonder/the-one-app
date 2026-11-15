@@ -45,7 +45,7 @@ pub fn target() -> String {
     format!("{}-{}", env::consts::OS, env::consts::ARCH)
 }
 
-/// What a device says of itself as it asks for its pass, which the network keeps so a list of its devices says
+/// What a device says of itself as it asks for its token, which the network keeps so a list of its devices says
 /// which build each is: its build, its kind of machine and its name.
 fn said() -> Value {
     json!({"build": BUILD, "target": target(), "name": name()})
@@ -72,15 +72,15 @@ const IDLE: Duration = Duration::from_secs(2);
 /// server is found where it starts again.
 const SILENT: Duration = Duration::from_secs(3);
 
-/// A network's address, and the pass this machine shows there: what says it's one of the network's own.
+/// A network's address, and the token this machine shows there: what says it's one of the network's own.
 #[derive(Clone, Deserialize)]
 pub struct Network {
     pub address: String,
-    pub pass: String,
+    pub token: String,
 }
 
 impl Network {
-    /// The headers of an ask of `path` at the address, with `body`: `key`'s signature of it, and the pass. The pieces
+    /// The headers of an ask of `path` at the address, with `body`: `key`'s signature of it, and the token. The pieces
     /// there check both (`core/edge/ask.js`), and a server's Elixir signs the same bytes (`OneCore.Edge`).
     pub fn signed(&self, key: &SecretKey, path: &str, body: &str) -> Result<[(&'static str, String); 4]> {
         let at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis().to_string();
@@ -89,14 +89,14 @@ impl Network {
             ("one-key", key.public().to_string()),
             ("one-at", at),
             ("one-signature", hex(&signature.to_bytes())),
-            ("one-pass", self.pass.clone()),
+            ("one-token", self.token.clone()),
         ])
     }
 
-    /// What a run of the client on the device with the key `device` shows the relay here, which `vouch` is the
-    /// device's word for: the device's pass, the device's key and the vouch, joined by dots.
-    fn shown(&self, device: &SecretKey, vouch: &str) -> Self {
-        Self { address: self.address.clone(), pass: format!("{}.{}.{vouch}", self.pass, device.public()) }
+    /// What a run of the client on the device with the key `device` shows the relay here, which `attestation` is the
+    /// device's word for: the device's token, the device's key and the attestation, joined by dots.
+    fn shown(&self, device: &SecretKey, attestation: &str) -> Self {
+        Self { address: self.address.clone(), token: format!("{}.{}.{attestation}", self.token, device.public()) }
     }
 
     /// The servers acting for `of`, a user's or a group's prefix, as the signer at the address says: the ones on their
@@ -127,13 +127,13 @@ impl Network {
 }
 
 /// What a client keeps of its network, in the file `network` of its home: the network's address, which whatever
-/// set the client up put there, and once the device is someone's, its pass to the relay there, whose it is and
+/// set the client up put there, and once the device is someone's, its token to the relay there, whose it is and
 /// the build it was when it got that, which it said as it asked.
 #[derive(Clone, Serialize, Deserialize)]
 struct Told {
     address: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pass: Option<String>,
+    token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     who: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -323,7 +323,7 @@ impl std::error::Error for NotApproved {}
 /// Asks the network's edge at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
 async fn ask_edge(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {
     let body = body.to_string();
-    let network = Network { address: address.to_owned(), pass: String::new() };
+    let network = Network { address: address.to_owned(), token: String::new() };
     let mut asked = web()?
         .post(format!("{}{path}", address.trim_end_matches('/')))
         .timeout(CONNECT * 3)
@@ -336,46 +336,46 @@ async fn ask_edge(address: &str, key: &SecretKey, path: &str, body: Value) -> Re
 }
 
 impl Told {
-    /// How long the pass this client has lasts before it's renewed, by when it says it ends: nothing if it has none.
+    /// How long the token this client has lasts before it's renewed, by when it says it ends: nothing if it has none.
     fn left(&self) -> Duration {
         self.ends().duration_since(SystemTime::now() + RENEW).unwrap_or_default()
     }
 
-    /// When the pass this client has ends, as it says: at once if it has none.
+    /// When the token this client has ends, as it says: at once if it has none.
     fn ends(&self) -> SystemTime {
-        let said = self.pass.as_ref().and_then(|pass| BASE64URL_NOPAD.decode(pass.as_bytes()).ok());
+        let said = self.token.as_ref().and_then(|token| BASE64URL_NOPAD.decode(token.as_bytes()).ok());
         let until =
             said.and_then(|said| serde_json::from_slice::<Value>(&said).ok()).and_then(|said| said["until"].as_u64());
         UNIX_EPOCH + Duration::from_millis(until.unwrap_or_default())
     }
 
-    /// Asks the network's edge for this device's pass, signed with its key, and keeps it in `home` with whose
+    /// Asks the network's edge for this device's token, signed with its key, and keeps it in `home` with whose
     /// device it is (`took`). A device that's nobody's there asks for a code to be let in by, and keeps nothing of
     /// whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
-        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"build": said()}});
+        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/token", "params": {"build": said()}});
         let (_, answer) = ask_edge(&self.address, key, "/mcp", ask).await?;
         if answer["error"]["code"] == NOBODY {
             if self.who.is_some() {
-                (self.pass, self.who) = (None, None);
+                (self.token, self.who) = (None, None);
                 self.keep(home)?;
             }
             bail!(DeviceAuthorization::asked(&self.address, key).await?)
         }
         if answer["result"].is_null() {
-            bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no pass"))
+            bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
         }
         self.took(&answer["result"], home)
     }
 
-    /// Keeps a pass this device was given, `{pass, who}`, in `home`. Once the device is someone else's, what it kept
+    /// Keeps a token this device was given, `{token, who}`, in `home`. Once the device is someone else's, what it kept
     /// of whoever's it was goes.
     fn took(&mut self, given: &Value, home: &Path) -> Result<()> {
-        let (Some(pass), Some(who)) = (given["pass"].as_str(), given["who"].as_str()) else {
-            bail!("this device was given no pass")
+        let (Some(token), Some(who)) = (given["token"].as_str(), given["who"].as_str()) else {
+            bail!("this device was given no token")
         };
         let someone_else = self.who.as_deref() != Some(who);
-        (self.pass, self.who, self.build) = (Some(pass.to_owned()), Some(who.to_owned()), Some(BUILD.to_owned()));
+        (self.token, self.who, self.build) = (Some(token.to_owned()), Some(who.to_owned()), Some(BUILD.to_owned()));
         if someone_else { self.keep(home) } else { write(&home.join("network"), &serde_json::to_vec(self)?) }
     }
 
@@ -409,11 +409,11 @@ fn hex(bytes: &[u8]) -> String {
 pub async fn endpoint(key: SecretKey, network: Option<&Network>) -> Result<Endpoint> {
     let mut probes = NetReportConfig::minimal();
     let relay = match network {
-        Some(Network { address, pass }) => {
+        Some(Network { address, token }) => {
             let address = address.parse().with_context(|| format!("{address} isn't a network's address"))?;
             // iroh takes the relay it timed as its own, so with none timed it would have none.
             probes.https_probes = true;
-            RelayMode::Custom(RelayConfig::new(address, None).with_auth_token(pass).into())
+            RelayMode::Custom(RelayConfig::new(address, None).with_auth_token(token).into())
         }
         None => RelayMode::Disabled,
     };
@@ -597,7 +597,7 @@ struct Reach {
 pub struct Client {
     home: PathBuf,
     key: SecretKey,
-    /// Its endpoint, its network and whose device it is, which are made again with each new pass (`renew`).
+    /// Its endpoint, its network and whose device it is, which are made again with each new token (`renew`).
     link: std::sync::RwLock<Link>,
     reach: Mutex<Reach>,
     notifications: broadcast::Sender<Value>,
@@ -619,32 +619,32 @@ pub struct Client {
 }
 
 /// A client's endpoint, and its network: the network's address, if it has one, where the client asks which servers
-/// act for its user, with the pass it shows there. A network on one machine has none, and whatever starts it tells
+/// act for its user, with the token it shows there. A network on one machine has none, and whatever starts it tells
 /// the client where its servers are, in `servers`. `who` is whose device this is, once it's someone's: the user it
 /// signed in as.
 ///
-/// The endpoint is this run's, with a key of its own that's made with it and kept nowhere, and `vouch` is the
+/// The endpoint is this run's, with a key of its own that's made with it and kept nowhere, and `attestation` is the
 /// device's word for that key: its signature of `one/run/1`, a line, and the key. A device runs many clients at
 /// once, the app, each agent's MCP and every command, and iroh reaches one endpoint by a key, as the relay does: two
 /// with one key take each other's place there, and neither is answered. So each run is its own endpoint, and what it
-/// shows the relay and says to a server names the device it runs for, with the vouch (`Network::shown`, `say`).
+/// shows the relay and says to a server names the device it runs for, with the attestation (`Network::shown`, `say`).
 /// The signer at the address and a server check it (`core/edge/signer`, `OneCore.User`).
 #[derive(Clone)]
 struct Link {
     endpoint: Endpoint,
     network: Option<Network>,
     who: Option<String>,
-    vouch: String,
+    attestation: String,
 }
 
 impl Link {
     /// A new run's link for the device with the key `device`, on its `network`.
     async fn run(device: &SecretKey, network: Option<Network>, who: Option<String>) -> Result<Self> {
         let key = SecretKey::generate();
-        let vouch = hex(&device.sign(format!("one/run/1\n{}", key.public()).as_bytes()).to_bytes());
-        let shown = network.as_ref().map(|network| network.shown(device, &vouch));
+        let attestation = hex(&device.sign(format!("one/run/1\n{}", key.public()).as_bytes()).to_bytes());
+        let shown = network.as_ref().map(|network| network.shown(device, &attestation));
         let endpoint = endpoint(key, shown.as_ref()).await?;
-        Ok(Self { endpoint, network, who, vouch })
+        Ok(Self { endpoint, network, who, attestation })
     }
 }
 
@@ -658,18 +658,18 @@ impl Client {
             }
             // An app built for one network knows its address.
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                BUILT_FOR.map(|address| Told { address: address.to_owned(), pass: None, who: None, build: None })
+                BUILT_FOR.map(|address| Told { address: address.to_owned(), token: None, who: None, build: None })
             }
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
-        // A device with no pass yet asks for one at the network's address, and while it's nobody's, for a code to
+        // A device with no token yet asks for one at the network's address, and while it's nobody's, for a code to
         // be let in by.
         let key = key(&home.join("key"))?;
-        // A device that's a new build since it last got its pass gets its next one now, which says so.
+        // A device that's a new build since it last got its token gets its next one now, which says so.
         let said = told.as_ref().is_some_and(|told| told.build.as_deref() == Some(BUILD));
         let (network, who) = match told {
             Some(mut told) => {
-                if told.pass.is_none() {
+                if told.token.is_none() {
                     match told.admit(&key, &home).await {
                         Err(error) if !error.is::<DeviceAuthorization>() => {
                             return Err(error)
@@ -678,8 +678,8 @@ impl Client {
                         admitted => admitted?,
                     }
                 }
-                let pass = told.pass.context("this device has no pass")?;
-                (Some(Network { address: told.address, pass }), told.who)
+                let token = told.token.context("this device has no token")?;
+                (Some(Network { address: told.address, token }), told.who)
             }
             None => (None, None),
         };
@@ -694,7 +694,7 @@ impl Client {
         let (resolvable, failed) = (std::sync::Mutex::default(), std::sync::Mutex::default());
         let reach = Mutex::default();
         let client = Arc::new(Self { home, key, link, reach, notifications, says, watching, connected, resolvers, resolvable, failed });
-        // A pass that's about to end is renewed before anything is asked with it, and so is one a new build hasn't
+        // A token that's about to end is renewed before anything is asked with it, and so is one a new build hasn't
         // renewed yet, and the next while this runs.
         if renews {
             let left = match client.network().left() {
@@ -712,30 +712,30 @@ impl Client {
     /// What this client keeps of its network, as it is now.
     fn network(&self) -> Told {
         let Link { network, who, .. } = self.link();
-        let network = network.expect("only a client of a network with an address has a pass");
-        Told { address: network.address, pass: Some(network.pass), who, build: Some(BUILD.to_owned()) }
+        let network = network.expect("only a client of a network with an address has a token");
+        Told { address: network.address, token: Some(network.token), who, build: Some(BUILD.to_owned()) }
     }
 
-    /// Asks for this device's next pass, and makes the run's endpoint again to show it, since iroh shows a relay the
-    /// pass an endpoint was made with. The new one has a key of its own too, as the old one is still there. A server
-    /// gives a pass to a device that's someone's. One that can't be reached, as where the pass this has ended, is
+    /// Asks for this device's next token, and makes the run's endpoint again to show it, since iroh shows a relay the
+    /// token an endpoint was made with. The new one has a key of its own too, as the old one is still there. A server
+    /// gives a token to a device that's someone's. One that can't be reached, as where the token this has ended, is
     /// asked at the network's address, which says where its person signs in for a device that's nobody's now. The
-    /// old endpoint goes once its pass ends, so what was asked over it finishes, and what's asked from now on is
-    /// asked from the new one, whose run the device now vouches for. Gives how long the new pass lasts before it's
+    /// old endpoint goes once its token ends, so what was asked over it finishes, and what's asked from now on is
+    /// asked from the new one, whose run the device now attests to. Gives how long the new token lasts before it's
     /// renewed.
     async fn renew(&self) -> Result<Duration> {
         let mut told = self.network();
-        // No server takes a pass that has ended, so that's asked at the address straight away.
+        // No server takes a token that has ended, so that's asked at the address straight away.
         let given = match told.ends() > SystemTime::now() {
-            true => self.request("one/pass", json!({"build": said()})).await.ok(),
+            true => self.request("one/token", json!({"build": said()})).await.ok(),
             false => None,
         };
         match given {
             Some(given) => told.took(&given, &self.home)?,
             None => told.admit(&self.key, &self.home).await?,
         }
-        let pass = told.pass.clone().context("this device was given no pass")?;
-        let network = Network { address: told.address.clone(), pass };
+        let token = told.token.clone().context("this device was given no token")?;
+        let network = Network { address: told.address.clone(), token };
         let new = Link::run(&self.key, Some(network), told.who.clone()).await?;
         accept(new.endpoint.clone(), self.notifications.clone());
         let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
@@ -868,7 +868,7 @@ impl Client {
     }
 
     /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
-    /// it got its pass. Then the answer says where its person lets it in again, as the network's edge says it.
+    /// it got its token. Then the answer says where its person lets it in again, as the network's edge says it.
     async fn taken_out(&self, answer: Vec<u8>) -> Vec<u8> {
         let (Some(network), Ok(mut said)) = (self.link().network, serde_json::from_slice::<Value>(&answer)) else {
             return answer;
@@ -876,7 +876,7 @@ impl Client {
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let mut told = Told { address: network.address, pass: None, who: self.link().who, build: None };
+        let mut told = Told { address: network.address, token: None, who: self.link().who, build: None };
         let asked = told.admit(&self.key, &self.home).await;
         match asked.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
@@ -885,10 +885,10 @@ impl Client {
         said.to_string().into_bytes()
     }
 
-    /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its vouch for the run's key,
+    /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its attestation for the run's key,
     /// and what the environment says, unless the request says otherwise, as one of a device's own does.
     fn say(&self, request: &mut Value) {
-        for (says, value) in [("device", self.key.public().to_string()), ("vouch", self.link().vouch)] {
+        for (says, value) in [("device", self.key.public().to_string()), ("attestation", self.link().attestation)] {
             request["params"]["_meta"][says] = json!(value);
         }
         for (says, value) in &self.says {
@@ -1004,11 +1004,11 @@ impl Client {
     }
 }
 
-/// How long before a device's pass ends it asks for the next one: half of what a server gives one
+/// How long before a device's token ends it asks for the next one: half of what a server gives one
 /// (`OneCore.Edge`), so a device that's taken out of its network uses its relay for an hour at most.
 const RENEW: Duration = Duration::from_secs(30 * 60);
 
-/// How soon a pass that couldn't be asked for is asked for again: the device may be offline.
+/// How soon a token that couldn't be asked for is asked for again: the device may be offline.
 const AGAIN: Duration = Duration::from_secs(60);
 
 /// The most failed calls kept until a server is told of them.
@@ -1041,7 +1041,7 @@ fn accept(endpoint: Endpoint, tell: broadcast::Sender<Value>) {
     });
 }
 
-/// Keeps a device's pass fresh while its client runs: once `left` has passed, the next is asked for (`renew`). One
+/// Keeps a device's token fresh while its client runs: once `left` has passed, the next is asked for (`renew`). One
 /// that can't be asked for, as on a device that's offline, is asked for again a minute later, and a device that's
 /// nobody's now has none to renew.
 async fn renewing(client: std::sync::Weak<Client>, mut left: Duration) {

@@ -9,11 +9,11 @@ const { privateKey, publicKey } = await crypto.subtle.generateKey("Ed25519", tru
 const key = hex.encode(new Uint8Array(await crypto.subtle.exportKey("raw", publicKey)));
 const sign = async (message) => new Uint8Array(await crypto.subtle.sign("Ed25519", privateKey, message));
 // It says it's on a list of servers, which it isn't.
-const pass = btoa(JSON.stringify({ list, first: "a guess" }));
+const token = btoa(JSON.stringify({ list, first: "a guess" }));
 
 const relay = new WebSocket(address.replace(/^http/, "ws") + "/relay", {
   protocols: ["iroh-relay-v2"],
-  headers: { authorization: `Bearer ${pass}` },
+  headers: { authorization: `Bearer ${token}` },
 });
 relay.binaryType = "arraybuffer";
 const told = await new Promise((resolve) => {
@@ -30,7 +30,7 @@ relay.close();
 async function ask(method, path, body) {
   const at = String(Date.now());
   const signature = hex.encode(await sign(new TextEncoder().encode(`one/ask/1\n${path.split("?")[0]}\n${at}\n${body ?? ""}`)));
-  const headers = { "one-key": key, "one-at": at, "one-signature": signature, "one-pass": pass };
+  const headers = { "one-key": key, "one-at": at, "one-signature": signature, "one-token": token };
   const answer = await fetch(address + path, { method, headers, body });
   if (!answer.ok) return console.log(`the signer, asked to ${method} ${path} ${body ?? ""}: ${answer.status} ${await answer.text()}`);
   const signed = await answer.json();

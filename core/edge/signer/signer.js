@@ -50,10 +50,10 @@ const isBlob = (key, start) =>
 
 const refuse = (status, why) => Response.json({ error: why }, { status });
 
-/** What a pass says, or nothing if it isn't one. */
-function said(pass) {
+/** What a token says, or nothing if it isn't one. */
+function said(token) {
   try {
-    return JSON.parse(atob(pass.replace(/-/g, "+").replace(/_/g, "/"))) ?? {};
+    return JSON.parse(atob(token.replace(/-/g, "+").replace(/_/g, "/"))) ?? {};
   } catch {
     return {};
   }
@@ -73,9 +73,9 @@ export default {
     const body = await request.text();
     const by = await asker(request, body);
     if (!by) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    if (pathname === "/signer/sign" && request.method === "POST") return sign(env, by, request.headers.get("one-pass"), body);
+    if (pathname === "/signer/sign" && request.method === "POST") return sign(env, by, request.headers.get("one-token"), body);
     if (pathname === "/signer/servers" && request.method === "GET") {
-      if (!(await admits(env, by, request.headers.get("one-pass")))) return refuse(403, "This network doesn't know you");
+      if (!(await admits(env, by, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
       // Whoever's servers are asked for, the ones acting for the network act for them too.
       const acting = [...(await servers(env, searchParams.get("of"))), ...(await servers(env, NETWORK))];
       return Response.json({ servers: [...new Set(acting)] });
@@ -91,9 +91,9 @@ export class Network extends WorkerEntrypoint {
     return servers(this.env, of);
   }
 
-  /** Whether `key` is one of the network's own, by the pass it shows: `null`, or `{until}` for a pass that ends. */
-  admits(key, pass) {
-    return admits(this.env, key, pass);
+  /** Whether `key` is one of the network's own, by the token it shows: `null`, or `{until}` for a token that ends. */
+  admits(key, token) {
+    return admits(this.env, key, token);
   }
 
   /** The key that signed what was asked at `url` with `body`, by the `one-` headers it came with, or null. */
@@ -128,11 +128,11 @@ export class Own extends WorkerEntrypoint {
 }
 
 /**
- * Signs one request to the bucket for the server `by`, which shows `pass`: `{read: key}`, `{write: key}` (only if
+ * Signs one request to the bucket for the server `by`, which shows `token`: `{read: key}`, `{write: key}` (only if
  * absent), `{replace: key, tag}` (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. Answers what to
  * send: its method, URL and headers.
  */
-async function sign(env, by, pass, body) {
+async function sign(env, by, token, body) {
   let ask;
   try {
     ask = JSON.parse(body);
@@ -147,10 +147,10 @@ async function sign(env, by, pass, body) {
   // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
   // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
   // list. The secret opens nothing after that, since the bucket lets only the first write land.
-  const first = ask.write === NETWORK + "servers" && same(said(pass).first, env.FIRST_SERVER);
+  const first = ask.write === NETWORK + "servers" && same(said(token).first, env.FIRST_SERVER);
   const server = SERVER.exec(key)?.[1];
   const reads = ask.read !== undefined || ask.list !== undefined;
-  const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await admits(env, by, pass));
+  const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await admits(env, by, token));
   const adder = ((ask.write !== undefined || ask.remove !== undefined) && ADDED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
   const added = adder && (await list(env, adder + "/"))?.includes(by);
   if (!listed && !first && !open && !added) return refuse(403, "You aren't on its list of servers");
@@ -171,20 +171,20 @@ async function sign(env, by, pass, body) {
 }
 
 /**
- * Whether `key` is one of the network's own, by the pass it shows: `null`, or `{until}` for a pass that ends. A
- * server's pass names a list it's on (`{list}`). A device's is signed by a server on a list, for that device's
+ * Whether `key` is one of the network's own, by the token it shows: `null`, or `{until}` for a token that ends. A
+ * server's token names a list it's on (`{list}`). A device's is signed by a server on a list, for that device's
  * key, until a time (`{list, by, until, signature}`): how a device gets one is the server's to decide. A run of a
- * client on a device has a key of its own, and shows the device's pass, the device's key and the device's word for
+ * client on a device has a key of its own, and shows the device's token, the device's key and the device's word for
  * the run's key, joined by dots (`core/client/src/lib.rs`).
  */
 async function admits(env, key, shown) {
-  const [pass, device = key, vouch] = (shown ?? "").split(".");
-  const { list, by, until, signature } = said(pass);
+  const [token, device = key, attestation] = (shown ?? "").split(".");
+  const { list, by, until, signature } = said(token);
   if (!isKey(key) || owner(list) !== list) return null;
   if (by === undefined) return (await servers(env, list)).includes(key) ? {} : null;
   if (!(until > Date.now())) return null;
-  if (device !== key && !(await signedBy(device, vouch, `one/run/1\n${key}`))) return null;
-  if (!(await signedBy(by, signature, `one/pass/1\n${device}\n${list}\n${until}`))) return null;
+  if (device !== key && !(await signedBy(device, attestation, `one/run/1\n${key}`))) return null;
+  if (!(await signedBy(by, signature, `one/token/1\n${device}\n${list}\n${until}`))) return null;
   return (await servers(env, list)).includes(by) ? { until } : null;
 }
 

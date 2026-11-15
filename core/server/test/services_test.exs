@@ -97,7 +97,7 @@ defmodule OneCore.ServicesTest do
   @tag :tmp_dir
   test "only a server acting for whoever it asks for calls a service's functions and the functions it calls" do
     stranger = String.duplicate("ab", 32)
-    said = %{who: OneCore.Test.owner(), for: OneCore.Test.owner(), passed_on: true}
+    said = %{who: OneCore.Test.owner(), for: OneCore.Test.owner(), forwarded: true}
     service = %{plugin: "network/plugins/counter", service: "Counter.Store", function: "add", arguments: [], _meta: said}
     plugin = %{added: "network", plugin: "counter", function: "counted", arguments: [7], _meta: said}
 

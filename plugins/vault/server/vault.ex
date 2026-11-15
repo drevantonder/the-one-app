@@ -891,10 +891,10 @@ defmodule Vault do
       {:ok, _said} ->
         :ok
 
-      {:passed_on, %{"isError" => true, "content" => [%{"text" => why} | _]}} ->
+      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} ->
         if(tool == "share", do: raise(why), else: :ok)
 
-      {:passed_on, _result} ->
+      {:forwarded, _result} ->
         :ok
 
       {:error, why} ->

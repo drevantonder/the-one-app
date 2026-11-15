@@ -32,6 +32,6 @@ console.log(`the second asks to be let in with the first's code, as itself: ${to
 console.log(`the second asks to be let in with the first's code, as the first: ${told(await second.ask("/sign-in/auth/device/token", { ...token, client_id: first.key }))}`);
 console.log(`the first asks with its own code, which nobody has answered: ${told(await first.ask("/sign-in/auth/device/token", { ...token, client_id: first.key }))}`);
 for (const [which, { ask }] of [["first", first], ["second", second]]) {
-  const pass = await ask("/mcp", { jsonrpc: "2.0", id: 1, method: "one/pass", params: {} });
-  console.log(`the ${which} asks for its pass: ${told(pass)}`);
+  const token = await ask("/mcp", { jsonrpc: "2.0", id: 1, method: "one/token", params: {} });
+  console.log(`the ${which} asks for its token: ${told(token)}`);
 }

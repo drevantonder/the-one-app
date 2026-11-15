@@ -36,8 +36,8 @@ defmodule OneCore.Mcp do
         try do
           Trace.follow(said(params)["traceparent"])
 
-          with {:ok, asked, passed_on} <- User.asking(from, said(params), method == "hooks/call"),
-               {:ok, result} <- result(method, params, from, asked, passed_on) do
+          with {:ok, asked, forwarded} <- User.asking(from, said(params), method == "hooks/call"),
+               {:ok, result} <- result(method, params, from, asked, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
           else
             {:error, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
@@ -92,35 +92,35 @@ defmodule OneCore.Mcp do
   defp said(%{"_meta" => %{} = said}), do: said
   defp said(_params), do: %{}
 
-  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _asked, passed_on) do
-    between(passed_on, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
+  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _asked, forwarded) do
+    between(forwarded, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"added" => at, "plugin" => plugin} = params, _from, asked, passed_on) do
+  defp result("plugins/call", %{"added" => at, "plugin" => plugin} = params, _from, asked, forwarded) do
     function = fn -> Calls.function(at, plugin, params["function"], params["arguments"], asked, true) end
 
-    with {:ok, result} <- between(passed_on, function) do
+    with {:ok, result} <- between(forwarded, function) do
       Server.changed()
       {:ok, result}
     end
   end
 
-  defp result("plugins/schedule", %{"added" => at, "plugin" => plugin}, _from, _asked, passed_on) do
-    between(passed_on, fn -> Calls.schedule(at, plugin, true) end)
+  defp result("plugins/schedule", %{"added" => at, "plugin" => plugin}, _from, _asked, forwarded) do
+    between(forwarded, fn -> Calls.schedule(at, plugin, true) end)
   end
 
-  defp result("hooks/call", %{"added" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, passed_on) do
-    between(passed_on, fn -> Calls.hook(at, plugin, hook, params["about"], asked, true) end)
+  defp result("hooks/call", %{"added" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, forwarded) do
+    between(forwarded, fn -> Calls.hook(at, plugin, hook, params["about"], asked, true) end)
   end
 
-  defp result("tools/call", %{"name" => name} = params, _from, asked, passed_on) do
-    case call(name, Map.get(params, "arguments", %{}), asked, passed_on) do
+  defp result("tools/call", %{"name" => name} = params, _from, asked, forwarded) do
+    case call(name, Map.get(params, "arguments", %{}), asked, forwarded) do
       {:ok, answer} -> changed(name, %{content: content(name, answer)}, asked)
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
-      {:passed_on, %{"isError" => true} = result} -> {:ok, result}
-      {:passed_on, result} -> changed(name, result, asked)
-      :passed_back -> {:error, Server.passed_back(), "This server would pass #{name} on in turn"}
+      {:forwarded, %{"isError" => true} = result} -> {:ok, result}
+      {:forwarded, result} -> changed(name, result, asked)
+      :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass #{name} on in turn"}
     end
   end
 
@@ -138,17 +138,17 @@ defmodule OneCore.Mcp do
 
   defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
 
-  # A user's device asks for its pass to the relay at the network's address, and for the next before that one
+  # A user's device asks for its token to the relay at the network's address, and for the next before that one
   # ends, and is told whose it is: the device a run of it proved here, or the edge did there. It says which
   # build it is as it asks.
-  defp result("one/pass", params, from, {"users/" <> _ = by, _for}, _passed_on) do
+  defp result("one/token", params, from, {"users/" <> _ = by, _for}, _passed_on) do
     device = User.device(from, said(params))
 
     if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
       Builds.seen(by, device, params["build"])
-      {:ok, %{pass: Edge.pass(device), who: by}}
+      {:ok, %{token: Edge.token(device), who: by}}
     else
-      {:error, "A pass is for a user's device, by its key"}
+      {:error, "A token is for a user's device, by its key"}
     end
   end
 
@@ -244,22 +244,22 @@ defmodule OneCore.Mcp do
 
   # What one server asks of another is run only for a server that says who it asks for, which only one acting
   # for them is believed about. This server runs it if it acts for whoever it's for too.
-  defp between(passed_on, run) when passed_on in [true, :to] do
+  defp between(forwarded, run) when forwarded in [true, :to] do
     case run.() do
       {:ok, answer} -> {:ok, %{answer: answer}}
       {:error, why} -> {:error, -32000, why}
-      {:passed_on, result} -> {:ok, result}
-      :passed_back -> {:error, Server.passed_back(), "This server would pass that on in turn"}
+      {:forwarded, result} -> {:ok, result}
+      :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass that on in turn"}
     end
   end
 
   defp between(_passed_on, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
-  defp call(name, inputs, asked, passed_on) do
-    with :none <- Tools.call(name, inputs, asked, passed_on),
+  defp call(name, inputs, asked, forwarded) do
+    with :none <- Tools.call(name, inputs, asked, forwarded),
          [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Calls.call(plugin, tool, inputs, asked, passed_on) do
+         {:ok, answer} <- Calls.call(plugin, tool, inputs, asked, forwarded) do
       case answer do
         text when is_binary(text) -> {:ok, text}
         {:blob, _kind, _data} -> {:ok, answer}
