@@ -14,7 +14,7 @@ defmodule OneCore.Tools do
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
   """
-  alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, Services, User}
+  alias OneCore.{Artifact, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Plugins.{Added, Calls, Deploy, Kept}
 
   @tools [
@@ -166,6 +166,75 @@ defmodule OneCore.Tools do
         },
         required: ["plugin", "service"]
       }
+    },
+    %{
+      name: "builds",
+      read_only: true,
+      description: """
+      Lists the build each of your servers runs and each of your devices last said it is, and the newest for each
+      kind of machine, so it says whether everything is on the same build.
+      A build is the commit it was built from. With `server`, that server answers, saying its own.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{server: %{type: "string", description: "The server's key. The server that answers, if left out"}}
+      }
+    },
+    %{
+      name: "download",
+      read_only: true,
+      description: """
+      Gives the newest builds for a kind of machine, each with its SHA-256 and a link that downloads it within a
+      minute: `server` for a server installed there, and `one` for the program.
+      `one serve on` and `one update` take them, checking each against its SHA-256 before they run it.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{
+          target: %{type: "string", description: "The kind of machine: linux-x86_64, linux-aarch64, macos-aarch64"}
+        },
+        required: ["target"]
+      }
+    },
+    %{
+      name: "publish",
+      description: """
+      Makes builds the newest for the network's machines, which they take when they're asked to update.
+      While the network lacks any of their files, it gives a link to send each by, with its `method` and
+      `headers`, and changes nothing: send them, and ask again. `./release` does all of this.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{
+          builds: %{
+            type: "array",
+            description: "Each build: its name (server/<target> or one/<target>), build, sha256 and size",
+            items: %{
+              type: "object",
+              properties: %{
+                name: %{type: "string", pattern: "^(server|one)/[a-z0-9_]+-[a-z0-9_]+$"},
+                build: %{type: "string"},
+                sha256: %{type: "string", pattern: "^[0-9a-f]{64}$"},
+                size: %{type: "integer"}
+              },
+              required: ["name", "build", "sha256", "size"]
+            }
+          }
+        },
+        required: ["builds"]
+      }
+    },
+    %{
+      name: "update",
+      description: """
+      Has a server's machine take the newest builds, its server's and its program's, if it isn't on them already.
+      It checks each before it runs it, hands its work to another server meanwhile, and goes back to the build it
+      had if the new one doesn't start and answer. `builds` then says which it's on.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{server: %{type: "string", description: "The server's key. The server that answers, if left out"}}
+      }
     }
   ]
 
@@ -313,6 +382,36 @@ defmodule OneCore.Tools do
       reaches!(asked, owner(), "owner")
       with {:error, why} <- Services.remove(plugin(who, name), service), do: raise(why)
       "#{service} no longer runs on the server #{Server.key()}."
+    end)
+  end
+
+  defp run("builds", inputs, {by, who} = asked, _pass) do
+    on(inputs["server"], "builds", inputs, asked, fn -> JSON.encode!(Builds.list(by, User.owner(who) || "network")) end)
+  end
+
+  defp run("download", %{"target" => target}, _asked, _pass), do: JSON.encode!(Builds.download(target))
+
+  # What the network's servers run is the network's.
+  defp run("publish", %{"builds" => builds}, asked, pass) do
+    at("network", pass)
+    reaches!(asked, "network", "owner")
+
+    case Builds.publish(builds) do
+      {:send, links} -> JSON.encode!(%{send: links})
+      {:ok, newest} -> JSON.encode!(%{newest: newest})
+    end
+  end
+
+  # What takes the newest builds is the program that keeps an installed server running, which hears this said.
+  defp run("update", inputs, asked, _pass) do
+    on(inputs["server"], "update", inputs, asked, fn ->
+      reaches!(asked, owner(), "owner")
+
+      if not Application.get_env(:one_core, :installed, false),
+        do: raise("The server #{Server.key()} wasn't installed with `one serve on`, so it doesn't update itself.")
+
+      IO.puts(Release.update_asked())
+      "The server #{Server.key()} is taking the newest builds, and answers again once it has."
     end)
   end
 

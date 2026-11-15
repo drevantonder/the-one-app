@@ -124,7 +124,17 @@ defmodule OneCore.App do
     end
   end
 
+  # The Bun an app is built with: an installed server's is the one its release names, `{url, sha256}`, which it
+  # downloads the first time and keeps in its home, so an update downloads no Bun of its own. One started with
+  # `mix network` uses the Bun on its PATH, as the rest of the repo does.
   defp bun do
+    case Application.get_env(:one_core, :bun) do
+      {url, sha256} -> fetched(url, sha256)
+      nil -> path()
+    end
+  end
+
+  defp path do
     case System.find_executable("bun") do
       nil ->
         {:error,
@@ -132,6 +142,28 @@ defmodule OneCore.App do
 
       bun ->
         {:ok, bun}
+    end
+  end
+
+  defp fetched(url, sha256) do
+    folder = Path.join([Server.home(), "bun", sha256])
+    bun = Path.join(folder, "bun")
+
+    with false <- File.exists?(bun),
+         {:ok, %{status: 200, body: zip}} <- Req.get(url, raw: true),
+         ^sha256 <- Base.encode16(:crypto.hash(:sha256, zip), case: :lower),
+         {:ok, files} <- :zip.extract(zip, [:memory]),
+         {_name, program} <- Enum.find(files, fn {name, _} -> Path.basename(to_string(name)) == "bun" end) do
+      writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+      File.mkdir_p!(writing)
+      File.write!(Path.join(writing, "bun"), program)
+      File.chmod!(Path.join(writing, "bun"), 0o755)
+      # Another build may have fetched it meanwhile, which is as good.
+      with {:error, _} <- File.rename(writing, folder), do: File.rm_rf!(writing)
+      {:ok, bun}
+    else
+      true -> {:ok, bun}
+      _ -> {:error, "Building an app needs Bun, which this server couldn't download whole from #{url}."}
     end
   end
 

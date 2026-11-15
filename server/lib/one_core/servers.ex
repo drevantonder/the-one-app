@@ -16,7 +16,7 @@ defmodule OneCore.Servers do
   What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
   (`look/1`) or forgets it all (`forget/0`).
   """
-  alias OneCore.{Bucket, Server}
+  alias OneCore.{Bucket, Builds, Server}
 
   @network "network"
 
@@ -74,10 +74,14 @@ defmodule OneCore.Servers do
     Bucket.Refused -> false
   end
 
-  @doc "A server that started says how to reach it now, what its machine is called, and who it's for if it has never said."
+  @doc """
+  A server that started says how to reach it now, what its machine is called and which build it is, and who it's for
+  if it has never said.
+  """
   def started(key, address, name, owner) do
     say("servers/#{key}/address", address)
     say("servers/#{key}/name", JSON.encode!(name))
+    Builds.started(key)
     Bucket.write("servers/#{key}/members", JSON.encode!([owner]))
     forget()
   end

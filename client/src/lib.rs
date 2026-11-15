@@ -12,6 +12,8 @@ pub mod cli;
 mod encrypts;
 mod kept;
 pub mod mcp;
+#[cfg(unix)]
+pub mod serving;
 
 use std::io::{ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -35,6 +37,21 @@ use tokio::time::{sleep, timeout};
 
 pub use kept::Shown;
 use kept::write;
+
+/// The build this program is: the commit it was built from, as `build.rs` says.
+pub const BUILD: &str = env!("ONE_BUILD");
+
+/// The kind of machine this is, as builds are named, the same as a server names it (`OneCore.Builds`):
+/// `linux-x86_64`, `macos-aarch64`.
+pub fn target() -> String {
+    format!("{}-{}", env::consts::OS, env::consts::ARCH)
+}
+
+/// What a device says of itself as it asks for its pass, which the network keeps so a list of its devices says
+/// which build each is: its build, its kind of machine and its name.
+fn said() -> Value {
+    json!({"build": BUILD, "target": target(), "name": gethostname::gethostname().to_string_lossy()})
+}
 
 /// What servers and clients speak.
 pub const ALPN: &[u8] = b"one/mcp/1";
@@ -112,7 +129,8 @@ impl Network {
 }
 
 /// What a client keeps of its network, in the file `network` of its home: the network's address, which whatever
-/// set the client up put there, and once the device is someone's, its pass to the relay there and whose it is.
+/// set the client up put there, and once the device is someone's, its pass to the relay there, whose it is and
+/// the build it was when it got that, which it said as it asked.
 #[derive(Clone, Serialize, Deserialize)]
 struct Told {
     address: String,
@@ -120,6 +138,8 @@ struct Told {
     pass: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     who: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build: Option<String>,
 }
 
 /// Why a client that knows its network isn't in it: its device is nobody's there yet. It has asked the network's
@@ -309,7 +329,7 @@ impl Told {
     /// device it is (`took`). A device that's nobody's there asks for a code to be let in by, and keeps nothing of
     /// whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
-        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {}});
+        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"build": said()}});
         let (_, answer) = ask_address(&self.address, key, "/mcp", ask).await?;
         if answer["error"]["code"] == NOBODY {
             if self.who.is_some() {
@@ -331,7 +351,7 @@ impl Told {
             bail!("this device was given no pass")
         };
         let someone_else = self.who.as_deref() != Some(who);
-        (self.pass, self.who) = (Some(pass.to_owned()), Some(who.to_owned()));
+        (self.pass, self.who, self.build) = (Some(pass.to_owned()), Some(who.to_owned()), Some(BUILD.to_owned()));
         if someone_else { self.keep(home) } else { write(&home.join("network"), &serde_json::to_vec(self)?) }
     }
 
@@ -349,7 +369,7 @@ impl Told {
 
 /// What asks over the web: the signer at a network's address, and the bucket by a link. Its TLS is the one iroh
 /// reaches the relay with.
-fn web() -> Result<reqwest::Client> {
+pub(crate) fn web() -> Result<reqwest::Client> {
     let tls = iroh::tls::CaTlsConfig::default().client_config(iroh::tls::default_provider())?;
     Ok(reqwest::Client::builder().tls_backend_preconfigured(tls).connect_timeout(CONNECT).build()?)
 }
@@ -607,13 +627,15 @@ impl Client {
             }
             // An app built for one network knows its address.
             Err(error) if error.kind() == ErrorKind::NotFound => {
-                BUILT_FOR.map(|address| Told { address: address.to_owned(), pass: None, who: None })
+                BUILT_FOR.map(|address| Told { address: address.to_owned(), pass: None, who: None, build: None })
             }
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         // A device with no pass yet asks for one at the network's address, and while it's nobody's, for a code to
         // be let in by.
         let key = key(&home.join("key"))?;
+        // A device that's a new build since it last got its pass gets its next one now, which says so.
+        let said = told.as_ref().is_some_and(|told| told.build.as_deref() == Some(BUILD));
         let (network, who) = match told {
             Some(mut told) => {
                 if told.pass.is_none() {
@@ -644,7 +666,7 @@ impl Client {
         // A pass that's about to end is renewed before anything is asked with it, and the next while this runs.
         if renews {
             let left = match client.network().left() {
-                left if !left.is_zero() => left,
+                left if !left.is_zero() && said => left,
                 _ => match client.renew().await {
                     Err(error) if error.is::<NotIn>() => return Err(error),
                     renewed => renewed.unwrap_or(AGAIN),
@@ -659,7 +681,7 @@ impl Client {
     fn network(&self) -> Told {
         let Link { network, who, .. } = self.link();
         let network = network.expect("only a client of a network with an address has a pass");
-        Told { address: network.address, pass: Some(network.pass), who }
+        Told { address: network.address, pass: Some(network.pass), who, build: Some(BUILD.to_owned()) }
     }
 
     /// Asks for this device's next pass, and makes the run's endpoint again to show it, since iroh shows a relay the
@@ -670,7 +692,7 @@ impl Client {
     /// before it's renewed.
     async fn renew(&self) -> Result<Duration> {
         let mut told = self.network();
-        match self.request("one/pass", json!({})).await {
+        match self.request("one/pass", json!({"build": said()})).await {
             Ok(given) => told.took(&given, &self.home)?,
             Err(_) => told.admit(&self.key, &self.home).await?,
         }
@@ -684,6 +706,16 @@ impl Client {
             old.endpoint.close().await
         });
         Ok(told.left())
+    }
+
+    /// Whose device this is, once it's someone's: the user it signed in as.
+    pub fn who(&self) -> Option<String> {
+        self.link().who
+    }
+
+    /// This client's key, as others know it.
+    pub fn key(&self) -> String {
+        self.key.public().to_string()
     }
 
     /// The network's address, if it has one.
@@ -789,7 +821,7 @@ impl Client {
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let mut told = Told { address: network.address, pass: None, who: self.link().who };
+        let mut told = Told { address: network.address, pass: None, who: self.link().who, build: None };
         let asked = told.admit(&self.key, &self.home).await;
         match asked.as_ref().map_err(|error| error.downcast_ref::<NotIn>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),

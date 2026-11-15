@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Builds the server and `one` for each kind of machine this machine builds them for, from the commit checked out,
+# and publishes them to a network, whose machines take them when they're asked to update:
+#
+#     ./release [<kind of machine>...]
+#
+# The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
+# the network's owner. On Linux it builds a server for linux-x86_64 and linux-aarch64, and `one` for this
+# machine; on a Mac, both for macos-aarch64. Naming kinds of machine builds those servers alone.
+#
+# A server is an Erlang release of One Core (`server/mix.exs`) that needs nothing else on its machine: the VM and
+# OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), its
+# Rust add-ons built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships with
+# and the kit's build, and the Bun it builds apps with named by its SHA-256, which it downloads the first time
+# (`OneCore.App`). The builds are in target/builds/<build>.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")" && pwd)
+# The tools this needs are the ones `mise.toml` names.
+command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+cd "$root"
+
+# A build is named by its commit, so what's built is all committed.
+[[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
+build=$(git describe --always --abbrev=12 --exclude='*')
+export ONE_BUILD=$build
+target=${CARGO_TARGET_DIR:-$root/target}
+out=$target/builds/$build
+cache=$target/release-cache
+mkdir -p "$out" "$cache"
+
+otp=$(erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(string:trim(V)), halt().')
+bun=$(bun --version)
+# What strips the VM's debugging symbols, for any kind of machine: Rust's own LLVM tools.
+objcopy=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-objcopy
+[[ -x $objcopy ]] || rustup component add llvm-tools
+
+case $(uname -s) in
+  Linux) every=(linux-x86_64 linux-aarch64) ;;
+  Darwin) every=(macos-aarch64) ;;
+  *) echo "A server is built on Linux or a Mac." >&2 && exit 1 ;;
+esac
+kinds=("$@")
+((${#kinds[@]})) || kinds=("${every[@]}")
+
+# Downloads a file once, into the cache, checked against its SHA-256.
+fetched() {
+  local file=$cache/$2
+  [[ -e $file ]] || { curl -fsSL -o "$file.part" "$1" && mv "$file.part" "$file"; }
+  [[ $(sha256sum "$file" | cut -d' ' -f1) == "$3" ]] || { echo "$1 isn't what it should be" >&2 && rm "$file" && exit 1; }
+  echo "$file"
+}
+
+(cd ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
+(cd server && mix deps.get --only prod >/dev/null)
+bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
+
+for kind in "${kinds[@]}"; do
+  echo "Building the server for $kind"
+  case $kind in
+    linux-x86_64) triple=x86_64-unknown-linux-gnu hex=amd64 bunzip=bun-linux-x64-baseline.zip ;;
+    linux-aarch64) triple=aarch64-unknown-linux-gnu hex=arm64 bunzip=bun-linux-aarch64.zip ;;
+    macos-aarch64) triple=aarch64-apple-darwin bunzip=bun-darwin-aarch64.zip ;;
+    *) echo "There's no server for $kind" >&2 && exit 1 ;;
+  esac
+
+  # The VM and OTP for that machine, from Hex's builds for Linux and the Erlang Ecosystem Foundation's for a Mac.
+  if [[ $kind == linux-* ]]; then
+    sum=$(curl -fsSL "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/builds.txt" | awk -v v="OTP-$otp" '$1 == v { print $4 }')
+    archive=$(fetched "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/OTP-$otp.tar.gz" "otp-$otp-$kind.tar.gz" "$sum")
+  else
+    url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-$triple.tar.gz"
+    [[ -e $cache/otp-$otp-$kind.tar.gz ]] || curl -fsSL -o "$cache/otp-$otp-$kind.tar.gz" "$url"
+    archive=$cache/otp-$otp-$kind.tar.gz
+  fi
+  vm=$cache/otp-$otp-$kind
+  if [[ ! -d $vm ]]; then
+    rm -rf "$vm.part" && mkdir -p "$vm.part" && tar -xzf "$archive" -C "$vm.part" --strip-components=1
+    mv "$vm.part" "$vm"
+  fi
+  # Hex's builds are made whole where they're put by their own script.
+  [[ ! -x $vm/Install || -e $vm/bin/erl ]] || (cd "$vm" && ./Install -minimal "$vm" >/dev/null)
+
+  # Its Rust add-ons, for that machine.
+  crates=(-p one_core_iroh -p sqlite -p folder)
+  if [[ $kind == linux-* ]]; then
+    cargo zigbuild --release --target "$triple.2.35" "${crates[@]}"
+    native=$target/$triple/release
+  else
+    cargo build --release "${crates[@]}"
+    native=$target/release
+  fi
+
+  release=$target/release-builds/$kind
+  rm -rf "$release"
+  (cd server && MIX_ENV=prod ONE_ERTS=$(echo "$vm"/erts-*) mix release --overwrite --quiet --path "$release")
+  # The add-ons of OTP's own applications as they're built for that machine. Their code runs on any.
+  for app in "$release"/lib/*; do
+    [[ ! -d $vm/lib/$(basename "$app")/priv ]] || { rm -rf "$app/priv" && cp -R "$vm/lib/$(basename "$app")/priv" "$app/priv"; }
+  done
+  priv=$(echo "$release"/lib/one_core-*/priv/native)
+  rm -rf "$priv" && mkdir -p "$priv"
+  for crate in one_core_iroh sqlite folder; do
+    cp "$native/lib$crate".so "$priv/$crate.so" 2>/dev/null || cp "$native/lib$crate.dylib" "$priv/$crate.so"
+  done
+  beam=$(echo "$release"/erts-*/bin/beam.smp)
+  "$objcopy" --strip-all "$beam"
+
+  # What it ships with, and the Bun it builds apps with.
+  mkdir -p "$release/shipped"
+  git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
+  cp -R ui/dist "$release/shipped/ui"
+  echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
+
+  tar -czf "$out/server-$kind.tar.gz" -C "$release" .
+done
+
+# `one`, for this machine, which is the app too: building it for another kind of machine needs that machine's
+# system libraries, so each kind builds its own.
+here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
+echo "Building one for $here"
+cargo build --release -p shell
+gzip -9 -c "$target/release/one" >"$out/one-$here.gz"
+
+# Publishes what was built: the network gives a link for each file it doesn't have yet, which is sent there, and
+# once it has them all, they're the newest.
+echo "Publishing to the network"
+ONE=$target/release/one OUT=$out BUILD=$build bun -e '
+  const { ONE, OUT, BUILD } = process.env;
+  const { readdirSync } = require("node:fs");
+  const builds = await Promise.all(readdirSync(OUT).map(async (file) => {
+    const bytes = await Bun.file(`${OUT}/${file}`).bytes();
+    const [, what, kind] = file.match(/^(server|one)-(.*?)(\.tar)?\.gz$/);
+    return { file, name: `${what}/${kind}`, build: BUILD, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
+  }));
+  const publish = () => {
+    const asked = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
+    if (asked.exitCode !== 0) process.exit(1);
+    return JSON.parse(asked.stdout.toString());
+  };
+  let said = publish();
+  if (said.send) {
+    for (const { file, name } of builds.filter(({ name }) => said.send[name])) {
+      const { method, url, headers } = said.send[name];
+      const sent = await fetch(url, { method, headers, body: Bun.file(`${OUT}/${file}`) });
+      if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
+    }
+    said = publish();
+  }
+  for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
+  if (!said.newest) throw new Error("The network didn'"'"'t take them");
+'
+echo "The network's machines take $build when they're asked to update."

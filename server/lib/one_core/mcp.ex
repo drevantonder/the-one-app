@@ -21,7 +21,7 @@ defmodule OneCore.Mcp do
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Address, Artifact, Hooks, Plugins, Server, Services, Skills, Tools, User}
+  alias OneCore.{Address, Artifact, Builds, Hooks, Plugins, Server, Services, Skills, Tools, User}
   alias OneCore.Plugins.{Calls, Kept, Version}
 
   # What a server speaks of MCP is the same in each of these.
@@ -119,7 +119,7 @@ defmodule OneCore.Mcp do
      %{
        protocolVersion: if(asked in @versions, do: asked, else: hd(@versions)),
        capabilities: %{tools: %{}, resources: %{}, extensions: %{"io.modelcontextprotocol/skills" => %{}}},
-       serverInfo: %{name: "one", version: to_string(Application.spec(:one_core, :vsn))},
+       serverInfo: %{name: "one", version: Builds.build()},
        instructions: instructions(holder?(by))
      }}
   end
@@ -127,13 +127,17 @@ defmodule OneCore.Mcp do
   defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
 
   # A user's device asks for its pass to the relay at the network's address, and for the next before that one
-  # ends, and is told whose it is: the device a run of it proved here, or the address did there.
+  # ends, and is told whose it is: the device a run of it proved here, or the address did there. It says which
+  # build it is as it asks.
   defp result("one/pass", params, from, {"users/" <> _ = by, _for}, _passed_on) do
     device = User.device(from, said(params))
 
-    if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/,
-      do: {:ok, %{pass: Address.pass(device), who: by}},
-      else: {:error, "A pass is for a user's device, by its key"}
+    if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
+      Builds.seen(by, device, params["build"])
+      {:ok, %{pass: Address.pass(device), who: by}}
+    else
+      {:error, "A pass is for a user's device, by its key"}
+    end
   end
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.

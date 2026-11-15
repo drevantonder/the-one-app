@@ -29,7 +29,8 @@ scheduled job across a takeover, on a folder or with `--address` through the sig
 tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
 `address/proof/proof.sh` runs a whole address with nothing deployed, `address/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
-try everything it mustn't reach.
+try everything it mustn't reach, and `server/test/install.sh` has a machine with nothing on it but `one` install a
+server, update it, go back from a build that can't start, and remove it.
 
 To put a network's address on Cloudflare, make an R2 bucket and an S3 API token for it, and write the signer's
 secrets to `address/signer/secrets`, a line each: `BUCKET`, the bucket's S3 address with its name on the end
@@ -44,6 +45,14 @@ which deploying attaches to the gateway. Then:
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
 nothing after. `--owner` names the network's first owner, and the server says where they join: a link they open to
 make their passkey.
+
+A machine that's let in as someone's becomes a server of theirs with `one serve on` (and the network's with
+`ONE_FOR=network`), which needs nothing else installed: it downloads the network's newest build of the server for
+that kind of machine, and the system keeps it running, a systemd user unit on Linux and a LaunchAgent on a Mac.
+`one serve off` stops it and removes it. `./release` builds the server and `one` from the commit checked out and
+publishes them to the network of the `one` running it, whose owner it has to be. Nothing updates by itself: the
+`update` tool has a server's machine take the newest builds, `one update` does it for this device, and the `builds`
+tool says which build each server and device is on.
 
 The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an Android SDK and its NDK:
 

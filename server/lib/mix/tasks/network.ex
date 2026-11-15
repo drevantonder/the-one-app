@@ -53,7 +53,7 @@ defmodule Mix.Tasks.Network do
   """
   use Mix.Task
   alias OneCore.{Address, Iroh, Server, Servers, User}
-  alias OneCore.Plugins.{Added, Deploy}
+  alias OneCore.Plugins.Added
 
   @root Path.expand("../../../..", __DIR__)
 
@@ -116,10 +116,6 @@ defmodule Mix.Tasks.Network do
         {:error, why} -> Mix.shell().error("#{without} wasn't removed: #{why}")
       end
     end
-
-    # The plugins The One App ships with are the network's, so a server acting for it deploys them.
-    if Servers.here?("network"),
-      do: for({name, {:error, why}} <- Deploy.ship(), do: Mix.shell().error("#{name} wasn't deployed: #{why}"))
 
     # The plugins are there first, so the ones that keep who may do what and who signs in are told who the first
     # owner is, and the server's log says where they join.

@@ -20,11 +20,11 @@ const NETWORK = "network/";
 const SERVER = /^servers\/([0-9a-f]{64})\//;
 /**
  * What every server of the network reads, whoever's it is: a plugin's code, which is open to everyone in the
- * network, what's added for whom, which servers act for whom, and who the network's first owner is. That's how a
- * server runs a plugin someone else deployed, finds the server to pass a call on to, and knows who may do
- * anything where no plugin decides who may.
+ * network, what's added for whom, which servers act for whom, who the network's first owner is, and the builds
+ * its machines take. That's how a server runs a plugin someone else deployed, finds the server to pass a call on
+ * to, knows who may do anything where no plugin decides who may, and updates.
  */
-const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|added|servers)|network\/owner)$/;
+const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|added|servers)|network\/owner|network\/builds\/.*)$/;
 /**
  * That a user, a group or the network added a plugin is a blob under the plugin, `added/<who>`, which a server
  * acting for them writes and removes, whoever's the plugin is: a deploy of it tells their servers.

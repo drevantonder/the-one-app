@@ -1,6 +1,6 @@
 //! The CLI. Every tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
 //! `one notes add --text milk` calls `notes_add`. `one notes` shows the plugin's skill and its tools, and
-//! `one mcp` serves MCP over stdio instead.
+//! `one mcp` serves MCP over stdio instead. A few words are about this device instead (`THIS_DEVICE`).
 
 use std::io::Write;
 use std::path::Path;
@@ -21,7 +21,18 @@ pub fn main() -> ExitCode {
     })
 }
 
+/// What's about this device rather than a tool: its build, making it a server (`serving`), and updating it.
+const THIS_DEVICE: &str = "This device:\n\n\
+                           one serve on       makes it a server of yours, which starts whenever it does\n\
+                           one serve off      stops it being one, and removes it\n\
+                           one update         takes the newest builds\n\
+                           one --version      says which build it is";
+
 async fn run(args: Vec<String>) -> Result<ExitCode> {
+    if args == ["--version"] {
+        println!("one {} {}", crate::BUILD, crate::target());
+        return Ok(ExitCode::SUCCESS);
+    }
     // A device that isn't in its network yet says its code and where it's let in, and carries on once it is.
     let client = match Client::open(crate::home()?).await {
         Err(error) if error.is::<NotIn>() => {
@@ -32,14 +43,32 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         }
         opened => opened?,
     };
-    let code = if args == ["mcp"] {
-        mcp::serve(client.clone()).await?;
-        ExitCode::SUCCESS
-    } else {
-        command(&client, &args).await?
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let code = match words.as_slice() {
+        ["mcp"] => {
+            mcp::serve(client.clone()).await?;
+            ExitCode::SUCCESS
+        }
+        #[cfg(unix)]
+        ["serve", "on"] => printed(crate::serving::on(&client).await?),
+        #[cfg(unix)]
+        ["serve", "off"] => printed(crate::serving::off(&client).await?),
+        #[cfg(unix)]
+        ["serve", "run"] => {
+            crate::serving::run(client.clone()).await?;
+            ExitCode::SUCCESS
+        }
+        #[cfg(unix)]
+        ["update"] => printed(crate::serving::update(&client).await?),
+        _ => command(&client, &args).await?,
     };
     client.close().await;
     Ok(code)
+}
+
+fn printed(text: String) -> ExitCode {
+    println!("{text}");
+    ExitCode::SUCCESS
 }
 
 /// Calls the tool `args` name, or shows what they could have named.
@@ -128,6 +157,7 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
             }
             println!("\n`one <tool> --help` shows a tool's inputs.");
             if name.is_empty() {
+                println!("\n{THIS_DEVICE}");
                 println!("\nA skill says when and how to use a plugin's tools, and `one <skill>` shows one:\n");
                 for skill in skills {
                     let words = said(skill["uri"].as_str().unwrap_or_default()).join(" ");
