@@ -31,9 +31,11 @@ const address = (view) => `${location.protocol === "tauri:" ? "oneapp://" : "htt
 /// couldn't.
 let answering = true
 let unlisted
-/// Why the client couldn't open as the app started, if it couldn't: its network's address didn't answer. Then
-/// that's all the window says, until trying again opens it.
-const unreached = new URLSearchParams(location.search).get("unreached")
+/// Where the window starts, which it asks as it opens: here, or on the page its device is let in by while it's
+/// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
+/// answer. Then that's all the window says, until trying again opens it.
+const { signIn, unreached = null } = await invoke("start")
+if (signIn) location.replace(signIn)
 
 /// Light or dark, as Settings › Appearance has it on this device, or as the device is.
 const scheme = matchMedia("(prefers-color-scheme: dark)")
@@ -142,6 +144,8 @@ function opened(view) {
     const name = view.app === HOME ? "home" : view.app.split("/")[0]
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
+    // The device hears its person's notifications once they see their home.
+    if (view.app === HOME) invoke("hear")
   }))
 }
 
@@ -309,7 +313,7 @@ document.getElementById("retry").addEventListener("click", () =>
 /// The user returned to the window, so what's showing asks again. While the window is on screen, what's showing
 /// asks again when a server says something changed.
 function returned() {
-  if (unreached !== null) return
+  if (signIn || unreached !== null) return
   invoke("shown", { onScreen: !document.hidden })
   if (document.hidden) return
   if (unlisted) start()
@@ -332,7 +336,7 @@ async function start() {
 
 dress()
 if (unreached !== null) problem()
-else {
+else if (!signIn) {
   await start()
   invoke("shown", { onScreen: !document.hidden })
 }

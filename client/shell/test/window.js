@@ -56,6 +56,7 @@ for (const [size, viewport] of Object.entries(sizes)) {
     // the one shown is made up, and typing one lets nothing in.
     await page.exposeFunction("asksWindow", async (command, args) => {
       if (command === "apps") return { ...(await ask("resources/list", said(args.who))), outdated: [] };
+      if (command === "start") return {};
       if (command === "client") return { device: "this-device", network: null };
       if (command === "ask") return ask(args.method, args.params);
       // Whether a tool only reads, as the server lists it: one that doesn't may have changed what a view was answered.
