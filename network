@@ -18,6 +18,9 @@
 #   way in.
 # --owner <name>, with --edge, starts a network people sign in to instead: that user is its first owner, it says
 #   where they join, with a passkey, and nobody acts as anyone by saying so.
+#
+# Where there's no desktop, as under `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a
+# minute for a desktop that isn't there.
 set -euo pipefail
 set -m # What's started is a job with a process group of its own, so all of it is stopped at once.
 
