@@ -34,6 +34,7 @@ defmodule OneCore.Plugins do
   alias OneCore.Plugins.Version
 
   @network "network"
+  @named "A plugin's name is lowercase letters, digits and hyphens, starting with a letter"
 
   # This, and after it what runs plugins' processes and what tells the plugins that hear a hook, which hold
   # versions here.
@@ -60,8 +61,7 @@ defmodule OneCore.Plugins do
          {:ok, version, warnings} <- Version.load(Path.basename(artifact), kept) do
       version = %{version | artifact: artifact}
 
-      with :ok <- bring(owner, name, version.uses),
-           :ok <- scheduled(owner, name, version),
+      with :ok <- fits(owner, name, version),
            {:ok, number} <- keep(artifact, name, kept, files),
            :ok <- note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         looked(owner, [{artifact, number, {:ok, version}}])
@@ -75,7 +75,10 @@ defmodule OneCore.Plugins do
     end
   end
 
-  @doc "Adds the plugin `artifact` for `owner`, who find it by `name`."
+  @doc """
+  Adds the plugin `artifact` for `owner`, who find it by `name`. The plugins it uses are there for them first, as
+  they are when it's deployed.
+  """
   def add(owner, name, artifact) do
     added = fn
       %{^name => ^artifact} = added ->
@@ -88,11 +91,22 @@ defmodule OneCore.Plugins do
         {:ok, Map.put(added, name, artifact)}
     end
 
-    cond do
-      not name?(name) -> {:error, "A plugin's name is lowercase letters, digits and hyphens, starting with a letter"}
-      newest(artifact) == nil -> {:error, "There's no plugin #{artifact}"}
-      true -> with :ok <- note(owner, added), do: told(owner)
+    with :ok <- if(name?(name), do: :ok, else: {:error, @named}),
+         {number, code, _tag} <- newest(artifact) || {:error, "There's no plugin #{artifact}"},
+         {:ok, version} <- newest_here(artifact, code) || loaded(artifact, code),
+         :ok <- fits(owner, name, version),
+         :ok <- note(owner, added) do
+      looked(owner, [{artifact, number, {:ok, version}}])
+      Server.tell_servers([owner])
+    else
+      :error -> {:error, "#{artifact}'s newest version doesn't compile here, so it isn't added."}
+      {:error, why} -> {:error, why}
     end
+  end
+
+  # The version of the plugin `artifact` running here, if it's the set of files named `code`.
+  defp newest_here(artifact, code) do
+    with %Version{code: ^code} = version <- version(artifact), do: {:ok, version}, else: (_ -> nil)
   end
 
   @doc "Removes a plugin from what's added for `owner`. It stays whoever's it is, and what it kept stays."
@@ -105,15 +119,9 @@ defmodule OneCore.Plugins do
     end
 
     case used_by do
-      [] -> with :ok <- note(owner, removed), do: told(owner)
+      [] -> with :ok <- note(owner, removed), do: look(owner) && Server.tell_servers([owner])
       _ -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
     end
-  end
-
-  # What's added for an owner changed: it's looked at here, and the other servers are told to.
-  defp told(owner) do
-    look(owner)
-    Server.tell_servers([owner])
   end
 
   @doc """
@@ -381,6 +389,12 @@ defmodule OneCore.Plugins do
         do: plugin
   end
 
+  # A plugin fits whoever it's added for when the plugins it uses are there for them, and one with scheduled jobs
+  # uses a plugin that keeps them.
+  defp fits(owner, name, version) do
+    with :ok <- bring(owner, name, version.uses), do: scheduled(owner, name, version)
+  end
+
   # A plugin's scheduled jobs are kept by a plugin it uses.
   defp scheduled(_owner, _name, %Version{jobs: []}), do: :ok
 
@@ -596,9 +610,14 @@ defmodule OneCore.Plugins do
       [] ->
         :ok
 
+      [missing] ->
+        {:error,
+         "#{name} uses #{missing}, which isn't added for #{owner} or the network. Add it for them first, or deploy it."}
+
       missing ->
         {:error,
-         "#{name} uses #{Enum.join(missing, ", ")}, which isn't added for #{owner} or the network. Deploy it first."}
+         "#{name} uses #{Enum.join(missing, ", ")}, which aren't added for #{owner} or the network. " <>
+           "Add them for them first, or deploy them."}
     end
   end
 
@@ -615,7 +634,7 @@ defmodule OneCore.Plugins do
   defp check(name, files) do
     cond do
       not name?(name) ->
-        {:error, "A plugin's name is lowercase letters, digits and hyphens, starting with a letter"}
+        {:error, @named}
 
       not (is_map(files) and map_size(files) > 0 and
                Enum.all?(files, fn {path, text} -> path?(path) and is_binary(text) end)) ->

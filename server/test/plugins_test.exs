@@ -56,6 +56,18 @@ defmodule OneCore.PluginsTest do
 
     send(first_call, :finish)
     assert Task.await(first) == {:ok, 1}
+
+    # A plugin is added for someone once the plugins it uses are there for them, as when it's deployed.
+    uses = ~s(defmodule Uses do\n  @behaviour OneCore.Plugin\n  @impl true\n  def uses, do: ["thing"]\nend)
+    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "thing", %{"app/thing.js" => "1"})
+    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "uses", %{"uses.ex" => uses})
+
+    assert Plugins.add("users/bob", "uses", "users/alice/plugins/uses") ==
+             {:error,
+              "uses uses thing, which isn't added for users/bob or the network. Add it for them first, or deploy it."}
+
+    assert :ok = Plugins.add("users/bob", "thing", "users/alice/plugins/thing")
+    assert :ok = Plugins.add("users/bob", "uses", "users/alice/plugins/uses")
     assert length(loaded()) == 1
 
     # A server starting on the same bucket runs what was deployed.

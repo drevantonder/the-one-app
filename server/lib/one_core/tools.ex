@@ -53,7 +53,7 @@ defmodule OneCore.Tools do
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
       It's the same plugin, at its newest version, with an artifact of its own for whoever it's added for. Whoever
-      it belongs to shares it with you first, as a viewer.
+      it belongs to shares it with you first, as a viewer, and the plugins it uses are added for you first.
       """,
       inputs: %{
         type: "object",
