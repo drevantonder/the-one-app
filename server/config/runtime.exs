@@ -15,6 +15,8 @@ if home = System.get_env("ONE_SERVER_HOME") do
     bucket: {OneCore.Bucket.S3, address},
     for: System.get_env("ONE_FOR", "network"),
     device: System.get_env("ONE_DEVICE"),
+    # What its machine is called, as its owner named it, which the server is listed by.
+    name: System.get_env("ONE_NAME"),
     # A network being built has its person's commands say who they act as, which only it lets them (`OneCore.User`),
     # and it was one of those that installed this server.
     development: System.get_env("ONE_AS") != nil,

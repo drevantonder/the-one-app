@@ -82,7 +82,7 @@ impl Client {
         for (name, says) in fills {
             let filled = match (says["format"].as_str().unwrap_or_default(), inputs.get(name).and_then(Value::as_str)) {
                 ("device", None) => self.key.public().to_string(),
-                ("device-name", None) => gethostname::gethostname().to_string_lossy().into_owned(),
+                ("device-name", None) => crate::name(),
                 ("secret", Some(text)) => self.secret(plugin, says, text, who).await?,
                 ("owner-key", typed) => self.owner_key_for(inputs, typed, who).await?,
                 ("artifact-keys", None) => self.artifact_keys(plugin, says, inputs, who).await?,
@@ -150,7 +150,12 @@ impl Client {
     /// The key of `who`, or of whoever this client asks for, encrypted to the device the input `device` names: the
     /// one typed as a recovery key, this device's copy, or for someone who has none yet, a new one, for this device
     /// itself.
-    async fn owner_key_for(&self, inputs: &Map<String, Value>, typed: Option<&str>, who: Option<&str>) -> Result<String> {
+    async fn owner_key_for(
+        &self,
+        inputs: &Map<String, Value>,
+        typed: Option<&str>,
+        who: Option<&str>,
+    ) -> Result<String> {
         let holds = self.tool_for(HOLDS, json!({}), who).await?;
         let (owner, me) = (holds["owner"].as_str().unwrap_or_default(), self.key.public().to_string());
         let device = inputs.get("device").and_then(Value::as_str).unwrap_or(&me);

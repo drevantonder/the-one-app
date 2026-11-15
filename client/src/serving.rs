@@ -132,6 +132,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             .env("ONE_ADDRESS", &address)
             .env("ONE_FOR", &who)
             .env("ONE_DEVICE", client.key())
+            .env("ONE_NAME", crate::name())
             .stdout(Stdio::piped())
             .kill_on_drop(true)
             .spawn()

@@ -52,7 +52,7 @@ pub fn target() -> String {
 /// What a device says of itself as it asks for its pass, which the network keeps so a list of its devices says
 /// which build each is: its build, its kind of machine and its name.
 fn said() -> Value {
-    json!({"build": BUILD, "target": target(), "name": gethostname::gethostname().to_string_lossy()})
+    json!({"build": BUILD, "target": target(), "name": name()})
 }
 
 /// What servers and clients speak.
@@ -218,22 +218,44 @@ impl NotIn {
     }
 }
 
-/// What this device is called, as its system says to an app that asks without a permission: a computer's name, an
-/// Android phone's name in its settings or else its model, and an iPhone's name from UIKit, which without Apple's
-/// entitlement for it is "iPhone" or "iPad". A phone has no name of its own as a host: that's `localhost`.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
-fn name() -> String {
+/// What this device is called, as its person named it and its system says to an app that asks without a
+/// permission: a Mac's name in its settings ("Andre's MacBook Air"), a Linux machine's pretty hostname if it has one,
+/// and another computer's name as a host; an Android phone's name in its settings or else its model, and an iPhone's
+/// name from UIKit, which without Apple's entitlement for it is "iPhone" or "iPad". It names a device and a server
+/// alike. A phone has no name of its own as a host: that's `localhost`.
+#[cfg(target_os = "macos")]
+pub fn name() -> String {
+    let named = std::process::Command::new("scutil").args(["--get", "ComputerName"]).output();
+    match named {
+        Ok(named) if named.status.success() => String::from_utf8_lossy(&named.stdout).trim().to_owned(),
+        _ => gethostname::gethostname().to_string_lossy().into_owned(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub fn name() -> String {
+    // Where systemd keeps it, as `hostnamectl set-hostname --pretty` sets it.
+    let info = fs::read_to_string("/etc/machine-info").unwrap_or_default();
+    let pretty = info.lines().find_map(|line| line.strip_prefix("PRETTY_HOSTNAME="));
+    match pretty.map(|pretty| pretty.trim_matches('"').trim()).filter(|pretty| !pretty.is_empty()) {
+        Some(pretty) => pretty.to_owned(),
+        None => gethostname::gethostname().to_string_lossy().into_owned(),
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android", target_os = "macos", target_os = "linux")))]
+pub fn name() -> String {
     gethostname::gethostname().to_string_lossy().into_owned()
 }
 
 #[cfg(target_os = "ios")]
-fn name() -> String {
+pub fn name() -> String {
     // UIKit answers on the main thread.
     dispatch2::run_on_main(|main| objc2_ui_kit::UIDevice::currentDevice(main).name().to_string())
 }
 
 #[cfg(target_os = "android")]
-fn name() -> String {
+pub fn name() -> String {
     use jni::objects::{JObject, JString};
     let named = || -> jni::errors::Result<String> {
         let android = ndk_context::android_context();
