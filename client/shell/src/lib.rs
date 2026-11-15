@@ -317,17 +317,15 @@ const HOME: &str = "tauri://localhost/index.html";
 /// in and the link it's let in by, which says `why` it shows a new code, if it does.
 async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Option<(Url, NotIn)>> {
     // A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
-    // the folder it shares with its notification extension instead, its App Group, which `main.mm` says as
-    // ONE_HOME, and moves there what a build before that kept in its own.
+    // the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
+    // when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone_home`).
     #[cfg(target_os = "android")]
     let home = app.path().app_data_dir()?;
     #[cfg(target_os = "ios")]
-    let home: std::path::PathBuf = {
-        let group =
-            std::env::var_os("ONE_HOME").ok_or_else(|| anyhow::anyhow!("this app was built with no App Group"))?;
-        ::client::move_home(&app.path().app_data_dir()?, group.as_ref())?;
-        group.into()
-    };
+    let home = ::client::phone_home(
+        &app.path().app_data_dir()?,
+        std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new),
+    )?;
     #[cfg(desktop)]
     let home = ::client::home()?;
     let client = match Client::open(home).await {
