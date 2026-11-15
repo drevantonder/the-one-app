@@ -17,6 +17,7 @@ defmodule SignIn do
   @impl true
   def apps do
     [
+      %{name: "People", page: "app/people.html", icon: "people.svg", settings: true},
       %{name: "Devices", page: "app/index.html", icon: "icon.svg", settings: true},
       %{name: "Passkeys", page: "app/passkeys.html", icon: "passkeys.svg", settings: true}
     ]
@@ -35,6 +36,23 @@ defmodule SignIn do
           type: "object",
           properties: %{name: %{type: "string", description: "Their name: lowercase letters, digits and hyphens"}},
           required: ["name"]
+        }
+      },
+      %{
+        name: "everyone",
+        read_only: true,
+        description:
+          "Lists everyone in the network and everyone invited to it: the name each goes by, and whether they've joined",
+        inputs: none
+      },
+      %{
+        name: "remove_person",
+        description:
+          "Takes someone out of the network: their devices, assistants and passkeys stop working, and what they made stays",
+        inputs: %{
+          type: "object",
+          properties: %{who: %{type: "string", pattern: "^users/[a-z][a-z0-9-]*$", description: "Who: users/<name>"}},
+          required: ["who"]
         }
       },
       %{
@@ -129,6 +147,19 @@ defmodule SignIn do
   def call("invite", %{"name" => name}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
     invite(name)
+  end
+
+  def call("everyone", _inputs, call) do
+    if not Call.member?(call, "network"), do: raise("Only a member of the network sees who's in it.")
+    ask(%{ask: "everyone"})["people"]
+  end
+
+  # Whoever invites takes out, and nobody takes themselves out.
+  def call("remove_person", %{"who" => who}, call) do
+    Call.reach(call, Artifact.name(call.own), "editor")
+    if who == call.by, do: raise("You can't take yourself out of the network.")
+    %{"removed" => name} = ask(%{ask: "remove_person", who: who})
+    "#{name} is out of the network. What they made stays."
   end
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})

@@ -94,7 +94,7 @@ async function nobodys(answer) {
  * What a server asks for a person in the app: one acting for them, or for the network, which acts for everyone, as
  * servers have it themselves (`OneCore.Servers.acting/1`). Nothing else is believed about who that is. An
  * invitation, the first owner's included, is only the network's to make, since it can make someone nobody acts for
- * yet.
+ * yet, and so is taking someone out and listing everyone, which a person's own server isn't told.
  */
 async function ask(request, auth, url) {
   const body = await request.text();
@@ -105,7 +105,7 @@ async function ask(request, auth, url) {
   } catch {
     return Response.json({ error: "An ask is JSON" }, { status: 400 });
   }
-  const of = ["invite", "owner"].includes(what.ask) ? [NETWORK] : [NETWORK, `${what.who}/`];
+  const of = ["invite", "owner", "everyone", "remove_person"].includes(what.ask) ? [NETWORK] : [NETWORK, `${what.who}/`];
   const acting = (await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat();
   if (!server || !acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
   return Response.json(await asked(auth, url.origin, what));

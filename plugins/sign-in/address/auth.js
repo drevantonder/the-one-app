@@ -280,11 +280,22 @@ async function invite(adapter, internalAdapter, origin, name, user) {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
   // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
   const invitee = user ?? (await internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }));
-  await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: invitee.id }] });
-  const link = hex(crypto.getRandomValues(new Uint8Array(24)));
-  await adapter.create({ model: "invite", data: { id: await sha256(link), userId: invitee.id, expiresAt: new Date(Date.now() + INVITED_FOR) }, forceAllowId: true });
-  return { link: `${origin}/sign-in/#invite=${link}` };
+  return { link: `${origin}/sign-in/#invite=${await invitation(adapter, invitee, INVITED_FOR)}` };
 }
+
+/**
+ * A new invitation for `user` to make a passkey by, lasting `lasts` milliseconds: what's carried after `#invite=` or
+ * `#passkey=` in a link. It ends the one made for them before.
+ */
+async function invitation(adapter, user, lasts) {
+  await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: user.id }] });
+  const link = hex(crypto.getRandomValues(new Uint8Array(24)));
+  await adapter.create({ model: "invite", data: { id: await sha256(link), userId: user.id, expiresAt: new Date(Date.now() + lasts) }, forceAllowId: true });
+  return link;
+}
+
+/** Whether `user` has joined: they made a passkey. */
+const joined = async (adapter, user) => (await adapter.findMany({ model: "passkey", where: [{ field: "userId", value: user.id }] })).length > 0;
 
 /**
  * What a server acting for the network asks, for a person in the app: `{ask, ...}`. Their name is theirs as
@@ -297,9 +308,17 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
 
   if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user);
   // The network's first owner is invited only until they've joined, so a link to join as them isn't made after.
-  if (ask === "owner") {
-    const joined = user && (await adapter.findMany({ model: "passkey", where: [{ field: "userId", value: user.id }] })).length > 0;
-    return joined ? { joined: true } : invite(adapter, internalAdapter, origin, named, user);
+  if (ask === "owner") return user && (await joined(adapter, user)) ? { joined: true } : invite(adapter, internalAdapter, origin, named, user);
+  // Everyone who has joined, and everyone invited who hasn't yet, with the name each goes by.
+  if (ask === "everyone") {
+    const [users, passkeys, invites] = await Promise.all(["user", "passkey", "invite"].map((model) => adapter.findMany({ model })));
+    const has = (rows) => new Set(rows.filter(({ expiresAt }) => !expiresAt || expiresAt > new Date()).map(({ userId }) => userId));
+    const [keyed, invited] = [has(passkeys), has(invites)];
+    return {
+      people: users
+        .filter(({ id }) => keyed.has(id) || invited.has(id))
+        .map((user) => ({ who: who(user), called: user.called ?? null, email: user.emailVerified ? user.email : null, joined: keyed.has(user.id) })),
+    };
   }
   if (!user) return { error: `${name} hasn't joined this network.` };
   const mine = [{ field: "userId", value: user.id }];
@@ -378,6 +397,15 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     if (!answered) return { error: "That code has been answered already." };
     await place(adapter, code.clientId, "app", code.name, user);
     return { let_in: code.name };
+  }
+  // Someone taken out of the network: nothing acts as them from then on, they sign in nowhere, and their name is free.
+  if (ask === "remove_person") {
+    for (const device of await adapter.findMany({ model: "device", where: mine })) await remove(adapter, device);
+    for (const model of ["oauthRefreshToken", "oauthAccessToken", "oauthConsent", "session", "passkey", "invite", "account"])
+      await adapter.deleteMany({ model, where: mine });
+    await adapter.delete({ model: "user", where: [{ field: "id", value: user.id }] });
+    await env.OWN.remove(`people/${user.name}`);
+    return { removed: user.called ?? user.name };
   }
   if (ask === "remove_passkey") {
     const passkeys = await adapter.findMany({ model: "passkey", where: mine });

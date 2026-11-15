@@ -49,3 +49,16 @@ export function pace(element, name) {
   // A time is written in milliseconds or seconds, and an animation counts in milliseconds.
   return { duration: parseFloat(time) * (time.endsWith("ms") ? 1 : 1000), easing: tokens.getPropertyValue(`--ease-${name}`).trim() }
 }
+
+/// `await share(link)`: hands text to the device's own share sheet where it has one, and copies it otherwise. Call
+/// it as a press is handled: a device shares only what its person just asked to. → `"shared"`, `"copied"`, or
+/// `undefined` if they closed the sheet.
+export async function share(text) {
+  if (!navigator.share) return navigator.clipboard.writeText(text).then(() => "copied")
+  try {
+    await navigator.share({ text })
+    return "shared"
+  } catch (error) {
+    if (error.name !== "AbortError") throw error
+  }
+}

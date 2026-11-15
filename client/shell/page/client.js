@@ -97,6 +97,8 @@ function load(app, who) {
   const view = { key: at, app, for: who, host: host(app, who) }
   view.frame = Object.assign(document.createElement("iframe"), { src: address(view), inert: true })
   view.frame.sandbox = "allow-scripts allow-same-origin allow-forms"
+  // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the kit's `share`).
+  view.frame.allow = "clipboard-write; web-share"
   view.loaded = new Promise((loaded) => view.frame.addEventListener("load", loaded, { once: true }))
   open.set(at, view)
   document.body.append(view.frame)
