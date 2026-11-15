@@ -65,7 +65,8 @@ A plugin uses an account by using this plugin, and never keeps a secret itself:
   `"Google {{email}}"`, with `openid` and `email` among the scopes, is an item for each account.
 - `fetch(call, item, request)` makes a web request with the item's fields filled in where `{{<field>}}` is
   written, and gives `%{status: ..., headers: ..., body: ...}`. A secret goes only to one of the item's sites.
-  A signed-in item's `access_token` is renewed when it has ended, or when the service says it has.
+  It waits 15 seconds for an answer, or `timeout` seconds if the request says. A signed-in item's
+  `access_token` is renewed when it has ended, or when the service says it has.
 - `value(call, item, field)` gives one field itself, to hand to a program a service brings. Hand it over on the
   program's input, and never answer with it, raise it or log it.
 - `keep(call, item, fields)` keeps secrets the plugin made itself or an outside service handed it, such as the

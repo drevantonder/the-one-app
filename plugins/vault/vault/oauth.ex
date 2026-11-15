@@ -110,7 +110,8 @@ defmodule Vault.OAuth do
            body: body,
            redirect: false,
            retry: false,
-           decode_body: false
+           decode_body: false,
+           receive_timeout: (request[:timeout] || 15) * 1000
          ) do
       {:ok, answer} ->
         blot = fn text -> Enum.reduce(secret, text, &String.replace(&2, fields[&1] || "\0", "[secret]")) end

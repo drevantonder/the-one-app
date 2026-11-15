@@ -258,8 +258,8 @@ defmodule Vault do
   @doc """
   Makes a web request with an item's fields filled in, for the plugin that calls this, which its person switched
   on for the item: `vault.fetch(call, "GitHub", %{url: "https://api.github.com/user", headers: %{"authorization"
-  => "Bearer {{token}}"}})`, with `method` and `body` if it has them. A secret goes only to one of the item's
-  sites. Gives the answer's `status`, `headers` and `body`. An item that a sign-in made has its tokens renewed when
+  => "Bearer {{token}}"}})`, with `method` and `body` if it has them, and `timeout`, how many seconds it may
+  take to answer, when that's more than 15. A secret goes only to one of the item's sites. Gives the answer's `status`, `headers` and `body`. An item that a sign-in made has its tokens renewed when
   they've ended.
   """
   def fetch(%Call{} = call, item, request), do: fetched(call, reached(call), item, request, {:plugin, call.who})
