@@ -164,6 +164,10 @@ for _ in $(seq 20); do as probe echo --text "$marker said this" >/dev/null; done
 echo "  probe echo, 20 times, each given the marker"
 refused as probe fail --text "$marker"
 refused as probe fail --text "$marker"
+# A call to a tool that isn't there, which the CLI would refuse before asking a server.
+nothing='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"probe_nothing","arguments":{}}}'
+said=$(ONE_AS=alice "$one" mcp <<<"$nothing") && [[ $said == *"probe has no tool named nothing"* ]] || { echo "probe_nothing wasn't refused: $said" && exit 1; }
+echo "  probe nothing, a tool that isn't there, refused"
 for _ in $(seq 5); do as probe slow >/dev/null; done
 echo "  probe slow, 5 times"
 may as via server probe count
@@ -209,11 +213,11 @@ holds python3 -I -c 'import json, sys; s = json.loads(sys.argv[1])["steps"]; n =
 echo "  probe.bytes counted 20 texts, and summed their bytes"
 
 may as insights errors
-for message in "Probe refused on purpose" "Count refused on purpose" "Bomb went off" "No server is answering."; do
+for message in "Probe refused on purpose" "Count refused on purpose" "Bomb went off" "No server is answering." "probe has no tool named nothing"; do
   [[ $said == *"$message"* ]] || { echo "the errors don't say: $message" && exit 1; }
 done
 said=$(pick 'x["message"] == "Probe refused on purpose"') && holds test "$(of .count)" = 2
-echo "  each error is there once, with how often: probe fail twice, the passed-on count once, the bomb, the unanswered call"
+echo "  each error is there once, with how often: probe fail twice, the passed-on count once, the bomb, the unanswered call, the refused call to a tool that isn't there"
 may as insights errors
 said=$(pick 'x["where"] == "probe count"')
 trace=$(of .trace)
