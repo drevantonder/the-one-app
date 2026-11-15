@@ -28,8 +28,9 @@ defmodule OneCore.User do
   where only one acting for someone is believed about what they asked for.
 
   - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on
-    what it was asked, having decided it, and `passed_on` says so. A scheduled job is asked by nobody, so its `who` is
-    `nil`.
+    what it was asked, having decided it, and `passed_on` says so: `:to` from a server that couldn't run it, and
+    `true` from one that handed it to this one for what it holds (`OneCore.Call`). A scheduled job is asked by
+    nobody, so its `who` is `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
   - `as` names a user to act as. It's for a network being built, to show who may do what with nobody signing
     in, and is refused unless the server's `:development` setting is on.
@@ -50,7 +51,7 @@ defmodule OneCore.User do
         {:error, "Only a server acting for #{whose} says it asks for them"}
 
       is_binary(said["for"]) ->
-        {:ok, {by, said["for"]}, said["passed_on"] == true}
+        {:ok, {by, said["for"]}, if(said["passed_on"] == "to", do: :to, else: said["passed_on"] == true)}
 
       true ->
         {:error, "A server says who it asks for too"}

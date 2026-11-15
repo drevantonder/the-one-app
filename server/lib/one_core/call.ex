@@ -16,6 +16,10 @@ defmodule OneCore.Call do
 
   The rest is One Core's: the plugin's name where it was added and the plugin as a who, what was asked of it, the
   plugins it uses, and whether another server passed it on.
+
+  A call is passed between servers at most twice, so none goes round. A server that can't run it has one that can
+  run it instead (`pass_to/2`): `passed_on` is then `:to`. That one may still hand it to the one server that holds
+  what it needs, as a database's lease (`pass_on/2`): `passed_on` is then `true`, and it goes no further.
   """
   alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
   alias OneCore.Plugins.Version
@@ -129,7 +133,16 @@ defmodule OneCore.Call do
   Has a server acting for `owner` run this call instead, since this one doesn't act for them. The call ends here
   with that server's answer, and raises if none of them is up, or none acts for whoever the plugin was added for
   too.
+
+  With servers' keys in `owner`'s place, it's one of those that runs it, for a plugin that knows which can: the
+  ones that hold a key, say. `:no_answer` then means none of them ran it.
   """
+  def pass_to(%__MODULE__{passed_on: false} = call, servers) when is_list(servers) do
+    for server <- servers -- [Server.key()], do: :no_answer = asks(call.ask, {call.by, call.for}, server, "to")
+    :no_answer
+  end
+
+  def pass_to(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :passed_back})
   def pass_to(%__MODULE__{} = call, owner), do: pass_to(call.ask, {call.by, call.for}, call.passed_on, owner)
 
   @doc """
@@ -138,7 +151,7 @@ defmodule OneCore.Call do
   """
   def pass_to(ask, asked, passed_on, owner) do
     if passed_on, do: throw({__MODULE__, :passed_back})
-    for server <- Servers.acting(owner) -- [Server.key()], do: :no_answer = asks(ask, asked, server)
+    for server <- Servers.acting(owner) -- [Server.key()], do: :no_answer = asks(ask, asked, server, "to")
     raise "No server acting for #{owner} answered"
   end
 
@@ -151,12 +164,14 @@ defmodule OneCore.Call do
   """
   def pass_on(%__MODULE__{passed_on: true}, _server), do: throw({__MODULE__, :passed_back})
 
-  def pass_on(%__MODULE__{ask: ask, for: who, by: by}, server), do: asks(ask, {by, who}, server)
+  def pass_on(%__MODULE__{ask: ask, for: who, by: by}, server), do: asks(ask, {by, who}, server, true)
 
-  defp asks({method, params}, {by, who}, server) do
+  # `passed_on` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
+  # `true` from one that hands it to the server holding what it needs.
+  defp asks({method, params}, {by, who}, server, passed_on) do
     passed_back = Server.passed_back()
 
-    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: true, who: by, for: who})) do
+    case Server.request(server, method, Map.put(params, :_meta, %{passed_on: passed_on, who: by, for: who})) do
       {:ok, result} -> throw({__MODULE__, {:passed_on, result}})
       {:error, ^passed_back, _why} -> :no_answer
       {:error, _code, why} -> raise why

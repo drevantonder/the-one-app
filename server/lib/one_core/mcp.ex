@@ -219,7 +219,7 @@ defmodule OneCore.Mcp do
 
   # What one server asks of another is run only for a server that says who it asks for, which only one acting
   # for them is believed about. This server runs it if it acts for whoever it's for too.
-  defp between(true, run) do
+  defp between(passed_on, run) when passed_on in [true, :to] do
     case run.() do
       {:ok, answer} -> {:ok, %{answer: answer}}
       {:error, why} -> {:error, -32000, why}
