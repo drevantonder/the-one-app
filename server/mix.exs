@@ -41,10 +41,8 @@ defmodule OneCore.MixProject do
     ]
   end
 
-  # The build this is: the commit it's built from, said as `client/build.rs` says a client's, and `-dirty` after it
-  # when what's built isn't all committed. `./release` names it.
+  # The build this is, as `build-name` names it from the commit it's built from, as a client's is.
   defp build do
-    System.get_env("ONE_BUILD") ||
-      elem(System.cmd("git", ~w(describe --always --dirty --abbrev=12 --exclude=*), cd: __DIR__), 0) |> String.trim()
+    elem(System.cmd(Path.expand("../build-name", __DIR__), []), 0) |> String.trim()
   end
 end

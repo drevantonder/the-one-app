@@ -1,0 +1,8 @@
+#!/bin/sh
+# Says the name of a build of this checkout, which is the one name it has everywhere: `one --version`, the `builds`
+# tool, a server, and a phone's app, whose store takes the number before the dash as its version and build number.
+# The number is how many commits lead to the one checked out, which only grows on main, and after it is that
+# commit: `2631-febd37350abc`, with `-dirty` on the end when what's built isn't all committed.
+set -e
+cd "$(dirname "$0")"
+echo "$(git rev-list --count HEAD)-$(git describe --always --dirty --abbrev=12 --exclude='*')"

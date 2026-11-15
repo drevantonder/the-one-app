@@ -20,10 +20,9 @@ root=$(cd "$(dirname "$0")" && pwd)
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
-# A build is named by its commit, so what's built is all committed.
+# A build is named by its commit (`build-name`), so what's built is all committed.
 [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
-build=$(git describe --always --abbrev=12 --exclude='*')
-export ONE_BUILD=$build
+build=$(./build-name)
 target=${CARGO_TARGET_DIR:-$root/target}
 out=$target/builds/$build
 cache=$target/release-cache

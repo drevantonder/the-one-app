@@ -1,17 +1,19 @@
 use serde_json::Value;
 
 fn main() {
-    // The build a program is: the commit it's built from, as `git describe` names it, with `-dirty` after it when
-    // what's built isn't all committed. `./release` names it in ONE_BUILD, and a server says its own the same way
-    // (`server/mix.exs`).
-    println!("cargo:rerun-if-env-changed=ONE_BUILD");
-    let build = std::env::var("ONE_BUILD").unwrap_or_else(|_| {
-        let described = std::process::Command::new("git")
-            .args(["describe", "--always", "--dirty", "--abbrev=12", "--exclude=*"])
-            .output()
-            .expect("git describes what's built");
-        String::from_utf8(described.stdout).expect("git says a commit").trim().to_owned()
-    });
+    // The build a program is, as `build-name` names it from the commit checked out, which a server and a phone's
+    // app are named by too. It's named again whenever the commit does: git's HEAD, the branch it's on, or what's
+    // staged changes.
+    let git = |asked: &[&str]| {
+        let said = std::process::Command::new("git").args(asked).output().expect("git is there");
+        String::from_utf8(said.stdout).expect("git says text").trim().to_owned()
+    };
+    let branch = git(&["symbolic-ref", "-q", "HEAD"]);
+    for watched in ["HEAD", "index", "packed-refs", branch.as_str()].into_iter().filter(|path| !path.is_empty()) {
+        println!("cargo:rerun-if-changed={}", git(&["rev-parse", "--path-format=absolute", "--git-path", watched]));
+    }
+    let named = std::process::Command::new("sh").arg("../build-name").output().expect("build-name names the build");
+    let build = String::from_utf8(named.stdout).expect("a build's name is text").trim().to_owned();
     println!("cargo:rustc-env=ONE_BUILD={build}");
 
     // What the app is to the system it's on is its build's Tauri identifier: `shell/tauri.conf.json`'s, or the one

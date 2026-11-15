@@ -56,6 +56,7 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        # What Tauri's CLI writes here as it builds. What's built says the build's number (Name the Build).
         CFBundleShortVersionString: 1.0.0
         CFBundleVersion: "1.0.0"
         # The folder the app keeps its client in, which its notification extension reads its key from
@@ -101,6 +102,14 @@ targets:
         outputFiles:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+    postBuildScripts:
+      # The build's number, as `build-name` says it, which the App Store takes as its version and build number.
+      - &name-the-build
+        script: |
+          number=$(sh "${SRCROOT:?}/../../../../build-name" | cut -d- -f1)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $number" -c "Set :CFBundleVersion $number" "${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}"
+        name: Name the Build
+        basedOnDependencyAnalysis: false
   # Opens each notification APNs brings before it shows, with the key the app keeps in their App Group
   # (Notifications/NotificationService.swift). CryptoKit's HPKE is on iOS 17 and later; before that, an iPhone shows
   # the fixed line Apple carries.
@@ -114,6 +123,7 @@ targets:
       path: Notifications/Info.plist
       properties:
         CFBundleDisplayName: Notifications
+        # What's built says the build's number (Name the Build).
         CFBundleShortVersionString: 1.0.0
         CFBundleVersion: "1.0.0"
         AppGroup: group.app.theone.client
@@ -132,3 +142,5 @@ targets:
         DEVELOPMENT_TEAM: $(APPLE_DEVELOPMENT_TEAM)
         ARCHS: [arm64]
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+    postBuildScripts:
+      - *name-the-build

@@ -1,17 +1,9 @@
-import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("rust")
-}
-
-val tauriProperties = Properties().apply {
-    val propFile = file("tauri.properties")
-    if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
-    }
 }
 
 android {
@@ -22,8 +14,10 @@ android {
         applicationId = "app.theone.client"
         minSdk = 24
         targetSdk = 37
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
-        versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+        // The build's name, as `build-name` says it, and its number, which Google Play takes as its version code.
+        val build = providers.exec { commandLine("sh", rootProject.file("../../../../build-name").path) }.standardOutput.asText.get().trim()
+        versionCode = build.substringBefore('-').toInt()
+        versionName = build
     }
     buildTypes {
         getByName("debug") {

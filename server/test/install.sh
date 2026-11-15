@@ -55,7 +55,7 @@ release() {
   (cd "$clone" && ONE_HOME=$client ONE_AS=owner ONE_FOR=network ./release linux-x86_64) >"$folder/release-$1.log" 2>&1 ||
     { tail -30 "$folder/release-$1.log" >&2; exit 1; }
   grep -E "^(server|one)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
-  git -C "$clone" describe --always --abbrev=12 --exclude='*'
+  "$clone/build-name"
 }
 
 say "Building and publishing this commit"
