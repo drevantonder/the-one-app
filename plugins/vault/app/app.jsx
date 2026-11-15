@@ -119,7 +119,7 @@ function RequestSheet() {
       <Show when={asked()}>
         <form onSubmit={allow}>
           <p class="about">
-            {asked().why ? `${asked().why}. ` : ""}
+            {asked().why ? `${asked().why.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
             {who()} can use {picked() || asked().title}
             {!picked() && asked().hosts.length ? `, sent only to ${listed(asked().hosts)}` : ""}. Nobody is shown what you type.
           </p>
