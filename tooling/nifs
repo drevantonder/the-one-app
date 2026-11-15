@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Builds the NIFs of the plugins The One App ships with for every kind of machine a server runs on, each beside its
+# source as a plugin brings it (`OneCore.Plugin`): `plugins/<name>/server/nif/<crate>/<kind>.so`. A plugin is the same
+# files on every server of a network, so it's deployed with all of them:
+#
+#     tooling/nifs && ONE_FOR=network one deploy --name <name> --files-from plugins/<name>
+#
+# With zig, from one machine, and for Linux for the same glibc as a server's VM (`tooling/release`).
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+# The tools this needs are the ones `mise.toml` names.
+command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+cd "$root"
+
+crates=($(dirname plugins/*/server/nif/*/Cargo.toml))
+target=${CARGO_TARGET_DIR:-$root/target}
+for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin; do
+  if [[ $triple == *linux* ]]; then os=linux glibc=.2.35 library=so; else os=macos glibc= library=dylib; fi
+  cargo zigbuild --release --target "$triple$glibc" $(printf -- '-p %s ' $(basename -a "${crates[@]}"))
+  for crate in "${crates[@]}"; do
+    cp "$target/$triple/release/lib$(basename "$crate").$library" "$crate/$os-${triple%%-*}.so"
+  done
+done

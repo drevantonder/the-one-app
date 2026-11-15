@@ -94,20 +94,6 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Waits until this server has deployed the plugins it bundles, as it does once it's started (`deploy_bundled/0`).
-  """
-  def await_bundled do
-    case List.keyfind(Supervisor.which_children(OneCore.Supervisor), :bundled, 0) do
-      {:bundled, pid, _type, _modules} when is_pid(pid) ->
-        deploying = Process.monitor(pid)
-        receive do: ({:DOWN, ^deploying, _, _, _} -> :ok)
-
-      _ ->
-        :ok
-    end
-  end
-
-  @doc """
   What of the plugins this server ships it's still deploying, or failed to, by name: `"waiting"`, `"building"`, or
   why it failed. Empty once every one is deployed.
   """

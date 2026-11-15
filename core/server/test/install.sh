@@ -57,7 +57,7 @@ release() {
     (cd "$clone" && eval "$2")
     git -C "$clone" -c user.name=test -c user.email=test@localhost commit -q --allow-empty -am "$1"
   fi
-  (cd "$clone" && ONE_HOME=$client ONE_AS=owner ONE_FOR=network tooling/release "$kind") >"$folder/release-$1.log" 2>&1 ||
+  (cd "$clone" && PATH=$root/target/release:$PATH ONE_HOME=$client ONE_AS=owner ONE_FOR=network tooling/release "server/$kind" "one/$kind") >"$folder/release-$1.log" 2>&1 ||
     { tail -30 "$folder/release-$1.log" >&2; exit 1; }
   grep -E "^(server|one)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
   "$clone/tooling/version"

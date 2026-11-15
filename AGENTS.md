@@ -50,3 +50,27 @@ before choosing.
   the background and let your harness tell you when it ends.
 - Stop what you start once you're done with it, since every thread shares these machines, and remove your worktree.
 - The machines here also run the app as it was before, whose command is `one`. Never install over it or stop it.
+
+## Releasing
+
+Whoever makes a change releases it, once it's on `main`, by the smallest path that change needs. `one builds` says
+the build each server runs, `<count>-<commit>`, and `ONE_FOR=network one code --name <plugin>` a plugin's files as
+deployed, so `git diff --stat <commit> origin/main` says what isn't live.
+
+- A plugin (`plugins/<name>/`): `ONE_FOR=network one deploy --name <name> --files-from plugins/<name>`, after
+  `tooling/nifs` if it has a NIF. A server leaves a plugin deployed by hand as it is, so deploy it even when the
+  server is released too.
+- The UI library (`ui/`): `bun build.js` in `ui/`, then `ONE_FOR=network one deploy --name ui --files-from ui/dist`,
+  and the edge, whose web client has it.
+- The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`): `bun install && bun edge.js deploy <the network's
+  address>` in `core/edge/`, with the Cloudflare account's token in `CLOUDFLARE_API_TOKEN`.
+- The server (`core/server/`, or Rust it builds with): `tooling/release server`, then `one update --server <key>`
+  for each server it names, one at a time.
+- The desktop app and CLI (`core/client/`, `clients/`, a plugin's `client/native/`): `tooling/release client`, then
+  `one update` on each device. A phone takes it only with a build from its store, which isn't made here: say one is
+  needed.
+- Docs, tests and `tooling/` need nothing.
+
+Release from `main` as it is now, never an older commit, and one server or edge release on a machine at a time:
+`tooling/release` waits for another itself, and an edge deploy runs under
+`flock "${XDG_RUNTIME_DIR:-/tmp}/one-release.lock"`.

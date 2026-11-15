@@ -57,7 +57,7 @@ defmodule OneCore.MixProject do
   end
 
   # The NIFs of the plugins The One App ships with, built for this machine and put beside their source, where a
-  # plugin brings them (`OneCore.Plugin`): here, its folder is what's deployed. `tooling/release` builds them for every
+  # plugin brings them (`OneCore.Plugin`): here, its folder is what's deployed. `tooling/nifs` builds them for every
   # kind of machine, as a server built for one is.
   defp nifs(_args) do
     root = Path.expand("../..", __DIR__)

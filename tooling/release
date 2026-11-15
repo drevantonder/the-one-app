@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# Builds the server and `one` for each kind of machine this machine builds them for, from the commit checked out,
-# and publishes them to a network, whose machines take them when they're asked to update:
+# Builds server and client builds from the commit checked out, which is on main, and publishes them to a network,
+# whose machines take them when they're asked to update (`one update`, or `one update --server <key>` for each
+# server `one builds` lists):
 #
-#     tooling/release [<kind of machine>...]
+#     tooling/release [server] [client] [--dry-run]
+#     tooling/release <name>...
+#
+# `server` is a server for every kind of machine one of the network's servers runs on, and `client` is `one` for
+# every kind of desktop machine among the network's devices; neither says both. A name is one build, as
+# `one builds` names them: `server/linux-x86_64`, `one/macos-aarch64`, `one-cli/linux-x86_64`. A phone's app is
+# built by its store, not here. --dry-run says what it would build, and builds nothing.
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
-# the network's owner. On Linux it builds a server for linux-x86_64 and linux-aarch64, and `one` for this
-# machine; on a Mac, both for macos-aarch64. Naming kinds of machine builds those servers alone.
+# the network's owner. Linux builds Linux's builds, and a Mac a Mac's, which needs its system's frameworks: from
+# Linux, what's for a Mac is built on the Mac `ssh mac` reaches, in its checkout ~/scratch/one-release, at the same
+# commit. One release runs on a machine at a time; another waits for it. A commit older than one the network has
+# published is refused, so a release that finishes late doesn't undo a newer one. A build already published is
+# left as it is.
 #
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), One
 # Core's Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships
-# with, with their NIFs built for every kind of machine, and the UI library's build, and the Bun it builds apps with named by its SHA-256, which it downloads the first time
-# (`OneCore.App`). The builds are in target/builds/<build>.
+# with, with their NIFs built for every kind of machine (`tooling/nifs`), and the UI library's build, and the Bun it
+# builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
+# target/builds/<build>.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,27 +31,84 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
+usage="tooling/release [server] [client] [--dry-run], or tooling/release <name>..."
+dry= wanted=()
+for arg in "$@"; do
+  case $arg in
+    --dry-run) dry=yes ;;
+    server | client | server/* | one/* | one-cli/*) wanted+=("$arg") ;;
+    *) echo "$usage" >&2 && exit 1 ;;
+  esac
+done
+((${#wanted[@]})) || wanted=(server client)
+
 # A build is named by its commit (`tooling/version`), so what's built is all committed.
 [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
 build=$(tooling/version)
+commit=$(git rev-parse HEAD)
+here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
+builds=$(one builds)
+
+# What's asked for, by name. A desktop or the CLI is built for each kind of machine a device of the network's is,
+# but a phone, whose app its store builds.
+names=()
+for want in "${wanted[@]}"; do
+  case $want in
+    server) names+=($(jq -r '.servers[].target | "server/" + .' <<<"$builds")) ;;
+    client) names+=($(jq -r '.devices[].target | select(startswith("linux-")) | "one/" + ., "one-cli/" + .' <<<"$builds")
+      $(jq -r '.devices[].target | select(startswith("macos-")) | "one/" + .' <<<"$builds")) ;;
+    *) names+=("$want") ;;
+  esac
+done
+names=($(printf '%s\n' "${names[@]}" | sort -u))
+
+# Nothing older than what the network runs or has published: a release that finished late would undo it.
+for running in $(jq -r '[.servers[].build, .devices[].build, (.latest // {} | .[].build)] | unique[]' <<<"$builds"); do
+  sha=$(cut -d- -f2 <<<"$running")
+  if [[ $commit != "$sha"* ]] && git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$commit" "$sha"; then
+    echo "The network has $running already, which is newer than $build: release from main as it is now." >&2 && exit 1
+  fi
+done
+
+# Which are built here, which on the Mac, and which are published already.
+mine=() mac=()
+for name in "${names[@]}"; do
+  kind=${name#*/}
+  if [[ $(jq -r --arg n "$name" '.latest[$n].build // ""' <<<"$builds") == "$build" ]]; then
+    echo "$name  $build is published already"
+  elif [[ ($name == server/* && ${kind%%-*} == ${here%%-*}) || $kind == "$here" ]]; then
+    mine+=("$name")
+  elif [[ $here == linux-* && $kind == macos-* ]]; then
+    mac+=("$name")
+  else
+    echo "$name isn't built on $here: build it on such a machine with tooling/release $name" >&2 && exit 1
+  fi
+done
+for name in "${mine[@]}"; do echo "$name  $build, built here"; done
+for name in "${mac[@]}"; do echo "$name  $build, built on the Mac"; done
+updated=$(jq -r --argjson kinds "$(printf '%s\n' "${mine[@]}" "${mac[@]}" | sed -n 's|^server/||p' | jq -R . | jq -s .)" \
+  '.servers[] | select(.target as $t | $kinds | index($t)) | "    one update --server \(.server)    # \(.name)"' <<<"$builds")
+[[ -z $dry ]] || { echo "Then each server takes it with" && echo "${updated:-    (no server)}" && exit 0; }
+((${#mine[@]} + ${#mac[@]})) || exit 0
+
+# One release on a machine at a time. A Mac has no flock, and what it builds is asked for by Linux's release.
+if command -v flock >/dev/null; then
+  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release.lock
+  exec 9>>"$lock"
+  flock -n 9 || { echo "Waiting for the release of $(<"$lock") to finish"; flock 9; }
+  echo "$build, pid $$" >"$lock"
+fi
+
+# The Mac builds its part from the same commit meanwhile.
+if ((${#mac[@]})); then
+  ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
+  on_mac=$!
+fi
+
 target=${CARGO_TARGET_DIR:-$root/target}
 out=$target/builds/$build
 cache=$target/release-cache
-mkdir -p "$out" "$cache"
-
-otp=$(erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(string:trim(V)), halt().')
-bun=$(bun --version)
-# What strips the VM's debugging symbols, for any kind of machine: Rust's own LLVM tools.
-objcopy=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-objcopy
-[[ -x $objcopy ]] || rustup component add llvm-tools
-
-case $(uname -s) in
-  Linux) every=(linux-x86_64 linux-aarch64) ;;
-  Darwin) every=(macos-aarch64) ;;
-  *) echo "A server is built on Linux or a Mac." >&2 && exit 1 ;;
-esac
-kinds=("$@")
-((${#kinds[@]})) || kinds=("${every[@]}")
+rm -rf "$out" && mkdir -p "$out" "$cache"
 
 # Downloads a file once, into the cache, checked against its SHA-256.
 fetched() {
@@ -50,26 +118,20 @@ fetched() {
   echo "$file"
 }
 
-(cd ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
-(cd core/server && mix deps.get --only prod >/dev/null)
-bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
+servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
+if ((${#servers[@]})); then
+  otp=$(erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(string:trim(V)), halt().')
+  bun=$(bun --version)
+  # What strips the VM's debugging symbols, for any kind of machine: Rust's own LLVM tools.
+  objcopy=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-objcopy
+  [[ -x $objcopy ]] || rustup component add llvm-tools
+  (cd ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
+  (cd core/server && mix deps.get --only prod >/dev/null)
+  bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
+  tooling/nifs
+fi
 
-# The NIFs of the plugins it ships with, for every kind of machine a server runs on, whatever kinds are built here,
-# each beside its source as a plugin brings it (`OneCore.Plugin`): a plugin is the same files on every server of a
-# network. With zig, from one machine, and for Linux for the same glibc as the VM.
-plugin_nifs=($(dirname plugins/*/server/nif/*/Cargo.toml))
-nifs=$target/release-nifs
-rm -rf "$nifs"
-for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin; do
-  if [[ $triple == *linux* ]]; then os=linux glibc=.2.35 library=so; else os=macos glibc= library=dylib; fi
-  cargo zigbuild --release --target "$triple$glibc" $(printf -- '-p %s ' $(basename -a "${plugin_nifs[@]}"))
-  for crate in "${plugin_nifs[@]}"; do
-    mkdir -p "$nifs/${crate#plugins/}"
-    cp "$target/$triple/release/lib$(basename "$crate").$library" "$nifs/${crate#plugins/}/$os-${triple%%-*}.so"
-  done
-done
-
-for kind in "${kinds[@]}"; do
+for kind in "${servers[@]}"; do
   echo "Building the server for $kind"
   case $kind in
     linux-x86_64) triple=x86_64-unknown-linux-gnu hex=amd64 bunzip=bun-linux-x64-baseline.zip ;;
@@ -121,56 +183,62 @@ for kind in "${kinds[@]}"; do
   beam=$(echo "$release"/erts-*/bin/beam.smp)
   "$objcopy" --strip-all "$beam"
 
-  # What it ships with, which it deploys as a folder is (`client::files`): the plugins, with their NIFs built above,
-  # the UI library's build, and the Bun it builds apps with.
+  # What it ships with, which it deploys as a folder is (`client::files`): the plugins, with their NIFs built beside
+  # their source, the UI library's build, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
   git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
-  cp -R "$nifs/." "$release/shipped/"
+  for nif in plugins/*/server/nif/*/*.so; do cp "$nif" "$release/shipped/${nif#plugins/}"; done
   cp -R ui/dist "$release/shipped/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 
   tar -czf "$out/server-$kind.tar.gz" -C "$release" .
 done
 
-# `one`, for this machine, which is the app too: building it for another kind of machine needs that machine's
-# system libraries, so each kind builds its own. Linux has `one-cli` too, the same without its window, for a machine
-# with no screen, which has no GTK or WebKitGTK; `one update` keeps each on its own.
-here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
-if [[ $here == linux-* ]]; then
-  echo "Building one-cli for $here"
-  cargo build --release -p app --no-default-features
-  gzip -9 -c "$target/release/one" >"$out/one-cli-$here.gz"
-fi
-echo "Building one for $here"
-cargo build --release -p app
-gzip -9 -c "$target/release/one" >"$out/one-$here.gz"
+# `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
+# which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
+# that machine's system libraries, so each kind builds its own.
+for name in "${mine[@]}"; do
+  case $name in
+    one-cli/*) echo "Building $name" && cargo build --release -p app --no-default-features && gzip -9 -c "$target/release/one" >"$out/one-cli-$here.gz" ;;
+  esac
+done
+for name in "${mine[@]}"; do
+  case $name in
+    one/*) echo "Building $name" && cargo build --release -p app && gzip -9 -c "$target/release/one" >"$out/one-$here.gz" ;;
+  esac
+done
 
 # Publishes what was built: the network gives a link for each file it doesn't have yet, which is sent there, and
-# once it has them all, they're the newest.
-echo "Publishing to the network"
-ONE=$target/release/one OUT=$out BUILD=$build bun -e '
-  const { ONE, OUT, BUILD } = process.env;
-  const { readdirSync } = require("node:fs");
-  const builds = await Promise.all(readdirSync(OUT).map(async (file) => {
-    const bytes = await Bun.file(`${OUT}/${file}`).bytes();
-    const [, what, kind] = file.match(/^(server|one-cli|one)-(.*?)(\.tar)?\.gz$/);
-    return { file, name: `${what}/${kind}`, build: BUILD, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
-  }));
-  const publish = () => {
-    const asked = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
-    if (asked.exitCode !== 0) process.exit(1);
-    return JSON.parse(asked.stdout.toString());
-  };
-  let said = publish();
-  if (said.send) {
-    for (const { file, name } of builds.filter(({ name }) => said.send[name])) {
-      const { method, url, headers } = said.send[name];
-      const sent = await fetch(url, { method, headers, body: Bun.file(`${OUT}/${file}`) });
-      if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
+# once it has them all, they're the latest.
+if ((${#mine[@]})); then
+  echo "Publishing to the network"
+  ONE=$(command -v one) OUT=$out BUILD=$build bun -e '
+    const { ONE, OUT, BUILD } = process.env;
+    const { readdirSync } = require("node:fs");
+    const builds = await Promise.all(readdirSync(OUT).map(async (file) => {
+      const bytes = await Bun.file(`${OUT}/${file}`).bytes();
+      const [, what, kind] = file.match(/^(server|one-cli|one)-(.*?)(\.tar)?\.gz$/);
+      return { file, name: `${what}/${kind}`, build: BUILD, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
+    }));
+    const publish = () => {
+      const asked = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
+      if (asked.exitCode !== 0) process.exit(1);
+      return JSON.parse(asked.stdout.toString());
+    };
+    let said = publish();
+    if (said.send) {
+      for (const { file, name } of builds.filter(({ name }) => said.send[name])) {
+        const { method, url, headers } = said.send[name];
+        const sent = await fetch(url, { method, headers, body: Bun.file(`${OUT}/${file}`) });
+        if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
+      }
+      said = publish();
     }
-    said = publish();
-  }
-  for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
-  if (!said.newest) throw new Error("The network didn'"'"'t take them");
-'
-echo "The network's machines take $build when they're asked to update."
+    if (said.send) throw new Error("The network didn'"'"'t take them");
+    for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
+  '
+fi
+[[ -z ${on_mac-} ]] || wait "$on_mac" || { echo "The Mac's part wasn't released." >&2 && exit 1; }
+
+echo "The network's machines take $build when they're asked to update: a device with \`one update\`, and each server with"
+echo "${updated:-    (no server)}"
