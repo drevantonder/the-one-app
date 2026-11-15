@@ -124,7 +124,7 @@ defmodule AiGateway do
       )
 
     Enum.reduce_while(tries, [], fn id, why ->
-      case ask(call, id, body, inputs["schema"] != nil) do
+      case asked(call, id, body, inputs["schema"] != nil) do
         {:ok, answer} -> {:halt, answer}
         {:down, said} -> {:cont, why ++ ["#{id}: #{said}"]}
       end
@@ -164,6 +164,13 @@ defmodule AiGateway do
     if models == [],
       do: "#{whose} #{job} tries no models of its own now.",
       else: "#{whose} #{job} tries #{Enum.join(Enum.uniq(models), ", then ")}."
+  end
+
+  # Each model asked is a span of the call, as OpenTelemetry's conventions for AI name it: Insights shows how long
+  # each took, and what each used.
+  defp asked(call, id, body, json?) do
+    attributes = %{"gen_ai.operation.name" => "chat", "gen_ai.request.model" => id}
+    OneCore.Telemetry.record("chat #{id}", attributes, fn -> ask(call, id, body, json?) end)
   end
 
   # Asks one model: `{:ok, answer}`, or `{:down, why}` when it isn't up, said no, or answered with what isn't an
@@ -214,7 +221,8 @@ defmodule AiGateway do
   # What a model said, as an answer: its text, and that read as JSON when a schema was asked for.
   defp answered(id, runs_on, status, said, json?) when status in 200..299 do
     case JSON.decode(said) do
-      {:ok, %{"choices" => [%{"message" => %{"content" => content}} = choice | _]}} ->
+      {:ok, %{"choices" => [%{"message" => %{"content" => content}} = choice | _]} = answered} ->
+        used(id, answered["usage"])
         text = text(content)
         json = if json?, do: JSON.decode(text), else: {:ok, nil}
 
@@ -246,6 +254,20 @@ defmodule AiGateway do
 
     {:down, "It answered #{status}: #{String.slice(why, 0, 200)}"}
   end
+
+  # What a model said it used: its tokens in and out, and what it cost where the endpoint says, as OpenRouter's
+  # does. Insights reads them as AI Gateway's spending.
+  defp used(id, %{} = usage) do
+    model = %{"gen_ai.request.model" => id}
+
+    for {type, tokens} <- [{"input", usage["prompt_tokens"]}, {"output", usage["completion_tokens"]}],
+        is_integer(tokens),
+        do: OneCore.Telemetry.record("gen_ai.client.token.usage", Map.put(model, "gen_ai.token.type", type), tokens)
+
+    if is_number(usage["cost"]), do: OneCore.Telemetry.record("gen_ai.client.cost", model, usage["cost"])
+  end
+
+  defp used(_id, _usage), do: :ok
 
   # Some servers answer with the content's parts rather than its text.
   defp text(parts) when is_list(parts), do: Enum.map_join(parts, &(&1["text"] || ""))

@@ -13,13 +13,14 @@ const port = Number(process.argv[2])
 const { KEY, SLOW = "20" } = process.env
 const seen = { asked: [], keys: { right: 0, wrong: 0 } }
 
-const answer = (model, content) =>
+// What it used is ten tokens in and one a character out, and a host says what that cost, as OpenRouter does.
+const answer = (model, content, priced) =>
   Response.json({
     id: "chatcmpl-fake",
     object: "chat.completion",
     model,
     choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    usage: { prompt_tokens: 10, completion_tokens: content.length, total_tokens: 10 + content.length, ...(priced && { cost: 0.0004 }) },
   })
 
 // What a receipt says, for a schema that asks for it, and something of the right type for anything else.
@@ -42,10 +43,11 @@ async function chat(request, url) {
     return Response.json({ error: { message: `the model broke, with the key ${sent}` } }, { status: 500 })
   }
   if (body.model === "slow") await Bun.sleep(Number(SLOW) * 1000)
-  if (body.response_format?.type === "json_schema") return answer(body.model, JSON.stringify(filled(body.response_format.json_schema.schema)))
-  if (images.length) return answer(body.model, `An image of ${Buffer.from(images[0].split(",")[1], "base64").length} bytes.`)
+  const priced = url.pathname.startsWith("/hosted/")
+  if (body.response_format?.type === "json_schema") return answer(body.model, JSON.stringify(filled(body.response_format.json_schema.schema)), priced)
+  if (images.length) return answer(body.model, `An image of ${Buffer.from(images[0].split(",")[1], "base64").length} bytes.`, priced)
   const text = parts.filter((part) => part.type === "text").at(-1)?.text
-  return answer(body.model, `You said: ${text}`)
+  return answer(body.model, `You said: ${text}`, priced)
 }
 
 // Whether a hosted place was sent the key, counted without saying it.
