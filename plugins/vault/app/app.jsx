@@ -172,10 +172,22 @@ function Item(props) {
         </Show>
       </Section>
       <Section heading="Used by">
-        <Switch label="Your agents" hint="They make requests with it, and never see it." checked={item().agents} onChange={(event) => does("vault_agents", { item: item().name, on: event.target.checked })} />
-        <For each={kept().plugins}>
-          {(plugin) => <Switch label={plugin} hint="Its code is handed the secret." checked={item().plugins.includes(plugin)} onChange={(event) => does("vault_use", { item: item().name, plugin, on: event.target.checked })} />}
-        </For>
+        <List>
+          <Row
+            heading="Your agents"
+            text="Use it, never see it"
+            end={<Switch aria-label="Your agents" checked={item().agents} onChange={(event) => does("vault_agents", { item: item().name, on: event.target.checked })} />}
+          />
+          <For each={kept().plugins}>
+            {(plugin) => (
+              <Row
+                heading={plugin}
+                text="Its code is handed it"
+                end={<Switch aria-label={plugin} checked={item().plugins.includes(plugin)} onChange={(event) => does("vault_use", { item: item().name, plugin, on: event.target.checked })} />}
+              />
+            )}
+          </For>
+        </List>
       </Section>
       <Section>
         <Button variant="destructive" onClick={remove}>
@@ -194,17 +206,17 @@ function OpenedBy() {
   }
   return (
     <Section heading="Opened by">
-      <For each={opened().may}>
-        {(server) => (
-          <Switch
-            label={server.name ?? "A server"}
-            hint="It holds your Vault's key, and runs what uses your secrets."
-            checked={opened().servers.includes(server.key)}
-            disabled={!holds()}
-            onChange={(event) => choose(server.key, event.target.checked)}
-          />
-        )}
-      </For>
+      <List>
+        <For each={opened().may}>
+          {(server) => (
+            <Row
+              heading={server.name ?? "A server"}
+              text="Holds your Vault's key"
+              end={<Switch aria-label={server.name ?? "A server"} checked={opened().servers.includes(server.key)} disabled={!holds()} onChange={(event) => choose(server.key, event.target.checked)} />}
+            />
+          )}
+        </For>
+      </List>
     </Section>
   )
 }
@@ -250,7 +262,7 @@ function YourKey() {
           </For>
           <Row heading="This device" text="Holds your key" />
           <For each={others()}>{(device) => <Row heading={device.name} text="Holds your key" />}</For>
-          <Row heading="Recovery Key" text="Lets a device in when every other is gone" onClick={showRecoveryKey} />
+          <Row heading="Recovery Key" text="For when every device is gone" onClick={showRecoveryKey} />
         </List>
       </Show>
     </Section>
@@ -267,7 +279,7 @@ function Vault() {
   const item = () => kept().items.find(({ name }) => name === open())
   return (
     <>
-      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()}>{(item) => <Item item={item()} />}</Show>}>
+      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={kept().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Item item={item()} />}</Show>}>
         <Screen
         heading="Vault"
         back

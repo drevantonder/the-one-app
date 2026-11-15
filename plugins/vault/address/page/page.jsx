@@ -18,7 +18,7 @@ render(
     <SignIn
       mark={<img src="./mark.png" alt="" />}
       heading={!back ? "Open Vault" : said()?.done ? "Signed in" : said()?.problem ? "Not signed in" : "Signing in"}
-      done={back ? said()?.done : "A key or sign-in of yours was asked for. Open Vault on a device of yours to answer it there."}
+      done={back ? said()?.done : "Requests for your keys and sign-ins are answered in Vault, on a device of yours."}
       problem={said()?.problem}
     />
   ),
