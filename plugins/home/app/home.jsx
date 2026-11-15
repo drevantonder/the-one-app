@@ -87,6 +87,8 @@ function held(page, item) {
       arrange(page(), items)
     })
     element.addEventListener("pointercancel", drop)
+    // A web view drags an icon as a picture of itself, and cancels the pointer, unless it's told not to.
+    element.addEventListener("dragstart", (event) => event.preventDefault())
     // A finger that's holding something moves it, not the page.
     element.addEventListener("touchmove", (event) => holding && event.preventDefault(), { passive: false })
   }
@@ -123,7 +125,7 @@ function Card(props) {
 function Tile(props) {
   return (
     <button type="button" class="tile" onPointerDown={() => open(props.app.app, { for: props.for, behind: true })} onClick={() => Date.now() > quiet && open(props.app.app, { for: props.for })}>
-      <img src={props.app.icon} alt="" draggable={false} />
+      <img src={props.app.icon} alt="" />
       <span>{props.app.name}</span>
     </button>
   )
