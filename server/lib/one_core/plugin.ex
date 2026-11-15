@@ -225,12 +225,19 @@ defmodule OneCore.Plugin do
   - The plugin decides which machine it calls: `OneCore.Service.servers(call, Hello.Door)` gives the keys of the
     servers that run the service, and `OneCore.Service.call/5` takes one of them last. Left out, it's the server
     running the call if the service runs there, and otherwise the first that's up. `OneCore.Service.server()`
-    gives a service the key of its own.
+    gives a service the key of its own, and `OneCore.Service.name(server)` what a server's machine is called,
+    for a person to pick it by: its machine's own name unless it was started as another.
+  - A plugin that uses this one calls its functions with its own call, and they reach this plugin's services as
+    they would from its own tools.
   - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
     `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was added for that
     this server acts for, or one the plugin passed it, as `call.added` or `call.for`. That function has the call, so
     it's where a service keeps anything in the plugin's artifact or its database. In a function of the service,
-    `service` goes where `self()` does.
+    `service` goes where `self()` does. Whoever its server is for comes first in `acts_for()`, so a service
+    that's for one person at a time, whoever's machine it's on, takes the first.
+  - What a service keeps on its machine goes in `OneCore.Service.folder(self())`, a folder of its own there,
+    which stays through its plugin's updates and goes when it's removed from that server. It runs as whoever
+    runs its server there, with their files and their programs.
   - When the plugin is updated, the service's process carries on in the new code with what it holds, and
     whatever it has open stays open. `code_change/3` is given the state, if the new code keeps it in another
     shape. A service that can't carry on starts afresh in the new code: one whose `code_change/3` refuses, one

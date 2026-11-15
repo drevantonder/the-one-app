@@ -22,15 +22,16 @@ defmodule OneCore.Service do
   Raises with what went wrong: the function raised, no server runs the service, or the one that does isn't up.
   """
   def call(%Call{} = call, service, function, arguments \\ [], server \\ nil) when is_list(arguments) do
+    plugin = whose(call, service)
     service = Version.own_name(service)
-    servers = if server, do: [server], else: Services.servers(call.who, service, call.for)
+    servers = if server, do: [server], else: Services.servers(plugin, service, call.for)
 
     if servers == [] do
-      raise "No server runs #{call.plugin}'s #{service}. `services` says what it needs, and `install_service` runs it on one."
+      raise "No server runs #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
     said = %{who: call.by, for: call.for, passed_on: true}
-    ask = %{plugin: call.who, service: service, function: "#{function}", arguments: json(arguments), _meta: said}
+    ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: said}
 
     case ask(servers, call.server, ask) do
       {:ok, answer} -> answer
@@ -39,7 +40,17 @@ defmodule OneCore.Service do
   end
 
   @doc "The keys of the servers that run a service of this call's plugin, for a plugin that chooses which to call."
-  def servers(%Call{who: plugin, for: who}, service), do: Services.servers(plugin, Version.own_name(service), who)
+  def servers(%Call{for: who} = call, service),
+    do: Services.servers(whose(call, service), Version.own_name(service), who)
+
+  @doc "What the machine a server runs on is called, by the server's key: its name, which the server says as it starts."
+  def name(server), do: Servers.name(server)
+
+  # The plugin whose service it is: this call's, or one it uses, whose function this call is running.
+  defp whose(%Call{who: plugin, uses: uses}, service) do
+    under = Version.under(service)
+    Enum.find_value(uses, plugin, fn {_name, {used, module}} -> Version.under(module) == under && used end)
+  end
 
   @doc """
   Calls a function of the service's plugin, for the user or group `who`, asked by nobody, and gives its answer.
@@ -66,15 +77,33 @@ defmodule OneCore.Service do
 
   @doc """
   Who the service that asks runs for on its server, each as `plugin/4` takes it: everyone its plugin was added
-  for, a user, a group or the network, that its server acts for.
+  for, a user, a group or the network, that its server acts for. Whoever the server is for comes first, as its
+  owner chose them, so a service that's for one of them at a time, its machine's person, takes the first.
   """
   def acts_for do
     {plugin, _name, _version} = which(self())
-    Enum.filter(Plugins.added_for(plugin), &Servers.here?/1)
+    members = Servers.members(Server.key())
+
+    Enum.sort_by(
+      Enum.filter(Plugins.added_for(plugin), &Servers.here?/1),
+      &(Enum.find_index(members, fn member -> member == &1 end) || length(members))
+    )
   end
 
   @doc "The key of the server a service runs on, as `call/5` takes it."
   def server, do: Server.key()
+
+  @doc """
+  A folder on this machine that is the service's own, for what it keeps there. It stays for as long as the service
+  is installed on this server, through its plugin's updates, and goes when it's removed. It also holds the folders
+  `folder/2` gives, each named after its path.
+  """
+  def folder(service) when is_pid(service) do
+    {plugin, name, _version} = which(service)
+    folder = Services.folder(plugin, name)
+    File.mkdir_p!(folder)
+    folder
+  end
 
   @doc """
   A folder on this machine holding the plugin's files under `path`, by their paths within it, for a program the

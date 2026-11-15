@@ -20,6 +20,11 @@ defmodule Mix.Tasks.Network do
   starts a server that is that user's, or that group's, and acts for them alone. Without it a server is the
   network's, and acts for everyone in it.
 
+      mix network <folder> <server> --name <name>
+
+  calls the server that name, where it would otherwise be called what its machine is: a server says so to the
+  others, and plugins name a machine by it. Two servers on one machine each need one.
+
       mix network <folder> --address <address> --first <secret>
 
   starts a server of a network that has an address (`address/`). Its bucket is the one the signer there signs
@@ -61,7 +66,8 @@ defmodule Mix.Tasks.Network do
              development: :boolean,
              for: :string,
              without: :string,
-             owner: :string
+             owner: :string,
+             name: :string
            ]
          ) do
       {options, [folder | server]} when length(server) <= 1 ->
@@ -87,6 +93,7 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :development, options[:development] == true)
     Application.put_env(:one_core, :for, options[:for] || "network")
     Application.put_env(:one_core, :home, Path.join(folder, server))
+    Application.put_env(:one_core, :name, options[:name])
     Application.put_env(:one_core, :shipped, shipped())
     Mix.Task.run("app.config")
 

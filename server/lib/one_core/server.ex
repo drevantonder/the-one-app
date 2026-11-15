@@ -140,7 +140,9 @@ defmodule OneCore.Server do
     {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})
-    Servers.started(key, address, Application.get_env(:one_core, :for, "network"))
+    {:ok, machine} = :inet.gethostname()
+    name = Application.get_env(:one_core, :name) || to_string(machine)
+    Servers.started(key, address, name, Application.get_env(:one_core, :for, "network"))
     {:ok, %{endpoint: endpoint}}
   end
 

@@ -132,8 +132,9 @@ defmodule OneCore.Tools do
       name: "services",
       read_only: true,
       description: """
-      Lists the services your plugins have, what each needs of a machine, and the servers that run it.
-      A service is a part of a plugin that runs on particular machines, for what is only there.
+      Lists the services your plugins have, what each needs of a machine, and the servers that run it, with
+      what each server's machine is called. A service is a part of a plugin that runs on particular machines,
+      for what is only there.
       """,
       inputs: %{type: "object", properties: %{}}
     },
@@ -294,8 +295,9 @@ defmodule OneCore.Tools do
   end
 
   defp run("services", _inputs, {_by, who}, _pass) do
-    owner = User.owner(who) || "network"
-    JSON.encode!(%{asked: Server.key(), servers: Servers.acting(owner), services: Services.list(who)})
+    servers = Servers.acting(User.owner(who) || "network")
+    names = Map.new(servers, &{&1, Servers.name(&1)})
+    JSON.encode!(%{asked: Server.key(), servers: servers, names: names, services: Services.list(who)})
   end
 
   defp run("install_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _pass) do

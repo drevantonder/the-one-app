@@ -6,8 +6,9 @@ defmodule OneCore.Servers do
   acting for the network, and only if there's no list. A server on a list adds another.
 
   A server's own blobs sit under `servers/<its key>/`, and only it writes them. Its `address` is how to reach it,
-  which it writes each time it starts, since it may start somewhere else. Its `members` are who it acts for: its
-  owner first, whom it was started for, and then whoever its owner chose. A new one is for its owner alone.
+  and its `name` what its machine is called, which it writes each time it starts, since it may start somewhere
+  else. Its `members` are who it acts for: its owner first, whom it was started for, and then whoever its owner
+  chose. A new one is for its owner alone.
 
   So a server acts for someone once both said so: they put it on their list, which is what gives it their blobs,
   and its owner chose them as a member, which is what has it run their plugins on its machine.
@@ -51,6 +52,9 @@ defmodule OneCore.Servers do
     forget()
   end
 
+  @doc "What the machine the server whose key is `key` runs on is called, as it said when it last started."
+  def name(key), do: kept({:name, key}, fn -> read("servers/#{key}/name", nil) end)
+
   @doc "How to reach a server, as the JSON a client is told it in."
   def address(key) do
     with {:ok, address, _tag} <- Bucket.read("servers/#{key}/address"), do: {:ok, address}
@@ -70,9 +74,10 @@ defmodule OneCore.Servers do
     Bucket.Refused -> false
   end
 
-  @doc "A server that started says how to reach it now, and who it's for if it has never said."
-  def started(key, address, owner) do
+  @doc "A server that started says how to reach it now, what its machine is called, and who it's for if it has never said."
+  def started(key, address, name, owner) do
     say("servers/#{key}/address", address)
+    say("servers/#{key}/name", JSON.encode!(name))
     Bucket.write("servers/#{key}/members", JSON.encode!([owner]))
     forget()
   end
@@ -146,7 +151,7 @@ defmodule OneCore.Servers do
   """
   def look(owner) do
     again({:listed, owner})
-    servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}], do: what
+    servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}, {:name, key}], do: what
     Enum.each(if(owner == @network, do: [:first_owner | servers], else: servers), &again/1)
   end
 

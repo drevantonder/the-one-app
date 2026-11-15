@@ -11,7 +11,8 @@
 # command acts as that user, and ONE_FOR=groups/<name> or ONE_FOR=network has it run for a group or the network.
 # Its first owner is the user `owner`.
 #
-# --spare starts a second server, which takes over when the first stops.
+# --spare starts a second server, which takes over when the first stops. Each server is called after its folder,
+#   `server` and `spare`, as two machines would be called what each is.
 # --address runs the network's address here too (`address/`): its Workers in `wrangler dev`, with a local S3 store
 #   as the bucket. Servers then keep their blobs through the signer there, and whoever holds a sharing link has a
 #   way in.
@@ -83,7 +84,7 @@ fi
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/server" && exec mix network "$folder" "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/server" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
