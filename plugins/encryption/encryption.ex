@@ -230,7 +230,7 @@ defmodule Encryption do
            else: (_ -> nil)
 
     check = with {:ok, check, _tag} <- Artifact.read(key, "check"), do: check, else: (:absent -> nil)
-    %{owner: call.for, check: check, slot: slot, devices: held, asking: asking}
+    %{owner: call.for, device: inputs["device"], check: check, slot: slot, devices: held, asking: asking}
   end
 
   @on_a_device "A device is let in from a device: in the app there, or with `one` on it. An assistant somewhere else has none."
