@@ -79,7 +79,9 @@ defmodule OneCore.Plugin do
     the call, for files that needn't outlive that machine.
   - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.for`, under an id the
     plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
-    name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by.
+    name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by. When they
+    delete one, it goes to the bin, which brings it back for 30 days: `OneCore.Call.tool(call, "bin", "remove",
+    %{"artifact" => name})`, whose skill says more.
   - `OneCore.Call.reach(call, name)` gives an artifact by its name, to a call that may reach it: as a `viewer`,
     to read it, or with `"editor"` or `"owner"` as a third argument, to change it or to say who else may. It
     raises with the reason if it may not, which is then what the caller is told, and `OneCore.Call.reaches?/3`

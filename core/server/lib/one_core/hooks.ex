@@ -104,6 +104,12 @@ defmodule OneCore.Hooks do
      `blob`'s name in it, and `by`, the plugin that did it, as a who. A plugin is told only if it could already reach
      the artifact for whoever changed it, and isn't told what it changed itself.
      """},
+    {"removed", :hears,
+     """
+     What a plugin made for someone was removed, restored or erased for good, as the plugin that keeps what's
+     removed tells every plugin. It's about the `artifact`'s name, and `what` happened: `removed`, `restored` or
+     `erased`. A plugin that keeps a list of what it made hears it to keep its list true.
+     """},
     {"recorded", :hears,
      """
      A server recorded what it and its clients did, as `OneCore.Telemetry` says, and hands it on about once a

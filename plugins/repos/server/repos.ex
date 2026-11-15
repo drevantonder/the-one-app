@@ -26,14 +26,10 @@ defmodule Repos do
   # The most of a file that's shown, and of a commit's changes.
   @shown 1_048_576
   @page 25
-  # How long a removed repo can be restored, after which it's erased.
-  @restorable :timer.hours(24 * 30)
-
+  # A repo that's removed goes to the bin, which keeps it for 30 days (`Bin`), and tells this plugin what became
+  # of it, so `list` leaves out what's in the bin.
   @impl true
-  def uses, do: ["database"]
-
-  @impl true
-  def jobs, do: [%{tool: "erase", every: 86_400}]
+  def hooks, do: ["removed"]
 
   @impl true
   def apps, do: [%{name: "Repos", page: "client/index.html", icon: "client/icon.svg"}]
@@ -143,11 +139,6 @@ defmodule Repos do
         inputs: only.(%{repo: repo}, ["repo"])
       },
       %{
-        name: "erase",
-        description: "Erases for good every repo removed more than 30 days ago. The clock calls it each day",
-        inputs: only.(%{}, [])
-      },
-      %{
         name: "git",
         description:
           "Carries one request of git's smart HTTP protocol to a repo. It's for `git-remote-one`, which git runs for `one::` addresses, not for calling by hand: clone, fetch and push with git",
@@ -168,6 +159,12 @@ defmodule Repos do
           )
       }
     ]
+  end
+
+  @impl true
+  def hook("removed", %{"artifact" => name, "what" => what}, _call) do
+    if name =~ @repo, do: indexed(name, what)
+    :ok
   end
 
   @impl true
@@ -413,37 +410,13 @@ defmodule Repos do
   end
 
   def call(tool, %{"repo" => name}, call) when tool in ["remove", "restore"] do
-    repo = Call.reach(call, name, "owner")
-    removed = if tool == "remove", do: now()
+    repo!(name)
+    Call.tool(call, "bin", tool, %{"artifact" => name})
+    indexed(name, tool <> "d")
 
-    Mirror.change(Mirror.of(call, repo), repo, nil, fn state, _folder ->
-      {Map.put(state, "removed", removed), [], :ok}
-    end)
-
-    key = "index/" <> name
-    {:ok, data, tag} = Artifact.read(index(), key)
-    Artifact.replace(index(), key, JSON.encode!(Map.put(JSON.decode!(data), "removed", removed)), tag)
-
-    if removed,
+    if tool == "remove",
       do: "Removed #{name}. `repos restore` brings it back as it was, for 30 days.",
       else: "Restored #{name}. It's as it was."
-  end
-
-  # A repo is its blobs, under its name, and its line in the index.
-  def call("erase", _inputs, _call) do
-    names = for "index/" <> name <- Artifact.list(index(), "index/"), do: name
-
-    erased =
-      for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(index(), Enum.map(names, &("index/" <> &1)))),
-          %{"removed" => at} when is_integer(at) <- [JSON.decode!(data)],
-          now() - at > @restorable do
-        repo = %Artifact{prefix: name <> "/"}
-        for blob <- Artifact.list(repo), do: Artifact.remove(repo, blob)
-        Artifact.remove(index(), "index/" <> name)
-        name
-      end
-
-    if erased == [], do: "Nothing to erase.", else: "Erased #{Enum.join(erased, ", ")}."
   end
 
   def call("git", %{"repo" => name, "path" => path} = inputs, call) do
@@ -455,7 +428,6 @@ defmodule Repos do
       case String.split(path, "?", parts: 2) do
         ["info/refs", "service=git-receive-pack"] ->
           {_folder, state} = Mirror.sync(process, repo)
-          live!(state, name)
           Wire.advertise(state)
 
         ["git-receive-pack"] ->
@@ -463,7 +435,6 @@ defmodule Repos do
 
         [service | _] when service in ["info/refs", "git-upload-pack"] ->
           {folder, state} = Mirror.sync(process, repo)
-          live!(state, name)
           Wire.upload_pack(folder, path, body, inputs["protocol"], inputs["encoding"])
 
         _ ->
@@ -486,7 +457,6 @@ defmodule Repos do
     try do
       {results, _state} =
         Mirror.change(process, repo, file, fn state, folder ->
-          live!(state, name)
 
           {changed, results} =
             Enum.reduce(commands, {state, []}, fn {old, new, ref}, {state, results} ->
@@ -633,9 +603,7 @@ defmodule Repos do
   # The repo as a viewer, its mirror brought up to date: its folder and `repo.json`.
   defp read(call, name) do
     repo = reach!(call, name)
-    {folder, state} = Mirror.sync(Mirror.of(call, repo), repo)
-    live!(state, name)
-    {folder, state}
+    Mirror.sync(Mirror.of(call, repo), repo)
   end
 
   # Whoever only reads a repo still suggests changes to it and declines their own, which this plugin keeps in the
@@ -649,16 +617,14 @@ defmodule Repos do
   defp writable(_call, repo), do: repo
 
   defp reach!(call, name) do
-    if not (name =~ @repo),
-      do: raise("#{name} isn't a repo's name, as `repos list` gives them: users/alice/made/repos/notes")
-
+    repo!(name)
     Call.reach(call, name)
   end
 
-  defp live!(%{"removed" => at}, name) when is_integer(at),
-    do: raise("#{name} was removed. Its owner brings it back with `repos restore`.")
-
-  defp live!(_state, _name), do: :ok
+  defp repo!(name) do
+    if not (name =~ @repo),
+      do: raise("#{name} isn't a repo's name, as `repos list` gives them: users/alice/made/repos/notes")
+  end
 
   # A ref asked for, which git checks; the default branch if none was.
   defp rev(state, inputs) do
@@ -703,6 +669,21 @@ defmodule Repos do
 
       :absent ->
         Artifact.write(index(), key, JSON.encode!(%{"pushed" => now()}))
+    end
+  end
+
+  # A repo's line in the index once it was removed, restored or erased: `list` leaves out one that's removed.
+  defp indexed(name, what) do
+    key = "index/" <> name
+
+    with {:ok, data, tag} <- Artifact.read(index(), key) do
+      kept = JSON.decode!(data)
+
+      case what do
+        "removed" -> Artifact.replace(index(), key, JSON.encode!(Map.put(kept, "removed", now())), tag)
+        "restored" -> Artifact.replace(index(), key, JSON.encode!(Map.delete(kept, "removed")), tag)
+        "erased" -> Artifact.remove(index(), key)
+      end
     end
   end
 

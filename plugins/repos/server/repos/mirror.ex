@@ -144,7 +144,9 @@ defmodule Repos.Mirror do
   def read!(repo) do
     case Artifact.read(repo, "repo.json") do
       {:ok, json, tag} -> {JSON.decode!(json), tag}
-      :absent -> raise "There's no repo #{Artifact.name(repo)}. `repos list` lists the ones you may read."
+      :absent ->
+        raise "There's no repo #{Artifact.name(repo)}. `repos list` lists the ones you may read, and its owner " <>
+                "brings back one removed in the last 30 days with `repos restore`."
     end
   end
 
