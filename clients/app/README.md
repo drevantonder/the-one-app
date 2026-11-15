@@ -18,6 +18,12 @@ is told its network's address by a `network` file put there (`{"address": "https
 for a network with an address. An app built with `TAURI_ONE_ADDRESS=https://...` set, on any system, starts on that
 network with no file there. It starts on that network's sign-in page.
 
+## On a Mac
+
+A Mac's app is its bundle, which `cargo tauri build --bundles app` makes in `target/release/bundle/macos`. It goes in
+`/Applications`, and `~/.local/bin/one` is a link to the program in it, so the CLI, a server and `one update` all run
+and replace that one program.
+
 ## A workplace's own app
 
 A workplace's own app, with its own name, identifier and icon, is a Tauri config of its own merged over

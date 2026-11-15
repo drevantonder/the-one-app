@@ -251,9 +251,11 @@ async fn take(client: &Client, here: &Here, program: &Path) -> Result<bool> {
 }
 
 /// Replaces this program with the build `one`, once it has said it's that build. What runs now runs on, and the
-/// next start is the new one.
+/// next start is the new one. It's the file a link to it names that's replaced, as on a Mac `~/.local/bin/one` is a
+/// link to the program in The One App's bundle.
 async fn take_program(one: &Value, program: &Path) -> Result<()> {
     let build = one["build"].as_str().context("a build says which it is")?;
+    let program = &program.canonicalize()?;
     let new = program.with_extension("new");
     let packed = program.with_extension("new.gz");
     fetch(one, &packed).await?;
