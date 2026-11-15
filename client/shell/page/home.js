@@ -62,13 +62,7 @@ async function list() {
     tile.append(Object.assign(new Image(), { src: app.icon, alt: "" }), Object.assign(document.createElement("span"), { textContent: app.name }))
     // An app starts as a finger lands on its icon, and shows as the finger lifts.
     tile.addEventListener("pointerdown", () => load(app))
-    tile.addEventListener("click", () => {
-      const tapped = performance.now()
-      move(() => show(app.plugin, tapped))
-      // The way back out of an app is an entry in this window's history, made once the app's page has loaded: a
-      // browser takes a frame back through its own screens only from an entry that knew the frame's page.
-      open.get(app.plugin).loaded.then(() => history.pushState(app.plugin, ""))
-    })
+    tile.addEventListener("click", () => go(app.plugin))
     return tile
   }))
   for (const view of open.values()) {
@@ -83,6 +77,20 @@ async function list() {
   }
   // The app that was showing is gone, so the home screen shows.
   if (history.state && !apps.has(history.state)) history.back()
+}
+
+/// Opens the app of the plugin named, as its icon or a notification from it was tapped. → whether there is one here.
+function go(plugin) {
+  const app = apps.get(plugin)
+  if (!app) return false
+  const tapped = performance.now()
+  const showing = history.state === plugin
+  load(app)
+  move(() => show(plugin, tapped))
+  // The way back out of an app is an entry in this window's history, made once the app's page has loaded: a
+  // browser takes a frame back through its own screens only from an entry that knew the frame's page.
+  if (!showing) open.get(plugin).loaded.then(() => history.pushState(plugin, ""))
+  return true
 }
 
 /// Starts an app: its page loads in a frame of its own, behind the home screen until it's shown.
@@ -222,16 +230,6 @@ addEventListener("message", async ({ source, data }) => {
   view.drawn = true
   if (!view.frame.inert) opened(view)
 })
-
-/// Opens the app of the plugin named, over whatever's showing. → whether there is one here.
-function go(plugin) {
-  const app = apps.get(plugin)
-  if (!app) return false
-  load(app)
-  if (history.state !== plugin) open.get(plugin).loaded.then(() => history.pushState(plugin, ""))
-  move(() => show(plugin, performance.now()))
-  return true
-}
 
 // A notification from an app was tapped.
 listen("open", ({ payload: plugin }) => go(plugin))
