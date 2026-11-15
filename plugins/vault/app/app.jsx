@@ -306,7 +306,7 @@ function Whose() {
   return (
     <Show when={owners().length > 1}>
       <Field label="Whose">
-        <Select collection={collection()} value={[key().owner]} onValueChange={pick} />
+        <Select.Root collection={collection()} value={[key().owner]} onValueChange={pick} />
       </Field>
     </Show>
   )

@@ -87,7 +87,7 @@ function NewRepo() {
         <Loading>
           <Show when={groups().length}>
             <Field label="Whose">
-              <Select collection={whose()} value={[forWhom()]} onValueChange={({ value }) => setFor(value[0])} />
+              <Select.Root collection={whose()} value={[forWhom()]} onValueChange={({ value }) => setFor(value[0])} />
             </Field>
           </Show>
         </Loading>
@@ -210,7 +210,7 @@ function Branch(props) {
   const branches = () => createListCollection({ items: props.about.branches.map((branch) => ({ value: branch.branch, label: branch.branch })) })
   return (
     <Show when={props.about.branches.length > 1} fallback={<span class="branch"><Branchy />{props.branch}</span>}>
-      <Select collection={branches()} value={[props.branch]} onValueChange={({ value }) => setRef(value[0])} aria-label="Branch" />
+      <Select.Root collection={branches()} value={[props.branch]} onValueChange={({ value }) => setRef(value[0])} aria-label="Branch" />
     </Show>
   )
 }
