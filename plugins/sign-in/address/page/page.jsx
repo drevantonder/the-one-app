@@ -67,7 +67,7 @@ if (code && !app)
 /// with it. Whoever was signed in here before no longer is.
 async function signIn() {
   if (another) {
-    const { error } = await auth.passkey.addPasskey({ context: another, name: Bowser.parse(navigator.userAgent).os.name })
+    const { error } = await auth.passkey.addPasskey({ context: another, name: ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ") })
     // Better Auth's own words for a device that holds a passkey of theirs already, which is all the browser says.
     if (error?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
     if (error) throw new Error(error.message ?? "That passkey wasn't made. Try again.")
