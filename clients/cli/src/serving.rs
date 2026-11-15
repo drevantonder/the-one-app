@@ -582,7 +582,8 @@ mod system {
     }
 }
 
-/// A phone runs no server, and Windows has nothing here yet to keep one running.
+/// A phone runs no server, and Windows has nothing here yet to keep one running. Services on phones stay open for
+/// later.
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 mod system {
     use super::*;

@@ -21,8 +21,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   implement it; we keep the tuples ourselves and run neither.
 - **TanStack DB**: a store inside a client that screens query, fed by plain requests to a backend. Live queries,
   optimistic changes at the screen, kept on disk in SQLite (browsers, Tauri), and a separate package that queues
-  changes made offline. A 1.0 release candidate is reported for 29 October 2026, by secondary sources only. Not named in
-  the rules.
+  changes made offline. A 1.0 release candidate is reported for 29 October 2026, by secondary sources only.
 - **Conditional writes**: Amazon S3, Cloudflare R2, Tigris, Google Cloud Storage and Azure Blob have them. Backblaze B2,
   Hetzner and DigitalOcean Spaces don't, by celld's own tests.
 
@@ -60,7 +59,6 @@ chose the same: a plugin's code on a server is free, and which servers act for w
 
 ## Not checked yet
 
-- That a Worker can pass requests, and a live connection, to a home server through a tunnel without keeping state.
 - That celld can load many plugins inside its one application.
 
 ## Looked at and set aside
@@ -106,3 +104,37 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   November 2026 the choice moved to E: every server and client is reached by its key.
 - **"Without needing the internet"** in the vision means two devices on one local network can reach each other. It
   never meant a network works with its bucket unreachable.
+- **Trust.** A network is trusted, and its users aren't assumed to be malicious. Keeping plugins apart is wise, but it's
+  a bonus: other things decide what plugins run in first. A plugin's code on a server is free, and nothing checks it.
+  Agents are intelligent, and a network is trusted. Letting a computer be a server for a user or a group means
+  trusting the plugins they add with that computer.
+- **Encryption.** Encrypting everything ourselves isn't built: a mistake there would lose everything, where a mistake
+  with an encrypted artifact loses something small.
+- **Signing in.** Signing in only says who a user is. No key comes from it, so how a network signs in can change.
+- **The Erlang VM.** The VM takes up to a second to start, which a cloud server started on demand pays each time. No
+  official build of the Erlang VM for Windows on ARM was found. The x64 build likely runs there emulated.
+
+## Not built yet
+
+- A server runs on Windows as well as Mac and Linux. On Windows it may run through WSL, if that doesn't weigh on the
+  computer and an agent can set it up. To test first: iroh through a Rust NIF on Windows: 1 day.
+- The web client is static files, served at the network's address. A sharing link opens in the web client, where
+  there is one.
+- Left open until the rest lands: what starts a network's cloud server when no other server answers for a user or
+  group. It's a big choice, and fewer other things should be moving first.
+- A server can keep a copy of what a server acting for an artifact's owner answered it.
+- To test first: an app in Tauri's web view on a mid-priced Android phone, opening, scrolling and going back: 2 to 3
+  days.
+- To test first: a phone on mobile data reaching a home server: how often directly, and how long the first connection
+  takes: 1 day.
+
+## Still to come
+
+Not designed yet: how a client's offline writes reach a server.
+
+Claims is the pressing need, but a bad platform would mean another rebuild, so the platform comes first.
+
+Later, and not critical: bringing data across from the app as it runs today and from the old PTC app.
+
+Parked, to keep in mind: the public as a who, anyone at all and not signed in, as a `viewer` of what an owner makes
+public. Filling in something like a form, and visitors without an account, come after that.

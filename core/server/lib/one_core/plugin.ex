@@ -363,6 +363,11 @@ defmodule OneCore.Plugin do
   - Its `package.json`'s packages are installed and its `build` script run where the edge is deployed from. A
     page it serves is built there as an app's is, against the kit (`bun ../../../ui/app.js <source> <out>`), which
     the edge serves at `/ui/` as every client has it. `sign-in` does all of this.
+
+  Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool
+  did outside the network isn't ours to undo.
+
+  Tools to check a plugin before it's deployed are recommended, not needed.
   """
   @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
 

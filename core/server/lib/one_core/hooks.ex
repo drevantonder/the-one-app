@@ -34,6 +34,8 @@ defmodule OneCore.Hooks do
   no tool is called but by the network's first owner (`OneCore.User.first_owner/0`), who is how a network whose
   deciding plugin was removed is put right. A network being built, the server's `:development` setting, lets
   everything through instead.
+
+  A history of who changed what, relation tuples included, is a plugin's to keep, through plugin hooks.
   """
   require Logger
   alias OneCore.Plugins

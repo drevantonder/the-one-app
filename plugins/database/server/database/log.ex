@@ -13,6 +13,8 @@ defmodule Database.Log do
   it's what a database is put back to an earlier moment from.
 
   Nothing here needs more of the bucket than writing a blob only if it's absent.
+
+  Putting a database back to an earlier moment is the database plugin's to offer, from its log. It isn't built early.
   """
   alias OneCore.Artifact
 

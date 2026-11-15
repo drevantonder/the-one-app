@@ -1,6 +1,6 @@
 # Building The One App
 
-Read `VISION.md`, `GLOSSARY.md`, `ARCHITECTURE.md`, `STACK.md` and `PRIOR-ART.md` first. Where they leave something open, ask
+Read `VISION.md`, `GLOSSARY.md` and `PRIOR-ART.md` first. Where they leave something open, ask
 before choosing.
 
 - Consider yourself the owner of this codebase, and treat it as its maintainer would.
@@ -17,14 +17,15 @@ before choosing.
 - People use apps. The CLI and MCP are for their agents, even for the most technical person on a network, so never
   shape a person's flow around a terminal.
 - How it looks is the repo's `DESIGN.md`: our look, the same on every client.
+- A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
+  what's best, and gives guidance to the agents that build it so they make wise decisions.
 
 ## Docs
 
 - Document only what the code can't say.
 - Nothing describes the code but the code: no hand-written references that can drift; generate them or point at the
   source.
-- As the code replaces a doc, the doc goes. Deleting a rule or a line of `STACK.md` is part of the change that builds
-  it.
+- As the code replaces a doc, the doc goes. Deleting a rule or a line of a doc is part of the change that builds it.
 
 ## Work
 

@@ -13,6 +13,7 @@ defmodule OneCore.MixProject do
         {:opentelemetry, "~> 1.7"},
         {:opentelemetry_api, "~> 1.5"},
         {:req, "~> 0.5"},
+        # A crash in a Rust NIF ends the VM. Rust panics are caught, and what's left is rare.
         {:rustler, "~> 0.38", runtime: false},
         {:tz, "~> 0.28"},
         {:yaml_elixir, "~> 2.12"}
