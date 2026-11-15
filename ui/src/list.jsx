@@ -1,6 +1,6 @@
 import { Show } from "solid-js"
 import { Icon } from "./button.jsx"
-import { pace, reduced } from "./kit.js"
+import { pace, reduced } from "./shared.js"
 
 /// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
 /// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
@@ -57,7 +57,7 @@ function leave(list, row, before = null) {
 /// it's a link to what it opens, with a chevron; with `onClick` the whole row is pressed and opens in place.
 /// `current` marks the one that's open beside the list, in a split. `control` is a control before all of it,
 /// pressed apart from the row, as a checkbox that picks rows is: `control={<input type="checkbox" aria-label="On
-/// this claim" checked={...} onChange={...} />}`. It's drawn as the kit's, and the row's whole height in front of
+/// this claim" checked={...} onChange={...} />}`. It's drawn as the UI library's, and the row's whole height in front of
 /// the row is its to press.
 export function Row(props) {
   const inside = () => (

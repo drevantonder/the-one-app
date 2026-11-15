@@ -1,6 +1,6 @@
 import { children, omit } from "solid-js"
 import { Icon } from "./button.jsx"
-import { said } from "./kit.js"
+import { said } from "./shared.js"
 import { popover } from "./popover.js"
 import { machine } from "./zag.jsx"
 

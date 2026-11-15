@@ -2,7 +2,7 @@ import { children, createContext, For, omit, Show, useContext } from "solid-js"
 import { parseDate } from "./day.js"
 import { Icon } from "./button.jsx"
 import { useField } from "./field.jsx"
-import { said, touch } from "./kit.js"
+import { said, touch } from "./shared.js"
 import { popover } from "./popover.js"
 import { machine } from "./zag.jsx"
 
@@ -108,7 +108,7 @@ export const DatePicker = {
   Context: (props) => props.children(use()),
 }
 
-/// Every part of a date picker, as the kit draws one. Under a finger the device's own `<input type="date">` lies
+/// Every part of a date picker, as the UI library draws one. Under a finger the device's own `<input type="date">` lies
 /// over the face, unseen, so a tap opens the device's own picker; with a mouse the face opens our calendar, and the
 /// device's control only holds the day, for the form.
 function Whole(props) {

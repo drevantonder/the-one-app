@@ -1,6 +1,6 @@
 defmodule Locker do
   @moduledoc """
-  Keeps one note encrypted, as a blob and as a row of a database, for the proofs of encryption
+  Keeps one note encrypted, as a blob and as a row of a database, for the tests of encryption
   (`plugins/vault/test/vault.sh`): the least a plugin does to keep something that whoever runs the bucket can't read.
   """
   @behaviour OneCore.Plugin

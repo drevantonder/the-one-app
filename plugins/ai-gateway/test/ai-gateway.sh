@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves, on a network on this machine (`./network <folder>`), what AI Gateway promises, by trying each against a
+# Tests, on a network on this machine (`tooling/network <folder>`), what AI Gateway promises, by trying each against a
 # fake model server (plugins/ai-gateway/test/fake.js) standing in for each kind of place: LM Studio on this machine,
 # a host that speaks OpenAI's chat completions, and Workers AI. A model on the person's own machines answers when
 # nothing is set; a job's list is tried in order, and the next answers when one is off; text, an image, a structured
@@ -15,7 +15,7 @@ set -m # The network is a job with a process group of its own, and so is each fa
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" >"$folder/network.log" 2>&1 &
 started=($!)
 stop() {
   local left
@@ -34,7 +34,7 @@ random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
 
 # The hosts' key carries a marker, and lives in a file. Nothing prints it: everything is searched for it at the end.
-marker=ai-gateway-proof-$(random 8)
+marker=ai-gateway-test-$(random 8)
 mkdir "$folder/secrets"
 printf '%s-%s' "$marker" "$(random 8)" >"$folder/secrets/key"
 holding() { { grep -r -a -l -F -e "$marker" "$@" 2>/dev/null || true; } | wc -l; }
@@ -87,7 +87,7 @@ may on encryption let_in
 may on vault grant --servers "[\"$server\"]"
 may on vault set --item "Fake Cloud" --field url --value "http://127.0.0.1:$hosted/hosted/v1" --secret false --hosts "[\"127.0.0.1:$hosted\"]"
 may on vault set --item "Fake Cloud" --field api_key --value-from "$folder/secrets/key"
-may on vault set --item "Workers AI" --field url --value "http://127.0.0.1:$hosted/client/v4/accounts/proof/ai/v1" --secret false --hosts "[\"127.0.0.1:$hosted\"]"
+may on vault set --item "Workers AI" --field url --value "http://127.0.0.1:$hosted/client/v4/accounts/test/ai/v1" --secret false --hosts "[\"127.0.0.1:$hosted\"]"
 may on vault set --item "Workers AI" --field api_key --value-from "$folder/secrets/key"
 may on ai-gateway models
 [[ $said != *'"name":"Fake Cloud"'* ]] && echo "  nothing's switched on for AI Gateway yet, so neither is listed"
@@ -106,7 +106,7 @@ may on ai-gateway chat --messages "$looking"
 answered_by "Fake Cloud/cloud-vision"
 [[ $said == *"An image of $bytes bytes"* ]] && echo "  the host was sent the whole picture ($bytes bytes)"
 may on ai-gateway chat --model "Workers AI/@cf/fake/vision" --messages "$looking" --schema "$schema"
-[[ $said == *'"json":{"total":12.5,"vendor":"Proof Cafe"}'* ]]
+[[ $said == *'"json":{"total":12.5,"vendor":"Test Cafe"}'* ]]
 may on ai-gateway chat --model local/fake-text --messages "$hello"
 answered_by local/fake-text
 

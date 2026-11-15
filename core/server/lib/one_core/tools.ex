@@ -222,7 +222,7 @@ defmodule OneCore.Tools do
       description: """
       Makes builds the newest for the network's machines, which they take when they're asked to update.
       While the network lacks any of their files, it gives a link to send each by, with its `method` and
-      `headers`, and changes nothing: send them, and ask again. `./release` does all of this.
+      `headers`, and changes nothing: send them, and ask again. `tooling/release` does all of this.
       """,
       inputs: %{
         type: "object",

@@ -77,7 +77,7 @@ defmodule OneCore.VaultTest do
 
   setup %{tmp_dir: folder} do
     server = OneCore.Test.server(folder)
-    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.ui("export const ui = 1"))
 
     for name <- ~w(database relations encryption vault),
         do: assert({:ok, 1, ""} = Deploy.deploy("network", name, OneCore.Test.shipped(name)))

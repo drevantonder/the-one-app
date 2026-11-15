@@ -1,6 +1,6 @@
 import { createContext, createMemo, createSignal, createUniqueId, For, omit, Show, useContext } from "solid-js"
 import { Icon } from "./button.jsx"
-import { said, touch } from "./kit.js"
+import { said, touch } from "./shared.js"
 
 const Context = createContext(null)
 
@@ -11,7 +11,7 @@ export const useField = () => useContext(Context)
 /// `<Field label="Name" hint="As your card has it"><Input name="name" required /></Field>`: a `label` above
 /// whatever's chosen or typed in, a grey `hint` below, and its problem in the hint's place: `error`, which the app
 /// sets, or what's wrong with what was typed, once the form was sent, which shows on the field and not in the
-/// browser's bubble. Every control below goes in one, the kit's with Zag's too (`<Select.Root>`,
+/// browser's bubble. Every control below goes in one, the UI library's with Zag's too (`<Select.Root>`,
 /// `<DatePicker.Root>`, `<NumberInput.Root>`), as a form's `<input>`s do: they're the form's own, in its
 /// FormData and its reset.
 export function Field(props) {

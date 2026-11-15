@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Proves, on a whole network on this machine (`./network <folder>`), what backups promise, by doing each. A network
+# Tests, on a whole network on this machine (`tooling/network <folder>`), what backups promise, by doing each. A network
 # with two people, a group, databases with rows, files and a Vault item is backed up to a folder, through the
-# service on its machine, and to S3-compatible storage (a local S3 store, as `./network --edge` runs one),
+# service on its machine, and to S3-compatible storage (a local S3 store, as `tooling/network --edge` runs one),
 # while writes go on. What changed is backed up again, and only that is sent. Then the bucket is destroyed, and
 # the network restored into an empty one from each place with nothing but the recovery key, a server started on
 # it, and everything is back and the Vault opens. A file deleted before the last backup is brought back into the
@@ -15,7 +15,7 @@ set -m # The network is a job with a process group of its own, and so is each se
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" >"$folder/network.log" 2>&1 &
 started=($!)
 stop() {
   local left
@@ -46,7 +46,7 @@ backups() { as owner for network backups "$@"; }
 # What each of them keeps, as one line to compare.
 everything() { for who in alice bob "alice for groups/family"; do as $who shelf all 2>/dev/null; echo; done; }
 
-# The server is stopped by its own process, and started again as `./network` started it.
+# The server is stopped by its own process, and started again as `tooling/network` started it.
 server() { pgrep -f "mix network $folder server --name server " || true; }
 down() {
   local server
@@ -62,7 +62,7 @@ up() {
   grep -q -m1 "A server is running" <(tail -f --pid="$server" -n 0 "$folder/server.log")
 }
 
-marker=backups-proof-$(random 8)
+marker=backups-test-$(random 8)
 mkdir "$folder/secrets"
 printf '%s-vault' "$marker" >"$folder/secrets/vault"
 holding() { { grep -r -a -l -F -e "$marker" "$@" 2>/dev/null || true; } | wc -l; }

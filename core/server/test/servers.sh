@@ -1,6 +1,6 @@
-# What the proofs here share: real servers of one network on this machine, with a folder as their bucket, started
-# and stopped by name. A proof sources this, and everything it makes is in the folder made here, which goes when
-# the proof ends. The network is one being built, where nobody signs in, and every client here asks as its first
+# What the tests here share: real servers of one network on this machine, with a folder as their bucket, started
+# and stopped by name. A test sources this, and everything it makes is in the folder made here, which goes when
+# the test ends. The network is one being built, where nobody signs in, and every client here asks as its first
 # owner.
 #
 # The client's program is the one `cargo build --release` builds.
@@ -22,7 +22,7 @@ since() { echo "$((($(now) - $1) / 1000)) ms"; }
 # Starts a server, and returns once it says it's running. A server after the first isn't one of the network's
 # until a server that is lets it in, which is asked here as the server itself says to. The client `only-<server>`
 # asks it and no other, and the client `client` asks every server, as `mix network` leaves them. `seen` is how much
-# of the server's log a proof has read. `options` is what a proof starts its servers with besides.
+# of the server's log a test has read. `options` is what a test starts its servers with besides.
 start() {
   mix network "$folder" "$1" --development --owner owner ${options:-} >"$folder/$1.log" 2>&1 &
   group[$1]=$!

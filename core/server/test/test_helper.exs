@@ -50,10 +50,10 @@ defmodule OneCore.Test do
   end
 
   @doc """
-  The files of a kit, the plugin `ui`, whose code is `code`: its build as the repo has it, which builds an app
+  The files of a UI library, the plugin `ui`, whose code is `code`: its build as the repo has it, which builds an app
   against it.
   """
-  def kit(code) do
+  def ui(code) do
     build =
       for file <- ~w(app.js package.json bun.lock), into: %{}, do: {"build/" <> file, File.read!("../../ui/" <> file)}
 

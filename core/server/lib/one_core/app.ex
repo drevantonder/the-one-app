@@ -1,10 +1,10 @@
 defmodule OneCore.App do
   @moduledoc """
   Builds a plugin's apps from their source, which is what's deployed: the folder `client/` of the plugin's files, apps
-  written in Solid with the kit. The kit is a plugin, `ui`, and an app is built with the build the kit itself holds,
-  its folder `build/` (`ui/app.js` as the kit was built), which Bun runs: so the kit an app is built against is the
-  kit it loads, whichever version of it runs for whoever the app is for. What a client is served at `client/` is what
-  that built. The code of the kit it was built against is kept there too, as `client/kit`, which no page loads.
+  written in Solid with the UI library. The UI library is a plugin, `ui`, and an app is built with the build the UI library itself holds,
+  its folder `build/` (`ui/app.js` as the UI library was built), which Bun runs: so the UI library an app is built against is the
+  UI library it loads, whichever version of it runs for whoever the app is for. What a client is served at `client/` is what
+  that built. The code of the UI library it was built against is kept there too, as `client/ui`, which no page loads.
 
   The files deployed are kept beside the plugin's code as they were (`OneCore.Plugins`), to change and deploy again.
   An app that names packages of its own in `client/package.json` has them installed as it's built; one that names none
@@ -14,21 +14,21 @@ defmodule OneCore.App do
   alias OneCore.Plugins.{Kept, Version}
 
   @client "client/"
-  @kit "client/kit"
+  @ui "client/ui"
   @build "build/"
 
   @doc """
   Whether a plugin's files hold an app's source to build: a page in `client/`. One whose `client/` has none was built
-  already, as the kit's is.
+  already, as the UI library's is.
   """
   def app?(files), do: Enum.any?(Map.keys(files), &(String.starts_with?(&1, @client) and Path.extname(&1) == ".html"))
 
   @doc """
-  The files of a plugin with an app as a server keeps them, from the files deployed and `kit`, the version of the
-  kit that runs for whoever it's deployed for. `{:error, why}` says why it didn't build: the compiler's own words, a
+  The files of a plugin with an app as a server keeps them, from the files deployed and `ui`, the version of the
+  UI library that runs for whoever it's deployed for. `{:error, why}` says why it didn't build: the compiler's own words, a
   problem to a line, with its file and line.
   """
-  def build(files, %Version{} = kit) do
+  def build(files, %Version{} = ui) do
     {app, rest} = Map.split_with(files, fn {path, _} -> String.starts_with?(path, @client) end)
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
@@ -38,7 +38,7 @@ defmodule OneCore.App do
       write(source, for({path, text} <- app, do: {String.replace_prefix(path, @client, ""), text}))
 
       with {:ok, bun} <- bun(),
-           {:ok, builder} <- builder(bun, kit),
+           {:ok, builder} <- builder(bun, ui),
            :ok <- install(bun, source),
            :ok <- run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder) do
         built =
@@ -51,24 +51,24 @@ defmodule OneCore.App do
         as_is =
           Map.filter(app, fn {path, _} -> String.starts_with?(MIME.from_path(path), ~w(image/ audio/ video/ font/)) end)
 
-        {:ok, rest |> Map.merge(as_is) |> Map.merge(built) |> Map.put(@kit, kit.code)}
+        {:ok, rest |> Map.merge(as_is) |> Map.merge(built) |> Map.put(@ui, ui.code)}
       end
     after
       File.rm_rf!(folder)
     end
   end
 
-  @doc "The code of the kit an app was built against, from the files a server keeps of its plugin, or `nil` for one with no app."
-  def kit(kept), do: kept[@kit]
+  @doc "The code of the UI library an app was built against, from the files a server keeps of its plugin, or `nil` for one with no app."
+  def ui(kept), do: kept[@ui]
 
-  # The kit's build, with what it builds with installed: its folder, made whole beside it and moved in, so a folder
+  # The UI library's build, with what it builds with installed: its folder, made whole beside it and moved in, so a folder
   # that's there is ready.
-  defp builder(bun, kit) do
-    {files, folder} = build(kit)
+  defp builder(bun, ui) do
+    {files, folder} = build(ui)
 
     cond do
       files == [] ->
-        {:error, "The kit, #{kit.artifact}, has no build/ to build an app with. Deploy a kit that has one."}
+        {:error, "The UI library, #{ui.artifact}, has no build/ to build an app with. Deploy a UI library that has one."}
 
       File.dir?(folder) ->
         {:ok, folder}
@@ -77,9 +77,9 @@ defmodule OneCore.App do
         writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 
         try do
-          write(writing, for({path, _hash} <- files, do: {String.replace_prefix(path, @build, ""), read(kit, path)}))
+          write(writing, for({path, _hash} <- files, do: {String.replace_prefix(path, @build, ""), read(ui, path)}))
 
-          with :ok <- run(bun, ~w(install --frozen-lockfile --production), "The kit's build didn't install", writing) do
+          with :ok <- run(bun, ~w(install --frozen-lockfile --production), "The UI library's build didn't install", writing) do
             # Another build may have made it meanwhile, which is as good.
             with {:error, _} <- File.rename(writing, folder), do: :ok
             {:ok, folder}
@@ -90,34 +90,34 @@ defmodule OneCore.App do
     end
   end
 
-  # A kit's build/ files, each by its path with the hash of what's in it, and the folder on this server its build
-  # is installed in: one for each set of those files, which kits that build alike share.
-  defp build(kit) do
-    files = for {path, hash} <- Enum.sort(Version.hashes(kit)), String.starts_with?(path, @build), do: {path, hash}
-    {files, Path.join([Server.home(), "kits", binary_part(Version.code(files), 0, 16)])}
+  # A UI library's build/ files, each by its path with the hash of what's in it, and the folder on this server its build
+  # is installed in: one for each set of those files, which UI library versions that build alike share.
+  defp build(ui) do
+    files = for {path, hash} <- Enum.sort(Version.hashes(ui)), String.starts_with?(path, @build), do: {path, hash}
+    {files, Path.join([Server.home(), "ui-builds", binary_part(Version.code(files), 0, 16)])}
   end
 
   @doc """
-  Removes the kits' builds on this server that none of `running` builds with, as a kit stops running here: what's
-  kept is what the kits that run need. A build being made is left to finish.
+  Removes the UI libraries' builds on this server that none of `running` builds with, as a UI library stops running here: what's
+  kept is what the UI library versions that run need. A build being made is left to finish.
   """
   def keep_builds(running) do
-    kits = Path.join(Server.home(), "kits")
+    builds = Path.join(Server.home(), "ui-builds")
     needed = for version <- Enum.uniq(running), {[_ | _], folder} <- [build(version)], do: folder
-    there = with {:ok, names} <- File.ls(kits), do: names, else: (_ -> [])
+    there = with {:ok, names} <- File.ls(builds), do: names, else: (_ -> [])
 
     gone =
       for name <- there,
           not String.contains?(name, "."),
-          folder = Path.join(kits, name),
+          folder = Path.join(builds, name),
           folder not in needed,
           do: folder
 
     Task.start(fn -> Enum.each(gone, &File.rm_rf!/1) end)
   end
 
-  defp read(kit, path) do
-    {:ok, text} = Kept.file(kit.artifact, kit.code, path)
+  defp read(ui, path) do
+    {:ok, text} = Kept.file(ui.artifact, ui.code, path)
     text
   end
 

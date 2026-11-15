@@ -111,7 +111,7 @@ function Flip(props) {
   )
 }
 
-/// One part of a layout. A part the kit doesn't have draws nothing.
+/// One part of a layout. A part the UI library doesn't have draws nothing.
 function Part(props) {
   const part = () => props.part
   const held = () => <For each={Array.isArray(part().parts) ? part().parts : []}>{(inside) => <Part part={inside} onCall={props.onCall} />}</For>

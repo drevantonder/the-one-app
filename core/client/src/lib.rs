@@ -1083,7 +1083,7 @@ async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
 
 /// The files of `folder`, by their paths in it, as a plugin's folder is deployed: names starting with a dot are left
 /// out, and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not.
-/// So is a plugin's `test/`, which proves it where it's made, and its native code but what a server loads: the clients
+/// So is a plugin's `test/`, which tests it where it's made, and its native code but what a server loads: the clients
 /// are built with its `client/native/`, and a NIF's source, a folder of its `server/nif/`, stays here, but for the
 /// library built from it for each kind of machine, `<kind>.so` there, which is deployed though git ignores it as
 /// built (`OneCore.Plugin`). A server reads the plugins it ships with this way too (`core/server/nif/folder`).

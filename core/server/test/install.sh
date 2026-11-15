@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Proves a server installs on a machine as one thing, with the one command, and updates in place, on Linux and on
-# a Mac. On a network with its edge on this machine (`./network --edge`), a second machine, a home folder of
+# Tests a server installs on a machine as one thing, with the one command, and updates in place, on Linux and on
+# a Mac. On a network with its edge on this machine (`tooling/network --edge`), a second machine, a home folder of
 # its own whose PATH has no Erlang, Elixir, Rust or Bun on it, and with only `one` from a build: turns itself into a
 # server of the network's (`one serve on`), which the system keeps running, a real systemd user unit on Linux and
 # a LaunchAgent on a Mac; runs with its person's login PATH; shows other users of the machine no secret and listens
 # as no Erlang node; runs a call and deploys an app through that server alone; is killed and started again by the
 # system; takes a newer build when it's asked, while the network's other server answers; goes back by itself from a
-# build that can't start; and is removed, leaving nothing behind. The builds are made by `./release` from this
+# build that can't start; and is removed, leaving nothing behind. The builds are made by `tooling/release` from this
 # repo's commit and two made on top of it.
 #
 #     cargo build --release && mise exec -- core/server/test/install.sh
@@ -38,7 +38,7 @@ since() { echo "$((($(now) - $1) / 1000)) ms"; }
 size() { du -sh "$1" | cut -f1; }
 
 say "A network, with its edge here"
-"$root/network" "$folder/network" --edge >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder/network" --edge >"$folder/network.log" 2>&1 &
 started+=($!)
 grep -q -m1 "A network is running" <("$tail" -F --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 client=$folder/network/client
@@ -55,12 +55,12 @@ release() {
   git -C "$clone" checkout -q "$(git -C "$root" rev-parse HEAD)"
   if [[ -n ${2-} ]]; then
     (cd "$clone" && eval "$2")
-    git -C "$clone" -c user.name=proof -c user.email=proof@localhost commit -q --allow-empty -am "$1"
+    git -C "$clone" -c user.name=test -c user.email=test@localhost commit -q --allow-empty -am "$1"
   fi
-  (cd "$clone" && ONE_HOME=$client ONE_AS=owner ONE_FOR=network ./release "$kind") >"$folder/release-$1.log" 2>&1 ||
+  (cd "$clone" && ONE_HOME=$client ONE_AS=owner ONE_FOR=network tooling/release "$kind") >"$folder/release-$1.log" 2>&1 ||
     { tail -30 "$folder/release-$1.log" >&2; exit 1; }
   grep -E "^(server|one)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
-  "$clone/build-name"
+  "$clone/tooling/version"
 }
 
 # This kind of machine, as builds are named, and what the system keeps the server running with here.

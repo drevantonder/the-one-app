@@ -1,4 +1,4 @@
-/* Every colour, size, radius and pace the kit draws with: shadcn's neutral, light and dark. A colour is
+/* Every colour, size, radius and pace the UI library draws with: shadcn's neutral, light and dark. A colour is
    light-dark(light, dark), so it follows `color-scheme` wherever it's used: the user's own by default, which a shell
    sets from Settings › Appearance, and any part of a page can set its own. */
 :root {

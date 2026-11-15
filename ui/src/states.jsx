@@ -1,6 +1,6 @@
 import { Show } from "solid-js"
 import { Icon } from "./button.jsx"
-import { said } from "./kit.js"
+import { said } from "./shared.js"
 
 /// `<Empty>No notes yet.</Empty>`: an empty screen or list: one grey line, and a button (`action`) only when
 /// there's an obvious first step.

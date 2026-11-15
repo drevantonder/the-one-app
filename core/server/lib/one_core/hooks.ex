@@ -108,9 +108,9 @@ defmodule OneCore.Hooks do
      """},
     {"removed", :hears,
      """
-     What a plugin made for someone was removed, restored or erased for good, as the plugin that keeps what's
+     What a plugin made for someone was removed, restored or purged, as the plugin that keeps what's
      removed tells every plugin. It's about the `artifact`'s name, and `what` happened: `removed`, `restored` or
-     `erased`. A plugin that keeps a list of what it made hears it to keep its list true.
+     `purged`. A plugin that keeps a list of what it made hears it to keep its list true.
      """},
     {"measured", :hears,
      """

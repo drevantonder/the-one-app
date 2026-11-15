@@ -20,7 +20,7 @@
 //!   extension) holds only that key.
 //!
 //! What each is encrypted for (the `for_` functions) a server's plugin says too, in its Elixir, as what it hands the
-//! NIF (`about`): the same text in both, which the proofs with a real device show agree (`plugins/vault/test/vault.sh`,
+//! NIF (`about`): the same text in both, which the tests with a real device show agree (`plugins/vault/test/vault.sh`,
 //! `plugins/backups/test/backups.sh`).
 
 use anyhow::{Context, Result, anyhow, bail};

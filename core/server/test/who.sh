@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves, on a whole network with a spare (`./network <folder> --spare`), who may do what and that the clock calls
+# Tests, on a whole network with a spare (`tooling/network <folder> --spare`), who may do what and that the clock calls
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
@@ -19,10 +19,10 @@ set -m # The network is a job with a process group of its own, and so is each se
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" --spare "$@" >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" --spare "$@" >"$folder/network.log" 2>&1 &
 network=$!
 started=("$network")
-# `./network` stops what it started when it's stopped.
+# `tooling/network` stops what it started when it's stopped.
 trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 one=$root/target/release/one
@@ -85,7 +85,7 @@ skills() {
 }
 refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
 
-# The plugins this proves with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
+# The plugins this tests with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
 # due and which server made it.
 mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost}/server

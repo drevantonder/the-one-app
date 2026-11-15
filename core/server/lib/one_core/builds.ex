@@ -4,7 +4,7 @@ defmodule OneCore.Builds do
 
   A build is named by the commit it was built from (`build/0`), and is made for a kind of machine (`target/0`):
   `server/<target>`, an installed server, `one/<target>`, the program `one`, and `one-cli/<target>`, `one` without its
-  window. `./release` makes them and publishes them (`publish/1`): each is a blob under the network's `builds/`, named
+  window. `tooling/release` makes them and publishes them (`publish/1`): each is a blob under the network's `builds/`, named
   by its SHA-256, and the blob `builds/newest` says which is newest for each name, by its build, its SHA-256 and its
   size. Every server reads them, whoever's it is (`core/edge/signer/signer.js`), and a client downloads one by a link
   a server gives (`download/1`), checking it against what `newest` says before it runs it

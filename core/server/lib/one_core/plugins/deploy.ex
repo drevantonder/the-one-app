@@ -187,27 +187,27 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # A plugin's app is built against the kit that runs for whoever it's deployed for, which is brought along as a
+  # A plugin's app is built against the UI library that runs for whoever it's deployed for, which is brought along as a
   # plugin it uses is.
   defp built(owner, name, files) do
     if App.app?(files) do
       with :ok <- bring(owner, name, ["ui"]) do
-        kit = Plugins.running(owner)["ui"]
-        built_before(Plugins.plugin(owner, name), files, kit) || App.build(files, kit)
+        ui = Plugins.running(owner)["ui"]
+        built_before(Plugins.plugin(owner, name), files, ui) || App.build(files, ui)
       end
     else
       {:ok, files}
     end
   end
 
-  # The apps as the plugin's running version built them, where that was from the same source against the same kit,
+  # The apps as the plugin's running version built them, where that was from the same source against the same UI library,
   # since building it again would make the same: `{:ok, files}`, or `nil`.
   defp built_before(nil, _files, _kit), do: nil
 
-  defp built_before(artifact, files, kit) do
+  defp built_before(artifact, files, ui) do
     client = &Map.filter(&1, fn {path, _} -> Version.client?(path) end)
 
-    with %Version{kit: code, code: kept} when code == kit.code <- Plugins.version(artifact),
+    with %Version{ui: code, code: kept} when code == ui.code <- Plugins.version(artifact),
          true <- client.(Kept.source(artifact, kept)) == client.(files) do
       {:ok,
        Map.merge(
@@ -220,21 +220,21 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Builds again, from its source, each app built against a kit that has changed since, as a server acting for
+  Builds again, from its source, each app built against a UI library that has changed since, as a server acting for
   whoever the plugin is, as they would deploy it again.
   """
   def rebuild do
     for {owner, added} <- Plugins.added(),
         {name, artifact} <- added,
-        %Version{kit: built_with} = version <- [Plugins.version(artifact)],
+        %Version{ui: built_with} = version <- [Plugins.version(artifact)],
         built_with != nil,
-        kit = Plugins.running(owner)["ui"],
-        kit != nil and kit.code != built_with,
+        ui = Plugins.running(owner)["ui"],
+        ui != nil and ui.code != built_with,
         whose = Kept.whose(artifact),
         Servers.here?(whose) and Plugins.plugin(whose, Path.basename(artifact)) == artifact,
         uniq: true do
       with {:error, why} <- deploy(whose, Path.basename(artifact), Kept.source(artifact, version.code)),
-           do: Logger.error("#{name}'s app wasn't built again against the kit that changed: #{why}")
+           do: Logger.error("#{name}'s app wasn't built again against the UI library that changed: #{why}")
     end
   end
 

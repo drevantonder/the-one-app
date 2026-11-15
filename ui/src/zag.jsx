@@ -11,7 +11,7 @@
 // isn't drawn at all; then they're drawn again, alive.
 import { createContext, createMemo, createSignal, createUniqueId, merge, omit, Show, useContext } from "solid-js"
 import { Dynamic } from "@solidjs/web"
-import { dir } from "./kit.js"
+import { dir } from "./shared.js"
 
 /// Once the page has first been drawn. What it didn't need for that is loaded then, so the first screen waits for
 /// none of it.
@@ -37,7 +37,7 @@ const text = (value) =>
 /// package's. `defaults`, called as the root is drawn, gives what the machine is told unless the root's props say
 /// otherwise; `still`, given the root's props, is what's known of the api before the machine is here. → `Ark`, the
 /// parts, `Root` among them; `use`, which gives a part the api; `live`, whether the machine is here; and `draw`,
-/// which draws a part of the kit's own, as `draw` below does, in the root it's in.
+/// which draws a part of the UI library's own, as `draw` below does, in the root it's in.
 export function machine(scope, load, root, list, { defaults = () => () => ({}), still = () => ({}) } = {}) {
   const Api = createContext()
   const use = () => useContext(Api).api

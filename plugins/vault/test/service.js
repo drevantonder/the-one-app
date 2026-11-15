@@ -1,21 +1,21 @@
-// An outside service, for the Vault's proof (`plugins/vault/test/vault.sh`): one that signs people in with OAuth and
+// An outside service, for the Vault's test (`plugins/vault/test/vault.sh`): one that signs people in with OAuth and
 // answers what they ask with the tokens it gave. It runs on this machine and stands for Google or anyone else.
 //
 //     MARKER=<text> bun service.js <port>
 //
-// Every secret it makes carries MARKER, so the proof can search for it wherever it mustn't be. Its sign-in page
+// Every secret it makes carries MARKER, so the test can search for it wherever it mustn't be. Its sign-in page
 // asks nothing: whoever opens it is signed in and sent back at once. An access token lasts LASTS seconds, which
-// is short, whatever the service said when it gave it, so the proof sees one renewed once the service refuses it.
+// is short, whatever the service said when it gave it, so the test sees one renewed once the service refuses it.
 import { createHash } from "node:crypto";
 
 const { MARKER, LASTS = "2" } = process.env;
-const client = { id: "proof-client", secret: `${MARKER}-client-secret` };
+const client = { id: "test-client", secret: `${MARKER}-client-secret` };
 /** The codes given and not yet redeemed, each with the challenge its redeemer has to meet. */
 const codes = new Map();
 /** The tokens that work, by token, with when each ends, and the refresh tokens. */
 const access = new Map();
 const refresh = new Set();
-/** What happened, for the proof to read: never a secret. */
+/** What happened, for the test to read: never a secret. */
 const seen = { signed_in: 0, exchanged: 0, renewed: 0, asked: 0, refused: 0, without_verifier: 0 };
 let made = 0;
 

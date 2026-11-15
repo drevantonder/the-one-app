@@ -1,5 +1,5 @@
 import { omit, Show } from "solid-js"
-import { said } from "./kit.js"
+import { said } from "./shared.js"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
@@ -16,7 +16,7 @@ import trash from "@phosphor-icons/core/assets/regular/trash.svg?raw"
 import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.svg?raw"
 import x from "@phosphor-icons/core/assets/regular/x.svg?raw"
 
-// The Phosphor icons the kit draws with, by Phosphor's own names, as what's inside each one's <svg>.
+// The Phosphor icons the UI library draws with, by Phosphor's own names, as what's inside each one's <svg>.
 const icons = Object.fromEntries(
   Object.entries({
     "calendar-blank": calendarBlank,
@@ -37,8 +37,8 @@ const icons = Object.fromEntries(
   }).map(([name, svg]) => [name, svg.replace(/^<svg[^>]*>|<\/svg>\s*$/g, "")]),
 )
 
-/// `<Icon name="plus" />`: one of the kit's icons, by Phosphor's name for it, the size of the text around it and
-/// its colour. A name the kit doesn't have throws the names it has. An app that wants another puts Phosphor's SVG
+/// `<Icon name="plus" />`: one of the UI library's icons, by Phosphor's name for it, the size of the text around it and
+/// its colour. A name the UI library doesn't have throws the names it has. An app that wants another puts Phosphor's SVG
 /// where the icon goes. `along` turns an arrow that points along the line of text where text runs right to left.
 export function Icon(props) {
   const paths = () => {

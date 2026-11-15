@@ -55,7 +55,7 @@ pub async fn on(client: &Client) -> Result<String> {
         let builds = download(client).await?;
         let build = builds
             .get("server")
-            .with_context(|| format!("The network has no server for {} yet: `./release` makes one.", target()))?;
+            .with_context(|| format!("The network has no server for {} yet: `tooling/release` makes one.", target()))?;
         let build = here.take(build).await?;
         here.point("current", &build)?;
     }

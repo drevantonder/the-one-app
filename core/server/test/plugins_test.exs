@@ -81,10 +81,10 @@ defmodule OneCore.PluginsTest do
   end
 
   @tag :tmp_dir
-  test "an app is built from its source as it's deployed, gives its source back, and is built again when the kit changes",
+  test "an app is built from its source as it's deployed, gives its source back, and is built again when the UI library changes",
        %{tmp_dir: folder} do
     OneCore.Test.server(folder)
-    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.ui("export const ui = 1"))
 
     page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.jsx"></script>)
 
@@ -118,10 +118,10 @@ defmodule OneCore.PluginsTest do
     assert {:error, why} = Deploy.deploy("network", "notes", broken)
     assert why =~ "app.jsx:3:"
 
-    # A new kit: the app is built again against it, from the source it was deployed with.
-    assert {:ok, 2, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 2"))
-    kit = Plugins.running("network")["ui"].code
-    rebuilt = Enum.find_value(1..100, fn _ -> Process.sleep(50) && Plugins.running("network")["notes"].kit == kit end)
+    # A new UI library: the app is built again against it, from the source it was deployed with.
+    assert {:ok, 2, ""} = Deploy.deploy("network", "ui", OneCore.Test.ui("export const ui = 2"))
+    ui = Plugins.running("network")["ui"].code
+    rebuilt = Enum.find_value(1..100, fn _ -> Process.sleep(50) && Plugins.running("network")["notes"].ui == ui end)
     assert rebuilt
     assert Kept.source(version.artifact, Plugins.running("network")["notes"].code) == source
   end

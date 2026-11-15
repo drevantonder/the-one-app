@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves, with real servers on this machine and a folder as their bucket, that a database outlives the server
+# Tests, with real servers on this machine and a folder as their bucket, that a database outlives the server
 # writing it. Writes go through a test plugin's database while servers are stopped with `kill -9`, frozen and started again, and
 # after each of those every write that was answered must be there, once.
 #

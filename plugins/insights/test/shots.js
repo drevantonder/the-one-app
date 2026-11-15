@@ -1,4 +1,4 @@
-// The pictures plugins/insights/test/insights.sh takes with clients/shell/test/window.js: Insights in Settings, then a
+// The pictures plugins/insights/test/insights.sh takes with clients/app/test/window.js: Insights in Settings, then a
 // failure's trace beside it on a desktop, and a slow tool's chart.
 export default async ({ page, home, shot, size }) => {
   await home.locator('button[aria-label="Settings"]').click()

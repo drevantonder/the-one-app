@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves, on a whole network with a spare (`./network <folder> --spare`), what Insights promises: tool calls, a tool
+# Tests, on a whole network with a spare (`tooling/network <folder> --spare`), what Insights promises: tool calls, a tool
 # that fails, a service that crashes, a slow tool, an app opening on a client and an AI Gateway call through a fake
 # model are recorded by the servers and kept by Insights, whose tools answer with the right counts and quantiles; a
 # call passed from one server to the other reads back as one trace; what's older than 14 days is let go and an
@@ -19,8 +19,8 @@ folder=$(mktemp -d)
 export ONE_HOME=$folder/client
 shots=
 [[ ${1:-} == --shots ]] && shots=$(mkdir -p "$2" && cd "$2" && pwd)
-# Insights keeps what each server heard every second, not every minute, so the proof needn't wait.
-OTEL_BSP_SCHEDULE_DELAY=1000 "$root/network" "$folder" --spare >"$folder/network.log" 2>&1 &
+# Insights keeps what each server heard every second, not every minute, so the test needn't wait.
+OTEL_BSP_SCHEDULE_DELAY=1000 "$root/tooling/network" "$folder" --spare >"$folder/network.log" 2>&1 &
 started=($!)
 stop() {
   local left
@@ -43,7 +43,7 @@ key_of() { key[$1]=$(grep -o -E "running in [^ ]*: [0-9a-f]{64}" "$folder/$1.log
 key_of server && key_of spare
 
 # What's given, answered and kept secret carries a marker. Nothing prints it: what Insights kept is searched for it.
-marker=insights-proof-$(random 8)
+marker=insights-test-$(random 8)
 mkdir "$folder/secrets"
 printf '%s-%s' "$marker" "$(random 8)" >"$folder/secrets/key"
 
@@ -57,7 +57,7 @@ as_owner() { ONE_AS=owner ONE_FOR=network "$one" "$@" 2>&1; }
 shown() { echo "  $1  $(sed -e "s|$folder|<folder>|g" -e "s/$marker/<marker>/g" <<<"${*:2}" | cut -c1-160)" && echo "           -> $(sed -e "s|$folder|<folder>|g" -e "s/$marker/<marker>/g" <<<"$said" | cut -c1-300)"; }
 may() { said=$("$@") && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
 refused() { ! said=$("$@") && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
-# Stops the proof unless what it's given holds: `holds test "$(of .count)" = 20`.
+# Stops the test unless what it's given holds: `holds test "$(of .count)" = 20`.
 holds() { "$@" || { echo "that isn't so: $*" && exit 1; }; }
 # What a JSON answer says at a path: `of .count`, `of .0.count`.
 of() { python3 -I -c 'import json, sys
@@ -69,7 +69,7 @@ pick() { python3 -I -c "import json, sys; xs = json.loads(sys.argv[1]); print(js
 # Insights has kept what each server heard a second after.
 handed_on() { sleep 3; }
 
-# A plugin to prove with. `echo` answers how long what it was given is, and records that as a number and a log
+# A plugin to test with. `echo` answers how long what it was given is, and records that as a number and a log
 # line; `fail` refuses; `slow` takes 300 ms; `count` keeps a count in its database, which the server holding its
 # lease writes, so a call through the other is passed on; `bomb` lights the service `Probe.Bomb` with what it was
 # given, and the service crashes holding it.
@@ -289,8 +289,8 @@ if [[ -n $shots ]]; then
   may as_owner add --plugin network/plugins/insights
   for _ in 1 2 3; do as probe slow >/dev/null; as probe echo --text "$marker" >/dev/null; done
   handed_on
-  (cd "$root/core/edge" && ONE_AS=owner bun "$root/clients/shell/test/window.js" "$shots" "$root/plugins/insights/test/shots.js")
-  (cd "$root/core/edge" && ONE_AS=alice ONE_HOME=$folder/phone bun "$root/clients/shell/test/window.js" "$shots" "$root/plugins/insights/test/gateway.js")
+  (cd "$root/core/edge" && ONE_AS=owner bun "$root/clients/app/test/window.js" "$shots" "$root/plugins/insights/test/shots.js")
+  (cd "$root/core/edge" && ONE_AS=alice ONE_HOME=$folder/phone bun "$root/clients/app/test/window.js" "$shots" "$root/plugins/insights/test/gateway.js")
   ls "$shots"
 fi
 

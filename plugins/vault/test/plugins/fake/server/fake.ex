@@ -1,8 +1,8 @@
 defmodule Fake do
   @moduledoc """
-  An app that signs its person in to an outside service, for the Vault's proof (`plugins/vault/test/vault.sh`): all it
+  An app that signs its person in to an outside service, for the Vault's test (`plugins/vault/test/vault.sh`): all it
   says of the service is the service's own, its addresses, scopes and sites, and the Vault does the rest. The
-  service is the fake one the proof runs on this machine (`vault/service.js`), at the port written here as PORT.
+  service is the fake one the test runs on this machine (`vault/service.js`), at the port written here as PORT.
   """
   @behaviour OneCore.Plugin
 

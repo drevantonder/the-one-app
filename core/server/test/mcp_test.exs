@@ -42,7 +42,7 @@ defmodule OneCore.McpTest do
   } do
     OneCore.Test.server(folder)
     OneCore.Test.being_built()
-    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.ui("export const ui = 1"))
 
     page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.js"></script>)
 

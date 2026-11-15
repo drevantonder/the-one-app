@@ -1,0 +1,150 @@
+# The app is named by its build's identifier, ONE_IDENTIFIER, which `generate` reads from its Tauri config: the
+# app, its notification extension and the App Group they share.
+name: app
+options:
+  bundleIdPrefix: ${ONE_IDENTIFIER}
+  deploymentTarget:
+    iOS: 15.0
+fileGroups: [../../src]
+configs:
+  debug: debug
+  release: release
+settingGroups:
+  app:
+    base:
+      PRODUCT_NAME: The One App
+      PRODUCT_BUNDLE_IDENTIFIER: ${ONE_IDENTIFIER}
+targetTemplates:
+  app:
+    type: application
+    sources:
+      - path: Sources
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info
+    settings:
+      groups: [app]
+targets:
+  app_iOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      - path: Assets.xcassets
+      # Exclude built static libs: regenerating with xcodegen after a build
+      # otherwise turns the per-configuration libapp.a copies into colliding
+      # resources ("Multiple commands produce …/libapp.a"). They are linked
+      # via LIBRARY_SEARCH_PATHS, never bundled as resources.
+      # It's there once the Rust code has been built.
+      - path: Externals
+        optional: true
+        excludes: ["**/*.a"]
+      - path: app_iOS
+      - path: assets
+        buildPhase: resources
+        type: folder
+      - path: LaunchScreen.storyboard
+    info:
+      path: app_iOS/Info.plist
+      properties:
+        LSRequiresIPhoneOS: true
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiredDeviceCapabilities: [arm64, metal]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # What Tauri's CLI writes here as it builds. What's built says the build's number (Name the Build).
+        CFBundleShortVersionString: 1.0.0
+        CFBundleVersion: "1.0.0"
+        # The folder the app keeps its client in, which its notification extension reads its key from
+        # (Sources/app/main.mm).
+        AppGroup: group.$(PRODUCT_BUNDLE_IDENTIFIER)
+    entitlements:
+      path: app_iOS/app_iOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.$(PRODUCT_BUNDLE_IDENTIFIER)]
+        # Without it iOS gives the app no APNs token. An App Store build is signed for production as it's exported.
+        aps-environment: development
+    scheme:
+      environmentVariables:
+        RUST_BACKTRACE: full
+        RUST_LOG: info
+    settings:
+      base:
+        ENABLE_BITCODE: false
+        ARCHS: [arm64]
+        VALID_ARCHS: arm64 
+        LIBRARY_SEARCH_PATHS[arch=x86_64]: $(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        LIBRARY_SEARCH_PATHS[arch=arm64]: $(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: true
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+      groups: [app]
+    dependencies:
+      - target: Notifications
+      - framework: libapp.a
+        embed: false
+      - sdk: CoreGraphics.framework
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: QuartzCore.framework
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: UIKit.framework
+      - sdk: WebKit.framework
+    preBuildScripts:
+      - script: |
+          cargo tauri ios xcode-script -v --platform "${PLATFORM_DISPLAY_NAME:?}" --sdk-root "${SDKROOT:?}" --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration "${CONFIGURATION:?}" ${FORCE_COLOR} ${ARCHS:?}
+        name: Build Rust Code
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
+          - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+    postBuildScripts:
+      # The build's number, as `tooling/version` says it, which the App Store takes as its version and build number.
+      - &name-the-build
+        script: |
+          number=$(sh "${SRCROOT:?}/../../../../tooling/version" | cut -d- -f1)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $number" -c "Set :CFBundleVersion $number" "${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}"
+        name: Name the Build
+        basedOnDependencyAnalysis: false
+  # Opens each notification APNs brings before it shows, with the key the app keeps in their App Group
+  # (Notifications/NotificationService.swift). CryptoKit's HPKE is on iOS 17 and later; before that, an iPhone shows
+  # the fixed line Apple carries.
+  Notifications:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Notifications
+    info:
+      path: Notifications/Info.plist
+      properties:
+        CFBundleDisplayName: Notifications
+        # What's built says the build's number (Name the Build).
+        CFBundleShortVersionString: 1.0.0
+        CFBundleVersion: "1.0.0"
+        AppGroup: group.${ONE_IDENTIFIER}
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    entitlements:
+      path: Notifications/Notifications.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.${ONE_IDENTIFIER}"]
+    settings:
+      base:
+        PRODUCT_NAME: Notifications
+        PRODUCT_BUNDLE_IDENTIFIER: ${ONE_IDENTIFIER}.notifications
+        # Tauri's CLI names the team in the app's target alone; xcodebuild has what it was told in its environment.
+        DEVELOPMENT_TEAM: $(APPLE_DEVELOPMENT_TEAM)
+        ARCHS: [arm64]
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+    postBuildScripts:
+      - *name-the-build

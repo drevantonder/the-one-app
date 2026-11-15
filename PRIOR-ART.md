@@ -33,7 +33,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   (popups, selection, keyboard, focus) for React, Vue, Svelte, Solid and Web Components, made for agents to build
   with. Considered for the UI the clients share, and not chosen.
 - **Ark UI** (`@ark-ui/solid`): Zag's machines as components. Its `6.0.0-next.0` still imports `solid-js/web`, which
-  Solid 2.0 removed, so it doesn't build on Solid 2.0 yet (tried 14 November 2026). The kit's Zag components are
+  Solid 2.0 removed, so it doesn't build on Solid 2.0 yet (tried 14 November 2026). The UI library's Zag components are
   in its shape until it does.
 - **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
   aside: it's compiled, so a plugin's app couldn't arrive from a server, and its widgets are each platform's own look.

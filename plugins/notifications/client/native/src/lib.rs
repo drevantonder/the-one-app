@@ -5,8 +5,8 @@
 //!   opens the app it's from. One that isn't running shows nothing: its person sees the inbox when they open it.
 //! - A phone is woken by its push service instead, even when the app isn't running, so it gives the plugin where
 //!   that reaches it, and the key what it's sent is encrypted to. What's sent is opened on the phone before it
-//!   shows: by the app's notification extension on an iPhone (`clients/shell/gen/apple/Notifications`), and on
-//!   Android by the app's own messaging service (`clients/shell/gen/android/.../Notifications.kt`), which asks
+//!   shows: by the app's notification extension on an iPhone (`clients/app/gen/apple/Notifications`), and on
+//!   Android by the app's own messaging service (`clients/app/gen/android/.../Notifications.kt`), which asks
 //!   `open` below.
 
 use std::path::Path;
@@ -160,7 +160,7 @@ pub fn notification(home: &Path, sealed: &[u8]) -> anyhow::Result<Value> {
     Ok(serde_json::from_slice(&cipher::open_notification(&device, sealed)?)?)
 }
 
-/// Opens a notification for Android's messaging service (`clients/shell/gen/android/.../Notifications.kt`), which may run while the
+/// Opens a notification for Android's messaging service (`clients/app/gen/android/.../Notifications.kt`), which may run while the
 /// app doesn't: `sealed` is what FCM carried, base64, and `home` the app's folder, whose key opens it. Gives its JSON,
 /// or null if it doesn't open.
 #[cfg(target_os = "android")]

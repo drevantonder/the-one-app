@@ -18,7 +18,7 @@ defmodule OneCore.MixProject do
       ],
       # Tests start only what they test: the server's key and socket aren't theirs to take.
       aliases: [test: &test/1] ++ if(Mix.env() == :prod, do: [], else: [compile: [&nifs/1, "compile"]]),
-      # A server installed on a machine (`one serve on`) is this, as `./release` builds it for each kind of machine:
+      # A server installed on a machine (`one serve on`) is this, as `tooling/release` builds it for each kind of machine:
       # the VM it runs on, ERTS, is the one `ONE_ERTS` names when it's built for another kind of machine than this.
       # It runs with no distribution (`rel/env.sh.eex`): nothing reaches it as an Erlang node, so no cookie guards
       # anything, and the one Mix puts on its command line, where every user of the machine sees it, is a word
@@ -30,7 +30,7 @@ defmodule OneCore.MixProject do
           cookie: "no-distribution"
         ]
       ],
-      # The plugins the proofs deploy are files to deploy, not tests.
+      # The plugins the tests deploy are files to deploy, not tests.
       test_ignore_filters: [~r{/test/plugins/}, ~r{^test/plugins/}]
     ]
   end
@@ -43,9 +43,9 @@ defmodule OneCore.MixProject do
     ]
   end
 
-  # The program is One Core. On a developer's machine it's also `mix network`, which `./network` runs, at the repo's
+  # The program is One Core. On a developer's machine it's also `mix network`, which `tooling/network` runs, at the repo's
   # root.
-  defp elixirc_paths(:dev), do: ["lib", Path.expand("../../network.ex", __DIR__)]
+  defp elixirc_paths(:dev), do: ["lib", Path.expand("../../tooling/network.ex", __DIR__)]
   defp elixirc_paths(_env), do: ["lib"]
 
   # One Core's tests, and the tests of the plugins it ships with, each in its plugin's `test/`. Naming tests runs
@@ -57,7 +57,7 @@ defmodule OneCore.MixProject do
   end
 
   # The NIFs of the plugins The One App ships with, built for this machine and put beside their source, where a
-  # plugin brings them (`OneCore.Plugin`): here, its folder is what's deployed. `./release` builds them for every
+  # plugin brings them (`OneCore.Plugin`): here, its folder is what's deployed. `tooling/release` builds them for every
   # kind of machine, as a server built for one is.
   defp nifs(_args) do
     root = Path.expand("../..", __DIR__)
@@ -72,8 +72,8 @@ defmodule OneCore.MixProject do
         do: File.cp!("#{target}/release/lib#{Path.basename(crate)}.#{extension}", "#{crate}/#{os}-#{arch}.so")
   end
 
-  # The build this is, as `build-name` names it from the commit it's built from, as a client's is.
+  # The build this is, as `tooling/version` names it from the commit it's built from, as a client's is.
   defp build do
-    elem(System.cmd(Path.expand("../../build-name", __DIR__), []), 0) |> String.trim()
+    elem(System.cmd(Path.expand("../../tooling/version", __DIR__), []), 0) |> String.trim()
   end
 end

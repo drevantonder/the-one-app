@@ -227,7 +227,7 @@ defmodule OneCore.Plugins do
           state
       end
 
-    # What a kit that stopped running while this server was down built with goes now.
+    # What a UI library that stopped running while this server was down built with goes now.
     App.keep_builds(Map.values(state.running))
     {:noreply, state}
   end
@@ -408,7 +408,7 @@ defmodule OneCore.Plugins do
     unload_unused(%{state | calls: calls}, versions)
   end
 
-  # A version nothing runs or holds any more is unloaded, and a kit's build goes once no kit that runs builds with it.
+  # A version nothing runs or holds any more is unloaded, and a UI library's build goes once no UI library that runs builds with it.
   defp unload_unused(state, versions) do
     held = Map.values(state.running) ++ Enum.concat(Map.values(state.calls))
     unused = for %Version{} = version <- Enum.uniq(versions), version not in held, do: version

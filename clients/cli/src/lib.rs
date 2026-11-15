@@ -148,7 +148,7 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                 Ok(()) => client.fresh(method, &params).await.ok(),
                 Err(_) => client.kept(method, &params),
             };
-            // A plugin with no tools can still have a skill: the kit's says how an app is written with it. It's
+            // A plugin with no tools can still have a skill: the UI library's says how an app is written with it. It's
             // read as any skill is, and what's printed of it is what follows its name and description. A plugin's
             // own skill is named here by the plugin's name, as it's added, and One Core's by its name. Where both
             // are, the plugin's is shown with its tools.

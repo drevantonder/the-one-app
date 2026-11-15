@@ -43,7 +43,7 @@ const services = [
   { binding: "WEB", service: "network-web" },
 ];
 
-// The web client is its files with the kit among them, as every client has it: a page here is built against it, as
+// The web client is its files with the UI library among them, as every client has it: a page here is built against it, as
 // an app is (`ui/app.js`), and finds it at `/ui/client/`. The piece `web` serves what's built, `clients/web/dist`.
 const web = `${root}/clients/web`;
 rmSync(`${web}/dist`, { recursive: true, force: true });

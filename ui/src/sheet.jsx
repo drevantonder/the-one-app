@@ -2,7 +2,7 @@ import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { covers } from "./bridge.js"
 import { Button, Icon } from "./button.jsx"
-import { said } from "./kit.js"
+import { said } from "./shared.js"
 import { hold } from "./toast.jsx"
 
 /// The sheets and alerts that are open, the last opened last.

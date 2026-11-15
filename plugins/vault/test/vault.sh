@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves, on a whole network with a spare and its edge on this machine (`./network <folder> --spare --edge`),
+# Tests, on a whole network with a spare and its edge on this machine (`tooling/network <folder> --spare --edge`),
 # what encryption and the Vault promise, by trying each, for a person, a group and the network. What's typed on a device is encrypted there, and the
 # bytes in the bucket hold none of it, for a blob and for a database. A server that wasn't chosen can't open
 # either and takes no lease; a chosen one can, and stops when it's taken off. The network's owner writes every
@@ -10,17 +10,17 @@
 #
 #     mise exec -- plugins/vault/test/vault.sh
 #
-# Every secret made here carries a marker, and lives in a file of the proof's folder. Nothing prints one: what
+# Every secret made here carries a marker, and lives in a file of the test's folder. Nothing prints one: what
 # was said by every tool, every log and the whole bucket are searched for the marker at the end.
 set -euo pipefail
 set -m # The network is a job with a process group of its own, and so is each server started here.
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
 network=$!
 started=("$network")
-# `./network` stops what it started when it's stopped. The bucket's store writes as it stops, so the folder goes
+# `tooling/network` stops what it started when it's stopped. The bucket's store writes as it stops, so the folder goes
 # once everything that was started in it has.
 stop() {
   local left
@@ -42,7 +42,7 @@ random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 free_port() { (cd "$root/core/edge" && bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'); }
 
 # The secrets: each a file, whose text starts with the marker.
-marker=vault-proof-$(random 8)
+marker=vault-test-$(random 8)
 mkdir "$folder/secrets"
 for secret in note github stripe pasted wifi storage; do printf '%s-%s-%s' "$marker" "$secret" "$(random 8)" >"$folder/secrets/$secret"; done
 # The one the outside service knows its client by.
@@ -93,7 +93,7 @@ browser() {
   ' "$1") | tee -a "$folder/said"
 }
 
-# A server is stopped by its own process, and started again as `./network` started it.
+# A server is stopped by its own process, and started again as `tooling/network` started it.
 down() {
   local server
   server=$(pgrep -f "mix network $folder $1 --name $1 ")
@@ -116,7 +116,7 @@ vault=users/alice/made/vault/items
 locker=users/alice/made/locker/notes
 servers() { local list; list=$(printf '"%s",' "${@/#/}"); echo "[${list%,}]"; }
 
-# The plugins this proves with: a locker that keeps one note encrypted, as a blob and in a database, and plain
+# The plugins this tests with: a locker that keeps one note encrypted, as a blob and in a database, and plain
 # notes, which nothing encrypts.
 mkdir -p "$folder/notes/server"
 cat >"$folder/notes/server/notes.ex" <<'EOF'
@@ -269,7 +269,7 @@ may on phone as alice fake forget --item Session
 refused on phone as alice fake digest --item Session --field key
 
 say "An app signs its person in to an outside service, and its tokens are kept, used and renewed"
-may on phone as alice vault set --item "Fake client" --field client_id --value proof-client --secret false --hosts "[\"127.0.0.1:$service\"]"
+may on phone as alice vault set --item "Fake client" --field client_id --value test-client --secret false --hosts "[\"127.0.0.1:$service\"]"
 may on phone as alice vault set --item "Fake client" --field client_secret --value-from "$folder/secrets/client"
 link=$(on laptop as alice fake sign_in)
 echo "  may      on laptop as alice fake sign_in"
@@ -354,7 +354,7 @@ may on attic as owner for network vault list
 
 say "No secret was answered, logged or stored anywhere but encrypted"
 # The chosen servers each keep a working copy of a database they write, on their own disk, which is the one place
-# outside the bucket a secret is: everything else of the network is searched. The secrets' own files are the proof's.
+# outside the bucket a secret is: everything else of the network is searched. The secrets' own files are the test's.
 everything=$(find "$folder" -type f -not -path "$folder/secrets/*" -not -path "*/database/copy.sqlite*")
 echo "  what every tool answered every device, here: $(wc -l <"$folder/said") lines, of which $({ grep -c -F -e "$marker" "$folder/said" || true; }) hold the marker"
 echo "  the servers' logs, the edge's and the service's: $(cat "$folder"/*.log | wc -l) lines, of which $({ cat "$folder"/*.log | grep -c -a -F -e "$marker" || true; }) hold the marker"

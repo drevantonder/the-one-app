@@ -2,7 +2,7 @@ import { createMemo, For } from "solid-js"
 import { render } from "@solidjs/web"
 import { popover } from "./popover.js"
 
-// Ark UI's toast (ark-ui.com/docs/components/toast) has an app draw each toast. The kit draws them itself, the
+// Ark UI's toast (ark-ui.com/docs/components/toast) has an app draw each toast. The UI library draws them itself, the
 // same in every app, so an app only says what happened: `toast`.
 
 /// Zag's toasts, loaded with the first toast; the toasts there are; and the one element of the page that shows

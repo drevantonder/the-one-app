@@ -33,5 +33,5 @@ repo `take`s one, which fast-forwards the branch it's for or merges it, or `decl
 decline it too. A suggestion that doesn't merge cleanly says which files conflict: fetch the branch it's for, merge it
 into yours, and push the suggestion again. `git fetch origin refs/suggestions/fix-typo` fetches one to look at.
 
-`remove` puts a repo you own in the bin, gone for everyone until `restore` brings it back as it was. After 30
+`remove` puts a repo you own in Recently Deleted, gone for everyone until `restore` brings it back as it was. After 30
 days it's erased for good. The tool `git` is what `git-remote-one` calls; don't call it yourself.

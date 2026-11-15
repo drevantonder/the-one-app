@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Starts a whole network on this machine, to build or test with, and says how to use it:
+#
+#     tooling/network <folder> [--spare] [--edge] [--owner <name>]
+#
+# It needs what `mise install` and `rustup` install, and on Linux WebKitGTK (`libwebkit2gtk-4.1-dev`), which the
+# app's window is built on.
+#
+# It builds what isn't built, then starts the network's server in the folder, which is where everything the network
+# keeps goes: its bucket, each server's home, a client's home and the logs. A new network starts with the plugins
+# The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
+#
+# It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
+# command acts as that user, and ONE_FOR=groups/<name> or ONE_FOR=network has it run for a group or the network.
+# Its first owner is the user `owner`.
+#
+# --spare starts a second server, which takes over when the first stops. Each server is called after its folder,
+#   `server` and `spare`, as two machines would be called what each is.
+# --edge runs the network's edge here too (`core/edge/`): its Workers in `wrangler dev`, with a local S3 store
+#   as the bucket. Servers then keep their blobs through the signer there, and whoever holds a sharing link has a
+#   way in.
+# --owner <name>, with --edge, starts a network people sign in to instead: that user is its first owner, it says
+#   where they join, with a passkey, and nobody acts as anyone by saying so.
+#
+# Where there's no desktop, as under `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a
+# minute for a desktop that isn't there.
+set -euo pipefail
+set -m # What's started is a job with a process group of its own, so all of it is stopped at once.
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+# The tools this needs are the ones `mise.toml` names.
+command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+
+usage="tooling/network <folder> [--spare] [--edge] [--owner <name>]"
+folder= spare= edge= owner=
+while (($#)); do
+  case $1 in
+    --spare) spare=yes ;;
+    --edge) edge=yes ;;
+    --owner) owner=${2-} && shift ;;
+    -*) echo "$usage" >&2 && exit 1 ;;
+    *) folder=$1 ;;
+  esac
+  shift
+done
+# People sign in at an address, and a spare is let in by a client, which there is someone's signed-in device.
+[[ -n $folder && (-z $owner || (-n $edge && -z $spare)) ]] || { echo "$usage" >&2 && exit 1; }
+if [[ -n $owner ]]; then as=(--owner "$owner"); else as=(--development --owner owner); fi
+mkdir -p "$folder"
+folder=$(cd "$folder" && pwd)
+one=$root/target/release/one
+
+(cd "$root" && cargo build --release)
+(cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
+(cd "$root/core/server" && mix deps.get && mix compile)
+
+started=()
+trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait' EXIT
+# Waits for a line in a log that the job just started is still writing. Fails if the job ends without it.
+# GNU's tail follows a file for as long as a process runs, which on a Mac is Homebrew's coreutils' `gtail`.
+tail=$(command -v gtail || command -v tail)
+wait_for() { grep -q -m1 -E "$1" <("$tail" -F --pid="${started[-1]}" -n +1 "$2"); }
+free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
+random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
+
+at_address=()
+if [[ -n $edge ]]; then
+  (cd "$root/core/edge" && bun install --frozen-lockfile)
+  # The bucket's credentials are made up for this run, and only the signer is given them, with the secret a
+  # network's first server shows.
+  access=$(random 8) secret=$(random 24) first=$(random 16)
+  bucket=127.0.0.1:$(free_port) gateway=$(free_port)
+  mkdir -p "$folder/bucket"
+  RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
+  started+=($!)
+  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/"
+  (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
+    import { AwsClient } from "aws4fetch";
+    const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
+    const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
+    if (!made.ok && made.status !== 409) throw new Error(`the bucket answered ${made.status}`);')
+  # `wrangler dev` gives the signer its secrets from the environment.
+  (cd "$root/core/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
+    WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
+    --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
+  started+=($!)
+  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping"
+  # A passkey is for a name, which on one machine is `localhost`.
+  at_address=(--address "http://localhost:$gateway" --first "$first")
+fi
+
+# Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
+# which is then done as it says, and it's started again.
+start() {
+  (cd "$root/core/server" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  started+=($!)
+  if ! wait_for "A server is running" "$folder/$1.log"; then
+    let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
+    ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in
+    start "$1"
+  fi
+}
+start server
+[[ -z $spare ]] || start spare
+
+# The program as whoever started this would type it.
+one=${one#"$PWD/"}
+[[ -z $owner ]] || cat <<SAID
+
+A network is running in $folder, at ${at_address[1]}.
+$(grep -o -m1 "users/$owner joins at.*" "$folder/server.log")
+
+Its client's home is $folder/client, which is nobody's device until they sign in on it:
+
+    export ONE_HOME=$folder/client
+    $one                                             opens the app, which signs in
+    $one sign-in devices                             shows the code and link that let this device in
+
+What each part says is in $folder/*.log. Ctrl-C stops it.
+SAID
+[[ -n $owner ]] || cat <<SAID
+
+A network is running in $folder. Its client's home is $folder/client:
+
+    export ONE_HOME=$folder/client ONE_AS=owner
+    $one                                             opens the app, as the network's first owner
+    $one relations group --name family               calls a tool
+    ONE_AS=alice $one relations group --name work    calls one as another user
+    $one --help                                      lists every tool
+    $one mcp                                         is the same tools as MCP over stdio
+${at_address:+
+Its address is ${at_address[1]}.
+}
+What each part says is in $folder/*.log. Ctrl-C stops it.
+SAID
+wait

@@ -3,7 +3,7 @@
 //
 // - /api/v1/models and /v1/chat/completions, as LM Studio does on a machine (on port 1234, LM Studio's own);
 // - /hosted/v1/models and /hosted/v1/chat/completions, as a host speaking OpenAI's chat completions does;
-// - /client/v4/accounts/proof/ai/..., as Workers AI does: its chat completions, and its models in OpenRouter's
+// - /client/v4/accounts/test/ai/..., as Workers AI does: its chat completions, and its models in OpenRouter's
 //   marketplace shape.
 //
 // A hosted place wants `Bearer <KEY>`, KEY from the environment. The model asked for says how it answers:
@@ -24,7 +24,7 @@ const answer = (model, content, priced) =>
   })
 
 // What a receipt says, for a schema that asks for it, and something of the right type for anything else.
-const receipt = { vendor: "Proof Cafe", date: "2026-11-14", total: 12.5, gst: 1.14 }
+const receipt = { vendor: "Test Cafe", date: "2026-11-14", total: 12.5, gst: 1.14 }
 const filled = (schema) =>
   Object.fromEntries(
     Object.entries(schema.properties ?? {}).map(([name, property]) => {
@@ -91,7 +91,7 @@ Bun.serve({
     if (path === "/hosted/v1/chat/completions") return chat(request, url)
     // Workers AI.
     if (path.startsWith("/client/v4/") && !keyed(request)) return refused()
-    if (path === "/client/v4/accounts/proof/ai/models/search" && url.searchParams.get("format") === "openrouter")
+    if (path === "/client/v4/accounts/test/ai/models/search" && url.searchParams.get("format") === "openrouter")
       return Response.json({
         data: [
           {
@@ -102,7 +102,7 @@ Bun.serve({
           { id: "@cf/fake/painter", input_modalities: [{ type: "text" }], output_modalities: [{ type: "image" }] },
         ],
       })
-    if (path === "/client/v4/accounts/proof/ai/v1/chat/completions") return chat(request, url)
+    if (path === "/client/v4/accounts/test/ai/v1/chat/completions") return chat(request, url)
     return new Response("Not found", { status: 404 })
   },
 })

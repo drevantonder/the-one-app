@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Proves, with two real servers on this machine and a folder as their bucket, that a plugin's service runs on the
+# Tests, with two real servers on this machine and a folder as their bucket, that a plugin's service runs on the
 # machine it's installed on and is called from wherever the rest of its plugin runs. The services are the two
 # plugins': `folder`, a test plugin that watches a folder, and `load`, which brings a program in Rust. They're installed on
-# server b only, and called through server a. It also proves that a network nobody uses reads nothing from its
+# server b only, and called through server a. It also tests that a network nobody uses reads nothing from its
 # bucket, and that b picks up what it wasn't told: behind the next call, and when it starts again.
 #
 #     cargo build --release && mise exec -- core/server/test/services.sh
@@ -54,11 +54,11 @@ print(opened)
 EOF
 }
 
-# A plugin of this proof's own: a tool that calls nothing, to time the others against, one that kills a service's
+# A plugin of this test's own: a tool that calls nothing, to time the others against, one that kills a service's
 # process on the server asked, as a plugin's code is free to, and a service that can be made to never answer again.
-mkdir -p "$folder/proof/server"
-cat >"$folder/proof/server/proof.ex" <<'EOF'
-defmodule Proof do
+mkdir -p "$folder/probe/server"
+cat >"$folder/probe/server/probe.ex" <<'EOF'
+defmodule Probe do
   @behaviour OneCore.Plugin
 
   @impl true
@@ -83,11 +83,11 @@ defmodule Proof do
     "Killed #{service}'s process."
   end
 
-  def call("hang", _inputs, call), do: OneCore.Service.call(call, Proof.Stuck, :hang)
-  def call("version", _inputs, call), do: OneCore.Service.call(call, Proof.Stuck, :version)
+  def call("hang", _inputs, call), do: OneCore.Service.call(call, Probe.Stuck, :hang)
+  def call("version", _inputs, call), do: OneCore.Service.call(call, Probe.Stuck, :version)
 end
 
-defmodule Proof.Stuck do
+defmodule Probe.Stuck do
   use GenServer
   @behaviour OneCore.Service
 
@@ -118,7 +118,7 @@ say "Two servers on one folder as the bucket, and two plugins that each have a s
 start a
 start b
 ONE_FOR=network ask a deploy --name folder --files-from test/plugins/folder
-ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
+ONE_FOR=network ask a deploy --name probe --files-from "$folder/probe"
 echo "What each service needs, which its machine's owner reads before installing it:"
 ask a services
 echo "Called before any server runs them:"
@@ -140,9 +140,9 @@ ask a folder watching | sed "s|$folder|...|g"
 ask a load now
 
 say "What a call to a service adds, over one connection: the median of 200 calls of each, in ms"
-timed b proof_ping ping-b
+timed b probe_ping ping-b
 timed b folder_watching watching-b
-timed a proof_ping ping-a
+timed a probe_ping ping-a
 timed a folder_watching watching-a
 timed b load_now load-b
 timed a load_now load-a
@@ -179,20 +179,20 @@ ask a load now
 echo "and the folder it was built in before is gone: $(ls "$folder/b/services/network/plugins/load/Load.Meter/server/meter" | wc -l) is left"
 
 say "A service that has stopped answering doesn't hold up its plugin's update"
-ask a install_service --plugin proof --service Proof.Stuck --server "${key[b]}"
-ask a proof version
-ask a proof hang >/dev/null
-sed -i 's/{:reply, 1, state}/{:reply, 2, state}/' "$folder/proof/server/proof.ex"
+ask a install_service --plugin probe --service Probe.Stuck --server "${key[b]}"
+ask a probe version
+ask a probe hang >/dev/null
+sed -i 's/{:reply, 1, state}/{:reply, 2, state}/' "$folder/probe/server/probe.ex"
 began=$(now)
-ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
+ONE_FOR=network ask a deploy --name probe --files-from "$folder/probe"
 echo "the update took $(since "$began"): the service had 5 seconds to move to it, and was stopped"
-until ask a proof version 2>&1 | grep -q "version 2"; do :; done
-echo "it answered again $(since "$began") after the update began: $(ask a proof version)"
+until ask a probe version 2>&1 | grep -q "version 2"; do :; done
+echo "it answered again $(since "$began") after the update began: $(ask a probe version)"
 
 say "The service's process is killed, and then its program: both come back, and the server stays up"
 echo "A service that stops is started again at once, or 5 seconds after it last started if that's later."
 before=$(ask a folder watching | grep -o '"since":"[^"]*"')
-ask b proof kill --plugin folder --service Folder.Watcher
+ask b probe kill --plugin folder --service Folder.Watcher
 began=$(now)
 until ask a folder watching 2>&1 | grep -q '"since"'; do :; done
 echo "folder answered again $(since "$began") later, watching the folder it's told at its start: $(ask a folder watching | sed "s|$folder|...|g")"
@@ -202,7 +202,7 @@ echo "and lists a file that arrives after it: $(ask a folder list | grep -o '"na
 
 program() { pgrep -f "$folder/b/services/network/plugins/load/" || true; }
 echo "load's program is the process $(program)"
-ask b proof kill --plugin load --service Load.Meter
+ask b probe kill --plugin load --service Load.Meter
 began=$(now)
 until ask a load now 2>&1 | grep -q '"since"'; do :; done
 echo "the service's process was killed: it answered again $(since "$began") later, with a program of its own, the process $(program)"
@@ -212,23 +212,23 @@ began=$(now)
 until ask a load now 2>&1 | grep -q '"since"'; do :; done
 echo "it answered again $(since "$began") later, from the process $(program): $(ask a load now)"
 kill -0 "${group[b]}"
-echo "server b is the process it was all along, and answers: $(ask b proof ping)"
+echo "server b is the process it was all along, and answers: $(ask b probe ping)"
 
 say "Nobody uses the network for five minutes, which is how long a server goes before looking again at whoever it's asked for"
 echo "the bucket was read $(reads 305) times meanwhile"
 
-say "b is frozen, and proof is deployed again through a, which can't tell b"
+say "b is frozen, and probe is deployed again through a, which can't tell b"
 kill -STOP -- "-${group[b]}"
-sed -i 's/{:reply, 2, state}/{:reply, 3, state}/' "$folder/proof/server/proof.ex"
+sed -i 's/{:reply, 2, state}/{:reply, 3, state}/' "$folder/probe/server/probe.ex"
 began=$(now)
-ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
+ONE_FOR=network ask a deploy --name probe --files-from "$folder/probe"
 echo "the deploy took $(since "$began"): a gave up on b after 3 seconds"
 kill -CONT -- "-${group[b]}"
 seen[b]=$(wc -l <"$folder/b.log")
-echo "b wakes, and nothing tells it. Asked through b, a call runs on what b has: $(ask b proof version)"
-grep -q -m1 "proof: version" <(tail -f --pid="${group[b]}" -n +$((seen[b] + 1)) "$folder/b.log")
-echo "and b looked behind it: $(tail -n +$((seen[b] + 1)) "$folder/b.log" | grep -o "network/plugins/proof: version.*")"
-echo "the next call runs on that: $(ask b proof version)"
+echo "b wakes, and nothing tells it. Asked through b, a call runs on what b has: $(ask b probe version)"
+grep -q -m1 "probe: version" <(tail -f --pid="${group[b]}" -n +$((seen[b] + 1)) "$folder/b.log")
+echo "and b looked behind it: $(tail -n +$((seen[b] + 1)) "$folder/b.log" | grep -o "network/plugins/probe: version.*")"
+echo "the next call runs on that: $(ask b probe version)"
 
 say "The owner deploys a plugin of their own, whose service is installed on b, and nobody calls it through b"
 mkdir -p "$folder/echo/server"

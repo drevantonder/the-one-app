@@ -1,4 +1,4 @@
-/* How every component of the kit looks, from the tokens (tokens.css). The kit's own parts are `ui-` classes; what
+/* How every component of the UI library looks, from the tokens (tokens.css). The UI library's own parts are `ui-` classes; what
    Zag draws in Ark's shape is styled by the attribute Zag names each part with (`data-menu-content`), which Ark
    gives it too. */
 
@@ -85,7 +85,7 @@ html:has(.ui-dialog[open]) {
   from { translate: calc(var(--ui-new-from) * var(--ui-toward-end)) 0; }
 }
 
-/* What every control of the kit starts from, under what any of them says of itself. */
+/* What every control of the UI library starts from, under what any of them says of itself. */
 :where(.ui-screen, .ui-dialog, .ui-search, .ui-file, .ui-row, .ui-toast, [data-tabs-root], [data-date-picker-content]) button {
   margin: 0;
   padding: 0;
@@ -210,7 +210,7 @@ html:has(.ui-dialog[open]) {
   color: var(--accent-foreground);
 }
 /* Hovering shows only under a mouse or a trackpad: a touch screen says it hovers too, and leaves what was tapped
-   looking hovered. Every hover in the kit is behind this same query. */
+   looking hovered. Every hover in the UI library is behind this same query. */
 @media (hover: hover) and (pointer: fine) {
   .ui-button:hover:not(:disabled) {
     background: color-mix(in oklab, var(--primary) 90%, transparent);

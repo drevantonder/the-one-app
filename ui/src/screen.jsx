@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { Icon } from "./button.jsx"
-import { reduced, said } from "./kit.js"
+import { reduced, said } from "./shared.js"
 
 /// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
 /// mustn't show it a second time.

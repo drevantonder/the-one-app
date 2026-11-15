@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Runs the repo's tests: unit tests (`mix test`, each `*_test.exs`) and end-to-end tests (each executable `test/*.sh`
+# of One Core, a plugin or the app).
+#
+#     tooling/test             lists them
+#     tooling/test <name>      runs that one, as listed: `tooling/test who`, `tooling/test vault_test`
+#     tooling/test --all       runs all of them
+#
+# It says in a sentence which failed. End-to-end tests need what `tooling/network` needs, and the release build of
+# `one`, which this builds first.
+set -uo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+# The tools this needs are the ones `mise.toml` names.
+command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+cd "$root"
+
+# Every test, as `<name> <path>`: the end-to-end ones, then the unit ones.
+tests() {
+  for file in core/server/test/*.sh core/edge/test/*.sh plugins/*/test/*.sh clients/app/test/*.sh; do
+    [[ -x $file ]] && echo "$(basename "$file" .sh) $file"
+  done
+  for file in core/server/test/*_test.exs plugins/*/test/*_test.exs; do
+    echo "$(basename "$file" .exs) $file"
+  done
+}
+
+# Runs one test by its path, and says in a sentence if it failed.
+run() {
+  local name=$1 file=$2 log status
+  log=$(mktemp)
+  echo "== $name"
+  case $file in
+    *.exs) (cd core/server && mix test "$root/$file") 2>&1 | tee "$log"; status=${PIPESTATUS[0]} ;;
+    *) cargo build --release --quiet && "$file" 2>&1 | tee "$log"; status=${PIPESTATUS[0]} ;;
+  esac
+  if ((status != 0)); then
+    echo "The test $name ($file) failed with exit $status. Its last line: $(grep -v '^\s*$' "$log" | tail -1)" >&2
+  fi
+  rm -f "$log"
+  return "$status"
+}
+
+case ${1-} in
+  "")
+    tests | awk '{ printf "%-20s %s\n", $1, $2 }'
+    ;;
+  --all)
+    failed=()
+    while read -r name file; do run "$name" "$file" || failed+=("$name"); done < <(tests)
+    if ((${#failed[@]})); then echo "These tests failed: ${failed[*]}." >&2 && exit 1; fi
+    echo "Every test passed."
+    ;;
+  *)
+    file=$(tests | awk -v name="$1" '$1 == name { print $2 }')
+    [[ -n $file ]] || { echo "There's no test called $1. \`tooling/test\` lists them." >&2 && exit 1; }
+    run "$1" "$file"
+    ;;
+esac

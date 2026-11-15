@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Proves Repos with real git, on a whole network with a spare and its edge on this machine (`./network <folder>
+# Tests Repos with real git, on a whole network with a spare and its edge on this machine (`tooling/network <folder>
 # --spare --edge`), whose bucket is an S3 store reached only through the signer there. As alice, bob and carol,
 # and the group family: alice clones, commits, pushes and fetches from two devices; a 50 MB repo with history is
 # pushed, then one small commit, with what each wrote to the bucket; two pushes to one branch at once, through the
@@ -14,12 +14,12 @@ set -m # The network is a job with a process group of its own.
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 folder=$(mktemp -d)
-"$root/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
+"$root/tooling/network" "$folder" --spare --edge >"$folder/network.log" 2>&1 &
 network=$!
 trap 'kill -- "-$network" 2>/dev/null || true; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 
-# `one` and git as the proof's people: git finds `git-remote-one` beside `one`, and reads only the config here.
+# `one` and git as the test's people: git finds `git-remote-one` beside `one`, and reads only the config here.
 export PATH=$root/target/release:$PATH GIT_CONFIG_GLOBAL=$folder/gitconfig GIT_CONFIG_NOSYSTEM=1
 git config --global init.defaultBranch main
 git config --global advice.detachedHead false

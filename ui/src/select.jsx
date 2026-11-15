@@ -1,7 +1,7 @@
 import { children, createContext, For, omit, Show, useContext } from "solid-js"
 import { Icon } from "./button.jsx"
 import { useField } from "./field.jsx"
-import { touch } from "./kit.js"
+import { touch } from "./shared.js"
 import { popover } from "./popover.js"
 import { machine } from "./zag.jsx"
 
@@ -102,7 +102,7 @@ export const Select = {
   },
 }
 
-/// Every part of a select, as the kit draws one. Under a finger the device's own `<select>` lies over the face,
+/// Every part of a select, as the UI library draws one. Under a finger the device's own `<select>` lies over the face,
 /// unseen, so a tap opens the device's own picker; with a mouse the face opens ours.
 function Whole(props) {
   const api = use()

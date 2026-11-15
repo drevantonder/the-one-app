@@ -52,7 +52,7 @@ defmodule OneCore.Plugin do
     The command reads one into it (`one hello keep --photo-from photo.jpg`).
   - A file that's large, such as a photo from a phone, doesn't go inside a call or its answer. A tool takes one in
     an input that says it's an upload, `%{type: "string", format: "upload"}`: the caller sent the file straight to
-    the bucket (an app with the kit's `upload`, an agent with the `upload` tool, the command with
+    the bucket (an app with the UI library's `upload`, an agent with the `upload` tool, the command with
     `--photo-from photo.jpg`), and the input is its name among the plugin's own blobs, `uploads/...`.
     `OneCore.Artifact.size(call.own, name)` says whether it arrived and how big it is. A tool answers with one of
     its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
@@ -80,7 +80,7 @@ defmodule OneCore.Plugin do
   - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.for`, under an id the
     plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
     name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by. When they
-    delete one, it goes to the bin, which brings it back for 30 days: `OneCore.Call.tool(call, "bin", "remove",
+    delete one, it goes to Recently Deleted, which brings it back for 30 days: `OneCore.Call.tool(call, "recently-deleted", "remove",
     %{"artifact" => name})`, whose skill says more.
   - `OneCore.Call.reach(call, name)` gives an artifact by its name, to a call that may reach it: as a `viewer`,
     to read it, or with `"editor"` or `"owner"` as a third argument, to change it or to say who else may. It
@@ -192,8 +192,8 @@ defmodule OneCore.Plugin do
 
   - An app that's a part of Settings says `settings: true`: it's then on Settings, and on no home page.
   - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
-    2.0 with the kit, and its source is the folder `client/`: each `.html` there is a page, whose script is the
-    app's, and the rest is whatever the app's made of. The kit gives every page its look, so a page is no more
+    2.0 with the UI library, and its source is the folder `client/`: each `.html` there is a page, whose script is the
+    app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more
     than this:
 
         client/index.html    <!doctype html><title>Hello</title><script type="module" src="./app.jsx"></script>
@@ -206,22 +206,22 @@ defmodule OneCore.Plugin do
     `code` tool gives the source back, to change and deploy again. A build that fails fails the deploy, which
     answers with the compiler's words, a problem to a line: `app.jsx:3:30: Unexpected token`, then the lines
     around it with a `^` under the place.
-  - Solid and the kit are in every client already, so an app leaves them out and is small; an app that needs
-    nothing more installs nothing. Packages of its own are installed as it's built. It's built with the kit's own
-    build, as the version of the kit that runs for whoever it's for holds it, and built again when that changes.
+  - Solid and the UI library are in every client already, so an app leaves them out and is small; an app that needs
+    nothing more installs nothing. Packages of its own are installed as it's built. It's built with the UI library's own
+    build, as the version of the UI library that runs for whoever it's for holds it, and built again when that changes.
   - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`
     (skill://ui/ui/skills/solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names
     by its code.
     They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. What it renders
     with is `@solidjs/web`, not `solid-js/web`, and `Dynamic` is `dynamic` there.
-  - The kit, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its skill,
+  - The UI library, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its skill,
     `ui`, has every component with an example. It speaks to the client for the app: its `call` and `changed` are
     how an app asks and hears, done.
-  - The kit's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
-    For something the kit lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
+  - The UI library's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
+    For something the UI library lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
     https://ark-ui.com/llms-solid.txt: an app adds `@zag-js/<component>` to its package.json, at the version of
-    Zag the kit's `build/package.json` names, and draws the component as Zag says, styling it with the kit's
-    custom properties. Zag's Solid adapter, `@zag-js/solid`, is the kit's, as Solid is. Zag's docs import from
+    Zag the UI library's `build/package.json` names, and draws the component as Zag says, styling it with the UI library's
+    custom properties. Zag's Solid adapter, `@zag-js/solid`, is the UI library's, as Solid is. Zag's docs import from
     `solid-js/web`, which is `@solidjs/web`; and Zag's props set `id`, so one written before them is replaced.
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then
@@ -246,7 +246,7 @@ defmodule OneCore.Plugin do
     the wide one a few rows, and the large one those rows with a detail each, or a chart.
   - The tool is called with the `size` to draw, for whoever's home page it's on, and answers a layout: one
     part, which holds the rest. A part is a map that says which `part` it is, from this list, and nothing in a
-    layout is ever markup. Every client draws the same layout: the kit's `Widget` on a home page, and a phone's
+    layout is ever markup. Every client draws the same layout: the UI library's `Widget` on a home page, and a phone's
     own home screen once it has widgets. A client asks again when something changed, and when the page is
     returned to.
   - `column` and `row` hold `parts`, with a `gap` between them in points if not the usual. Any part can say
@@ -358,7 +358,7 @@ defmodule OneCore.Plugin do
   - The plugin's server part asks it over the web, signing what it asks as its server does at the edge
     (`OneCore.Edge.signed/2`). `env.NETWORK.asker(url, headers, body)` gives the key that signed it, or `null`.
   - Its `package.json`'s packages are installed and its `build` script run where the edge is deployed from. A
-    page it serves is built there as an app's is, against the kit (`bun ../../../ui/app.js <source> <out>`), which
+    page it serves is built there as an app's is, against the UI library (`bun ../../../ui/app.js <source> <out>`), which
     the edge serves at `/ui/` as every client has it. `sign-in` does all of this.
 
   Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool

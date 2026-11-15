@@ -26,8 +26,8 @@ defmodule Repos do
   # The most of a file that's shown, and of a commit's changes.
   @shown 1_048_576
   @page 25
-  # A repo that's removed goes to the bin, which keeps it for 30 days (`Bin`), and tells this plugin what became
-  # of it, so `list` leaves out what's in the bin.
+  # A repo that's removed goes to Recently Deleted, which keeps it for 30 days (`RecentlyDeleted`), and tells this plugin what became
+  # of it, so `list` leaves out what's in Recently Deleted.
   @impl true
   def hooks, do: ["removed"]
 
@@ -411,7 +411,7 @@ defmodule Repos do
 
   def call(tool, %{"repo" => name}, call) when tool in ["remove", "restore"] do
     repo!(name)
-    Call.tool(call, "bin", tool, %{"artifact" => name})
+    Call.tool(call, "recently-deleted", tool, %{"artifact" => name})
     indexed(name, tool <> "d")
 
     if tool == "remove",
@@ -672,7 +672,7 @@ defmodule Repos do
     end
   end
 
-  # A repo's line in the index once it was removed, restored or erased: `list` leaves out one that's removed.
+  # A repo's line in the index once it was removed, restored or purged: `list` leaves out one that's removed.
   defp indexed(name, what) do
     key = "index/" <> name
 
@@ -682,7 +682,7 @@ defmodule Repos do
       case what do
         "removed" -> Artifact.replace(index(), key, JSON.encode!(Map.put(kept, "removed", now())), tag)
         "restored" -> Artifact.replace(index(), key, JSON.encode!(Map.delete(kept, "removed")), tag)
-        "erased" -> Artifact.remove(index(), key)
+        "purged" -> Artifact.remove(index(), key)
       end
     end
   end

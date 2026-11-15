@@ -1,6 +1,6 @@
 defmodule Shelf do
   @moduledoc """
-  Notes as rows of a database, and files as blobs, each in an artifact of whoever it runs for, for the proof of
+  Notes as rows of a database, and files as blobs, each in an artifact of whoever it runs for, for the test of
   backups (`plugins/backups/test/backups.sh`): what a person's or a group's data is, in the least a plugin does to keep it.
   """
   @behaviour OneCore.Plugin

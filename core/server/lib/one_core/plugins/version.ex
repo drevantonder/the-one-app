@@ -19,7 +19,7 @@ defmodule OneCore.Plugins.Version do
   So they're kept apart from the struct, where reading them copies nothing (`:persistent_term`), and a call costs
   the same however many files a plugin has.
 
-  `kit` is the code of the kit its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
+  `ui` is the code of the UI library its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
   `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address, and `settings`, whether
   it's a part of Settings. `widgets` lists its widgets: each one's `name`, the `tool` that answers its layout, and
@@ -33,7 +33,7 @@ defmodule OneCore.Plugins.Version do
   alias OneCore.{App, Builds, Hooks, Server, Skills}
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code]
-  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code, :kit, :artifact]
+  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code, :ui, :artifact]
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a home page's grid.
   @sizes ~w(2x2 4x2 4x4)
@@ -72,7 +72,7 @@ defmodule OneCore.Plugins.Version do
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
       own = Map.reject(rest, fn {path, _} -> client?(path) end)
       :persistent_term.put({__MODULE__, under}, %{files: served, hashes: hashes, skills: skills, own: own})
-      {:ok, %{version | code: code(files), kit: App.kit(files)}, warnings}
+      {:ok, %{version | code: code(files), ui: App.ui(files)}, warnings}
     else
       {:error, why} ->
         unload(under)
@@ -352,7 +352,7 @@ defmodule OneCore.Plugins.Version do
   @doc "Whether `path` is of what runs on a server, its Elixir among it: the folder `server/`."
   def server?(path), do: String.starts_with?(path, "server/")
 
-  # Whether a page loads `path`: a client may load nothing it isn't served (`clients/shell`'s `APP_MAY_LOAD`), and
+  # Whether a page loads `path`: a client may load nothing it isn't served (`clients/app`'s `APP_MAY_LOAD`), and
   # is served pages, scripts, stylesheets, pictures, sounds, videos and fonts.
   defp loaded?(path) do
     client?(path) and

@@ -38,14 +38,14 @@ function size(bytes) {
 }
 const plural = (count, one) => `${count} ${one}${count === 1 ? "" : "s"}`
 
-/// Phosphor's folder, which the kit doesn't have.
+/// Phosphor's folder, which the UI library doesn't have.
 const Folder = () => (
   <svg class="ui-icon folder" viewBox="0 0 256 256" aria-hidden="true">
     <path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72Z" />
   </svg>
 )
 
-/// Phosphor's git branch, which the kit doesn't have either.
+/// Phosphor's git branch, which the UI library doesn't have either.
 const Branchy = () => (
   <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
     <path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192Z" />

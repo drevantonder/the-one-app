@@ -1,6 +1,6 @@
-// Builds an app: `bun app.js <source> <out>`. A server runs it, as the kit it serves holds it (build.js), when a
+// Builds an app: `bun app.js <source> <out>`. A server runs it, as the UI library it serves holds it (build.js), when a
 // plugin with an app is deployed, on the app's source as it was deployed, and serves what it writes to <out>. Each
-// `.html` in <source> is a page. What every app shares (Solid, Zag's Solid adapter and the kit) is left out of it,
+// `.html` in <source> is a page. What every app shares (Solid, Zag's Solid adapter and the UI library) is left out of it,
 // and imported from the plugin `ui`, which the network serves once. A build that fails says why on stderr, a
 // problem to a line with its file and line, and exits with 1.
 import { readdirSync, readFileSync } from "node:fs"
@@ -24,8 +24,8 @@ try {
     logLevel: "silent",
     plugins: [
       solid(),
-      // Every page has the kit's look before any of it has run.
-      { name: "kit", transformIndexHtml: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" }] },
+      // Every page has the UI library's look before any of it has run.
+      { name: "ui", transformIndexHtml: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" }] },
     ],
     build: {
       outDir: out,
