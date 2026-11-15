@@ -3,11 +3,12 @@
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
-# user, group and the network it's added for, and its skill is seen by whoever it's added for. One Core's own tools
-# are whoever's may. Anyone brings a server, which acts for them alone until its owner chooses who else and they
-# agree, runs only their plugins and passes on the rest. A plugin that decides refuses a call with its reason, and
-# one that breaks is undone. Who may approve is a tuple, and a job that's being called when the server calling it
-# is killed is called once by the spare. It says what a check costs a call.
+# user, group and the network it's added for, and its skill is seen by whoever it's added for. Its code is open to
+# whoever it's in use for, and what it keeps isn't. One Core's own tools are whoever's may. Anyone brings a server,
+# which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
+# the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
+# a tuple, and a job that's being called when the server calling it is killed is called once by the spare. It says
+# what a check costs a call.
 #
 #     mise exec -- core/server/test/who.sh [--edge]
 #
@@ -365,6 +366,32 @@ may as bob remove --name diary
 refused as bob diary write --text "Mine again"
 may as alice diary write --text "Still here"
 may as bob add --plugin users/alice/plugins/diary
+
+say "A plugin's code is open to everyone it's in use for, and to nobody else, and what it keeps stays whoever's it is"
+may as alice deploy --name recipes --files-from "$folder/notes"
+recipe=$(as alice recipes write --id soup --text "Leek and potato")
+echo "  alice wrote $recipe with it"
+may as alice code --name recipes
+refused as carol add --plugin users/alice/plugins/recipes
+may as alice for groups/family add --plugin users/alice/plugins/recipes
+may as carol for groups/family code --name recipes
+refused as dave for groups/family code --name recipes
+refused as dave add --plugin users/alice/plugins/recipes
+may as carol add --plugin users/alice/plugins/recipes
+may as carol code --name recipes
+refused as carol recipes read --note "$recipe"
+refused as carol relations shared --artifact users/alice/plugins/recipes
+may as alice for groups/family remove --name recipes
+refused as carol code --name recipes
+refused as carol add --plugin users/alice/plugins/recipes --name again
+may as owner for network add --plugin users/alice/plugins/recipes
+may as dave code --name recipes
+may as dave add --plugin users/alice/plugins/recipes --name mine
+refused as dave recipes read --note "$recipe"
+may as owner for network remove --name recipes
+refused as dave code --name mine
+may as dave remove --name mine
+may as carol remove --name recipes
 
 say "One Core's own tools are whoever's may, decided by the same hooks"
 refused as bob deploy --name diary --files-from "$folder/diary"

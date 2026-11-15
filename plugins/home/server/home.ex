@@ -130,8 +130,8 @@ defmodule Home do
     Enum.sort_by(parts, &String.downcase(&1.name))
   end
 
-  # A plugin's deployed code is open to everyone in the network, so every plugin anyone deployed is one anyone may
-  # add, whether or not it's on a page now.
+  # Every plugin anyone deployed, whether or not it's on a page now. One that isn't in use for a group someone's in
+  # or the network, nor shared with them, is listed for them too, and adding it says why it can't be.
   def call("store", _inputs, call) do
     apps =
       for %{plugin: plugin, apps: apps} <- Call.deployed(call), app <- apps, not app.settings do

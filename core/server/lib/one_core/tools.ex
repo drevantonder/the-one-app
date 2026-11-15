@@ -5,11 +5,12 @@ defmodule OneCore.Tools do
   They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.Calls.tool/6`): the plugins that
   change a call's inputs change theirs, the ones that decide a call decide theirs, and the ones that hear are
   told. What each changes it reaches as a plugin reaches an artifact, so the plugins that decide `reach` say
-  whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` adds it, and only an `owner` of
-  a user, a group or the network changes what's added for them and which servers act for them. A server is its
-  owner's: who it was started for, and only their `owner` says who else it acts for and what it runs. Nothing is
-  asked about what's whoever's asked, which is what their name starts. With no plugin deciding, they're the
-  network's first owner's alone.
+  whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` reads its code and adds it, and
+  so does a `member` of the group or the network it's whoever's or added for, since what's in use is open to
+  everyone it's in use for, and only an `owner` of a user, a group or the network changes what's added for them
+  and which servers act for them. A server is its owner's: who it was started for, and only their `owner` says
+  who else it acts for and what it runs. Nothing is asked about what's whoever's asked, which is what their name
+  starts. With no plugin deciding, they're the network's first owner's alone.
 
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
@@ -56,7 +57,8 @@ defmodule OneCore.Tools do
       name: "code",
       description: """
       Gives a plugin's files as they were deployed, its app's source among them, by their paths: what `deploy`
-      takes, to change and deploy again.
+      takes, to change and deploy again. Asked for a group or the network, it's one of the plugins in use for them,
+      which their members may read.
       """,
       read_only: true,
       inputs: %{
@@ -69,8 +71,9 @@ defmodule OneCore.Tools do
       name: "add",
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
-      It's the same plugin, at its newest version, with an artifact of its own for whoever it's added for. Whoever
-      it belongs to shares it with you first, as a viewer, and the plugins it uses are added for you first.
+      It's the same plugin, at its newest version, with an artifact of its own for whoever it's added for. One in
+      use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
+      with you first, as a viewer. The plugins it uses are added for you first.
       """,
       inputs: %{
         type: "object",
@@ -303,11 +306,10 @@ defmodule OneCore.Tools do
     end
   end
 
-  # A plugin's deployed code is open to whoever may see the plugin.
   defp run("code", %{"name" => name}, {_by, who} = asked, _pass) do
     case Plugins.running(who) do
       %{^name => version} ->
-        reaches!(asked, version.artifact, "viewer")
+        opens!(asked, version.artifact)
         JSON.encode!(Kept.sent(Kept.source(version.artifact, version.code)))
 
       _ ->
@@ -318,7 +320,7 @@ defmodule OneCore.Tools do
   defp run("add", %{"plugin" => plugin} = inputs, {_by, who} = asked, pass) do
     name = Map.get(inputs, "name", Path.basename(plugin))
     at(who, pass)
-    reaches!(asked, plugin, "viewer")
+    opens!(asked, plugin)
     reaches!(asked, who, "owner")
     with {:error, why} <- Added.add(who, name, plugin), do: raise(why)
     "#{plugin} is added for #{who}, as #{name}."
@@ -446,10 +448,28 @@ defmodule OneCore.Tools do
 
   # Raises unless whoever asked may reach the artifact as `relation`, which the plugins that decide `reach` say.
   # Nothing is asked about what's their own: themselves, and what their name starts.
-  defp reaches!({by, _who} = asked, artifact, relation) do
-    if not (artifact == by or String.starts_with?(artifact, by <> "/")) do
-      about = %{"who" => by, "relation" => relation, "artifact" => artifact}
-      with {:refuse, why} <- Hooks.decide("reach", about, asked), do: raise(why)
+  defp reaches!(asked, artifact, relation) do
+    with {:refuse, why} <- reaches(asked, artifact, relation), do: raise(why)
+  end
+
+  defp reaches({by, _who} = asked, artifact, relation) do
+    if artifact == by or String.starts_with?(artifact, by <> "/"),
+      do: :ok,
+      else: Hooks.decide("reach", %{"who" => by, "relation" => relation, "artifact" => artifact}, asked)
+  end
+
+  # Raises unless whoever asked may read a plugin's code and add it: a `viewer` of it, or a member of a group or
+  # the network that it's whoever's or added for, as the plugins that decide `reach` say. That's VISION's "what's
+  # made is open to everyone inside once it's in use": what only its author has is theirs and whoever they share
+  # it with, and taking it away from a group takes it away from them. Only its code is opened: what it keeps for
+  # anyone is never the plugin's artifact, and is reached as ever.
+  defp opens!({by, _who} = asked, plugin) do
+    with {:refuse, why} <- reaches(asked, plugin, "viewer") do
+      in_use =
+        for of <- [User.owner(plugin) | Added.added_for(plugin)], of == "network" or match?("groups/" <> _, of), do: of
+
+      member = &(Hooks.decide("reach", %{"who" => by, "relation" => "member", "artifact" => &1}, {by, &1}) == :ok)
+      if not Enum.any?(Enum.uniq(in_use), member), do: raise(why)
     end
   end
 
