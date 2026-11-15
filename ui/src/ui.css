@@ -1092,8 +1092,18 @@ button.ui-box {
   .ui-split > [data-open] > .list {
     visibility: visible;
   }
+  /* Beside the list it shows with nothing open, as the app's grey line saying what to pick, in its middle. */
   .ui-split > .panes > .detail {
     --screen-back: none;
+    visibility: visible;
+  }
+  .ui-split > .panes > .detail > .ui-state {
+    place-content: center;
+    justify-items: center;
+    max-width: none;
+    height: 100%;
+    padding: var(--gutter);
+    text-align: center;
   }
 }
 
