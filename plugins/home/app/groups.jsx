@@ -1,13 +1,23 @@
-// Groups: the groups whoever's looking is in, and who's in each. A group has a home page of its own, which its
-// members see, and an owner adds and removes its members.
+// Groups: the groups whoever's looking is in, and who's in each, by the names they go by. A group has a home page of
+// its own, which its members see, and an owner adds someone in the network to it, and takes members out.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Field, Icon, Input, leave, List, Problem, Row, Screen, Section, Sheet, Skeleton, Split, toast } from "ui"
 
-const groups = createMemo(() => call("relations_groups").then(JSON.parse))
+/// The name each person goes by, as last answered.
+let called = new Map()
+
+/// The groups, and everyone in the network by who they are, with the name each goes by. A network where nobody
+/// signs in has nobody to say who they are, and each is their name in it.
+const groups = createMemo(async () => {
+  const [list, people] = await Promise.all([call("relations_groups").then(JSON.parse), call("sign-in_everyone").then(JSON.parse, () => [])])
+  called = new Map(people.filter((person) => person.called).map((person) => [person.who, person.called]))
+  return Object.assign(list, { people: people.filter((person) => person.joined) })
+})
 changed(() => refresh(groups))
 
-const named = (who) => who.replace(/^(groups|users)\//, "")
+const handle = (who) => who.replace("users/", "")
+const named = (who) => called.get(who) ?? handle(who)
 const [open, setOpen] = createSignal()
 const [adding, setAdding] = createSignal()
 
@@ -72,6 +82,7 @@ function Group(props) {
 
 function Groups(props) {
   const group = () => props.groups.find(({ group }) => group === open())
+  const outside = () => props.groups.people.filter((person) => !group()?.members.includes(person.who))
   return (
     <>
       <Split open={!!group()} onClose={() => setOpen()} detail={<Show when={group()}><Group group={group()} /></Show>}>
@@ -88,7 +99,20 @@ function Groups(props) {
         </Screen>
       </Split>
       <Naming heading="New Group" action="Make Group" open={adding() === "group"} onClose={() => setAdding()} onName={(name) => change("relations_group", { name })} />
-      <Naming heading="Add Member" hint="Their name in this network." pattern="[a-zA-Z][a-zA-Z0-9\-]*" action="Add" open={adding() === "member"} onClose={() => setAdding()} onName={(name) => change("relations_share", { artifact: open(), relation: "member", who: `users/${name.toLowerCase()}` })} />
+      <Show
+        when={props.groups.people.length}
+        fallback={<Naming heading="Add Member" hint="Their name in this network." pattern="[a-zA-Z][a-zA-Z0-9\-]*" action="Add" open={adding() === "member"} onClose={() => setAdding()} onName={(name) => change("relations_share", { artifact: open(), relation: "member", who: `users/${name.toLowerCase()}` })} />}
+      >
+        <Sheet heading="Add Member" open={adding() === "member"} onClose={() => setAdding()}>
+          <Show when={outside().length} fallback={<Empty>Everyone in the network is in it.</Empty>}>
+            <List>
+              <For each={outside()} keyed={(person) => person.who}>
+                {(person) => <Row heading={named(person().who)} text={handle(person().who)} onClick={() => (setAdding(), change("relations_share", { artifact: open(), relation: "member", who: person().who }))} />}
+              </For>
+            </List>
+          </Show>
+        </Sheet>
+      </Show>
     </>
   )
 }
