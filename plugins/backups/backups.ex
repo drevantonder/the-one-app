@@ -4,9 +4,10 @@ defmodule Backups do
   folder on one of the network's machines, as on a disk plugged into it, through the service `Backups.Disk`, or
   S3-compatible storage, whose keys are an item in the network's Vault.
 
-  A backup is encrypted to the backup key of the network's owner who added the place: a key derived from their own
-  key (`client/src/cipher.rs`, `backups`), whose public half their device hands over as they add it. So a server
-  writes backups and reads none, and their recovery key alone opens every one, with `one restore` and no network
+  A backup is encrypted to the network's backup key: a key derived from the network's own key, the one its owners'
+  devices hold (`client/src/cipher.rs`, `backups`), whose public half an owner's device hands over as they add a
+  place. So a server writes backups and reads none, any owner's device that holds the network's key restores, and
+  the network's recovery key alone opens every one, with `one restore` and no network
   running (`client/src/backups.rs`, which says what a place holds).
 
   What's kept here, in the plugin's database for the network, is what the place can't say without the key: which
@@ -34,7 +35,9 @@ defmodule Backups do
     """,
     "create index objects_by_content on objects (place, sha256)",
     "create table problems (place text primary key, at integer not null, kind text not null, text text not null)",
-    "create table settings (name text primary key, value text not null)"
+    "create table settings (name text primary key, value text not null)",
+    # Every place's backups are encrypted to the network's backup key, not to whoever added it.
+    "alter table places drop column whose"
   ]
 
   # How often each schedule backs up, in seconds.
@@ -66,7 +69,7 @@ defmodule Backups do
       %{
         name: "add",
         description:
-          "Adds a place to back up to: a folder on a machine of the network's, as on a disk plugged into it, or S3-compatible storage. It's tried first. Backups to it are encrypted to your backup key, so your recovery key restores them",
+          "Adds a place to back up to: a folder on a machine of the network's, as on a disk plugged into it, or S3-compatible storage. It's tried first. Backups to it are encrypted to the network's backup key, so the network's recovery key restores them, and so does any owner's device that holds the network's key",
         inputs: %{
           type: "object",
           properties: %{
@@ -120,7 +123,7 @@ defmodule Backups do
       %{
         name: "restore",
         description:
-          "Brings back what a backup holds under `blobs` that's gone from the network, such as one person's or one plugin's data, or a file. It changes nothing that's there. Your device hands over your backup key",
+          "Brings back what a backup holds under `blobs` that's gone from the network, such as one person's or one plugin's data, or a file. It changes nothing that's there. Your device hands over the network's backup key",
         inputs: %{
           type: "object",
           properties: %{
@@ -129,7 +132,7 @@ defmodule Backups do
             blobs: %{
               type: "string",
               description:
-                "What to bring back, by how its blobs' names start: users/alice/ for a person, users/alice/plugins/notes/ for one plugin of theirs, or one blob's whole name"
+                "What to bring back, by how its blobs' names start: users/alice/ for a person, users/alice/own/notes/ for what one plugin keeps for them, or one blob's whole name"
             },
             key: %{type: "string", format: "backup-key", opened_by: "opened_by"}
           },
@@ -139,7 +142,7 @@ defmodule Backups do
       %{
         name: "opened_by",
         read_only: true,
-        description: "Whose backup key a device hands over, and the servers it's handed to",
+        description: "Whose backup key a device hands over, the network's, and the servers it's handed to",
         inputs: %{type: "object", properties: %{}}
       },
       %{
@@ -152,7 +155,7 @@ defmodule Backups do
 
   @impl true
   def call("opened_by", _inputs, call) do
-    %{person: call.by, servers: OneCore.Servers.acting(call.added)}
+    %{owner: "network", servers: OneCore.Servers.acting(call.added)}
   end
 
   def call("due", _inputs, call) do
@@ -193,16 +196,6 @@ defmodule Backups do
     end
   end
 
-  # What someone goes by, as they chose it.
-  defp called(call, who) do
-    case Call.tool(call, "sign-in", "people", %{"users" => [who]}) do
-      [%{"called" => called} | _] when is_binary(called) -> called
-      _ -> String.replace_prefix(who, "users/", "")
-    end
-  rescue
-    _ -> String.replace_prefix(who, "users/", "")
-  end
-
   defp owned("places", _inputs, call) do
     {places, every, problems, backups} =
       transaction(call, fn db ->
@@ -230,7 +223,6 @@ defmodule Backups do
             where: where(place),
             machine: place["machine"] && Service.name(place["machine"]),
             item: place["item"],
-            whose: called(call, place["whose"]),
             size: sizes[place["id"]] || 0,
             last: List.first(listed),
             backups: for(backup <- listed, do: Map.drop(backup, ["place"])),
@@ -242,7 +234,8 @@ defmodule Backups do
 
   defp owned("add", inputs, call) do
     recipient =
-      inputs["key"] || raise "Your device hands over your backup key: add a place from the app, or with `one`."
+      inputs["key"] ||
+        raise "Your device hands over the network's backup key: add a place from the app, or with `one`."
 
     place =
       case inputs do
@@ -275,11 +268,7 @@ defmodule Backups do
       end
 
     place =
-      Map.merge(place, %{
-        "id" => Base.encode16(:crypto.strong_rand_bytes(8), case: :lower),
-        "recipient" => recipient,
-        "whose" => call.by
-      })
+      Map.merge(place, %{"id" => Base.encode16(:crypto.strong_rand_bytes(8), case: :lower), "recipient" => recipient})
 
     Backups.Place.try(call, place)
 
@@ -287,7 +276,7 @@ defmodule Backups do
       if query(db, "select 1 from places where name = ?", [place["name"]]) != [],
         do: raise("There's a place called #{place["name"]} already.")
 
-      columns = ~w(id name kind machine folder endpoint bucket region item recipient whose)
+      columns = ~w(id name kind machine folder endpoint bucket region item recipient)
 
       query(
         db,
@@ -296,7 +285,7 @@ defmodule Backups do
       )
     end)
 
-    "Added #{place["name"]}. Backups go there #{every(call)}, and #{called(call, call.by)}'s recovery key restores them."
+    "Added #{place["name"]}. Backups go there #{every(call)}, and the network's recovery key restores them."
   end
 
   defp owned("remove", %{"place" => name}, call) do
@@ -331,7 +320,9 @@ defmodule Backups do
   end
 
   defp owned("restore", %{"place" => name, "blobs" => blobs} = inputs, call) do
-    given = inputs["key"] || raise "Your device hands over your backup key: restore from the app, or with `one`."
+    given =
+      inputs["key"] || raise "Your device hands over the network's backup key: restore from the app, or with `one`."
+
     [place] = transaction(call, &named(&1, name))
     Run.restore(call, place, inputs["backup"], blobs, given)
   end

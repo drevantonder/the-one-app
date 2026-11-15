@@ -293,17 +293,17 @@ defmodule Backups.Run do
            {:ok, sealed} <- Base.decode64(sealed[call.server] || "") do
         sealed
       else
-        _ -> raise "Your backup key wasn't handed to this server. Ask again from your device."
+        _ -> raise "The network's backup key wasn't handed to this server. Ask again from your device."
       end
 
     {key, public} =
       case Cipher.backup_key(OneCore.Server.key_file(), sealed) do
         {:ok, opened} -> opened
-        {:error, _why} -> raise "Your backup key wasn't handed to this server. Ask again from your device."
+        {:error, _why} -> raise "The network's backup key wasn't handed to this server. Ask again from your device."
       end
 
     if public != place["recipient"],
-      do: raise("#{place["name"]}'s backups are encrypted to #{place["whose"]}'s backup key, which isn't yours.")
+      do: raise("#{place["name"]}'s backups are encrypted to another key than the network's.")
 
     name =
       backup ||

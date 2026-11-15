@@ -12,8 +12,8 @@
 //!   device's copy of its owner's key. A server that was listed and no longer is starts a new epoch.
 //! - `owner-key`: the owner's key for the device in the input `device`: a new one if they have none, and otherwise
 //!   this device's copy, or the recovery key given.
-//! - `backup-recipient`: the public half of the backup key (`cipher::backups`) of whoever asks, which the
-//!   plugin's tool named by `opened_by` says as its `person`.
+//! - `backup-recipient`: the public half of the backup key (`cipher::backups`) of whoever the plugin's tool named
+//!   by `opened_by` says is its `owner`: the network, for Backups.
 //! - `backup-key`: that backup key itself, encrypted to each server the same tool lists, for a restore.
 //! - `device` and `device-name`: this device's key and its name, where none is given.
 
@@ -211,12 +211,12 @@ impl Client {
         Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots}).to_string())
     }
 
-    /// The backup key of the person asking, as the plugin's tool that the input names says who that is, with what
-    /// the tool said.
+    /// The backup key of whoever the plugin's tool that the input names says owns the backups, with what the tool
+    /// said.
     async fn backups_key(&self, plugin: &str, says: &Value, who: Option<&str>) -> Result<(iroh::SecretKey, Value)> {
         let opened_by = self.opened_by(plugin, says, who).await?;
-        let person = opened_by["person"].as_str().context("the tool didn't say whose backup key it is")?;
-        Ok((cipher::backups(&self.owner_key_of(Some(person)).await?.0), opened_by))
+        let owner = opened_by["owner"].as_str().context("the tool didn't say whose backup key it is")?;
+        Ok((cipher::backups(&self.owner_key_of(Some(owner)).await?.0), opened_by))
     }
 
     /// The backup key, encrypted to each server the plugin's tool lists, for one of them to restore with.

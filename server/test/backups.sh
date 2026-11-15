@@ -84,11 +84,12 @@ as alice vault grant --servers "[\"$(ls "$folder/bucket/servers")\"]" | shown
 as alice vault set --item Marker --field secret --value-from "$folder/secrets/vault" | shown
 echo "  the bucket: $(size "$folder/bucket"), $(find "$folder/bucket" -type f -not -path '*/.*' | wc -l) blobs, of which $(holding "$folder/bucket") hold the marker: alice's diary.txt, which nothing encrypts"
 
-say "The owner's key, whose recovery key restores, and the two places"
+say "The network's key, whose recovery key restores, and the two places"
 as owner encryption let_in | shown
+as owner for network encryption let_in | shown
+ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$root/target/release/examples/recovery_key" "$folder/secrets/network"
 ONE_AS=owner ONE_HOME=$folder/client "$root/target/release/examples/recovery_key" "$folder/secrets/owner"
-ONE_AS=alice ONE_HOME=$folder/client "$root/target/release/examples/recovery_key" "$folder/secrets/alice"
-echo "  the owner's window shows their recovery key once, which they write down (kept in a file here)"
+echo "  the owner's window shows the network's recovery key once, which they write down (kept in a file here)"
 mkdir "$folder/disk"
 as owner for network install_service --plugin backups --service Backups.Disk | shown
 backups add --folder "$folder/disk" --name Disk | shown
@@ -105,7 +106,6 @@ curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$s3/"
   if (!made.ok) throw new Error(`the store answered ${made.status}`);')
 printf 'ACCESS_KEY_ID=%s\nSECRET_ACCESS_KEY=%s\n' "$access" "$secret" >"$folder/secrets/s3"
 printf '%s' "$secret" >"$folder/secrets/s3-secret"
-as owner for network encryption let_in | shown
 as owner for network vault grant --servers "[\"$(ls "$folder/bucket/servers")\"]" | shown
 as owner for network vault set --item "Backup storage" --field access_key_id --value "$access" --secret false --hosts "[\"$s3\"]" | shown
 as owner for network vault set --item "Backup storage" --field secret_access_key --value-from "$folder/secrets/s3-secret" | shown
@@ -142,7 +142,7 @@ down
 rm -rf "$folder/bucket"
 echo "  the server is stopped and the bucket is gone: $(ls "$folder" | grep -c '^bucket$' || true) buckets"
 mkdir "$folder/bucket"
-(time -p "$one" restore --from "$folder/disk" --to "$folder/bucket" --key-from "$folder/secrets/owner") 2>&1 | grep -v '^user\|^sys' | shown
+(time -p "$one" restore --from "$folder/disk" --to "$folder/bucket" --key-from "$folder/secrets/network") 2>&1 | grep -v '^user\|^sys' | shown
 up
 echo "  the server is started on it: $(size "$folder/bucket")"
 [[ $(everything) == "$before" ]] && echo "  every row and file of alice's, bob's and the family's is as it was at the last backup"
@@ -155,7 +155,7 @@ down
 rm -rf "$folder/bucket"
 mkdir "$folder/bucket"
 oldest=$("$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --list | head -1)
-(time -p "$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --backup "$oldest" --to "$folder/bucket" --key-from "$folder/secrets/owner") 2>&1 | grep -v '^user\|^sys' | shown
+(time -p "$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --backup "$oldest" --to "$folder/bucket" --key-from "$folder/secrets/network") 2>&1 | grep -v '^user\|^sys' | shown
 up
 meanwhile=$(as bob shelf all | grep -o 'written meanwhile [0-9]*' | grep -o '[0-9]*$' | paste -sd' ')
 echo "  bob's notes written meanwhile, as that backup has them: ${meanwhile:0:60}..."
@@ -165,7 +165,7 @@ as alice vault list | grep -q '"Marker"' && echo "  alice's Vault opens, with he
 
 say "Another key restores nothing"
 mkdir "$folder/empty"
-"$one" restore --from "$folder/disk" --to "$folder/empty" --key-from "$folder/secrets/alice" 2>&1 | shown || true
+"$one" restore --from "$folder/disk" --to "$folder/empty" --key-from "$folder/secrets/owner" 2>&1 | shown || true
 printf 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-IIII-JJJJ-KKKK-LLLL-MMMQ' >"$folder/secrets/guess"
 "$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --to "$folder/empty" --key-from "$folder/secrets/guess" 2>&1 | shown || true
 echo "  files in the bucket they'd have gone to: $(find "$folder/empty" -type f | wc -l)"

@@ -1,6 +1,7 @@
 // Backups, a part of Settings: the places backups go, each saying when it was last backed up and how big it is, or
 // what's wrong; how often they're made and which are kept. A place opens beside the list with its backups,
-// Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
+// Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network, and the
+// network's key restores them.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, toast } from "ui"
@@ -28,8 +29,8 @@ function size(bytes) {
 }
 /// How long something took: "40 ms", "14 s", "3 min".
 const took = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
-/// A person's name as relation tuples say it, short: "users/andre" is "andre".
-const person = (who) => String(who ?? "").replace(/^users\//, "")
+/// A name as relation tuples say it, short: "users/andre" is "andre".
+const short = (who) => String(who ?? "").replace(/^(users|groups)\//, "")
 
 /// A place's grey line: what's wrong, or when it was last backed up and how big it is, or that it hasn't been yet.
 const about = (place) =>
@@ -50,6 +51,7 @@ async function doing(does) {
 
 const [open, setOpen] = createSignal()
 const [adding, setAdding] = createSignal(false)
+const [restoring, setRestoring] = createSignal()
 const [working, setWorking] = createSignal()
 
 /// `does` under way on the button `which`, which shows it's working until it's done.
@@ -91,7 +93,7 @@ function Place(props) {
           <Row heading="Keys" text={`${place().item}, in Everyone's Vault`} />
         </Show>
         <Row heading="Size" text={size(place().size)} />
-        <Row heading="Restored With" text={`${person(place().whose)}'s recovery key`} />
+        <Row heading="Restored With" text="Everyone's recovery key, or an owner's device that holds Everyone's key" />
       </List>
       <Show when={place().backups.length}>
         <Section heading="Backups">
@@ -104,6 +106,7 @@ function Place(props) {
       </Show>
       <div class="actions">
         <Show when={place().backups.length}>
+          <Button variant="secondary" onClick={() => setRestoring(place())}>Restore</Button>
           <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>
         </Show>
         <Button variant="destructive" onClick={stop}>Stop Backing Up Here</Button>
@@ -155,9 +158,77 @@ function AddSheet(props) {
         <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
           <Input name="name" />
         </Field>
-        <p class="hint">Backups there are encrypted to your key, so your recovery key restores them.</p>
+        <p class="hint">Backups there are encrypted to Everyone's key, so Everyone's recovery key restores them.</p>
         <Button type="submit" loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length}>Add</Button>
       </form>
+    </Sheet>
+  )
+}
+
+/// Brings back what a backup holds that's gone: someone's data, what one app keeps for them, or one file. What's
+/// there now stays as it is.
+function RestoreSheet() {
+  const place = () => restoring()
+  const [what, setWhat] = createSignal("whose")
+  const choices = createMemo(async () => {
+    if (!place()) return { whose: [], apps: [] }
+    const [people, groups, store] = await Promise.all(["sign-in_everyone", "relations_groups", "home_store"].map((tool) => call(tool).then(JSON.parse, () => [])))
+    const whose = [
+      ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
+      ...groups.map((group) => ({ value: group.group, label: group.called })),
+      { value: "network", label: "Everyone" },
+    ]
+    const apps = [...new Map(store.map((app) => [app.plugin.split("/").pop(), app.name])).entries()].map(([value, label]) => ({ value, label }))
+    return { whose: createListCollection({ items: whose }), apps: createListCollection({ items: apps }) }
+  })
+  const backupsOf = () => createListCollection({ items: place().backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
+  const restore = async (event) => {
+    event.preventDefault()
+    const typed = Object.fromEntries(new FormData(event.target))
+    const blobs = what() === "file" ? [typed.file.trim()] : what() === "app" ? [`${typed.whose}/own/${typed.app}/`, `${typed.whose}/made/${typed.app}/`] : [`${typed.whose}/`]
+    setWorking("restore")
+    const said = await doing(async () => {
+      const each = []
+      for (const one of blobs) each.push(await call("backups_restore", { place: place().name, backup: typed.backup, blobs: one }, network))
+      return each.join("\n")
+    })
+    setWorking()
+    if (said) {
+      toast(said)
+      setRestoring()
+    }
+  }
+  return (
+    <Sheet heading="Restore" open={!!place()} onClose={() => setRestoring()}>
+      <Show when={place()}>
+        <form onSubmit={restore}>
+          <Field label="From">
+            <Select.Root name="backup" collection={backupsOf()} defaultValue={[place().backups[0]?.name]} />
+          </Field>
+          <Field label="What">
+            <RadioGroup value={what()} onChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
+          </Field>
+          <Loading fallback={<Skeleton rows={1} />}>
+            <Show when={what() !== "file"}>
+              <Field label="Whose">
+                <Select.Root name="whose" collection={choices().whose} required />
+              </Field>
+            </Show>
+            <Show when={what() === "app"}>
+              <Field label="App">
+                <Select.Root name="app" collection={choices().apps} required />
+              </Field>
+            </Show>
+          </Loading>
+          <Show when={what() === "file"}>
+            <Field label="File" hint="Its whole name in the network, as users/alice/made/notes/7/photo.jpg.">
+              <Input name="file" autocapitalize="none" spellcheck={false} required />
+            </Field>
+          </Show>
+          <p class="hint">Only what's gone comes back. Nothing that's there now changes.</p>
+          <Button type="submit" loading={working() === "restore"}>Restore</Button>
+        </form>
+      </Show>
     </Sheet>
   )
 }
@@ -187,6 +258,7 @@ function Backups(props) {
         </Screen>
       </Split>
       <AddSheet machines={props.all.machines} />
+      <RestoreSheet />
     </>
   )
 }
