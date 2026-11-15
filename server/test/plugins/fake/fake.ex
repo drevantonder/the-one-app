@@ -30,6 +30,16 @@ defmodule Fake do
       %{name: "sign_in", description: "Gives the link you sign in to Fake at", inputs: %{type: "object"}},
       %{name: "me", description: "Asks Fake who you are there", inputs: %{type: "object"}},
       %{
+        name: "keep",
+        description: "Makes a secret of its own and keeps it in an item, and gives its SHA-256",
+        inputs: %{type: "object", properties: %{item: %{type: "string"}}, required: ["item"]}
+      },
+      %{
+        name: "forget",
+        description: "Removes an item it keeps",
+        inputs: %{type: "object", properties: %{item: %{type: "string"}}, required: ["item"]}
+      },
+      %{
         name: "digest",
         description: "Hands an item's field to a program, and gives the program's answer: its SHA-256",
         inputs: item
@@ -45,6 +55,17 @@ defmodule Fake do
     answer = OneCore.Call.plugin(call, "vault").fetch(call, "Fake", request)
     if answer.status != 200, do: raise("Fake answered #{answer.status}")
     "Fake says you're #{JSON.decode!(answer.body)["account"]}."
+  end
+
+  def call("keep", %{"item" => item}, call) do
+    secret = Base.encode64(:crypto.strong_rand_bytes(32))
+    OneCore.Call.plugin(call, "vault").keep(call, item, %{"key" => secret})
+    Base.encode16(:crypto.hash(:sha256, secret), case: :lower)
+  end
+
+  def call("forget", %{"item" => item}, call) do
+    OneCore.Call.plugin(call, "vault").remove(call, item)
+    "Removed."
   end
 
   # The secret goes to the program on its input, which is how a service hands one to a program it brings. The

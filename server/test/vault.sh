@@ -253,6 +253,17 @@ refused on phone as alice fake digest --item Pasted --field password
 may on phone as alice vault use --item GitHub --plugin fake --on false
 refused on phone as alice fake digest --item GitHub --field token
 
+say "A plugin keeps a secret it made itself, which only it uses"
+may on phone as alice fake keep --item Session
+kept=$said
+may on phone as alice fake digest --item Session --field key
+[[ $said == "$kept" ]] && echo "  which is the SHA-256 the plugin gave as it kept it"
+refused on phone as alice nosy digest --item Session --field key
+refused on phone as alice nosy keep --item Session
+may on phone as alice vault list
+may on phone as alice fake forget --item Session
+refused on phone as alice fake digest --item Session --field key
+
 say "An app signs its person in to an outside service, and its tokens are kept, used and renewed"
 may on phone as alice vault set --item "Fake client" --field client_id --value proof-client --secret false --hosts "[\"127.0.0.1:$service\"]"
 may on phone as alice vault set --item "Fake client" --field client_secret --value-from "$folder/secrets/client"

@@ -66,5 +66,8 @@ A plugin uses an account by using this plugin, and never keeps a secret itself:
   A signed-in item's `access_token` is renewed when it has ended, or when the service says it has.
 - `value(call, item, field)` gives one field itself, to hand to a program a service brings. Hand it over on the
   program's input, and never answer with it, raise it or log it.
-- Both raise unless the item is switched on for the plugin, which its person does in the Vault's app or with
-  `use`.
+- `keep(call, item, fields)` keeps secrets the plugin made itself or an outside service handed it, such as the
+  key a session it holds is encrypted with, in an item it makes, switched on for it. `remove(call, item)` removes
+  one, as when that account is signed out.
+- `fetch` and `value` raise unless the item is switched on for the plugin, which its person does in the Vault's
+  app or with `use`, or which `keep` did.

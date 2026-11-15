@@ -11,8 +11,8 @@ defmodule Vault do
   (`quietly/2`).
 
   A plugin that uses the Vault calls its functions: `fetch/3` makes a web request with an item's fields filled
-  in, `value/3` gives one field to hand to a program, and `sign_in/3` starts an OAuth sign-in whose tokens become
-  an item (`Vault.OAuth`), which `fetch/3` then keeps fresh.
+  in, `value/3` gives one field to hand to a program, `sign_in/3` starts an OAuth sign-in whose tokens become an
+  item (`Vault.OAuth`), which `fetch/3` then keeps fresh, and `keep/4` keeps secrets the plugin made itself.
   """
   @behaviour OneCore.Plugin
   alias OneCore.{Artifact, Call, Plugins, Server, User}
@@ -274,6 +274,54 @@ defmodule Vault do
       transaction(call, artifact, fn db ->
         item = allowed!(db, item, {:plugin, call.who})
         fields(db, item)[field] || raise "#{item["name"]} has no field named #{field}."
+      end)
+    end)
+  end
+
+  @doc """
+  Keeps `fields`, by their names, in the item `item`, for the plugin that calls this: secrets it made itself or an
+  outside service handed it, such as the key a session it holds is encrypted with. Each is secret. An item there's
+  none of is made, switched on for the plugin, with `hosts` its sites; one that's there is changed only if it's
+  switched on for the plugin.
+  """
+  def keep(%Call{} = call, item, fields, hosts \\ []) when is_map(fields) do
+    # The plugin reaches the Vault as an editor of it from here on, as a sign-in has it.
+    share(call, "share", theirs(call), call.who)
+    artifact = reached(call)
+
+    quietly("Keeping #{item}", fn ->
+      transaction(call, artifact, fn db ->
+        kept =
+          if item(db, item) do
+            allowed!(db, item, {:plugin, call.who})
+          else
+            made = new(db, item, hosts)
+            query(db, "insert into uses (item, plugin) values (?, ?)", [made["id"], call.who])
+            made
+          end
+
+        for {field, value} <- fields, do: keep(db, kept, field, value, true)
+        :ok
+      end)
+    end)
+  end
+
+  @doc """
+  Removes the item `item`, for the plugin that calls this, which its person switched on for it or which it made
+  with `keep/4`: as when an account it holds is signed out. One that isn't there is nothing to remove.
+  """
+  def remove(%Call{} = call, item) do
+    artifact = reached(call)
+
+    quietly("Removing #{item}", fn ->
+      transaction(call, artifact, fn db ->
+        if item(db, item) do
+          %{"id" => id} = allowed!(db, item, {:plugin, call.who})
+          for table <- ~w(fields uses), do: query(db, "delete from #{table} where item = ?", [id])
+          query(db, "delete from items where id = ?", [id])
+        end
+
+        :ok
       end)
     end)
   end
