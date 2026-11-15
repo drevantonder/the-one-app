@@ -128,5 +128,7 @@ targets:
       base:
         PRODUCT_NAME: Notifications
         PRODUCT_BUNDLE_IDENTIFIER: app.theone.client.notifications
+        # Tauri's CLI names the team in the app's target alone; xcodebuild has what it was told in its environment.
+        DEVELOPMENT_TEAM: $(APPLE_DEVELOPMENT_TEAM)
         ARCHS: [arm64]
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64

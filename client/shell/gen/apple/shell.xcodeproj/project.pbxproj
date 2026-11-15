@@ -198,14 +198,14 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
-		"TEMP_9CF2F2B7-B0E1-42FC-86E9-A8C46EB379CE" /* arm64 */ = {
+		"TEMP_0E377054-29D3-4889-9445-3707E84D4A0B" /* arm64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
 			path = arm64;
 			sourceTree = "<group>";
 		};
-		"TEMP_EF715E9F-4574-4D89-951B-AD9D27038BD8" /* x86_64 */ = {
+		"TEMP_2E12A3A5-CDD8-41AE-880F-4A9B2F366290" /* x86_64 */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -263,6 +263,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					610205510B5B7E7E7A2710FA = {
+						DevelopmentTeam = "$(APPLE_DEVELOPMENT_TEAM)";
+					};
 				};
 			};
 			buildConfigurationList = F14DC14E930E46E2CD2F5B98 /* Build configuration list for PBXProject "shell" */;
@@ -388,6 +391,7 @@
 					arm64,
 				);
 				CODE_SIGN_ENTITLEMENTS = Notifications/Notifications.entitlements;
+				DEVELOPMENT_TEAM = "$(APPLE_DEVELOPMENT_TEAM)";
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				INFOPLIST_FILE = Notifications/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -466,6 +470,7 @@
 					arm64,
 				);
 				CODE_SIGN_ENTITLEMENTS = Notifications/Notifications.entitlements;
+				DEVELOPMENT_TEAM = "$(APPLE_DEVELOPMENT_TEAM)";
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				INFOPLIST_FILE = Notifications/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
