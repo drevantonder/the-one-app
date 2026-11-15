@@ -23,12 +23,15 @@ ignore = "0.4"
 iroh.workspace = true
 # Asking the signer at a network's address, with the TLS iroh reaches the relay there with.
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }
+# Restoring from a backup in S3-compatible storage (`backups`): requests signed here, and sent with reqwest.
+rusty-s3 = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11"
 # Names the key file without replacing one that's there, on every system, a phone included.
 tempfile = "3"
 tokio.workspace = true
+url = "2"
 # Keys are wiped from memory when they're let go of.
 zeroize = "1"
 

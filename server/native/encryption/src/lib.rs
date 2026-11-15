@@ -28,6 +28,12 @@ fn binary<'a>(env: Env<'a>, bytes: &[u8]) -> Binary<'a> {
     binary.into()
 }
 
+/// A backup key a device handed this server, to restore from a backup with while that's asked.
+struct BackupKey(iroh::SecretKey);
+
+#[rustler::resource_impl]
+impl Resource for BackupKey {}
+
 /// What was encrypted to the key kept in `key_file`, for what `about` says.
 fn opened(key_file: &str, about: impl Fn(&str) -> String, sealed: &[u8]) -> Result<Vec<u8>, String> {
     let key = client::key(Path::new(key_file)).map_err(|error| format!("{error:#}"))?;
@@ -77,6 +83,27 @@ fn secret<'a>(env: Env<'a>, key_file: &str, sealed: Binary) -> Result<Binary<'a>
 fn seal<'a>(env: Env<'a>, to: &str, about: &str, data: Binary) -> Result<Binary<'a>, String> {
     let to: PublicKey = to.parse().map_err(|_| "that isn't a machine's key")?;
     Ok(binary(env, &cipher::seal(&to, about, data.as_slice()).map_err(|error| error.to_string())?))
+}
+
+/// The backup key that `sealed` hands the server whose key is kept in `key_file`, and its public half.
+#[rustler::nif(schedule = "DirtyIo")]
+fn backup_key(key_file: &str, sealed: Binary) -> Result<(ResourceArc<BackupKey>, String), String> {
+    let bytes = opened(key_file, cipher::for_restoring, sealed.as_slice())?;
+    let bytes: [u8; 32] = bytes.as_slice().try_into().map_err(|_| "that isn't a backup key")?;
+    let key = iroh::SecretKey::from_bytes(&bytes);
+    let public = key.public().to_string();
+    Ok((ResourceArc::new(BackupKey(key)), public))
+}
+
+/// What a backup holds, encrypted to the backup key for what `about` says.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn backup_open<'a>(
+    env: Env<'a>,
+    key: ResourceArc<BackupKey>,
+    about: &str,
+    sealed: Binary,
+) -> Result<Binary<'a>, String> {
+    Ok(binary(env, &cipher::open(&key.0, about, sealed.as_slice()).map_err(|error| error.to_string())?))
 }
 
 rustler::init!("Elixir.Cipher");

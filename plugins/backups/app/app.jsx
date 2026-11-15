@@ -1,0 +1,203 @@
+// Backups, a part of Settings: the places backups go, each saying when it was last backed up and how big it is, or
+// what's wrong; how often they're made and which are kept. A place opens beside the list with its backups,
+// Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
+import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { render } from "@solidjs/web"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, toast } from "ui"
+import "./app.css"
+
+const network = { for: "network" }
+const backups = createMemo(() => call("backups_places", {}, network).then(JSON.parse))
+changed(() => refresh(backups))
+
+const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+/// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
+function since(at) {
+  const minutes = Math.round((at - Date.now()) / 60_000)
+  if (minutes > -1) return "just now"
+  if (minutes > -60) return ago.format(minutes, "minute")
+  if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
+  return ago.format(Math.round(minutes / (24 * 60)), "day")
+}
+const when = (at) => new Date(at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+const units = ["bytes", "KB", "MB", "GB", "TB"]
+function size(bytes) {
+  let n = bytes, unit = 0
+  while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
+  return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
+}
+/// How long something took: "40 ms", "14 s", "3 min".
+const took = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
+/// A person's name as relation tuples say it, short: "users/andre" is "andre".
+const person = (who) => String(who ?? "").replace(/^users\//, "")
+
+/// A place's grey line: what's wrong, or when it was last backed up and how big it is, or that it hasn't been yet.
+const about = (place) =>
+  place.problem ? (place.problem.kind === "check" ? "Changed since it was sent" : "Couldn't back up") : place.last ? `Backed up ${since(place.last.at)} · ${size(place.size)}` : "Not backed up yet"
+
+/// Does something, says why if it couldn't, and shows everything as it is after. → whether it was done.
+async function doing(does) {
+  try {
+    const said = await does()
+    return said ?? true
+  } catch (error) {
+    toast(error.message)
+    return false
+  } finally {
+    refresh(backups)
+  }
+}
+
+const [open, setOpen] = createSignal()
+const [adding, setAdding] = createSignal(false)
+const [working, setWorking] = createSignal()
+
+/// `does` under way on the button `which`, which shows it's working until it's done.
+const press = (which, does) => async () => {
+  setWorking(which)
+  await doing(does)
+  setWorking()
+}
+
+const schedules = createListCollection({
+  items: [
+    { value: "hour", label: "Every Hour" },
+    { value: "day", label: "Every Day" },
+    { value: "week", label: "Every Week" },
+    { value: "never", label: "Only When Asked" },
+  ],
+})
+
+/// A place, opened: what's wrong with it, where it is, its backups, Check and Stop Backing Up Here.
+function Place(props) {
+  const place = () => props.place
+  const stop = async () => {
+    const question = { heading: `Stop backing up to ${place().name}?`, text: "What's there now stays there.", action: "Stop Backing Up", destructive: true }
+    if (!(await confirm(question))) return
+    if (await doing(() => call("backups_remove", { place: place().name }, network))) setOpen()
+  }
+  const check = press("check", async () => toast(await call("backups_check", { place: place().name }, network)))
+  return (
+    <Screen heading={place().name} back>
+      <Show when={place().problem}>
+        <Problem heading={place().problem.kind === "check" ? `What's at ${place().name} was changed` : `Couldn't back up to ${place().name}`} text={place().problem.kind === "check" ? "Part of the newest backup isn't there as it was sent. Back up now to send it again." : place().problem.text} action={<Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { place: place().name }, network))}>Back Up Now</Button>} />
+      </Show>
+      <List>
+        <Row heading={place().kind === "folder" ? "Folder" : "Bucket"} text={place().where} />
+        <Show when={place().machine}>
+          <Row heading="On" text={place().machine} />
+        </Show>
+        <Show when={place().item}>
+          <Row heading="Keys" text={`${place().item}, in Everyone's Vault`} />
+        </Show>
+        <Row heading="Size" text={size(place().size)} />
+        <Row heading="Restored With" text={`${person(place().whose)}'s recovery key`} />
+      </List>
+      <Show when={place().backups.length}>
+        <Section heading="Backups">
+          <List>
+            <For each={place().backups} keyed={(backup) => backup.name}>
+              {(backup) => <Row heading={when(backup().at)} text={`${size(backup().bytes)} · ${size(backup().sent_bytes)} sent · ${took(backup().took)}`} />}
+            </For>
+          </List>
+        </Section>
+      </Show>
+      <div class="actions">
+        <Show when={place().backups.length}>
+          <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>
+        </Show>
+        <Button variant="destructive" onClick={stop}>Stop Backing Up Here</Button>
+      </div>
+    </Screen>
+  )
+}
+
+/// Adds a place: a folder on one of the network's machines, as on a disk plugged into it, or S3-compatible storage
+/// whose keys are an item in Everyone's Vault. It's tried before it's added, so a typo shows here.
+function AddSheet(props) {
+  const [kind, setKind] = createSignal("folder")
+  const machines = () => createListCollection({ items: props.machines.map((machine) => ({ value: machine.key, label: machine.name ?? machine.key.slice(0, 8) })) })
+  const add = async (event) => {
+    event.preventDefault()
+    const typed = Object.fromEntries([...new FormData(event.target)].filter(([name, value]) => value !== "" && name !== "kind"))
+    setWorking("add")
+    if (await doing(() => call("backups_add", { ...typed }, network))) setAdding(false)
+    setWorking()
+  }
+  return (
+    <Sheet heading="Add Place" open={adding()} onClose={() => setAdding(false)}>
+      <form onSubmit={add}>
+        <RadioGroup name="kind" value={kind()} onChange={setKind} options={[{ value: "folder", label: "A Disk" }, { value: "s3", label: "S3-Compatible Storage" }]} />
+        <Show when={kind() === "folder"}>
+          <Show
+            when={props.machines.length}
+            fallback={<Problem warn heading="No machine can hold backups yet" text="Switch on Backups.Disk for the machine the disk is plugged into, in Devices." />}
+          >
+            <Field label="Machine">
+              <Select.Root name="machine" collection={machines()} />
+            </Field>
+            <Field label="Folder" hint="Its whole path on that machine.">
+              <Input name="folder" placeholder="/mnt/disk/backups" autocapitalize="none" spellcheck={false} required />
+            </Field>
+          </Show>
+        </Show>
+        <Show when={kind() === "s3"}>
+          <Field label="Endpoint">
+            <Input name="endpoint" type="url" placeholder="https://<account>.r2.cloudflarestorage.com" autocapitalize="none" spellcheck={false} required />
+          </Field>
+          <Field label="Bucket">
+            <Input name="bucket" placeholder="backups" autocapitalize="none" spellcheck={false} required />
+          </Field>
+          <Field label="Keys" hint="An item in Everyone's Vault with access_key_id and secret_access_key, switched on for Backups.">
+            <Input name="item" placeholder="Backups Storage" required />
+          </Field>
+        </Show>
+        <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
+          <Input name="name" />
+        </Field>
+        <p class="hint">Backups there are encrypted to your key, so your recovery key restores them.</p>
+        <Button type="submit" loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length}>Add</Button>
+      </form>
+    </Sheet>
+  )
+}
+
+function Backups(props) {
+  const places = () => props.all.places
+  const opened = () => places().find((place) => place.name === open())
+  const now = press("now", () => call("backups_now", {}, network))
+  const schedule = ({ value: [every] }) => every && every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
+  return (
+    <>
+      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={places().length}><Empty>Pick a place to see its backups.</Empty></Show>}><Place place={opened()} /></Show>}>
+        <Screen heading="Backups" back onBack={leave} action={<Show when={places().length}><Button loading={working() === "now"} onClick={now}>Back Up Now</Button></Show>}>
+          <Show when={places().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Place</Button>}>Nothing is backed up yet.</Empty>}>
+            <List>
+              <For each={places()} keyed={(place) => place.name}>
+                {(place) => <Row heading={place().name} text={<span class={{ warn: !!place().problem }}>{about(place())}</span>} current={open() === place().name} onClick={() => setOpen(place().name)} />}
+              </For>
+              <Row heading="Add Place" onClick={() => setAdding(true)} />
+            </List>
+            <Section heading="Schedule">
+              <Field label="Back Up" hint={props.all.kept}>
+                <Select.Root collection={schedules} value={[props.all.every]} onValueChange={schedule} />
+              </Field>
+            </Section>
+          </Show>
+        </Screen>
+      </Split>
+      <AddSheet machines={props.all.machines} />
+    </>
+  )
+}
+
+render(
+  () => (
+    <Errored fallback={(error) => <Screen heading="Backups" back onBack={leave}><Problem heading="Can't show backups" text={String(error().message ?? error())} /></Screen>}>
+      <Loading fallback={<Screen heading="Backups" back onBack={leave}><Skeleton rows={3} /></Screen>}>
+        <Backups all={backups()} />
+      </Loading>
+    </Errored>
+  ),
+  document.body,
+)

@@ -44,7 +44,7 @@
 - A network is trusted, and its users aren't assumed to be malicious. Keeping plugins apart is wise, but it's a bonus:
   other things decide what plugins run in first.
 - The One App ships with these plugins: signing in, relation tuples, the database, encryption, home pages, Insights,
-  repos, the Vault and notifications.
+  repos, the Vault, notifications and backups.
 - Plugins are written against one published interface for everything One Core gives them. In a client they reach
   nothing else. On a server they're also free to use the machine: its files, its programs and its network.
 - A plugin's parts needn't be written in the same language. Its server part and its client part already aren't.

@@ -7,6 +7,7 @@
 //! that: a client that wants to hear, as the app does while it runs, says it's watching, and a server connects to it
 //! when there's something to say.
 
+mod backups;
 pub mod cipher;
 pub mod cli;
 mod encrypts;
@@ -834,11 +835,15 @@ impl Client {
     }
 
     /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its vouch for the run's key,
-    /// and what the environment says.
+    /// and what the environment says, unless the request says otherwise, as one of a device's own does.
     fn say(&self, request: &mut Value) {
-        let device = [("device", self.key.public().to_string()), ("vouch", self.link().vouch)];
-        for (says, value) in device.into_iter().chain(self.says.iter().cloned()) {
+        for (says, value) in [("device", self.key.public().to_string()), ("vouch", self.link().vouch)] {
             request["params"]["_meta"][says] = json!(value);
+        }
+        for (says, value) in &self.says {
+            if request["params"]["_meta"][says].is_null() {
+                request["params"]["_meta"][says] = json!(value);
+            }
         }
     }
 

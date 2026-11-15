@@ -685,11 +685,13 @@ dependencies = [
  "ndk-context",
  "objc2-ui-kit",
  "reqwest",
+ "rusty-s3",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "tokio",
+ "url",
  "zeroize",
 ]
 
@@ -2447,6 +2449,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "instant-xml"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c32db75b7c16c5051ea7b6605eea01f7b5a25abe84c20473c9e7c7987f5850c"
+dependencies = [
+ "instant-xml-macros",
+ "xmlparser",
+]
+
+[[package]]
+name = "instant-xml-macros"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac3c2e6cbd6e0579ee53a8290fc0015a438cfff0139c8359d5891cae130815d7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3049,6 +3073,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
+]
+
+[[package]]
+name = "md-5"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
+dependencies = [
+ "cfg-if",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4656,6 +4690,25 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "rusty-s3"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1af5b74b316ee483ae486bd3cb206c8caa5dbb3cf0eab7269a868ae43aeece03"
+dependencies = [
+ "base64 0.23.1",
+ "hmac",
+ "instant-xml",
+ "jiff",
+ "md-5",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "url",
+ "zeroize",
+]
 
 [[package]]
 name = "ryu"
@@ -7302,6 +7355,12 @@ dependencies = [
  "rand_core 0.10.1",
  "zeroize",
 ]
+
+[[package]]
+name = "xmlparser"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "yoke"

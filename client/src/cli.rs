@@ -26,12 +26,17 @@ const THIS_DEVICE: &str = "This device:\n\n\
                            one serve on       makes it a server of yours, which starts whenever it does\n\
                            one serve off      stops it being one, and removes it\n\
                            one update         takes the newest builds\n\
+                           one restore        restores a whole network from a backup, with none running\n\
                            one --version      says which build it is";
 
 async fn run(args: Vec<String>) -> Result<ExitCode> {
     if args == ["--version"] {
         println!("one {} {}", crate::BUILD, crate::target());
         return Ok(ExitCode::SUCCESS);
+    }
+    // A network is restored where there's none running.
+    if args.first().is_some_and(|word| word == "restore") {
+        return Ok(printed(crate::backups::restore(&args[1..]).await?));
     }
     // A device that isn't in its network yet says its code and where it's let in, and carries on once it is.
     let client = match Client::open(crate::home()?).await {

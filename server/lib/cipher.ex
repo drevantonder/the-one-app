@@ -27,6 +27,15 @@ defmodule Cipher do
   @doc "What a person typed on their device, which encrypted it to the key kept in `key_file`."
   def secret(_key_file, _sealed), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc """
+  The backup key that a device handed the server whose key is kept in `key_file`, for one restore: `{:ok, {key,
+  public}}`, where `key` is a reference to it and `public` its public half, which is what backups are encrypted to.
+  """
+  def backup_key(_key_file, _sealed), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "What a backup holds, encrypted to the backup key for what `about` says: `{:ok, data}` or `{:error, why}`."
+  def backup_open(_key, _about, _sealed), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "Encrypts `data` to the machine whose key is `to`, for what `about` says, which is all it then opens for."
   def seal(_to, _about, _data), do: :erlang.nif_error(:nif_not_loaded)
 end

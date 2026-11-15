@@ -12,6 +12,9 @@
 //! - **A blob** (`wrap`, `unwrap`) is encrypted with XChaCha20-Poly1305 under its artifact's newest key, with a
 //!   random nonce, and says which epoch's. Its name in the bucket is authenticated with it, so a blob put in
 //!   another's place doesn't open.
+//! - **A backup** is encrypted to a key of its own, derived from the owner's key of whoever added where it goes
+//!   (`backups`), with HPKE as above: a server is given only its public half, so whatever backs up can't read a
+//!   backup, and the recovery key opens every one.
 
 use anyhow::{Context, Result, anyhow, bail};
 use chacha20poly1305::aead::{Aead, Generate, Payload};
@@ -63,6 +66,27 @@ fn derived(owner: &Key, what: &str) -> Key {
 /// An artifact's keys for every epoch up to `epochs`, the first first, from its owner's key.
 pub fn artifact(owner: &Key, artifact: &str, epochs: u32) -> Vec<Key> {
     (1..=epochs).map(|epoch| derived(owner, &format!("one/encryption/1/artifact\n{artifact}\n{epoch}"))).collect()
+}
+
+/// The key backups are encrypted to, from the owner's key of whoever added where they go. A server holds only its
+/// public half, which is what a device hands over.
+pub fn backups(owner: &Key) -> SecretKey {
+    SecretKey::from_bytes(&derived(owner, "one/backups/1/key"))
+}
+
+/// What a backup's object is encrypted for, which only that object opens as: its name where the backup goes.
+pub fn for_object(object: &str) -> String {
+    format!("one/backups/1/object\n{object}")
+}
+
+/// What a backup's list of blobs is encrypted for: its name where the backup goes.
+pub fn for_backup(backup: &str) -> String {
+    format!("one/backups/1/backup\n{backup}")
+}
+
+/// The backup key, for a server that restores from a backup while a device asks it to.
+pub fn for_restoring(server: &str) -> String {
+    format!("one/backups/1/restoring\n{server}")
 }
 
 /// What tells an owner's key from another without giving it away: kept beside what's encrypted to their devices,
@@ -196,6 +220,17 @@ mod tests {
         );
         let first = wrap(&keys[..1], "name", b"before").unwrap();
         assert_eq!(unwrap(&keys, "name", &first).unwrap(), b"before");
+    }
+
+    #[test]
+    fn a_backup_opens_with_the_key_its_owners_recovery_key_gives_and_no_other() {
+        let owner = owner();
+        let to = backups(&owner).public();
+        let sealed = seal(&to, &for_object("ab"), b"a blob").unwrap();
+        let recovered = backups(&recovered(&recovery(&owner)).unwrap());
+        assert_eq!(open(&recovered, &for_object("ab"), &sealed).unwrap().as_slice(), b"a blob");
+        assert!(open(&recovered, &for_object("cd"), &sealed).is_err());
+        assert!(open(&backups(&super::owner()), &for_object("ab"), &sealed).is_err());
     }
 
     #[test]

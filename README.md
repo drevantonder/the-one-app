@@ -27,7 +27,9 @@ two servers, with one that picks up what it wasn't told and a network nobody use
 scheduled job across a takeover, on a folder or with `--address` through the signer,
 `server/test/vault.sh` shows that what's encrypted is read only by the servers its owner chose, and never by a
 tool's answer, a log or the bucket, through a sign-in to an outside service and the loss of every device,
-`address/proof/proof.sh` runs a whole address with nothing deployed, `address/proof/sign-in.sh` has people sign in
+`server/test/backups.sh` backs a network up to a disk and to S3-compatible storage, destroys its bucket and
+restores it from each with the recovery key, `address/proof/proof.sh` runs a whole address with nothing deployed,
+`address/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
 try everything it mustn't reach, and `server/test/install.sh` has a machine with nothing on it but `one` install a
 server, update it, go back from a build that can't start, and remove it.
