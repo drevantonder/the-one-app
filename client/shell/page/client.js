@@ -207,6 +207,11 @@ async function answer(view, method, params) {
     if (!go(params.url.slice("one:".length), params.for ?? view.for, params.behind)) throw new Error("That app isn't on this device")
     return {}
   }
+  // A web address opens in the device's own browser: the window is sent there, and leaves it to the browser.
+  if (method === "ui/open-link" && /^https?:/.test(new URL(params.url).protocol)) {
+    location.assign(params.url)
+    return {}
+  }
   // What an app is told of its client, and the few things one changes of it.
   if (method === "one/client") {
     if (params.leave) return invoke("enter")

@@ -100,8 +100,10 @@ export const leave = () => greet().then(() => tell("ui/notifications/request-tea
 /// from it does. `open("notes/app/index.html", { for: "groups/family" })` names a page of the plugin's that isn't
 /// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a home page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
-/// without.
-export const open = (app, who = {}) => greet().then(() => ask("ui/open-link", { url: `one:${app}`, for: who.for, behind: who.behind }))
+/// without. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an
+/// outside service's sign-in page is opened.
+export const open = (app, who = {}) =>
+  greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, for: who.for, behind: who.behind }))
 
 /// `const { device, network } = await client()`: this device's key, as Devices lists it, and the network's
 /// address, if it has one. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
