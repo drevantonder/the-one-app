@@ -1,5 +1,6 @@
-// Passkeys: what whoever's looking signs in with. One is removed here, but never the last. Another is made in the
-// device's own browser, which has passkeys where an app's web view doesn't, by a link that works once.
+// Passkeys: what whoever's looking signs in with. One is removed here, but never the last, which says so before
+// it's pressed. Another is made in the device's own browser, which has passkeys where an app's web view doesn't,
+// by a link that works once.
 import { createMemo, Errored, For, Loading, refresh } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, leave, List, open, Problem, Row, Screen, Skeleton, toast } from "ui"
@@ -29,7 +30,10 @@ render(
         <Loading fallback={<Skeleton rows={2} />}>
           <List>
             <For each={mine().passkeys} keyed={(passkey) => passkey.id}>
-              {(passkey) => <Row heading={passkey().name} text={`Made ${on(passkey().added)}`} end={<Remove name={passkey().name} onClick={() => remove(passkey())} />} />}
+              {(passkey) => {
+                const only = () => mine().passkeys.length === 1
+                return <Row heading={passkey().name} text={only() ? "Your only one. Add another to remove it." : `Made ${on(passkey().added)}`} end={<Remove name={passkey().name} disabled={only()} onClick={() => remove(passkey())} />} />
+              }}
             </For>
           </List>
         </Loading>
