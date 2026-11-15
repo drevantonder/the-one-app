@@ -1,5 +1,6 @@
-# What a server logs is shown with the test that failed, and otherwise not at all.
-ExUnit.start(capture_log: true)
+# What a server logs is shown with the test that failed, and otherwise not at all. What a test waits to be told is
+# waited for longer than ExUnit's 100 ms, which a busy machine takes to run a process that has just been started.
+ExUnit.start(capture_log: true, assert_receive_timeout: 2_000)
 
 defmodule OneCore.Test do
   @doc "The first owner of each test's network: who may do anything in it while no plugin decides who may."

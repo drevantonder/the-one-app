@@ -33,10 +33,8 @@ defmodule OneCore.Plugins.Process do
 
   @doc "The process of a plugin's module running here under `key`, or `nil` if there's none."
   def whereis(plugin, name, key \\ nil) do
-    case Registry.lookup(@registry, {plugin, name, key}) do
-      [{process, _version}] -> process
-      [] -> nil
-    end
+    # A process that has just ended stays in the registry until it hears so, and `Registry.lookup/2` still gives it.
+    with :undefined <- Registry.whereis_name({@registry, {plugin, name, key}}), do: nil
   end
 
   @doc """

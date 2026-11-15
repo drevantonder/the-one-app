@@ -72,11 +72,12 @@ defmodule Database.Lease do
     {:reply, {:held_by, lease.held_by}, lease}
   end
 
-  # Each job that's due at `now`, and isn't being called already, is called in a process of its own.
+  # Each job that's due at `now`, and isn't being called already, is called in a process of its own. A call that has
+  # marked its job as run is done with it, even while its process is still ending.
   def handle_call({:schedule, jobs, fire, now} = schedule, from, lease) do
     case transact(lease, &due(&1, jobs, now)) do
       {:ok, due, lease} ->
-        calling = for {_caller, %{job: job}} <- lease.firing, do: job
+        calling = for {_caller, %{job: job, marked: false}} <- lease.firing, do: job
 
         firing =
           for {job, at, called} <- due, job not in calling, into: lease.firing do
