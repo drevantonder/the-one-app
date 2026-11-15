@@ -230,7 +230,7 @@ function Find(props) {
           <For each={sections()} keyed={(section) => section.name}>
             {(section) => (
               <details open>
-                <summary>{section().name}</summary>
+                <summary><Icon name="caret-right" />{section().name}</summary>
                 <List>
                   <For each={section().apps} keyed={(app) => app.app}>
                     {(app) => <Row heading={app().name} start={<img src={app().icon} alt="" />} onClick={() => go(section(), app())} />}

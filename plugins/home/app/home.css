@@ -78,7 +78,8 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .cell,
-  .dots i {
+  .dots i,
+  .find summary .ui-icon {
     transition: none;
   }
 }
@@ -202,11 +203,25 @@ footer p {
   gap: var(--gap);
 }
 .find summary {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  list-style: none;
   padding: 0 0 0.375rem;
   color: var(--muted-foreground);
   font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
+}
+.find summary::-webkit-details-marker {
+  display: none;
+}
+/* A section's caret points at its apps while they show. */
+.find summary .ui-icon {
+  transition: rotate var(--move-quick) var(--ease-quick);
+}
+.find details[open] summary .ui-icon {
+  rotate: 90deg;
 }
 .find img {
   display: block;
