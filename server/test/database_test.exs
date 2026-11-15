@@ -9,7 +9,8 @@ defmodule OneCore.DatabaseTest do
   that fails is a bug to find, never a flake. `SEEDS=5000 mix test test/database_test.exs` runs more of them.
   """
   use ExUnit.Case
-  alias OneCore.{Artifact, Call, Plugins, User}
+  alias OneCore.{Artifact, Call, Plugins}
+  alias OneCore.Plugins.Deploy
 
   @prefix OneCore.Test.owner() <> "/own/simulated/"
   @servers 3
@@ -84,7 +85,7 @@ defmodule OneCore.DatabaseTest do
     files =
       for file <- Path.wildcard(folder <> "/**/*.ex"), into: %{}, do: {Path.relative_to(file, folder), File.read!(file)}
 
-    {:ok, 1, _warnings} = Plugins.deploy("network", "database", files)
+    {:ok, 1, _warnings} = Deploy.deploy("network", "database", files)
     %{database: Plugins.running("network")["database"].plugin, home: home}
   end
 

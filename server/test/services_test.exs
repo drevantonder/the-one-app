@@ -1,6 +1,7 @@
 defmodule OneCore.ServicesTest do
   use ExUnit.Case
-  alias OneCore.{Mcp, Plugins, Server, Services, User}
+  alias OneCore.{Mcp, Plugins, Server, Services}
+  alias OneCore.Plugins.{Calls, Deploy}
 
   # A plugin whose service keeps a count. Its tool asks the service to add one, and the service tells the plugin
   # each count, which the plugin sends to the test.
@@ -55,37 +56,36 @@ defmodule OneCore.ServicesTest do
     OneCore.Test.server(folder)
     # What an earlier test loaded stays loaded, since nothing unloads a server's plugins as it stops.
     earlier = loaded()
-    assert {:ok, 1, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(1, self())})
+    assert {:ok, 1, ""} = Deploy.deploy("network", "counter", %{"counter.ex" => counter(1, self())})
     assert :ok = Services.install("network/plugins/counter", "Counter.Kept")
     %{earlier: earlier}
   end
 
   @tag :tmp_dir
   test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
-    assert Plugins.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 1]}
+    assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 1]}
     # The plugin was added for the network, so that's who its service has it run for.
     assert_receive {:counted, "network", 1}
     service = Plugins.Process.whereis("network/plugins/counter", "Counter.Kept")
 
     # More updates than the two versions of a module the VM keeps.
     for number <- 2..4,
-        do:
-          assert({:ok, ^number, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(number, self())}))
+        do: assert({:ok, ^number, ""} = Deploy.deploy("network", "counter", %{"counter.ex" => counter(number, self())}))
 
-    assert Plugins.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [902, 4]}
+    assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [902, 4]}
     assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == service
     assert length(loaded() -- earlier) == 1
 
     # A version without the service stops it, and one with it starts it afresh.
     assert {:ok, 5, ""} =
-             Plugins.deploy("network", "counter", %{
+             Deploy.deploy("network", "counter", %{
                "counter.ex" => "defmodule Counter do\n  @behaviour OneCore.Plugin\nend"
              })
 
     assert Plugins.Process.whereis("network/plugins/counter", "Counter.Kept") == nil
     assert loaded() -- earlier == []
-    assert {:ok, 6, ""} = Plugins.deploy("network", "counter", %{"counter.ex" => counter(6, self())})
-    assert Plugins.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 6]}
+    assert {:ok, 6, ""} = Deploy.deploy("network", "counter", %{"counter.ex" => counter(6, self())})
+    assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 6]}
   end
 
   @tag :tmp_dir

@@ -10,8 +10,8 @@ defmodule OneCore.App do
   An app that names packages of its own in `app/package.json` has them installed as it's built; one that names none
   installs nothing.
   """
-  alias OneCore.{Plugins, Server}
-  alias OneCore.Plugins.Version
+  alias OneCore.Server
+  alias OneCore.Plugins.{Kept, Version}
 
   @app "app/"
   @kit "app/kit"
@@ -87,7 +87,7 @@ defmodule OneCore.App do
   end
 
   defp read(kit, path) do
-    {:ok, text} = Plugins.file(kit.artifact, kit.code, path)
+    {:ok, text} = Kept.file(kit.artifact, kit.code, path)
     text
   end
 

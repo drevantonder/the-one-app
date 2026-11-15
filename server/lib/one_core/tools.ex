@@ -2,7 +2,7 @@ defmodule OneCore.Tools do
   @moduledoc """
   One Core's own tools: what adds, updates and removes plugins, servers and services.
 
-  They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.tool/6`): the plugins that
+  They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.Calls.tool/6`): the plugins that
   change a call's inputs change theirs, the ones that decide a call decide theirs, and the ones that hear are
   told. What each changes it reaches as a plugin reaches an artifact, so the plugins that decide `reach` say
   whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` adds it, and only an `owner` of
@@ -15,6 +15,7 @@ defmodule OneCore.Tools do
   the call on to.
   """
   alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, Services, User}
+  alias OneCore.Plugins.{Added, Calls, Deploy, Kept}
 
   @tools [
     %{
@@ -174,7 +175,7 @@ defmodule OneCore.Tools do
   def tools, do: @taking
 
   @doc """
-  Calls one of One Core's own tools for `asked`, who asked and who for. Gives what `OneCore.Plugins.call/5` does,
+  Calls one of One Core's own tools for `asked`, who asked and who for. Gives what `OneCore.Plugins.Calls.call/5` does,
   or `:none` if `name` isn't one.
   """
   def call(name, inputs, asked, passed_on \\ false) do
@@ -188,7 +189,7 @@ defmodule OneCore.Tools do
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in ["deploy", "remove"], do: {User.owner(elem(asked, 1)), inputs["name"]}
-        Plugins.tool(tool, about, asked, nil, &run(name, &1, asked, pass), apart)
+        Calls.tool(tool, about, asked, nil, &run(name, &1, asked, pass), apart)
     end
   end
 
@@ -203,7 +204,7 @@ defmodule OneCore.Tools do
       plugin -> at(User.owner(plugin), pass) && reaches!(asked, plugin, "editor")
     end
 
-    case Plugins.deploy(who, name, files) do
+    case Deploy.deploy(who, name, files) do
       {:ok, number, ""} -> "#{name} is running, at version #{number}."
       {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
       {:error, why} -> raise why
@@ -215,7 +216,7 @@ defmodule OneCore.Tools do
     case Plugins.running(who) do
       %{^name => version} ->
         reaches!(asked, version.artifact, "viewer")
-        JSON.encode!(Plugins.source(version.artifact, version.code))
+        JSON.encode!(Kept.source(version.artifact, version.code))
 
       _ ->
         raise "There's no plugin named #{name}"
@@ -227,14 +228,14 @@ defmodule OneCore.Tools do
     at(who, pass)
     reaches!(asked, plugin, "viewer")
     reaches!(asked, who, "owner")
-    with {:error, why} <- Plugins.add(who, name, plugin), do: raise(why)
+    with {:error, why} <- Added.add(who, name, plugin), do: raise(why)
     "#{plugin} is added for #{who}, as #{name}."
   end
 
   defp run("remove", %{"name" => name}, {_by, who} = asked, pass) do
     at(who, pass)
     reaches!(asked, who, "owner")
-    with {:error, why} <- Plugins.remove(who, name), do: raise(why)
+    with {:error, why} <- Added.remove(who, name), do: raise(why)
     "#{name} is removed from what's added for #{who}."
   end
 

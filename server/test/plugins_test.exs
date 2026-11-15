@@ -1,6 +1,7 @@
 defmodule OneCore.PluginsTest do
   use ExUnit.Case
   alias OneCore.Plugins
+  alias OneCore.Plugins.{Added, Calls, Deploy, Kept}
 
   # A plugin of two modules. Its tool waits to be told to finish, then asks its other module which version it is.
   defp slow(number) do
@@ -33,18 +34,18 @@ defmodule OneCore.PluginsTest do
   test "a call running through updates finishes on its own version, and the next gets the newest", %{tmp_dir: folder} do
     OneCore.Test.server(folder)
     test = self()
-    wait = fn -> Task.async(fn -> Plugins.call("slow", "wait", %{"test" => test}, OneCore.Test.owner()) end) end
+    wait = fn -> Task.async(fn -> Calls.call("slow", "wait", %{"test" => test}, OneCore.Test.owner()) end) end
 
-    assert {:ok, 1, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(1)})
+    assert {:ok, 1, ""} = Deploy.deploy("network", "slow", %{"slow.ex" => slow(1)})
     first = wait.()
     assert_receive {:waiting, first_call}
 
     # More updates than the two versions of a module the VM keeps.
-    assert {:ok, 2, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(2)})
-    assert {:ok, 3, ""} = Plugins.deploy("network", "slow", %{"slow.ex" => slow(3)})
+    assert {:ok, 2, ""} = Deploy.deploy("network", "slow", %{"slow.ex" => slow(2)})
+    assert {:ok, 3, ""} = Deploy.deploy("network", "slow", %{"slow.ex" => slow(3)})
 
     assert {:error, why} =
-             Plugins.deploy("network", "slow", %{"slow.ex" => "defmodule Slow do\n  def broken(, do: 1\nend"})
+             Deploy.deploy("network", "slow", %{"slow.ex" => "defmodule Slow do\n  def broken(, do: 1\nend"})
 
     assert why =~ "slow.ex:2"
 
@@ -59,15 +60,15 @@ defmodule OneCore.PluginsTest do
 
     # A plugin is added for someone once the plugins it uses are there for them, as when it's deployed.
     uses = ~s(defmodule Uses do\n  @behaviour OneCore.Plugin\n  @impl true\n  def uses, do: ["thing"]\nend)
-    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "thing", %{"app/thing.js" => "1"})
-    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "uses", %{"uses.ex" => uses})
+    assert {:ok, 1, ""} = Deploy.deploy("users/alice", "thing", %{"app/thing.js" => "1"})
+    assert {:ok, 1, ""} = Deploy.deploy("users/alice", "uses", %{"uses.ex" => uses})
 
-    assert Plugins.add("users/bob", "uses", "users/alice/plugins/uses") ==
+    assert Added.add("users/bob", "uses", "users/alice/plugins/uses") ==
              {:error,
               "uses uses thing, which isn't added for users/bob or the network. Add it for them first, or deploy it."}
 
-    assert :ok = Plugins.add("users/bob", "thing", "users/alice/plugins/thing")
-    assert :ok = Plugins.add("users/bob", "uses", "users/alice/plugins/uses")
+    assert :ok = Added.add("users/bob", "thing", "users/alice/plugins/thing")
+    assert :ok = Added.add("users/bob", "uses", "users/alice/plugins/uses")
     assert length(loaded()) == 1
 
     # A server starting on the same bucket runs what was deployed.
@@ -83,7 +84,7 @@ defmodule OneCore.PluginsTest do
   test "an app is built from its source as it's deployed, gives its source back, and is built again when the kit changes",
        %{tmp_dir: folder} do
     OneCore.Test.server(folder)
-    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
 
     page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.jsx"></script>)
 
@@ -94,28 +95,28 @@ defmodule OneCore.PluginsTest do
     """
 
     source = %{"app/index.html" => page, "app/app.jsx" => app, "icon.svg" => "<svg/>"}
-    assert {:ok, 1, ""} = Plugins.deploy("network", "notes", source)
+    assert {:ok, 1, ""} = Deploy.deploy("network", "notes", source)
 
     version = Plugins.running("network")["notes"]
     # A client is listed what a page loads, and nothing else of the plugin.
     assert "app/index.html" in version.files and Enum.any?(version.files, &(&1 =~ ~r{^app/assets/.*\.js$}))
     assert Enum.all?(version.files, &(Path.extname(&1) in ~w(.html .js .css .svg)))
     refute "icon.svg" in version.files
-    {:ok, built} = Plugins.file(version.artifact, version.code, "app/index.html")
+    {:ok, built} = Kept.file(version.artifact, version.code, "app/index.html")
     assert built =~ "/ui/app/ui.css"
-    assert Plugins.source(version.artifact, version.code) == source
+    assert Kept.source(version.artifact, version.code) == source
 
     broken =
       Map.put(source, "app/app.jsx", String.replace(app, "<Screen heading=\"Notes\" />", "<Screen heading=\"Notes\">"))
 
-    assert {:error, why} = Plugins.deploy("network", "notes", broken)
+    assert {:error, why} = Deploy.deploy("network", "notes", broken)
     assert why =~ "app.jsx:3:"
 
     # A new kit: the app is built again against it, from the source it was deployed with.
-    assert {:ok, 2, ""} = Plugins.deploy("network", "ui", OneCore.Test.kit("export const kit = 2"))
+    assert {:ok, 2, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 2"))
     kit = Plugins.running("network")["ui"].code
     rebuilt = Enum.find_value(1..100, fn _ -> Process.sleep(50) && Plugins.running("network")["notes"].kit == kit end)
     assert rebuilt
-    assert Plugins.source(version.artifact, Plugins.running("network")["notes"].code) == source
+    assert Kept.source(version.artifact, Plugins.running("network")["notes"].code) == source
   end
 end

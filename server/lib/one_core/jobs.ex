@@ -4,12 +4,13 @@ defmodule OneCore.Jobs do
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
   telling another. At each of those times, and when this server starts or a plugin's version changes, the plugin is
-  asked to have what's due called (`OneCore.Plugins.schedule/2`), for each one it was added for. Every server asks,
+  asked to have what's due called (`OneCore.Plugins.Calls.schedule/2`), for each one it was added for. Every server asks,
   and the plugin keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
   plugin was added for: a time that passed with no server up is made up for by the first that's back.
   """
   use GenServer
   alias OneCore.{Plugins, Servers}
+  alias OneCore.Plugins.Calls
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -36,7 +37,7 @@ defmodule OneCore.Jobs do
     scheduled = for {added, _name, _jobs} = scheduled <- Plugins.scheduled(), Servers.here?(added), do: scheduled
 
     for {added, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
-      Task.Supervisor.start_child(OneCore.Asks, fn -> Plugins.schedule(added, name) end)
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(added, name) end)
     end
 
     next = for {_added, _name, jobs} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every

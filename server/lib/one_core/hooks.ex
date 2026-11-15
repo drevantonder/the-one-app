@@ -37,6 +37,7 @@ defmodule OneCore.Hooks do
   """
   require Logger
   alias OneCore.Plugins
+  alias OneCore.Plugins.Calls
 
   @kinds [
     hears: """
@@ -233,7 +234,7 @@ defmodule OneCore.Hooks do
   @doc "Tells each plugin that hears `hook` what it's about, for `asked`."
   def heard(hook, about, {_by, who} = asked) do
     for {at, name} <- hooking(hook, who),
-        do: Task.Supervisor.start_child(__MODULE__, fn -> Plugins.hook(at, name, hook, about, asked) end)
+        do: Task.Supervisor.start_child(__MODULE__, fn -> Calls.hook(at, name, hook, about, asked) end)
 
     :ok
   end
@@ -343,7 +344,7 @@ defmodule OneCore.Hooks do
 
   # A hook whose plugin keeps what it needs in a database another server writes is answered there.
   defp answered({at, plugin}, hook, about, asked) do
-    case Plugins.hook(at, plugin, hook, about, asked) do
+    case Calls.hook(at, plugin, hook, about, asked) do
       {:ok, answer} -> {:ok, answer}
       {:passed_on, %{"answer" => answer}} -> {:ok, answer}
       {:error, why} -> {:error, why}

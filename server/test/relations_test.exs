@@ -1,7 +1,8 @@
 defmodule OneCore.RelationsTest do
   @moduledoc "Who may do what, as the relation tuples plugin decides it from its tuples."
   use ExUnit.Case
-  alias OneCore.{Plugins, Server, Services, User}
+  alias OneCore.{Server, User}
+  alias OneCore.Plugins.{Added, Calls, Deploy}
 
   # Notes, each an artifact made for whoever wrote it. `Peek` is the same plugin under another name, which made
   # none of them.
@@ -44,7 +45,7 @@ defmodule OneCore.RelationsTest do
 
   defp call(name, inputs, who) do
     [plugin, tool] = String.split(name, "_", parts: 2)
-    Plugins.call(plugin, tool, inputs, who)
+    Calls.call(plugin, tool, inputs, who)
   end
 
   defp write(id, who), do: elem({:ok, _name} = call("notes_write", %{"id" => id}, who), 1)
@@ -56,11 +57,11 @@ defmodule OneCore.RelationsTest do
 
   setup %{tmp_dir: folder} do
     OneCore.Test.server(folder)
-    for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Plugins.deploy("network", name, shipped(name)))
+    for name <- ["database", "relations"], do: assert({:ok, 1, ""} = Deploy.deploy("network", name, shipped(name)))
     # The plugin that keeps who may do what was told who the first owner is, and wrote their tuple.
     assert :ok = OneCore.User.make_first_owner(OneCore.Test.owner())
-    assert {:ok, 1, ""} = Plugins.deploy("network", "notes", %{"notes.ex" => @notes})
-    assert {:ok, 1, ""} = Plugins.deploy("network", "peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
+    assert {:ok, 1, ""} = Deploy.deploy("network", "notes", %{"notes.ex" => @notes})
+    assert {:ok, 1, ""} = Deploy.deploy("network", "peek", %{"peek.ex" => String.replace(@notes, "Notes", "Peek")})
     :ok
   end
 
@@ -182,7 +183,7 @@ defmodule OneCore.RelationsTest do
 
     # Without the relation tuples plugin nothing is shared, and nobody does anything but the network's first
     # owner, who is how it's put back.
-    assert :ok = Plugins.remove("network", "relations")
+    assert :ok = Added.remove("network", "relations")
     assert not reads?(note, @alice) and not reads?(note, @bob, "peek")
     assert reads?(note, OneCore.Test.owner(), "peek")
   end
@@ -302,7 +303,7 @@ defmodule OneCore.RelationsTest do
     end
     """
 
-    assert {:ok, 1, ""} = Plugins.deploy("network", "approvals", %{"approvals.ex" => approvals})
+    assert {:ok, 1, ""} = Deploy.deploy("network", "approvals", %{"approvals.ex" => approvals})
     own = "network/own/approvals"
 
     for who <- [@alice, @bob],

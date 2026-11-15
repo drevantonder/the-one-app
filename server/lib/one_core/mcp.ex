@@ -22,7 +22,7 @@ defmodule OneCore.Mcp do
   """
   require Logger
   alias OneCore.{Address, Artifact, Hooks, Plugins, Server, Services, Skills, Tools, User}
-  alias OneCore.Plugins.Version
+  alias OneCore.Plugins.{Calls, Kept, Version}
 
   # What a server speaks of MCP is the same in each of these.
   @versions ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
@@ -80,7 +80,7 @@ defmodule OneCore.Mcp do
   end
 
   defp result("plugins/call", %{"added" => at, "plugin" => plugin} = params, _from, asked, passed_on) do
-    function = fn -> Plugins.function(at, plugin, params["function"], params["arguments"], asked, true) end
+    function = fn -> Calls.function(at, plugin, params["function"], params["arguments"], asked, true) end
 
     with {:ok, result} <- between(passed_on, function) do
       Server.changed()
@@ -89,11 +89,11 @@ defmodule OneCore.Mcp do
   end
 
   defp result("plugins/schedule", %{"added" => at, "plugin" => plugin}, _from, _asked, passed_on) do
-    between(passed_on, fn -> Plugins.schedule(at, plugin, true) end)
+    between(passed_on, fn -> Calls.schedule(at, plugin, true) end)
   end
 
   defp result("hooks/call", %{"added" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, passed_on) do
-    between(passed_on, fn -> Plugins.hook(at, plugin, hook, params["about"], asked, true) end)
+    between(passed_on, fn -> Calls.hook(at, plugin, hook, params["about"], asked, true) end)
   end
 
   defp result("tools/call", %{"name" => name} = params, _from, asked, passed_on) do
@@ -203,7 +203,7 @@ defmodule OneCore.Mcp do
     with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
          true <- Version.client?(path),
          %{^plugin => version} <- Plugins.running(who),
-         {:ok, text} <- Plugins.file(version.artifact, code, path) do
+         {:ok, text} <- Kept.file(version.artifact, code, path) do
       {:ok, %{contents: [%{uri: uri, mimeType: Version.kind(path), text: text}]}}
     else
       _ -> {:error, -32002, "There's nothing at #{uri}"}
@@ -229,7 +229,7 @@ defmodule OneCore.Mcp do
   defp call(name, inputs, asked, passed_on) do
     with :none <- Tools.call(name, inputs, asked, passed_on),
          [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Plugins.call(plugin, tool, inputs, asked, passed_on) do
+         {:ok, answer} <- Calls.call(plugin, tool, inputs, asked, passed_on) do
       case answer do
         text when is_binary(text) -> {:ok, text}
         {:blob, _kind, _data} -> {:ok, answer}

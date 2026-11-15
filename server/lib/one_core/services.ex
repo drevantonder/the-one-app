@@ -15,7 +15,7 @@ defmodule OneCore.Services do
   use GenServer
   require Logger
   alias OneCore.{Plugins, Server, Servers, User}
-  alias OneCore.Plugins.Version
+  alias OneCore.Plugins.{Calls, Version}
 
   # The least time between two starts of one service, in milliseconds. What a service needs can be gone for a
   # while (a program that won't build, a device unplugged), and it would otherwise be started as fast as it stops.
@@ -107,7 +107,7 @@ defmodule OneCore.Services do
         instance == nil ->
           {:error, GenServer.call(__MODULE__, {:stopped, {plugin, service}})}
 
-        function = Plugins.exported(module, function, length(arguments) + 1) ->
+        function = Calls.exported(module, function, length(arguments) + 1) ->
           {:ok, apply(module, function, [instance | arguments])}
 
         true ->

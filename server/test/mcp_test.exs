@@ -1,6 +1,7 @@
 defmodule OneCore.McpTest do
   use ExUnit.Case
   alias OneCore.{Mcp, Plugins}
+  alias OneCore.Plugins.{Added, Deploy}
 
   # What a client's Rust and an app's JavaScript read of a plugin, as the server's Elixir says it.
   @plugin """
@@ -41,7 +42,7 @@ defmodule OneCore.McpTest do
   } do
     OneCore.Test.server(folder)
     OneCore.Test.being_built()
-    assert {:ok, 1, ""} = Plugins.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "ui", OneCore.Test.kit("export const kit = 1"))
 
     page = ~s(<!doctype html><title>Notes</title><script type="module" src="./app.js"></script>)
 
@@ -52,7 +53,7 @@ defmodule OneCore.McpTest do
       "icon.svg" => "<svg/>"
     }
 
-    assert {:ok, 1, ""} = Plugins.deploy("network", "notes", files)
+    assert {:ok, 1, ""} = Deploy.deploy("network", "notes", files)
 
     resources = for %{"uri" => "ui://notes/" <> _} = resource <- ask("resources/list", %{})["resources"], do: resource
     assert [script, app] = resources
@@ -72,7 +73,7 @@ defmodule OneCore.McpTest do
              answer("resources/read", %{uri: "ui://notes/#{version}/notes.ex"}, %{as: "owner"})
 
     # A version that's been replaced is still read by a client that's showing it.
-    assert {:ok, 2, ""} = Plugins.deploy("network", "notes", %{files | "app/app.js" => "document.title = 2"})
+    assert {:ok, 2, ""} = Deploy.deploy("network", "notes", %{files | "app/app.js" => "document.title = 2"})
     assert %{"contents" => [%{"text" => text}]} = ask("resources/read", %{uri: script["uri"]})
     assert text =~ "document.title=1" or text =~ "document.title = 1"
     assert Enum.all?(ask("resources/list", %{})["resources"], &(not String.contains?(&1["uri"], version)))
@@ -105,7 +106,7 @@ defmodule OneCore.McpTest do
     {alice, bob, holder} = {%{as: "alice"}, %{as: "bob"}, %{link: "users/alice/a-secret"}}
 
     skill = "---\nname: notes\ndescription: Read before keeping a note.\nlicense: MIT\n---\n\nUse `add` to keep one.\n"
-    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "notes", %{"SKILL.md" => skill})
+    assert {:ok, 1, ""} = Deploy.deploy("users/alice", "notes", %{"SKILL.md" => skill})
     digest = &("sha256:" <> Base.encode16(:crypto.hash(:sha256, &1), case: :lower))
     {own, uri} = {"skill://building-plugins/SKILL.md", "skill://notes/notes/SKILL.md"}
 
@@ -155,7 +156,7 @@ defmodule OneCore.McpTest do
     refute ask("initialize", %{}, holder)["instructions"] =~ "skill"
 
     # A SKILL.md that isn't a skill of the plugin's name fails the deploy, with how to put it right.
-    deploy = &Plugins.deploy("users/alice", "notes", %{"SKILL.md" => &1})
+    deploy = &Deploy.deploy("users/alice", "notes", %{"SKILL.md" => &1})
 
     assert {:error,
             "SKILL.md names its skill \"diary\". A skill is named as its folder is, the plugin's at its root: `name: notes`."} =
@@ -175,7 +176,7 @@ defmodule OneCore.McpTest do
       "skills/notes-by-voice/WORDS.md" => "Say it."
     }
 
-    assert {:ok, 2, ""} = Plugins.deploy("users/alice", "notes", files)
+    assert {:ok, 2, ""} = Deploy.deploy("users/alice", "notes", files)
     assert %{"skills" => [^core, ^notes, voice]} = ask("skills/list", %{}, alice)
     voice_uri = "skill://notes/notes/skills/notes-by-voice/SKILL.md"
     words = "skill://notes/notes/skills/notes-by-voice/WORDS.md"
@@ -186,11 +187,11 @@ defmodule OneCore.McpTest do
 
     # A skill is found by the name its plugin is added by, so neither another plugin by the same own name nor one
     # named as One Core's own skill takes its place.
-    assert :ok = Plugins.add("users/bob", "journal", "users/alice/plugins/notes")
+    assert :ok = Added.add("users/bob", "journal", "users/alice/plugins/notes")
     other = String.replace(skill, "keep a note", "keep another note")
-    assert {:ok, 1, ""} = Plugins.deploy("users/bob", "notes", %{"SKILL.md" => other})
+    assert {:ok, 1, ""} = Deploy.deploy("users/bob", "notes", %{"SKILL.md" => other})
     builder = String.replace(skill, "name: notes", "name: building-plugins")
-    assert {:ok, 1, ""} = Plugins.deploy("users/bob", "building-plugins", %{"SKILL.md" => builder})
+    assert {:ok, 1, ""} = Deploy.deploy("users/bob", "building-plugins", %{"SKILL.md" => builder})
     bobs = for %{"uri" => uri} <- ask("skills/list", %{}, bob)["skills"], do: uri
 
     assert bobs == [

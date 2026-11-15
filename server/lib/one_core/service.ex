@@ -6,7 +6,7 @@ defmodule OneCore.Service do
   on each server whose owner installed it, and its public functions are what the rest of its plugin calls there.
   """
   alias OneCore.{Call, Plugins, Server, Servers, Services}
-  alias OneCore.Plugins.Version
+  alias OneCore.Plugins.{Calls, Kept, Version}
 
   @doc "What the service needs of a machine, for its owner to read before installing it."
   @callback needs() :: String.t()
@@ -54,7 +54,7 @@ defmodule OneCore.Service do
       Plugins.added(who, plugin) || raise "#{plugin} isn't added for #{who}, or for the network"
 
     answer =
-      case Plugins.function(added, name, "#{function}", json(arguments), {nil, who}) do
+      case Calls.function(added, name, "#{function}", json(arguments), {nil, who}) do
         {:ok, answer} -> json(answer)
         {:passed_on, %{"answer" => answer}} -> answer
         {:error, why} -> raise why
@@ -98,7 +98,7 @@ defmodule OneCore.Service do
       File.rm_rf!(writing)
 
       for {file, _hash} <- files do
-        {:ok, text} = Plugins.file(plugin, version.code, file)
+        {:ok, text} = Kept.file(plugin, version.code, file)
         written = Path.join(writing, Path.relative_to(file, path))
         File.mkdir_p!(Path.dirname(written))
         File.write!(written, text)

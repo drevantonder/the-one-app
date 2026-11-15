@@ -1,6 +1,7 @@
 defmodule OneCore.HooksTest do
   use ExUnit.Case
-  alias OneCore.{Plugins, User}
+  alias OneCore.User
+  alias OneCore.Plugins.{Added, Calls, Deploy}
 
   @echo """
   defmodule Echo do
@@ -59,7 +60,7 @@ defmodule OneCore.HooksTest do
   end
   """
 
-  defp say(word), do: Plugins.call("echo", "say", %{"word" => word}, OneCore.Test.owner())
+  defp say(word), do: Calls.call("echo", "say", %{"word" => word}, OneCore.Test.owner())
 
   @tag :tmp_dir
   test "plugins change, decide and hear a call, and neither their order nor a forgotten answer lets one through", %{
@@ -70,10 +71,10 @@ defmodule OneCore.HooksTest do
     anyone = OneCore.Test.owner()
 
     for {name, source} <- [echo: @echo, upper: changes("Upper", "upcase"), gate: @gate, ears: @ears],
-        do: assert({:ok, 1, ""} = Plugins.deploy("network", "#{name}", %{"#{name}.ex" => source}))
+        do: assert({:ok, 1, ""} = Deploy.deploy("network", "#{name}", %{"#{name}.ex" => source}))
 
     assert {:error, "hooks/0 gives" <> _} =
-             Plugins.deploy("network", "wrong", %{"wrong.ex" => String.replace(@ears, ~s(["called"]), ~s(["calling"]))})
+             Deploy.deploy("network", "wrong", %{"wrong.ex" => String.replace(@ears, ~s(["called"]), ~s(["calling"]))})
 
     # The tool is called with what was changed, and those that hear are told who changed what.
     assert say("hello") == {:ok, "HELLO"}
@@ -90,7 +91,7 @@ defmodule OneCore.HooksTest do
     refute_receive {:called, _about, _who}
 
     # Two that change the same thing agree, or the call is refused: neither is the one that came last.
-    assert {:ok, 1, ""} = Plugins.deploy("network", "lower", %{"lower.ex" => changes("Lower", "downcase")})
+    assert {:ok, 1, ""} = Deploy.deploy("network", "lower", %{"lower.ex" => changes("Lower", "downcase")})
     assert say("42") == {:ok, "42"}
     assert say("hello") == {:error, "lower and upper each change word to something else. One has to give way."}
 
@@ -110,8 +111,8 @@ defmodule OneCore.HooksTest do
     end
     """
 
-    for name <- ["upper", "lower"], do: assert(:ok = Plugins.remove("network", name))
-    assert {:ok, 1, ""} = Plugins.deploy("network", "refused", %{"refused.ex" => refused})
+    for name <- ["upper", "lower"], do: assert(:ok = Added.remove("network", name))
+    assert {:ok, 1, ""} = Deploy.deploy("network", "refused", %{"refused.ex" => refused})
 
     assert OneCore.Tools.call("deploy", %{"name" => "more", "files" => %{}}, {anyone, anyone}) ==
              {:error, "Nothing is deployed for #{anyone}."}
@@ -148,19 +149,19 @@ defmodule OneCore.HooksTest do
       """
     end
 
-    assert :ok = Plugins.remove("network", "refused")
+    assert :ok = Added.remove("network", "refused")
     OneCore.Test.being_built()
-    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "echo", %{"echo.ex" => @echo})
-    assert {:ok, 1, ""} = Plugins.deploy("users/alice", "refused", %{"refused.ex" => broken.("raise(\"Broken.\")")})
+    assert {:ok, 1, ""} = Deploy.deploy("users/alice", "echo", %{"echo.ex" => @echo})
+    assert {:ok, 1, ""} = Deploy.deploy("users/alice", "refused", %{"refused.ex" => broken.("raise(\"Broken.\")")})
     alice = {"users/alice", "users/alice"}
 
-    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") ==
+    assert Calls.call("echo", "say", %{"word" => "hi"}, "users/alice") ==
              {:error, "refused couldn't decide it: Broken."}
 
     assert OneCore.Tools.call("services", %{}, alice) == {:error, "refused couldn't decide it: Broken."}
     assert OneCore.Tools.call("remove", %{"name" => "echo"}, alice) == {:error, "refused couldn't decide it: Broken."}
-    assert {:ok, 1, ""} = Plugins.deploy("users/bob", "echo", %{"echo.ex" => @echo})
-    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/bob") == {:ok, "hi"}
+    assert {:ok, 1, ""} = Deploy.deploy("users/bob", "echo", %{"echo.ex" => @echo})
+    assert Calls.call("echo", "say", %{"word" => "hi"}, "users/bob") == {:ok, "hi"}
 
     assert {:ok, "refused is running, at version 2."} =
              OneCore.Tools.call(
@@ -169,15 +170,15 @@ defmodule OneCore.HooksTest do
                alice
              )
 
-    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:error, "Still broken."}
+    assert Calls.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:error, "Still broken."}
 
     # One that never answers has refused once it's had ten seconds.
     hangs = %{"name" => "refused", "files" => %{"refused.ex" => broken.("Process.sleep(:infinity)")}}
     assert {:ok, "refused is running, at version 3."} = OneCore.Tools.call("deploy", hangs, alice)
-    {took, refused} = :timer.tc(fn -> Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") end, :second)
+    {took, refused} = :timer.tc(fn -> Calls.call("echo", "say", %{"word" => "hi"}, "users/alice") end, :second)
     assert refused == {:error, "refused couldn't decide it: refused didn't answer call within 10 seconds"}
     assert took == 10
     assert {:ok, _} = OneCore.Tools.call("remove", %{"name" => "refused"}, alice)
-    assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:ok, "hi"}
+    assert Calls.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:ok, "hi"}
   end
 end
