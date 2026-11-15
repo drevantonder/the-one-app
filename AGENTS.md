@@ -10,6 +10,9 @@ before choosing.
 - Plain English is for sentences. An identifier, a tool, a flag or a file is named with the word that ecosystem's own
   docs use for it (request, response, cache, token, forward, approve, create), never with an everyday verb chosen to
   avoid it.
+- Agents are intelligent. To keep iteration fast, avoid wrappers: an agent uses the underlying tools directly and
+  chooses what to run, so no more is built, tested or released than its change needs. `tooling/` is only for what
+  isn't obvious.
 - Consider yourself the owner of this codebase, and treat it as its maintainer would.
 - Dumb beats clever. Delete before adding.
 - Choose the simplest implementation that fully meets the requirements. Prefer well-maintained libraries over custom
