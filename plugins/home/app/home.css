@@ -34,8 +34,8 @@ body {
   scroll-snap-stop: always;
   container-type: inline-size;
 }
-/* A grid of cells, four across on a phone and as many as fit where there's more room, each as big as a phone's:
-   an app takes one, and a widget a phone's own sizes, 2×2, 4×2 and 4×4. What's small fills the gaps the large
+/* A grid of cells, four across on a phone and as many as fit where there's more room, each wide enough there for
+   an app's whole name under its icon: an app takes one, and a widget a phone's own sizes, 2×2, 4×2 and 4×4. What's small fills the gaps the large
    leave. */
 .grid {
   display: grid;
@@ -46,7 +46,7 @@ body {
 }
 @container (min-width: 26rem) {
   .grid {
-    grid-template-columns: repeat(auto-fill, 5.25rem);
+    grid-template-columns: repeat(auto-fill, 6.5rem);
     justify-content: center;
   }
 }
