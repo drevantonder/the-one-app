@@ -83,7 +83,7 @@ async function signIn() {
     const { url } = await ask("/oauth2/consent", { accept: true, oauth_query: request })
     return location.replace(url)
   }
-  if (!code) return setDone("You're signed in.")
+  if (!code) return setDone(invite ? "You've joined. Now open the app on your phone or computer, and sign in there." : "You're signed in. Now open the app on your phone or computer.")
   setSignedIn(true)
   await claim()
 }
@@ -91,7 +91,7 @@ async function signIn() {
 /// This person's answer to the device whose code they compared.
 async function answer(yes) {
   await ask(yes ? "/device/approve" : "/device/deny", { userCode: code })
-  setDone(yes ? `${acts()} is yours now. Go back to it.` : `${acts()} wasn't let in.`)
+  setDone(yes ? `It's yours now: ${acts()}. Go back to it.` : `Stopped: ${acts()} wasn't let in.`)
 }
 
 /// The link the device gives, as it's opened in the device's own browser.

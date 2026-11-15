@@ -196,7 +196,7 @@ defmodule SignIn do
 
   def call("let_in", %{"code" => code}, call) do
     %{"let_in" => name} = ask(%{ask: "let_in", who: person(call), code: code})
-    "#{name} is in, and is yours now."
+    "Let in: #{name} is yours now."
   end
 
   def call("remove_device", %{"device" => device}, call) do
