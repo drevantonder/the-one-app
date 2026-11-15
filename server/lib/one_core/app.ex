@@ -56,11 +56,10 @@ defmodule OneCore.App do
   @doc "The code of the kit an app was built against, from the files a server keeps of its plugin, or `nil` for one with no app."
   def kit(kept), do: kept[@kit]
 
-  # The kit's build, with what it builds with installed: a folder on this server for each set of those files,
-  # made whole beside it and moved in, so a folder that's there is ready.
+  # The kit's build, with what it builds with installed: its folder, made whole beside it and moved in, so a folder
+  # that's there is ready.
   defp builder(bun, kit) do
-    files = for {path, hash} <- Enum.sort(Version.hashes(kit)), String.starts_with?(path, @build), do: {path, hash}
-    folder = Path.join([Server.home(), "kits", binary_part(Version.code(files), 0, 16)])
+    {files, folder} = build(kit)
 
     cond do
       files == [] ->
@@ -84,6 +83,32 @@ defmodule OneCore.App do
           File.rm_rf!(writing)
         end
     end
+  end
+
+  # A kit's build/ files, each by its path with the hash of what's in it, and the folder on this server its build
+  # is installed in: one for each set of those files, which kits that build alike share.
+  defp build(kit) do
+    files = for {path, hash} <- Enum.sort(Version.hashes(kit)), String.starts_with?(path, @build), do: {path, hash}
+    {files, Path.join([Server.home(), "kits", binary_part(Version.code(files), 0, 16)])}
+  end
+
+  @doc """
+  Removes the kits' builds on this server that none of `running` builds with, as a kit stops running here: what's
+  kept is what the kits that run need. A build being made is left to finish.
+  """
+  def keep_builds(running) do
+    kits = Path.join(Server.home(), "kits")
+    needed = for version <- Enum.uniq(running), {[_ | _], folder} <- [build(version)], do: folder
+    there = with {:ok, names} <- File.ls(kits), do: names, else: (_ -> [])
+
+    gone =
+      for name <- there,
+          not String.contains?(name, "."),
+          folder = Path.join(kits, name),
+          folder not in needed,
+          do: folder
+
+    Task.start(fn -> Enum.each(gone, &File.rm_rf!/1) end)
   end
 
   defp read(kit, path) do

@@ -17,7 +17,7 @@ defmodule OneCore.Plugins do
   """
   use GenServer
   require Logger
-  alias OneCore.{Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
+  alias OneCore.{App, Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
   alias OneCore.Plugins.{Added, Deploy, Kept, Version}
 
   @network "network"
@@ -201,6 +201,8 @@ defmodule OneCore.Plugins do
           state
       end
 
+    # What a kit that stopped running while this server was down built with goes now.
+    App.keep_builds(Map.values(state.running))
     {:ok, state}
   end
 
@@ -378,9 +380,12 @@ defmodule OneCore.Plugins do
     unload_unused(%{state | calls: calls}, versions)
   end
 
+  # A version nothing runs or holds any more is unloaded, and a kit's build goes once no kit that runs builds with it.
   defp unload_unused(state, versions) do
     held = Map.values(state.running) ++ Enum.concat(Map.values(state.calls))
-    for %Version{} = version <- versions, version not in held, do: Version.unload(version)
+    unused = for %Version{} = version <- Enum.uniq(versions), version not in held, do: version
+    Enum.each(unused, &Version.unload/1)
+    if unused != [], do: App.keep_builds(held)
     state
   end
 end
