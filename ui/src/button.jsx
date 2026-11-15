@@ -7,6 +7,7 @@ import caretUpDown from "@phosphor-icons/core/assets/regular/caret-up-down.svg?r
 import check from "@phosphor-icons/core/assets/regular/check.svg?raw"
 import dotsThree from "@phosphor-icons/core/assets/regular/dots-three.svg?raw"
 import file from "@phosphor-icons/core/assets/regular/file.svg?raw"
+import gearSix from "@phosphor-icons/core/assets/fill/gear-six-fill.svg?raw"
 import magnifyingGlass from "@phosphor-icons/core/assets/regular/magnifying-glass.svg?raw"
 import paperclip from "@phosphor-icons/core/assets/regular/paperclip.svg?raw"
 import pencilSimple from "@phosphor-icons/core/assets/regular/pencil-simple.svg?raw"
@@ -25,6 +26,7 @@ const icons = Object.fromEntries(
     check,
     "dots-three": dotsThree,
     file,
+    "gear-six": gearSix,
     "magnifying-glass": magnifyingGlass,
     paperclip,
     "pencil-simple": pencilSimple,

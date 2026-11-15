@@ -9,6 +9,7 @@ let asked = 0
 addEventListener("message", ({ source, data }) => {
   if (source !== parent) return
   if (data?.method === "notifications/one/changed") for (const listener of listeners) listener()
+  else if (data?.method === "ui/notifications/host-context-changed") dress(data.params)
   // The device's own back, where a device has one and something is open over the page: the last opened shuts.
   else if (data?.method === "notifications/one/back") over.at(-1)?.()
   else waiting.get(data?.id)?.(data)
@@ -26,13 +27,16 @@ const ask = (method, params = {}) => new Promise((answered, refused) => {
   parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
 })
 
+/// Light or dark, where the client says which (Settings › Appearance), and otherwise the device's own.
+const dress = (context) => context && "theme" in context && (document.documentElement.style.colorScheme = context.theme ?? "")
+
 /// A client answers a page once the page has said what it is, which it does before the first thing it asks.
 let greeted
 const greet = () => greeted ??= ask("ui/initialize", {
   protocolVersion: "2026-01-26",
   appInfo: { name: document.title, version: "1" },
   appCapabilities: {},
-}).then(() => tell("ui/notifications/initialized"))
+}).then(({ hostContext }) => (dress(hostContext), tell("ui/notifications/initialized")))
 
 /// What's open over the page, the last opened last, each as the function that shuts it: a sheet, an alert, a
 /// menu, a select's list, a calendar. A device's own back shuts the last of them before it goes anywhere, so the
@@ -56,9 +60,11 @@ export function covers(shut) {
 /// the client keeps the file at. A tool that refuses throws what it said. The client keeps the answer of a tool
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
 /// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
-export async function call(tool, inputs = {}) {
+/// An app opened from a group's home page is answered for the group, with nothing said. A page that shows more
+/// than one of them says who each call is for: `call("home_page", {}, { for: "groups/family" })`, or `network`.
+export async function call(tool, inputs = {}, who = {}) {
   await greet()
-  const { content, isError } = await ask("tools/call", { name: tool, arguments: inputs })
+  const { content, isError } = await ask("tools/call", { name: tool, arguments: inputs, ...(who.for ? { _meta: { for: who.for } } : {}) })
   const text = content.map(({ type, text, uri, data, mimeType, resource }) => text ?? (type === "resource_link" ? uri : `data:${mimeType ?? resource.mimeType};base64,${data ?? resource.blob}`)).join("\n")
   if (isError) throw new Error(text)
   return text
@@ -85,9 +91,19 @@ export function changed(listener) {
   return () => listeners.delete(listener)
 }
 
-/// `open("claims")`: opens another app, by its plugin's name, as tapping a notification from it does.
-export const open = (app) => greet().then(() => ask("ui/open-link", { url: `one:${app}` }))
 
 /// `<Screen heading="Notes" back onBack={leave}>`: tells the client the user went back out of the app, from its
 /// first screen.
 export const leave = () => greet().then(() => tell("ui/notifications/request-teardown"))
+
+/// `open("claims")`: shows another app over this one, by its plugin's name, as tapping its icon or a notification
+/// from it does. `open("notes/app/index.html", { for: "groups/family" })` names a page of the plugin's that isn't
+/// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a home page opens
+/// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
+/// without.
+export const open = (app, who = {}) => greet().then(() => ask("ui/open-link", { url: `one:${app}`, for: who.for, behind: who.behind }))
+
+/// `const { device, network } = await client()`: this device's key, as Devices lists it, and the network's
+/// address, if it has one. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
+/// `null` as the device is, and `client({ leave: true })` starts the client again once its device has been taken out.
+export const client = (change = {}) => greet().then(() => ask("one/client", change))
