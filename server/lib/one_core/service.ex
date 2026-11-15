@@ -86,7 +86,10 @@ defmodule OneCore.Service do
   """
   def folder(service, path) when is_pid(service) do
     {plugin, name, version} = which(service)
-    files = Enum.sort(for {file, hash} <- Version.hashes(version), String.starts_with?(file, path <> "/"), do: {file, hash})
+
+    files =
+      Enum.sort(for {file, hash} <- Version.hashes(version), String.starts_with?(file, path <> "/"), do: {file, hash})
+
     if files == [], do: raise("#{plugin} has no files under #{path}/")
 
     within = Path.join(Services.folder(plugin, name), URI.encode_www_form(path))

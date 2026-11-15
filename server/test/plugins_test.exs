@@ -99,7 +99,9 @@ defmodule OneCore.PluginsTest do
 
     version = Plugins.running("network")["notes"]
     # A client is listed what a page loads, and nothing else of the plugin.
-    assert "app/index.html" in Version.files(version) and Enum.any?(Version.files(version), &(&1 =~ ~r{^app/assets/.*\.js$}))
+    assert "app/index.html" in Version.files(version) and
+             Enum.any?(Version.files(version), &(&1 =~ ~r{^app/assets/.*\.js$}))
+
     assert Enum.all?(Version.files(version), &(Path.extname(&1) in ~w(.html .js .css .svg)))
     refute "icon.svg" in Version.files(version)
     {:ok, built} = Kept.file(version.artifact, version.code, "app/index.html")
