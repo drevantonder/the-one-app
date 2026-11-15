@@ -75,10 +75,10 @@ render(
             </Show>
           </Section>
           <Show when={inbox().apps.length}>
-            <Section heading="Hear From">
+            <Section heading="Allow Notifications">
               <form>
                 <For each={inbox().apps} keyed={(app) => app.app}>
-                  {(app) => <Switch label={app().name} checked={app().hear} onChange={(event) => change("notifications_hear", { app: app().app, hear: event.currentTarget.checked })} />}
+                  {(app) => <Switch label={app().name} checked={app().allowed} onChange={(event) => change("notifications_allow", { app: app().app, allow: event.currentTarget.checked })} />}
                 </For>
               </form>
             </Section>

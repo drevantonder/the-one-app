@@ -14,8 +14,8 @@ defmodule Locker do
   @impl true
   def tools do
     none = %{type: "object", properties: %{}}
-    text = %{type: "string", format: "secret", opened_by: "opened_by", description: "What to keep"}
-    keys = %{type: "string", format: "artifact-keys", opened_by: "opened_by"}
+    text = %{type: "string", format: "secret", unlocked_on: "unlocked_on", description: "What to keep"}
+    keys = %{type: "string", format: "artifact-keys", unlocked_on: "unlocked_on"}
 
     [
       %{name: "ping", read_only: true, description: "Answers, calling nothing", inputs: none},
@@ -30,7 +30,7 @@ defmodule Locker do
         description: "Opens the note, and gives its SHA-256 and the server that opened it",
         inputs: none
       },
-      %{name: "opened_by", read_only: true, description: "Says which servers open your locker", inputs: none},
+      %{name: "unlocked_on", read_only: true, description: "Says which servers open your locker", inputs: none},
       %{
         name: "grant",
         description: "Chooses the servers that open your locker",
@@ -45,7 +45,7 @@ defmodule Locker do
 
   @impl true
   def call("ping", _inputs, _call), do: "pong"
-  def call("opened_by", _inputs, call), do: encryption(call).opened_by(call, Call.make(call, "notes"))
+  def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, Call.make(call, "notes"))
   def call("grant", %{"keys" => keys}, call), do: encryption(call).choose(call, Call.make(call, "notes"), keys)
 
   def call("keep", %{"text" => text}, call) do

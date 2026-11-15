@@ -15,7 +15,7 @@ defmodule OneCore.User do
   """
   alias OneCore.{Bucket, Hooks, Server, Servers}
 
-  @nobody "This device is nobody's here. Sign in on it, or let it in from a device that's yours."
+  @nobody "This device isn't signed in here. Sign in on it, or approve it from a device of yours."
 
   @doc "The JSON-RPC error a device that's nobody's is answered, so whatever passed its request on can tell."
   def nobody, do: -32003

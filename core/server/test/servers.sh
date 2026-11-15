@@ -27,9 +27,9 @@ start() {
   mix network "$folder" "$1" --development --owner owner ${options:-} >"$folder/$1.log" 2>&1 &
   group[$1]=$!
   if ! grep -q -m1 "A server is running" <(tail -F --pid=$! -n +1 "$folder/$1.log"); then
-    local let_in
-    let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log"; exit 1; }
-    ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in >/dev/null
+    local approve
+    approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log"; exit 1; }
+    ONE_FOR=network ONE_HOME=$folder/client "$one" $approve >/dev/null
     start "$1"
     return
   fi

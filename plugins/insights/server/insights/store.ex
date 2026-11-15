@@ -4,7 +4,7 @@ defmodule Insights.Store do
 
   - `batches/<day>/<hour>/<to>-<server>-<bytes>` is one server's batch, as it handed it on: what it recorded until
     `to`, in nanoseconds since 1970. A server that's busy writes about one a minute, and an idle one none.
-  - `batches/<day>/<hour>/hour-<bytes>` is all of an hour that's over, put together once it is (`tidy/1`), with the
+  - `batches/<day>/<hour>/hour-<bytes>` is all of an hour that's over, put together once it is (`prune/1`), with the
     batches it holds named in it, so it's put together once even if tidying stopped partway.
 
   Each is Erlang's term format, compressed, and its size is in its name, so listing them says how much is kept.
@@ -58,7 +58,7 @@ defmodule Insights.Store do
   Puts each hour that's over into one blob, and lets go of hours older than `days/0`, and then of the oldest while
   more than `most_bytes/0` is kept. Gives what it did.
   """
-  def tidy(own) do
+  def prune(own) do
     now = System.os_time(:nanosecond)
     hours = Enum.group_by(Artifact.list(own, "batches/"), &Path.dirname/1)
     oldest = hour(now - @days * 86_400_000_000_000)

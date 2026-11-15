@@ -52,17 +52,17 @@ async fn tool_for(client: &Client, name: &str, inputs: Value, who: Option<&str>)
 
 /// What the plugin's tool that an input names says of the artifact it's kept in: its name, its epoch, and the
 /// servers that open it.
-async fn opened_by(client: &Client, plugin: &str, says: &Value, who: Option<&str>) -> Result<Value> {
-    let tool = says["opened_by"].as_str().context("the input doesn't say which tool lists the servers")?;
+async fn unlocked_on(client: &Client, plugin: &str, says: &Value, who: Option<&str>) -> Result<Value> {
+    let tool = says["unlocked_on"].as_str().context("the input doesn't say which tool lists the servers")?;
     tool_for(client, &format!("{plugin}_{tool}"), json!({}), who).await
 }
 
 /// `text` encrypted to each server that opens what it's kept in, by the server's key.
 async fn secret(client: &Client, plugin: &str, says: &Value, text: &str, who: Option<&str>) -> Result<String> {
-    let opened_by = opened_by(client, plugin, says, who).await?;
-    let servers = opened_by["servers"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let unlocked_on = unlocked_on(client, plugin, says, who).await?;
+    let servers = unlocked_on["servers"].as_array().map(Vec::as_slice).unwrap_or_default();
     if servers.is_empty() {
-        bail!("No server opens what this is kept in yet. Choose one first, from a device that holds your key.")
+        bail!("No server opens what this is kept in yet. Choose one first, from a trusted device.")
     }
     let mut sealed = Map::new();
     for server in servers.iter().filter_map(Value::as_str) {
@@ -82,7 +82,7 @@ async fn owner_key_of(client: &Client, who: Option<&str>) -> Result<(Key, String
     let (owner, me) =
         (holds["owner"].as_str().unwrap_or_default().to_owned(), client.device_key().public().to_string());
     let Some(slot) = holds["slot"].as_str() else {
-        bail!("This device doesn't hold your key. Let it in from a device that does, or with your recovery key.")
+        bail!("This device isn't trusted yet. Approve it from a trusted device, or with your recovery key.")
     };
     let slot = BASE64.decode(slot.as_bytes()).context("that isn't a key for this device")?;
     let key = cipher::open(client.device_key(), &cipher::for_device(&owner, &me), &slot)?;
@@ -128,13 +128,13 @@ async fn artifact_keys(
     inputs: &Map<String, Value>,
     who: Option<&str>,
 ) -> Result<String> {
-    let opened_by = opened_by(client, plugin, says, who).await?;
-    let artifact = opened_by["artifact"].as_str().context("the tool didn't name the artifact")?;
-    let was = opened_by["epoch"].as_u64().unwrap_or_default() as u32;
+    let unlocked_on = unlocked_on(client, plugin, says, who).await?;
+    let artifact = unlocked_on["artifact"].as_str().context("the tool didn't name the artifact")?;
+    let was = unlocked_on["epoch"].as_u64().unwrap_or_default() as u32;
     let keys = |value: &Value| -> Vec<String> {
         value.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
     };
-    let (had, servers) = (keys(&opened_by["servers"]), keys(inputs.get("servers").unwrap_or(&Value::Null)));
+    let (had, servers) = (keys(&unlocked_on["servers"]), keys(inputs.get("servers").unwrap_or(&Value::Null)));
     let epoch = if was == 0 || had.iter().any(|server| !servers.contains(server)) { was + 1 } else { was };
     let (owner, _) = owner_key_of(client, who).await?;
     let joined = cipher::joined(&cipher::artifact(&owner, artifact, epoch));
@@ -157,16 +157,16 @@ async fn backups_key(
     says: &Value,
     who: Option<&str>,
 ) -> Result<(iroh_base::SecretKey, Value)> {
-    let opened_by = opened_by(client, plugin, says, who).await?;
-    let owner = opened_by["owner"].as_str().context("the tool didn't say whose backup key it is")?;
-    Ok((cipher::backups(&owner_key_of(client, Some(owner)).await?.0), opened_by))
+    let unlocked_on = unlocked_on(client, plugin, says, who).await?;
+    let owner = unlocked_on["owner"].as_str().context("the tool didn't say whose backup key it is")?;
+    Ok((cipher::backups(&owner_key_of(client, Some(owner)).await?.0), unlocked_on))
 }
 
 /// The backup key, encrypted to each server the plugin's tool lists, for one of them to restore with.
 async fn backup_key(client: &Client, plugin: &str, says: &Value, who: Option<&str>) -> Result<String> {
-    let (key, opened_by) = backups_key(client, plugin, says, who).await?;
+    let (key, unlocked_on) = backups_key(client, plugin, says, who).await?;
     let mut sealed = Map::new();
-    for server in opened_by["servers"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+    for server in unlocked_on["servers"].as_array().into_iter().flatten().filter_map(Value::as_str) {
         let to: PublicKey = server.parse().context("that isn't a server's key")?;
         let key = zeroize::Zeroizing::new(key.to_bytes());
         sealed.insert(
@@ -187,5 +187,5 @@ pub async fn recovery_key(client: &Client, who: Option<&str>) -> Result<String> 
 /// Lets this device hold the key of `who`, or of whoever this client asks for, with the recovery key its person
 /// typed in its window.
 pub async fn recover(client: &Client, recovery_key: &str, who: Option<&str>) -> Result<()> {
-    tool_for(client, "encryption_let_in", json!({"key": recovery_key}), who).await.map(drop)
+    tool_for(client, "encryption_approve", json!({"key": recovery_key}), who).await.map(drop)
 }

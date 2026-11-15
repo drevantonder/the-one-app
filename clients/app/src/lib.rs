@@ -249,7 +249,7 @@ async fn enter(app: AppHandle) {
     let not_in = starts(&app, None).await;
     home(&app);
     if let Some(not_in) = not_in {
-        tauri::async_runtime::spawn(let_in(app, not_in));
+        tauri::async_runtime::spawn(await_approval(app, not_in));
     }
 }
 
@@ -404,7 +404,7 @@ fn home(app: &AppHandle) {
 
 /// Waits for this device's person to answer, and then the window goes to the home screen once the device is in, or
 /// to a new code if they stopped it or the last one ended.
-async fn let_in(app: AppHandle, mut not_in: DeviceAuthorization) {
+async fn await_approval(app: AppHandle, mut not_in: DeviceAuthorization) {
     loop {
         let why = match not_in.answered().await {
             Ok(()) => None,
@@ -459,7 +459,7 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Some(not_in) = starts(&handle, None).await {
-                    let_in(handle, not_in).await
+                    await_approval(handle, not_in).await
                 }
             });
             let goes = app.handle().clone();

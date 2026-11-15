@@ -109,7 +109,7 @@ function Invite(props) {
             <Field label="Name" hint="Lowercase letters, digits and hyphens. It's who they are here, for good." error={error()}>
               <Input name="name" required autofocus autocapitalize="none" autocorrect="off" spellcheck={false} pattern="[a-zA-Z][a-zA-Z0-9\-]*" />
             </Field>
-            <Button type="submit" loading={working()}>Make Link</Button>
+            <Button type="submit" loading={working()}>Create Link</Button>
           </form>
         }
       >

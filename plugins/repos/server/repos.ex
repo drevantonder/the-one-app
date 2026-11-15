@@ -1,16 +1,16 @@
 defmodule Repos do
   @moduledoc """
   Repos: git hosting for people and their agents. A repo is an artifact, a person's, a group's or the network's,
-  shared as anything is with relation tuples: a `viewer` clones and fetches it and suggests changes, and an
-  `editor` pushes to it and takes or declines what's suggested. What it is in the bucket is `Repos.Mirror`'s.
+  shared as anything is with relation tuples: a `viewer` clones and fetches it and opens pull requests, and an
+  `editor` pushes to it and merges or closes pull requests. What it is in the bucket is `Repos.Mirror`'s.
 
   Git reaches a repo from a person's devices through `one`, which is git's remote helper for `one::` addresses
   (`git clone one::users/alice/made/repos/notes`): it runs git's own HTTP transport, and carries each of its
   requests to a server as a call of the tool `git`, signed as every call of the device is. So git needs no
   password, and works wherever the device reaches a server.
 
-  A suggested change is a push to `refs/suggestions/<name>` by anyone who may read the repo. The repo's editors
-  take it, which merges it into the branch it's for, or decline it.
+  A pull request is a push to `refs/pull/<name>` by anyone who may read the repo. The repo's editors
+  merge it into the branch it's for, or close it.
   """
   @behaviour OneCore.Plugin
   require Logger
@@ -39,14 +39,14 @@ defmodule Repos do
     repo = %{type: "string", description: "The repo, as `list` names it: users/alice/made/repos/notes"}
     ref = %{type: "string", description: "A branch, a tag or a commit. Left out, the repo's default branch"}
     path = %{type: "string", description: "A path in the repo, like src/app.js. Left out, the top"}
-    suggestion = %{type: "string", description: "The suggestion's name, as `suggestions` lists them"}
+    pull_request = %{type: "string", description: "The pull_request's name, as `pull_requests` lists them"}
     only = fn properties, required -> %{type: "object", properties: properties, required: required} end
 
     [
       %{
-        name: "make",
+        name: "create",
         description:
-          "Makes an empty repo, yours, or a group's or the network's when asked for them, and answers how to clone it",
+          "Creates an empty repo, yours, or a group's or the network's when asked for them, and answers how to clone it",
         inputs:
           only.(%{name: %{type: "string", description: "Lowercase letters, digits, - and _, like notes"}}, ["name"])
       },
@@ -109,23 +109,23 @@ defmodule Repos do
           ])
       },
       %{
-        name: "suggestions",
+        name: "pull_requests",
         read_only: true,
         description:
-          "The changes suggested to a repo, open ones first: each one's name, who suggested it, the branch it's for, its title, its commits, and whether it was taken or declined",
+          "A repo's pull requests, open ones first: each one's name, who opened it, the branch it's for, its title, its commits, and whether it was merged or closed",
         inputs: only.(%{repo: repo}, ["repo"])
       },
       %{
-        name: "take",
+        name: "merge",
         description:
-          "Takes a suggested change into the branch it's for: a fast-forward where it can be, or else a merge. Only someone who pushes to the repo takes one",
-        inputs: only.(%{repo: repo, suggestion: suggestion}, ["repo", "suggestion"])
+          "Merges a pull request into the branch it's for: a fast-forward where it can be, or else a merge. Only someone who pushes to the repo merges one",
+        inputs: only.(%{repo: repo, pull_request: pull_request}, ["repo", "pull_request"])
       },
       %{
-        name: "decline",
+        name: "close",
         description:
-          "Declines a suggested change: it's no longer open, and nothing of it reaches a branch. Whoever pushes to the repo declines one, and so does whoever suggested it",
-        inputs: only.(%{repo: repo, suggestion: suggestion}, ["repo", "suggestion"])
+          "Closes a pull request: it's no longer open, and nothing of it reaches a branch. Whoever pushes to the repo closes one, and so does whoever opened it",
+        inputs: only.(%{repo: repo, pull_request: pull_request}, ["repo", "pull_request"])
       },
       %{
         name: "remove",
@@ -170,7 +170,7 @@ defmodule Repos do
   end
 
   @impl true
-  def call("make", %{"name" => name}, call) do
+  def call("create", %{"name" => name}, call) do
     if not (name =~ ~r/^[a-z0-9][a-z0-9_-]{0,63}$/),
       do: raise("A repo's name is lowercase letters, digits, - and _, starting with a letter or digit")
 
@@ -182,7 +182,7 @@ defmodule Repos do
       "refs" => %{},
       "packs" => [],
       "retired" => [],
-      "suggestions" => %{},
+      "pull_requests" => %{},
       "made" => now,
       "by" => call.actor || call.subject
     }
@@ -192,7 +192,7 @@ defmodule Repos do
 
     Artifact.write(index(), "index/" <> Artifact.name(repo), JSON.encode!(%{"pushed" => now}))
 
-    "Made #{Artifact.name(repo)}. Clone it with `git clone #{address(repo)}`, or push to it from a repo you have " <>
+    "Created #{Artifact.name(repo)}. Clone it with `git clone #{address(repo)}`, or push to it from a repo you have " <>
       "with `git remote add origin #{address(repo)}` and `git push -u origin main`."
   end
 
@@ -333,17 +333,17 @@ defmodule Repos do
     }
   end
 
-  def call("suggestions", %{"repo" => name}, call) do
+  def call("pull_requests", %{"repo" => name}, call) do
     {folder, state} = read(call, name)
 
-    for {suggestion, about} <- state["suggestions"] do
-      tip = about["commit"] || state["refs"]["refs/suggestions/#{suggestion}"]
+    for {pull_request, about} <- state["pull_requests"] do
+      tip = about["commit"] || state["refs"]["refs/pull/#{pull_request}"]
       # Its commits are those the branch it's for didn't have, then or now.
       into = if about["state"] == "open", do: state["refs"]["refs/heads/#{about["into"]}"], else: about["from"]
       range = if into, do: ["#{into}..#{tip}"], else: [tip]
 
       Map.merge(about, %{
-        "name" => suggestion,
+        "name" => pull_request,
         "commits" =>
           for line <- lines(Mirror.git!(folder, ["log", "--format=%H%x1f%s%x1f%an%x1f%at" | range])) do
             [sha, subject, author, at] = String.split(line, "\x1f")
@@ -354,58 +354,58 @@ defmodule Repos do
     |> Enum.sort_by(&{&1["state"] != "open", -&1["at"]})
   end
 
-  def call("take", %{"repo" => name, "suggestion" => suggestion}, call) do
+  def call("merge", %{"repo" => name, "pull_request" => pull_request}, call) do
     repo = Call.reach(call, name, "editor")
     by = call.actor || call.subject
     [person] = Call.tool(call, "sign-in", "people", %{"users" => [by]})
 
     {answer, _state} =
       Mirror.change(Mirror.of(call, repo), repo, nil, fn state, folder ->
-        about = open!(state, suggestion)
-        tip = state["refs"]["refs/suggestions/#{suggestion}"]
+        about = open!(state, pull_request)
+        tip = state["refs"]["refs/pull/#{pull_request}"]
         into = "refs/heads/" <> about["into"]
         base = state["refs"][into]
 
         {merged, made} =
           if base == nil or ancestor?(folder, base, tip),
             do: {tip, []},
-            else: merge(folder, base, tip, "Take #{suggestion}: #{about["title"]}", person, by)
+            else: merge(folder, base, tip, "Take #{pull_request}: #{about["title"]}", person, by)
 
-        refs = state["refs"] |> Map.put(into, merged) |> Map.delete("refs/suggestions/#{suggestion}")
+        refs = state["refs"] |> Map.put(into, merged) |> Map.delete("refs/pull/#{pull_request}")
 
-        taken =
-          Map.merge(about, %{"state" => "taken", "commit" => tip, "from" => base, "by_then" => by, "then" => now()})
+        merged =
+          Map.merge(about, %{"state" => "merged", "commit" => tip, "from" => base, "by_then" => by, "then" => now()})
 
-        {%{state | "refs" => refs, "suggestions" => Map.put(state["suggestions"], suggestion, taken)}, made,
-         "Took #{suggestion} into #{about["into"]}, which is at #{String.slice(merged, 0, 7)} now."}
+        {%{state | "refs" => refs, "pull_requests" => Map.put(state["pull_requests"], pull_request, merged)}, made,
+         "Merged #{pull_request} into #{about["into"]}, which is at #{String.slice(merged, 0, 7)} now."}
       end)
 
     pushed(name)
     answer
   end
 
-  def call("decline", %{"repo" => name, "suggestion" => suggestion}, call) do
+  def call("close", %{"repo" => name, "pull_request" => pull_request}, call) do
     repo = writable(call, reach!(call, name))
     by = call.actor || call.subject
     editor = Call.reaches?(call, name, "editor")
 
     {answer, _state} =
       Mirror.change(Mirror.of(call, repo), repo, nil, fn state, _folder ->
-        about = open!(state, suggestion)
+        about = open!(state, pull_request)
 
         if not editor and about["by"] != by,
-          do: raise("Only whoever pushes to #{name}, or suggested #{suggestion}, declines it.")
+          do: raise("Only whoever pushes to #{name}, or opened #{pull_request}, closes it.")
 
-        tip = state["refs"]["refs/suggestions/#{suggestion}"]
+        tip = state["refs"]["refs/pull/#{pull_request}"]
         from = state["refs"]["refs/heads/#{about["into"]}"]
 
-        declined =
-          Map.merge(about, %{"state" => "declined", "commit" => tip, "from" => from, "by_then" => by, "then" => now()})
+        closed =
+          Map.merge(about, %{"state" => "closed", "commit" => tip, "from" => from, "by_then" => by, "then" => now()})
 
-        refs = Map.delete(state["refs"], "refs/suggestions/#{suggestion}")
+        refs = Map.delete(state["refs"], "refs/pull/#{pull_request}")
 
-        {%{state | "refs" => refs, "suggestions" => Map.put(state["suggestions"], suggestion, declined)}, [],
-         "Declined #{suggestion}."}
+        {%{state | "refs" => refs, "pull_requests" => Map.put(state["pull_requests"], pull_request, closed)}, [],
+         "Closed #{pull_request}."}
       end)
 
     answer
@@ -446,7 +446,7 @@ defmodule Repos do
     answered(call, type, answer)
   end
 
-  # A push: each ref moves only from where its pusher saw it. Whoever only reads the repo pushes suggestions.
+  # A push: each ref moves only from where its pusher saw it. Whoever only reads the repo pushes pull_requests.
   defp receive_pack(call, repo, process, body) do
     name = Artifact.name(repo)
     editor = Call.reaches?(call, name, "editor")
@@ -483,17 +483,17 @@ defmodule Repos do
 
     cond do
       not ref?(folder, ref) ->
-        {:no, "a repo keeps branches, tags and suggestions (refs/suggestions/<name>)"}
+        {:no, "a repo keeps branches, tags and pull_requests (refs/pull/<name>)"}
 
       now == new ->
         {:ok, state}
 
-      String.starts_with?(ref, "refs/suggestions/") ->
-        suggest(state, folder, {old, new, ref}, editor, by)
+      String.starts_with?(ref, "refs/pull/") ->
+        pull_request(state, folder, {old, new, ref}, editor, by)
 
       not editor ->
         {:no,
-         "you may read this repo but not push to it: suggest a change with git push origin HEAD:refs/suggestions/<name>"}
+         "you may read this repo but not push to it: open a pull request with git push origin HEAD:refs/pull/<name>"}
 
       now != old ->
         {:no, "fetch first: it moved since you fetched"}
@@ -509,16 +509,16 @@ defmodule Repos do
     end
   end
 
-  defp suggest(state, folder, {old, new, "refs/suggestions/" <> name = ref}, editor, by) do
-    was = state["suggestions"][name]
+  defp pull_request(state, folder, {old, new, "refs/pull/" <> name = ref}, editor, by) do
+    was = state["pull_requests"][name]
     now = state["refs"][ref] || @zero
 
     cond do
       new == @zero ->
-        {:no, "a suggestion is declined with `repos decline`, not deleted"}
+        {:no, "a pull request is closed with `repos close`, not deleted"}
 
       was && was["state"] == "open" && was["by"] != by && not editor ->
-        {:no, "#{name} is someone else's suggestion: pick another name"}
+        {:no, "#{name} is someone else's pull_request: pick another name"}
 
       now != old ->
         {:no, "fetch first: it moved since you fetched"}
@@ -535,12 +535,12 @@ defmodule Repos do
          %{
            state
            | "refs" => Map.put(state["refs"], ref, new),
-             "suggestions" => Map.put(state["suggestions"], name, about)
+             "pull_requests" => Map.put(state["pull_requests"], name, about)
          }}
     end
   end
 
-  defp ref?(_folder, "refs/suggestions/" <> name), do: name =~ ~r/^[a-z0-9][a-z0-9_-]*$/
+  defp ref?(_folder, "refs/pull/" <> name), do: name =~ ~r/^[a-z0-9][a-z0-9_-]*$/
 
   defp ref?(folder, ref),
     do: ref =~ ~r{^refs/(heads|tags)/} and elem(Mirror.git(folder, ["check-ref-format", ref]), 1) == 0
@@ -562,7 +562,7 @@ defmodule Repos do
           [_tree | files] = lines(out)
 
           raise "It doesn't merge cleanly: #{Enum.join(files, ", ")} changed on both sides. Its author fetches, " <>
-                  "merges the branch it's for and pushes the suggestion again."
+                  "merges the branch it's for and pushes the pull_request again."
       end
 
     # Git wants an email, and where signing in has none, whoever took it is said as relation tuples say them.
@@ -585,11 +585,11 @@ defmodule Repos do
     {merged, [String.trim(out)]}
   end
 
-  defp open!(state, suggestion) do
-    case state["suggestions"][suggestion] do
+  defp open!(state, pull_request) do
+    case state["pull_requests"][pull_request] do
       %{"state" => "open"} = about -> about
-      %{"state" => was} -> raise "#{suggestion} was #{was} already."
-      nil -> raise "There's no suggestion #{suggestion}. `repos suggestions` lists them."
+      %{"state" => was} -> raise "#{pull_request} was #{was} already."
+      nil -> raise "There's no pull_request #{pull_request}. `repos pull_requests` lists them."
     end
   end
 
@@ -608,7 +608,7 @@ defmodule Repos do
     Mirror.sync(Mirror.of(call, repo), repo)
   end
 
-  # Whoever only reads a repo still suggests changes to it and declines their own, which this plugin keeps in the
+  # Whoever only reads a repo still opens pull requests on it and closes their own, which this plugin keeps in the
   # repo: so it writes there as an editor, once it has decided what they may do.
   defp writable(call, %Artifact{reached: {plugin, asked, "viewer"}} = repo) do
     if Call.reaches?(call, Artifact.name(repo), "editor"),

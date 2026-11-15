@@ -81,7 +81,7 @@ async function remove(adapter, device) {
 /** The invitation a link carries, if it's one that still stands. The link is kept nowhere: only its hash is. */
 async function invited(adapter, link) {
   const [invite] = await adapter.findMany({ model: "invite", where: [{ field: "id", value: await sha256(link ?? "") }] });
-  if (!invite || invite.expiresAt < new Date()) throw new APIError("FORBIDDEN", { message: "That invitation has ended. Ask for another." });
+  if (!invite || invite.expiresAt < new Date()) throw new APIError("FORBIDDEN", { message: "That invitation expired. Ask for another." });
   return invite;
 }
 
@@ -133,7 +133,7 @@ const devices = () => ({
         handler: createAuthMiddleware(async (ctx) => {
           const session = await getSessionFromCtx(ctx);
           if (!session || Date.now() - new Date(session.session.createdAt).getTime() >= FRESH * 1000)
-            throw new APIError("FORBIDDEN", { message: "Sign in again to let this in." });
+            throw new APIError("FORBIDDEN", { message: "Sign in again to approve this." });
         }),
       },
     ],
@@ -261,7 +261,7 @@ export function at(origin) {
  * how many, when the last was, and `again()`, which counts one more.
  */
 async function wrong(adapter, user) {
-  const key = `let_in/${user.id}`;
+  const key = `approve/${user.id}`;
   const [row] = await adapter.findMany({ model: "rateLimit", where: [{ field: "key", value: key }] });
   const lastRequest = Number(row?.lastRequest ?? 0);
   const count = row && Date.now() - lastRequest < WRONG_CODES.window * 1000 ? row.count : 0;
@@ -368,7 +368,7 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     await internalAdapter.deleteSession(signed_in.token);
     return { removed: browser(signed_in.userAgent) };
   }
-  if (ask === "let_in") {
+  if (ask === "approve") {
     // A person lets a device in by its code from one of their own devices or assistants, which a passkey let in.
     // Better Auth's device authorization answers a code only for a browser that's signed in, so this is what its
     // `/device` and `/device/approve` check, in one change that only a code nobody else has opened makes: it's
@@ -384,9 +384,9 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
       await missed.again();
       return { error: "That isn't a code any device is showing now." };
     }
-    if (code.expiresAt < new Date()) return { error: "That code has ended. The device shows another when it's asked again." };
-    if (code.status === "denied") return { error: "That code was stopped, so its device isn't let in." };
-    if (code.status !== "pending") return { error: "That code has been answered already." };
+    if (code.expiresAt < new Date()) return { error: "That code expired. The device shows another when it's asked again." };
+    if (code.status === "denied") return { error: "That code was denied, so its device isn't approved." };
+    if (code.status !== "pending") return { error: "Already approved." };
     if (code.userId && code.userId !== user.id) return { error: "Someone else opened that code first, and only they can answer it." };
     const where = [
       { field: "id", value: code.id },
@@ -394,9 +394,9 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
       { field: "userId", operator: "eq", value: code.userId ?? null },
     ];
     const answered = await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: "approved", userId: user.id } });
-    if (!answered) return { error: "That code has been answered already." };
+    if (!answered) return { error: "Already approved." };
     await place(adapter, code.clientId, "app", code.name, user);
-    return { let_in: code.name };
+    return { approved: code.name };
   }
   // Someone taken out of the network: nothing acts as them from then on, they sign in nowhere, and their name is free.
   if (ask === "remove_person") {

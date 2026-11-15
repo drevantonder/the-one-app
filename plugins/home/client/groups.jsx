@@ -98,7 +98,7 @@ function Groups(props) {
           </Show>
         </Screen>
       </Split>
-      <Naming heading="New Group" action="Make Group" open={adding() === "group"} onClose={() => setAdding()} onName={(name) => change("relations_group", { name })} />
+      <Naming heading="New Group" action="New Group" open={adding() === "group"} onClose={() => setAdding()} onName={(name) => change("relations_group", { name })} />
       <Show
         when={props.groups.people.length}
         fallback={<Naming heading="Add Member" hint="Their name in this network." pattern="[a-zA-Z][a-zA-Z0-9\-]*" action="Add" open={adding() === "member"} onClose={() => setAdding()} onName={(name) => change("relations_share", { artifact: open(), relation: "member", who: `users/${name.toLowerCase()}` })} />}

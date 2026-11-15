@@ -108,16 +108,16 @@ defmodule Notifications do
       %{
         name: "apps",
         read_only: true,
-        description: "Lists the apps that have notified you, and whether you hear from each",
+        description: "Lists the apps that have notified you, and whether each is allowed",
         inputs: none
       },
       %{
-        name: "hear",
-        description: "Says whether you hear from an app. One you don't sends you nothing",
+        name: "allow",
+        description: "Allows or mutes an app's notifications. A muted app sends you nothing",
         inputs: %{
           type: "object",
-          properties: %{app: app, hear: %{type: "boolean", description: "true to hear from it, false to silence it"}},
-          required: ["app", "hear"]
+          properties: %{app: app, allow: %{type: "boolean", description: "true to allow it, false to mute it"}},
+          required: ["app", "allow"]
         }
       },
       %{
@@ -190,7 +190,7 @@ defmodule Notifications do
 
     Enum.join(
       [if(sent == [], do: "Nobody was notified.", else: "Notified #{listed(sent)}.")] ++
-        if(quiet == [], do: [], else: ["#{listed(quiet)} silenced #{app}."]) ++ List.wrap(pushed),
+        if(quiet == [], do: [], else: ["#{listed(quiet)} muted #{app}."]) ++ List.wrap(pushed),
       " "
     )
   end
@@ -236,26 +236,26 @@ defmodule Notifications do
       query(
         db,
         """
-        select app, not exists (select 1 from quiet where quiet.user = ? and quiet.app = apps.app) as hear from (
+        select app, not exists (select 1 from quiet where quiet.user = ? and quiet.app = apps.app) as allowed from (
           select app from notifications where user = ? and app is not null union select app from quiet where user = ?
         ) as apps order by app
         """,
         [user, user, user]
       )
-      |> Enum.map(&Map.merge(&1, %{"hear" => &1["hear"] == 1, "name" => names[&1["app"]] || &1["app"]}))
+      |> Enum.map(&Map.merge(&1, %{"allowed" => &1["allowed"] == 1, "name" => names[&1["app"]] || &1["app"]}))
     end)
   end
 
-  def call("hear", %{"app" => app, "hear" => hear}, call) do
+  def call("allow", %{"app" => app, "allow" => allow}, call) do
     user = person(call)
 
     transaction(call, fn db ->
-      if hear,
+      if allow,
         do: query(db, "delete from quiet where user = ? and app = ?", [user, app]),
         else: query(db, "insert or ignore into quiet (user, app) values (?, ?)", [user, app])
     end)
 
-    if hear, do: "You hear from #{app}.", else: "#{app} is silenced."
+    if allow, do: "#{app} is allowed.", else: "#{app} is muted."
   end
 
   def call("register", %{"via" => via, "token" => token, "name" => name, "key" => key}, call) do

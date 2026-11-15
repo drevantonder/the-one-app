@@ -989,7 +989,7 @@ impl Client {
             (Some(leads), ..) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
             (_, Some(acts_as), _) => format!("users/{acts_as}/"),
             (_, _, Some(who)) => format!("{who}/"),
-            _ => bail!("This device is nobody's here. In a network being built, ONE_AS says who it acts as."),
+            _ => bail!("This device isn't signed in here. In a network being built, ONE_AS says who it acts as."),
         };
         let asked = (SERVERS, json!({"of": of}));
         if !now {

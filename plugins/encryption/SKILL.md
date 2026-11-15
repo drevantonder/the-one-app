@@ -6,7 +6,7 @@ description: Read before a plugin keeps something that whoever stores the networ
 Encryption keeps an artifact's blobs encrypted in the bucket, so whoever runs the bucket can't read them, and nor
 can a server its owner didn't choose. The Vault keeps its items this way.
 
-- Someone's key is made on a device of theirs, and stays on their devices: `let_in`, on a device, makes it the
+- Someone's key is made on a device of theirs, and stays on their devices: `approve`, on a device, makes it the
   first time, and after that lets in another device, by the key `key` lists it under. A device that isn't in yet
   asks with `ask`, and a device that is lets it in. No server ever holds the key, and signing in gives none.
 - A server opens something encrypted only once its owner chose it, from a device that holds their key: the
@@ -16,7 +16,7 @@ can a server its owner didn't choose. The Vault keeps its items this way.
 - The network's owner can write that tuple for any server, and it opens nothing: only a device that holds the
   key hands one over. Nobody asks for a user here but the user: not their groups, not the owner.
 - When every device that held the key is gone, its person lets a new one in with their recovery key, which the
-  first device showed them: in the app, or as `let_in`'s `key`. Without it, or a device that's in, nobody is
+  first device showed them: in the app, or as `approve`'s `key`. Without it, or a device that's in, nobody is
   let in again. A recovery key is a secret: never ask for one in a chat, and never repeat one.
 - "No server may open it yet" means its owner hasn't chosen one. "No server that may open it is up" means the
   ones they chose aren't running. Neither is fixed from a server.
@@ -45,12 +45,12 @@ A plugin keeps something encrypted by using this plugin:
   of any database. A plugin's scheduled jobs are kept in its own artifact's database, which then isn't the one
   to encrypt: keep what's encrypted in an artifact the plugin makes.
 - What a person types that's secret is encrypted on their device, by an input that says so: `%{type: "string",
-  format: "secret", opened_by: "opened_by"}`, where `opened_by` names a read-only tool of the plugin that
-  answers `encryption.opened_by(call, artifact)`. The app, `one` and an agent's MCP on a device all encrypt it
+  format: "secret", unlocked_on: "unlocked_on"}`, where `unlocked_on` names a read-only tool of the plugin that
+  answers `encryption.unlocked_on(call, artifact)`. The app, `one` and an agent's MCP on a device all encrypt it
   before it's sent, and `encryption.secret(call, input)` opens it on a chosen server. So no hook, log or other
   server reads it. What arrives as it was typed is refused.
 - Choosing servers is a tool of the plugin's that takes `servers`, their keys, and an input the device fills
-  in, `%{type: "string", format: "artifact-keys", opened_by: "opened_by"}`, and calls `encryption.choose(call,
+  in, `%{type: "string", format: "artifact-keys", unlocked_on: "unlocked_on"}`, and calls `encryption.choose(call,
   artifact, keys)`. `servers(artifact)` lists the ones chosen.
 - Never answer with what's encrypted, raise it or log it: a tool's answer goes to agents and into what clients
   keep.

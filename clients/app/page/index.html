@@ -22,12 +22,12 @@
     <div class="panel">
       <header><h2 id="recovery-heading">Recovery Key</h2></header>
       <form class="body">
-        <p class="about shown">Write it down, and keep it off your devices. It lets a new device in when every device that holds your key is gone.</p>
-        <p class="about typed">Type it as you wrote it down. This device will hold your key.</p>
+        <p class="about shown">Write it down, and keep it off your devices. It approves a new device when no trusted device is left.</p>
+        <p class="about typed">Type it as you wrote it down. This device will be trusted.</p>
         <output class="key shown"></output>
         <textarea class="entry typed ui-box ring" rows="3" aria-labelledby="recovery-heading" autocapitalize="characters" autocomplete="off" spellcheck="false"></textarea>
         <p class="wrong" role="alert"></p>
-        <button class="typed ui-button press ring" data-variant="default">Let This Device In</button>
+        <button class="typed ui-button press ring" data-variant="default">Approve This Device</button>
         <button class="typed ui-button press ring" data-variant="outline" value="cancel" formnovalidate>Cancel</button>
         <button class="shown ui-button press ring" data-variant="default">Done</button>
       </form>

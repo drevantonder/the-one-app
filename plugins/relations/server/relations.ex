@@ -99,7 +99,7 @@ defmodule Relations do
       %{
         name: "forget",
         description:
-          "Removes every tuple naming someone taken out of the network as who: the groups they were in, and what " <>
+          "Removes every tuple naming someone removed from the network as subject: the groups they were in, and what " <>
             "was shared with them. Taking someone out calls it",
         inputs: %{
           type: "object",
@@ -262,7 +262,7 @@ defmodule Relations do
   # shows it. So the tuples don't hold the link, and nothing but the link gives it.
   def call("link", %{"artifact" => artifact} = inputs, call) do
     relation = Map.get(inputs, "relation", "viewer")
-    owner = OneCore.User.owner(artifact) || raise "#{artifact} is nobody's, so no link leads to it."
+    owner = OneCore.User.owner(artifact) || raise "#{artifact} has no owner, so no link leads to it."
     link = owner <> "/" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
     who = OneCore.User.link(link)
 

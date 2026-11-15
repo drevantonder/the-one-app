@@ -1,11 +1,11 @@
 defmodule Backups.Run do
   @moduledoc """
-  Backing up to a place, checking what's there, and restoring from it into the running network.
+  Backing up to a destination, checking what's there, and restoring from it into the running network.
 
-  A backup reads every blob in the bucket and sends each one the place hasn't been sent before, by what's in it,
-  as an object of its own: the blob encrypted to the place's backup key for the object's name, which is random.
+  A backup reads every blob in the bucket and sends each one the destination hasn't been sent before, by what's in it,
+  as an object of its own: the blob encrypted to the destination's backup key for the object's name, which is random.
   Then it sends the backup's list of blobs, encrypted the same way, named by when the backup began. What was sent
-  is kept here, so the place's objects are never read to know what's there.
+  is kept here, so the destination's objects are never read to know what's there.
 
   A database is a snapshot and a log after it, where a snapshot is written whole and then the ones before the
   newest two are removed, and the log is only ever added to (`Database.Log`). So the log is listed last, once the
@@ -14,24 +14,24 @@ defmodule Backups.Run do
 
   Old backups go by the rule `Backups` says, and with them the objects no backup kept holds any more.
   """
-  alias Backups.Place
+  alias Backups.Destination
   alias OneCore.Bucket
   import Backups, only: [transaction: 2, query: 3]
 
   # How many blobs are read from the bucket at once.
   @together 32
 
-  @doc "Backs up to `place` now, and says what was sent and how long it took. A failure is kept as its problem."
-  def back_up(call, place) do
+  @doc "Backs up to `destination` now, and says what was sent and how long it took. A failure is kept as its problem."
+  def back_up(call, destination) do
     began = System.os_time(:millisecond)
 
     try do
-      opened = Place.open(call, place)
+      opened = Destination.open(call, destination)
 
       known =
         transaction(call, fn db ->
           Map.new(
-            query(db, "select sha256, object from objects where place = ?", [place["id"]]),
+            query(db, "select sha256, object from objects where destination = ?", [destination["id"]]),
             &{&1["sha256"], &1["object"]}
           )
         end)
@@ -52,16 +52,16 @@ defmodule Backups.Run do
 
       name = String.pad_leading(Integer.to_string(began), 16, "0")
       json = JSON.encode!(%{at: began, blobs: listed})
-      {:ok, sealed} = Cipher.seal(place["recipient"], "one/backups/1/backup\n" <> name, json)
-      Place.put(opened, "backups/" <> name, sealed)
+      {:ok, sealed} = Cipher.seal(destination["recipient"], "one/backups/1/backup\n" <> name, json)
+      Destination.put(opened, "backups/" <> name, sealed)
       took = System.os_time(:millisecond) - began
       bytes = Enum.sum_by(listed, & &1.size)
       sent_bytes = Enum.sum_by(sent, & &1.stored)
 
       transaction(call, fn db ->
         for object <- sent do
-          query(db, "insert or ignore into objects (place, object, sha256, stored, digest) values (?, ?, ?, ?, ?)", [
-            place["id"],
+          query(db, "insert or ignore into objects (destination, object, sha256, stored, digest) values (?, ?, ?, ?, ?)", [
+            destination["id"],
             object.object,
             object.sha256,
             object.stored,
@@ -71,9 +71,9 @@ defmodule Backups.Run do
 
         query(
           db,
-          "insert into backups (place, name, at, took, blobs, bytes, sent, sent_bytes, stored, digest, listed) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "insert into backups (destination, name, at, took, blobs, bytes, sent, sent_bytes, stored, digest, listed) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           [
-            place["id"],
+            destination["id"],
             name,
             began,
             took,
@@ -87,30 +87,30 @@ defmodule Backups.Run do
           ]
         )
 
-        query(db, "delete from problems where place = ?", [place["id"]])
+        query(db, "delete from problems where destination = ?", [destination["id"]])
       end)
 
-      gone = prune(call, opened, place)
+      gone = prune(call, opened, destination)
 
-      "#{place["name"]}: backed up #{length(listed)} blobs, #{size(bytes)}, in #{seconds(took)}. Sent #{length(sent)} new, #{size(sent_bytes)}." <>
+      "#{destination["name"]}: backed up #{length(listed)} blobs, #{size(bytes)}, in #{seconds(took)}. Sent #{length(sent)} new, #{size(sent_bytes)}." <>
         if(gone > 0, do: " #{gone} older backups went, by the rule of what's kept.", else: "")
     rescue
       failed ->
         text = Exception.message(failed)
 
         transaction(call, fn db ->
-          query(db, "insert or replace into problems (place, at, kind, text) values (?, ?, 'backup', ?)", [
-            place["id"],
+          query(db, "insert or replace into problems (destination, at, kind, text) values (?, ?, 'backup', ?)", [
+            destination["id"],
             began,
             text
           ])
         end)
 
-        reraise "Couldn't back up to #{place["name"]}: #{text}", __STACKTRACE__
+        reraise "Couldn't back up to #{destination["name"]}: #{text}", __STACKTRACE__
     end
   end
 
-  # Reads `keys` from the bucket, a few at once, and sends what the place doesn't have: the blobs listed, and the
+  # Reads `keys` from the bucket, a few at once, and sends what the destination doesn't have: the blobs listed, and the
   # objects sent. A blob removed since it was listed isn't there to back up.
   defp copy(opened, keys, known, {listed, sent}) do
     keys
@@ -128,8 +128,8 @@ defmodule Backups.Run do
 
               _ ->
                 object = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-                {:ok, sealed} = Cipher.seal(opened.place["recipient"], "one/backups/1/object\n" <> object, data)
-                Place.put(opened, "objects/" <> object, sealed)
+                {:ok, sealed} = Cipher.seal(opened.destination["recipient"], "one/backups/1/object\n" <> object, data)
+                Destination.put(opened, "objects/" <> object, sealed)
                 new = %{object: object, sha256: sha256, stored: byte_size(sealed), digest: digest(sealed)}
                 {object, [new | sent], Map.put(known, sha256, object)}
             end
@@ -144,38 +144,38 @@ defmodule Backups.Run do
   end
 
   # Removes the backups the rule doesn't keep, and then the objects no backup kept holds. Gives how many went.
-  defp prune(call, opened, place) do
+  defp prune(call, opened, destination) do
     backups =
-      transaction(call, &query(&1, "select name, at from backups where place = ? order by at desc", [place["id"]]))
+      transaction(call, &query(&1, "select name, at from backups where destination = ? order by at desc", [destination["id"]]))
 
     gone = backups -- kept(backups, System.os_time(:millisecond))
 
     if gone == [] do
       0
     else
-      for %{"name" => name} <- gone, do: Place.remove(opened, "backups/" <> name)
+      for %{"name" => name} <- gone, do: Destination.remove(opened, "backups/" <> name)
 
       unheld =
         transaction(call, fn db ->
           for %{"name" => name} <- gone,
-              do: query(db, "delete from backups where place = ? and name = ?", [place["id"], name])
+              do: query(db, "delete from backups where destination = ? and name = ?", [destination["id"], name])
 
           held =
-            for %{"listed" => listed} <- query(db, "select listed from backups where place = ?", [place["id"]]),
+            for %{"listed" => listed} <- query(db, "select listed from backups where destination = ?", [destination["id"]]),
                 %{"object" => object} <- listed(listed),
                 into: MapSet.new(),
                 do: object
 
-          for %{"object" => object} <- query(db, "select object from objects where place = ?", [place["id"]]),
+          for %{"object" => object} <- query(db, "select object from objects where destination = ?", [destination["id"]]),
               not MapSet.member?(held, object),
               do: object
         end)
 
-      for object <- unheld, do: Place.remove(opened, "objects/" <> object)
+      for object <- unheld, do: Destination.remove(opened, "objects/" <> object)
 
       transaction(call, fn db ->
         for object <- unheld,
-            do: query(db, "delete from objects where place = ? and object = ?", [place["id"], object])
+            do: query(db, "delete from objects where destination = ? and object = ?", [destination["id"], object])
       end)
 
       length(gone)
@@ -212,42 +212,42 @@ defmodule Backups.Run do
   end
 
   @doc """
-  Reads the newest backup at `place` back whole, its list of blobs and every object it holds, and compares each
+  Reads the newest backup at `destination` back whole, its list of blobs and every object it holds, and compares each
   with what was sent. Says what it read, how long it took, and which blobs aren't as they were sent.
   """
-  def check(call, place) do
+  def check(call, destination) do
     began = System.os_time(:millisecond)
-    opened = Place.open(call, place)
+    opened = Destination.open(call, destination)
 
     {backup, objects} =
       transaction(call, fn db ->
         {List.first(
-           query(db, "select name, digest, listed from backups where place = ? order by at desc limit 1", [place["id"]])
+           query(db, "select name, digest, listed from backups where destination = ? order by at desc limit 1", [destination["id"]])
          ),
          Map.new(
-           query(db, "select object, digest from objects where place = ?", [place["id"]]),
+           query(db, "select object, digest from objects where destination = ?", [destination["id"]]),
            &{&1["object"], &1["digest"]}
          )}
       end)
 
-    if backup, do: check(call, place, opened, began, backup, objects), else: "#{place["name"]} has no backup yet."
+    if backup, do: check(call, destination, opened, began, backup, objects), else: "#{destination["name"]} has no backup yet."
   end
 
-  defp check(call, place, opened, began, backup, objects) do
+  defp check(call, destination, opened, began, backup, objects) do
     %{"name" => name, "digest" => listed_digest, "listed" => listed} = backup
     blobs = listed(listed)
     held = blobs |> Enum.map(& &1["object"]) |> Enum.uniq()
 
     read =
       held
-      |> Task.async_stream(&{&1, Place.get(opened, "objects/" <> &1)}, max_concurrency: 8, timeout: :infinity)
+      |> Task.async_stream(&{&1, Destination.get(opened, "objects/" <> &1)}, max_concurrency: 8, timeout: :infinity)
       |> Enum.map(fn {:ok, read} -> read end)
 
     wrong = for {object, data} <- read, data == nil or digest(data) != objects[object], into: MapSet.new(), do: object
-    listed_ok = digest(Place.get(opened, "backups/" <> name) || "") == listed_digest
+    listed_ok = digest(Destination.get(opened, "backups/" <> name) || "") == listed_digest
     bytes = Enum.sum_by(read, fn {_object, data} -> byte_size(data || "") end)
     took = seconds(System.os_time(:millisecond) - began)
-    said = "#{place["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{took}."
+    said = "#{destination["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{took}."
 
     case {listed_ok, for(%{"key" => key, "object" => object} <- blobs, object in wrong, do: key)} do
       {true, []} ->
@@ -263,14 +263,14 @@ defmodule Backups.Run do
 
         # What isn't there as it was sent goes, and so does what's kept of it here, so the next backup sends it
         # again.
-        for object <- wrong, do: Place.remove(opened, "objects/" <> object)
+        for object <- wrong, do: Destination.remove(opened, "objects/" <> object)
 
         transaction(call, fn db ->
           for object <- wrong,
-              do: query(db, "delete from objects where place = ? and object = ?", [place["id"], object])
+              do: query(db, "delete from objects where destination = ? and object = ?", [destination["id"], object])
 
-          query(db, "insert or replace into problems (place, at, kind, text) values (?, ?, 'check', ?)", [
-            place["id"],
+          query(db, "insert or replace into problems (destination, at, kind, text) values (?, ?, 'check', ?)", [
+            destination["id"],
             began,
             String.trim(not_as_sent) <> " The next backup sends it again."
           ])
@@ -281,12 +281,12 @@ defmodule Backups.Run do
   end
 
   @doc """
-  Brings back what backup `backup` at `place` holds under `blobs` that's gone from the bucket, with the backup key a
+  Brings back what backup `backup` at `destination` holds under `blobs` that's gone from the bucket, with the backup key a
   device handed over in `given`. Changes nothing that's there.
   """
-  def restore(call, place, backup, blobs, given) do
+  def restore(call, destination, backup, blobs, given) do
     began = System.os_time(:millisecond)
-    opened = Place.open(call, place)
+    opened = Destination.open(call, destination)
 
     sealed =
       with {:ok, %{} = sealed} <- JSON.decode(given),
@@ -305,16 +305,16 @@ defmodule Backups.Run do
         {:error, _why} -> raise "The network's backup key wasn't handed to this server. Ask again from your device."
       end
 
-    if public != place["recipient"],
-      do: raise("#{place["name"]}'s backups are encrypted to another key than the network's.")
+    if public != destination["recipient"],
+      do: raise("#{destination["name"]}'s backups are encrypted to another key than the network's.")
 
     name =
       backup ||
-        List.last(Place.list(opened, "backups/")) ||
-        raise("#{place["name"]} has no backup yet.")
+        List.last(Destination.list(opened, "backups/")) ||
+        raise("#{destination["name"]} has no backup yet.")
 
     name = String.replace_prefix(name, "backups/", "")
-    sealed = Place.get(opened, "backups/" <> name) || raise "#{place["name"]} has no backup #{name}."
+    sealed = Destination.get(opened, "backups/" <> name) || raise "#{destination["name"]} has no backup #{name}."
     {:ok, listed} = open(key, "one/backups/1/backup\n" <> name, sealed)
 
     {gone, there} =
@@ -323,7 +323,7 @@ defmodule Backups.Run do
       |> Enum.split_with(&(Bucket.size(&1["key"]) == :absent))
 
     for blob <- gone do
-      sealed = Place.get(opened, "objects/" <> blob["object"]) || raise "#{blob["key"]} is missing from the backup."
+      sealed = Destination.get(opened, "objects/" <> blob["object"]) || raise "#{blob["key"]} is missing from the backup."
       {:ok, data} = open(key, "one/backups/1/object\n" <> blob["object"], sealed)
       if digest(data) != blob["sha256"], do: raise("#{blob["key"]} isn't what was backed up: the backup was changed.")
       Bucket.write(blob["key"], data)

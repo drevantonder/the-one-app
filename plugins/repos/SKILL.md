@@ -1,6 +1,6 @@
 ---
 name: repos
-description: Read before making, cloning, pushing to or reading a git repo in the network, or suggesting a change to a repo you can't push to.
+description: Read before making, cloning, pushing to or reading a git repo in the network, or opening a pull request on a repo you can't push to.
 ---
 
 Repos is git hosting in the network. A repo is a person's, a group's or the network's, and is named as any artifact
@@ -18,20 +18,20 @@ git-remote-one`, or on Windows `mklink /H git-remote-one.exe one.exe`.
 - `list` lists every repo you may read. `branches`, `tree`, `file`, `log` and `commit` read one without cloning it:
   a folder or a file at a ref, the history, one commit's diff.
 - Who reads and who pushes is sharing, as for anything: `relations share --artifact <repo> --relation viewer` (reads
-  and clones, and suggests changes) or `editor` (pushes, and takes suggestions). A group's members push to its
+  and clones, and opens pull requests) or `editor` (pushes, and merges pull requests). A group's members push to its
   repos. Share only when asked.
 - A push moves a branch only from where you fetched it. If someone pushed first, git says `fetch first`: fetch,
   rebase or merge, and push again. Nothing pushed is lost.
 
-To change a repo you may read but not push to, suggest the change: commit it on a branch of yours, push it to
-`refs/suggestions/<name>`, a short name of your own for it, and tell its owner. The commit's subject is its title.
+To change a repo you may read but not push to, open a pull request: commit it on a branch of yours, push it to
+`refs/pull/<name>`, a short name of your own for it, and tell its owner. The commit's subject is its title.
 
-    git push origin HEAD:refs/suggestions/fix-typo
+    git push origin HEAD:refs/pull/fix-typo
 
-Pushing there again updates it. `suggestions` lists a repo's suggestions with their commits. Whoever pushes to the
-repo `take`s one, which fast-forwards the branch it's for or merges it, or `decline`s it; whoever suggested it can
-decline it too. A suggestion that doesn't merge cleanly says which files conflict: fetch the branch it's for, merge it
-into yours, and push the suggestion again. `git fetch origin refs/suggestions/fix-typo` fetches one to look at.
+Pushing there again updates it. `pull_requests` lists a repo's pull_requests with their commits. Whoever pushes to the
+repo `merge`s one, which fast-forwards the branch it's for or merges it, or `close`s it; whoever opened it can
+close it too. A pull request that doesn't merge cleanly says which files conflict: fetch the branch it's for, merge it
+into yours, and push the pull_request again. `git fetch origin refs/pull/fix-typo` fetches one to look at.
 
 `remove` puts a repo you own in Recently Deleted, gone for everyone until `restore` brings it back as it was. After 30
 days it's erased for good. The tool `git` is what `git-remote-one` calls; don't call it yourself.

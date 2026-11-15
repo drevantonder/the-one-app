@@ -1,6 +1,6 @@
 // Repos: the repos someone may read, and each one opening beside them as GitHub shows a repo: its files at a branch
-// with the newest commit and its README, its history, and the changes suggested to it, which whoever pushes takes or
-// declines. A file and a commit open in the repo's place, with Back.
+// with the newest commit and its README, its history, and its pull requests, which whoever pushes merges or
+// closes. A file and a commit open in the repo's place, with Back.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { marked } from "marked"
@@ -74,7 +74,7 @@ function NewRepo() {
   const make = async (event) => {
     event.preventDefault()
     const { name } = Object.fromEntries(new FormData(event.target))
-    if (!(await does("repos_make", { name }, forWhom() ? { for: forWhom() } : undefined))) return
+    if (!(await does("repos_create", { name }, forWhom() ? { for: forWhom() } : undefined))) return
     setAdding(false)
     setOpen(`${forWhom() || (await mine())}/made/repos/${name}`)
   }
@@ -86,12 +86,12 @@ function NewRepo() {
         </Field>
         <Loading>
           <Show when={groups().length}>
-            <Field label="Whose">
+            <Field label="Owner">
               <Select.Root collection={whose()} value={[forWhom()]} onValueChange={({ value }) => setFor(value[0])} />
             </Field>
           </Show>
         </Loading>
-        <Button type="submit">Make</Button>
+        <Button type="submit">Create</Button>
       </form>
     </Sheet>
   )
@@ -121,7 +121,7 @@ function Repos() {
   )
 }
 
-/// A repo, as GitHub's page has it: what it is and how to clone it, then its code, history and suggestions.
+/// A repo, as GitHub's page has it: what it is and how to clone it, then its code, history and pull_requests.
 function Repo(props) {
   const about = createMemo(() => json("repos_branches", { repo: props.repo }))
   const branch = () => ref() ?? about().head
@@ -159,7 +159,7 @@ function Repo(props) {
         <Tabs.List>
           <Tabs.Trigger value="code">Code</Tabs.Trigger>
           <Tabs.Trigger value="history">History</Tabs.Trigger>
-          <Tabs.Trigger value="suggestions">Suggestions</Tabs.Trigger>
+          <Tabs.Trigger value="pull_requests">Pull Requests</Tabs.Trigger>
           <Tabs.Indicator />
         </Tabs.List>
         <Tabs.Content value="code">
@@ -172,9 +172,9 @@ function Repo(props) {
             <History repo={props.repo} branch={branch()} />
           </Loading>
         </Tabs.Content>
-        <Tabs.Content value="suggestions">
+        <Tabs.Content value="pull_requests">
           <Loading fallback={<Skeleton rows={3} />}>
-            <Suggestions repo={props.repo} pushes={about().pushes} />
+            <PullRequests repo={props.repo} pushes={about().pushes} />
           </Loading>
         </Tabs.Content>
       </Tabs.Root>
@@ -352,15 +352,15 @@ function Commit(props) {
   )
 }
 
-function Suggestions(props) {
-  const suggested = createMemo(() => json("repos_suggestions", { repo: props.repo }))
-  const open = () => suggested().filter((one) => one.state === "open")
-  const closed = () => suggested().filter((one) => one.state !== "open")
-  const take = (one) => does("repos_take", { repo: props.repo, suggestion: one.name }).then((said) => said && (toast(said), refresh(suggested)))
-  const decline = async (one) => (await confirm({ heading: `Decline ${one.title}?`, text: "It stays listed as declined.", action: "Decline" })) && (await does("repos_decline", { repo: props.repo, suggestion: one.name })) && refresh(suggested)
+function PullRequests(props) {
+  const pullRequests = createMemo(() => json("repos_pull_requests", { repo: props.repo }))
+  const open = () => pullRequests().filter((one) => one.state === "open")
+  const closed = () => pullRequests().filter((one) => one.state !== "open")
+  const merge = (one) => does("repos_merge", { repo: props.repo, pull_request: one.name }).then((said) => said && (toast(said), refresh(pullRequests)))
+  const close = async (one) => (await confirm({ heading: `Close ${one.title}?`, text: "It stays listed as closed.", action: "Close" })) && (await does("repos_close", { repo: props.repo, pull_request: one.name })) && refresh(pullRequests)
   const line = (one) => `${short(one.by)} · into ${one.into} · ${plural(one.commits.length, "commit")} · ${since(one.at)}`
   return (
-    <Show when={suggested().length} fallback={<Empty>No suggested changes.</Empty>}>
+    <Show when={pullRequests().length} fallback={<Empty>No pull requests.</Empty>}>
       <Show when={open().length}>
         <Section heading="Open">
           <List>
@@ -372,11 +372,11 @@ function Suggestions(props) {
                   end={
                     <Show when={props.pushes}>
                       <div class="actions">
-                        <Button variant="secondary" onClick={() => take(one)}>
-                          Take
+                        <Button variant="secondary" onClick={() => merge(one)}>
+                          Merge
                         </Button>
-                        <Button variant="ghost" onClick={() => decline(one)}>
-                          Decline
+                        <Button variant="ghost" onClick={() => close(one)}>
+                          Close
                         </Button>
                       </div>
                     </Show>
@@ -390,7 +390,7 @@ function Suggestions(props) {
       <Show when={closed().length}>
         <Section heading="Closed">
           <List>
-            <For each={closed()}>{(one) => <Row heading={one.title} text={`${one.state === "taken" ? "Taken" : "Declined"} · ${line(one)}`} />}</For>
+            <For each={closed()}>{(one) => <Row heading={one.title} text={`${one.state === "merged" ? "Merged" : "Closed"} · ${line(one)}`} />}</For>
           </List>
         </Section>
       </Show>

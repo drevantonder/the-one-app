@@ -141,7 +141,7 @@ on desk as owner for network deploy --name notes --files-from "$folder/notes" >/
 
 say "Alice's key is made on her phone, which then chooses the server to open her Vault and her locker"
 refused on phone as alice vault list
-may on phone as alice encryption let_in
+may on phone as alice encryption approve
 ONE_AS=alice ONE_HOME=$folder/devices/phone "$root/target/release/examples/recovery_key" "$folder/secrets/recovery"
 echo "  her phone's window shows her recovery key once, which she writes down ($(wc -c <"$folder/secrets/recovery") characters, kept in a file here)"
 may on phone as alice vault grant --servers "$(servers "${key[server]}")"
@@ -201,7 +201,7 @@ up server
 may on phone as alice vault grant --servers "$(servers "${key[server]}")"
 may on phone as alice locker grant --servers "$(servers "${key[server]}")"
 may on phone as alice relations shared --artifact $vault
-may on phone as alice vault opened_by
+may on phone as alice vault unlocked_on
 down server
 refused on phone as alice vault list
 refused on phone as alice locker read
@@ -294,7 +294,7 @@ refused on laptop as alice vault grant --servers "$(servers "${key[server]}" "${
 may on laptop as alice encryption ask
 asking=$(on phone as alice encryption key | grep -o '"asking":\[[^]]*\]' | grep -o '[0-9a-f]\{64\}')
 key[laptop]=$asking
-may on phone as alice encryption let_in --device "$asking" --name laptop
+may on phone as alice encryption approve --device "$asking" --name laptop
 may on laptop as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on laptop as alice vault grant --servers "$(servers "${key[server]}")"
 rm -rf "$folder/devices/phone" "$folder/devices/laptop"
@@ -304,8 +304,8 @@ may on tablet as alice vault list
 may on tablet as alice fake me
 refused on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 printf '%s' "AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-IIII-JJJJ-KKKK-LLLL-MMMQ" >"$folder/secrets/guess"
-refused on tablet as alice encryption let_in --key-from "$folder/secrets/guess"
-may on tablet as alice encryption let_in --key-from "$folder/secrets/recovery"
+refused on tablet as alice encryption approve --key-from "$folder/secrets/guess"
+may on tablet as alice encryption approve --key-from "$folder/secrets/recovery"
 may on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 down server
 may on tablet as alice vault list
@@ -332,14 +332,14 @@ echo "  and no file of the bucket holds the marker, as below"
 say "A group's Vault and the network's, each set up and opened by an owner, and the network's by its recovery key"
 may on den as alice relations group --name family
 may on den as alice relations share --artifact groups/family --relation member --who users/bob
-may on den as alice for groups/family encryption let_in
+may on den as alice for groups/family encryption approve
 may on den as alice for groups/family vault grant --servers "$(servers "${key[server]}")"
 may on den as alice for groups/family vault set --item Wifi --field password --value-from "$folder/secrets/wifi"
 may on den as alice for groups/family vault list
 [[ $said == *Wifi* ]]
 refused on bobs as bob for groups/family vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
-refused on bobs as bob for groups/family encryption let_in
-may on den as owner for network encryption let_in
+refused on bobs as bob for groups/family encryption approve
+may on den as owner for network encryption approve
 ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/devices/den "$root/target/release/examples/recovery_key" "$folder/secrets/network-recovery"
 echo "  the den's window shows the network's recovery key once, which its owner writes down"
 may on den as owner for network vault grant --servers "$(servers "${key[server]}")"
@@ -347,7 +347,7 @@ may on den as owner for network vault set --item Storage --field secret_key --va
 rm -rf "$folder/devices/den"
 echo "  the den is gone, with its keys. On the attic, the network's owner:"
 refused on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
-may on attic as owner for network encryption let_in --key-from "$folder/secrets/network-recovery"
+may on attic as owner for network encryption approve --key-from "$folder/secrets/network-recovery"
 may on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on attic as owner for network vault list
 [[ $said == *Storage* && $said != *Wifi* && $said != *GitHub* ]]

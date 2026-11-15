@@ -48,7 +48,7 @@ pub async fn on(client: &Client) -> Result<String> {
     let key = here.key()?;
     let who = match env::var("ONE_FOR") {
         Ok(who) => who,
-        Err(_) => client.who().context("This device is nobody's yet: sign in on it first.")?,
+        Err(_) => client.who().context("This device isn't signed in yet. Sign in on it first.")?,
     };
     tool(client, "add_server", json!({"key": key})).await?;
     if here.current().is_err() {

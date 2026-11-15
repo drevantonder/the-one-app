@@ -12,7 +12,7 @@ const [whose, setWhose] = createSignal()
 const ask = (tool, inputs) => call(tool, inputs, { for: whose() }).then(JSON.parse)
 
 /// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
-const opened = createMemo(() => ask("vault_opened_by"))
+const opened = createMemo(() => ask("vault_unlocked_on"))
 const key = createMemo(() => ask("encryption_key"))
 const kept = createMemo(() => (opened().servers.length ? ask("vault_list") : { items: [], requests: [], plugins: [] }))
 const again = () => [opened, key, kept].forEach(refresh)
@@ -224,7 +224,7 @@ function OpenedBy() {
     return does("vault_grant", { servers: on ? [...servers, server] : servers })
   }
   return (
-    <Section heading="Opened by">
+    <Section heading="Unlocked On">
       <List>
         <For each={opened().may}>
           {(server) => (
@@ -251,10 +251,10 @@ function YourKey() {
           <Problem
             warn
             heading={`This device doesn't hold ${whom()} key`}
-            text={`It adds and uses items. Choosing the servers that open ${whom()} Vault takes a device that holds the key.`}
+            text={`It adds and uses items. Choosing the servers that open ${whom()} Vault takes a trusted device.`}
             action={
               <>
-                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => asked && toast("Asked. Open Vault on a device that holds the key."))}>
+                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => asked && toast("Asked. Open Vault on a trusted device."))}>
                   Ask Another Device
                 </Button>
                 <Button variant="outline" onClick={() => useRecoveryKey({ for: whose() }).then(again)}>
@@ -270,17 +270,17 @@ function YourKey() {
             {(device) => (
               <Row
                 heading={device.name}
-                text="Asks to hold the key"
+                text="Wants to be trusted"
                 end={
-                  <Button variant="secondary" onClick={() => does("encryption_let_in", { device: device.device, name: device.name })}>
-                    Let In
+                  <Button variant="secondary" onClick={() => does("encryption_approve", { device: device.device, name: device.name })}>
+                    Approve
                   </Button>
                 }
               />
             )}
           </For>
-          <Row heading="This device" text="Holds the key" />
-          <For each={others()}>{(device) => <Row heading={device.name} text="Holds the key" />}</For>
+          <Row heading="This device" text="Trusted device" />
+          <For each={others()}>{(device) => <Row heading={device.name} text="Trusted device" />}</For>
           <Row heading="Recovery Key" text="For when every device is gone" onClick={() => showRecoveryKey({ for: whose() })} />
         </List>
       </Show>
@@ -292,7 +292,7 @@ function YourKey() {
 /// the network's, by one of its owners. It shows them its recovery key then, which is the one time they're asked
 /// to write something down.
 async function setUp() {
-  if (await does("encryption_let_in", {})) await showRecoveryKey({ for: whose() })
+  if (await does("encryption_approve", {})) await showRecoveryKey({ for: whose() })
 }
 
 /// Which Vault shows, where its person owns more than their own.
@@ -305,7 +305,7 @@ function Whose() {
   }
   return (
     <Show when={owners().length > 1}>
-      <Field label="Whose">
+      <Field label="Owner">
         <Select.Root collection={collection()} value={[key().owner]} onValueChange={pick} />
       </Field>
     </Show>
@@ -330,7 +330,7 @@ function Vault() {
         <Whose />
         <Show when={key().check} fallback={<Empty action={<Button onClick={setUp}>Set Up</Button>}>Keys and sign-ins are kept here, encrypted. Set up {whom()} key first.</Empty>}>
           <Show when={!opened().servers.length}>
-            <Problem warn heading={`No server opens ${whom()} Vault`} text={holds() ? "Choose one below. Until then it keeps nothing." : "Choose one from a device that holds the key. Until then it keeps nothing."} />
+            <Problem warn heading={`No server opens ${whom()} Vault`} text={holds() ? "Choose one below. Until then it keeps nothing." : "Choose one from a trusted device. Until then it keeps nothing."} />
           </Show>
           <Show when={kept().requests.length}>
             <Section heading="Asked for">

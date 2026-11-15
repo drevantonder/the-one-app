@@ -50,11 +50,11 @@ if (request) ask("/oauth2/public-client-prelogin", { client_id: asked.get("clien
 async function claim() {
   const { data, error } = await auth.device({ query: { user_code: code } })
   if (error?.status === 429) throw new Error("That's too many tries. Try again later.")
-  if (error?.error === "expired_token") throw new Error("That code has ended. Start again on the device.")
+  if (error?.error === "expired_token") throw new Error("Expired. Start again on the device.")
   if (error) throw new Error("No device is showing that code.")
   // Someone else opened this link first, and it's theirs to answer.
-  if (!data.client_id) throw new Error("Someone else is letting this device in.")
-  if (data.status !== "pending") throw new Error("That device has been answered.")
+  if (!data.client_id) throw new Error("Someone else is approving this device.")
+  if (data.status !== "pending") throw new Error("Already approved.")
   setActs(data.name)
 }
 if (code && !app)
@@ -71,7 +71,7 @@ async function signIn() {
     // Better Auth's own words for a device that holds a passkey of theirs already, which is all the browser says.
     if (error?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
     if (error) throw new Error(error.message ?? "That passkey wasn't made. Try again.")
-    return setDone("Your passkey is made. Go back to the app.")
+    return setDone("Your passkey is created. Go back to the app.")
   }
   if (invite && !called().trim()) throw new Error("Say your name first.")
   await auth.signOut()
@@ -91,7 +91,7 @@ async function signIn() {
 /// This person's answer to the device whose code they compared.
 async function answer(yes) {
   await ask(yes ? "/device/approve" : "/device/deny", { userCode: code })
-  setDone(yes ? `It's yours now: ${acts()}. Go back to it.` : `Stopped: ${acts()} wasn't let in.`)
+  setDone(yes ? `It's yours now: ${acts()}. Go back to it.` : `Denied: ${acts()} wasn't approved.`)
 }
 
 /// The link the device gives, as it's opened in the device's own browser.
@@ -105,7 +105,7 @@ render(
   () => (
     <SignIn
       mark={<img src="./mark.png" alt="" />}
-      heading={answering() ? `Let ${acts()} in?` : another ? "Add a passkey" : invite ? "Join" : "Sign in"}
+      heading={answering() ? `Approve ${acts()}?` : another ? "Add a passkey" : invite ? "Join" : "Sign in"}
       note={app ? "Check this code where you sign in" : "It should be showing"}
       code={(app || answering()) && shown}
       warning={

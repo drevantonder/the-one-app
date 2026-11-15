@@ -4,7 +4,7 @@ defmodule Repos.Mirror do
   itself reads it, packs what a fetch wants and checks what a push brings.
 
   A repo in the bucket is `repo.json` and its packs. `repo.json` holds its refs, which branch is its `head`, the
-  names of the packs that hold its objects, the suggested changes, and the packs merged away lately, which are
+  names of the packs that hold its objects, the pull requests, and the packs merged away lately, which are
   removed an hour after. Each pack is `packs/<name>.pack` and its index `packs/<name>.idx`, written once and never
   changed. So a push writes its own pack and replaces `repo.json`, and nothing else: a small commit to a large repo
   writes a small pack.

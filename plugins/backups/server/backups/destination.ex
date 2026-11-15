@@ -1,4 +1,4 @@
-defmodule Backups.Place do
+defmodule Backups.Destination do
   @moduledoc """
   Where backups go, reached by name: a folder on a machine of the network's, through the service `Backups.Disk`
   there, or a bucket of S3-compatible storage, signed with the keys in the network's Vault item that it names.
@@ -6,41 +6,41 @@ defmodule Backups.Place do
   alias Backups.Disk
   alias OneCore.Service
 
-  @doc "A place ready to reach: a folder's call to its machine, or a bucket's keys, read from the Vault once."
-  def open(call, %{"kind" => "folder"} = place), do: %{place: place, call: call}
+  @doc "A destination ready to reach: a folder's call to its machine, or a bucket's keys, read from the Vault once."
+  def open(call, %{"kind" => "folder"} = destination), do: %{destination: destination, call: call}
 
-  def open(call, %{"kind" => "s3", "item" => item} = place) do
+  def open(call, %{"kind" => "s3", "item" => item} = destination) do
     vault = OneCore.Call.plugin(call, "vault")
 
     sign = [
       access_key_id: vault.value(call, item, "access_key_id"),
       secret_access_key: vault.value(call, item, "secret_access_key"),
       service: :s3,
-      region: place["region"]
+      region: destination["region"]
     ]
 
-    %{place: place, call: call, sign: sign}
+    %{destination: destination, call: call, sign: sign}
   end
 
-  @doc "Tries a place before it's added: writes something there, reads it back and removes it."
-  def try(call, place) do
-    opened = open(call, place)
+  @doc "Tries a destination before it's added: writes something there, reads it back and removes it."
+  def try(call, destination) do
+    opened = open(call, destination)
     tried = "tried-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
     put(opened, tried, "tried")
-    if get(opened, tried) != "tried", do: raise("What was written to #{Backups.where(place)} didn't read back.")
+    if get(opened, tried) != "tried", do: raise("What was written to #{Backups.where(destination)} didn't read back.")
     remove(opened, tried)
   rescue
-    failed -> reraise "#{Backups.where(place)} didn't work: #{Exception.message(failed)}", __STACKTRACE__
+    failed -> reraise "#{Backups.where(destination)} didn't work: #{Exception.message(failed)}", __STACKTRACE__
   end
 
-  def put(%{place: %{"kind" => "folder"} = place, call: call}, name, data),
-    do: Service.call(call, Disk, :put, [place["folder"], name, Base.encode64(data)], place["machine"])
+  def put(%{destination: %{"kind" => "folder"} = destination, call: call}, name, data),
+    do: Service.call(call, Disk, :put, [destination["folder"], name, Base.encode64(data)], destination["machine"])
 
   def put(opened, name, data), do: s3(opened, :put, name, body: data) |> ok(name)
 
   @doc "What's at `name`, or `nil`."
-  def get(%{place: %{"kind" => "folder"} = place, call: call}, name) do
-    with data when is_binary(data) <- Service.call(call, Disk, :get, [place["folder"], name], place["machine"]),
+  def get(%{destination: %{"kind" => "folder"} = destination, call: call}, name) do
+    with data when is_binary(data) <- Service.call(call, Disk, :get, [destination["folder"], name], destination["machine"]),
          do: Base.decode64!(data)
   end
 
@@ -52,14 +52,14 @@ defmodule Backups.Place do
     end
   end
 
-  def remove(%{place: %{"kind" => "folder"} = place, call: call}, name),
-    do: Service.call(call, Disk, :remove, [place["folder"], name], place["machine"])
+  def remove(%{destination: %{"kind" => "folder"} = destination, call: call}, name),
+    do: Service.call(call, Disk, :remove, [destination["folder"], name], destination["machine"])
 
   def remove(opened, name), do: s3(opened, :delete, name) |> ok(name)
 
   @doc "The names starting with `prefix`, in order."
-  def list(%{place: %{"kind" => "folder"} = place, call: call}, prefix),
-    do: Service.call(call, Disk, :list, [place["folder"], prefix], place["machine"])
+  def list(%{destination: %{"kind" => "folder"} = destination, call: call}, prefix),
+    do: Service.call(call, Disk, :list, [destination["folder"], prefix], destination["machine"])
 
   def list(opened, prefix, next \\ nil) do
     params =
@@ -92,8 +92,8 @@ defmodule Backups.Place do
   end
 
   # A request to the bucket, for one of its objects or, with no name, the bucket itself.
-  defp s3(%{place: place, sign: sign} = opened, method, name, options \\ []) do
-    [bucket | _] = String.split(place["bucket"], "/")
+  defp s3(%{destination: destination, sign: sign} = opened, method, name, options \\ []) do
+    [bucket | _] = String.split(destination["bucket"], "/")
 
     path =
       if name,
@@ -101,13 +101,13 @@ defmodule Backups.Place do
         else: ""
 
     Req.request!(
-      [method: method, url: "#{place["endpoint"]}/#{bucket}#{path}", aws_sigv4: sign, decode_body: false] ++ options
+      [method: method, url: "#{destination["endpoint"]}/#{bucket}#{path}", aws_sigv4: sign, decode_body: false] ++ options
     )
   end
 
-  # The folder in the bucket the place is, as the start of its objects' names.
-  defp folder(%{place: place}) do
-    case String.split(place["bucket"], "/", parts: 2) do
+  # The folder in the bucket the destination is, as the start of its objects' names.
+  defp folder(%{destination: destination}) do
+    case String.split(destination["bucket"], "/", parts: 2) do
       [_bucket, folder] -> String.trim(folder, "/") <> "/"
       [_bucket] -> ""
     end

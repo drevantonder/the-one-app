@@ -1,8 +1,8 @@
 //! Restoring a whole network from a backup, on any machine and with no network running: `one restore`. The
 //! backups plugin writes a backup (`plugins/backups`), and this reads one with nothing but where it went and the
-//! recovery key of whoever added that place.
+//! recovery key of whoever added that destination.
 //!
-//! A place holds `objects/<id>`, each one blob of the network's bucket encrypted to the backup key
+//! A destination holds `objects/<id>`, each one blob of the network's bucket encrypted to the backup key
 //! (`cipher::backups`) for its id, and `backups/<name>`, each a backup's list of blobs encrypted for its name: a
 //! JSON object whose `blobs` are each a blob's `key` in the bucket, the `object` holding it, its `size` and its
 //! `sha256`. The name is when the backup was made, in milliseconds since 1970, so the newest is the last.
@@ -20,12 +20,12 @@ use sha2::{Digest, Sha256};
 
 use encryption_client::cipher;
 
-const USAGE: &str = "one restore --from <place> --to <bucket> --key-from <file> [--backup <name>]\n\n\
-    Restores a whole network from a backup into an empty bucket, with no network running. A place or a bucket is a\n\
+const USAGE: &str = "one restore --from <destination> --to <bucket> --key-from <file> [--backup <name>]\n\n\
+    Restores a whole network from a backup into an empty bucket, with no network running. A destination or a bucket is a\n\
     folder, or S3-compatible storage as https://<endpoint>/<bucket>[/<folder>], whose keys are in the file\n\
     --from-keys or --to-keys names, as ACCESS_KEY_ID=... and SECRET_ACCESS_KEY=... lines (the presigner's `secrets`\n\
-    has them). --key-from is a file holding the recovery key of whoever added the place. --backup names one of\n\
-    the place's backups, the newest if left out, and with --list the place's backups are listed instead.";
+    has them). --key-from is a file holding the recovery key of whoever added the destination. --backup names one of\n\
+    the destination's backups, the newest if left out, and with --list the destination's backups are listed instead.";
 
 /// How long a signed request to S3-compatible storage works for.
 const SIGNED_FOR: Duration = Duration::from_secs(300);
@@ -46,12 +46,12 @@ struct Blob {
 }
 
 /// Where blobs are: a folder, or a bucket of S3-compatible storage with a folder in it.
-enum Place {
+enum Destination {
     Folder(PathBuf),
     S3 { bucket: Box<Bucket>, credentials: Credentials, folder: String },
 }
 
-impl Place {
+impl Destination {
     fn at(said: &str, keys: Option<&String>) -> Result<Self> {
         if !(said.starts_with("https://") || said.starts_with("http://")) {
             return Ok(Self::Folder(PathBuf::from(said)));
@@ -199,12 +199,12 @@ pub async fn restore(args: &[String]) -> Result<String> {
             _ => bail!("{USAGE}"),
         };
     }
-    let from = Place::at(said.get("from").context(USAGE)?, said.get("from-keys"))?;
+    let from = Destination::at(said.get("from").context(USAGE)?, said.get("from-keys"))?;
     let backups = from.list("backups/").await?;
     if said.contains_key("list") {
         return Ok(backups.iter().map(|name| name.trim_start_matches("backups/")).collect::<Vec<_>>().join("\n"));
     }
-    let to = Place::at(said.get("to").context(USAGE)?, said.get("to-keys"))?;
+    let to = Destination::at(said.get("to").context(USAGE)?, said.get("to-keys"))?;
     let recovery = fs::read_to_string(said.get("key-from").context(USAGE)?).context("couldn't read --key-from")?;
     let key = cipher::backups(&cipher::recovered(&recovery)?);
 

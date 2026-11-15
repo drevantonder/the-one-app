@@ -1,6 +1,6 @@
 ---
 name: notifications
-description: Read before telling a person something when they aren't looking, or when asked about their notifications, their inbox, or which apps they hear from.
+description: Read before telling a person something when they aren't looking, or when asked about their notifications, their inbox, or which apps are allowed to notify them.
 ---
 
 Notifications reach a person on their devices and stay in their inbox until they clear them.
@@ -18,8 +18,8 @@ Notifications reach a person on their devices and stay in their inbox until they
   a sentence, no "Notification:" or emoji, and never a secret: it passes through Apple's and Google's servers.
 - `inbox` lists a person's notifications, newest first, with how many are unread. `read` and `clear` take an
   `id`, or do all of them without one.
-- `apps` lists the apps that have notified a person and whether they hear from each, and `hear` silences one or
-  brings it back. A silenced app's notifications aren't sent to them at all. These are the person's choices:
+- `apps` lists the apps that have notified a person and whether each is allowed, and `allow` mutes one or
+  brings it back. A muted app's notifications aren't sent to them at all. These are the person's choices:
   change them when they ask.
 - `register`, `unregister` and `devices` are for the app on a phone or in a browser, which registers where its
   push service reaches it, and its notification key: what it's sent is encrypted to that key, so Apple, Google

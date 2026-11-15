@@ -51,8 +51,8 @@ const presence = (thing) => (thing.here ? "This device" : thing.seen === "on" ? 
 /// A device's or a server's grey line: whether it's on, and that an update is ready for it.
 function about(thing) {
   const what = {
-    app: () => presence(thing) ?? `Let in ${on(thing.added)}`,
-    assistant: () => `An assistant, let in ${on(thing.added)}`,
+    app: () => presence(thing) ?? `Approved ${on(thing.added)}`,
+    assistant: () => `An assistant, approved ${on(thing.added)}`,
     browser: () => (thing.here ? "This device" : `A browser, signed in ${on(thing.added)}`),
     server: () => presence(thing),
   }[thing.kind ?? "server"]()
@@ -78,7 +78,7 @@ const update = (thing) => (thing.kind ? client({ update: true }).then(({ said })
 /// where a device that isn't in does. A device that's taken out forgets what it kept of theirs when it's next on.
 async function remove(device) {
   const question = device.here
-    ? { heading: "Sign out of this device?", text: "It stops acting as you, and has to be let in again.", action: "Sign Out" }
+    ? { heading: "Sign out of this device?", text: "It stops acting as you, and has to be approved again.", action: "Sign Out" }
     : { heading: `Remove ${device.name}?`, text: "It stops acting as you at once, and erases what it kept of yours when it's next on.", action: "Remove" }
   if (!(await confirm({ ...question, destructive: true }))) return
   if (await doing(() => call("sign-in_remove_device", { device: device.id })) && device.here) client({ leave: true })
@@ -86,7 +86,7 @@ async function remove(device) {
 
 /// Takes a server off the list of whoever it acts for. It no longer runs their apps.
 async function removeServer(server) {
-  if (!(await confirm({ heading: `Stop using ${server.name ?? "this server"}?`, text: "It stops running your apps. Another server takes its work.", action: "Stop Using", destructive: true }))) return
+  if (!(await confirm({ heading: `Remove ${server.name ?? "this server"}?`, text: "It stops running your apps. Another server takes its work.", action: "Remove", destructive: true }))) return
   doing(() => call("remove_server", { key: server.id }, { for: server.for }))
 }
 
@@ -144,7 +144,7 @@ function Detail(props) {
         </Section>
       </Show>
       <div class="readable">
-        <Show when={thing().kind} fallback={<Button variant="destructive" onClick={() => removeServer(thing())}>Stop Using</Button>}>
+        <Show when={thing().kind} fallback={<Button variant="destructive" onClick={() => removeServer(thing())}>Remove</Button>}>
           <Button variant={thing().here ? "outline" : "destructive"} onClick={() => remove(thing())}>{thing().here ? "Sign Out" : "Remove"}</Button>
         </Show>
       </div>
@@ -165,7 +165,7 @@ function Devices(props) {
   return (
     <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()} all={props.all} /></Show>}>
       <Screen heading="Devices" back onBack={leave} action={behind().length ? <Button loading={working() === "all"} onClick={all}>Update All</Button> : undefined}>
-        <Show when={props.all.devices.length} fallback={<Empty>Nothing acts as you yet.</Empty>}>
+        <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
           <List>
             <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
           </List>

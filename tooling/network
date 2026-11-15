@@ -95,8 +95,8 @@ start() {
   (cd "$root/core/server" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
-    let_in=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
-    ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$one" $let_in
+    approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
+    ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$one" $approve
     start "$1"
   fi
 }

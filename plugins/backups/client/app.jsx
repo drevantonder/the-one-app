@@ -1,5 +1,5 @@
-// Backups, a part of Settings: the places backups go, each saying when it was last backed up and how big it is, or
-// what's wrong; how often they're made and which are kept. A place opens beside the list with its backups,
+// Backups, a part of Settings: the destinations backups go, each saying when it was last backed up and how big it is, or
+// what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network, and the
 // network's key restores them.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
@@ -8,7 +8,7 @@ import { Button, call, changed, confirm, createListCollection, Empty, Field, Inp
 import "./app.css"
 
 const network = { for: "network" }
-const backups = createMemo(() => call("backups_places", {}, network).then(JSON.parse))
+const backups = createMemo(() => call("backups_destinations", {}, network).then(JSON.parse))
 changed(() => refresh(backups))
 
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
@@ -32,9 +32,9 @@ const took = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 
 /// A name as relation tuples say it, short: "users/andre" is "andre".
 const short = (who) => String(who ?? "").replace(/^(users|groups)\//, "")
 
-/// A place's grey line: what's wrong, or when it was last backed up and how big it is, or that it hasn't been yet.
-const about = (place) =>
-  place.problem ? (place.problem.kind === "check" ? "Changed since it was sent" : "Couldn't back up") : place.last ? `Backed up ${since(place.last.at)} · ${size(place.size)}` : "Not backed up yet"
+/// A destination's grey line: what's wrong, or when it was last backed up and how big it is, or that it hasn't been yet.
+const about = (destination) =>
+  destination.problem ? (destination.problem.kind === "check" ? "Changed since it was sent" : "Couldn't back up") : destination.last ? `Backed up ${since(destination.last.at)} · ${size(destination.size)}` : "Not backed up yet"
 
 /// Does something, says why if it couldn't, and shows everything as it is after. → whether it was done.
 async function doing(does) {
@@ -66,47 +66,47 @@ const schedules = createListCollection({
     { value: "hour", label: "Every Hour" },
     { value: "day", label: "Every Day" },
     { value: "week", label: "Every Week" },
-    { value: "never", label: "Only When Asked" },
+    { value: "never", label: "Manually" },
   ],
 })
 
-/// A place, opened: what's wrong with it, where it is, its backups, Check and Stop Backing Up Here.
-function Place(props) {
-  const place = () => props.place
+/// A destination, opened: what's wrong with it, where it is, its backups, Check and Stop Backing Up Here.
+function Destination(props) {
+  const destination = () => props.destination
   const stop = async () => {
-    const question = { heading: `Stop backing up to ${place().name}?`, text: "What's there now stays there.", action: "Stop Backing Up", destructive: true }
+    const question = { heading: `Stop backing up to ${destination().name}?`, text: "What's there now stays there.", action: "Stop Backing Up", destructive: true }
     if (!(await confirm(question))) return
-    if (await doing(() => call("backups_remove", { place: place().name }, network))) setOpen()
+    if (await doing(() => call("backups_remove", { destination: destination().name }, network))) setOpen()
   }
-  const check = press("check", async () => toast(await call("backups_check", { place: place().name }, network)))
+  const check = press("check", async () => toast(await call("backups_check", { destination: destination().name }, network)))
   return (
-    <Screen heading={place().name} back>
-      <Show when={place().problem}>
-        <Problem heading={place().problem.kind === "check" ? `What's at ${place().name} was changed` : `Couldn't back up to ${place().name}`} text={place().problem.kind === "check" ? "Part of the newest backup isn't there as it was sent. Back up now to send it again." : place().problem.text} action={<Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { place: place().name }, network))}>Back Up Now</Button>} />
+    <Screen heading={destination().name} back>
+      <Show when={destination().problem}>
+        <Problem heading={destination().problem.kind === "check" ? `What's at ${destination().name} was changed` : `Couldn't back up to ${destination().name}`} text={destination().problem.kind === "check" ? "Part of the newest backup isn't there as it was sent. Back up now to send it again." : destination().problem.text} action={<Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>} />
       </Show>
       <List>
-        <Row heading={place().kind === "folder" ? "Folder" : "Bucket"} text={place().where} />
-        <Show when={place().machine}>
-          <Row heading="On" text={place().machine} />
+        <Row heading={destination().kind === "folder" ? "Folder" : "Bucket"} text={destination().where} />
+        <Show when={destination().machine}>
+          <Row heading="On" text={destination().machine} />
         </Show>
-        <Show when={place().item}>
-          <Row heading="Keys" text={`${place().item}, in Everyone's Vault`} />
+        <Show when={destination().item}>
+          <Row heading="Keys" text={`${destination().item}, in Everyone's Vault`} />
         </Show>
-        <Row heading="Size" text={size(place().size)} />
+        <Row heading="Size" text={size(destination().size)} />
         <Row heading="Restored With" text="Everyone's recovery key, or an owner's device that holds Everyone's key" />
       </List>
-      <Show when={place().backups.length}>
+      <Show when={destination().backups.length}>
         <Section heading="Backups">
           <List>
-            <For each={place().backups} keyed={(backup) => backup.name}>
+            <For each={destination().backups} keyed={(backup) => backup.name}>
               {(backup) => <Row heading={when(backup().at)} text={`${size(backup().bytes)} · ${size(backup().sent_bytes)} sent · ${took(backup().took)}`} />}
             </For>
           </List>
         </Section>
       </Show>
       <div class="actions">
-        <Show when={place().backups.length}>
-          <Button variant="secondary" onClick={() => setRestoring(place())}>Restore</Button>
+        <Show when={destination().backups.length}>
+          <Button variant="secondary" onClick={() => setRestoring(destination())}>Restore</Button>
           <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>
         </Show>
         <Button variant="destructive" onClick={stop}>Stop Backing Up Here</Button>
@@ -115,7 +115,7 @@ function Place(props) {
   )
 }
 
-/// Adds a place: a folder on one of the network's machines, as on a disk plugged into it, or S3-compatible storage
+/// Adds a destination: a folder on one of the network's machines, as on a disk plugged into it, or S3-compatible storage
 /// whose keys are an item in Everyone's Vault. It's tried before it's added, so a typo shows here.
 function AddSheet(props) {
   const [kind, setKind] = createSignal("folder")
@@ -128,7 +128,7 @@ function AddSheet(props) {
     setWorking()
   }
   return (
-    <Sheet heading="Add Place" open={adding()} onClose={() => setAdding(false)}>
+    <Sheet heading="Add Destination" open={adding()} onClose={() => setAdding(false)}>
       <form onSubmit={add}>
         <RadioGroup name="kind" value={kind()} onChange={setKind} options={[{ value: "folder", label: "A Disk" }, { value: "s3", label: "S3-Compatible Storage" }]} />
         <Show when={kind() === "folder"}>
@@ -168,10 +168,10 @@ function AddSheet(props) {
 /// Brings back what a backup holds that's gone: someone's data, what one app keeps for them, or one file. What's
 /// there now stays as it is.
 function RestoreSheet() {
-  const place = () => restoring()
+  const destination = () => restoring()
   const [what, setWhat] = createSignal("whose")
   const choices = createMemo(async () => {
-    if (!place()) return { whose: [], apps: [] }
+    if (!destination()) return { whose: [], apps: [] }
     const [people, groups, store] = await Promise.all(["sign-in_everyone", "relations_groups", "home_store"].map((tool) => call(tool).then(JSON.parse, () => [])))
     const whose = [
       ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
@@ -181,7 +181,7 @@ function RestoreSheet() {
     const apps = [...new Map(store.map((app) => [app.plugin.split("/").pop(), app.name])).entries()].map(([value, label]) => ({ value, label }))
     return { whose: createListCollection({ items: whose }), apps: createListCollection({ items: apps }) }
   })
-  const backupsOf = () => createListCollection({ items: place().backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
+  const backupsOf = () => createListCollection({ items: destination().backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
   const restore = async (event) => {
     event.preventDefault()
     const typed = Object.fromEntries(new FormData(event.target))
@@ -189,7 +189,7 @@ function RestoreSheet() {
     setWorking("restore")
     const said = await doing(async () => {
       const each = []
-      for (const one of blobs) each.push(await call("backups_restore", { place: place().name, backup: typed.backup, blobs: one }, network))
+      for (const one of blobs) each.push(await call("backups_restore", { destination: destination().name, backup: typed.backup, blobs: one }, network))
       return each.join("\n")
     })
     setWorking()
@@ -199,18 +199,18 @@ function RestoreSheet() {
     }
   }
   return (
-    <Sheet heading="Restore" open={!!place()} onClose={() => setRestoring()}>
-      <Show when={place()}>
+    <Sheet heading="Restore" open={!!destination()} onClose={() => setRestoring()}>
+      <Show when={destination()}>
         <form onSubmit={restore}>
           <Field label="From">
-            <Select.Root name="backup" collection={backupsOf()} defaultValue={[place().backups[0]?.name]} />
+            <Select.Root name="backup" collection={backupsOf()} defaultValue={[destination().backups[0]?.name]} />
           </Field>
           <Field label="What">
             <RadioGroup value={what()} onChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
           </Field>
           <Loading fallback={<Skeleton rows={1} />}>
             <Show when={what() !== "file"}>
-              <Field label="Whose">
+              <Field label="Owner">
                 <Select.Root name="whose" collection={choices().whose} required />
               </Field>
             </Show>
@@ -234,20 +234,20 @@ function RestoreSheet() {
 }
 
 function Backups(props) {
-  const places = () => props.all.places
-  const opened = () => places().find((place) => place.name === open())
+  const destinations = () => props.all.destinations
+  const opened = () => destinations().find((destination) => destination.name === open())
   const now = press("now", () => call("backups_now", {}, network))
   const schedule = ({ value: [every] }) => every && every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
   return (
     <>
-      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={places().length}><Empty>Pick a place to see its backups.</Empty></Show>}><Place place={opened()} /></Show>}>
-        <Screen heading="Backups" back onBack={leave} action={<Show when={places().length}><Button loading={working() === "now"} onClick={now}>Back Up Now</Button></Show>}>
-          <Show when={places().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Place</Button>}>Nothing is backed up yet.</Empty>}>
+      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Destination destination={opened()} /></Show>}>
+        <Screen heading="Backups" back onBack={leave} action={<Show when={destinations().length}><Button loading={working() === "now"} onClick={now}>Back Up Now</Button></Show>}>
+          <Show when={destinations().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
-              <For each={places()} keyed={(place) => place.name}>
-                {(place) => <Row heading={place().name} text={<span class={{ warn: !!place().problem }}>{about(place())}</span>} current={open() === place().name} onClick={() => setOpen(place().name)} />}
+              <For each={destinations()} keyed={(destination) => destination.name}>
+                {(destination) => <Row heading={destination().name} text={<span class={{ warn: !!destination().problem }}>{about(destination())}</span>} current={open() === destination().name} onClick={() => setOpen(destination().name)} />}
               </For>
-              <Row heading="Add Place" onClick={() => setAdding(true)} />
+              <Row heading="Add Destination" onClick={() => setAdding(true)} />
             </List>
             <Section heading="Schedule">
               <Field label="Back Up" hint={props.all.kept}>

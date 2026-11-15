@@ -65,7 +65,7 @@ defmodule Vault do
       description: "The sites its secrets are sent to, like api.example.com"
     }
 
-    secret = %{type: "string", format: "secret", opened_by: "opened_by"}
+    secret = %{type: "string", format: "secret", unlocked_on: "unlocked_on"}
 
     [
       %{
@@ -215,7 +215,7 @@ defmodule Vault do
         description: """
         Chooses the servers that open your Vault: they hold its key, and run what uses your secrets. `servers` is
         all of them from now on, so one left out no longer opens it. Only a device that holds your key does this
-        (`encryption_let_in`), and a Vault no server opens keeps no secret.
+        (`encryption_approve`), and a Vault no server opens keeps no secret.
         """,
         inputs: %{
           type: "object",
@@ -223,12 +223,12 @@ defmodule Vault do
             servers: %{
               type: "array",
               items: %{type: "string"},
-              description: "The servers' keys, as `opened_by` lists them"
+              description: "The servers' keys, as `unlocked_on` lists them"
             },
             keys: %{
               type: "string",
               format: "artifact-keys",
-              opened_by: "opened_by",
+              unlocked_on: "unlocked_on",
               description: "Your device fills this in"
             }
           },
@@ -236,13 +236,13 @@ defmodule Vault do
         }
       },
       %{
-        name: "opened_by",
+        name: "unlocked_on",
         read_only: true,
         description: "Says which servers open your Vault, and which may be chosen to.",
         inputs: %{type: "object", properties: %{}}
       },
       %{
-        name: "back",
+        name: "oauth_callback",
         by_link: true,
         description:
           "Finishes a sign-in to an outside service. The network's edge calls this when the service sends its person back.",
@@ -368,7 +368,7 @@ defmodule Vault do
           client
         end)
 
-      OAuth.link(service, client["client_id"], address <> "/vault/back", state, verifier)
+      OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)
     end)
   end
 
@@ -406,12 +406,12 @@ defmodule Vault do
   end
 
   @impl true
-  def call("opened_by", _inputs, call), do: encryption(call).opened_by(call, made(call))
+  def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, made(call))
 
   def call("grant", %{"servers" => _servers} = inputs, call) do
     keys =
       inputs["keys"] ||
-        raise "Which servers open your Vault is chosen from a device that holds your key: in the Vault's app there, or with `one vault grant` on it."
+        raise "Which servers open your Vault is chosen from a trusted device: in the Vault's app there, or with `one vault grant` on it."
 
     chosen = encryption(call).choose(call, made(call), keys)
 
@@ -676,7 +676,7 @@ defmodule Vault do
   # Whoever the service sent back is nobody the network knows: what says whose sign-in this finishes is its
   # `state`, which only the browser that began it was given, and which starts with whose it is.
   # A server that passed this on has checked that, and asks for whoever's it is, by nobody.
-  def call("back", %{"state" => state} = inputs, %Call{actor: by} = call) do
+  def call("oauth_callback", %{"state" => state} = inputs, %Call{actor: by} = call) do
     with [whose, _random] <- String.split(state, "."),
          {:ok, owner} <- Base.url_decode64(whose, padding: false),
          true <- User.owner?(owner),
@@ -696,7 +696,7 @@ defmodule Vault do
         service = JSON.decode!(sign_in["service"])
         if why = inputs["error"], do: raise("#{service["name"]} didn't sign you in: #{why}.")
         code = inputs["code"] || raise "#{service["name"]} sent no code back."
-        tokens = OAuth.exchange(service, sign_in["client"], code, sign_in["verifier"], address() <> "/vault/back")
+        tokens = OAuth.exchange(service, sign_in["client"], code, sign_in["verifier"], address() <> "/vault/callback")
         name = signed_in(sign_in["item"], service, tokens)
 
         transaction(call, artifact, fn db ->

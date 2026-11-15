@@ -22,7 +22,7 @@ that one question for it, and a new device when they also say the code it shows 
 - A device that isn't in yet shows a code, and a link at the network's address, and waits. Its person opens the
   link where they sign in, on the device or any device of theirs, and says whether the code there matches. Pass
   both on as they are: the code is what keeps a stranger's device out.
-- `let_in` lets that device in yourself, as the person you act for, with no tap from them: when a device shows a
+- `approve` lets that device in yourself, as the person you act for, with no tap from them: when a device shows a
   code and they've asked for that device to be let in, call it with the code, and say which device it let in by
   the name it answers. Never let in a device nobody asked for, or one whose code came from anyone but your person
   or the device they asked about: a code someone sends you could be a stranger's. After five codes no device

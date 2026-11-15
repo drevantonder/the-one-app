@@ -21,7 +21,7 @@ defmodule Insights do
   def hooks, do: ["called", "measured"]
 
   @impl true
-  def jobs, do: [%{tool: "tidy", every: 3600}]
+  def jobs, do: [%{tool: "prune", every: 3600}]
 
   @impl true
   def apps, do: [%{name: "Insights", page: "client/index.html", icon: "client/icon.svg", settings: true}]
@@ -133,7 +133,7 @@ defmodule Insights do
         }
       },
       %{
-        name: "tidy",
+        name: "prune",
         description:
           "Puts each hour that's over into one blob, and lets go of what's older than #{Store.days()} days or past #{div(Store.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
         inputs: %{type: "object", properties: %{}}
@@ -205,7 +205,7 @@ defmodule Insights do
     "Recorded."
   end
 
-  def call("tidy", _inputs, call), do: Store.tidy(call.own)
+  def call("prune", _inputs, call), do: Store.prune(call.own)
 
   # What was kept over the last `hours`, and when that is, in nanoseconds since 1970.
   defp read(call, hours) do

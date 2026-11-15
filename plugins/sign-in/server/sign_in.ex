@@ -94,8 +94,8 @@ defmodule SignIn do
         }
       },
       %{
-        name: "let_in",
-        description: "Lets in a device that shows a code, as yours: one you were asked to let in",
+        name: "approve",
+        description: "Approves a device that shows a code, as yours: one you were asked to approve",
         inputs: %{
           type: "object",
           properties: %{code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"}},
@@ -104,7 +104,7 @@ defmodule SignIn do
       },
       %{
         name: "remove_device",
-        description: "Takes one of your devices, assistants or browsers out. It's nobody's from then on",
+        description: "Removes one of your devices, assistants or browsers. It's signed out from then on",
         inputs: %{
           type: "object",
           properties: %{device: %{type: "string", description: "The device's id, as `devices` lists it"}},
@@ -195,14 +195,14 @@ defmodule SignIn do
     "You go by #{called} now."
   end
 
-  def call("let_in", %{"code" => code}, call) do
-    %{"let_in" => name} = ask(%{ask: "let_in", who: person(call), code: code})
+  def call("approve", %{"code" => code}, call) do
+    %{"approved" => name} = ask(%{ask: "approve", who: person(call), code: code})
     "Let in: #{name} is yours now."
   end
 
   def call("remove_device", %{"device" => device}, call) do
     %{"removed" => name} = ask(%{ask: "remove_device", who: person(call), device: device})
-    "#{name} is out, and is nobody's from now on."
+    "#{name} is removed, and signed out from now on."
   end
 
   def call("remove_passkey", %{"passkey" => passkey}, call) do

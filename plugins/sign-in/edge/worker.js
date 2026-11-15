@@ -61,7 +61,7 @@ async function mcp(request, auth, url) {
   // An assistant somewhere else shows the token it was given when a person let it in. One they've since removed
   // is nobody's, and is asked to be let in again.
   const resource = `${url.origin}/mcp`;
-  const let_in = requireMcpAuth(
+  const approve = requireMcpAuth(
     auth,
     async (request, claims) => {
       const answer = await forward(await request.text(), await assistant(claims.azp, claims.sub), [`${claims.who}/`, NETWORK]);
@@ -71,7 +71,7 @@ async function mcp(request, auth, url) {
     },
     { resource },
   );
-  return let_in(request);
+  return approve(request);
 }
 
 /**
