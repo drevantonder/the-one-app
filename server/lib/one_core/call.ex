@@ -139,6 +139,29 @@ defmodule OneCore.Call do
   end
 
   @doc """
+  Whether whoever asked owns whoever this call runs for: themselves, or the group or the network they asked for,
+  as its `owner`. It's who changes what's added for them, so a plugin asks it before changing what's a group's
+  or the network's as a whole, where being a member isn't enough.
+  """
+  def owns?(%__MODULE__{for: who, by: who}), do: true
+  def owns?(%__MODULE__{by: nil}), do: false
+
+  def owns?(%__MODULE__{for: who, by: by}),
+    do: Hooks.decide("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}) == :ok
+
+  @doc """
+  The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
+  `plugin` it is, as its artifact's name, who it was `added` for, its `apps` and its `widgets`. A home page is
+  drawn from these.
+  """
+  def plugins(%__MODULE__{for: who}) do
+    for at <- Enum.reverse(Plugins.chain(who)), {name, version} <- Plugins.versions([at]), into: %{} do
+      {name, %{name: name, plugin: version.artifact, added: at, apps: version.apps, widgets: version.widgets}}
+    end
+    |> Map.values()
+  end
+
+  @doc """
   A process that keeps running on this server between calls: the GenServer `module`, which is one of this call's
   plugin's or of a plugin it uses. There's one for each `key`, started when first asked for, with `argument` given
   to its `init/1`, and found again by every call after. It carries on through its plugin's updates as a service

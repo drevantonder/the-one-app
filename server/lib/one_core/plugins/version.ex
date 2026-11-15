@@ -19,6 +19,10 @@ defmodule OneCore.Plugins.Version do
 
   `kit` is the code of the kit its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
+  `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address, and `settings`, whether
+  it's a part of Settings. `widgets` lists its widgets: each one's `name`, the `tool` that answers its layout, and
+  the `sizes` it comes in.
+
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, and what it
   `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
@@ -26,8 +30,11 @@ defmodule OneCore.Plugins.Version do
   """
   alias OneCore.{App, Hooks, Server, Skills}
 
-  @enforce_keys [:under, :plugin, :tools, :apps, :uses, :services, :hooks, :jobs, :code]
-  defstruct [:under, :plugin, :tools, :apps, :uses, :services, :hooks, :jobs, :code, :kit, :artifact]
+  @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code]
+  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code, :kit, :artifact]
+
+  # The sizes a widget comes in, which are a phone's own: columns by rows of a home page's grid.
+  @sizes ~w(2x2 4x2 4x4)
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
   @names 4096
@@ -171,11 +178,12 @@ defmodule OneCore.Plugins.Version do
   defp describe(under, modules, rest) do
     case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
       [] when modules == [] ->
-        {:ok, version(under, nil, [], [], [], rest)}
+        {:ok, version(under, nil, [], [], [], [], rest)}
 
       [plugin] ->
         tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
+        widgets = if function_exported?(plugin, :widgets, 0), do: plugin.widgets(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
         hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
         jobs = if function_exported?(plugin, :jobs, 0), do: plugin.jobs(), else: []
@@ -188,6 +196,11 @@ defmodule OneCore.Plugins.Version do
           not (is_list(apps) and Enum.all?(apps, &app?(&1, rest))) ->
             {:error,
              "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of app/ and icon a file here"}
+
+          not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
+            {:error,
+             "widgets/0 gives a list of %{name: ..., tool: ..., sizes: [...]}: one of this plugin's tools that only " <>
+               "reads, and the sizes it comes in, of #{Enum.join(@sizes, ", ")}"}
 
           not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
             {:error, "uses/0 gives a list of plugins' names"}
@@ -208,7 +221,7 @@ defmodule OneCore.Plugins.Version do
               for tool <- tools,
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
-            version = version(under, plugin, tools, apps, Enum.sort(services), rest)
+            version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest)
 
             with {:ok, jobs} <- jobs(jobs, tools),
                  do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), jobs: jobs}}
@@ -219,7 +232,8 @@ defmodule OneCore.Plugins.Version do
     end
   rescue
     error ->
-      {:error, "tools/0, apps/0, uses/0, hooks/0, jobs/0 or a service's needs/0 raised: " <> Exception.message(error)}
+      {:error,
+       "tools/0, apps/0, widgets/0, uses/0, hooks/0, jobs/0 or a service's needs/0 raised: " <> Exception.message(error)}
   end
 
   # A scheduled job calls one of the plugin's tools with inputs the tool takes, so one that could never run is
@@ -248,17 +262,21 @@ defmodule OneCore.Plugins.Version do
   defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
-  defp version(under, plugin, tools, apps, services, rest) do
+  defp version(under, plugin, tools, apps, widgets, services, rest) do
     apps =
-      for %{name: name, page: page, icon: icon} <- apps do
-        %{name: name, page: page, icon: "data:#{kind(icon)};base64,#{Base.encode64(rest[icon])}"}
+      for %{name: name, page: page, icon: icon} = app <- apps do
+        icon = "data:#{kind(icon)};base64,#{Base.encode64(rest[icon])}"
+        %{name: name, page: page, icon: icon, settings: app[:settings] == true}
       end
+
+    widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
 
     %__MODULE__{
       under: under,
       plugin: plugin,
       tools: tools,
       apps: apps,
+      widgets: widgets,
       uses: [],
       services: services,
       hooks: [],
@@ -292,6 +310,12 @@ defmodule OneCore.Plugins.Version do
     do: client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page) and is_map_key(rest, icon)
 
   defp app?(_, _), do: false
+
+  # A widget is drawn from what one of the plugin's tools answers, which a home page asks again and again.
+  defp widget?(%{name: name, tool: tool, sizes: [_ | _] = sizes}, tools) when is_binary(name),
+    do: Enum.any?(tools, &(&1.name == tool and &1[:read_only] == true)) and sizes -- @sizes == []
+
+  defp widget?(_, _), do: false
 
   defp tool?(%{name: name, description: description, inputs: %{}}) when is_binary(name) and is_binary(description),
     do: name =~ ~r/^[a-z][a-z0-9_]*$/

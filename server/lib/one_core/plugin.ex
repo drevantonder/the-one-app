@@ -86,6 +86,10 @@ defmodule OneCore.Plugin do
     makes is the group's, it reaches what the group may, and `call.by` is who asked. A tool that the holder of a
     sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to what
     `reach` gives it.
+  - `OneCore.Call.owns?(call)` says whether whoever asked owns whoever the call runs for: themselves, or the
+    group or the network as its `owner`. A tool that changes what's a group's as a whole asks it.
+  - `OneCore.Call.plugins(call)` lists the plugins whoever the call runs for finds, theirs and the network's,
+    each with who it was added for, its apps and its widgets. A home page is drawn from it.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added for, or
@@ -153,6 +157,7 @@ defmodule OneCore.Plugin do
       @impl true
       def apps, do: [%{name: "Hello", page: "app/index.html", icon: "icon.svg"}]
 
+  - An app that's a part of Settings says `settings: true`: it's then on Settings, and on no home page.
   - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
     2.0 with the kit, and its source is the folder `app/`: each `.html` there is a page, whose script is the
     app's, and the rest is whatever the app's made of. The kit gives every page its look, so a page is no more
@@ -191,6 +196,47 @@ defmodule OneCore.Plugin do
     and sends `ui/notifications/request-teardown` when its user goes back out of it.
   - The client sends an app `notifications/one/changed` when what it was answered has changed. The app asks
     again and draws what it's answered.
+
+  A widget is what the plugin shows on a home page at a glance: a tool call, drawn. `widgets/0`, if the plugin
+  has one, lists them:
+
+      @impl true
+      def widgets, do: [%{name: "Hello", tool: "glance", sizes: ["2x2", "4x2"]}]
+
+      def call("glance", %{"size" => size}, call) do
+        greeted = length(OneCore.Artifact.list(call.own, "greeted/"))
+        %{part: "column", parts: [%{part: "stat", value: greeted, label: "greeted"}] ++ more(size)}
+      end
+
+  - A widget names one of the plugin's `tool`s that only reads, its `name` on the card, and the `sizes` it comes
+    in, a phone's own: `2x2`, `4x2` and `4x4`, columns by rows of a home page's grid. The smallest is one fact,
+    the wide one a few rows, and the large one those rows with a detail each, or a chart.
+  - The tool is called with the `size` to draw, for whoever's home page it's on, and answers a layout: one
+    part, which holds the rest. A part is a map that says which `part` it is, from this list, and nothing in a
+    layout is ever markup. Every client draws the same layout: the kit's `Widget` on a home page, and a phone's
+    own home screen once it has widgets. A client asks again when something changed, and when the page is
+    returned to.
+  - `column` and `row` hold `parts`, with a `gap` between them in points if not the usual. Any part can say
+    `grow: true` to take the room that's left, and a `width` in points. `align: "center"` centres what a column
+    or row holds, and `dim: true` fades it, for what's off.
+  - `text` says `text`, in a `size` (`xl`, `lg`, `sm`, `xs`) and `weight` (`medium`, `bold`) if not the usual,
+    cut to `lines`. `time` says when `at` was, in milliseconds since 1970, as `style`: `relative` (the
+    usual), `clock` or `date`.
+  - `stat` is one figure: its `value`, a `unit` beside it and a `label` under it. `gauge` is a ring and
+    `progress` a bar, each filled to `value`, from 0 to 1, with a `label`. `spark` is a small line of `values`
+    up to `max`, and `chart` is bars of `values` over their `labels`, or with `kind: "line"` a line.
+  - `item` is a row of a list: its `title`, a grey `subtitle`, and what it ends with, `trailing` text or a time
+    `at`. `divider` is a line between parts.
+  - `icon` is drawn from an SVG `path` in a box of 24, with a `badge`, another path, at its corner: a brand's
+    real logo, never a generic glyph. `image` shows a picture by its `url`, a `data:` address, `width` by
+    `height`, `round` for a face.
+  - `button` says its `label` and calls the plugin's `tool` with `inputs` when it's pressed. `switch` says its
+    `label` and whether it's `on`, and calls `tool` with `inputs` and the new `on`. The widget is asked for again
+    after.
+  - Colour is for what needs someone: `tone: "warn"` or `"bad"` on a part, and `"muted"` for what matters
+    less. Fine is plain.
+  - The first part can say `title: false` when it names itself, and the card leaves its title out. A widget
+    with nothing to show yet answers one muted `text`.
 
   A service is a part of the plugin that runs only on the machines that have what it needs, and keeps running
   between calls: to watch for something, hold a connection open or keep a program going. It's a module of the
@@ -295,10 +341,11 @@ defmodule OneCore.Plugin do
   @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map}]
   @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
   @callback apps() :: [%{name: String.t(), page: String.t(), icon: String.t()}]
+  @callback widgets() :: [%{name: String.t(), tool: String.t(), sizes: [String.t()]}]
   @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]
   @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-  @optional_callbacks tools: 0, call: 3, apps: 0, uses: 0, hooks: 0, hook: 3, jobs: 0, schedule: 3
+  @optional_callbacks tools: 0, call: 3, apps: 0, widgets: 0, uses: 0, hooks: 0, hook: 3, jobs: 0, schedule: 3
 end
