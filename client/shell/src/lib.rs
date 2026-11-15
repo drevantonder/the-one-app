@@ -185,7 +185,8 @@ fn client(views: State<'_, Views>) -> Value {
 /// off` do. Gives what they say.
 #[tauri::command]
 async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
-    let done = if on { ::client::serving::on(&views.client).await } else { ::client::serving::off(&views.client).await };
+    let done =
+        if on { ::client::serving::on(&views.client).await } else { ::client::serving::off(&views.client).await };
     done.map_err(|error| format!("{error:#}"))
 }
 
@@ -248,16 +249,18 @@ async fn enter(app: AppHandle) {
     }
 }
 
-/// Where the window starts, as its page asks once it has opened: `{}` for its person's home, `{signIn}` for the
-/// link this device is let in by while it's nobody's, or `{unreached}`, what went wrong as the network's address
-/// didn't answer.
+/// Where the window starts, as its page asks once it has opened, which waits for the client to open: `{}` for its
+/// person's home, `{signIn}` for the link this device is let in by while it's nobody's, or `{unreached}`, what went
+/// wrong as the network's address didn't answer.
 #[tauri::command]
-fn start(app: AppHandle) -> Value {
-    match app.state::<Start>().0.lock().expect("no view panics").clone() {
+async fn start(app: AppHandle) -> Result<Value, ()> {
+    let mut opened = app.state::<Start>().0.subscribe();
+    let opened = opened.wait_for(Option::is_some).await.map_err(drop)?.clone();
+    Ok(match opened.expect("it waited for one") {
         Opened::In => json!({}),
         Opened::NotIn(link) => json!({"signIn": link.as_str()}),
         Opened::Unreached(why) => json!({"unreached": why}),
-    }
+    })
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
@@ -276,8 +279,8 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
 }
 
-/// Where the window starts, as the client last opened (`starts`).
-struct Start(Mutex<Opened>);
+/// Where the window starts, as the client last opened (`starts`): nothing until it first has.
+struct Start(tokio::sync::watch::Sender<Option<Opened>>);
 
 /// How the client opened: in its network, or not in it yet, or not at all, since the network's address didn't
 /// answer, which says what went wrong. While the device isn't in, the window starts on the link it's let in by,
@@ -367,7 +370,8 @@ async fn starts(app: &AppHandle, why: Option<NotLetIn>) -> Option<NotIn> {
             (Opened::Unreached(error.to_string()), None)
         }
     };
-    *app.state::<Start>().0.lock().expect("no view panics") = opened;
+    eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
+    app.state::<Start>().0.send_replace(Some(opened));
     not_in
 }
 
@@ -403,8 +407,10 @@ async fn let_in(app: AppHandle, mut not_in: NotIn) {
 fn stays(app: &AppHandle, to: &Url) -> bool {
     let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())
         || to.host_str().is_some_and(|host| host.ends_with(".localhost"));
-    let start = match &*app.state::<Start>().0.lock().expect("no view panics") {
-        Opened::NotIn(start) => (start.origin(), start.path(), start.query()) == (to.origin(), to.path(), to.query()),
+    let start = match &*app.state::<Start>().0.borrow() {
+        Some(Opened::NotIn(start)) => {
+            (start.origin(), start.path(), start.query()) == (to.origin(), to.path(), to.query())
+        }
         _ => false,
     };
     if !own && !start {
@@ -426,14 +432,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(notifications::plugin())
         .setup(move |app| {
-            app.manage(Start(Mutex::new(Opened::In)));
+            app.manage(Start(tokio::sync::watch::Sender::new(None)));
             app.manage(started);
-            // The window opens at home, which a device that isn't in its network yet goes on from to the page that
-            // signs it in. A phone opens the window again at the same address as it's made again (a change of
-            // text size), so that's home too, which asks where to go now.
-            if let Some(not_in) = tauri::async_runtime::block_on(starts(app.handle(), None)) {
-                tauri::async_runtime::spawn(let_in(app.handle().clone(), not_in));
-            }
+            // The window opens at home at once, which draws the mark until the client has opened behind it, and
+            // then goes on to where it starts: a device that isn't in its network yet to the page that signs it
+            // in. A phone opens the window again at the same address as it's made again (a change of text size),
+            // so that's home too, which asks where to go now.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(not_in) = starts(&handle, None).await {
+                    let_in(handle, not_in).await
+                }
+            });
             let goes = app.handle().clone();
             let page = HOME.parse().expect("the home screen has an address");
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page))
@@ -441,6 +451,7 @@ pub fn run() {
             #[cfg(desktop)]
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0);
             window.build()?;
+            eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("oneapp", |context, request, responder| {

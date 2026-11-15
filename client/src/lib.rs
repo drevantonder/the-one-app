@@ -320,11 +320,15 @@ async fn ask_address(address: &str, key: &SecretKey, path: &str, body: Value) ->
 impl Told {
     /// How long the pass this client has lasts before it's renewed, by when it says it ends: nothing if it has none.
     fn left(&self) -> Duration {
+        self.ends().duration_since(SystemTime::now() + RENEW).unwrap_or_default()
+    }
+
+    /// When the pass this client has ends, as it says: at once if it has none.
+    fn ends(&self) -> SystemTime {
         let said = self.pass.as_ref().and_then(|pass| BASE64URL_NOPAD.decode(pass.as_bytes()).ok());
         let until =
             said.and_then(|said| serde_json::from_slice::<Value>(&said).ok()).and_then(|said| said["until"].as_u64());
-        let ends = UNIX_EPOCH + Duration::from_millis(until.unwrap_or_default());
-        ends.duration_since(SystemTime::now() + RENEW).unwrap_or_default()
+        UNIX_EPOCH + Duration::from_millis(until.unwrap_or_default())
     }
 
     /// Asks the network's address for this device's pass, signed with its key, and keeps it in `home` with whose
@@ -673,14 +677,19 @@ impl Client {
         let fills = std::sync::Mutex::default();
         let client =
             Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering, fills });
-        // A pass that's about to end is renewed before anything is asked with it, and the next while this runs.
+        // A pass that has ended is renewed before anything is asked with it. One that's about to end, or that a new
+        // build hasn't renewed yet, is renewed behind what's asked, which it's still good for, so opening waits on
+        // nothing over the network. Then the next while this runs.
         if renews {
-            let left = match client.network().left() {
-                left if !left.is_zero() && said => left,
-                _ => match client.renew().await {
+            let left = if client.network().ends() <= SystemTime::now() {
+                match client.renew().await {
                     Err(error) if error.is::<NotIn>() => return Err(error),
                     renewed => renewed.unwrap_or(AGAIN),
-                },
+                }
+            } else if said {
+                client.network().left()
+            } else {
+                Duration::ZERO
             };
             tokio::spawn(renewing(Arc::downgrade(&client), left));
         }
@@ -703,9 +712,14 @@ impl Client {
     /// renewed.
     async fn renew(&self) -> Result<Duration> {
         let mut told = self.network();
-        match self.request("one/pass", json!({"build": said()})).await {
-            Ok(given) => told.took(&given, &self.home)?,
-            Err(_) => told.admit(&self.key, &self.home).await?,
+        // No server takes a pass that has ended, so that's asked at the address straight away.
+        let given = match told.ends() > SystemTime::now() {
+            true => self.request("one/pass", json!({"build": said()})).await.ok(),
+            false => None,
+        };
+        match given {
+            Some(given) => told.took(&given, &self.home)?,
+            None => told.admit(&self.key, &self.home).await?,
         }
         let pass = told.pass.clone().context("this device was given no pass")?;
         let network = Network { address: told.address.clone(), pass };

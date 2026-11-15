@@ -50,6 +50,8 @@ scheme.addEventListener("change", dress)
 /// Says over the home pages that no server is answering: with nothing to show, as what needs its user now, and
 /// over what this device kept, as what can wait. Fine is silent.
 function problem() {
+  // A problem is said in place of the mark.
+  if (unreached !== null || unlisted) document.getElementById("opening").hidden = true
   const box = document.getElementById("problem")
   const nothing = Boolean(unlisted) || unreached !== null
   box.hidden = (answering && !nothing) || Boolean(history.state)
@@ -143,8 +145,11 @@ function opened(view) {
     const name = view.app === HOME ? "home" : view.app.split("/")[0]
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
-    // The device hears its person's notifications once they see their home.
-    if (view.app === HOME) invoke("hear")
+    // The device hears its person's notifications once they see their home, which has drawn over the mark.
+    if (view.app === HOME) {
+      document.getElementById("opening").hidden = true
+      invoke("hear")
+    }
   }))
 }
 

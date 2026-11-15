@@ -3,13 +3,13 @@
   "productName": "The One App",
   "identifier": "app.theone.client",
   "build": {
-    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "../../ui/src/tokens.css", "../../ui/src/ui.css"]
+    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "../../icons/Logo.png", "../../ui/src/tokens.css", "../../ui/src/ui.css"]
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [],
     "security": {
-      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src data:; frame-src oneapp: http://*.localhost; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src oneapp: http://*.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
