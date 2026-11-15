@@ -4,6 +4,8 @@
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The home pages
 //! are an app too, the plugin `home`'s, which the window shows first and under every other.
 
+#![cfg(feature = "window")]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

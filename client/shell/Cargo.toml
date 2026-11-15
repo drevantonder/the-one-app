@@ -13,28 +13,45 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "one"
 path = "src/main.rs"
 
+# The window, which is all of the program but its CLI and MCP. A Linux machine with no screen has a build without
+# it (`cargo build --no-default-features`), which needs none of GTK or WebKitGTK there.
+[features]
+default = ["window"]
+window = [
+  "dep:tauri-build",
+  "dep:anyhow",
+  "dep:data-encoding",
+  "dep:serde_json",
+  "dep:tokio",
+  "dep:tauri",
+  "dep:tauri-plugin-opener",
+  "dep:tauri-plugin-notification",
+  "dep:tauri-plugin-notifications",
+  "client/window",
+]
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-anyhow.workspace = true
+anyhow = { workspace = true, optional = true }
 client = { path = ".." }
-data-encoding = "2"
-serde_json.workspace = true
-tokio.workspace = true
+data-encoding = { version = "2", optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 # `custom-protocol` builds the app with its page inside it, however it's built.
-tauri = { version = "2", features = ["custom-protocol"] }
+tauri = { version = "2", features = ["custom-protocol"], optional = true }
 # Opens the sign-in page in the device's own browser, where a passkey works.
-tauri-plugin-opener = "2"
+tauri-plugin-opener = { version = "2", optional = true }
 
 # A computer shows a notification while the app runs, as the system's own, and hears it tapped.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-notification = "2.8"
+tauri-plugin-notification = { version = "2.8", optional = true }
 
 # A phone is woken by its push service, Apple's or Google's, which it gives the network its token for. Tauri's own
 # notification plugin has no push; this one does.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
-tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"] }
+tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"], optional = true }
 
 # Android's messaging service asks the app's Rust to open each notification (`src/notifications.rs`).
 [target.'cfg(target_os = "android")'.dependencies]

@@ -225,11 +225,12 @@ defmodule OneCore.Tools do
         properties: %{
           builds: %{
             type: "array",
-            description: "Each build: its name (server/<target> or one/<target>), build, sha256 and size",
+            description:
+              "Each build: its name (server/<target>, one/<target> or one-cli/<target>), build, sha256 and size",
             items: %{
               type: "object",
               properties: %{
-                name: %{type: "string", pattern: "^(server|one)/[a-z0-9_]+-[a-z0-9_]+$"},
+                name: %{type: "string", pattern: "^(server|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+$"},
                 build: %{type: "string"},
                 sha256: %{type: "string", pattern: "^[0-9a-f]{64}$"},
                 size: %{type: "integer"}

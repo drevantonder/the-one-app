@@ -55,7 +55,8 @@ make their passkey.
 A machine that's let in as someone's becomes a server of theirs with `one serve on` (and the network's with
 `ONE_FOR=network`), which needs nothing else installed: it downloads the network's newest build of the server for
 that kind of machine, and the system keeps it running, a systemd user unit on Linux and a LaunchAgent on a Mac.
-`one serve off` stops it and removes it. `./release` builds the server and `one` from the commit checked out and
+`one serve off` stops it and removes it. A Linux machine with no screen runs `one-cli`, which is `one` without its window
+(`cargo build -p shell --no-default-features`) and needs no GTK or WebKitGTK; `./release` builds both there. `./release` builds the server and `one` from the commit checked out and
 publishes them to the network of the `one` running it, whose owner it has to be. Nothing updates by itself: the
 `update` tool has a server's machine take the newest builds, `one update` does it for this device, and the `builds`
 tool says which build each server and device is on.

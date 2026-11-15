@@ -43,6 +43,10 @@ zeroize = "1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# Built into the app, with its window: which build of `one` an update takes (`serving`).
+[features]
+window = []
+
 [build-dependencies]
 serde_json.workspace = true
 

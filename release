@@ -115,8 +115,14 @@ for kind in "${kinds[@]}"; do
 done
 
 # `one`, for this machine, which is the app too: building it for another kind of machine needs that machine's
-# system libraries, so each kind builds its own.
+# system libraries, so each kind builds its own. Linux has `one-cli` too, the same without its window, for a machine
+# with no screen, which has no GTK or WebKitGTK; `one update` keeps each on its own.
 here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
+if [[ $here == linux-* ]]; then
+  echo "Building one-cli for $here"
+  cargo build --release -p shell --no-default-features
+  gzip -9 -c "$target/release/one" >"$out/one-cli-$here.gz"
+fi
 echo "Building one for $here"
 cargo build --release -p shell
 gzip -9 -c "$target/release/one" >"$out/one-$here.gz"
@@ -129,7 +135,7 @@ ONE=$target/release/one OUT=$out BUILD=$build bun -e '
   const { readdirSync } = require("node:fs");
   const builds = await Promise.all(readdirSync(OUT).map(async (file) => {
     const bytes = await Bun.file(`${OUT}/${file}`).bytes();
-    const [, what, kind] = file.match(/^(server|one)-(.*?)(\.tar)?\.gz$/);
+    const [, what, kind] = file.match(/^(server|one-cli|one)-(.*?)(\.tar)?\.gz$/);
     return { file, name: `${what}/${kind}`, build: BUILD, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
   }));
   const publish = () => {

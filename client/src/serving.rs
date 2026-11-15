@@ -33,6 +33,9 @@ use crate::{BUILD, Client, target};
 /// What the server says when it's running, with its key after, and when it's asked to take the newest builds.
 const RUNNING: &str = "A server is running: ";
 const UPDATE_ASKED: &str = "Update asked";
+/// Which build of `one` this is, which an update takes the newest of: the app, with its window, or `one` built
+/// without it, for a Linux machine with no screen.
+const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// How long a build being tried has to start and answer before the one before it is started again: a server
 /// acting for the network deploys what it ships with that the network has never had before it's running.
 const START: Duration = Duration::from_secs(180);
@@ -238,7 +241,7 @@ async fn take(client: &Client, here: &Here, program: &Path) -> Result<bool> {
         fs::write(here.folder.join("next"), build)?;
         took = true;
     }
-    if let Some(one) = builds.get("one")
+    if let Some(one) = builds.get(PROGRAM)
         && one["build"] != BUILD
     {
         take_program(one, program).await?;
