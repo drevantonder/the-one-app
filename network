@@ -49,7 +49,7 @@ one=$root/target/release/one
 (cd "$root/server" && mix deps.get && mix compile)
 
 started=()
-trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done' EXIT
+trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait' EXIT
 # Waits for a line in a log that the job just started is still writing. Fails if the job ends without it.
 wait_for() { grep -q -m1 -E "$1" <(tail -f --pid="${started[-1]}" -n +1 "$2"); }
 free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
