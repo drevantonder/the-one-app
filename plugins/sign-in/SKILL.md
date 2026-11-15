@@ -13,7 +13,8 @@ that one question for it, and a new device when they also say the code it shows 
   they've lost every passkey.
 - `devices` lists your devices, the assistants you let in and the browsers you're signed in on, and your
   passkeys. An app's `seen` is `on` while it's connected, or when it last was. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a
-  passkey, but never your last.
+  passkey, but never your last. `add_passkey` makes a link your person makes another passkey by, in a browser, within a quarter of an hour:
+  open it for them, and pass it to nobody.
 - `people` says who people are: the name each goes by, chosen as they joined, and their email where signing in
   has one. `name` changes the name your person goes by, when they ask. `everyone` lists everyone in the network
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their

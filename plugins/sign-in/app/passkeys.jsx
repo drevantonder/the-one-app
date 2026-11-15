@@ -1,7 +1,8 @@
-// Passkeys: what whoever's looking signs in with. One is removed here, but never the last.
+// Passkeys: what whoever's looking signs in with. One is removed here, but never the last. Another is made in the
+// device's own browser, which has passkeys where an app's web view doesn't, by a link that works once.
 import { createMemo, Errored, For, Loading, refresh } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, confirm, leave, List, Problem, Row, Screen, Skeleton, toast } from "ui"
+import { Button, call, changed, confirm, leave, List, open, Problem, Row, Screen, Skeleton, toast } from "ui"
 import { on, Remove } from "./mine.jsx"
 
 const mine = createMemo(() => call("sign-in_devices").then(JSON.parse))
@@ -13,9 +14,17 @@ async function remove(passkey) {
   refresh(mine)
 }
 
+async function add() {
+  try {
+    await open(await call("sign-in_add_passkey"))
+  } catch (error) {
+    toast(error.message)
+  }
+}
+
 render(
   () => (
-    <Screen heading="Passkeys" back onBack={leave}>
+    <Screen heading="Passkeys" back onBack={leave} action={<Button onClick={add}>Add Passkey</Button>}>
       <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={String(error().message ?? error())} />}>
         <Loading fallback={<Skeleton rows={2} />}>
           <List>

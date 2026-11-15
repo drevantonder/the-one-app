@@ -56,6 +56,12 @@ defmodule SignIn do
         }
       },
       %{
+        name: "add_passkey",
+        description:
+          "Makes a link that you make another passkey by, in a browser, within a quarter of an hour. Open it, don't pass it on",
+        inputs: none
+      },
+      %{
         name: "devices",
         read_only: true,
         description: "Lists your devices, assistants and browsers, and your passkeys",
@@ -161,6 +167,8 @@ defmodule SignIn do
     %{"removed" => name} = ask(%{ask: "remove_person", who: who})
     "#{name} is out of the network. What they made stays."
   end
+
+  def call("add_passkey", _inputs, call), do: ask(%{ask: "passkey", who: person(call)})["link"]
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
 

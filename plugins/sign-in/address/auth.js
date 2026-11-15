@@ -407,6 +407,8 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     await env.OWN.remove(`people/${user.name}`);
     return { removed: user.called ?? user.name };
   }
+  // A link that this person makes another passkey by, in a browser, within a quarter of an hour.
+  if (ask === "passkey") return { link: `${origin}/sign-in/#passkey=${await invitation(adapter, user, 15 * 60 * 1000)}` };
   if (ask === "remove_passkey") {
     const passkeys = await adapter.findMany({ model: "passkey", where: mine });
     const passkey = passkeys.find(({ id }) => id === about.passkey);
