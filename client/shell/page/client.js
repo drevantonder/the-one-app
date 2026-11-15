@@ -10,9 +10,9 @@ const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event
 
 const HOME = "home/app/index.html"
-/// The apps that are open, by who each is for and what it is: `{ key, app, for, host, frame, loaded, tapped, drawn,
-/// over }`. An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to
-/// it shows it as it was.
+/// The apps that are open, by who each is for and what it is: `{ key, app, for, host, frame, tapped, drawn, over }`.
+/// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
+/// it as it was.
 const open = new Map()
 const key = (app, who) => `${who ?? ""}|${app}`
 /// Each plugin's first app, by the plugin's name, among this user's, and one that isn't a part of Settings if it
@@ -101,7 +101,6 @@ function load(app, who) {
   view.frame.sandbox = "allow-scripts allow-same-origin allow-forms"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the kit's `share`).
   view.frame.allow = "clipboard-write; web-share"
-  view.loaded = new Promise((loaded) => view.frame.addEventListener("load", loaded, { once: true }))
   open.set(at, view)
   document.body.append(view.frame)
   return view
@@ -270,9 +269,9 @@ function go(app, who, behind) {
   if (behind) return true
   const showing = history.state === next.key
   move(() => show(next.key, tapped))
-  // The way back out of an app is an entry in this window's history, made once the app's page has loaded: a
-  // browser takes a frame back through its own screens only from an entry that knew the frame's page.
-  if (!showing) next.loaded.then(() => history.pushState(next.key, ""))
+  // The way back out of an app is an entry in this window's history, made as it's opened, so the device's back
+  // leads out of the app however soon it's pressed.
+  if (!showing) history.pushState(next.key, "")
   return true
 }
 
