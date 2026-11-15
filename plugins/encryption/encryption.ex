@@ -108,11 +108,27 @@ defmodule Encryption do
       end
 
       GenServer.call(Call.process(call, Keys, name, {artifact, call.server}), :look)
+      look(call, name, Enum.uniq(had ++ Map.keys(slots)))
       Map.keys(slots)
     else
       _ ->
         raise "That isn't an artifact's keys as a device hands them over. A device that holds your key fills them in."
     end
+  end
+
+  # Has each of `servers` look at what it's handed of an artifact now, so one that was taken off lets go of its
+  # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
+  defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
+    {at, plugin} = OneCore.Plugins.added(call.for, encryption)
+    said = %{who: nil, for: User.owner(name), passed_on: true}
+    ask = %{added: at, plugin: plugin, function: "looked", arguments: [name], _meta: said}
+    for server <- servers -- [call.server], do: Server.request(server, "plugins/call", ask)
+  end
+
+  @doc false
+  # What another server asks of this one once the servers that open an artifact were chosen again.
+  def looked(%Call{} = call, name) do
+    GenServer.call(Call.process(call, Keys, name, {%Artifact{prefix: name <> "/"}, call.server}), :look)
   end
 
   # A relation tuple is the relations plugin's to write, as whoever asked.
