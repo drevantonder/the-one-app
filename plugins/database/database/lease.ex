@@ -17,6 +17,10 @@ defmodule Database.Lease do
   of its own, and the first transaction that process commits marks it as run, in that same transaction. So the
   mark and what the call wrote reach the log in one entry, or neither does, and a server that takes the lease
   reads from the log whether the call is still to make. A call that made no transaction is marked when it ends.
+
+  A call says what wraps the artifact it has (`OneCore.Artifact`). If that isn't what this was opened with, the
+  database closes, and the call opens it again: an encrypted artifact's keys are given anew to a server that was
+  taken off it and chosen again, and what it had open is from before another server wrote.
   """
   use GenServer
   require Logger
@@ -43,12 +47,29 @@ defmodule Database.Lease do
     {:ok, look(Map.put(lease, :firing, %{}))}
   end
 
+  # The server this one took to hold the lease didn't run a call passed on to it. If the log still names it, this
+  # server takes the lease, and otherwise it has learnt who holds it now.
   @impl true
-  def handle_call({:transaction, _schema, _fun}, _from, %{db: nil} = lease) do
+  def handle_call({:take_over, server}, _from, %{db: nil} = lease) do
+    case look(lease) do
+      %{db: nil, held_by: ^server} = lease -> {:reply, :ok, take(lease)}
+      lease -> {:reply, :ok, lease}
+    end
+  end
+
+  def handle_call({:take_over, _server}, _from, lease), do: {:reply, :ok, lease}
+
+  # Anything else is asked with what wraps the artifact of the call that asks.
+  def handle_call({wrapped, _ask}, _from, %{artifact: %{wrapped: was}} = lease) when wrapped != was,
+    do: {:stop, :normal, :wrapped_anew, lease}
+
+  def handle_call({_wrapped, ask}, from, lease), do: asked(ask, from, lease)
+
+  defp asked({:transaction, _schema, _fun}, _from, %{db: nil} = lease) do
     {:reply, {:held_by, lease.held_by}, lease}
   end
 
-  def handle_call({:transaction, schema, fun} = transaction, {caller, _} = from, lease) do
+  defp asked({:transaction, schema, fun} = transaction, {caller, _} = from, lease) do
     firing = lease.firing[caller]
 
     ran =
@@ -63,18 +84,18 @@ defmodule Database.Lease do
       {:ok, result, lease} when firing != nil -> {:reply, {:ok, result}, put_in(lease.firing[caller].marked, true)}
       {:ok, result, lease} -> {:reply, {:ok, result}, lease}
       # Here again if this server holds the lease after all, and otherwise answered with who does.
-      {:lost, lease} -> handle_call(transaction, from, lease)
+      {:lost, lease} -> asked(transaction, from, lease)
       {raised, lease} -> {:reply, raised, lease}
     end
   end
 
-  def handle_call({:schedule, _jobs, _fire, _now}, _from, %{db: nil} = lease) do
+  defp asked({:schedule, _jobs, _fire, _now}, _from, %{db: nil} = lease) do
     {:reply, {:held_by, lease.held_by}, lease}
   end
 
   # Each job that's due at `now`, and isn't being called already, is called in a process of its own. A call that has
   # marked its job as run is done with it, even while its process is still ending.
-  def handle_call({:schedule, jobs, fire, now} = schedule, from, lease) do
+  defp asked({:schedule, jobs, fire, now} = schedule, from, lease) do
     case transact(lease, &due(&1, jobs, now)) do
       {:ok, due, lease} ->
         calling = for {_caller, %{job: job, marked: false}} <- lease.firing, do: job
@@ -88,20 +109,9 @@ defmodule Database.Lease do
         {:reply, :ok, %{lease | firing: firing}}
 
       {:lost, lease} ->
-        handle_call(schedule, from, lease)
+        asked(schedule, from, lease)
     end
   end
-
-  # The server this one took to hold the lease didn't run a call passed on to it. If the log still names it, this
-  # server takes the lease, and otherwise it has learnt who holds it now.
-  def handle_call({:take_over, server}, _from, %{db: nil} = lease) do
-    case look(lease) do
-      %{db: nil, held_by: ^server} = lease -> {:reply, :ok, take(lease)}
-      lease -> {:reply, :ok, lease}
-    end
-  end
-
-  def handle_call({:take_over, _server}, _from, lease), do: {:reply, :ok, lease}
 
   # A job's call ended. One that committed no transaction is marked as run now, unless the lease has gone:
   # then the server holding it makes the call.

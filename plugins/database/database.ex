@@ -15,9 +15,13 @@ defmodule Database do
     lease = Lease.of(call)
     if lease == self(), do: raise("A transaction is already running here: use `query` inside it")
 
-    case GenServer.call(lease, {:transaction, schema, fun}, :infinity) do
+    case GenServer.call(lease, {call.own.wrapped, {:transaction, schema, fun}}, :infinity) do
       {:ok, result} ->
         result
+
+      :wrapped_anew ->
+        opened_again(lease)
+        transaction(call, schema, fun)
 
       {:raised, kind, reason, stacktrace} ->
         :erlang.raise(kind, reason, stacktrace)
@@ -40,14 +44,27 @@ defmodule Database do
   def schedule(%Call{} = call, jobs, fire) when is_list(jobs) and is_function(fire, 1) do
     lease = Lease.of(call)
 
-    case GenServer.call(lease, {:schedule, jobs, fire, System.os_time(:second)}, :infinity) do
+    case GenServer.call(lease, {call.own.wrapped, {:schedule, jobs, fire, System.os_time(:second)}}, :infinity) do
       :ok ->
         :ok
+
+      :wrapped_anew ->
+        opened_again(lease)
+        schedule(call, jobs, fire)
 
       {:held_by, server} ->
         :no_answer = Call.pass_on(call, server)
         :ok = GenServer.call(lease, {:take_over, server}, :infinity)
         schedule(call, jobs, fire)
+    end
+  end
+
+  # A database that was open under what wrapped its artifact before has closed, for the next call to open it.
+  defp opened_again(lease) do
+    closing = Process.monitor(lease)
+
+    receive do
+      {:DOWN, ^closing, :process, _lease, _why} -> :ok
     end
   end
 
