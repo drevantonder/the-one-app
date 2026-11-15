@@ -76,19 +76,19 @@ defmodule OneCore.Plugins do
   Holds the newest version of the plugin `artifact` loaded: `{:ok, held, version}`, or `:absent` if it isn't
   running here. It stays loaded until `release(held)`, or until the process that asked ends.
   """
-  def hold(artifact), do: GenServer.call(__MODULE__, {:hold, artifact})
+  def hold(artifact), do: ask({:hold, artifact})
 
   @doc "Lets go of the versions that were held, which are unloaded once nothing runs or holds them."
-  def release(held), do: GenServer.call(__MODULE__, {:end, held})
+  def release(held), do: ask({:end, held})
 
   @doc "The plugins something that runs for `who` finds, by name: each one's `Version`, which holds its tools, its skill and its apps."
   def running(who), do: versions(chain(who))
 
   @doc "The plugins added for `owners`, by name, the first's found first. One this server hasn't looked at is first."
   def versions(owners) do
-    with :unknown <- GenServer.call(__MODULE__, {:running, owners}) do
+    with :unknown <- ask({:running, owners}) do
       Enum.each(owners, &look/1)
-      GenServer.call(__MODULE__, {:running, owners})
+      ask({:running, owners})
     end
   end
 
@@ -108,29 +108,29 @@ defmodule OneCore.Plugins do
   end
 
   @doc "Everyone this server has looked at that the plugin `artifact` is added for."
-  def added_for(artifact), do: GenServer.call(__MODULE__, {:added_for, artifact})
+  def added_for(artifact), do: ask({:added_for, artifact})
 
   @doc "The version running here of the plugin `artifact`, or `nil`."
-  def version(artifact), do: GenServer.call(__MODULE__, {:version, artifact})
+  def version(artifact), do: ask({:version, artifact})
 
   @doc "Every plugin this server has looked at that has scheduled jobs: who it was added for, its name there, and the jobs."
-  def scheduled, do: GenServer.call(__MODULE__, :scheduled)
+  def scheduled, do: ask(:scheduled)
 
   @doc "What's added for everyone this server has looked at, by who: each plugin's name there, with the plugin."
-  def added, do: GenServer.call(__MODULE__, :added)
+  def added, do: ask(:added)
 
   @doc """
   The versions running here of the plugins `names` and of each plugin they use, by their names, as `owner` finds
   them: `{:ok, versions}`, or `{:absent, name}` for the first that isn't running here.
   """
-  def used(owner, names), do: GenServer.call(__MODULE__, {:used, owner, names})
+  def used(owner, names), do: ask({:used, owner, names})
 
   @doc """
   Has everyone this server has looked at looked at again behind the next request for them, and gives who to look
   at now: the network, whoever this server acts for, and whoever's plugins have services installed here.
   """
   def look_again do
-    GenServer.call(__MODULE__, :look_again)
+    ask(:look_again)
     here(Server.key())
   end
 
@@ -150,8 +150,8 @@ defmodule OneCore.Plugins do
   def look(owner, loaded \\ []) do
     {added, _tag} = Added.read(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
-    newer = Kept.newer(Enum.uniq(Map.values(added)) -- known, GenServer.call(__MODULE__, :newest))
-    {changed, any} = GenServer.call(__MODULE__, {:looked, owner, added, loaded ++ newer})
+    newer = Kept.newer(Enum.uniq(Map.values(added)) -- known, ask(:newest))
+    {changed, any} = ask({:looked, owner, added, loaded ++ newer})
 
     for artifact <- changed do
       # A process whose own code brought the newer version in is the one that can't wait for itself.
@@ -175,14 +175,21 @@ defmodule OneCore.Plugins do
   # A call holds the newest version of its plugin and of each plugin that one uses, however far that goes. A
   # plugin this server doesn't run is looked for first.
   defp begin(owners, name) do
-    with {:absent, _missing} <- GenServer.call(__MODULE__, {:begin, owners, name}),
+    with {:absent, _missing} <- ask({:begin, owners, name}),
          _ = Enum.each(Enum.uniq(owners ++ [@network]), &look(&1)),
-         {:absent, missing} <- GenServer.call(__MODULE__, {:begin, owners, name}) do
+         {:absent, missing} <- ask({:begin, owners, name}) do
       if missing == name,
         do: {:error, "There's no plugin named #{name}"},
         else: {:error, "#{name} needs #{missing}, which isn't added for #{Enum.join(owners, " or ")} or the network"}
     end
   end
+
+  @doc "Returns once this server has started the plugins it runs whether or not it's asked for them."
+  def started, do: ask(:started)
+
+  # Everything asked of this waits while it starts the plugins, so the server can be reached meanwhile: what's asked
+  # of it is answered once they're there.
+  defp ask(message), do: GenServer.call(__MODULE__, message, :infinity)
 
   # A server starts with the newest version of every plugin it runs whether or not it's asked for them. `added` is
   # what's added for each owner it has looked at, and `looked` when it last did; `running` and `newest` are by
@@ -190,10 +197,15 @@ defmodule OneCore.Plugins do
   @impl true
   def init(nil) do
     Hooks.keep()
+    {:ok, %{added: %{}, looked: %{}, running: %{}, newest: %{}, calls: %{}}, {:continue, :start}}
+  end
+
+  @impl true
+  def handle_continue(:start, state) do
     {:ok, key} = Iroh.key(Server.key_file())
 
     state =
-      for owner <- here(key), reduce: %{added: %{}, looked: %{}, running: %{}, newest: %{}, calls: %{}} do
+      for owner <- here(key), reduce: state do
         state ->
           {added, _tag} = Added.read(owner)
           newer = Kept.newer(Enum.uniq(Map.values(added)), state.newest)
@@ -203,10 +215,12 @@ defmodule OneCore.Plugins do
 
     # What a kit that stopped running while this server was down built with goes now.
     App.keep_builds(Map.values(state.running))
-    {:ok, state}
+    {:noreply, state}
   end
 
   @impl true
+  def handle_call(:started, _from, state), do: {:reply, :ok, state}
+
   def handle_call({:looked, owner, added, loaded}, _from, state) do
     {state, changed, any} = took_over(state, owner, added, loaded)
     {:reply, {changed, any}, state}

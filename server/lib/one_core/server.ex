@@ -152,9 +152,16 @@ defmodule OneCore.Server do
     {:noreply, server}
   end
 
+  # A server is reached as soon as it starts, and answers what it's asked once its plugins are there, since they
+  # say whose a device is: so whoever asks while they start waits for them, and isn't told it can't be reached.
   @impl true
   def handle_info({:ask, ask, from, message}, server) do
-    Task.Supervisor.start_child(OneCore.Asks, fn -> Iroh.answer(ask, Mcp.answer(message, from)) end)
+    answer = fn ->
+      Plugins.started()
+      Iroh.answer(ask, Mcp.answer(message, from))
+    end
+
+    Task.Supervisor.start_child(OneCore.Asks, answer)
     {:noreply, server}
   end
 end
