@@ -1,8 +1,8 @@
 // Builds an app: `bun app.js <source> <out>`. A server runs it, as the kit it serves holds it (build.js), when a
 // plugin with an app is deployed, on the app's source as it was deployed, and serves what it writes to <out>. Each
-// `.html` in <source> is a page. What every app shares (Solid, and the kit) is left out of it, and imported from the
-// plugin `ui`, which the network serves once. A build that fails says why on stderr, a problem to a line with its
-// file and line, and exits with 1.
+// `.html` in <source> is a page. What every app shares (Solid, Zag's Solid adapter and the kit) is left out of it,
+// and imported from the plugin `ui`, which the network serves once. A build that fails says why on stderr, a
+// problem to a line with its file and line, and exits with 1.
 import { readdirSync, readFileSync } from "node:fs"
 import { extname, join, relative } from "node:path"
 import solid from "@solidjs/vite-plugin"
@@ -11,7 +11,7 @@ import { build, parseAst } from "vite"
 const [source, out] = process.argv.slice(2)
 
 // What an app imports that the plugin `ui` serves, by where it's served (ui/build.js).
-const shared = { "solid-js": "/ui/app/solid.js", "@solidjs/web": "/ui/app/web.js", ui: "/ui/app/ui.js" }
+const shared = { "solid-js": "/ui/app/solid.js", "@solidjs/web": "/ui/app/web.js", "@zag-js/solid": "/ui/app/zag.js", ui: "/ui/app/ui.js" }
 
 const pages = readdirSync(source, { recursive: true }).filter((path) => path.endsWith(".html") && !path.split("/").includes("node_modules"))
 

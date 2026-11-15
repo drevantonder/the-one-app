@@ -175,8 +175,9 @@ defmodule OneCore.Plugin do
     how an app asks and hears, done.
   - The kit's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
     For something the kit lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
-    https://ark-ui.com/llms-solid.txt: an app adds `@zag-js/<component>` and `@zag-js/solid` to its package.json
-    and draws the component as Zag says, styling it with the kit's custom properties. Zag's docs import from
+    https://ark-ui.com/llms-solid.txt: an app adds `@zag-js/<component>` to its package.json, at the version of
+    Zag the kit's `build/package.json` names, and draws the component as Zag says, styling it with the kit's
+    custom properties. Zag's Solid adapter, `@zag-js/solid`, is the kit's, as Solid is. Zag's docs import from
     `solid-js/web`, which is `@solidjs/web`; and Zag's props set `id`, so one written before them is replaced.
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then
