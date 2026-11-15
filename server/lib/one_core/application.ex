@@ -7,7 +7,8 @@ defmodule OneCore.Application do
 
   # A server is started for its owner, its `:for` setting: a user, a group or the network. One that isn't on
   # their list doesn't start: `{:not_joined, key}` says so, with its key. The plugins The One App ships with are
-  # the network's, so a server acting for it deploys the ones the network has never had before it's started.
+  # the network's, so a server acting for it deploys the ones the network has never had, and those whose
+  # newest version a server shipped from other files, once it's started (`OneCore.Plugins.Deploy.ship/0`).
   @impl true
   def start(_type, _args) do
     {:ok, key} = Iroh.key(Server.key_file())

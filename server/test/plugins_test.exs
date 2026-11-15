@@ -121,4 +121,50 @@ defmodule OneCore.PluginsTest do
     assert rebuilt
     assert Kept.source(version.artifact, Plugins.running("network")["notes"].code) == source
   end
+
+  # A plugin the server ships, kept in a folder of its own, whose tool says which version of the folder it is.
+  defp ships(folder, number) do
+    File.mkdir_p!(folder)
+
+    File.write!(Path.join(folder, "said.ex"), """
+    defmodule Said do
+      @behaviour OneCore.Plugin
+      @impl true
+      def tools, do: [%{name: "which", description: "Says which it is", inputs: %{}}]
+      @impl true
+      def call("which", _inputs, _call), do: #{number}
+    end
+    """)
+  end
+
+  @tag :tmp_dir
+  test "a server brings along the plugins it ships when they've changed, but not over one deployed on purpose", %{
+    tmp_dir: folder
+  } do
+    shipped = Path.join(folder, "shipped/said")
+    Application.put_env(:one_core, :shipped, %{"said" => shipped})
+    on_exit(fn -> Application.delete_env(:one_core, :shipped) end)
+    OneCore.Test.server(folder)
+    which = fn -> Calls.call("said", "which", %{}, OneCore.Test.owner()) end
+
+    ships(shipped, 1)
+    assert [{"said", {:ok, 1, _}}] = Deploy.ship()
+    assert Deploy.ship() == []
+    assert which.() == {:ok, 1}
+
+    # An updated server ships other files, and the network takes them.
+    ships(shipped, 2)
+    assert [{"said", {:ok, 2, _}}] = Deploy.ship()
+    assert which.() == {:ok, 2}
+
+    # Someone deploys their own, and a server that ships other files again leaves it.
+    {:ok, 3, _} =
+      Deploy.deploy("network", "said", %{
+        "said.ex" => File.read!(Path.join(shipped, "said.ex")) |> String.replace("2", "30")
+      })
+
+    ships(shipped, 4)
+    assert Deploy.ship() == []
+    assert which.() == {:ok, 30}
+  end
 end

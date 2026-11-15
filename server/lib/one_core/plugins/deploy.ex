@@ -8,7 +8,7 @@ defmodule OneCore.Plugins.Deploy do
   each one's folder by its name. Those are added for the network.
   """
   require Logger
-  alias OneCore.{App, Folder, Server, Servers}
+  alias OneCore.{App, Bucket, Folder, Server, Servers}
   alias OneCore.Plugins
   alias OneCore.Plugins.{Added, Calls, Kept, Version}
 
@@ -42,16 +42,44 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Deploys for the network each plugin this server ships with that the network has never had. One the network has
-  is left as it is: deploying it again is what updates it. Gives what `deploy/3` gave for each, by its name.
+  Deploys for the network each plugin this server ships with that the network has never had, and each whose
+  newest version a server shipped from other files than this one ships: so an updated server brings its plugins
+  along. One deployed since on purpose is left as it is. Gives what `deploy/3` gave for each, by its name.
+
+  What a server last shipped of a plugin is the plugin's blob `shipped`: the version's number, and the hash of the
+  files it was deployed from. One the network had before servers said so was shipped too.
   """
   def ship do
     for {name, folder} <- Enum.sort(Application.get_env(:one_core, :shipped, %{})),
-        Kept.newest("#{@network}/plugins/#{name}") == nil do
-      case shipped(name) do
-        files when files == %{} -> {name, {:error, "There are no files in #{folder}"}}
-        files -> {name, deploy(@network, name, files)}
+        files = shipped(name),
+        artifact = "#{@network}/plugins/#{name}",
+        source = Version.code(files),
+        ship?(artifact, source) do
+      with true <- files != %{} || {:error, "There are no files in #{folder}"},
+           {:ok, number, _warnings} = deployed <- deploy(@network, name, files) do
+        shipped = JSON.encode!(%{number: number, source: source})
+
+        :ok =
+          case Bucket.read(artifact <> "/shipped") do
+            {:ok, _was, tag} -> Bucket.replace(artifact <> "/shipped", shipped, tag)
+            :absent -> Bucket.write(artifact <> "/shipped", shipped)
+          end
+
+        {name, deployed}
+      else
+        error -> {name, error}
       end
+    end
+  end
+
+  # Whether a plugin this server ships is to be deployed for the network from what it ships, whose hash is `source`.
+  defp ship?(artifact, source) do
+    with {number, _code, _tag} <- Kept.newest(artifact),
+         {:ok, shipped, _tag} <- Bucket.read(artifact <> "/shipped") do
+      %{"number" => shipped, "source" => was} = JSON.decode!(shipped)
+      shipped == number and was != source
+    else
+      _never_or_before_servers_said -> true
     end
   end
 
