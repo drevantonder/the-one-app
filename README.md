@@ -71,6 +71,18 @@ there (`{"address": "https://..."}`), as `mix network` writes one for a network 
 `TAURI_ONE_ADDRESS=https://...` set, on any system, starts on that network with no file there. It starts on that
 network's sign-in page.
 
+A workplace's own app, with its own name, identifier and icon, is a Tauri config of its own merged over
+`client/shell/tauri.conf.json`, as Tauri merges one:
+
+    {"productName": "The PTC App", "identifier": "app.ptcau.client", "bundle": {"icon": ["/path/to/icon.png"]}}
+
+`cargo tauri build --config <that file>` builds it, and `TAURI_CONFIG="$(cat <that file>)" cargo build --release`
+the program alone. Its identifier names the folder its client is kept in too, so it sits beside The One App on one
+device. On iPhone, Tauri's CLI puts the name and identifier in the Xcode project as it builds, and `cargo tauri icon
+<png>` makes its icons. Android's project names The One App's identifier and name itself (`app/build.gradle.kts`,
+`strings.xml`, the folder of `MainActivity`), so a workplace's Android app is made from its own `cargo tauri android
+init` for now.
+
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
 - `client/shell`: the app, a window on that half, and the one program both are.

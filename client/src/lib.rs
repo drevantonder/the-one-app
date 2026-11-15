@@ -459,9 +459,10 @@ pub fn home() -> Result<PathBuf> {
     }
 }
 
-/// What the app is to the system it's on: the name of its folder, and of the app among a phone's. The app before
-/// this one is `one` and `The One App` there, and this is neither.
-pub const NAME: &str = "app.theone.client";
+/// What the app is to the system it's on: the name of its folder, and of the app among a phone's. It's the build's
+/// Tauri identifier (`build.rs`), so a workplace's own build keeps its own folder beside The One App's. The app
+/// before this one is `one` and `The One App` there, and this is neither.
+pub const NAME: &str = env!("ONE_IDENTIFIER");
 
 /// The address of the network an app was built for, if it was: what `TAURI_ONE_ADDRESS` was as it was built. Tauri's
 /// builds for phones give the Rust build only the variables whose names start with TAURI.

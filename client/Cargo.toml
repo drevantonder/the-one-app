@@ -32,6 +32,9 @@ tokio.workspace = true
 # Keys are wiped from memory when they're let go of.
 zeroize = "1"
 
+[build-dependencies]
+serde_json.workspace = true
+
 # What a phone is called, which only its system says (`name` in `src/lib.rs`).
 [target.'cfg(target_os = "ios")'.dependencies]
 dispatch2 = "0.3"
