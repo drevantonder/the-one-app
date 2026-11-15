@@ -688,8 +688,9 @@ impl Client {
     /// pass an endpoint was made with. The new one has a key of its own too, as the old one is still there. A server
     /// gives a pass to a device that's someone's. One that can't be reached, as where the pass this has ended, is
     /// asked at the network's address, which says where its person signs in for a device that's nobody's now. The
-    /// old endpoint goes once its pass ends, so what was asked over it finishes. Gives how long the new pass lasts
-    /// before it's renewed.
+    /// old endpoint goes once its pass ends, so what was asked over it finishes, and what's asked from now on is
+    /// asked from the new one, whose run the device now vouches for. Gives how long the new pass lasts before it's
+    /// renewed.
     async fn renew(&self) -> Result<Duration> {
         let mut told = self.network();
         match self.request("one/pass", json!({"build": said()})).await {
@@ -701,6 +702,7 @@ impl Client {
         let new = Link::run(&self.key, Some(network), told.who.clone()).await?;
         accept(new.endpoint.clone(), self.told.clone());
         let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
+        self.reach.lock().await.open = None;
         tokio::spawn(async move {
             sleep(RENEW).await;
             old.endpoint.close().await
