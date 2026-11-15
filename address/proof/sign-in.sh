@@ -27,7 +27,7 @@ network=$!
 started=("$network")
 # The people leave when nothing more is asked of them, and the rest is stopped.
 trap '[[ -z ${to_people-} ]] || exec {to_people}>&-; for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
-grep -q -m1 "A network is running" <(tail -f --pid=$network -n +1 "$folder/network.log") || { cat "$folder/network.log" "$folder/server.log"; exit 1; }
+grep -q -m1 "A network is running" <(tail -F --pid=$network -n +1 "$folder/network.log" 2>/dev/null) || { cat "$folder/network.log" "$folder/server.log"; exit 1; }
 one=$root/target/release/one
 address=$(grep -o -m1 'http://localhost:[0-9]*' "$folder/network.log")
 
@@ -65,7 +65,7 @@ refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answ
 asks() {
   device "$@" >"$folder/$1.said" 2>&1 &
   asking=$!
-  grep -q -m1 "user_code=" <(tail -f --pid="$asking" -n +1 "$folder/$1.said")
+  grep -q -m1 "user_code=" <(tail -F --pid="$asking" -n +1 "$folder/$1.said" 2>/dev/null)
   link=$(grep -o -m1 'http://[^ ]*user_code=[A-Z0-9]*' "$folder/$1.said")
   code=$(grep -o -m1 'shows [A-Z0-9-]*' "$folder/$1.said" | cut -d' ' -f2)
   echo "  $1, which isn't in, is asked: one ${*:2}"
@@ -190,14 +190,14 @@ PATH=$folder/browser:$PATH ONE_HOME=$folder/tablet dbus-run-session -- xvfb-run 
 app=$!
 started+=("$app")
 disown "$app"
-grep -q -m1 DISPLAY <(tail -f --pid="$app" -n +1 "$folder/screen")
+grep -q -m1 DISPLAY <(tail -F --pid="$app" -n +1 "$folder/screen" 2>/dev/null)
 window() { env $(cat "$folder/screen") xdotool search --sync --onlyvisible --name "The One App" "$@" >/dev/null; }
 window
 echo "  the app's window is open on a device that isn't in, and its home screen has opened $(grep -c "home opened" "$folder/app.log") times"
 # The page has drawn once it asks for the mark it shows, and its one button is its only link, which Tab reaches first.
 grep -q -m1 "mark.png" <(tail -f -n +$((before + 1)) "$folder/address.log")
 window windowfocus --sync key --delay 300 Tab Return
-grep -q -m1 "sign-in" <(tail -f -n +1 "$folder/opened")
+grep -q -m1 "sign-in" <(tail -F -n +1 "$folder/opened" 2>/dev/null)
 echo "  its button is pressed, and it asks the device's browser to open $(plain <"$folder/opened")"
 browser alice "$(cat "$folder/opened")" matches
 timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
@@ -359,7 +359,7 @@ spare() {
   spare=$!
   started+=("$spare")
   disown "$spare"
-  grep -q -m1 -E "A server is running|isn't one of" <(tail -f --pid="$spare" -n +1 "$folder/spare.log")
+  grep -q -m1 -E "A server is running|isn't one of" <(tail -F --pid="$spare" -n +1 "$folder/spare.log" 2>/dev/null)
 }
 spare
 ONE_FOR=network may device laptop $(grep -o 'add_server --key [0-9a-f]*' "$folder/spare.log")
