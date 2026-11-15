@@ -344,7 +344,7 @@ defmodule Vault do
     name = item || service.name
 
     quietly("Starting the sign-in", fn ->
-      {state, verifier} = {"#{Base.url_encode64(call.for, padding: false)}.#{random(24)}", random(48)}
+      {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{random(24)}", random(48)}
 
       client =
         transaction(call, artifact, fn db ->
@@ -422,7 +422,7 @@ defmodule Vault do
 
   def call("list", _inputs, call) do
     names = names(call)
-    use_it = Enum.sort(for {name, version} <- Plugins.running(call.for), "vault" in version.uses, do: name)
+    use_it = Enum.sort(for {name, version} <- Plugins.running(call.subject), "vault" in version.uses, do: name)
 
     transaction(call, own(call), fn db ->
       items =
@@ -524,7 +524,7 @@ defmodule Vault do
     artifact = own(call)
 
     who =
-      Plugins.plugin(call.for, plugin) || Plugins.plugin("network", plugin) ||
+      Plugins.plugin(call.subject, plugin) || Plugins.plugin("network", plugin) ||
         raise "There's no plugin named #{plugin}."
 
     if Map.get(inputs, "on", true) do
@@ -562,7 +562,7 @@ defmodule Vault do
     plugin =
       if name = inputs["plugin"],
         do:
-          Plugins.plugin(call.for, name) || Plugins.plugin("network", name) || raise("There's no plugin named #{name}.")
+          Plugins.plugin(call.subject, name) || Plugins.plugin("network", name) || raise("There's no plugin named #{name}.")
 
     if fields == %{}, do: raise("A request names the fields it needs.")
     fields = for {name, about} <- fields, do: %{name: field!(name), secret: Map.get(about, "secret", true)}
@@ -676,12 +676,12 @@ defmodule Vault do
   # Whoever the service sent back is nobody the network knows: what says whose sign-in this finishes is its
   # `state`, which only the browser that began it was given, and which starts with whose it is.
   # A server that passed this on has checked that, and asks for whoever's it is, by nobody.
-  def call("back", %{"state" => state} = inputs, %Call{by: by} = call) do
+  def call("back", %{"state" => state} = inputs, %Call{actor: by} = call) do
     with [whose, _random] <- String.split(state, "."),
          {:ok, owner} <- Base.url_decode64(whose, padding: false),
          true <- User.owner?(owner),
-         true <- by == User.link("#{owner}/#{state}") or (by == nil and call.for == owner) do
-      call = %{call | for: owner, by: nil}
+         true <- by == User.link("#{owner}/#{state}") or (by == nil and call.subject == owner) do
+      call = %{call | subject: owner, actor: nil}
       artifact = own(call)
 
       quietly("Finishing the sign-in", fn ->
@@ -872,7 +872,7 @@ defmodule Vault do
   end
 
   # The plugins' names as whoever this runs for finds them, by their artifacts.
-  defp names(call), do: Map.new(Plugins.running(call.for), fn {name, version} -> {version.artifact, name} end)
+  defp names(call), do: Map.new(Plugins.running(call.subject), fn {name, version} -> {version.artifact, name} end)
   defp named(names, plugin), do: Map.get(names, plugin, Path.basename(plugin))
 
   defp address do
@@ -887,7 +887,7 @@ defmodule Vault do
   defp share(call, tool, artifact, who) do
     inputs = %{"artifact" => artifact, "relation" => "editor", "who" => who}
 
-    case Calls.call("relations", tool, inputs, {call.by, call.for}) do
+    case Calls.call("relations", tool, inputs, {call.actor, call.subject}) do
       {:ok, _said} ->
         :ok
 
@@ -903,7 +903,7 @@ defmodule Vault do
   end
 
   # Someone's Vault is theirs alone: no relation tuple has anyone else ask for a user, the network's owner included.
-  defp mine!(%Call{for: who, by: by} = call) do
+  defp mine!(%Call{subject: who, actor: by} = call) do
     if String.starts_with?(who, "users/") and by not in [who, nil], do: raise("#{who}'s Vault is theirs alone.")
     call
   end
@@ -915,7 +915,7 @@ defmodule Vault do
   defp own(call), do: encryption(call).encrypted(call, made(call))
 
   # The same artifact by its name, for a plugin that uses the Vault, which finds it added as `vault`.
-  defp theirs(call), do: "#{mine!(call).for}/made/vault/items"
+  defp theirs(call), do: "#{mine!(call).subject}/made/vault/items"
 
   # It reaches the Vault as an editor, which a tuple says once anything of the Vault's is switched on for it.
   defp reached(call), do: encryption(call).encrypted(call, Call.reach(call, theirs(call), "editor"))

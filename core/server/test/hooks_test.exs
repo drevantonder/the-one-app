@@ -42,7 +42,7 @@ defmodule OneCore.HooksTest do
     def hooks, do: ["call"]
 
     @impl true
-    def hook("call", %{"inputs" => %{"word" => "NO"}}, call), do: {:refuse, "The gate says no to \#{call.for}."}
+    def hook("call", %{"inputs" => %{"word" => "NO"}}, call), do: {:refuse, "The gate says no to \#{call.subject}."}
     def hook("call", %{"inputs" => %{"word" => "FORGOT"}}, _call), do: nil
     def hook("call", _about, _call), do: :ok
   end
@@ -56,7 +56,7 @@ defmodule OneCore.HooksTest do
     def hooks, do: ["called"]
 
     @impl true
-    def hook("called", about, call), do: send(:hooks_test, {:called, about, call.for})
+    def hook("called", about, call), do: send(:hooks_test, {:called, about, call.subject})
   end
   """
 
@@ -112,9 +112,9 @@ defmodule OneCore.HooksTest do
       def hooks, do: ["inputs", "call"]
 
       @impl true
-      def hook("inputs", %{"plugin" => nil, "tool" => "remove", "inputs" => %{"name" => "ECHO"}}, _call), do: %{"name" => "echo"}
+      def hook("inputs", %{"plugin" => nil, "tool" => "uninstall", "inputs" => %{"name" => "ECHO"}}, _call), do: %{"name" => "echo"}
       def hook("inputs", _about, _call), do: %{}
-      def hook("call", %{"plugin" => nil, "tool" => "deploy"}, call), do: {:refuse, "Nothing is deployed for \#{call.for}."}
+      def hook("call", %{"plugin" => nil, "tool" => "deploy"}, call), do: {:refuse, "Nothing is deployed for \#{call.subject}."}
       def hook("call", _about, _call), do: :ok
     end
     """
@@ -132,7 +132,7 @@ defmodule OneCore.HooksTest do
              {:ok, "echo is removed from what's installed for network."}
 
     assert_receive {:called,
-                    %{"plugin" => nil, "tool" => "remove", "changed" => %{"name" => "refused"}, "error" => nil}, _}
+                    %{"plugin" => nil, "tool" => "uninstall", "changed" => %{"name" => "refused"}, "error" => nil}, _}
 
     assert {:error, "There's no plugin named echo"} = say("hello")
 

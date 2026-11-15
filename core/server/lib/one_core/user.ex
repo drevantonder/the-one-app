@@ -142,14 +142,14 @@ defmodule OneCore.User do
 
       true ->
         with {:refuse, why} <-
-               Hooks.decide("reach", %{"who" => by, "relation" => "member", "artifact" => asked}, {by, asked}),
+               Hooks.validate("reach", %{"who" => by, "relation" => "member", "artifact" => asked}, {by, asked}),
              do: {:error, why}
     end
   end
 
   @doc """
   The network's first owner, or `nil` while it has none. One Core keeps who that is itself, in the blob
-  `network/owner`, since it's who may do anything where no plugin decides who may (`OneCore.Hooks.decide/4`).
+  `network/owner`, since it's who may do anything where no plugin decides who may (`OneCore.Hooks.validate/4`).
   """
   def first_owner do
     Servers.cached(:first_owner, fn ->
@@ -169,7 +169,7 @@ defmodule OneCore.User do
 
       if wrote == :ok or first_owner() == who do
         Server.notify_servers(["network"])
-        with {:refuse, why} <- Hooks.decide("owner", %{"who" => who}, {nil, "network"}), do: {:error, why}
+        with {:refuse, why} <- Hooks.validate("owner", %{"who" => who}, {nil, "network"}), do: {:error, why}
       else
         {:error, "The network's first owner is #{first_owner()}"}
       end

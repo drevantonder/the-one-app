@@ -93,10 +93,10 @@ defmodule OneCore.Plugins.Calls do
 
   # What a call is about once the plugins that change its inputs have, if the ones that decide it agree to it.
   defp hooked(about, takes, asked, apart) do
-    with {:ok, changes, by} <- Hooks.change("inputs", about, asked, apart),
+    with {:ok, changes, by} <- Hooks.mutate("inputs", about, asked, apart),
          about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
          :ok <- if(changes == %{}, do: :ok, else: changed(takes, about)),
-         :ok <- Hooks.decide("call", about, asked, apart) do
+         :ok <- Hooks.validate("call", about, asked, apart) do
       {:ok, about}
     else
       {:refuse, why} -> {:error, why}
@@ -128,13 +128,13 @@ defmodule OneCore.Plugins.Calls do
 
         case ended do
           {:ok, _answer} ->
-            Hooks.heard("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), asked)
+            Hooks.observe("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), asked)
 
           {:error, why} ->
-            Hooks.heard("called", Map.merge(about, %{"error" => why, "forwarded" => false}), asked)
+            Hooks.observe("called", Map.merge(about, %{"error" => why, "forwarded" => false}), asked)
 
           {:forwarded, result} ->
-            Hooks.heard("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), asked)
+            Hooks.observe("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), asked)
 
           # It would have been passed on again, so the server that passed it here hears it.
           :forwarding_loop ->
@@ -346,11 +346,11 @@ defmodule OneCore.Plugins.Calls do
       installed: at,
       folder: Path.join(Server.home(), own),
       server: Server.key(),
-      for: who,
-      by: by,
+      subject: who,
+      actor: by,
       plugin: name,
       who: versions[name].artifact,
-      ask: ask,
+      request: ask,
       uses: for({used, version} <- versions, used != name, into: %{}, do: {used, {version.artifact, version.plugin}}),
       forwarded: forwarded
     }

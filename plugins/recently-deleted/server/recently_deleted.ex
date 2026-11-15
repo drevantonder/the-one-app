@@ -69,7 +69,7 @@ defmodule RecentlyDeleted do
     id = Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
     aside = aside(name, id)
     moved(blobs, &(aside <> String.replace_prefix(&1, name <> "/", "")))
-    line = %{"artifact" => name, "at" => now(), "by" => call.by || call.for}
+    line = %{"artifact" => name, "at" => now(), "by" => call.actor || call.subject}
     :ok = Artifact.write(call.own, "removed/" <> id, JSON.encode!(line))
     told(call, name, "removed")
     "Removed #{name}. `restore` brings it back as it was, for 30 days."
@@ -153,9 +153,9 @@ defmodule RecentlyDeleted do
 
   # Whether whoever the call runs for owns the artifact, as the plugins that decide `reach` say.
   defp owner(call, name),
-    do: Hooks.decide("reach", %{"who" => call.for, "relation" => "owner", "artifact" => name}, {call.by, call.for})
+    do: Hooks.validate("reach", %{"who" => call.subject, "relation" => "owner", "artifact" => name}, {call.actor, call.subject})
 
-  defp told(call, name, what), do: Hooks.heard("removed", %{"artifact" => name, "what" => what}, {call.by, call.for})
+  defp told(call, name, what), do: Hooks.observe("removed", %{"artifact" => name, "what" => what}, {call.actor, call.subject})
 
   defp now, do: System.system_time(:millisecond)
 end

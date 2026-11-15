@@ -159,7 +159,7 @@ defmodule Notifications do
 
   @impl true
   def call("send", %{"title" => title} = inputs, call) do
-    to = Map.get(inputs, "to", call.for)
+    to = Map.get(inputs, "to", call.subject)
     app = inputs["app"]
     users = users(call, to)
     at = DateTime.to_iso8601(DateTime.utc_now(:second))
@@ -325,7 +325,7 @@ defmodule Notifications do
   defp users(_call, to), do: raise("#{to} isn't a user, a group or the network.")
 
   # A person's inbox is theirs whoever the call runs for: a group or the network they asked for.
-  defp person(%Call{by: "users/" <> _ = by}), do: by
+  defp person(%Call{actor: "users/" <> _ = by}), do: by
   defp person(_call), do: raise("An inbox is a person's, and nobody is asking.")
 
   defp listed([one]), do: one

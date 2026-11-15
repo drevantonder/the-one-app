@@ -16,7 +16,7 @@ defmodule OneCore.ServicesTest do
       @impl true
       def call("add", _inputs, call), do: OneCore.Service.call(call, Counter.Store, :add)
 
-      def counted(%OneCore.Call{for: who}, count) do
+      def counted(%OneCore.Call{subject: who}, count) do
         send(:erlang.list_to_pid(~c"#{:erlang.pid_to_list(test)}"), {:counted, who, count})
         :ok
       end

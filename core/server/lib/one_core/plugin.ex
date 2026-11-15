@@ -77,7 +77,7 @@ defmodule OneCore.Plugin do
     tag, replaces only if unchanged and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's
     given, and `remove/2` removes one for good. Its `folder` is a folder of the plugin's own on the machine running
     the call, for files that needn't outlive that machine.
-  - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.for`, under an id the
+  - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.subject`, under an id the
     plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
     name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by. When they
     delete one, it goes to Recently Deleted, which brings it back for 30 days: `OneCore.Call.tool(call, "recently-deleted", "remove",
@@ -89,9 +89,9 @@ defmodule OneCore.Plugin do
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
     decide `reach` say. `relations` is the one The One App ships with, and its skill says how something is
     shared. With none, nothing is reached but by the network's first owner.
-  - A tool runs for whoever asked, `call.for`. Whoever asks
-    can ask for a group they're a member of, or for the network: `call.for` is then the group, what the tool
-    makes is the group's, it reaches what the group may, and `call.by` is who asked. A tool that the holder of a
+  - A tool runs for whoever asked, `call.subject`. Whoever asks
+    can ask for a group they're a member of, or for the network: `call.subject` is then the group, what the tool
+    makes is the group's, it reaches what the group may, and `call.actor` is who asked. A tool that the holder of a
     sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to what
     `reach` gives it.
   - `OneCore.Call.owns?(call)` says whether whoever asked owns whoever the call runs for: themselves, or the
@@ -150,7 +150,7 @@ defmodule OneCore.Plugin do
     seconds apart. It's due at each whole multiple of that since 1970 in UTC, so `every: 3600` is on the hour and
     `every: 86_400` is at midnight UTC, and first at the next one after it's deployed.
   - The call is made on one server, for whoever the plugin was installed for, when a server is up: once for each of
-    them, with `call.for` the user, the group or the network, and `call.by` nobody. Times that
+    them, with `call.subject` the user, the group or the network, and `call.actor` nobody. Times that
     passed with none up are made up for with one call when one is back.
   - A plugin with jobs uses `database`, which keeps when each last ran in the plugin's database, and has the
     server writing that database make the call. Its skill says what that promises a job's tool.
@@ -319,7 +319,7 @@ defmodule OneCore.Plugin do
     they would from its own tools.
   - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
     `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was installed for that
-    this server acts for, or one the plugin passed it, as `call.installed` or `call.for`. That function has the call, so
+    this server acts for, or one the plugin passed it, as `call.installed` or `call.subject`. That function has the call, so
     it's where a service keeps anything in the plugin's artifact or its database. In a function of the service,
     `service` goes where `self()` does. Whoever its server is for comes first in `acts_for()`, so a service
     that's for one person at a time, whoever's machine it's on, takes the first.

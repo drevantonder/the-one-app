@@ -3,7 +3,7 @@ defmodule OneCore.Servers do
   Which servers act for whom. One Core keeps, for each user and group, the list of servers that act for them,
   under their prefix: the blob `servers`, of the servers' keys. The network's list is the same blob under
   `network/`, and a server on it acts for everyone in the network. A list's first server is written by a server
-  acting for the network, and only if there's no list. A server on a list installs another.
+  acting for the network, and only if there's no list. A server on a list adds another.
 
   A server's own blobs sit under `servers/<its key>/`, and only it writes them. Its `address` is how to reach it,
   and its `name` what its machine is called, which it writes each time it starts, since it may start somewhere

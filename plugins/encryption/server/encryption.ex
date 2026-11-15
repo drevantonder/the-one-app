@@ -49,7 +49,7 @@ defmodule Encryption do
   # decide `reach` say. One Core keeps their answer, so a call asks once.
   defp chosen(call, artifact, server) do
     about = %{"who" => "servers/" <> server, "relation" => "editor", "artifact" => artifact}
-    Hooks.decide("reach", about, {call.by, call.for})
+    Hooks.validate("reach", about, {call.actor, call.subject})
   end
 
   @doc "The keys of the servers that hold an artifact's keys."
@@ -119,9 +119,9 @@ defmodule Encryption do
   # Has each of `servers` look at what it's handed of an artifact now, so one that was taken off lets go of its
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
   defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
-    {at, plugin} = OneCore.Plugins.installed(call.for, encryption)
+    {at, plugin} = OneCore.Plugins.installed(call.subject, encryption)
     said = %{who: nil, for: User.owner(name), forwarded: true}
-    ask = %{added: at, plugin: plugin, function: "looked", arguments: [name], _meta: said}
+    ask = %{installed: at, plugin: plugin, function: "looked", arguments: [name], _meta: said}
     for server <- servers -- [call.server], do: Server.request(server, "plugins/call", ask)
   end
 
@@ -135,7 +135,7 @@ defmodule Encryption do
   defp share(call, tool, artifact, server) do
     inputs = %{"artifact" => artifact, "relation" => "editor", "who" => "servers/" <> server}
 
-    case Calls.call("relations", tool, inputs, {call.by, call.for}) do
+    case Calls.call("relations", tool, inputs, {call.actor, call.subject}) do
       {:ok, _said} -> :ok
       {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
       {:forwarded, _result} -> :ok
@@ -172,7 +172,7 @@ defmodule Encryption do
 
   # What's encrypted for someone is theirs alone to hand keys for: a user's by that user, and a group's or the
   # network's by an owner of it. No relation tuple lets anyone else, the network's owner included.
-  defp owner!(%Call{for: who, by: by} = call, artifact) do
+  defp owner!(%Call{subject: who, actor: by} = call, artifact) do
     cond do
       User.owner(artifact) != who ->
         raise "#{artifact} isn't #{who}'s"
@@ -185,7 +185,7 @@ defmodule Encryption do
 
       true ->
         with {:refuse, why} <-
-               Hooks.decide("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}),
+               Hooks.validate("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}),
              do: raise(why)
     end
 
@@ -247,7 +247,7 @@ defmodule Encryption do
            else: (_ -> nil)
 
     check = with {:ok, check, _tag} <- Artifact.read(key, "check"), do: check, else: (:absent -> nil)
-    %{owner: call.for, device: inputs["device"], check: check, slot: slot, devices: held, asking: asking}
+    %{owner: call.subject, device: inputs["device"], check: check, slot: slot, devices: held, asking: asking}
   end
 
   @on_a_device "A device is let in from a device: in the app there, or with `one` on it. An assistant somewhere else has none."
@@ -295,7 +295,7 @@ defmodule Encryption do
   end
 
   # Where an owner's key is kept, encrypted to each of their devices. It's theirs alone: nobody asks for a user.
-  defp key(%Call{for: who, by: by} = call) do
+  defp key(%Call{subject: who, actor: by} = call) do
     if String.starts_with?(who, "users/") and by != who, do: raise("#{who}'s key is theirs alone.")
     Call.make(call, "key")
   end

@@ -216,8 +216,8 @@ defmodule Insights do
 
   # Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
   # doing is open, and who did what isn't.
-  defp shown(%Call{by: by} = call) do
-    owner = by != nil and Call.owns?(%{call | for: "network"})
+  defp shown(%Call{actor: by} = call) do
+    owner = by != nil and Call.owns?(%{call | subject: "network"})
     fn whose -> owner or whose == OneCore.User.owner(by || "") end
   end
 

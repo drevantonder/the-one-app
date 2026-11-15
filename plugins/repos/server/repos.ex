@@ -184,7 +184,7 @@ defmodule Repos do
       "retired" => [],
       "suggestions" => %{},
       "made" => now,
-      "by" => call.by || call.for
+      "by" => call.actor || call.subject
     }
 
     if Artifact.write(repo, "repo.json", JSON.encode!(state)) == :exists,
@@ -356,7 +356,7 @@ defmodule Repos do
 
   def call("take", %{"repo" => name, "suggestion" => suggestion}, call) do
     repo = Call.reach(call, name, "editor")
-    by = call.by || call.for
+    by = call.actor || call.subject
     [person] = Call.tool(call, "sign-in", "people", %{"users" => [by]})
 
     {answer, _state} =
@@ -386,7 +386,7 @@ defmodule Repos do
 
   def call("decline", %{"repo" => name, "suggestion" => suggestion}, call) do
     repo = writable(call, reach!(call, name))
-    by = call.by || call.for
+    by = call.actor || call.subject
     editor = Call.reaches?(call, name, "editor")
 
     {answer, _state} =
@@ -450,7 +450,7 @@ defmodule Repos do
   defp receive_pack(call, repo, process, body) do
     name = Artifact.name(repo)
     editor = Call.reaches?(call, name, "editor")
-    by = call.by || call.for
+    by = call.actor || call.subject
     {commands, pack} = Wire.commands(body || "")
     Logger.info("repos: taking a push of #{byte_size(pack)} bytes to #{name}")
     file = if pack != "", do: Path.join(System.tmp_dir!(), "repos-push-" <> random())

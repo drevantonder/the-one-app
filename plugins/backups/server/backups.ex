@@ -159,7 +159,7 @@ defmodule Backups do
   end
 
   def call("due", _inputs, call) do
-    if call.by, do: owner!(call)
+    if call.actor, do: owner!(call)
 
     {places, every, last} =
       transaction(call, fn db ->
@@ -190,7 +190,7 @@ defmodule Backups do
 
   defp owner!(call) do
     cond do
-      call.for != "network" -> raise "Backups are the network's: ask for the network (ONE_FOR=network)."
+      call.subject != "network" -> raise "Backups are the network's: ask for the network (ONE_FOR=network)."
       not Call.owns?(call) -> raise "Only the network's owners see and change its backups."
       true -> :ok
     end

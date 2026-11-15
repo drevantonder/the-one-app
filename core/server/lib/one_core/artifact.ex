@@ -98,7 +98,7 @@ defmodule OneCore.Artifact do
   defp writes(%__MODULE__{prefix: prefix}), do: prefix
 
   defp changed(%__MODULE__{reached: {plugin, asked, _as}} = artifact, blob, :ok) do
-    Hooks.heard("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, asked)
+    Hooks.observe("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, asked)
   end
 
   defp changed(_artifact, _blob, outcome), do: outcome

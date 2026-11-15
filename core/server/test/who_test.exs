@@ -18,8 +18,8 @@ defmodule OneCore.WhoTest do
     end
 
     @impl true
-    def call(_tool, _inputs, %{for: who, by: who}), do: who
-    def call(_tool, _inputs, call), do: "\#{call.by} for \#{call.for}"
+    def call(_tool, _inputs, %{subject: who, actor: who}), do: who
+    def call(_tool, _inputs, call), do: "\#{call.actor} for \#{call.subject}"
   end
   """
 
@@ -55,7 +55,7 @@ defmodule OneCore.WhoTest do
     def hooks, do: ["changed"]
 
     @impl true
-    def hook("changed", about, call), do: send(:who_test, {:changed, call.plugin, about, call.for})
+    def hook("changed", about, call), do: send(:who_test, {:changed, call.plugin, about, call.subject})
   end
   """
 
@@ -103,10 +103,10 @@ defmodule OneCore.WhoTest do
     @impl true
     def call("count", _inputs, %{own: own} = call) do
       Artifact.write(own, "\#{length(Artifact.list(own))}", "")
-      "\#{Artifact.name(own)}: \#{length(Artifact.list(own))} for \#{call.for}"
+      "\#{Artifact.name(own)}: \#{length(Artifact.list(own))} for \#{call.subject}"
     end
 
-    def call("tick", _inputs, call), do: send(:who_test, {:ticked, call.for, call.by, Artifact.name(call.own)})
+    def call("tick", _inputs, call), do: send(:who_test, {:ticked, call.subject, call.actor, Artifact.name(call.own)})
     def call("peek", %{"artifact" => name}, call), do: Artifact.list(OneCore.Call.reach(call, name))
   end
   """
@@ -120,7 +120,7 @@ defmodule OneCore.WhoTest do
     def hooks, do: ["call"]
 
     @impl true
-    def hook("call", _about, call), do: {:refuse, "Shut to \#{call.for}."}
+    def hook("call", _about, call), do: {:refuse, "Shut to \#{call.subject}."}
   end
   """
 
@@ -385,7 +385,7 @@ defmodule OneCore.WhoTest do
              call("tally_peek", %{"artifact" => "users/alice/own/counts"}, alice)
 
     # Everyone using a plugin runs its latest version.
-    newer = String.replace(@counts, "for \#{call.for}", "now \#{call.for}")
+    newer = String.replace(@counts, "for \#{call.subject}", "now \#{call.subject}")
     assert {:ok, 2, ""} = Deploy.deploy(alice, "counts", %{"server/counts.ex" => newer})
     assert call("counts_count", %{}, bob) == {:ok, "users/bob/own/counts: 2 now users/bob"}
     assert call("tally_count", %{}, bob) == {:ok, "network/own/tally: 3 now users/bob"}

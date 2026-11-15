@@ -82,7 +82,7 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = unshare(note, "viewer", @bob, @alice)
     assert not reads?(note, @bob) and reads?(note, @carol)
 
-    # An editor shares up to their own relation, a viewer shares nothing, and only an owner installs an owner.
+    # An editor shares up to their own relation, a viewer shares nothing, and only an owner adds an owner.
     assert {:ok, _} = share(note, "viewer", @bob, @carol)
     assert {:error, "users/bob isn't an editor of" <> _} = share(note, "viewer", "users/dave", @bob)
     assert {:error, "users/carol isn't an owner of" <> _} = share(note, "owner", @carol, @carol)
@@ -153,7 +153,7 @@ defmodule OneCore.RelationsTest do
     assert {:ok, {@carol, "groups/family"}, false} = for_family.(@carol)
 
     assert for_family.(@bob) ==
-             {:error, "users/bob isn't a member of groups/family. Whoever owns it installs them, with relations_share."}
+             {:error, "users/bob isn't a member of groups/family. Whoever owns it adds them, with relations_share."}
 
     assert {:ok, {@bob, "network"}, false} = OneCore.User.asking(nil, %{"as" => "bob", "for" => "network"})
 
@@ -229,11 +229,11 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _name} = call("diary_write", %{"id" => "1"}, @alice)
     assert {:error, "There's no plugin named diary"} = call("diary_write", %{"id" => "1"}, @bob)
 
-    assert tool.("add", %{"plugin" => diary}, {@bob, @bob}) ==
+    assert tool.("install", %{"plugin" => diary}, {@bob, @bob}) ==
              {:error, "users/bob isn't a viewer of #{diary}. Whoever owns it shares it, with relations_share."}
 
     assert {:ok, _} = share(diary, "viewer", @bob, @alice)
-    assert {:ok, "#{diary} is installed for users/bob, as diary."} == tool.("add", %{"plugin" => diary}, {@bob, @bob})
+    assert {:ok, "#{diary} is installed for users/bob, as diary."} == tool.("install", %{"plugin" => diary}, {@bob, @bob})
     assert {:ok, "users/bob/made/diary/1"} = call("diary_write", %{"id" => "1"}, @bob)
 
     assert {:error, "users/bob isn't an editor of users/alice/plugins/diary" <> _} =
@@ -245,13 +245,13 @@ defmodule OneCore.RelationsTest do
     # What's installed for a group is its owner's to change, not its members', and what's installed for the network is
     # the network's owner's: its members don't deploy over relations, or remove it.
     assert {:error, "users/bob isn't an owner of groups/family" <> _} =
-             tool.("add", %{"plugin" => diary}, {@bob, "groups/family"})
+             tool.("install", %{"plugin" => diary}, {@bob, "groups/family"})
 
-    assert {:ok, _} = tool.("add", %{"plugin" => diary}, {@alice, "groups/family"})
+    assert {:ok, _} = tool.("install", %{"plugin" => diary}, {@alice, "groups/family"})
     assert {:ok, "groups/family/made/diary/1"} = call("diary_write", %{"id" => "1"}, {@bob, "groups/family"})
 
     assert {:error, "users/bob isn't an owner of groups/family" <> _} =
-             tool.("remove", %{"name" => "diary"}, {@bob, "groups/family"})
+             tool.("uninstall", %{"name" => "diary"}, {@bob, "groups/family"})
 
     assert {:error, "users/bob isn't an owner of groups/family" <> _} =
              tool.("deploy", Map.put(files, "name", "more"), {@bob, "groups/family"})
@@ -262,7 +262,7 @@ defmodule OneCore.RelationsTest do
     # A plugin has no say in its own removal or in being deployed over, so with relations apart nothing decides
     # that call, and it's the first owner's alone.
     for inputs <- [%{"name" => "relations"}, Map.put(files, "name", "relations")],
-        name = if(inputs["files"], do: "deploy", else: "remove") do
+        name = if(inputs["files"], do: "deploy", else: "uninstall") do
       assert {:error, "Nothing here decides who may do what" <> _} = tool.(name, inputs, {@alice, "network"})
     end
 
@@ -307,10 +307,10 @@ defmodule OneCore.RelationsTest do
              {:error, "The network keeps a server. Add another before this one goes."}
 
     # The network's owner does all of it, and so recovers anything.
-    assert {:ok, _} = tool.("remove", %{"name" => "diary"}, {OneCore.Test.owner(), "groups/family"})
+    assert {:ok, _} = tool.("uninstall", %{"name" => "diary"}, {OneCore.Test.owner(), "groups/family"})
 
     assert {:ok, "relations is removed from what's installed for network."} =
-             tool.("remove", %{"name" => "relations"}, {OneCore.Test.owner(), "network"})
+             tool.("uninstall", %{"name" => "relations"}, {OneCore.Test.owner(), "network"})
   end
 
   @tag :tmp_dir

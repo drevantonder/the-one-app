@@ -164,7 +164,7 @@ defmodule SignIn do
   # Whoever invites takes out, and nobody takes themselves out.
   def call("remove_person", %{"who" => who}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
-    if who == call.by, do: raise("You can't take yourself out of the network.")
+    if who == call.actor, do: raise("You can't take yourself out of the network.")
     %{"removed" => name} = ask(%{ask: "remove_person", who: who})
     Call.tool(call, "relations", "forget", %{"who" => who})
     "#{name} is out of the network. What they made stays."
@@ -179,7 +179,7 @@ defmodule SignIn do
   def call("people", inputs, call) do
     users = Map.get(inputs, "users", [person(call)])
 
-    if users -- [call.by] != [] and not Call.member?(call, "network"),
+    if users -- [call.actor] != [] and not Call.member?(call, "network"),
       do: raise("Only a member of the network sees who's in it.")
 
     for "users/" <> name = user <- users do
@@ -218,7 +218,7 @@ defmodule SignIn do
   defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
 
   # Devices are a person's, whoever a call runs for.
-  defp person(%Call{by: "users/" <> _ = by}), do: by
+  defp person(%Call{actor: "users/" <> _ = by}), do: by
   defp person(_call), do: raise("This is a person's to ask, and nobody is asking.")
 
   # Asks this plugin's edge part, as this server: it answers only the network's own.

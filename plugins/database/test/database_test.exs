@@ -382,14 +382,14 @@ defmodule OneCore.DatabaseTest do
   defp call(run, server) do
     %Call{
       own: %Artifact{prefix: @prefix},
-      added: OneCore.Test.owner(),
+      installed: OneCore.Test.owner(),
       folder: Path.join(run.home, server),
       server: server,
-      for: OneCore.Test.owner(),
-      by: OneCore.Test.owner(),
+      subject: OneCore.Test.owner(),
+      actor: OneCore.Test.owner(),
       plugin: "simulated",
       who: "network/plugins/simulated",
-      ask: {"tools/call", %{name: "simulated_write", arguments: %{}}},
+      request: {"tools/call", %{name: "simulated_write", arguments: %{}}},
       uses: %{"database" => {"network/plugins/database", run.database}},
       forwarded: false
     }

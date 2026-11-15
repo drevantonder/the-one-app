@@ -111,7 +111,7 @@ defmodule OneCore.Tools do
       description: """
       Lets a server act for you: asked for a group or for the network, for them.
       It then reads and writes what's yours, runs the plugins installed for you, and takes over when another of your
-      servers stops. A new server is its owner's alone, who installs it first. Someone else's acts for you once its
+      servers stops. A new server is its owner's alone, who adds it first. Someone else's acts for you once its
       owner chose you, with `add_member`, and you add it.
       """,
       inputs: %{
@@ -346,7 +346,7 @@ defmodule OneCore.Tools do
   end
 
   # Whoever a server acts for put it on their list, and its owner chose them. A server with no members yet is a
-  # new one, which whoever installs it first is bringing.
+  # new one, which whoever adds it first is bringing.
   defp run("add_server", %{"key" => key}, {_by, who} = asked, forward) do
     at(who, forward)
     reaches!(asked, who, "owner")
@@ -358,7 +358,7 @@ defmodule OneCore.Tools do
       do: raise("That server is #{hd(members)}'s, who hasn't chosen #{who}. Its owner does, with add_member.")
 
     with {:error, why} <- Servers.add(key, who), do: raise(why)
-    Hooks.heard("joined", %{"server" => key, "for" => who, "by" => Server.key()}, asked)
+    Hooks.observe("joined", %{"server" => key, "for" => who, "by" => Server.key()}, asked)
     Server.notify_servers([who])
     "That server acts for #{who} now, once it's started for them or its owner has chosen them."
   end
@@ -452,7 +452,7 @@ defmodule OneCore.Tools do
   defp reaches({by, _who} = asked, artifact, relation) do
     if artifact == by or String.starts_with?(artifact, by <> "/"),
       do: :ok,
-      else: Hooks.decide("reach", %{"who" => by, "relation" => relation, "artifact" => artifact}, asked)
+      else: Hooks.validate("reach", %{"who" => by, "relation" => relation, "artifact" => artifact}, asked)
   end
 
   # Raises unless whoever asked may read a plugin's code and add it: a `viewer` of it, or a member of a group or
@@ -465,7 +465,7 @@ defmodule OneCore.Tools do
       in_use =
         for of <- [User.owner(plugin) | Installed.installed_for(plugin)], of == "network" or match?("groups/" <> _, of), do: of
 
-      member = &(Hooks.decide("reach", %{"who" => by, "relation" => "member", "artifact" => &1}, {by, &1}) == :ok)
+      member = &(Hooks.validate("reach", %{"who" => by, "relation" => "member", "artifact" => &1}, {by, &1}) == :ok)
       if not Enum.any?(Enum.uniq(in_use), member), do: raise(why)
     end
   end

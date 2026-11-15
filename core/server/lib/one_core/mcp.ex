@@ -56,7 +56,7 @@ defmodule OneCore.Mcp do
 
       # A client saying how long its apps took to open, and which of its calls failed before a server answered.
       {:ok, %{"method" => "notifications/one/measured", "params" => %{} = said}} when from != nil ->
-        Hooks.heard("measured", Map.put(said, "device", from), {nil, "network"})
+        Hooks.observe("measured", Map.put(said, "device", from), {nil, "network"})
         ""
 
       # The relay at the network's address saying one of its servers came or went.

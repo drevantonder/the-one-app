@@ -155,11 +155,11 @@ defmodule AiGateway do
         not String.contains?(model, "/"),
         do: raise("#{model} isn't a model's id: they're local/<model> or <Vault item>/<model>.")
 
-    changed(call.own, "jobs/" <> call.for, fn jobs ->
+    changed(call.own, "jobs/" <> call.subject, fn jobs ->
       if models == [], do: Map.delete(jobs, job), else: Map.put(jobs, job, Enum.uniq(models))
     end)
 
-    whose = if call.for == "network", do: "Everyone's", else: "Your"
+    whose = if call.subject == "network", do: "Everyone's", else: "Your"
 
     if models == [],
       do: "#{whose} #{job} tries no models of its own now.",
@@ -417,8 +417,8 @@ defmodule AiGateway do
   defp items(call), do: for(%{name: name} <- Call.plugin(call, "vault").items(call), do: name)
 
   # The lists of models each job tries: whoever asks's own, and the network's, which are everyone's.
-  defp mine(%Call{for: "network"}), do: %{}
-  defp mine(call), do: jobs(call, call.for)
+  defp mine(%Call{subject: "network"}), do: %{}
+  defp mine(call), do: jobs(call, call.subject)
   defp everyone(call), do: jobs(call, "network")
 
   defp jobs(call, who) do

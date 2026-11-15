@@ -86,7 +86,7 @@ defmodule Home do
 
   @impl true
   def call("page", _inputs, call) do
-    here = for plugin <- Call.plugins(call), plugin.installed == call.for, do: plugin
+    here = for plugin <- Call.plugins(call), plugin.installed == call.subject, do: plugin
 
     apps =
       for plugin <- here, app <- plugin.apps, not app.settings do
@@ -108,11 +108,11 @@ defmodule Home do
 
     # An app added since the page was last arranged goes after the rest.
     items = placed ++ Enum.sort_by(apps -- placed, &String.downcase(&1.name))
-    %{who: call.for, arranges: Call.owns?(call), items: items, widgets: widgets}
+    %{who: call.subject, arranges: Call.owns?(call), items: items, widgets: widgets}
   end
 
   def call("arrange", %{"items" => items}, call) do
-    if not Call.owns?(call), do: raise("#{call.for}'s home page is arranged by their owners.")
+    if not Call.owns?(call), do: raise("#{call.subject}'s home page is arranged by their owners.")
 
     items =
       for item <- items, is_binary(item["app"]) or is_binary(item["widget"]), do: Map.take(item, ~w(app widget size))

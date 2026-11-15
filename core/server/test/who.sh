@@ -200,7 +200,7 @@ defmodule Gate do
 
   @impl true
   def hook("call", %{"plugin" => "notes", "tool" => "write", "inputs" => %{"text" => text}}, call) do
-    if text =~ ~r/password/i, do: {:refuse, "Gate: a note is no place for a password, #{call.for}."}, else: :ok
+    if text =~ ~r/password/i, do: {:refuse, "Gate: a note is no place for a password, #{call.subject}."}, else: :ok
   end
 
   def hook("call", _about, _call), do: :ok
@@ -220,7 +220,7 @@ defmodule Diary do
   @impl true
   def call("write", %{"text" => text}, %{own: own} = call) do
     Artifact.write(own, "#{length(Artifact.list(own)) + 1}", text)
-    "#{Artifact.name(own)} has #{length(Artifact.list(own))}: ran for #{call.for}, asked by #{call.by}, on #{call.server}"
+    "#{Artifact.name(own)} has #{length(Artifact.list(own))}: ran for #{call.subject}, asked by #{call.actor}, on #{call.server}"
   end
 end
 EOF

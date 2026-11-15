@@ -8,10 +8,10 @@ defmodule OneCore.Call do
   - `folder`: a folder on the machine running this call that is the plugin's own for whoever it was installed for, for what
     it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
-  - `for`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
+  - `subject`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
     or the group or the network they asked for. What it makes is theirs, and it reaches what they may. A
     scheduled job runs for whoever its plugin was installed for.
-  - `by`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
+  - `actor`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
     job is called by the clock, so by nobody: `nil`.
 
   The rest is One Core's: the plugin's name where it was installed and the plugin as a who, what was asked of it, the
@@ -24,10 +24,10 @@ defmodule OneCore.Call do
   alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
   alias OneCore.Plugins.{Calls, Version}
 
-  @enforce_keys [:own, :installed, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
-  defstruct [:own, :installed, :folder, :server, :for, :by, :plugin, :who, :ask, :uses, :forwarded]
+  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
+  defstruct [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
 
-  @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), for: String.t()}
+  @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
   @doc """
   A plugin this call's plugin uses, or that one of those uses: its module, whose functions take this call and run
@@ -49,7 +49,7 @@ defmodule OneCore.Call do
 
       OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})
   """
-  def tool(%__MODULE__{by: by, for: who}, plugin, tool, inputs) do
+  def tool(%__MODULE__{actor: by, subject: who}, plugin, tool, inputs) do
     case Calls.call(plugin, tool, inputs, {by, who}) do
       {:ok, answer} when is_binary(answer) -> answer
       {:ok, answer} -> JSON.decode!(JSON.encode!(answer))
@@ -77,7 +77,7 @@ defmodule OneCore.Call do
       OneCore.Artifact.name(note)
       #=> "users/alice/made/notes/7"
   """
-  def make(%__MODULE__{for: who, by: by, plugin: plugin} = call, id) do
+  def make(%__MODULE__{subject: who, actor: by, plugin: plugin} = call, id) do
     if User.link?(who), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
     if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
     %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {call.who, {by, who}, "owner"}}
@@ -95,7 +95,7 @@ defmodule OneCore.Call do
       note = OneCore.Call.reach(call, "users/alice/made/notes/7")
       {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
   """
-  def reach(%__MODULE__{for: who, by: by} = call, name, relation \\ "viewer") do
+  def reach(%__MODULE__{subject: who, actor: by} = call, name, relation \\ "viewer") do
     if why = refused(call, name, relation), do: raise(why)
     # Its blobs are whoever's it is, whom this server may not act for. One that does runs the call.
     owner = User.owner(name) || "network"
@@ -107,7 +107,7 @@ defmodule OneCore.Call do
   def reaches?(%__MODULE__{} = call, name, relation \\ "viewer"), do: refused(call, name, relation) == nil
 
   @doc "Why this call may not reach the artifact `name` as `relation`, or `nil` if it may."
-  def refused(%__MODULE__{for: who, by: by, plugin: plugin} = call, name, relation)
+  def refused(%__MODULE__{subject: who, actor: by, plugin: plugin} = call, name, relation)
       when relation in ["viewer", "editor", "owner"] do
     parts = String.split(name, "/")
 
@@ -130,7 +130,7 @@ defmodule OneCore.Call do
       "#{name} is a plugin's own artifact, which only that plugin reaches"
     else
       Enum.find_value(about, fn about ->
-        case Hooks.decide("reach", %{"who" => about, "relation" => relation, "artifact" => name}, {by, who}) do
+        case Hooks.validate("reach", %{"who" => about, "relation" => relation, "artifact" => name}, {by, who}) do
           :ok -> nil
           {:refuse, why} -> why
         end
@@ -143,11 +143,11 @@ defmodule OneCore.Call do
   nobody asking, as for a scheduled job, it's whoever the call runs for. It's what a plugin asks before telling
   someone what only a group's members, or the network's, may know.
   """
-  def member?(%__MODULE__{for: who, by: by}, of) do
+  def member?(%__MODULE__{subject: who, actor: by}, of) do
     asking = by || who
 
     asking == of or
-      Hooks.decide("reach", %{"who" => asking, "relation" => "member", "artifact" => of}, {by, who}) == :ok
+      Hooks.validate("reach", %{"who" => asking, "relation" => "member", "artifact" => of}, {by, who}) == :ok
   end
 
   @doc """
@@ -155,18 +155,18 @@ defmodule OneCore.Call do
   as its `owner`. It's who changes what's installed for them, so a plugin asks it before changing what's a group's
   or the network's as a whole, where being a member isn't enough.
   """
-  def owns?(%__MODULE__{for: who, by: who}), do: true
-  def owns?(%__MODULE__{by: nil}), do: false
+  def owns?(%__MODULE__{subject: who, actor: who}), do: true
+  def owns?(%__MODULE__{actor: nil}), do: false
 
-  def owns?(%__MODULE__{for: who, by: by}),
-    do: Hooks.decide("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}) == :ok
+  def owns?(%__MODULE__{subject: who, actor: by}),
+    do: Hooks.validate("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}) == :ok
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
   `plugin` it is, as its artifact's name, who it was `installed` for, its `apps` and its `widgets`. A home page is
   drawn from these.
   """
-  def plugins(%__MODULE__{for: who}) do
+  def plugins(%__MODULE__{subject: who}) do
     for at <- Enum.reverse(Plugins.chain(who)), {name, version} <- Plugins.versions([at]), into: %{} do
       {name, %{name: name, plugin: version.artifact, installed: at, apps: version.apps, widgets: version.widgets}}
     end
@@ -186,7 +186,7 @@ defmodule OneCore.Call do
   to its `init/1`, and found again by every call after. It carries on through its plugin's updates as a service
   does, and one that stopped is started by the next call that asks for it.
 
-      counter = OneCore.Call.process(call, Hello.Counter, call.for, 0)
+      counter = OneCore.Call.process(call, Hello.Counter, call.subject, 0)
   """
   def process(%__MODULE__{uses: uses, who: plugin}, module, key, argument) do
     under = Version.under(module)
@@ -205,12 +205,12 @@ defmodule OneCore.Call do
   ones that hold a key, say. `:no_answer` then means none of them ran it.
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
-    for server <- servers -- [Server.key()], do: :no_answer = asks(call.ask, {call.by, call.for}, server, "to")
+    for server <- servers -- [Server.key()], do: :no_answer = asks(call.request, {call.actor, call.subject}, server, "to")
     :no_answer
   end
 
   def forward(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :forwarding_loop})
-  def forward(%__MODULE__{} = call, owner), do: forward(call.ask, {call.by, call.for}, call.forwarded, owner)
+  def forward(%__MODULE__{} = call, owner), do: forward(call.request, {call.actor, call.subject}, call.forwarded, owner)
 
   @doc """
   Has a server acting for `owner` run what was asked of this one instead, as `forward/2` does for a call: `ask` is
@@ -231,7 +231,7 @@ defmodule OneCore.Call do
   """
   def forward_to(%__MODULE__{forwarded: true}, _server), do: throw({__MODULE__, :forwarding_loop})
 
-  def forward_to(%__MODULE__{ask: ask, for: who, by: by}, server), do: asks(ask, {by, who}, server, true)
+  def forward_to(%__MODULE__{request: ask, subject: who, actor: by}, server), do: asks(ask, {by, who}, server, true)
 
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.

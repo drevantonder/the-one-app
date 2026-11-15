@@ -4,7 +4,7 @@ defmodule Relations do
   this plugin's database, and it decides the `reach` hook from them, so a plugin reaches an artifact only where a
   tuple says both it and whoever it runs for may.
 
-  Nothing here knows how anyone signs in. Who asks is `call.for`, as One Core says it.
+  Nothing here knows how anyone signs in. Who asks is `call.subject`, as One Core says it.
   """
   @behaviour OneCore.Plugin
 
@@ -171,24 +171,24 @@ defmodule Relations do
 
   def call("shared", %{"artifact" => artifact}, call) do
     transaction(call, fn db ->
-      reaches!(db, call.for, "viewer", artifact)
+      reaches!(db, call.subject, "viewer", artifact)
       query(db, "select relation, who from tuples where artifact = ? order by relation, who", [artifact])
     end)
   end
 
   def call("check", %{"artifact" => artifact} = inputs, call) do
-    who = Map.get(inputs, "who", call.for)
+    who = Map.get(inputs, "who", call.subject)
     relation = Map.get(inputs, "relation", "viewer")
 
     transaction(call, fn db ->
-      if who != call.for, do: reaches!(db, call.for, "viewer", artifact)
+      if who != call.subject, do: reaches!(db, call.subject, "viewer", artifact)
       %{who: who, relation: relation, artifact: artifact, may: may?(db, who, relation, artifact)}
     end)
   end
 
   # Every user is in the network, so its members are every user a tuple names, as who or as whose an artifact is.
   def call("members", %{"of" => "network"}, call) do
-    if not user?(call.for), do: raise("Only a user lists the network's users.")
+    if not user?(call.subject), do: raise("Only a user lists the network's users.")
 
     transaction(call, fn db ->
       named = query(db, "select distinct who as name from tuples union select distinct artifact from tuples", [])
@@ -201,8 +201,8 @@ defmodule Relations do
 
   def call("members", %{"of" => "groups/" <> _ = group}, call) do
     transaction(call, fn db ->
-      if not (member?(db, call.for, group) or may?(db, call.for, "viewer", group)),
-        do: raise("#{call.for} isn't in #{group}, so doesn't see who is.")
+      if not (member?(db, call.subject, group) or may?(db, call.subject, "viewer", group)),
+        do: raise("#{call.subject} isn't in #{group}, so doesn't see who is.")
 
       Enum.sort(Enum.filter(followed(db, @members, [group], []), &user?/1))
     end)
@@ -236,7 +236,7 @@ defmodule Relations do
         do: raise("There's a group called #{called} already.")
 
       for relation <- ["owner", "member"],
-          do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, call.for])
+          do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, call.subject])
 
       query(db, "insert into names (artifact, called) values (?, ?)", [group, called])
       group
@@ -245,7 +245,7 @@ defmodule Relations do
 
   def call("groups", _inputs, call) do
     transaction(call, fn db ->
-      for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.for], []) -- [call.for]) do
+      for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.subject], []) -- [call.subject]) do
         having = &for %{"who" => who} <- query(db, @having, [group, &1]), do: who
         # A group that sharing with it made, and not `group`, is called what it's named.
         called =
@@ -277,7 +277,7 @@ defmodule Relations do
   # editor shares up to their own relation and says who's a member, and only an owner adds or removes an owner
   # or a parent.
   defp shares!(db, call, artifact, relation) do
-    reaches!(db, call.for, if(relation in ["owner", "parent"], do: "owner", else: "editor"), artifact)
+    reaches!(db, call.subject, if(relation in ["owner", "parent"], do: "owner", else: "editor"), artifact)
   end
 
   defp reaches!(db, who, relation, artifact) do

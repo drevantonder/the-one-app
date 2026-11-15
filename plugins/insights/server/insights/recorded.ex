@@ -44,7 +44,7 @@ defmodule Insights.Recorded do
         "start" => now - took * 1000,
         "end" => now,
         "attributes" =>
-          Map.merge(attributes, %{"one.for" => User.owner(call.for) || "link"})
+          Map.merge(attributes, %{"one.for" => User.owner(call.subject) || "link"})
           |> Map.merge(if(forwarded, do: %{"one.forwarded" => true}, else: %{})),
         "status" => %{"code" => if(error, do: "error", else: "ok"), "message" => short(error || "")},
         "events" => []
@@ -170,7 +170,7 @@ defmodule Insights.Recorded do
 
   # A server's own warnings and errors are the network's, so the Insights installed for the network hears them. The
   # handler is this module as it is now, so it's added again each time the plugin moves to newer code.
-  defp listen(%{added: "network"}) do
+  defp listen(%{installed: "network"}) do
     :logger.remove_handler(__MODULE__)
     :ok = :logger.add_handler(__MODULE__, __MODULE__, %{level: :warning, config: %{to: self()}})
   end
@@ -180,10 +180,10 @@ defmodule Insights.Recorded do
   ## The batch
 
   @impl true
-  def init({added, server}) do
+  def init({installed, server}) do
     every = every()
     Process.send_after(self(), :flush, every)
-    state = %{added: added, server: server, every: every, from: System.os_time(:nanosecond)}
+    state = %{installed: installed, server: server, every: every, from: System.os_time(:nanosecond)}
     listen(state)
     {:ok, Map.merge(state, empty())}
   end
@@ -195,7 +195,7 @@ defmodule Insights.Recorded do
   end
 
   @impl true
-  def terminate(_why, %{added: "network"}), do: :logger.remove_handler(__MODULE__)
+  def terminate(_why, %{installed: "network"}), do: :logger.remove_handler(__MODULE__)
   def terminate(_why, _state), do: :ok
 
   @impl true
@@ -215,7 +215,7 @@ defmodule Insights.Recorded do
       machine = Servers.name(state.server) || String.slice(state.server, 0, 8)
 
       batch = Map.merge(batch, %{"server" => state.server, "machine" => machine, "from" => state.from, "to" => to})
-      Service.plugin(self(), state.added, :keep, [batch])
+      Service.plugin(self(), state.installed, :keep, [batch])
     end
 
     Process.send_after(self(), :flush, state.every)
