@@ -368,8 +368,9 @@ mod system {
         format!("one-server-{}.service", &key[..12])
     }
 
-    /// Writes the unit in the server's folder and has systemd start it now and with the user's processes. That
-    /// returns once the server is running (`ready`), or failed to start.
+    /// Writes the unit in the server's folder and has systemd start it now, or again with what it's run with now
+    /// where it's running, and with the user's processes. That returns once the server is running (`ready`), or
+    /// failed to start.
     pub fn start(here: &Here, key: &str, program: &Path, said: &[(&str, String)]) -> Result<()> {
         let unit = here.folder.join(name(key));
         let said: String = said.iter().map(|(name, value)| format!("Environment=\"{name}={value}\"\n")).collect();
@@ -383,20 +384,22 @@ mod system {
                 START.as_secs()
             ),
         )?;
-        systemctl(&["enable", "--now"], &unit.display().to_string())
+        systemctl(&["enable", &unit.display().to_string()])?;
+        systemctl(&["daemon-reload"])?;
+        systemctl(&["restart", &name(key)])
     }
 
     pub fn stop(_here: &Here, key: &str) -> Result<()> {
-        systemctl(&["stop"], &name(key))
+        systemctl(&["stop", &name(key)])
     }
 
     pub fn again(_here: &Here, key: &str) -> Result<()> {
-        systemctl(&["start"], &name(key))
+        systemctl(&["start", &name(key)])
     }
 
     /// Has systemd forget the unit, which goes with the server's folder.
     pub fn forget(_here: &Here, key: &str) -> Result<()> {
-        systemctl(&["disable"], &name(key))
+        systemctl(&["disable", &name(key)])
     }
 
     /// Tells systemd the server is running, as `Type=notify` has it wait for.
@@ -413,8 +416,8 @@ mod system {
         Ok(())
     }
 
-    fn systemctl(asked: &[&str], unit: &str) -> Result<()> {
-        let done = std::process::Command::new("systemctl").arg("--user").args(asked).arg(unit).output()?;
+    fn systemctl(asked: &[&str]) -> Result<()> {
+        let done = std::process::Command::new("systemctl").arg("--user").args(asked).output()?;
         ensure!(done.status.success(), "systemd didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
         Ok(())
     }
@@ -422,6 +425,8 @@ mod system {
 
 #[cfg(target_os = "macos")]
 mod system {
+    use std::os::unix::net::UnixDatagram;
+
     use super::*;
 
     fn label(key: &str) -> String {
@@ -436,12 +441,18 @@ mod system {
         Ok(String::from_utf8(std::process::Command::new("id").arg("-u").output()?.stdout)?.trim().to_owned())
     }
 
-    /// Writes the LaunchAgent and has launchd start it now and at each login, keeping it running. Its output is
-    /// `server.log` in the server's folder.
+    /// Writes the LaunchAgent and has launchd start it now, or again with what it's run with now where it's
+    /// running, and at each login, keeping it running. Its output is `server.log` in the server's folder. That
+    /// returns once the server is running: it says so (`ready`) on a socket in its folder, as systemd hears it.
     pub fn start(here: &Here, key: &str, program: &Path, said: &[(&str, String)]) -> Result<()> {
+        let ready = here.folder.join("ready");
         let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;");
-        let said: String =
-            said.iter().map(|(name, value)| format!("<key>{name}</key><string>{}</string>", text(value))).collect();
+        let said: String = said
+            .iter()
+            .map(|(name, value)| (*name, value.clone()))
+            .chain([("NOTIFY_SOCKET", ready.display().to_string())])
+            .map(|(name, value)| format!("<key>{name}</key><string>{}</string>", text(&value)))
+            .collect();
         let log = text(&here.folder.join("server.log").display().to_string());
         let agent = agent(key)?;
         fs::create_dir_all(agent.parent().context("a folder")?)?;
@@ -459,7 +470,18 @@ mod system {
                 text(&program.display().to_string())
             ),
         )?;
-        launchctl(&["bootstrap", &format!("gui/{}", user()?), &agent.display().to_string()])
+        // launchd won't load an agent that's loaded already, as it is where `serve on` is run again.
+        let _ = stop(here, key);
+        let _ = fs::remove_file(&ready);
+        let heard = UnixDatagram::bind(&ready)?;
+        heard.set_read_timeout(Some(START))?;
+        launchctl(&["bootstrap", &format!("gui/{}", user()?), &agent.display().to_string()])?;
+        let running = heard.recv(&mut [0; 16]);
+        fs::remove_file(&ready)?;
+        running.with_context(|| {
+            format!("The server didn't start: its log is {}", here.folder.join("server.log").display())
+        })?;
+        Ok(())
     }
 
     pub fn stop(_here: &Here, key: &str) -> Result<()> {
@@ -474,8 +496,10 @@ mod system {
         Ok(fs::remove_file(agent(key)?)?)
     }
 
-    /// launchd doesn't wait for a program to say it's running.
+    /// Tells `start` the server is running. Nothing hears it when launchd started it by itself, as at a login.
     pub fn ready() -> Result<()> {
+        let Some(socket) = env::var_os("NOTIFY_SOCKET") else { return Ok(()) };
+        let _ = UnixDatagram::unbound()?.send_to(b"READY=1", socket);
         Ok(())
     }
 
