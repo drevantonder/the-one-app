@@ -5,9 +5,12 @@ defmodule SignIn do
   artifact for the network as `devices/<device>`: the user whose it is. One Core asks whose a device is, the
   `device` hook, and it's answered from that blob, so no call asks anything of the address.
 
-  What a person does with their devices in the app is asked of the part at the address, which keeps them.
+  What a person does with their devices in the app is asked of the part at the address, which keeps them. A network
+  with an address is joined by invitation, its first owner's included: when it gets its first owner, the server's
+  log says where they join.
   """
   @behaviour OneCore.Plugin
+  require Logger
   alias OneCore.{Address, Artifact, Call}
 
   @impl true
@@ -55,7 +58,7 @@ defmodule SignIn do
   end
 
   @impl true
-  def hooks, do: ["device"]
+  def hooks, do: ["device", "owner"]
 
   @impl true
   def hook("device", %{"device" => device}, call) do
@@ -67,13 +70,18 @@ defmodule SignIn do
     end
   end
 
+  # A network without an address has nobody to sign in, and is built with whoever a client says it acts as.
+  def hook("owner", %{"who" => "users/" <> name}, _call) do
+    if Application.get_env(:one_core, :address), do: Logger.info(invite(name))
+    :ok
+  end
+
   @impl true
   # Who invites is whoever may change what this plugin keeps for the network: its owners, and whoever they made
   # an editor of it.
   def call("invite", %{"name" => name}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
-    %{"link" => link} = ask(%{ask: "invite", who: name})
-    "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
+    invite(name)
   end
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
@@ -86,6 +94,11 @@ defmodule SignIn do
   def call("remove_passkey", %{"passkey" => passkey}, call) do
     %{"removed" => name} = ask(%{ask: "remove_passkey", who: person(call), passkey: passkey})
     "#{name} is removed."
+  end
+
+  defp invite(name) do
+    %{"link" => link} = ask(%{ask: "invite", who: name})
+    "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
   end
 
   # Devices are a person's, whoever a call runs for.

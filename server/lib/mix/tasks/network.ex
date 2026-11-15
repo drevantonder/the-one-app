@@ -113,19 +113,12 @@ defmodule Mix.Tasks.Network do
     if Servers.here?("network"),
       do: for({name, {:error, why}} <- Plugins.ship(), do: Mix.shell().error("#{name} wasn't deployed: #{why}"))
 
-    # The plugins are there first, so the one that keeps who may do what is told who the first owner is.
+    # The plugins are there first, so the ones that keep who may do what and who signs in are told who the first
+    # owner is, and the server's log says where they join.
     if owner = options[:owner] do
       case User.make_first_owner("users/" <> owner) do
         :ok -> Mix.shell().info("users/#{owner} is the network's first owner.")
         {:error, why} -> Mix.shell().error("users/#{owner} wasn't made the network's first owner: #{why}")
-      end
-
-      # Where people sign in, the first owner joins as anyone invited does, and the first invitation is their own.
-      if address && !options[:development] do
-        case Plugins.call("sign-in", "invite", %{"name" => owner}, "users/" <> owner) do
-          {:ok, said} -> Mix.shell().info(said)
-          {:error, why} -> Mix.shell().error("users/#{owner} wasn't invited: #{why}")
-        end
       end
     end
 

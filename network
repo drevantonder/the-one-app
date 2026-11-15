@@ -99,7 +99,7 @@ one=${one#"$PWD/"}
 [[ -z $owner ]] || cat <<SAID
 
 A network is running in $folder, at ${at_address[1]}.
-$(grep -m1 "^users/$owner joins at" "$folder/server.log")
+$(grep -o -m1 "users/$owner joins at.*" "$folder/server.log")
 
 Its client's home is $folder/client, which is nobody's device until they sign in on it:
 
