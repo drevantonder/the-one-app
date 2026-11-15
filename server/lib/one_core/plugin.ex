@@ -91,7 +91,9 @@ defmodule OneCore.Plugin do
   - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added for, or
     for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call,
     "database")` gives one of them: its module, whose functions take the call and run as this plugin, for whoever it
-    runs for. A plugin that keeps more than a few blobs uses `database`, whose skill says how.
+    runs for. A plugin that keeps more than a few blobs uses `database`, whose skill says how. What whoever
+    runs the bucket mustn't read it keeps with `encryption`, and an account at an outside service it uses through
+    `vault`: their skills say how, and which of a tool's inputs a device encrypts before it's sent.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them. One that only provides functions leaves out `tools/0` and `call/3`.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
