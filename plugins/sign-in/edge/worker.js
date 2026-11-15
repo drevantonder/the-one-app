@@ -43,7 +43,7 @@ const llms = (origin) => `# ${new URL(origin).host}
 `;
 
 /** The key that signed what was asked, as the pieces of the edge check it, or null. */
-const presigner = (request, body) => env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
+const signerKey = (request, body) => env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
 
 async function mcp(request, auth, url) {
   // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
@@ -53,7 +53,7 @@ async function mcp(request, auth, url) {
   // server, and asks for a code to be let in by (`auth.js`).
   if (request.headers.has("one-key")) {
     const body = await request.text();
-    const device = await presigner(request, body);
+    const device = await signerKey(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
     return forward(body, device, [NETWORK]);
   }
@@ -115,7 +115,7 @@ async function nobodys(answer) {
  */
 async function ask(request, auth, url) {
   const body = await request.text();
-  const server = await presigner(request, body);
+  const server = await signerKey(request, body);
   let what;
   try {
     what = JSON.parse(body);
