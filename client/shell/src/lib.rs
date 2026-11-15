@@ -185,6 +185,16 @@ fn close(views: State<'_, Views>, view: String) {
     views.loaded.lock().expect("no view panics").remove(&view);
 }
 
+/// Opens the client again, which couldn't be as the app started, and sends the window where it starts now.
+#[tauri::command]
+async fn enter(app: AppHandle) {
+    let (to, not_in) = starts(&app, None).await;
+    go(&app, to);
+    if let Some(not_in) = not_in {
+        tauri::async_runtime::spawn(let_in(app, not_in));
+    }
+}
+
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
 /// screen from when its page began to load, which the time since the program started is beside.
 #[tauri::command]
@@ -260,6 +270,29 @@ async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Optio
     Ok(None)
 }
 
+/// Where the window starts as the client opens (`entered`): the home screen, or while this device isn't in its
+/// network, the link it's let in by, with what waits for its person to answer. If the network's address didn't
+/// answer, the home screen says so, told what went wrong (`?unreached`), and nothing more.
+async fn starts(app: &AppHandle, why: Option<NotLetIn>) -> (Url, Option<NotIn>) {
+    let mut home: Url = HOME.parse().expect("the home screen has an address");
+    match entered(app, why).await {
+        Ok(None) => (home, None),
+        Ok(Some(not_in)) => (start(app), Some(not_in)),
+        Err(error) => {
+            eprintln!("{error:#}");
+            home.query_pairs_mut().append_pair("unreached", &error.to_string());
+            (home, None)
+        }
+    }
+}
+
+/// Sends the window to `to`.
+fn go(app: &AppHandle, to: Url) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.navigate(to);
+    }
+}
+
 /// Waits for this device's person to answer, and then the window goes to the home screen once the device is in, or
 /// to a new code if they stopped it or the last one ended.
 async fn let_in(app: AppHandle, mut not_in: NotIn) {
@@ -271,14 +304,8 @@ async fn let_in(app: AppHandle, mut not_in: NotIn) {
                 error.downcast_ref::<NotLetIn>().copied()
             }
         };
-        let (to, next) = match entered(&app, why).await {
-            Ok(None) => (HOME.parse().expect("the home screen has an address"), None),
-            Ok(Some(next)) => (start(&app), Some(next)),
-            Err(error) => return eprintln!("{error:#}"),
-        };
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.navigate(to);
-        }
+        let (to, next) = starts(&app, why).await;
+        go(&app, to);
         let Some(next) = next else { return };
         not_in = next;
     }
@@ -317,15 +344,13 @@ pub fn run() {
             app.manage(Start(Mutex::default()));
             app.manage(started);
             // A device that isn't in its network yet starts on the page that signs it in.
-            let page = match tauri::async_runtime::block_on(entered(app.handle(), None))? {
-                None => WebviewUrl::default(),
-                Some(not_in) => {
-                    tauri::async_runtime::spawn(let_in(app.handle().clone(), not_in));
-                    WebviewUrl::External(start(app.handle()))
-                }
-            };
+            let (page, not_in) = tauri::async_runtime::block_on(starts(app.handle(), None));
+            if let Some(not_in) = not_in {
+                tauri::async_runtime::spawn(let_in(app.handle().clone(), not_in));
+            }
             let goes = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", page).on_navigation(move |to| stays(&goes, to));
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page))
+                .on_navigation(move |to| stays(&goes, to));
             #[cfg(desktop)]
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0);
             window.build()?;
@@ -347,7 +372,7 @@ pub fn run() {
                 responder.respond(response.expect("these headers are valid"))
             });
         })
-        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, network, watch, close, opened])
+        .invoke_handler(tauri::generate_handler![apps, ask, again, upload, network, watch, close, enter, opened])
         .run(tauri::generate_context!())
         .expect("the app runs");
 }

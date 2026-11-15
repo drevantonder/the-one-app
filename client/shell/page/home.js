@@ -22,15 +22,21 @@ const address = ({ plugin, page }) =>
 /// couldn't.
 let answering = true
 let unlisted
+/// Why the client couldn't open as the app started, if it couldn't: its network's address didn't answer. Then
+/// that's all the home screen says, until trying again opens it.
+const unreached = new URLSearchParams(location.search).get("unreached")
 
 /// Says on the home screen that no server is answering: with nothing to show, as what needs its user now, and
 /// over what this device kept, as what can wait. Fine is silent.
 function problem() {
   const box = document.getElementById("problem")
-  box.hidden = answering && !unlisted
-  box.toggleAttribute("data-waits", !unlisted)
-  document.getElementById("what").textContent = unlisted ? "Can't show your apps" : "No server is answering"
-  document.getElementById("why").textContent = unlisted ?? "This is what this device kept. Check it's online and a server is on."
+  box.hidden = answering && !unlisted && unreached === null
+  box.toggleAttribute("data-waits", !unlisted && unreached === null)
+  document.getElementById("what").textContent =
+    unreached !== null ? "Can't reach your network" : unlisted ? "Can't show your apps" : "No server is answering"
+  document.getElementById("why").textContent = unreached !== null
+    ? `${unreached}. Check this device is online.`
+    : unlisted ?? "This is what this device kept. Check it's online and a server is on."
 }
 
 /// Draws the home screen from the apps a server listed. An open app whose plugins have a new version loads again.
@@ -210,11 +216,14 @@ listen("answering", ({ payload }) => {
   // What couldn't be listed is asked for again now that a server answers.
   if (answering && unlisted) list()
 })
-document.getElementById("retry").addEventListener("click", () => (unlisted ? list() : invoke("again", { view: "home" })))
+document.getElementById("retry").addEventListener("click", () =>
+  unreached !== null ? invoke("enter") : unlisted ? list() : invoke("again", { view: "home" }),
+)
 
 /// The user returned to the window, so what's showing asks again. While the window is on screen, servers say when
 /// something changed.
 function returned() {
+  if (unreached !== null) return
   invoke("watch", { watching: !document.hidden })
   if (document.hidden) return
   if (unlisted) list()
@@ -224,9 +233,12 @@ function returned() {
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
-// Whose network this is: where its address is, or with none, the machine it's kept on.
-invoke("network").then((address) => (document.getElementById("network").textContent = address ? `at ${new URL(address).host}` : "on this computer"))
-await list()
-invoke("watch", { watching: !document.hidden })
-show(history.state)
-requestAnimationFrame(() => requestAnimationFrame(() => invoke("opened", { view: "home", ms: Math.round(performance.now()) })))
+if (unreached !== null) problem()
+else {
+  // Whose network this is: where its address is, or with none, the machine it's kept on.
+  invoke("network").then((address) => (document.getElementById("network").textContent = address ? `at ${new URL(address).host}` : "on this computer"))
+  await list()
+  invoke("watch", { watching: !document.hidden })
+  show(history.state)
+  requestAnimationFrame(() => requestAnimationFrame(() => invoke("opened", { view: "home", ms: Math.round(performance.now()) })))
+}
