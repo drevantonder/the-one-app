@@ -1,4 +1,4 @@
-// The home pages: yours, each of your groups' and the network's, side by side, then Settings. Each is a grid of
+// The Home Screen: yours, each of your groups' and the network's, side by side, then Settings. Each is a grid of
 // the widgets put on it and its apps' icons. Swiping moves between them, and so does sliding along the dots.
 // Touch and hold, or right-click, for what an app or a widget offers; hold and move to put it somewhere else.
 import { createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
@@ -278,7 +278,7 @@ function Home(props) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your home pages" text={String(error().message ?? error())} />}>
+    <Errored fallback={(error) => <Problem heading="Can't show your Home Screen pages" text={String(error().message ?? error())} />}>
       <Loading>
         <Home home={home()} />
       </Loading>

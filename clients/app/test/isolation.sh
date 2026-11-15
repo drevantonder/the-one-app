@@ -76,7 +76,7 @@ start a
 ONE_HOME=$folder/client "$one" deploy --name a-kept --files-from "$folder/kept"
 ONE_HOME=$folder/client "$one" deploy --name a-prober --files-from "$folder/prober"
 
-say "The app, on a screen of its own: Kept is started behind the home pages, and Prober is opened"
+say "The app, on a screen of its own: Kept is started behind the Home Screen, and Prober is opened"
 ONE_HOME=$folder/client dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
   "$0" 2>"$1/app.log" &
   app=$!

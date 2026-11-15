@@ -1,6 +1,6 @@
 // The gateway: sends each request at the network's address where its path says, and does nothing else. Which
 // piece answers which path is made where the edge is deployed (`edge.js`): the pieces every edge has, and
-// each plugin's edge part.
+// each plugin's edge function.
 
 export default {
   fetch(request, env) {

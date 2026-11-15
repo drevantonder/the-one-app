@@ -1,4 +1,4 @@
-# Notifications' edge part
+# Notifications' edge function
 
 This Worker wakes phones and browsers when someone is notified. It holds the network's keys to the push services as
 its secrets, and nothing else holds them. Whoever deploys the edge writes them to `secrets` here, which git

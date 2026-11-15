@@ -6,7 +6,7 @@ defmodule Notifications do
   A running app on a computer hears that something changed and asks `inbox` for what's new, which it shows as the
   system's own notification: one that isn't running shows nothing, and its person sees the inbox when they open
   it. A phone or a browser registers where its push service reaches it (`register`), with its notification key,
-  and this plugin's edge part (`edge/`) sends there, since only it holds the push services'
+  and this plugin's edge function (`edge/`) sends there, since only it holds the push services'
   keys. What it's handed for each device is the notification encrypted to that key (`Cipher.seal/3`), so
   neither it nor the push service reads it: the device opens it before it shows.
   """
@@ -331,7 +331,7 @@ defmodule Notifications do
   defp listed([one]), do: one
   defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
 
-  # Has this plugin's edge part wake the phones and browsers it went to, each sent the
+  # Has this plugin's edge function wake the phones and browsers it went to, each sent the
   # notification encrypted to it, and forgets the ones whose push service says they're gone. With no address there's nothing to send through, and that's said only if
   # some device was to be woken.
   defp push(_call, [], _notification), do: nil
@@ -364,7 +364,7 @@ defmodule Notifications do
     Base.encode64(sealed)
   end
 
-  # Asks this plugin's edge part, signed as this server, which it answers only for a server
+  # Asks this plugin's edge function, signed as this server, which it answers only for a server
   # acting for the network.
   defp ask(address, what) do
     body = JSON.encode!(what)

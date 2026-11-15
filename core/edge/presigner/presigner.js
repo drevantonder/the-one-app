@@ -2,7 +2,7 @@
 // it does if that server is on the list of whoever the blob belongs to. It never signs a write without a condition
 // (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
 // signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
-// are, for the other pieces here and for a client (`Network`), and keeps the blobs a plugin's edge part
+// are, for the other pieces here and for a client (`Network`), and keeps the blobs a plugin's edge function
 // writes for its plugin's servers (`Own`). It keeps nothing itself and runs no plugin code. Another Worker is
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -103,7 +103,7 @@ export class Network extends WorkerEntrypoint {
 }
 
 /**
- * A plugin's edge part keeps blobs in its plugin's own artifact for the network, which is where its
+ * A plugin's edge function keeps blobs in its plugin's own artifact for the network, which is where its
  * plugin's servers read them, and reaches nothing else in the bucket. Which plugin is said by the binding it was
  * given (`props`), which only whoever deploys the edge sets.
  */

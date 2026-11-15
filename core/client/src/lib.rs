@@ -1,4 +1,4 @@
-//! One Core in a client: what every client and every plugin's client part stands on. It holds the device's key,
+//! One Core in a client: what every client and every plugin's client-side code stands on. It holds the device's key,
 //! reaches a server by its key and asks it, keeps what servers answered (`kept`), and answers what an app's page asks
 //! through its bridge (`Subscription`). The clients are programs on it (`clients/`): the CLI and MCP, and the app, a window
 //! on it. A program is built with the native code of the plugins it ships with, which fills in what a device does of

@@ -1,7 +1,7 @@
 defmodule OneCore.Plugin do
   @text """
   A plugin is a folder of files, and nothing is needed to write one but a text editor. It has the same three parts
-  as One Core: its Elixir in `server/`, what runs in a client in `client/`, and its edge part, if it has one, in
+  as One Core: its Elixir in `server/`, what runs in a client in `client/`, and its edge function, if it has one, in
   `edge/`. Its skill is at its top. Deploying it (the `deploy` tool) hands the server those files: it compiles its
   Elixir, says what's wrong if it doesn't compile, and otherwise runs it at once, with no restart. The plugin is
   whoever's deployed it, and is installed for them: a user, or the group or the network they asked for. Someone else
@@ -97,7 +97,7 @@ defmodule OneCore.Plugin do
   - `OneCore.Call.owns?(call)` says whether whoever asked owns whoever the call runs for: themselves, or the
     group or the network as its `owner`. A tool that changes what's a group's as a whole asks it.
   - `OneCore.Call.plugins(call)` lists the plugins whoever the call runs for finds, theirs and the network's,
-    each with who it was installed for, its apps and its widgets. A home page is drawn from it.
+    each with who it was installed for, its apps and its widgets. A Home Screen page is drawn from it.
   - `OneCore.Call.deployed(call)` lists every plugin anyone in the network has deployed, with its apps, whether or
     not it's installed for anyone now: an app store is drawn from it.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
@@ -184,13 +184,13 @@ defmodule OneCore.Plugin do
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
-  and its edge part. `apps/0`, if the plugin has one, names its apps, as many as it has, each a page of `client/`
+  and its edge function. `apps/0`, if the plugin has one, names its apps, as many as it has, each a page of `client/`
   with an icon there:
 
       @impl true
       def apps, do: [%{name: "Hello", page: "client/index.html", icon: "client/icon.svg"}]
 
-  - An app that's a part of Settings says `settings: true`: it's then on Settings, and on no home page.
+  - An app that's a part of Settings says `settings: true`: it's then on Settings, and on no Home Screen page.
   - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
     2.0 with the UI library, and its source is the folder `client/`: each `.html` there is a page, whose script is the
     app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more
@@ -230,7 +230,7 @@ defmodule OneCore.Plugin do
   - The client sends an app `notifications/one/changed` when what it was answered has changed. The app asks
     again and draws what it's answered.
 
-  A widget is what the plugin shows on a home page at a glance: a tool call, drawn. `widgets/0`, if the plugin
+  A widget is what the plugin shows on a Home Screen page at a glance: a tool call, drawn. `widgets/0`, if the plugin
   has one, lists them:
 
       @impl true
@@ -242,11 +242,11 @@ defmodule OneCore.Plugin do
       end
 
   - A widget names one of the plugin's `tool`s that only reads, its `name` on the card, and the `sizes` it comes
-    in, a phone's own: `2x2`, `4x2` and `4x4`, columns by rows of a home page's grid. The smallest is one fact,
+    in, a phone's own: `2x2`, `4x2` and `4x4`, columns by rows of a Home Screen page's grid. The smallest is one fact,
     the wide one a few rows, and the large one those rows with a detail each, or a chart.
-  - The tool is called with the `size` to draw, for whoever's home page it's on, and answers a layout: one
+  - The tool is called with the `size` to draw, for whoever's Home Screen page it's on, and answers a layout: one
     part, which holds the rest. A part is a map that says which `part` it is, from this list, and nothing in a
-    layout is ever markup. Every client draws the same layout: the UI library's `Widget` on a home page, and a phone's
+    layout is ever markup. Every client draws the same layout: the UI library's `Widget` on a Home Screen page, and a phone's
     own home screen once it has widgets. A client asks again when something changed, and when the page is
     returned to.
   - `column` and `row` hold `parts`, with a `gap` between them in points if not the usual. Any part can say
@@ -339,7 +339,7 @@ defmodule OneCore.Plugin do
     that stops by itself should stop the service, so that both are started again. The plugin `load` does all of
     this.
 
-  A plugin's edge part is what of it has to be reached over the web: a page that opens in a
+  A plugin's edge function is what of it has to be reached over the web: a page that opens in a
   browser, or a call from a service outside. It's an ordinary Cloudflare Worker in the plugin's folder `edge/`,
   with a `wrangler.jsonc`, and a `package.json` that names the first part of each path it answers:
 
@@ -350,12 +350,12 @@ defmodule OneCore.Plugin do
     (`core/edge/edge.js`), so it's for the plugins a network is set up with.
   - It keeps what it needs in storage of its own, which its `wrangler.jsonc` binds, and is given three bindings
     besides. `env.OWN.write(name, data)` writes a blob of the plugin's own artifact for the network, only if
-    there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server part reads what this
+    there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server-side code reads what this
     part has to tell it, as `call.own` of the plugin installed for the network. `env.NETWORK.servers(of)` gives the
     keys of the servers acting for a user, a group or the network, by their prefix (`users/alice/`).
     `env.RELAY.forward(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if
     that server isn't up, and `env.RELAY.notify(message)` tells every server a notification.
-  - The plugin's server part asks it over the web, signing what it asks as its server does at the edge
+  - The plugin's server-side code asks it over the web, signing what it asks as its server does at the edge
     (`OneCore.Edge.signed/2`). `env.NETWORK.verifiedKey(url, headers, body)` gives the key that signed it, or `null`.
   - Its `package.json`'s packages are installed and its `build` script run where the edge is deployed from. A
     page it serves is built there as an app's is, against the UI library (`bun ../../../ui/app.js <source> <out>`), which
@@ -366,7 +366,7 @@ defmodule OneCore.Plugin do
 
   Tools to check a plugin before it's deployed are recommended, not needed.
   """
-  @moduledoc "The interface a plugin's server part is written against.\n\n" <> @text
+  @moduledoc "The interface a plugin's server-side code is written against.\n\n" <> @text
 
   @doc """
   One of a plugin's own files, by its path among the files it was deployed with, from any module of the plugin:

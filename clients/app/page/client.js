@@ -4,7 +4,7 @@
 // here. It speaks to this page as an MCP App speaks to its host: JSON-RPC messages, posted. What it asks goes to
 // the client's Rust half (`ask`), which answers what only reads from what it kept and says when that has changed.
 //
-// The home pages are an app too: the plugin `home`'s, which reaches this client from a server as every plugin
+// The Home Screen are an app too: the plugin `home`'s, which reaches this client from a server as every plugin
 // does. It's the one this page shows first, under every other, and it opens the rest (`one/open`).
 const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event
@@ -47,7 +47,7 @@ function dress() {
 }
 scheme.addEventListener("change", dress)
 
-/// Says over the home pages that no server is answering: with nothing to show, as what needs its user now, and
+/// Says over the Home Screen that no server is answering: with nothing to show, as what needs its user now, and
 /// over what this device kept, as what can wait. Fine is silent.
 function problem() {
   // A problem is said in place of the mark.
@@ -57,7 +57,7 @@ function problem() {
   box.hidden = (answering && !nothing) || Boolean(history.state)
   box.toggleAttribute("data-waits", !nothing)
   document.getElementById("what").textContent =
-    unreached !== null ? "Can't reach your network" : unlisted ? "Can't show your home pages" : "No server is answering"
+    unreached !== null ? "Can't reach your network" : unlisted ? "Can't show your Home Screen pages" : "No server is answering"
   document.getElementById("why").textContent = unreached !== null
     ? `${unreached}. Check this device is online.`
     : unlisted ?? "This is what this device kept. Check it's online and a server is on."
@@ -112,8 +112,8 @@ function load(app, who) {
 /// mustn't show it a second time.
 let shownByDevice = false
 
-/// Changes between the home pages and an app as a move, as the UI library moves between an app's screens
-/// (ui/src/screen.jsx): the browser slides the app in over the home pages, or with `back`, back out from over
+/// Changes between the Home Screen and an app as a move, as the UI library moves between an app's screens
+/// (ui/src/screen.jsx): the browser slides the app in over the Home Screen, or with `back`, back out from over
 /// them. Where the browser can't, or the user asked for no motion, it's a plain swap.
 function move(change, back = false) {
   const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
@@ -121,7 +121,7 @@ function move(change, back = false) {
   document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
 }
 
-/// Shows the app that's open as `at` over the rest, or with none there, the home pages. `tapped` is when its icon
+/// Shows the app that's open as `at` over the rest, or with none there, the Home Screen. `tapped` is when its icon
 /// was tapped.
 function show(at, tapped) {
   const view = open.get(at) ?? open.get(key(HOME))
@@ -136,7 +136,7 @@ function show(at, tapped) {
 }
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
-/// showing with what it drew from. The home pages' time is from when this page began to load.
+/// showing with what it drew from. The Home Screen' time is from when this page began to load.
 function opened(view) {
   if (view.tapped === undefined) return
   const tapped = view.tapped
@@ -236,7 +236,7 @@ async function answer(view, method, params) {
     return { ...(await invoke("client")), theme: chosen() }
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
-  // An app opened from a group's home page is answered for the group.
+  // An app opened from a group's Home Screen page is answered for the group.
   const who = params._meta?.for ?? view.for
   if (who && !listed.has(who)) list(who)
   return invoke("request", { view: view.key, method, params: who ? { ...params, _meta: { ...params._meta, for: who } } : params })
@@ -247,7 +247,7 @@ addEventListener("message", async ({ source, data }) => {
   if (!view || typeof data?.method !== "string") return
   const { id, method, params = {} } = data
   if (id === undefined) {
-    // The app's user went back out of it. The app stays open behind the home pages.
+    // The app's user went back out of it. The app stays open behind the Home Screen.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && history.state) history.back()
     // Something is open over its page, or nothing is any more.
     if (method === "notifications/one/over") view.over = params.over === true
@@ -296,7 +296,7 @@ listen("changed", ({ payload: view }) => {
 
 /// The device's own back, where a device has one (the app's window there calls this): what's open over the app
 /// that's showing shuts first. → whether anything was. If nothing was, the device goes back through this window's
-/// history, which leads back through an app's screens and out of it, and from the home pages out of the app.
+/// history, which leads back through an app's screens and out of it, and from the Home Screen out of the app.
 window.back = () => {
   const view = open.get(history.state) ?? open.get(key(HOME))
   if (!view?.over || view.frame.inert) return false
@@ -336,13 +336,13 @@ function returned() {
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
-/// Lists this user's files, and shows the home pages once there are some to show them from.
+/// Lists this user's files, and shows the Home Screen once there are some to show them from.
 async function start() {
   await list()
   if (unlisted) return
   if (open.has(key(HOME))) open.get(key(HOME)).frame.contentWindow.location.replace(address(open.get(key(HOME))))
   else load(HOME)
-  // The app that was showing when the page was loaded again is gone, so the home pages show.
+  // The app that was showing when the page was loaded again is gone, so the Home Screen show.
   if (history.state) history.replaceState(null, "")
   show(null, 0)
 }

@@ -1,6 +1,6 @@
 [package]
 name = "notifications_client"
-description = "Notifications' client part that's built into the app: showing them on this device, and a phone's push."
+description = "Notifications' client-side code that's built into the app: showing them on this device, and a phone's push."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,4 +1,4 @@
-// Notifications' edge part. A server acting for the network asks it to wake phones and browsers
+// Notifications' edge function. A server acting for the network asks it to wake phones and browsers
 // (`/notifications/send`) with what it encrypted to each, which this can't read either, and it does, through the push services whose keys only it holds (`senders.js`). A browser
 // asks it for the key it subscribes with (`/notifications/key`).
 import { send } from "./senders.js";

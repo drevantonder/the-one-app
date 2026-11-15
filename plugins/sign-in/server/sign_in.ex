@@ -1,12 +1,12 @@
 defmodule SignIn do
   @moduledoc """
-  Signing in: whose each device is. People sign in at the network's address, where this plugin's edge part
+  Signing in: whose each device is. People sign in at the network's address, where this plugin's edge function
   (`edge/`) keeps their passkeys and what they let act as them, and writes each device into this plugin's own
   artifact for the network as `devices/<device>`: the user whose it is. One Core asks whose a device is, the
   `device` hook, and it's answered from that blob, so no call asks anything of the edge. What each person goes
   by is there too, `people/<name>`, which `people` tells whoever may see who's in the network.
 
-  What a person does with their devices in the app is asked of the edge part, which keeps them. A network
+  What a person does with their devices in the app is asked of the edge function, which keeps them. A network
   with an address that isn't being built is joined by invitation, its first owner's included: until they've joined,
   the server's log says where, each time it's told who they are. A new link ends the one before.
   """
@@ -221,7 +221,7 @@ defmodule SignIn do
   defp person(%Call{actor: "users/" <> _ = by}), do: by
   defp person(_call), do: raise("This is a person's to ask, and nobody is asking.")
 
-  # Asks this plugin's edge part, as this server: it answers only the network's own.
+  # Asks this plugin's edge function, as this server: it answers only the network's own.
   defp ask(what) do
     address =
       Application.get_env(:one_core, :address) ||

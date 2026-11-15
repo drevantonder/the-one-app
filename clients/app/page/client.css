@@ -1,4 +1,4 @@
-/* The window's own page: the frames its apps are drawn in, the home pages' under the rest, and a problem above
+/* The window's own page: the frames its apps are drawn in, the Home Screen' under the rest, and a problem above
    them. An app has the whole window but what the device keeps for itself. A frame is told of no safe area, so the
    page keeps the app clear of it. */
 html,
@@ -20,7 +20,7 @@ body {
   user-select: none;
   overscroll-behavior: none;
 }
-/* A problem is shown above the home pages, as the UI library's `Problem` shows one: red for what needs the user now, and
+/* A problem is shown above the Home Screen, as the UI library's `Problem` shows one: red for what needs the user now, and
    the warning's colour for what can wait. It takes its own room, so it covers none of what this device kept. */
 #problem {
   justify-self: center;
@@ -87,8 +87,8 @@ iframe[inert] {
   display: none !important;
 }
 
-/* Between the home pages and an app, as the UI library moves between screens (ui/src/ui.css): the app slides in over
-   the home pages from the end of the line, and going back it slides out again. */
+/* Between the Home Screen and an app, as the UI library moves between screens (ui/src/ui.css): the app slides in over
+   the Home Screen from the end of the line, and going back it slides out again. */
 :root {
   --toward-end: 1;
 }

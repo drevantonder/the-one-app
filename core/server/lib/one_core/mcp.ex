@@ -64,7 +64,7 @@ defmodule OneCore.Mcp do
         Servers.seen_again()
         ""
 
-      # Another server, or a plugin's edge part, saying that what this one kept of some hooks
+      # Another server, or a plugin's edge function, saying that what this one kept of some hooks
       # was decided from what has since changed.
       {:ok, %{"method" => "notifications/one/forget"} = said} ->
         Hooks.forget(for hook <- List.wrap(said["params"]["hooks"]), is_binary(hook), do: hook)

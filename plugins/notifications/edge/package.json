@@ -1,6 +1,6 @@
 {
   "name": "notifications",
-  "description": "Notifications' edge part: it wakes phones and browsers through Apple's, Google's and the browsers' push services, whose keys only it holds.",
+  "description": "Notifications' edge function: it wakes phones and browsers through Apple's, Google's and the browsers' push services, whose keys only it holds.",
   "private": true,
   "type": "module",
   "paths": [

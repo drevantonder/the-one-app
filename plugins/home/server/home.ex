@@ -1,6 +1,6 @@
 defmodule Home do
   @moduledoc """
-  Home pages: where apps and widgets sit. A user has one, and so does each group and the network.
+  Home Screen: where apps and widgets sit. A user has one, and so does each group and the network.
 
   A page is what's installed for whoever it belongs to: each plugin's apps, and the widgets its plugins have. So
   adding an app to a page is adding its plugin for them (One Core's `install`), which is what puts it on the clients
@@ -35,7 +35,7 @@ defmodule Home do
         name: "page",
         read_only: true,
         description: """
-        Gives your home page: its apps and widgets in order (`items`), the widgets that could be put on it
+        Gives your Home Screen page: its apps and widgets in order (`items`), the widgets that could be put on it
         (`widgets`), and whether you may arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none
@@ -43,7 +43,7 @@ defmodule Home do
       %{
         name: "arrange",
         description: """
-        Arranges your home page: its apps and widgets, in the order given. Asked for a group or for the network,
+        Arranges your Home Screen page: its apps and widgets, in the order given. Asked for a group or for the network,
         it arranges theirs, which their owners do. A widget not given is taken off the page, and an app not given
         goes after the rest: `uninstall` is what takes an app off a page, and `install` puts one on.
         """,
@@ -112,7 +112,7 @@ defmodule Home do
   end
 
   def call("arrange", %{"items" => items}, call) do
-    if not Call.owns?(call), do: raise("#{call.subject}'s home page is arranged by their owners.")
+    if not Call.owns?(call), do: raise("#{call.subject}'s Home Screen page is arranged by their owners.")
 
     items =
       for item <- items, is_binary(item["app"]) or is_binary(item["widget"]), do: Map.take(item, ~w(app widget size))

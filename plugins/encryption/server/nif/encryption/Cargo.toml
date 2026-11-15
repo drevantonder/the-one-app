@@ -12,7 +12,7 @@ test = false
 doctest = false
 
 [dependencies]
-# What's encrypted is the plugin's client part's to say (`encryption_client::cipher`), so a server and a device do the
+# What's encrypted is the plugin's client-side code's to say (`encryption_client::cipher`), so a server and a device do the
 # same thing. Without its feature `client`, which a device's needs, it's built for every kind of server from one
 # machine (`tooling/release`).
 encryption_client = { path = "../../../client/native", default-features = false }

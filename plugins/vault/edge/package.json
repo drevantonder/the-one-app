@@ -1,6 +1,6 @@
 {
   "name": "vault",
-  "description": "The Vault's edge part: where an outside service sends someone back once they've signed in to it, and where a request for a key says where it's answered.",
+  "description": "The Vault's edge function: where an outside service sends someone back once they've signed in to it, and where a request for a key says where it's answered.",
   "private": true,
   "type": "module",
   "paths": [

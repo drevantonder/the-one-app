@@ -1,6 +1,6 @@
 // The public MCP endpoint for whoever holds a sharing link: they call a tool here over the web, as MCP over HTTP, and the call is
 // passed through the relay to a server acting for whoever the link leads to, by that server's key. Everyone else
-// outside signs in, which is a plugin's edge part.
+// outside signs in, which is a plugin's edge function.
 
 const refuse = (status, why) =>
   Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });

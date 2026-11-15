@@ -19,7 +19,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - A screen works fully within what MCP Apps allows (no reliance on notifications, a navigation stack, sheets outside its frame or native features), so it's the same in our clients and in someone else's.
 - Motion: the browser's own transitions and animations inside a screen, the browser's View Transitions between screens, and neither when the user asked for reduced motion.
 
-## Home pages
+## Home Screen
 
 - A page has no title at its top. Its name is small above the dots.
 - The dots are a centred capsule. Swiping moves between pages, and so does sliding along the dots.

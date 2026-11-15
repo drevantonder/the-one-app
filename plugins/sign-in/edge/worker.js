@@ -1,4 +1,4 @@
-// Signing in's edge part. It serves the sign-in page and what the page asks (`/sign-in/`), is the
+// Signing in's edge function. It serves the sign-in page and what the page asks (`/sign-in/`), is the
 // OAuth provider that MCP's authorization asks for (`/.well-known`), and is the way in over the web for whatever
 // has signed in (`/mcp`): an assistant somewhere else with the token a person let it have, or one of the
 // network's own devices with its key. Either way the call is passed through the relay to a server, which is told

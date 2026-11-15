@@ -1,7 +1,7 @@
 //! The app: a window on One Core in a client (`core/client`). Its own page (`page`) draws nothing of its own but a problem: it
 //! holds the frames. The window always opens there, and asks where it starts (`start`): a device that isn't in its
 //! network yet is sent on to the network's sign-in page, with the code it's let in by, until its person has. Each app is a page of its plugin's, drawn in a frame of its own, which
-//! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The home pages
+//! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The Home Screen
 //! are an app too, the plugin `home`'s, which the window shows first and under every other.
 
 #![cfg(feature = "window")]

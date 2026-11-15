@@ -12,8 +12,8 @@ erl_crash.dump
 /core/server/tmp/
 # What Tauri writes as it builds
 /clients/app/gen/schemas/
-# What `wrangler dev` keeps, the secrets of the presigner and of a plugin's edge part as whoever deploys an
-# edge writes them, and the web client as it's built (each plugin's edge part is built in target/)
+# What `wrangler dev` keeps, the secrets of the presigner and of a plugin's edge function as whoever deploys an
+# edge writes them, and the web client as it's built (each plugin's edge function is built in target/)
 .wrangler/
 /core/edge/presigner/secrets
 /plugins/*/edge/secrets

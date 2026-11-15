@@ -73,7 +73,7 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   unreleased or archived. **iroh-blobs and iroh-docs**: a way to copy blobs between devices, not a store.
 - **Jazz**: its encrypted design is frozen and its makers wrote up why they left it; Jazz 2 is rows a server is
   trusted with, in alpha.
-- **What a plugin's server part could run in**, weighed on 14 November 2026 before Elixir was chosen:
+- **What a plugin's server-side code could run in**, weighed on 14 November 2026 before Elixir was chosen:
   - **QuickJS-NG inside the server**: smallest, with limits per plugin, but no Web APIs of its own and no way to reach
     the machine, so services would stay a separate thing.
   - **V8 inside the server** (`deno_core`): fast, but it leans on Deno's crates, whose team moved to Cloudflare.

@@ -1,4 +1,4 @@
-// Groups: the groups whoever's looking is in, and who's in each, by the names they go by. A group has a home page of
+// Groups: the groups whoever's looking is in, and who's in each, by the names they go by. A group has a Home Screen page of
 // its own, which its members see, and an owner adds someone in the network to it, and takes members out.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"

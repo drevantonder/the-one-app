@@ -1,4 +1,4 @@
-// The Vault's edge part. An outside service sends whoever signed in to it back here
+// The Vault's edge function. An outside service sends whoever signed in to it back here
 // (`/vault/back`), with a code and the `state` their sign-in began with, and this passes both through the relay
 // to a server acting for whoever's sign-in it is, which the state starts with. That server swaps the code for
 // tokens and keeps them in their Vault: this part holds nothing, and a code alone redeems nothing, since only the

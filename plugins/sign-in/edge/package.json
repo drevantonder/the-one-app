@@ -1,6 +1,6 @@
 {
   "name": "sign-in",
-  "description": "Signing in's edge part: the sign-in page, passkeys, the way in for a device or an assistant that someone let act as them, and the llms.txt that tells an assistant how.",
+  "description": "Signing in's edge function: the sign-in page, passkeys, the way in for a device or an assistant that someone let act as them, and the llms.txt that tells an assistant how.",
   "private": true,
   "type": "module",
   "paths": [

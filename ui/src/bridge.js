@@ -60,7 +60,7 @@ export function covers(shut) {
 /// the client keeps the file at. A tool that refuses throws what it said. The client keeps the answer of a tool
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
 /// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
-/// An app opened from a group's home page is answered for the group, with nothing said. A page that shows more
+/// An app opened from a group's Home Screen page is answered for the group, with nothing said. A page that shows more
 /// than one of them says who each call is for: `call("home_page", {}, { for: "groups/family" })`, or `network`.
 export async function call(tool, inputs = {}, who = {}) {
   await greet()
@@ -98,7 +98,7 @@ export const leave = () => greet().then(() => tell("ui/notifications/request-tea
 
 /// `open("claims")`: shows another app over this one, by its plugin's name, as tapping its icon or a notification
 /// from it does. `open("notes/client/index.html", { for: "groups/family" })` names a page of the plugin's that isn't
-/// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a home page opens
+/// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a Home Screen page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
 /// without. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an
 /// outside service's sign-in page is opened.

@@ -163,7 +163,7 @@ defmodule OneCore.Call do
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
-  `plugin` it is, as its artifact's name, who it was `installed` for, its `apps` and its `widgets`. A home page is
+  `plugin` it is, as its artifact's name, who it was `installed` for, its `apps` and its `widgets`. A Home Screen page is
   drawn from these.
   """
   def plugins(%__MODULE__{subject: who}) do

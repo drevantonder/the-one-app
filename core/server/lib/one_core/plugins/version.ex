@@ -35,7 +35,7 @@ defmodule OneCore.Plugins.Version do
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code]
   defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code, :ui, :artifact]
 
-  # The sizes a widget comes in, which are a phone's own: columns by rows of a home page's grid.
+  # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
   @sizes ~w(2x2 4x2 4x4)
 
   # The names versions are loaded under: each is free, or taken by the one version loaded under it.
@@ -375,7 +375,7 @@ defmodule OneCore.Plugins.Version do
 
   defp app?(_, _), do: false
 
-  # A widget is drawn from what one of the plugin's tools answers, which a home page asks again and again.
+  # A widget is drawn from what one of the plugin's tools answers, which a Home Screen page asks again and again.
   defp widget?(%{name: name, tool: tool, sizes: [_ | _] = sizes}, tools) when is_binary(name),
     do: Enum.any?(tools, &(&1.name == tool and &1[:read_only] == true)) and sizes -- @sizes == []
 

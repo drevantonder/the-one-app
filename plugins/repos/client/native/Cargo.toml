@@ -1,6 +1,6 @@
 [package]
 name = "repos_client"
-description = "Repos' client part that's built into a client: git's remote helper for `one::` addresses."
+description = "Repos' client-side code that's built into a client: git's remote helper for `one::` addresses."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

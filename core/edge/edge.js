@@ -7,7 +7,7 @@
 // DNS record and certificate, if the name is on a zone of the same account. Without one it answers only at
 // workers.dev.
 //
-// That's the pieces in this folder, the web client's files (`clients/web`), and each plugin's edge part: a plugin
+// That's the pieces in this folder, the web client's files (`clients/web`), and each plugin's edge function: a plugin
 // that has one holds an ordinary Worker in the folder `edge` of its own (`plugins/<name>/edge`), with a
 // `wrangler.jsonc` and a `package.json` that names the first part of each path it answers (`"paths": ["mcp"]`).
 // The gateway's list of paths is made here from those. A part is built in `target/edge/<name>`, a copy as deep in

@@ -1,6 +1,6 @@
 [package]
 name = "backups_client"
-description = "Backups' client part that's built into a client: restoring a whole network from a backup, `one restore`."
+description = "Backups' client-side code that's built into a client: restoring a whole network from a backup, `one restore`."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
