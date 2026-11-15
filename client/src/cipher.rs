@@ -15,6 +15,9 @@
 //! - **A backup** is encrypted to a key of its own, derived from the owner's key of whoever added where it goes
 //!   (`backups`), with HPKE as above: a server is given only its public half, so whatever backs up can't read a
 //!   backup, and the recovery key opens every one.
+//! - **A notification** is encrypted to a key of its device's, derived from the device's own (`notifications`), with
+//!   HPKE as above, so the push service that carries it reads nothing, and what shows it on a phone (its notification
+//!   extension) holds only that key.
 
 use anyhow::{Context, Result, anyhow, bail};
 use chacha20poly1305::aead::{Aead, Generate, Payload};
@@ -87,6 +90,28 @@ pub fn for_backup(backup: &str) -> String {
 /// The backup key, for a server that restores from a backup while a device asks it to.
 pub fn for_restoring(server: &str) -> String {
     format!("one/backups/1/restoring\n{server}")
+}
+
+/// The key a device's notifications are encrypted to, from the device's own key. Its public half is what the device
+/// registers with its push token.
+pub fn notifications(device: &SecretKey) -> SecretKey {
+    SecretKey::from_bytes(&derived(&Zeroizing::new(device.to_bytes()), "one/notifications/1/key"))
+}
+
+/// What a notification is encrypted for: the key it's encrypted to, by its name.
+pub fn for_notification(to: &str) -> String {
+    format!("one/notifications/1/notification\n{to}")
+}
+
+/// A notification, encrypted to a device's notification key `to`, as a server sends it.
+pub fn seal_notification(to: &PublicKey, notification: &[u8]) -> Result<Vec<u8>> {
+    seal(to, &for_notification(&to.to_string()), notification)
+}
+
+/// A notification as the device it was sent to opens it, with its own key.
+pub fn open_notification(device: &SecretKey, sealed: &[u8]) -> Result<Zeroizing<Vec<u8>>> {
+    let key = notifications(device);
+    open(&key, &for_notification(&key.public().to_string()), sealed)
 }
 
 /// What tells an owner's key from another without giving it away: kept beside what's encrypted to their devices,
@@ -231,6 +256,18 @@ mod tests {
         assert_eq!(open(&recovered, &for_object("ab"), &sealed).unwrap().as_slice(), b"a blob");
         assert!(open(&recovered, &for_object("cd"), &sealed).is_err());
         assert!(open(&backups(&super::owner()), &for_object("ab"), &sealed).is_err());
+    }
+
+    #[test]
+    fn a_device_opens_a_notification_sent_to_it_and_nothing_else_does() {
+        let (device, other) = (SecretKey::generate(), SecretKey::generate());
+        let said = br#"{"title":"Lunch is here","text":"At the door","app":"meals"}"#;
+        let sealed = seal_notification(&notifications(&device).public(), said).unwrap();
+        assert!(!sealed.windows(5).any(|part| part == b"Lunch"));
+        assert_eq!(open_notification(&device, &sealed).unwrap().as_slice(), said);
+        assert!(open_notification(&other, &sealed).is_err());
+        // Not with the device's own key: only the key derived for its notifications.
+        assert!(open(&device, &for_notification(&notifications(&device).public().to_string()), &sealed).is_err());
     }
 
     #[test]

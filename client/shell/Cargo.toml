@@ -36,6 +36,10 @@ tauri-plugin-notification = "2.8"
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"] }
 
+# Android's messaging service asks the app's Rust to open each notification (`src/notifications.rs`).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
 # libc after 0.2.189 has no `in6_ifreq` on iOS, which netdev 0.46, through iroh, uses there.
 [target.'cfg(target_os = "ios")'.dependencies]
 libc = "=0.2.189"

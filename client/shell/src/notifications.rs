@@ -4,7 +4,9 @@
 //! - A computer shows what's new in the inbox as the system's own notification while the app runs, and a tap on one
 //!   opens the app it's from. One that isn't running shows nothing: its person sees the inbox when they open it.
 //! - A phone is woken by its push service instead, even when the app isn't running, so it gives the plugin where
-//!   that reaches it, and shows nothing itself.
+//!   that reaches it, and the key what it's sent is encrypted to. What's sent is opened on the phone before it
+//!   shows: by the app's notification extension on an iPhone (`gen/apple/Notifications`), and on Android by the
+//!   app's own messaging service (`gen/android/.../Notifications.kt`), which asks `open` below.
 
 use std::sync::Arc;
 
@@ -125,10 +127,39 @@ pub async fn hear(app: AppHandle, client: Arc<Client>) {
         Ok(token) => token,
         Err(error) => return eprintln!("this phone isn't woken by notifications: {error}"),
     };
-    let register = json!({"name": "notifications_register", "arguments": {"via": via, "token": token, "name": name}});
+    let key = client.notification_key();
+    let register =
+        json!({"name": "notifications_register", "arguments": {"via": via, "token": token, "name": name, "key": key}});
     match client.request("tools/call", register).await {
         Ok(answer) if answer["isError"] != true => eprintln!("this phone is woken by notifications"),
         Ok(answer) => eprintln!("this phone isn't woken by notifications: {}", answer["content"][0]["text"]),
         Err(error) => eprintln!("this phone isn't woken by notifications: {error:#}"),
+    }
+}
+
+/// Opens a notification for Android's messaging service (`gen/android/.../Notifications.kt`), which may run while the
+/// app doesn't: `sealed` is what FCM carried, base64, and `home` the app's folder, whose key opens it. Gives its JSON,
+/// or null if it doesn't open.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_client_Notifications_open<'local>(
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    home: jni::objects::JString<'local>,
+    sealed: jni::objects::JString<'local>,
+) -> jni::sys::jstring {
+    let mut opened = || -> anyhow::Result<String> {
+        let home: String = env.get_string(&home)?.into();
+        let sealed: String = env.get_string(&sealed)?.into();
+        let sealed = data_encoding::BASE64.decode(sealed.as_bytes())?;
+        Ok(client::notification(std::path::Path::new(&home), &sealed)?.to_string())
+    };
+    let opened = opened();
+    match opened {
+        Ok(said) => env.new_string(said).map(|said| said.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Err(error) => {
+            eprintln!("a notification didn't open: {error:#}");
+            std::ptr::null_mut()
+        }
     }
 }

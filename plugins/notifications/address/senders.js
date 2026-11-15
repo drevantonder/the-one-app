@@ -1,21 +1,29 @@
 // The push services a notification wakes a device through: Apple's (APNs), Google's (FCM) and a browser's (Web
 // Push). Each makes the one request its service documents, with `fetch` given, so a test sees each request as it
 // would go out. The keys are the Worker's secrets (README.md); a service whose keys aren't there fails, saying so.
+//
+// What a device shows is encrypted to it by the server that sent it (`client/src/cipher.rs`, `seal_notification`),
+// as `sealed`, and that's all that goes: the push service carries it and reads nothing. On an iPhone, the app's
+// notification extension opens it before it shows (`mutable-content`), so Apple has only a fixed line; on Android
+// it's a data message, which the app opens and shows itself.
 import { buildPushPayload } from "@block65/webcrypto-web-push";
 import { importPKCS8, SignJWT } from "jose";
 
+/** What Apple shows on an iPhone that can't open a notification: one too old for the extension. */
+export const FIXED = "New notification";
+
 /**
- * Wakes each of `devices` (`{ via, token }`, as the plugin keeps them) with `notification` (`{ title, text, app }`).
+ * Wakes each of `devices` (`{ via, token, sealed }`, the notification encrypted to that device, as base64).
  * Gives the tokens whose service says they're gone, which the plugin forgets, and why each failure failed.
  */
-export async function send(fetch, env, devices, notification) {
+export async function send(fetch, env, devices) {
   const gone = [];
   const failed = [];
   await Promise.all(
-    devices.map(async ({ via, token }) => {
+    devices.map(async ({ via, token, sealed }) => {
       let outcome;
       try {
-        outcome = await SENDERS[via](fetch, env, token, notification);
+        outcome = await SENDERS[via](fetch, env, token, sealed);
       } catch (error) {
         outcome = { failed: error.message };
       }
@@ -40,7 +48,7 @@ async function token(whose, make) {
  * APNs, with a token from the team's .p8 key: an ES256 JWT, which Apple takes for up to an hour and refuses to
  * have made more often than every 20 minutes, so it's kept 50.
  */
-async function apns(fetch, env, device, { title, text, app }) {
+async function apns(fetch, env, device, sealed) {
   if (!env.APNS_KEY) return { failed: "APNs isn't set up for this network" };
   const bearer = await token("apns", async () => ({
     token: await new SignJWT({ iss: env.APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) })
@@ -58,7 +66,7 @@ async function apns(fetch, env, device, { title, text, app }) {
       "apns-priority": "10",
       "content-type": "application/json",
     },
-    body: JSON.stringify({ aps: { alert: { title, ...(text && { body: text }) }, sound: "default" }, ...(app && { app }) }),
+    body: JSON.stringify({ aps: { alert: { body: FIXED }, "mutable-content": 1, sound: "default" }, n: sealed }),
   });
   if (answer.ok) return {};
   const { reason = "" } = await answer.json().catch(() => ({}));
@@ -68,7 +76,7 @@ async function apns(fetch, env, device, { title, text, app }) {
 }
 
 /** FCM's HTTP v1 API, with an OAuth token for the Firebase service account, from its RS256 JWT. */
-async function fcm(fetch, env, device, { title, text, app }) {
+async function fcm(fetch, env, device, sealed) {
   if (!env.FCM_ACCOUNT) return { failed: "FCM isn't set up for this network" };
   const account = JSON.parse(env.FCM_ACCOUNT);
   const bearer = await token("fcm", async () => {
@@ -86,7 +94,7 @@ async function fcm(fetch, env, device, { title, text, app }) {
     if (!given.access_token) throw new Error(`Google gave FCM no token: ${given.error_description ?? answer.status}`);
     return { token: given.access_token, lasts: (given.expires_in - 300) * 1000 };
   });
-  const message = { token: device, notification: { title, ...(text && { body: text }) }, ...(app && { data: { app } }) };
+  const message = { token: device, data: { n: sealed }, android: { priority: "HIGH", ttl: "86400s" } };
   const answer = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
     method: "POST",
     headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
@@ -101,11 +109,11 @@ async function fcm(fetch, env, device, { title, text, app }) {
 }
 
 /** Web Push: RFC 8291's encryption to the browser's subscription, which is the token, and RFC 8292's VAPID. */
-async function webpush(fetch, env, device, notification) {
+async function webpush(fetch, env, device, sealed) {
   if (!env.VAPID_PRIVATE_KEY) return { failed: "Web Push isn't set up for this network" };
   const subscription = JSON.parse(device);
   const vapid = { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
-  const message = { data: JSON.stringify(notification), options: { ttl: 86_400, urgency: "high" } };
+  const message = { data: JSON.stringify({ n: sealed }), options: { ttl: 86_400, urgency: "high" } };
   const answer = await fetch(subscription.endpoint, await buildPushPayload(message, subscription, vapid));
   if (answer.ok) return {};
   if (answer.status === 404 || answer.status === 410) return { gone: true };

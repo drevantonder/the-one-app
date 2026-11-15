@@ -58,8 +58,13 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 1.0.0
         CFBundleVersion: "1.0.0"
+        # The folder the app keeps its client in, which its notification extension reads its key from
+        # (Sources/shell/main.mm).
+        AppGroup: group.$(PRODUCT_BUNDLE_IDENTIFIER)
     entitlements:
       path: shell_iOS/shell_iOS.entitlements
+      properties:
+        com.apple.security.application-groups: [group.$(PRODUCT_BUNDLE_IDENTIFIER)]
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -75,6 +80,7 @@ targets:
         EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
       groups: [app]
     dependencies:
+      - target: Notifications
       - framework: libapp.a
         embed: false
       - sdk: CoreGraphics.framework
@@ -93,3 +99,32 @@ targets:
         outputFiles:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+  # Opens each notification APNs brings before it shows, with the key the app keeps in their App Group
+  # (Notifications/NotificationService.swift). CryptoKit's HPKE is on iOS 17 and later; before that, an iPhone shows
+  # the fixed line Apple carries.
+  Notifications:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Notifications
+    info:
+      path: Notifications/Info.plist
+      properties:
+        CFBundleDisplayName: Notifications
+        CFBundleShortVersionString: 1.0.0
+        CFBundleVersion: "1.0.0"
+        AppGroup: group.app.theone.client
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    entitlements:
+      path: Notifications/Notifications.entitlements
+      properties:
+        com.apple.security.application-groups: [group.app.theone.client]
+    settings:
+      base:
+        PRODUCT_NAME: Notifications
+        PRODUCT_BUNDLE_IDENTIFIER: app.theone.client.notifications
+        ARCHS: [arm64]
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64

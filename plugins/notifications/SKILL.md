@@ -22,4 +22,5 @@ Notifications reach a person on their devices and stay in their inbox until they
   brings it back. A silenced app's notifications aren't sent to them at all. These are the person's choices:
   change them when they ask.
 - `register`, `unregister` and `devices` are for the app on a phone or in a browser, which registers where its
-  push service reaches it. A computer's app shows notifications while it runs, and needs nothing registered.
+  push service reaches it, and its notification key: what it's sent is encrypted to that key, so Apple, Google
+  and the network's address carry it without reading it, and the phone opens it before it shows. A computer's app shows notifications while it runs, and needs nothing registered.

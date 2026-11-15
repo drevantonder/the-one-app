@@ -2,7 +2,7 @@
 // reaches Apple, Google or a browser's push service.
 import { expect, test } from "bun:test";
 import { decodeProtectedHeader, importSPKI, jwtVerify } from "jose";
-import { send } from "./senders.js";
+import { FIXED, send } from "./senders.js";
 
 const pem = (der, kind) => `-----BEGIN ${kind}-----\n${Buffer.from(der).toString("base64")}\n-----END ${kind}-----`;
 const base64url = (bytes) => Buffer.from(bytes).toString("base64url");
@@ -47,10 +47,18 @@ function fake(answer) {
 }
 
 const notification = { title: "Sam approved your claim", text: "Lunch with Sam, $42", app: "claims" };
+// What the server sends each device: its notification, encrypted to it, which stands in here for the real thing.
+const sealed = Buffer.from(crypto.getRandomValues(new Uint8Array(96))).toString("base64");
+const to = (via, token) => ({ via, token, sealed });
 
-test("APNs is asked with the team's token, for the app, with what it shows", async () => {
+/** Whether anything a notification says shows in what was asked, anywhere: its URL, its headers or its body. */
+const shows = (asked) => {
+  const seen = asked.map(({ url, headers, body }) => [url, JSON.stringify(headers ?? {}), ArrayBuffer.isView(body) || body instanceof ArrayBuffer ? new TextDecoder().decode(body) : String(body ?? "")].join("\n")).join("\n");
+  return Object.values(notification).some((said) => seen.includes(said)) || ["Sam", "Lunch", "claim"].some((word) => seen.includes(word));
+};
+test("APNs is asked with the team's token, for the app, with the notification encrypted and a fixed line", async () => {
   const { fetch, asked } = fake(() => new Response(null, { status: 200 }));
-  expect(await send(fetch, env, [{ via: "apns", token: "a1b2" }], notification)).toEqual({ gone: [], failed: [] });
+  expect(await send(fetch, env, [to("apns", "a1b2")])).toEqual({ gone: [], failed: [] });
   const [{ url, headers, body }] = asked;
   expect(url).toBe("https://api.push.apple.com/3/device/a1b2");
   expect(headers["apns-topic"]).toBe("app.theone.client");
@@ -58,7 +66,8 @@ test("APNs is asked with the team's token, for the app, with what it shows", asy
   expect(decodeProtectedHeader(bearer)).toEqual({ alg: "ES256", kid: "KEY123" });
   const key = await importSPKI(pem(await crypto.subtle.exportKey("spki", ec.publicKey), "PUBLIC KEY"), "ES256");
   expect((await jwtVerify(bearer, key)).payload.iss).toBe("TEAM123");
-  expect(JSON.parse(body)).toEqual({ aps: { alert: { title: notification.title, body: notification.text }, sound: "default" }, app: "claims" });
+  expect(JSON.parse(body)).toEqual({ aps: { alert: { body: FIXED }, "mutable-content": 1, sound: "default" }, n: sealed });
+  expect(shows(asked)).toBe(false);
 });
 
 test("an iPhone APNs says is gone is gone, and another failure says why", async () => {
@@ -67,15 +76,15 @@ test("an iPhone APNs says is gone is gone, and another failure says why", async 
       ? Response.json({ reason: "Unregistered" }, { status: 410 })
       : Response.json({ reason: "TooManyRequests" }, { status: 429 }),
   );
-  const devices = [{ via: "apns", token: "gone" }, { via: "apns", token: "busy" }];
-  expect(await send(fetch, env, devices, notification)).toEqual({ gone: ["gone"], failed: [{ token: "busy", why: "APNs answered 429 TooManyRequests" }] });
+  const devices = [to("apns", "gone"), to("apns", "busy")];
+  expect(await send(fetch, env, devices)).toEqual({ gone: ["gone"], failed: [{ token: "busy", why: "APNs answered 429 TooManyRequests" }] });
 });
 
-test("FCM is asked with a token Google gave for the service account", async () => {
+test("FCM is asked with a token Google gave for the service account, for a data message of the encrypted notification", async () => {
   const { fetch, asked } = fake((url) =>
     url === "https://oauth2.googleapis.com/token" ? Response.json({ access_token: "google-token", expires_in: 3600 }) : Response.json({ name: "sent" }),
   );
-  expect(await send(fetch, env, [{ via: "fcm", token: "phone" }], notification)).toEqual({ gone: [], failed: [] });
+  expect(await send(fetch, env, [to("fcm", "phone")])).toEqual({ gone: [], failed: [] });
   const [grant, sent] = asked;
   const assertion = new URLSearchParams(grant.body).get("assertion");
   const key = await importSPKI(pem(await crypto.subtle.exportKey("spki", rsa.publicKey), "PUBLIC KEY"), "RS256");
@@ -83,26 +92,26 @@ test("FCM is asked with a token Google gave for the service account", async () =
   expect(payload.iss).toBe("push@the-one-app.iam.gserviceaccount.com");
   expect(sent.url).toBe("https://fcm.googleapis.com/v1/projects/the-one-app/messages:send");
   expect(sent.headers.authorization).toBe("Bearer google-token");
-  expect(JSON.parse(sent.body)).toEqual({
-    message: { token: "phone", notification: { title: notification.title, body: notification.text }, data: { app: "claims" } },
-  });
+  expect(JSON.parse(sent.body)).toEqual({ message: { token: "phone", data: { n: sealed }, android: { priority: "HIGH", ttl: "86400s" } } });
+  expect(shows(asked)).toBe(false);
 });
 
-test("a browser is sent what it shows, encrypted to its subscription and signed with the network's VAPID key", async () => {
+test("a browser is sent the encrypted notification, encrypted again to its subscription and signed with the network's VAPID key", async () => {
   const { fetch, asked } = fake(() => new Response(null, { status: 201 }));
-  expect(await send(fetch, env, [{ via: "webpush", token: JSON.stringify(subscription) }], notification)).toEqual({ gone: [], failed: [] });
+  expect(await send(fetch, env, [to("webpush", JSON.stringify(subscription))])).toEqual({ gone: [], failed: [] });
   const [{ url, headers, body }] = asked;
   expect(url).toBe(subscription.endpoint);
   expect(headers["content-encoding"]).toBe("aes128gcm");
   expect(headers.authorization).toStartWith("vapid t=");
   expect(headers.authorization).toEndWith(`k=${env.VAPID_PUBLIC_KEY}`);
-  expect(new TextDecoder().decode(body)).not.toContain(notification.title);
+  expect(new TextDecoder().decode(body)).not.toContain(sealed);
+  expect(shows(asked)).toBe(false);
 });
 
 test("a service with no keys fails, saying so", async () => {
   const { fetch, asked } = fake(() => new Response(null, { status: 200 }));
-  const devices = [{ via: "apns", token: "a" }, { via: "fcm", token: "b" }, { via: "webpush", token: JSON.stringify(subscription) }];
-  expect(await send(fetch, {}, devices, notification)).toEqual({
+  const devices = [to("apns", "a"), to("fcm", "b"), to("webpush", JSON.stringify(subscription))];
+  expect(await send(fetch, {}, devices)).toEqual({
     gone: [],
     failed: [
       { token: "a", why: "APNs isn't set up for this network" },

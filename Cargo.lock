@@ -5136,6 +5136,7 @@ dependencies = [
  "anyhow",
  "client",
  "data-encoding",
+ "jni 0.21.1",
  "libc",
  "serde_json",
  "tauri",

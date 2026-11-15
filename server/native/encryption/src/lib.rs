@@ -78,6 +78,13 @@ fn secret<'a>(env: Env<'a>, key_file: &str, sealed: Binary) -> Result<Binary<'a>
     Ok(binary(env, &opened(key_file, cipher::for_secret, sealed.as_slice())?))
 }
 
+/// Encrypts a notification to a device's notification key, `to`, as `client::cipher` says a device opens it.
+#[rustler::nif]
+fn notification<'a>(env: Env<'a>, to: &str, data: Binary) -> Result<Binary<'a>, String> {
+    let to: PublicKey = to.parse().map_err(|_| "that isn't a device's notification key")?;
+    Ok(binary(env, &cipher::seal_notification(&to, data.as_slice()).map_err(|error| error.to_string())?))
+}
+
 /// Encrypts `data` to the machine whose key is `to`, for what `about` says.
 #[rustler::nif]
 fn seal<'a>(env: Env<'a>, to: &str, about: &str, data: Binary) -> Result<Binary<'a>, String> {

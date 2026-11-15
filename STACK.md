@@ -15,7 +15,9 @@ exists and what was set aside is in `PRIOR-ART.md`.
   OAuth provider that MCP's authorization asks for.
 - **A notification reaches a computer through Tauri's notification plugin** while the app runs, and a phone
   through APNs or FCM, whose token the app gets from `tauri-plugin-notifications`, since Tauri's own has no push.
-  The notifications plugin's part at the address sends there, and to browsers with Web Push.
+  The notifications plugin's part at the address sends there, and to browsers with Web Push, each notification
+  encrypted to its device. The phone opens it before it shows: an iPhone in the app's Notification Service
+  Extension, Android in the app's own FCM service, which takes the place of the push plugin's.
 - **An app's UI is Solid 2.0, built by a server with Vite**, which Bun runs. Its components' behaviour is Zag's,
   in Ark UI's shape until Ark runs on Solid 2.0, when they import Ark's instead.
 

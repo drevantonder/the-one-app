@@ -5,8 +5,10 @@ defmodule Notifications do
 
   A running app on a computer hears that something changed and asks `inbox` for what's new, which it shows as the
   system's own notification: one that isn't running shows nothing, and its person sees the inbox when they open
-  it. A phone or a browser registers where its push service reaches it (`register`), and this plugin's part at the
-  network's address (`address/`) sends there, since only it holds the push services' keys.
+  it. A phone or a browser registers where its push service reaches it (`register`), with its notification key,
+  and this plugin's part at the network's address (`address/`) sends there, since only it holds the push services'
+  keys. What it's handed for each device is the notification encrypted to that key (`Cipher.notification/2`), so
+  neither it nor the push service reads it: the device opens it before it shows.
   """
   @behaviour OneCore.Plugin
   require Logger
@@ -24,6 +26,16 @@ defmodule Notifications do
     """
     create table devices (
       token text primary key, user text not null, via text not null, name text not null, at text not null
+    )
+    """,
+    "create index devices_by_user on devices (user)",
+    # A device registers its notification key with its token, which what it's sent is encrypted to. One that
+    # registered before that registers again as its app starts.
+    "drop table devices",
+    """
+    create table devices (
+      token text primary key, user text not null, via text not null, name text not null, at text not null,
+      key text not null
     )
     """,
     "create index devices_by_user on devices (user)"
@@ -121,9 +133,15 @@ defmodule Notifications do
               maxLength: 2000,
               description: "Where it reaches the device: an APNs or FCM token, or a browser's subscription as JSON"
             },
-            name: %{type: "string", maxLength: 80, description: "What the device is called"}
+            name: %{type: "string", maxLength: 80, description: "What the device is called"},
+            key: %{
+              type: "string",
+              pattern: "^[0-9a-f]{64}$",
+              description:
+                "The device's notification key, which what it's sent is encrypted to, so nothing on the way reads it"
+            }
           },
-          required: ["via", "token", "name"]
+          required: ["via", "token", "name", "key"]
         }
       },
       %{
@@ -163,7 +181,7 @@ defmodule Notifications do
         end
 
         {sent, quiet,
-         query(db, "select token, via, name from devices where user in (select value from json_each(?))", [
+         query(db, "select token, via, name, key from devices where user in (select value from json_each(?))", [
            JSON.encode!(sent)
          ])}
       end)
@@ -240,17 +258,18 @@ defmodule Notifications do
     if hear, do: "You hear from #{app}.", else: "#{app} is silenced."
   end
 
-  def call("register", %{"via" => via, "token" => token, "name" => name}, call) do
+  def call("register", %{"via" => via, "token" => token, "name" => name, "key" => key}, call) do
     user = person(call)
     at = DateTime.to_iso8601(DateTime.utc_now(:second))
 
     transaction(call, fn db ->
-      query(db, "insert or replace into devices (token, user, via, name, at) values (?, ?, ?, ?, ?)", [
+      query(db, "insert or replace into devices (token, user, via, name, at, key) values (?, ?, ?, ?, ?, ?)", [
         token,
         user,
         via,
         name,
-        at
+        at,
+        key
       ])
     end)
 
@@ -312,15 +331,16 @@ defmodule Notifications do
   defp listed([one]), do: one
   defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
 
-  # Has this plugin's part at the network's address wake the phones and browsers it went to, which forgets the ones
-  # whose push service says they're gone. With no address there's nothing to send through, and that's said only if
+  # Has this plugin's part at the network's address wake the phones and browsers it went to, each sent the
+  # notification encrypted to it, and forgets the ones whose push service says they're gone. With no address there's nothing to send through, and that's said only if
   # some device was to be woken.
   defp push(_call, [], _notification), do: nil
 
   defp push(call, devices, notification) do
     with address when is_binary(address) <- Application.get_env(:one_core, :address),
-         sent = Enum.map(devices, &Map.take(&1, ["token", "via"])),
-         {:ok, %{"gone" => gone, "failed" => failed}} <- ask(address, %{devices: sent, notification: notification}) do
+         said = JSON.encode!(notification),
+         sent = Enum.map(devices, &%{token: &1["token"], via: &1["via"], sealed: sealed(&1["key"], said)}),
+         {:ok, %{"gone" => gone, "failed" => failed}} <- ask(address, %{devices: sent}) do
       if gone != [] do
         forget = "delete from devices where token in (select value from json_each(?))"
         transaction(call, &query(&1, forget, [JSON.encode!(gone)]))
@@ -337,6 +357,11 @@ defmodule Notifications do
       nil -> "Phones and browsers weren't woken: this network has no address."
       {:error, why} -> "Phones and browsers weren't woken: #{why}"
     end
+  end
+
+  defp sealed(key, said) do
+    {:ok, sealed} = Cipher.notification(key, said)
+    Base.encode64(sealed)
   end
 
   # Asks this plugin's part at the network's address, signed as this server, which it answers only for a server

@@ -422,6 +422,13 @@ pub fn address(endpoint: &Endpoint, network: Option<&Network>) -> Result<Endpoin
     }
 }
 
+/// A notification sent to the device whose home is `home`, opened with its key there: `{title, text, app}`. It's
+/// for what shows a notification on a phone, which may run while the app doesn't (`client/shell`).
+pub fn notification(home: &Path, sealed: &[u8]) -> Result<serde_json::Value> {
+    let device = key(&home.join("key"))?;
+    Ok(serde_json::from_slice(&cipher::open_notification(&device, sealed)?)?)
+}
+
 /// The key kept in `file`, which is made on first use. It's made whole under a name of its own and then given its
 /// name only if nothing has it yet, so of two programs that start at once in a new home, as the app and a command
 /// can, one makes it and the other reads it whole. `tempfile` gives it that name without a hard link where the
@@ -721,6 +728,11 @@ impl Client {
     /// This client's key, as others know it.
     pub fn key(&self) -> String {
         self.key.public().to_string()
+    }
+
+    /// The key this device's notifications are encrypted to, which it registers with its push token.
+    pub fn notification_key(&self) -> String {
+        cipher::notifications(&self.key).public().to_string()
     }
 
     /// The network's address, if it has one.

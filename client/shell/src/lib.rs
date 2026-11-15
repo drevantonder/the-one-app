@@ -299,9 +299,12 @@ const HOME: &str = "tauri://localhost/index.html";
 /// Opens the client and gives the window its views, or if this device isn't in its network yet, gives what lets it
 /// in and the link it's let in by, which says `why` it shows a new code, if it does.
 async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Option<(Url, NotIn)>> {
-    // A phone gives each app a folder of its own, which only the app is told.
-    #[cfg(mobile)]
+    // A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
+    // the folder it shares with its notification extension instead, which `main.mm` says as ONE_HOME.
+    #[cfg(target_os = "android")]
     let home = app.path().app_data_dir()?;
+    #[cfg(target_os = "ios")]
+    let home = std::env::var_os("ONE_HOME").map_or_else(|| app.path().app_data_dir(), |home| Ok(home.into()))?;
     #[cfg(desktop)]
     let home = ::client::home()?;
     let client = match Client::open(home).await {

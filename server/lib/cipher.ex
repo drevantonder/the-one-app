@@ -36,6 +36,12 @@ defmodule Cipher do
   @doc "What a backup holds, encrypted to the backup key for what `about` says: `{:ok, data}` or `{:error, why}`."
   def backup_open(_key, _about, _sealed), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc """
+  Encrypts a notification, `data`, to a device's notification key `to`, as the device opens it
+  (`client/src/cipher.rs`): `{:ok, sealed}`.
+  """
+  def notification(_to, _data), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "Encrypts `data` to the machine whose key is `to`, for what `about` says, which is all it then opens for."
   def seal(_to, _about, _data), do: :erlang.nif_error(:nif_not_loaded)
 end
