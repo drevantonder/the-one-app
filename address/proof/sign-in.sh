@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 # Proves signing in, on a whole network on this machine that people sign in to (`./network <folder> --address --owner
 # alice`), with nothing deployed. People join with a passkey, in a real browser each, and each sees only their own. A
-# new device shows a code and a link that carries it, and is nobody's until its person opens that where they sign in
-# and says the code they're shown matches: with nothing more where they're signed in already, and after their passkey
-# where they aren't. Saying stop refuses it, and the device is told. A link a stranger sends shows the stranger's
-# code, and lets in nothing unless it's said to match. A code that has ended, one someone else opened first, too many
-# wrong ones, and a key asking on a code that isn't its own are refused. One that's removed is refused the next thing
-# it asks, by every server, and is let in again as someone else's at once. A stranger who knows a server's key and
-# where it is, and dials it with a key of their own, is refused. An assistant somewhere else is let in at /mcp as
-# MCP's authorization says, acts as whoever let it in, and is one of their devices. A network without the plugin that
-# decides who may is its first owner's alone, and one without the plugin that signs people in answers nobody. It says
-# what a call costs once a device is someone's. A device or assistant of a person's lets in their next by its code,
-# with no browser; given by someone else's, it's theirs; and only a server acting for that person says so.
+# new device shows a code and a link that carries it, and is nobody's until its person opens that where they sign in and
+# says the code they're shown matches: with nothing more where they're signed in already, and after their passkey where
+# they aren't. Saying stop refuses it, and the device is told. A link a stranger sends shows the stranger's code, and
+# lets in nothing unless it's said to match. A code that has ended, one someone else opened first, too many wrong ones,
+# through a browser or a tool, and a key asking on a code that isn't its own are refused. One that's removed is refused
+# the next thing it asks, by every server, and is let in again as someone else's at once. A stranger who knows a
+# server's key and where it is, and dials it with a key of their own, is refused. A first owner who has joined is given
+# no link to join by again. An assistant somewhere else is let in at /mcp as MCP's authorization says, acts as whoever
+# let it in, and is one of their devices. A network without the plugin that decides who may is its first owner's alone,
+# and one without the plugin that signs people in answers nobody. It says what a call costs once a device is someone's.
+# A device or assistant of a person's lets in their next by its code, with no browser; given by someone else's, it's
+# theirs; and only a server acting for that person says so.
 #
 #     mise exec -- address/proof/sign-in.sh
 #
@@ -371,6 +372,10 @@ may device laptop sign-in remove_device --device "$direct"
 refused through server ping ping
 refused through spare ping ping
 kill -9 "$spare"
+
+say "Its first owner has joined, so a server that starts again gives no link to join as them"
+restart --owner alice
+echo "  the server is killed and started again with --owner alice, and its log has $(grep -c "joins at" "$folder/server.log") links to join by"
 
 say "Without the plugin that decides who may, the network is its first owner's alone"
 restart --without relations

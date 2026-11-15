@@ -9,7 +9,7 @@ that one question for it, and a new device when they also say the code it shows 
 
 - `invite` makes a link someone joins by: they open it and make a passkey, and are that user from then on. The
   network's owners invite, and whoever they made an editor of `network/own/sign-in`. The link works once, for a
-  week, and is answered once, so pass it on then. Inviting someone who's already in gives them a way back when
+  week, and a new one for them ends it, so pass on the newest. Inviting someone who's already in gives them a way back when
   they've lost every passkey.
 - `devices` lists your devices, the assistants you let in and the browsers you're signed in on, and your
   passkeys. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a

@@ -237,6 +237,20 @@ export function at(origin) {
 }
 
 /**
+ * A link that `name` joins the network by, as that user, made for them if they're new. It's their only one: an
+ * earlier link to join as them no longer works.
+ */
+async function invite(adapter, internalAdapter, origin, name, user) {
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
+  // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
+  const invitee = user ?? (await internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }));
+  await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: invitee.id }] });
+  const link = hex(crypto.getRandomValues(new Uint8Array(24)));
+  await adapter.create({ model: "invite", data: { id: await sha256(link), userId: invitee.id, expiresAt: new Date(Date.now() + INVITED_FOR) }, forceAllowId: true });
+  return { link: `${origin}/sign-in/#invite=${link}` };
+}
+
+/**
  * What a server acting for the network asks, for a person in the app: `{ask, ...}`. Their name is theirs as
  * relation tuples have it, `users/<name>`.
  */
@@ -245,13 +259,11 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
   const named = String(name ?? "").replace(/^users\//, "");
   const [user] = await adapter.findMany({ model: "user", where: [{ field: "name", value: named }] });
 
-  if (ask === "invite") {
-    if (!/^[a-z][a-z0-9-]*$/.test(named)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
-    // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
-    const invitee = user ?? (await internalAdapter.createUser({ name: named, email: `${named}@${new URL(origin).hostname}`, emailVerified: false }));
-    const link = hex(crypto.getRandomValues(new Uint8Array(24)));
-    await adapter.create({ model: "invite", data: { id: await sha256(link), userId: invitee.id, expiresAt: new Date(Date.now() + INVITED_FOR) }, forceAllowId: true });
-    return { link: `${origin}/sign-in/#invite=${link}` };
+  if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user);
+  // The network's first owner is invited only until they've joined, so a link to join as them isn't made after.
+  if (ask === "owner") {
+    const joined = user && (await adapter.findMany({ model: "passkey", where: [{ field: "userId", value: user.id }] })).length > 0;
+    return joined ? { joined: true } : invite(adapter, internalAdapter, origin, named, user);
   }
   if (!user) return { error: `${name} hasn't joined this network.` };
   const mine = [{ field: "userId", value: user.id }];

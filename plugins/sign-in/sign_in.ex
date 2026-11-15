@@ -6,8 +6,8 @@ defmodule SignIn do
   `device` hook, and it's answered from that blob, so no call asks anything of the address.
 
   What a person does with their devices in the app is asked of the part at the address, which keeps them. A network
-  with an address that isn't being built is joined by invitation, its first owner's included: when it gets its first
-  owner, the server's log says where they join.
+  with an address that isn't being built is joined by invitation, its first owner's included: until they've joined,
+  the server's log says where, each time it's told who they are. A new link ends the one before.
   """
   @behaviour OneCore.Plugin
   require Logger
@@ -23,7 +23,8 @@ defmodule SignIn do
     [
       %{
         name: "invite",
-        description: "Makes a link someone joins the network by, as the user you name",
+        description:
+          "Makes a link someone joins the network by, as the user you name. It ends the one made for them before",
         inputs: %{
           type: "object",
           properties: %{name: %{type: "string", description: "Their name: lowercase letters, digits and hyphens"}},
@@ -80,10 +81,14 @@ defmodule SignIn do
   end
 
   # Only a network that has an address and isn't being built has people sign in. One being built acts as whoever a
-  # client says, so its first owner joins nowhere.
+  # client says, so its first owner joins nowhere. One who has joined is given no link to join by again.
   def hook("owner", %{"who" => "users/" <> name}, _call) do
     signs_in = Application.get_env(:one_core, :address) && !Application.get_env(:one_core, :development, false)
-    if signs_in, do: Logger.info(invite(name))
+
+    with true <- signs_in,
+         %{"link" => link} <- ask(%{ask: "owner", who: name}),
+         do: Logger.info(joins(name, link))
+
     :ok
   end
 
@@ -114,8 +119,10 @@ defmodule SignIn do
 
   defp invite(name) do
     %{"link" => link} = ask(%{ask: "invite", who: name})
-    "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
+    joins(name, link)
   end
+
+  defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
 
   # Devices are a person's, whoever a call runs for.
   defp person(%Call{by: "users/" <> _ = by}), do: by
