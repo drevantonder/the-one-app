@@ -26,6 +26,14 @@ defmodule Repos do
   # The most of a file that's shown, and of a commit's changes.
   @shown 1_048_576
   @page 25
+  # How long a removed repo can be restored, after which it's erased.
+  @restorable :timer.hours(24 * 30)
+
+  @impl true
+  def uses, do: ["database"]
+
+  @impl true
+  def jobs, do: [%{tool: "erase", every: 86_400}]
 
   @impl true
   def apps, do: [%{name: "Repos", page: "app/index.html", icon: "icon.svg"}]
@@ -131,8 +139,13 @@ defmodule Repos do
       },
       %{
         name: "restore",
-        description: "Brings back a repo you own that was removed, as it was",
+        description: "Brings back a repo you own that was removed in the last 30 days, as it was",
         inputs: only.(%{repo: repo}, ["repo"])
+      },
+      %{
+        name: "erase",
+        description: "Erases for good every repo removed more than 30 days ago. The clock calls it each day",
+        inputs: only.(%{}, [])
       },
       %{
         name: "git",
@@ -412,8 +425,25 @@ defmodule Repos do
     Artifact.replace(index(), key, JSON.encode!(Map.put(JSON.decode!(data), "removed", removed)), tag)
 
     if removed,
-      do: "Removed #{name}. `repos restore` brings it back as it was.",
+      do: "Removed #{name}. `repos restore` brings it back as it was, for 30 days.",
       else: "Restored #{name}. It's as it was."
+  end
+
+  # A repo is its blobs, under its name, and its line in the index.
+  def call("erase", _inputs, _call) do
+    names = for "index/" <> name <- Artifact.list(index(), "index/"), do: name
+
+    erased =
+      for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(index(), Enum.map(names, &("index/" <> &1)))),
+          %{"removed" => at} when is_integer(at) <- [JSON.decode!(data)],
+          now() - at > @restorable do
+        repo = %Artifact{prefix: name <> "/"}
+        for blob <- Artifact.list(repo), do: Artifact.remove(repo, blob)
+        Artifact.remove(index(), "index/" <> name)
+        name
+      end
+
+    if erased == [], do: "Nothing to erase.", else: "Erased #{Enum.join(erased, ", ")}."
   end
 
   def call("git", %{"repo" => name, "path" => path} = inputs, call) do

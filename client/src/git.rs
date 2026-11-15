@@ -74,19 +74,38 @@ pub async fn helper(args: &[String]) -> Result<ExitCode> {
 /// Puts `git-remote-one` beside `one` where `one` is found on the PATH, so git finds it: the same program, which
 /// knows it's the helper by the name it's run as. A folder this can't write in, as a system's, is left to whoever
 /// installed `one` there, so this says nothing if it can't.
-#[cfg(unix)]
 pub fn beside() {
     let Ok(me) = env::current_exe().and_then(fs::canonicalize) else { return };
     let Some(path) = env::var_os("PATH") else { return };
+    let program = |name: &str| format!("{name}{}", env::consts::EXE_SUFFIX);
     for folder in env::split_paths(&path) {
-        let one = folder.join("one");
+        let one = folder.join(program("one"));
         if fs::canonicalize(&one).is_ok_and(|found| found == me) {
-            let helper = folder.join(HELPER);
-            if fs::symlink_metadata(&helper).is_err() {
-                let _ = std::os::unix::fs::symlink(Path::new("one"), helper);
-            }
+            link(&one, &folder.join(program(HELPER)));
             return;
         }
+    }
+}
+
+/// A symbolic link to `one`, which follows it as it's updated.
+#[cfg(unix)]
+fn link(_one: &Path, helper: &Path) {
+    if fs::symlink_metadata(helper).is_err() {
+        let _ = std::os::unix::fs::symlink(Path::new("one"), helper);
+    }
+}
+
+/// A hard link to `one.exe`: Windows lets only an administrator make a symbolic link. A hard link is the program as
+/// it was when it was linked, so one that an update replaced since is linked again; while git runs the old one,
+/// Windows keeps it, and it's linked the next time.
+#[cfg(windows)]
+fn link(one: &Path, helper: &Path) {
+    let same = match (fs::metadata(one), fs::metadata(helper)) {
+        (Ok(one), Ok(helper)) => one.len() == helper.len() && one.modified().ok() == helper.modified().ok(),
+        _ => false,
+    };
+    if !same && (fs::remove_file(helper).is_ok() || !helper.exists()) {
+        let _ = fs::hard_link(one, helper);
     }
 }
 

@@ -11,7 +11,7 @@ is: `users/alice/made/repos/notes`. Its address for git is `one::` and its name,
 
 Git signs in as the device does, with no password. `one` puts `git-remote-one` beside itself on the PATH the first
 time it runs, which is what git runs for `one::` addresses; where it couldn't, link it there: `ln -s one
-git-remote-one`.
+git-remote-one`, or on Windows `mklink /H git-remote-one.exe one.exe`.
 
 - `make --name notes` makes an empty repo, yours, or a group's with `ONE_FOR=groups/<name>`. Then push to it from a
   repo you have: `git remote add origin one::users/alice/made/repos/notes` and `git push -u origin main`.
@@ -33,5 +33,6 @@ repo `take`s one, which fast-forwards the branch it's for or merges it, or `decl
 decline it too. A suggestion that doesn't merge cleanly says which files conflict: fetch the branch it's for, merge it
 into yours, and push the suggestion again. `git fetch origin refs/suggestions/fix-typo` fetches one to look at.
 
-`remove` hides a repo you own from everyone until `restore` brings it back as it was. The tool `git` is what
+`remove` hides a repo you own from everyone until `restore` brings it back as it was. After 30 days it's
+erased for good, by `erase`, which the clock calls each day. The tool `git` is what
 `git-remote-one` calls; don't call it yourself.
