@@ -182,40 +182,111 @@ fn said(uri: &str) -> Vec<&str> {
     }
 }
 
-/// A tool's inputs from the command line: `--name value`, typed as the tool says, or `--name-from path` to read
-/// the value from a file. A file for an input that says it's an upload (its schema's `format`) is sent to where
-/// the network keeps it, and the input is the name it was given there.
+/// A tool's inputs from the command line: `--name value`, typed as the tool says (`value`), or `--name-from path`
+/// to read the value from a file. A list takes its items one after another, or again with each `--name`.
+/// `--no-name` is nothing (`null`) for an input that takes it, and `false` for one that's true or false, which
+/// `--name` alone is `true` for. A file for an input that says it's an upload (its schema's `format`) is sent to
+/// where the network keeps it, and the input is the name it was given there.
 async fn inputs(client: &Client, tool: &Value, flags: &[String]) -> Result<Value> {
     let known = &tool["inputSchema"]["properties"];
     let mut inputs = Map::new();
     let mut flags = flags.iter().peekable();
     while let Some(flag) = flags.next() {
         let name = flag.strip_prefix("--").with_context(|| format!("`{flag}` isn't an input: write --name value"))?;
+        if let Some(none) =
+            name.strip_prefix("no-").filter(|none| known.get(name).is_none() && known.get(none).is_some())
+        {
+            let value = match kinds(&known[none]) {
+                kinds if kinds.contains(&"null") => Value::Null,
+                kinds if kinds.contains(&"boolean") => Value::Bool(false),
+                _ => bail!("--{none} can't be nothing. Leave it out, or give it {}.", takes(&known[none])),
+            };
+            inputs.insert(none.to_owned(), value);
+            continue;
+        }
         let (name, from_file) = match name.strip_suffix("-from") {
             Some(name) if known.get(name).is_some() => (name, true),
             _ => (name, false),
         };
-        let kind =
-            known.get(name).with_context(|| format!("It has no input named `{name}`. --help shows them."))?["type"]
-                .as_str()
-                .unwrap_or("JSON");
+        let schema = known.get(name).with_context(|| format!("It has no input named `{name}`. --help shows them."))?;
+        let kinds = kinds(schema);
         let value = match flags.next_if(|next| !next.starts_with("--")) {
-            None if kind == "boolean" => Value::Bool(true),
-            None => bail!("--{name} needs a value"),
-            Some(path) if from_file && known[name]["format"] == "upload" => {
+            None if kinds.contains(&"boolean") => Value::Bool(true),
+            None => bail!("--{name} needs {}", takes(schema)),
+            Some(path) if from_file && schema["format"] == "upload" => {
                 let file = fs::read(path).with_context(|| format!("couldn't read {path}"))?;
                 let plugin = tool["name"].as_str().and_then(|tool| tool.split('_').next()).unwrap_or_default();
                 Value::String(client.upload(plugin, file).await?)
             }
-            Some(path) if from_file => read(Path::new(path), known[name]["contentEncoding"] == "base64")?,
-            Some(text) if kind == "string" => Value::String(text.clone()),
-            Some(text) => {
-                serde_json::from_str(text).with_context(|| format!("--{name} takes {kind}, written as JSON"))?
+            Some(path) if from_file => read(Path::new(path), schema["contentEncoding"] == "base64")?,
+            // A list's items are the words up to the next input, unless it's written as JSON.
+            Some(word) if kinds.contains(&"array") && !word.starts_with('[') => {
+                let mut items = vec![value(name, &schema["items"], word)?];
+                while let Some(word) = flags.next_if(|next| !next.starts_with("--")) {
+                    items.push(value(name, &schema["items"], word)?);
+                }
+                match inputs.remove(name) {
+                    Some(Value::Array(before)) => Value::Array([before, items].concat()),
+                    _ => Value::Array(items),
+                }
             }
+            Some(word) => value(name, schema, word)?,
         };
         inputs.insert(name.to_owned(), value);
     }
     Ok(Value::Object(inputs))
+}
+
+/// The kinds of value a schema takes, by JSON Schema's names: its `type`, one or several. None for a schema that
+/// doesn't say, which takes any JSON.
+fn kinds(schema: &Value) -> Vec<&str> {
+    match &schema["type"] {
+        Value::String(kind) => vec![kind.as_str()],
+        Value::Array(kinds) => kinds.iter().filter_map(Value::as_str).collect(),
+        _ => vec![],
+    }
+}
+
+/// One word as a value `schema` takes: a word that's JSON of a kind it takes besides text and nothing is that
+/// (`12`, `true`, `["a"]`), and any other word is text, where it takes text. Nothing is `--no-<input>`, so a word
+/// is never it, and `null` is the text it says.
+fn value(name: &str, schema: &Value, word: &str) -> Result<Value> {
+    let kinds = kinds(schema);
+    let is = |value: &Value, kind: &str| match kind {
+        "integer" => value.is_i64() || value.is_u64(),
+        "number" => value.is_number(),
+        "boolean" => value.is_boolean(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        _ => false,
+    };
+    let json = serde_json::from_str::<Value>(word).ok();
+    match json.filter(|value| kinds.is_empty() && !value.is_null() || kinds.iter().any(|kind| is(value, kind))) {
+        Some(value) => Ok(value),
+        None if kinds.is_empty() || kinds.contains(&"string") => Ok(Value::String(word.to_owned())),
+        None => bail!("--{name} takes {}, which `{word}` isn't", takes(schema)),
+    }
+}
+
+/// What a schema takes, as `--help` says it: one of a few as the few, `text`, `a number` and the rest.
+fn takes(schema: &Value) -> String {
+    let one_of: Vec<&str> = schema["enum"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !one_of.is_empty() {
+        return one_of.join("|");
+    }
+    let taken: Vec<String> = kinds(schema)
+        .into_iter()
+        .filter(|kind| *kind != "null")
+        .map(|kind| match kind {
+            "string" => "text".to_owned(),
+            "integer" => "a whole number".to_owned(),
+            "number" => "a number".to_owned(),
+            "boolean" => "true|false".to_owned(),
+            "array" => format!("{} ...", takes(&schema["items"])),
+            _ => "JSON".to_owned(),
+        })
+        .collect();
+    if taken.is_empty() { "JSON".to_owned() } else { taken.join(" or ") }
 }
 
 /// A file's text, or a folder as its files by their paths in it, as `crate::files` reads a folder: each one's text,
@@ -250,11 +321,9 @@ fn usage(tool: &Value) {
     for (name, input) in inputs {
         let optional = if required.iter().any(|required| required == name) { "" } else { ", optional" };
         let about = input["description"].as_str().unwrap_or_default();
-        // One of a few is shown as the few.
-        let one_of: Vec<&str> = input["enum"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-        let kind =
-            if one_of.is_empty() { input["type"].as_str().unwrap_or("JSON").to_owned() } else { one_of.join("|") };
-        println!("  --{name} <{kind}{optional}>  {about}");
+        let none = if kinds(input).contains(&"null") { format!(" or --no-{name}") } else { String::new() };
+        println!("  --{name} <{}{optional}>{none}  {about}", takes(input));
     }
-    println!("\n--<input>-from <path> reads an input from a file, or from a folder's files that git doesn't ignore.");
+    println!("\nA list takes its items one after another. --no-<input> is nothing, where an input says it takes that.");
+    println!("--<input>-from <path> reads an input from a file, or from a folder's files that git doesn't ignore.");
 }

@@ -36,7 +36,9 @@ defmodule OneCore.Plugin do
 
   - `tools/0` lists each tool's `name` (lowercase letters, digits and `_`), its `description`, and its `inputs` as a
     JSON Schema object. A tool of the plugin `hello` named `greet` is the MCP tool `hello_greet` and the command
-    `one hello greet`.
+    `one hello greet`, whose inputs are flags as its `type` says: `--name Sam`, `--count 3`, `--loud` for true, a
+    list's items one after another (`--tags a b`), and `--no-name` for `null` where the type takes it
+    (`["string", "null"]`). `one hello greet --help` says what each takes.
   - `call/3` runs a tool with its inputs, a map with string keys. They're checked against the tool's `inputs`
     first, and a caller that left out what's required, or gave the wrong kind of thing, is told so. It returns the
     answer: text, or anything JSON can hold. To refuse, raise, and the message is what the caller is told.
