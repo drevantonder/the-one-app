@@ -1,0 +1,28 @@
+---
+name: insights
+description: Read when someone asks what's failing, slow or broken in their network, how long something took, what AI cost, or to read a trace; and before looking into a bug or a slow tool.
+---
+
+Insights keeps what the network's servers, clients and plugins did: a span for each tool call, numbers such as how
+long each tool took and what AI used, and warnings, errors and crashes. It's kept in the network for 14 days, up
+to 256 MB, and nothing about it leaves. It holds no one's data: names, sizes, durations and outcomes, never what
+anyone wrote, was given or answered. What a server recorded arrives here about a minute later.
+
+- `overview` is what the Insights screen in Settings shows: what's failing, what's slowest and what AI cost, over
+  the last `hours` (24 if left out, up to 336).
+- `errors` lists each kind of error once: where (a span's name, as `<plugin> <tool>`, or what logged it), its
+  message, how often, when it was last, and the trace of the newest. Start a bug there.
+- `trace` reads one trace whole by its `id`, across every server it went through: each span's depth, server,
+  start and duration in milliseconds, outcome, message and events. A call that one server passed to another is
+  one trace, the other server's span under the first's.
+- `slowest` lists tools by their 95th percentile, with their calls, failures and 50th and 99th percentiles in
+  milliseconds, then how long each app took to open, from a tap to its first drawing.
+- `metric` gives one metric over time, per step, as its count, sum and quantiles, of the data with the
+  `attributes` given: `one.tool.duration` with `{"one.plugin": "ai-gateway", "one.tool": "chat"}`, say. With no
+  `name` it lists every metric there is, with its attributes.
+- `spending` gives AI Gateway's tokens in and out per model per day, and what they cost where the endpoint says
+  (OpenRouter does). It has no prices of its own.
+- Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
+  doing is open, and who did what isn't.
+
+A plugin records more with `OneCore.Telemetry.record` (the skill building-plugins says how), and it shows here.

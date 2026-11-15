@@ -1,13 +1,23 @@
 // AI Gateway: which models each job tries, in order, then every model there is by where it runs: each machine of
 // yours and each hosted endpoint, with what each model does. A place that isn't answering says so where it is.
-// Pressing a job chooses its models.
+// Pressing a job chooses its models. Spending opens Insights, which keeps what each model used.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, toast } from "ui"
+import { Button, call, changed, Empty, leave, List, open, Problem, Row, Screen, Section, seen, Sheet, Skeleton, toast } from "ui"
 import "./app.css"
 
 const models = createMemo(() => call("ai-gateway_models").then(JSON.parse))
-changed(() => refresh(models))
+/// What AI used this week, as Insights keeps it, or nothing where the network has no Insights.
+const spent = createMemo(() => call("insights_spending", { days: 7 }).then(JSON.parse, () => null))
+changed(() => (refresh(models), refresh(spent)))
+const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
+/// This week's tokens, and what they cost where an endpoint said.
+function spending(days) {
+  const tokens = days.reduce((sum, day) => sum + day.input + day.output, 0)
+  const priced = days.filter((day) => day.cost != null)
+  const cost = priced.reduce((sum, day) => sum + day.cost, 0).toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 })
+  return tokens ? [`${compact.format(tokens)} tokens this week`, priced.length && cost].filter(Boolean).join(" · ") : "No AI used this week"
+}
 
 /// The jobs everyone has, and any other someone set.
 const jobs = () => {
@@ -82,6 +92,11 @@ render(
               </For>
             </List>
           </Section>
+          <Show when={spent()}>
+            <List>
+              <Row heading="Spending" text={spending(spent())} onClick={() => open("insights")} />
+            </List>
+          </Show>
           <Show when={models().places.length} fallback={<Empty>No models yet. Run a model server on a machine of yours, or add a key in the Vault.</Empty>}>
             <For each={models().places}>
               {(place) => (
