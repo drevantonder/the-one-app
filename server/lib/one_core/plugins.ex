@@ -339,7 +339,7 @@ defmodule OneCore.Plugins do
         )
 
       if hook in version.hooks and hears?(call, about),
-        do: {:ok, Hooks.answer(hook, version.plugin.hook(hook, about, call))},
+        do: {:ok, Hooks.answer(hook, Hooks.within(name, hook, fn -> version.plugin.hook(hook, about, call) end))},
         else: {:ok, Hooks.answer(hook, Hooks.nothing(hook))}
     end)
   end

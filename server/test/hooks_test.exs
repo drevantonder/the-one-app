@@ -170,6 +170,13 @@ defmodule OneCore.HooksTest do
              )
 
     assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:error, "Still broken."}
+
+    # One that never answers has refused once it's had ten seconds.
+    hangs = %{"name" => "refused", "files" => %{"refused.ex" => broken.("Process.sleep(:infinity)")}}
+    assert {:ok, "refused is running, at version 3."} = OneCore.Tools.call("deploy", hangs, alice)
+    {took, refused} = :timer.tc(fn -> Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") end, :second)
+    assert refused == {:error, "refused couldn't decide it: refused didn't answer call within 10 seconds"}
+    assert took == 10
     assert {:ok, _} = OneCore.Tools.call("remove", %{"name" => "refused"}, alice)
     assert Plugins.call("echo", "say", %{"word" => "hi"}, "users/alice") == {:ok, "hi"}
   end

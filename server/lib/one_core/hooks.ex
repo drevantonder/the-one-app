@@ -16,8 +16,8 @@ defmodule OneCore.Hooks do
   by the plugins added for them and by the ones added for the network, and by nobody else's: what one user adds
   decides nothing for another.
 
-  A plugin that can't answer, because it raised or its server couldn't be reached, has refused: nothing is let
-  through for want of an answer. So a plugin that breaks blocks what it changes or decides, for whoever it was
+  A plugin that can't answer, because it raised, its server couldn't be reached or it took longer than ten seconds
+  (`within/3`), has refused: nothing is let through for want of an answer. So a plugin that breaks blocks what it changes or decides, for whoever it was
   added for and nobody else, until it's removed or deployed again, and it has no say in either: a call that
   removes a plugin or deploys over it isn't that plugin's to change or decide.
 
@@ -119,6 +119,33 @@ defmodule OneCore.Hooks do
   end
 
   defp flat(text), do: text |> String.split() |> Enum.join(" ")
+
+  # How long a plugin has to answer a hook, in milliseconds. A check is answered in well under a millisecond, and
+  # the slowest answer is one whose database's server has just gone: finding that out and taking its lease over
+  # takes about three seconds (`server/test/takeover.sh`), and more where the bucket is far away. This is that
+  # with room to spare, and still short of a person giving up on what they asked.
+  @answers_within 10_000
+
+  @doc """
+  Runs `fun`, a plugin's `hook/3` at `hook`, and gives what it answered, or raises what it raised. One that hasn't
+  answered within ten seconds is stopped and has refused: it raises, saying so.
+  """
+  def within(plugin, hook, fun) do
+    task =
+      Task.async(fn ->
+        try do
+          {:answered, fun.()}
+        catch
+          kind, reason -> {kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case Task.yield(task, @answers_within) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:answered, answer}} -> answer
+      {:ok, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
+      _ -> raise "#{plugin} didn't answer #{hook} within #{div(@answers_within, 1000)} seconds"
+    end
+  end
 
   # How long a server keeps that something may be reached, in milliseconds, where nothing told it to forget.
   @kept_for 10_000
