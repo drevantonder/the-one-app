@@ -472,6 +472,32 @@ pub fn home() -> Result<PathBuf> {
     }
 }
 
+/// Moves a client kept in `from` to `home`, where it's kept from now on, as a phone's app does when that changes:
+/// an iPhone's goes from the app's own folder to the one it shares with its notification extension. Its person
+/// stays signed in. Nothing moves once `home` holds a key. The key moves last, so a move that's cut short is done
+/// again whole at the next start.
+pub fn move_home(from: &Path, home: &Path) -> Result<()> {
+    if home.join("key").exists() || !from.join("key").exists() {
+        return Ok(());
+    }
+    fs::create_dir_all(home)?;
+    let mut kept: Vec<_> = fs::read_dir(from)?.map(|entry| Ok(entry?.file_name())).collect::<Result<_>>()?;
+    kept.sort_by_key(|name| name == "key");
+    for name in kept {
+        let to = home.join(&name);
+        // What a move that was cut short left there goes first: it's moved again whole.
+        match fs::metadata(&to) {
+            Ok(there) if there.is_dir() => fs::remove_dir_all(&to)?,
+            Ok(_) => fs::remove_file(&to)?,
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        fs::rename(from.join(&name), &to)
+            .with_context(|| format!("couldn't move {} to {}", name.display(), home.display()))?;
+    }
+    Ok(())
+}
+
 /// What the app is to the system it's on: the name of its folder, and of the app among a phone's. It's the build's
 /// Tauri identifier (`build.rs`), so a workplace's own build keeps its own folder beside The One App's. The app
 /// before this one is `one` and `The One App` there, and this is neither.
@@ -1056,4 +1082,35 @@ pub fn files(folder: &Path) -> Result<Vec<String>> {
     }
     files.sort();
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A client kept in the app's own folder moves whole to its new home, once, and a cut-short move is done again.
+    #[test]
+    fn a_client_moves_home_once() {
+        let (from, home) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let home = home.path().join("group");
+        fs::write(from.path().join("key"), [7; 32]).unwrap();
+        fs::write(from.path().join("network"), b"{}").unwrap();
+        fs::create_dir_all(from.path().join("kept/answers")).unwrap();
+        fs::write(from.path().join("kept/answers/one"), b"kept").unwrap();
+        // A move cut short: some of it there already, but not the key.
+        fs::create_dir_all(home.join("kept")).unwrap();
+        fs::write(home.join("kept/half"), b"half").unwrap();
+
+        move_home(from.path(), &home).unwrap();
+        assert_eq!(fs::read(home.join("key")).unwrap(), [7; 32]);
+        assert_eq!(fs::read(home.join("network")).unwrap(), b"{}");
+        assert_eq!(fs::read(home.join("kept/answers/one")).unwrap(), b"kept");
+        assert!(!home.join("kept/half").exists());
+        assert_eq!(fs::read_dir(from.path()).unwrap().count(), 0);
+
+        // Once it holds a key, nothing moves over it.
+        fs::write(from.path().join("key"), [9; 32]).unwrap();
+        move_home(from.path(), &home).unwrap();
+        assert_eq!(fs::read(home.join("key")).unwrap(), [7; 32]);
+    }
 }
