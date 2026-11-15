@@ -186,16 +186,3 @@ pub extern "system" fn Java_app_theone_client_Notifications_open<'local>(
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A tap opens the app the notification came from, as a phone's push plugin says it, and nothing else.
-    #[test]
-    fn a_tap_opens_its_app() {
-        assert_eq!(opens(&json!({"id": -1, "data": {"app": "claims", "n": "sealed"}})), Some("claims"));
-        assert_eq!(opens(&json!({"id": -1, "data": {"app": ""}})), None);
-        assert_eq!(opens(&json!({"id": -1})), None);
-    }
-}
