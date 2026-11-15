@@ -47,10 +47,17 @@ The same app builds for Android with Tauri's CLI (`cargo install tauri-cli`), an
     cd client/shell
     ANDROID_HOME=~/Android/Sdk NDK_HOME=~/Android/Sdk/ndk/<version> cargo tauri android build --debug --apk
 
-Its project is `client/shell/gen/android`. A phone's client is kept in the app's own folder, and is told its
-network's address by a `network` file put there (`{"address": "https://..."}`), as `mix network` writes one for a
-network with an address. An app built with `TAURI_ONE_ADDRESS=https://...` set, on any system, starts on that network
-with no file there. It starts on that network's sign-in page.
+And for iPhone on a Mac, with Xcode, `xcodegen` and Rust's iOS targets, signed by an Apple team:
+
+    cd client/shell
+    APPLE_DEVELOPMENT_TEAM=<team> cargo tauri ios build --export-method debugging
+
+Their projects are `client/shell/gen/android` and `client/shell/gen/apple`. `xcrun devicectl device install app` puts
+what's built in `gen/apple/build/arm64` on a paired iPhone, and `--target aarch64-sim --debug` builds it for the
+simulator. A phone's client is kept in the app's own folder, and is told its network's address by a `network` file put
+there (`{"address": "https://..."}`), as `mix network` writes one for a network with an address. An app built with
+`TAURI_ONE_ADDRESS=https://...` set, on any system, starts on that network with no file there. It starts on that
+network's sign-in page.
 
 - `server`: One Core, in Elixir, with its Rust add-ons in `server/native`.
 - `client`: the client's Rust half, which is the CLI and MCP.
