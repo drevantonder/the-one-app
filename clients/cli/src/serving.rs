@@ -26,7 +26,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 use client::{BUILD, Client, target};
 
@@ -270,11 +270,22 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Whether the server whose key is `key` answers by it, saying it's `build`.
+/// Whether the server whose key is `key` answers by it, saying it's `build`, within `START`. It's asked again
+/// until then: the network's relay passes calls to a server that's just started only once it has seen it there.
 async fn answers(client: &Client, key: &str, build: &str) -> bool {
-    let asked = timeout(START, tool(client, "builds", json!({"server": key}))).await;
-    let said = asked.ok().and_then(Result::ok).and_then(|said| serde_json::from_str::<Value>(&said).ok());
-    said.is_some_and(|said| said["build"] == build)
+    let asking = async {
+        loop {
+            let said = tool(client, "builds", json!({"server": key})).await.ok();
+            if said
+                .and_then(|said| serde_json::from_str::<Value>(&said).ok())
+                .is_some_and(|said| said["build"] == build)
+            {
+                return;
+            }
+            sleep(Duration::from_secs(5)).await;
+        }
+    };
+    timeout(START, asking).await.is_ok()
 }
 
 /// The newest builds for this kind of machine, by what they are (`server`, `one`), each with a link to it.
