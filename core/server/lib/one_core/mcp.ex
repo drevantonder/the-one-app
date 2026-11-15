@@ -66,16 +66,16 @@ defmodule OneCore.Mcp do
 
       # Another server, or a plugin's edge part, saying that what this one kept of some hooks
       # was decided from what has since changed.
-      {:ok, %{"method" => "notifications/one/decided"} = said} ->
+      {:ok, %{"method" => "notifications/one/forget"} = said} ->
         Hooks.forget(for hook <- List.wrap(said["params"]["hooks"]), is_binary(hook), do: hook)
         ""
 
       # Another server saying there's something new in the bucket for some owners, or with none, this server saying
       # it can reach its network's address again.
-      {:ok, %{"method" => "notifications/one/look"} = said} ->
+      {:ok, %{"method" => "notifications/one/reload"} = said} ->
         case said["params"]["for"] do
-          nil -> Server.came_back()
-          owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Server.look(owner)
+          nil -> Server.reconnected()
+          owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Server.reload(owner)
         end
 
         ""

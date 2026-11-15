@@ -10,13 +10,13 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const [address, ...tools] = process.argv.slice(2);
 
 // Where the person's browser is sent back to with the code, on this machine.
-let came_back;
-const code = new Promise((resolve) => (came_back = resolve));
+let redirected;
+const code = new Promise((resolve) => (redirected = resolve));
 const back = Bun.serve({
   port: 0,
   hostname: "127.0.0.1",
   fetch(request) {
-    came_back(new URL(request.url).searchParams.get("code"));
+    redirected(new URL(request.url).searchParams.get("code"));
     return new Response("Go back to your assistant.");
   },
 });

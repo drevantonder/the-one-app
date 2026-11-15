@@ -15,11 +15,11 @@ defmodule Database do
     lease = Lease.of(call)
     if lease == self(), do: raise("A transaction is already running here: use `query` inside it")
 
-    case GenServer.call(lease, {call.own.wrapped, {:transaction, schema, fun}}, :infinity) do
+    case GenServer.call(lease, {call.own.codec, {:transaction, schema, fun}}, :infinity) do
       {:ok, result} ->
         result
 
-      :wrapped_anew ->
+      :codec_changed ->
         opened_again(lease)
         transaction(call, schema, fun)
 
@@ -44,11 +44,11 @@ defmodule Database do
   def schedule(%Call{} = call, jobs, fire) when is_list(jobs) and is_function(fire, 1) do
     lease = Lease.of(call)
 
-    case GenServer.call(lease, {call.own.wrapped, {:schedule, jobs, fire, System.os_time(:second)}}, :infinity) do
+    case GenServer.call(lease, {call.own.codec, {:schedule, jobs, fire, System.os_time(:second)}}, :infinity) do
       :ok ->
         :ok
 
-      :wrapped_anew ->
+      :codec_changed ->
         opened_again(lease)
         schedule(call, jobs, fire)
 
@@ -59,7 +59,7 @@ defmodule Database do
     end
   end
 
-  # A database that was open under what wrapped its artifact before has closed, for the next call to open it.
+  # A database that was open under its artifact's codec before has closed, for the next call to open it.
   defp opened_again(lease) do
     closing = Process.monitor(lease)
 

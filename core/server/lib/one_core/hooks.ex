@@ -204,7 +204,7 @@ defmodule OneCore.Hooks do
   # hasn't looked at is looked at first.
   defp added(owner) do
     with [] <- :ets.lookup(__MODULE__, owner),
-         _ = Plugins.look(owner),
+         _ = Plugins.reload(owner),
          [] <- :ets.lookup(__MODULE__, owner) do
       %{}
     else

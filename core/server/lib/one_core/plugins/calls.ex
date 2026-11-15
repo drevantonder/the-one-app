@@ -39,7 +39,7 @@ defmodule OneCore.Plugins.Calls do
           try do
             call = called(at, name, versions, ask, asked, forwarded)
             answered = tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
-            if kept != [], do: Server.tell_servers(Enum.uniq([at | Plugins.chain(who)]), "decided", kept)
+            if kept != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", kept)
             answered
           after
             Hooks.forget(kept)

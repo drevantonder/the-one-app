@@ -143,8 +143,8 @@ export default class extends WorkerEntrypoint {
   }
 
   /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
-  async tell(message) {
-    await this.relay().fetch("https://relay/tell", { method: "POST", body: message });
+  async notify(message) {
+    await this.relay().fetch("https://relay/notify", { method: "POST", body: message });
   }
 
   /**
@@ -179,7 +179,7 @@ export class Relay extends DurableObject {
     const url = new URL(request.url);
     if (url.pathname === "/endpoint") return this.endpoint(url.searchParams);
     if (url.pathname === "/relay/outside") return this.server(request);
-    if (url.pathname === "/tell") return this.tell(await request.text());
+    if (url.pathname === "/notify") return this.notify(await request.text());
     return this.call(url.searchParams.get("to"));
   }
 
@@ -194,7 +194,7 @@ export class Relay extends DurableObject {
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`endpoint ${key}`, `on ${device}`]);
     ours.serializeAttachment({ key, device, server });
-    if (server) this.tell(SEEN);
+    if (server) this.notify(SEEN);
     return new Response(null, { status: 101, webSocket: theirs });
   }
 
@@ -221,7 +221,7 @@ export class Relay extends DurableObject {
   }
 
   /** Says `message` to every server that's here. Each takes it as a call, whose answer nothing waits for. */
-  tell(message) {
+  notify(message) {
     for (const server of this.ctx.getWebSockets()) {
       if (server.deserializeAttachment()?.outside) server.send(JSON.stringify({ message }));
     }
@@ -269,7 +269,7 @@ export class Relay extends DurableObject {
     // The last connection a device or server had here ends, so it was last seen now.
     if (device && !this.on(device, ws)) {
       await this.ctx.storage.put(`seen ${device}`, Date.now());
-      if (server) this.tell(SEEN);
+      if (server) this.notify(SEEN);
     }
     // A server that left answers nothing, so the calls waiting on it are told.
     if (!outside || this.ctx.getWebSockets(`outside ${outside}`).some((other) => other !== ws)) return;

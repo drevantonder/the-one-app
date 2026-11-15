@@ -22,57 +22,57 @@ defmodule OneCore.Artifact do
   reached knows as what: reached as a `viewer`, it's only read, and a change to it is told to the plugins that
   hear `changed`.
 
-  A plugin wraps an artifact's blobs by saying what they pass through on their way in and out: `%{artifact |
-  wrapped: {module, with}}`, where `module.wrap(with, name, data)` and `module.unwrap(with, name, blob)` each give
+  A plugin gives an artifact a codec by saying what they pass through on their way in and out: `%{artifact |
+  codec: {module, with}}`, where `module.encode(with, name, data)` and `module.decode(with, name, blob)` each give
   `{:ok, binary}` or `{:error, why}`, and `name` is the blob's whole name in the bucket. Everything built on blobs
-  then reads and writes what was wrapped without knowing, a database too. That's how a plugin encrypts
-  one. A wrapped blob isn't handed out by a link, which would give what's in the bucket.
+  then reads and writes through it without knowing, a database too. That's how a plugin encrypts
+  one. A blob with a codec isn't handed out by a link, which would give what's in the bucket.
   """
   alias OneCore.{Bucket, Hooks}
 
   @enforce_keys [:prefix]
-  defstruct [:prefix, :reached, :wrapped]
+  defstruct [:prefix, :reached, :codec]
 
   @typedoc """
   `reached` is the plugin that reached it, who asked and who for, and as what, or `nil` for a plugin's own.
-  `wrapped` is what its blobs pass through, a module and what to call it with, or `nil`.
+  `codec` is what its blobs pass through, a module and what to call it with, or `nil`.
   """
   @type t :: %__MODULE__{
           prefix: String.t(),
           reached: {String.t(), {String.t() | nil, String.t()}, String.t()} | nil,
-          wrapped: {module, term} | nil
+          codec: {module, term} | nil
         }
 
   @doc "An artifact's name."
   def name(%__MODULE__{prefix: prefix}), do: String.trim_trailing(prefix, "/")
 
   def read(%__MODULE__{prefix: prefix} = artifact, name) do
-    with {:ok, blob, tag} <- Bucket.read(prefix <> name), do: {:ok, passed(artifact, :unwrap, name, blob), tag}
+    with {:ok, blob, tag} <- Bucket.read(prefix <> name), do: {:ok, passed(artifact, :decode, name, blob), tag}
   end
 
   @doc "Each of several of its blobs, as `read/2` gives it, in order, read at once where the bucket is far away."
   def read_all(%__MODULE__{prefix: prefix} = artifact, names) do
     for {name, read} <- Enum.zip(names, Bucket.read_all(Enum.map(names, &(prefix <> &1)))) do
-      with {:ok, blob, tag} <- read, do: {:ok, passed(artifact, :unwrap, name, blob), tag}
+      with {:ok, blob, tag} <- read, do: {:ok, passed(artifact, :decode, name, blob), tag}
     end
   end
 
   def write(artifact, name, data) do
     key = writes(artifact) <> name
-    changed(artifact, name, Bucket.write(key, passed(artifact, :wrap, name, data)))
+    changed(artifact, name, Bucket.write(key, passed(artifact, :encode, name, data)))
   end
 
   def replace(artifact, name, data, tag) do
     key = writes(artifact) <> name
-    changed(artifact, name, Bucket.replace(key, passed(artifact, :wrap, name, data), tag))
+    changed(artifact, name, Bucket.replace(key, passed(artifact, :encode, name, data), tag))
   end
 
   def remove(artifact, name), do: changed(artifact, name, Bucket.remove(writes(artifact) <> name))
   def size(%__MODULE__{prefix: prefix}, name), do: Bucket.size(prefix <> name)
 
   @doc "A short-lived link to one of its blobs, for a client to read it with, or to write it if there's none."
-  def link(%__MODULE__{wrapped: {_module, _with}} = artifact, _name, _mode),
-    do: raise("#{name(artifact)} is wrapped, so its blobs aren't handed out by a link")
+  def link(%__MODULE__{codec: {_module, _with}} = artifact, _name, _mode),
+    do: raise("#{name(artifact)} has a codec, so its blobs aren't handed out by a link")
 
   def link(%__MODULE__{prefix: prefix}, name, :read), do: Bucket.link(prefix <> name, :read)
   def link(artifact, name, :write), do: Bucket.link(writes(artifact) <> name, :write)
@@ -82,10 +82,10 @@ defmodule OneCore.Artifact do
     for key <- Bucket.list(prefix <> starting), do: String.replace_prefix(key, prefix, "")
   end
 
-  # A blob on its way into the bucket or out of it, through what wraps the artifact, if anything does.
-  defp passed(%__MODULE__{wrapped: nil}, _way, _name, data), do: data
+  # A blob on its way into the bucket or out of it, through its codec, if it has one.
+  defp passed(%__MODULE__{codec: nil}, _way, _name, data), do: data
 
-  defp passed(%__MODULE__{wrapped: {module, with}, prefix: prefix}, way, name, data) do
+  defp passed(%__MODULE__{codec: {module, with}, prefix: prefix}, way, name, data) do
     case apply(module, way, [with, prefix <> name, data]) do
       {:ok, passed} -> passed
       {:error, why} -> raise why

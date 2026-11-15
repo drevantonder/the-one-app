@@ -60,8 +60,8 @@ defmodule Database.Lease do
   def handle_call({:take_over, _server}, _from, lease), do: {:reply, :ok, lease}
 
   # Anything else is asked with what wraps the artifact of the call that asks.
-  def handle_call({wrapped, _ask}, _from, %{artifact: %{wrapped: was}} = lease) when wrapped != was,
-    do: {:stop, :normal, :wrapped_anew, lease}
+  def handle_call({codec, _ask}, _from, %{artifact: %{codec: was}} = lease) when codec != was,
+    do: {:stop, :normal, :codec_changed, lease}
 
   def handle_call({_wrapped, ask}, from, lease), do: asked(ask, from, lease)
 

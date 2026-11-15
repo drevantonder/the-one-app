@@ -359,7 +359,7 @@ defmodule OneCore.Tools do
 
     with {:error, why} <- Servers.add(key, who), do: raise(why)
     Hooks.heard("joined", %{"server" => key, "for" => who, "by" => Server.key()}, asked)
-    Server.tell_servers([who])
+    Server.notify_servers([who])
     "That server acts for #{who} now, once it's started for them or its owner has chosen them."
   end
 
@@ -369,7 +369,7 @@ defmodule OneCore.Tools do
     reaches!(asked, who, "owner")
     acting = Servers.acting(who)
     with {:error, why} <- Servers.remove(key, who), do: raise(why)
-    Server.tell(acting, [who])
+    Server.notify(acting, [who])
     "That server no longer acts for #{who}."
   end
 
@@ -380,7 +380,7 @@ defmodule OneCore.Tools do
 
       reaches!(asked, owner(), "owner")
       Servers.choose(member)
-      Server.tell_servers([member, owner()])
+      Server.notify_servers([member, owner()])
       "The server #{Server.key()} acts for #{member} too, once they add it with add_server."
     end)
   end

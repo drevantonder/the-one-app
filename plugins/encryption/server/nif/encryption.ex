@@ -38,8 +38,8 @@ defmodule Cipher do
   def open_keys(_keys, _about, _sealed), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Encrypts a blob under the newest of an artifact's `keys`: `{:ok, blob}`. `name` is its whole name in the bucket."
-  def wrap(_keys, _name, _data), do: :erlang.nif_error(:nif_not_loaded)
+  def encode(_keys, _name, _data), do: :erlang.nif_error(:nif_not_loaded)
 
-  @doc "A blob as it was before `wrap/3`: `{:ok, data}`, or `{:error, why}` if these keys don't open it under that name."
-  def unwrap(_keys, _name, _blob), do: :erlang.nif_error(:nif_not_loaded)
+  @doc "A blob as it was before `encode/3`: `{:ok, data}`, or `{:error, why}` if these keys don't open it under that name."
+  def decode(_keys, _name, _blob), do: :erlang.nif_error(:nif_not_loaded)
 end

@@ -22,13 +22,13 @@ defmodule Encryption do
   uses what this gives. Only a server the artifact's owner chose gives it. Any other has a server that was chosen
   run the call instead, which ends here with that server's answer, and raises if none is up.
   """
-  def encrypted(%Call{} = call, %Artifact{wrapped: nil} = artifact) do
+  def encrypted(%Call{} = call, %Artifact{codec: nil} = artifact) do
     name = Artifact.name(artifact)
     keys = Call.process(call, Keys, name, {%{artifact | reached: nil}, call.server})
 
     with :ok <- chosen(call, name, call.server),
          {:ok, keys} <- GenServer.call(keys, :keys) do
-      %{artifact | wrapped: {Cipher, keys}}
+      %{artifact | codec: {Cipher, keys}}
     else
       refused ->
         # A server that's no longer chosen lets go of the keys it held, whatever still holds them.
@@ -54,7 +54,7 @@ defmodule Encryption do
 
   @doc "The keys of the servers that hold an artifact's keys."
   def servers(%Artifact{} = artifact) do
-    for "keys/" <> server <- Artifact.list(%{artifact | wrapped: nil}, "keys/"),
+    for "keys/" <> server <- Artifact.list(%{artifact | codec: nil}, "keys/"),
         server =~ ~r/^[0-9a-f]{64}$/,
         do: server
   end
@@ -74,7 +74,7 @@ defmodule Encryption do
   end
 
   defp epoch(artifact) do
-    case Artifact.read(%{artifact | wrapped: nil}, "keys/epoch") do
+    case Artifact.read(%{artifact | codec: nil}, "keys/epoch") do
       {:ok, epoch, _tag} -> String.to_integer(epoch)
       :absent -> 0
     end
@@ -87,7 +87,7 @@ defmodule Encryption do
   chooses: the call is theirs, and by them.
   """
   def choose(%Call{} = call, %Artifact{} = artifact, given) do
-    artifact = %{artifact | wrapped: nil}
+    artifact = %{artifact | codec: nil}
     name = Artifact.name(artifact)
     owner!(call, name)
 

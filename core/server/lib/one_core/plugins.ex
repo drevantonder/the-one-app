@@ -11,7 +11,7 @@ defmodule OneCore.Plugins do
   A server looks in the bucket at what's added for the network and for whoever it acts for when it starts, and at
   what's added for anyone else when it's first asked for them. Only a server acting for whoever a plugin was added for
   runs it for them: another passes the call on to one that does. It looks again when it's told to, when it's asked for
-  a plugin it doesn't run, when it comes back (`OneCore.Server.came_back/0`), and behind a request for someone it
+  a plugin it doesn't run, when it comes back (`OneCore.Server.reconnected/0`), and behind a request for someone it
   last looked at more than five minutes ago: the request runs on what the server has, and the look is for what it
   wasn't told. So nothing is read for someone nobody uses.
   """
@@ -101,7 +101,7 @@ defmodule OneCore.Plugins do
   @doc "The plugins added for `owners`, by name, the first's found first. One this server hasn't looked at is first."
   def versions(owners) do
     with :unknown <- ask({:running, owners}) do
-      Enum.each(owners, &look/1)
+      Enum.each(owners, &reload/1)
       ask({:running, owners})
     end
   end
@@ -143,8 +143,8 @@ defmodule OneCore.Plugins do
   Has everyone this server has looked at looked at again behind the next request for them, and gives who to look
   at now: the network, whoever this server acts for, and whoever's plugins have services installed here.
   """
-  def look_again do
-    ask(:look_again)
+  def refresh do
+    ask(:refresh)
     here(Server.key())
   end
 
@@ -161,7 +161,7 @@ defmodule OneCore.Plugins do
   whose newest version took over has its processes follow it, and its services installed here that weren't
   running start.
   """
-  def look(owner, loaded \\ []) do
+  def reload(owner, loaded \\ []) do
     {added, _tag} = Added.read(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
     newer = Store.newer(Enum.uniq(Map.values(added)) -- known, ask(:newest))
@@ -179,7 +179,7 @@ defmodule OneCore.Plugins do
 
     if any do
       Hooks.forget()
-      Jobs.look()
+      Jobs.reload()
     end
 
     if Enum.any?(changed, &(Path.basename(&1) == "ui")), do: Task.start(&Deploy.rebuild/0)
@@ -190,7 +190,7 @@ defmodule OneCore.Plugins do
   # plugin this server doesn't run is looked for first.
   defp begin(owners, name) do
     with {:absent, _missing} <- ask({:begin, owners, name}),
-         _ = Enum.each(Enum.uniq(owners ++ [@network]), &look(&1)),
+         _ = Enum.each(Enum.uniq(owners ++ [@network]), &reload(&1)),
          {:absent, missing} <- ask({:begin, owners, name}) do
       if missing == name,
         do: {:error, "There's no plugin named #{name}"},
@@ -211,7 +211,7 @@ defmodule OneCore.Plugins do
   @impl true
   def init(nil) do
     Hooks.keep()
-    {:ok, %{added: %{}, looked: %{}, running: %{}, newest: %{}, calls: %{}}, {:continue, :start}}
+    {:ok, %{added: %{}, reloaded: %{}, running: %{}, newest: %{}, calls: %{}}, {:continue, :start}}
   end
 
   @impl true
@@ -241,7 +241,7 @@ defmodule OneCore.Plugins do
   end
 
   def handle_call(:newest, _from, state), do: {:reply, state.newest, state}
-  def handle_call(:look_again, _from, state), do: {:reply, :ok, %{state | looked: %{}}}
+  def handle_call(:refresh, _from, state), do: {:reply, :ok, %{state | reloaded: %{}}}
   def handle_call(:added, _from, state), do: {:reply, state.added, state}
   def handle_call({:version, artifact}, _from, state), do: {:reply, state.running[artifact], state}
 
@@ -313,11 +313,11 @@ defmodule OneCore.Plugins do
     stale =
       for owner <- Enum.uniq(owners ++ [@network]),
           is_map_key(state.added, owner),
-          Map.get(state.looked, owner, now - @looks_after) <= now - @looks_after,
+          Map.get(state.reloaded, owner, now - @looks_after) <= now - @looks_after,
           do: owner
 
-    for owner <- stale, do: Task.start(fn -> Server.look(owner) end)
-    %{state | looked: Map.merge(state.looked, Map.new(stale, &{&1, now}))}
+    for owner <- stale, do: Task.start(fn -> Server.reload(owner) end)
+    %{state | reloaded: Map.merge(state.reloaded, Map.new(stale, &{&1, now}))}
   end
 
   # What's added for `owner` is `added` now, and each version in `loaded` takes over from its plugin's if it's
@@ -344,7 +344,7 @@ defmodule OneCore.Plugins do
 
     any = changed != [] or state.added[owner] != added
     state = %{state | added: Map.put(state.added, owner, added)}
-    state = put_in(state.looked[owner], System.monotonic_time(:millisecond))
+    state = put_in(state.reloaded[owner], System.monotonic_time(:millisecond))
     kept = for {_owner, added} <- state.added, {_name, artifact} <- added, into: MapSet.new(), do: artifact
     {running, dropped} = Map.split_with(state.running, fn {artifact, _version} -> artifact in kept end)
 

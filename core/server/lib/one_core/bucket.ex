@@ -57,7 +57,7 @@ defmodule OneCore.Bucket do
   def link(key, mode) when mode in [:read, :write], do: bucket(:link, [key, mode])
 
   # A server that couldn't reach the bucket may have missed being told something meanwhile, so the first answer
-  # after has it look again (`OneCore.Server.came_back/0`). A bucket that couldn't be reached raises
+  # after has it look again (`OneCore.Server.reconnected/0`). A bucket that couldn't be reached raises
   # `OneCore.Edge.Unreachable`, since what isn't on this machine is reached through the network's edge.
   defp bucket(function, arguments) do
     {module, where} = Application.fetch_env!(:one_core, :bucket)
@@ -65,7 +65,7 @@ defmodule OneCore.Bucket do
 
     if :persistent_term.get(Edge.Unreachable, false) do
       :persistent_term.erase(Edge.Unreachable)
-      Task.start(&OneCore.Server.came_back/0)
+      Task.start(&OneCore.Server.reconnected/0)
     end
 
     answer

@@ -168,7 +168,7 @@ defmodule OneCore.User do
       Servers.forget()
 
       if wrote == :ok or first_owner() == who do
-        Server.tell_servers(["network"])
+        Server.notify_servers(["network"])
         with {:refuse, why} <- Hooks.decide("owner", %{"who" => who}, {nil, "network"}), do: {:error, why}
       else
         {:error, "The network's first owner is #{first_owner()}"}

@@ -35,8 +35,8 @@ defmodule OneCore.Plugins.Added do
          :ok <- Deploy.fits(owner, name, version),
          :ok <- note(owner, added) do
       Bucket.write("#{artifact}/added/#{owner}", "")
-      Plugins.look(owner, [{artifact, number, {:ok, version}}])
-      Server.tell_servers([owner])
+      Plugins.reload(owner, [{artifact, number, {:ok, version}}])
+      Server.notify_servers([owner])
     else
       :error -> {:error, "#{artifact}'s newest version doesn't compile here, so it isn't added."}
       {:error, why} -> {:error, why}
@@ -62,8 +62,8 @@ defmodule OneCore.Plugins.Added do
          :ok <- note(owner, removed) do
       {added, _tag} = read(owner)
       if artifact not in Map.values(added), do: Bucket.remove("#{artifact}/added/#{owner}")
-      Plugins.look(owner)
-      Server.tell_servers([owner])
+      Plugins.reload(owner)
+      Server.notify_servers([owner])
     else
       {:error, why} -> {:error, why}
       used_by -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}

@@ -82,16 +82,16 @@ fn open_keys(keys: ResourceArc<Keys>, about: &str, sealed: Binary) -> Result<Res
 
 /// Encrypts a blob under the newest of an artifact's `keys`. `name` is its whole name in the bucket.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn wrap<'a>(env: Env<'a>, keys: ResourceArc<Keys>, name: &str, data: Binary) -> Result<Binary<'a>, String> {
+fn encode<'a>(env: Env<'a>, keys: ResourceArc<Keys>, name: &str, data: Binary) -> Result<Binary<'a>, String> {
     let keys = keys.0.read().map_err(|_| "an earlier call panicked")?;
-    Ok(binary(env, &cipher::wrap(&keys, name, data.as_slice()).map_err(said)?))
+    Ok(binary(env, &cipher::encrypt(&keys, name, data.as_slice()).map_err(said)?))
 }
 
-/// A blob as it was before `wrap`.
+/// A blob as it was before `encode`.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn unwrap<'a>(env: Env<'a>, keys: ResourceArc<Keys>, name: &str, blob: Binary) -> Result<Binary<'a>, String> {
+fn decode<'a>(env: Env<'a>, keys: ResourceArc<Keys>, name: &str, blob: Binary) -> Result<Binary<'a>, String> {
     let keys = keys.0.read().map_err(|_| "an earlier call panicked")?;
-    Ok(binary(env, &cipher::unwrap(&keys, name, blob.as_slice()).map_err(said)?))
+    Ok(binary(env, &cipher::decrypt(&keys, name, blob.as_slice()).map_err(said)?))
 }
 
 rustler::init!("Elixir.Cipher");

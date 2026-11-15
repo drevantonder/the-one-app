@@ -39,8 +39,8 @@ async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<(
 
     let (socket, _) = connect_async(request).await?;
     // What the network's servers and the pieces of the edge told this one while it wasn't there, it didn't hear.
-    // So it looks again, as a server that comes back does (`OneCore.Server.came_back/0`).
-    let _ = crate::ask(asked, None, br#"{"jsonrpc":"2.0","method":"notifications/one/look"}"#).await;
+    // So it looks again, as a server that comes back does (`OneCore.Server.reconnected/0`).
+    let _ = crate::ask(asked, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#).await;
     let (mut up, mut down) = socket.split();
     let (answers, mut answered) = mpsc::unbounded_channel();
     let mut say = interval(EVERY);

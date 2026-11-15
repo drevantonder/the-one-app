@@ -190,7 +190,7 @@ defmodule OneCore.Servers do
   Reads again what's kept of the servers acting for `owner`: their list, and what each server on it acts for and
   has installed. Until it's read, what was kept is what's asked. The network's first owner is the network's.
   """
-  def look(owner) do
+  def reload(owner) do
     again({:listed, owner})
     servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}, {:name, key}], do: what
     Enum.each(if(owner == @network, do: [:first_owner | servers], else: servers), &again/1)

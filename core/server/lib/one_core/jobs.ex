@@ -15,17 +15,17 @@ defmodule OneCore.Jobs do
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   @doc "The plugins running changed: every plugin's jobs are looked at now. With no clock running, nothing is."
-  def look, do: GenServer.cast(__MODULE__, :look)
+  def reload, do: GenServer.cast(__MODULE__, :reload)
 
   # `at` is the second up to which what was due has been asked for, and `timer` wakes this at the next.
   @impl true
-  def init(nil), do: {:ok, %{at: 0, timer: nil}, {:continue, :look}}
+  def init(nil), do: {:ok, %{at: 0, timer: nil}, {:continue, :reload}}
 
   @impl true
-  def handle_continue(:look, clock), do: {:noreply, asked(%{clock | at: 0})}
+  def handle_continue(:reload, clock), do: {:noreply, asked(%{clock | at: 0})}
 
   @impl true
-  def handle_cast(:look, clock), do: {:noreply, asked(%{clock | at: 0})}
+  def handle_cast(:reload, clock), do: {:noreply, asked(%{clock | at: 0})}
 
   @impl true
   def handle_info(:due, clock), do: {:noreply, asked(clock)}

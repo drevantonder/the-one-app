@@ -120,7 +120,7 @@ defmodule OneCore.DatabaseTest do
         send(test, {:called, server})
       end
 
-      GenServer.call(lease.of(call), {call.own.wrapped, {:schedule, [job], fire, now}})
+      GenServer.call(lease.of(call), {call.own.codec, {:schedule, [job], fire, now}})
     end
 
     takes = fn server, from -> GenServer.call(lease.of(call(simulated, server)), {:take_over, from}) end

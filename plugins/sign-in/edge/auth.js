@@ -51,7 +51,7 @@ async function secret() {
 }
 
 /** Tells every server that whose a device is has changed, so each asks again. */
-const forget = () => env.RELAY.tell(JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/decided", params: { hooks: ["device"] } }));
+const forget = () => env.RELAY.notify(JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/forget", params: { hooks: ["device"] } }));
 
 /** Makes `device` the user's, under `name`, from now on. */
 async function place(adapter, device, kind, name, user) {

@@ -9,7 +9,7 @@
 //!   recovery key, which is the key itself in base32 (RFC 4648).
 //! - **An artifact's key** is derived from its owner's with HKDF-SHA256 (RFC 5869), from the artifact's name and
 //!   an epoch: taking a server off an artifact starts a new epoch, whose key that server was never given.
-//! - **A blob** (`wrap`, `unwrap`) is encrypted with XChaCha20-Poly1305 under its artifact's newest key, with a
+//! - **A blob** (`encrypt`, `decrypt`) is encrypted with XChaCha20-Poly1305 under its artifact's newest key, with a
 //!   random nonce, and says which epoch's. Its name in the bucket is authenticated with it, so a blob put in
 //!   another's place doesn't open.
 //! - **A backup** is encrypted to a key of its own, derived from the owner's key of whoever added where it goes
@@ -189,7 +189,7 @@ pub fn split(joined: &[u8]) -> Result<Vec<Key>> {
 }
 
 /// Encrypts a blob under its artifact's newest key. `name` is the blob's whole name in the bucket.
-pub fn wrap(keys: &[Key], name: &str, data: &[u8]) -> Result<Vec<u8>> {
+pub fn encrypt(keys: &[Key], name: &str, data: &[u8]) -> Result<Vec<u8>> {
     let key = keys.last().context("this server holds no key for that artifact")?;
     let nonce = XNonce::generate();
     let encrypted = XChaCha20Poly1305::new(key.as_slice().try_into().expect("32 bytes"))
@@ -199,9 +199,9 @@ pub fn wrap(keys: &[Key], name: &str, data: &[u8]) -> Result<Vec<u8>> {
     Ok([&[BLOB][..], &epoch.to_be_bytes(), &nonce, &encrypted].concat())
 }
 
-/// A blob as it was before `wrap`. One that was changed, was written under another name, or is of an epoch this
+/// A blob as it was before `encrypt`. One that was changed, was written under another name, or is of an epoch this
 /// server was never given, doesn't open.
-pub fn unwrap(keys: &[Key], name: &str, blob: &[u8]) -> Result<Vec<u8>> {
+pub fn decrypt(keys: &[Key], name: &str, blob: &[u8]) -> Result<Vec<u8>> {
     let not = || anyhow!("{name} isn't a blob this server's keys open");
     let (&[BLOB], rest) = blob.split_at_checked(1).ok_or_else(not)? else { return Err(not()) };
     let (epoch, rest) = rest.split_at_checked(4).ok_or_else(not)?;
@@ -233,18 +233,18 @@ mod tests {
     fn a_blob_opens_under_its_own_name_with_its_epochs_key() {
         let owner = owner();
         let keys = artifact(&owner, "users/alice/made/vault/items", 2);
-        let blob = wrap(&keys, "users/alice/made/vault/items/log/1", b"a secret").unwrap();
+        let blob = encrypt(&keys, "users/alice/made/vault/items/log/1", b"a secret").unwrap();
         assert!(!blob.windows(8).any(|part| part == b"a secret"));
-        assert_eq!(unwrap(&keys, "users/alice/made/vault/items/log/1", &blob).unwrap(), b"a secret");
-        assert!(unwrap(&keys, "users/alice/made/vault/items/log/2", &blob).is_err());
+        assert_eq!(decrypt(&keys, "users/alice/made/vault/items/log/1", &blob).unwrap(), b"a secret");
+        assert!(decrypt(&keys, "users/alice/made/vault/items/log/2", &blob).is_err());
         // A server taken off before the second epoch holds only the first's key.
-        assert!(unwrap(&keys[..1], "users/alice/made/vault/items/log/1", &blob).is_err());
+        assert!(decrypt(&keys[..1], "users/alice/made/vault/items/log/1", &blob).is_err());
         assert!(
-            unwrap(&artifact(&owner, "users/bob/made/vault/items", 2), "users/alice/made/vault/items/log/1", &blob)
+            decrypt(&artifact(&owner, "users/bob/made/vault/items", 2), "users/alice/made/vault/items/log/1", &blob)
                 .is_err()
         );
-        let first = wrap(&keys[..1], "name", b"before").unwrap();
-        assert_eq!(unwrap(&keys, "name", &first).unwrap(), b"before");
+        let first = encrypt(&keys[..1], "name", b"before").unwrap();
+        assert_eq!(decrypt(&keys, "name", &first).unwrap(), b"before");
     }
 
     #[test]

@@ -33,8 +33,8 @@ defmodule OneCore.Plugins.Deploy do
            {:ok, number} <- Store.keep(artifact, name, kept, files),
            :ok <- Added.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         listed(owner, name, version)
-        Plugins.look(owner, [{artifact, number, {:ok, version}}])
-        Server.tell_servers(Enum.uniq([owner | Added.added_for(artifact)]))
+        Plugins.reload(owner, [{artifact, number, {:ok, version}}])
+        Server.notify_servers(Enum.uniq([owner | Added.added_for(artifact)]))
         {:ok, number, warnings}
       else
         {:error, why} ->
