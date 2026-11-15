@@ -31,3 +31,12 @@ tempfile = "3"
 tokio.workspace = true
 # Keys are wiped from memory when they're let go of.
 zeroize = "1"
+
+# What a phone is called, which only its system says (`name` in `src/lib.rs`).
+[target.'cfg(target_os = "ios")'.dependencies]
+dispatch2 = "0.3"
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIDevice"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

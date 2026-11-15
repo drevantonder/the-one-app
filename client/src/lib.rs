@@ -152,8 +152,7 @@ impl NotIn {
     /// Asks the network's address at `address` for a code to let the device with `key` in by, under this
     /// machine's name.
     async fn asked(address: &str, key: &SecretKey) -> Result<Self> {
-        let name = gethostname::gethostname().to_string_lossy().into_owned();
-        let ask = json!({"client_id": key.public().to_string(), "name": name});
+        let ask = json!({"client_id": key.public().to_string(), "name": name()});
         let (given, said) = ask_address(address, key, "/sign-in/auth/device/code", ask).await?;
         let (true, Some(link), Some(code), Some(device_code)) = (
             given,
@@ -195,6 +194,61 @@ impl NotIn {
             }
         }
     }
+}
+
+/// What this device is called, as its system says to an app that asks without a permission: a computer's name, an
+/// Android phone's name in its settings or else its model, and an iPhone's name from UIKit, which without Apple's
+/// entitlement for it is "iPhone" or "iPad". A phone has no name of its own as a host: that's `localhost`.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn name() -> String {
+    gethostname::gethostname().to_string_lossy().into_owned()
+}
+
+#[cfg(target_os = "ios")]
+fn name() -> String {
+    // UIKit answers on the main thread.
+    dispatch2::run_on_main(|main| objc2_ui_kit::UIDevice::currentDevice(main).name().to_string())
+}
+
+#[cfg(target_os = "android")]
+fn name() -> String {
+    use jni::objects::{JObject, JString};
+    let named = || -> jni::errors::Result<String> {
+        let android = ndk_context::android_context();
+        // Tauri's window on Android gives what it runs in to `ndk_context` as it starts.
+        let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }?;
+        let mut env = vm.attach_current_thread()?;
+        let activity = unsafe { JObject::from_raw(android.context().cast()) };
+        let text = |env: &mut jni::JNIEnv, said: JObject| -> jni::errors::Result<String> {
+            if said.is_null() {
+                return Err(jni::errors::Error::NullPtr("nothing was said"));
+            }
+            Ok(env.get_string(&JString::from(said))?.into())
+        };
+        let set = (|| {
+            let resolver =
+                env.call_method(&activity, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?.l()?;
+            let setting = env.new_string("device_name")?;
+            let get = "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;";
+            let said = env
+                .call_static_method(
+                    "android/provider/Settings$Global",
+                    "getString",
+                    get,
+                    &[(&resolver).into(), (&setting).into()],
+                )?
+                .l()?;
+            text(&mut env, said)
+        })();
+        if set.is_err() {
+            env.exception_clear()?;
+        }
+        set.or_else(|_| {
+            let model = env.get_static_field("android/os/Build", "MODEL", "Ljava/lang/String;")?.l()?;
+            text(&mut env, model)
+        })
+    };
+    named().unwrap_or_else(|_| "An Android phone".to_owned())
 }
 
 /// Why a device's person didn't let it in: they stopped it where they signed in, or its code ended first. The app
