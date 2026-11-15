@@ -2,10 +2,10 @@ defmodule OneCore.Plugins.Store do
   @moduledoc """
   A plugin as the bucket keeps it. A plugin is an artifact whose blobs are code, and it's whoever's deployed it:
   `<theirs>/plugins/<name>`. Each set of files deployed is kept at `code/<its hash>/`, and where the server built
-  some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `newest` says
-  which set it runs now, with that version's number. A deploy replaces `newest` only if it's unchanged, so two
+  some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `latest` says
+  which set it runs now, with that version's number. A deploy replaces `latest` only if it's unchanged, so two
   deploys at once can't both be the plugin's next version, and first writes the version it replaces to
-  `versions/<number>`, so a plugin keeps its history. `newest` names the files it was deployed from too, by their
+  `versions/<number>`, so a plugin keeps its history. `latest` names the files it was deployed from too, by their
   hash, its `source`.
   """
   require Logger
@@ -47,27 +47,27 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  A plugin's newest version as the bucket has it, its number and the set of files it runs, and the blob's tag.
+  A plugin's latest version as the bucket has it, its number and the set of files it runs, and the blob's tag.
   `nil` if there's no such plugin.
   """
-  def newest(artifact) do
-    with {:ok, newest, tag} <- Bucket.read("#{artifact}/newest"),
-         %{"number" => number, "code" => code} = JSON.decode!(newest) do
+  def latest(artifact) do
+    with {:ok, latest, tag} <- Bucket.read("#{artifact}/latest"),
+         %{"number" => number, "code" => code} = JSON.decode!(latest) do
       {number, code, tag}
     else
       :absent -> nil
     end
   end
 
-  @doc "The hash of the files the plugin `artifact`'s newest version was deployed from, or `nil` if there's none."
-  def newest_source(artifact) do
-    with {:ok, newest, _tag} <- Bucket.read("#{artifact}/newest"), do: JSON.decode!(newest)["source"], else: (_ -> nil)
+  @doc "The hash of the files the plugin `artifact`'s latest version was deployed from, or `nil` if there's none."
+  def latest_source(artifact) do
+    with {:ok, latest, _tag} <- Bucket.read("#{artifact}/latest"), do: JSON.decode!(latest)["source"], else: (_ -> nil)
   end
 
   @doc """
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
-  newest is there. Gives the version's number.
+  latest is there. Gives the version's number.
   """
   def keep(artifact, name, files, deployed) do
     code = Version.code(files)
@@ -76,16 +76,16 @@ defmodule OneCore.Plugins.Store do
     if deployed != files,
       do: for({path, text} <- deployed, do: Bucket.write("#{artifact}/source/#{code}/#{path}", text))
 
-    was = newest(artifact)
+    was = latest(artifact)
     number = if was, do: elem(was, 0) + 1, else: 1
     next = JSON.encode!(%{number: number, code: code, source: Version.code(deployed)})
 
     wrote =
       with {before, code, tag} <- was do
         Bucket.write("#{artifact}/versions/" <> String.pad_leading("#{before}", 8, "0"), code)
-        Bucket.replace("#{artifact}/newest", next, tag)
+        Bucket.replace("#{artifact}/latest", next, tag)
       else
-        nil -> Bucket.write("#{artifact}/newest", next)
+        nil -> Bucket.write("#{artifact}/latest", next)
       end
 
     # Another deploy of this plugin got there first, and whoever asked for this one hasn't seen it.
@@ -95,16 +95,16 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  The versions in the bucket of the plugins `artifacts` that are newer than the ones in `newest`: each one's
+  The versions in the bucket of the plugins `artifacts` that are newer than the ones in `latest`: each one's
   plugin, its number, and the version loaded, which is `:error` for one this server can't compile. Read at once:
   a bucket at an address is asked for each over the internet.
   """
-  def newer(artifacts, newest) do
+  def newer(artifacts, latest) do
     artifacts
-    |> Task.async_stream(&{&1, newest(&1)}, max_concurrency: 16, timeout: :infinity)
+    |> Task.async_stream(&{&1, latest(&1)}, max_concurrency: 16, timeout: :infinity)
     |> Enum.flat_map(fn {:ok, {artifact, in_bucket}} ->
       with {number, code, _tag} <- in_bucket,
-           true <- number > Map.get(newest, artifact, 0),
+           true <- number > Map.get(latest, artifact, 0),
            do: [{artifact, number, loaded(artifact, code)}],
            else: (_ -> [])
     end)
@@ -132,7 +132,7 @@ defmodule OneCore.Plugins.Store do
         {:ok, %{version | artifact: artifact}}
 
       {:error, why} ->
-        Logger.error("#{artifact} isn't updated here, because its newest version doesn't compile:\n#{why}")
+        Logger.error("#{artifact} isn't updated here, because its latest version doesn't compile:\n#{why}")
         :error
     end
   end

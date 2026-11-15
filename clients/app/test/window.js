@@ -83,7 +83,7 @@ for (const [size, viewport] of Object.entries(sizes)) {
       const from = ["tokens.css", "ui.css"].includes(file) ? `${root}/ui/src/${file}` : file === "Logo.png" ? `${root}/icons/Logo.png` : `${root}/clients/app/page/${file}`;
       route.fulfill({ contentType: page_files[file] ?? "text/css", body: readFileSync(from) });
     });
-    // An app's file, as the app's window finds it: among the newest files of its plugin that a server lists for
+    // An app's file, as the app's window finds it: among the latest files of its plugin that a server lists for
     // whoever the app is for, which follows its name in its address, last part first.
     await page.route(/^http:\/\/oneapp\.[^/]+\.localhost\//, async (route) => {
       const address = new URL(route.request().url());

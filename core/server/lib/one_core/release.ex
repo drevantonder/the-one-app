@@ -2,7 +2,7 @@ defmodule OneCore.Release do
   @moduledoc """
   A server installed on a machine, as the program that keeps it running starts it (`one serve run`, in
   `clients/cli/src/serving.rs`): `bin/one_core eval 'OneCore.Release.serve()'`. It says on its output when it's
-  running, and when it's asked to update, and that program does the rest: it takes the newest build, starts it,
+  running, and when it's asked to update, and that program does the rest: it takes the latest build, starts it,
   and goes back to this one if that doesn't start and answer.
   """
   alias OneCore.{Builds, Server}
@@ -10,7 +10,7 @@ defmodule OneCore.Release do
   @doc "What it says when it's running, with its key after."
   def running, do: "A server is running: "
 
-  @doc "What it says when it's asked to take the newest build."
+  @doc "What it says when it's asked to take the latest build."
   def update_asked, do: "Update asked"
 
   @doc "Starts the server, says so, and runs until it's stopped."

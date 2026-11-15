@@ -12,7 +12,7 @@
 //! - `home`: the server's own folder, its key among it, whichever build runs.
 //!
 //! The server says on its output when it's running and when it's asked to update (`OneCore.Release`): asked, this
-//! takes the newest builds, the program's too, then stops the server and starts itself again in its place. While
+//! takes the latest builds, the program's too, then stops the server and starts itself again in its place. While
 //! it's stopped, the network's other servers take its work over, and it takes its share back once it's running.
 
 use std::path::{Path, PathBuf};
@@ -30,10 +30,10 @@ use tokio::time::{sleep, timeout};
 
 use client::{BUILD, Client, target};
 
-/// What the server says when it's running, with its key after, and when it's asked to take the newest builds.
+/// What the server says when it's running, with its key after, and when it's asked to take the latest builds.
 const RUNNING: &str = "A server is running: ";
 const UPDATE_ASKED: &str = "Update asked";
-/// Which build of `one` this is, which an update takes the newest of: the app, with its window, or `one` built
+/// Which build of `one` this is, which an update takes the latest of: the app, with its window, or `one` built
 /// without it, for a Linux machine with no screen.
 const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// How long a build being tried has to start and answer before the one before it is started again: a server
@@ -117,7 +117,7 @@ pub async fn off(client: &Client) -> Result<String> {
     Ok(format!("This device is no longer a server, and nothing of it is left here: {key}"))
 }
 
-/// Takes the newest builds: this device's server's, if it's one, which it's asked to take, and otherwise the
+/// Takes the latest builds: this device's server's, if it's one, which it's asked to take, and otherwise the
 /// program's own.
 pub async fn update(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
@@ -127,7 +127,7 @@ pub async fn update(client: &Client) -> Result<String> {
     let builds = download(client).await?;
     let one = builds.get("one").with_context(|| format!("The network has no build of one for {} yet.", target()))?;
     if one["build"] == BUILD {
-        return Ok(format!("This device is on the newest build already: {BUILD}"));
+        return Ok(format!("This device is on the latest build already: {BUILD}"));
     }
     take_program(one, &env::current_exe()?).await?;
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
@@ -141,7 +141,7 @@ pub fn server() -> Option<String> {
 }
 
 /// Keeps this device's server running, as the system runs it: tries a build there's one to try, starts the
-/// server, and takes the newest builds when it's asked. It ends when the server stops, for the system to start it
+/// server, and takes the latest builds when it's asked. It ends when the server stops, for the system to start it
 /// again.
 pub async fn run(client: Arc<Client>) -> Result<()> {
     // The program's own file, named before an update replaces what's there.
@@ -213,8 +213,8 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                         server.kill().await?;
                         return Err(again(&program));
                     }
-                    Ok(false) => println!("This device is on the newest builds already."),
-                    Err(error) => println!("The newest builds weren't taken: {error:#}"),
+                    Ok(false) => println!("This device is on the latest builds already."),
+                    Err(error) => println!("The latest builds weren't taken: {error:#}"),
                 }
             }
         }
@@ -222,14 +222,14 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     }
 }
 
-/// Starts this program again in this one's place, as the system started it: the newest of it, which tries the
-/// newest server.
+/// Starts this program again in this one's place, as the system started it: the latest of it, which tries the
+/// latest server.
 fn again(program: &Path) -> anyhow::Error {
     use std::os::unix::process::CommandExt;
     std::process::Command::new(program).args(["serve", "run"]).exec().into()
 }
 
-/// Takes the newest builds this device isn't on: the server's, to try next, and the program's. Gives whether it
+/// Takes the latest builds this device isn't on: the server's, to try next, and the program's. Gives whether it
 /// took any.
 async fn take(client: &Client, here: &Here, program: &Path) -> Result<bool> {
     let builds = download(client).await?;
@@ -288,7 +288,7 @@ async fn answers(client: &Client, key: &str, build: &str) -> bool {
     timeout(START, asking).await.is_ok()
 }
 
-/// The newest builds for this kind of machine, by what they are (`server`, `one`), each with a link to it.
+/// The latest builds for this kind of machine, by what they are (`server`, `one`), each with a link to it.
 async fn download(client: &Client) -> Result<Map<String, Value>> {
     let said = tool(client, "download", json!({"target": target()})).await?;
     match serde_json::from_str(&said)? {

@@ -71,7 +71,7 @@ defmodule OneCore.Tools do
       name: "install",
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
-      It's the same plugin, at its newest version, with an artifact of its own for whoever it's installed for. One in
+      It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
       with you first, as a viewer. The plugins it uses are installed for you first.
       """,
@@ -191,9 +191,9 @@ defmodule OneCore.Tools do
       read_only: true,
       description: """
       Lists the build each of your servers runs, with what its machine is called and whether it's on, and the
-      build each of your devices last said it is, and the newest for each kind of machine, so it says whether
+      build each of your devices last said it is, and the latest for each kind of machine, so it says whether
       everything is on the same build, and which plugins The One App ships with the server is still deploying, or
-      failed to deploy and why, under `shipping`.
+      failed to deploy and why, under `bundled`.
       A build is the commit it was built from. With `server`, that server answers, saying its own.
       """,
       inputs: %{
@@ -205,7 +205,7 @@ defmodule OneCore.Tools do
       name: "download",
       read_only: true,
       description: """
-      Gives the newest builds for a kind of machine, each with its SHA-256 and a link that downloads it within a
+      Gives the latest builds for a kind of machine, each with its SHA-256 and a link that downloads it within a
       minute: `server` for a server installed there, and `one` for the program.
       `one serve on` and `one update` take them, checking each against its SHA-256 before they run it.
       """,
@@ -220,7 +220,7 @@ defmodule OneCore.Tools do
     %{
       name: "publish",
       description: """
-      Makes builds the newest for the network's machines, which they take when they're asked to update.
+      Makes builds the latest for the network's machines, which they take when they're asked to update.
       While the network lacks any of their files, it gives a link to send each by, with its `method` and
       `headers`, and changes nothing: send them, and ask again. `tooling/release` does all of this.
       """,
@@ -249,7 +249,7 @@ defmodule OneCore.Tools do
     %{
       name: "update",
       description: """
-      Has a server's machine take the newest builds, its server's and its program's, if it isn't on them already.
+      Has a server's machine take the latest builds, its server's and its program's, if it isn't on them already.
       It checks each before it runs it, hands its work to another server meanwhile, and goes back to the build it
       had if the new one doesn't start and answer. `builds` then says which it's on.
       """,
@@ -420,11 +420,11 @@ defmodule OneCore.Tools do
 
     case Builds.publish(builds) do
       {:send, links} -> JSON.encode!(%{send: links})
-      {:ok, newest} -> JSON.encode!(%{newest: newest})
+      {:ok, latest} -> JSON.encode!(%{latest: latest})
     end
   end
 
-  # What takes the newest builds is the program that keeps an installed server running, which hears this said.
+  # What takes the latest builds is the program that keeps an installed server running, which hears this said.
   defp run("update", inputs, asked, _pass) do
     on(inputs["server"], "update", inputs, asked, fn ->
       reaches!(asked, owner(), "owner")
@@ -433,7 +433,7 @@ defmodule OneCore.Tools do
         do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
 
       IO.puts(Release.update_asked())
-      "#{here()} is taking the newest builds, and answers again once it has."
+      "#{here()} is taking the latest builds, and answers again once it has."
     end)
   end
 

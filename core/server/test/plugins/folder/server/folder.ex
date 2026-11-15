@@ -39,7 +39,7 @@ defmodule Folder do
       %{
         name: "list",
         read_only: true,
-        description: "Lists the files that arrived, the newest first",
+        description: "Lists the files that arrived, the latest first",
         inputs: %{
           type: "object",
           properties: %{limit: %{type: "integer", description: "How many at most. 50 if left out"}}

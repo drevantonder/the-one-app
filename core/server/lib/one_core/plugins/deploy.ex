@@ -4,7 +4,7 @@ defmodule OneCore.Plugins.Deploy do
   its Elixir is compiled and loaded (`OneCore.Plugins.Version`), and it's kept in the bucket
   (`OneCore.Plugins.Store`) and runs at once.
 
-  Deploying or adding a plugin brings along the ones it uses that the server ships with: its `:shipped` setting,
+  Deploying or adding a plugin brings along the ones it uses that the server ships with: its `:bundled` setting,
   each one's folder by its name. Those are installed for the network.
   """
   require Logger
@@ -45,7 +45,7 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Every plugin anyone has deployed, with its apps as its newest version has them: `[%{plugin: artifact, apps:
+  Every plugin anyone has deployed, with its apps as its latest version has them: `[%{plugin: artifact, apps:
   [...]}]`. It's what lists every app there is, whether or not it's on anyone's page now.
   """
   def deployed do
@@ -77,94 +77,94 @@ defmodule OneCore.Plugins.Deploy do
   @doc """
   Deploys for the network each plugin this server ships with that the network has never had, and each that runs
   what a server once shipped but not what this one ships: so an updated server brings its plugins along. One whose
-  newest version came from files no server shipped was changed on purpose, and is left as it is. Gives what
-  `deploy/3` gave for each, by its name, and says each in the log and in `shipping/0` as it goes.
+  latest version came from files no server shipped was changed on purpose, and is left as it is. Gives what
+  `deploy/3` gave for each, by its name, and says each in the log and in `deploying_bundled/0` as it goes.
 
-  What servers have shipped of a plugin is the plugin's blob `shipped`: the hashes of every set of files they
+  What servers have shipped of a plugin is the plugin's blob `bundled`: the hashes of every set of files they
   deployed it from.
   """
-  def ship do
+  def deploy_bundled do
     names =
-      for {name, _folder} <- Enum.sort(Application.get_env(:one_core, :shipped, %{})),
-          ship?(name, Version.code(shipped(name))),
+      for {name, _folder} <- Enum.sort(Application.get_env(:one_core, :bundled, %{})),
+          deploy_bundled?(name, Version.code(bundled(name))),
           do: name
 
-    for name <- names, do: shipping(name, "waiting")
-    for name <- names, ship?(name, Version.code(shipped(name))), do: {name, ship(name)}
+    for name <- names, do: deploying(name, "waiting")
+    for name <- names, deploy_bundled?(name, Version.code(bundled(name))), do: {name, deploy_bundled(name)}
   end
 
   @doc """
   What of the plugins this server ships it's still deploying, or failed to, by name: `"waiting"`, `"building"`, or
   why it failed. Empty once every one is deployed.
   """
-  def shipping, do: Agent.get(__MODULE__, & &1)
+  def deploying_bundled, do: Agent.get(__MODULE__, & &1)
 
   @doc false
   def child_spec(_), do: %{id: __MODULE__, start: {Agent, :start_link, [fn -> %{} end, [name: __MODULE__]]}}
 
-  defp shipping(name, nil), do: Agent.update(__MODULE__, &Map.delete(&1, name))
-  defp shipping(name, said), do: Agent.update(__MODULE__, &Map.put(&1, name, said))
+  defp deploying(name, nil), do: Agent.update(__MODULE__, &Map.delete(&1, name))
+  defp deploying(name, said), do: Agent.update(__MODULE__, &Map.put(&1, name, said))
 
   # Deploys one plugin this server ships for the network, and notes its files among what servers have shipped.
-  defp ship(name) do
-    files = shipped(name)
+  defp deploy_bundled(name) do
+    files = bundled(name)
     source = Version.code(files)
     started = System.monotonic_time(:millisecond)
     Logger.info("Shipping #{name}")
-    shipping(name, "building")
+    deploying(name, "building")
 
-    with true <- files != %{} || {:error, "There are no files to ship it from"},
+    with true <- files != %{} || {:error, "There are no files to deploy it from"},
          {:ok, number, _warnings} = deployed <- deploy(@network, name, files),
-         :ok <- note_shipped("#{@network}/plugins/#{name}/shipped", source) do
+         :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")
-      shipping(name, nil)
+      deploying(name, nil)
       deployed
     else
       {:error, why} = failed ->
-        Logger.error("#{name} wasn't shipped: #{why}")
-        shipping(name, why)
+        Logger.error("#{name} wasn't deployed: #{why}")
+        deploying(name, why)
         failed
     end
   end
 
-  defp note_shipped(blob, source) do
+  defp note_bundled(blob, source) do
     case Bucket.read(blob) do
       {:ok, said, tag} ->
-        sources = shipped_sources(said)
+        sources = bundled_sources(said)
 
         cond do
           source in sources -> :ok
           Bucket.replace(blob, JSON.encode!([source | sources]), tag) == :ok -> :ok
-          true -> note_shipped(blob, source)
+          true -> note_bundled(blob, source)
         end
 
       :absent ->
-        with :exists <- Bucket.write(blob, JSON.encode!([source])), do: note_shipped(blob, source)
+        with :exists <- Bucket.write(blob, JSON.encode!([source])), do: note_bundled(blob, source)
     end
   end
 
   # Whether the plugin `name` that this server ships, from files whose hash is `source`, is to be deployed for the
-  # network: it never had it, or it runs what a server shipped once and that isn't this. One whose newest version
+  # network: it never had it, or it runs what a server shipped once and that isn't this. One whose latest version
   # doesn't say what it was deployed from is from before versions said so, and was shipped too.
-  defp ship?(name, source) do
+  defp deploy_bundled?(name, source) do
     artifact = "#{@network}/plugins/#{name}"
 
-    case Store.newest_source(artifact) do
+    case Store.latest_source(artifact) do
       nil ->
         true
 
       ^source ->
         false
 
-      newest ->
-        case Bucket.read(artifact <> "/shipped") do
-          {:ok, said, _tag} -> newest in shipped_sources(said)
+      latest ->
+        case Bucket.read(artifact <> "/bundled") do
+          {:ok, said, _tag} -> latest in bundled_sources(said)
           :absent -> false
         end
     end
   end
 
-  defp shipped_sources(said),
+  defp bundled_sources(said),
     do: with(sources when is_list(sources) <- JSON.decode!(said), do: sources, else: (_ -> []))
 
   @doc """
@@ -240,13 +240,13 @@ defmodule OneCore.Plugins.Deploy do
 
   # The plugins a plugin uses are installed before it is: the ones missing, and the ones running from files a server
   # shipped before this one's, come from what the server ships with, and are installed for the network, by a server
-  # acting for it. Shipping goes by name, so a plugin can come before one it uses that's still to be shipped.
+  # acting for it. Bundled plugins go by name, so a plugin can come before one it uses that's still to be shipped.
   defp bring(owner, name, uses) do
-    shipped =
-      &(Servers.here?(@network) and shipped(&1) != %{} and ship?(&1, Version.code(shipped(&1))) and
-          match?({:ok, _, _}, ship(&1)))
+    deployable =
+      &(Servers.here?(@network) and bundled(&1) != %{} and deploy_bundled?(&1, Version.code(bundled(&1))) and
+          match?({:ok, _, _}, deploy_bundled(&1)))
 
-    case Enum.reject(uses, &(shipped.(&1) or is_map_key(Plugins.running(owner), &1))) do
+    case Enum.reject(uses, &(deployable.(&1) or is_map_key(Plugins.running(owner), &1))) do
       [] ->
         :ok
 
@@ -263,8 +263,8 @@ defmodule OneCore.Plugins.Deploy do
 
   # The files of a plugin this server ships with, as a deploy from its folder sends them, or none if it ships with
   # no such plugin.
-  defp shipped(name) do
-    with %{^name => folder} <- Application.get_env(:one_core, :shipped, %{}),
+  defp bundled(name) do
+    with %{^name => folder} <- Application.get_env(:one_core, :bundled, %{}),
          {:ok, paths} <- Folder.files(folder) do
       Map.new(paths, &{&1, File.read!(Path.join(folder, &1))})
     else

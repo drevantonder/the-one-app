@@ -853,7 +853,7 @@ impl Client {
         self.connected.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
         match answer {
             Ok(answer) => {
-                // What a device fills in of each tool's inputs is what the newest list of them says.
+                // What a device fills in of each tool's inputs is what the latest list of them says.
                 if lists
                     && let Ok(listed) = serde_json::from_slice::<Value>(&answer)
                     && listed["result"]["tools"].is_array()

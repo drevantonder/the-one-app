@@ -22,5 +22,5 @@ if home = System.get_env("ONE_SERVER_HOME") do
     development: System.get_env("ONE_AS") != nil,
     installed: true,
     bun: {url, sha256},
-    shipped: Map.new(Path.wildcard(Path.join(root, "shipped/*")), &{Path.basename(&1), &1})
+    bundled: Map.new(Path.wildcard(Path.join(root, "shipped/*")), &{Path.basename(&1), &1})
 end

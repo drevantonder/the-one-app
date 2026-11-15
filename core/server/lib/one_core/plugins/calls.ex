@@ -1,7 +1,7 @@
 defmodule OneCore.Plugins.Calls do
   @moduledoc """
   Calling a plugin: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having
-  its scheduled jobs called. A call runs on the version of the plugin that was newest when it began, and the ones
+  its scheduled jobs called. A call runs on the version of the plugin that was latest when it began, and the ones
   it uses, which stay loaded until it ends (`OneCore.Plugins.run/3`). It runs on a server acting for whoever the
   plugin was installed for: this one, or one it's passed on to.
   """

@@ -31,7 +31,7 @@ defmodule OneCore.PluginsTest do
   defp loaded, do: for({module, _} <- :code.all_loaded(), String.ends_with?("#{module}", ".Slow"), do: module)
 
   @tag :tmp_dir
-  test "a call running through updates finishes on its own version, and the next gets the newest", %{tmp_dir: folder} do
+  test "a call running through updates finishes on its own version, and the next gets the latest", %{tmp_dir: folder} do
     OneCore.Test.server(folder)
     test = self()
     wait = fn -> Task.async(fn -> Calls.call("slow", "wait", %{"test" => test}, OneCore.Test.owner()) end) end
@@ -127,7 +127,7 @@ defmodule OneCore.PluginsTest do
   end
 
   # A plugin the server ships, kept in a folder of its own, whose tool says which version of the folder it is.
-  defp ships(folder, number) do
+  defp bundles(folder, number) do
     File.mkdir_p!(Path.join(folder, "server"))
 
     File.write!(Path.join(folder, "server/said.ex"), """
@@ -145,47 +145,47 @@ defmodule OneCore.PluginsTest do
   test "a server brings along the plugins it ships when they've changed, but not over one deployed on purpose", %{
     tmp_dir: folder
   } do
-    shipped = Path.join(folder, "shipped/said")
-    Application.put_env(:one_core, :shipped, %{"said" => shipped})
-    on_exit(fn -> Application.delete_env(:one_core, :shipped) end)
+    bundled = Path.join(folder, "shipped/said")
+    Application.put_env(:one_core, :bundled, %{"said" => bundled})
+    on_exit(fn -> Application.delete_env(:one_core, :bundled) end)
     OneCore.Test.server(folder)
     which = fn -> Calls.call("said", "which", %{}, OneCore.Test.owner()) end
 
-    ships(shipped, 1)
-    assert [{"said", {:ok, 1, _}}] = Deploy.ship()
-    assert Deploy.ship() == []
+    bundles(bundled, 1)
+    assert [{"said", {:ok, 1, _}}] = Deploy.deploy_bundled()
+    assert Deploy.deploy_bundled() == []
     assert which.() == {:ok, 1}
 
     # An updated server ships other files, and the network takes them.
-    ships(shipped, 2)
-    assert [{"said", {:ok, 2, _}}] = Deploy.ship()
+    bundles(bundled, 2)
+    assert [{"said", {:ok, 2, _}}] = Deploy.deploy_bundled()
     assert which.() == {:ok, 2}
 
     # Someone deploys their own, and a server that ships other files again leaves it.
     {:ok, 3, _} =
       Deploy.deploy("network", "said", %{
-        "server/said.ex" => File.read!(Path.join(shipped, "server/said.ex")) |> String.replace("2", "30")
+        "server/said.ex" => File.read!(Path.join(bundled, "server/said.ex")) |> String.replace("2", "30")
       })
 
-    ships(shipped, 4)
-    assert Deploy.ship() == []
+    bundles(bundled, 4)
+    assert Deploy.deploy_bundled() == []
     assert which.() == {:ok, 30}
 
     # Someone deploys the very files a server shipped once, and an updated server takes it over again.
-    ships(shipped, 1)
+    bundles(bundled, 1)
 
     {:ok, 4, _} =
-      Deploy.deploy("network", "said", %{"server/said.ex" => File.read!(Path.join(shipped, "server/said.ex"))})
+      Deploy.deploy("network", "said", %{"server/said.ex" => File.read!(Path.join(bundled, "server/said.ex"))})
 
-    ships(shipped, 4)
-    assert [{"said", {:ok, 5, _}}] = Deploy.ship()
+    bundles(bundled, 4)
+    assert [{"said", {:ok, 5, _}}] = Deploy.deploy_bundled()
     assert which.() == {:ok, 4}
-    assert Deploy.shipping() == %{}
+    assert Deploy.deploying_bundled() == %{}
 
-    # One that fails to ship says why.
-    File.write!(Path.join(shipped, "server/said.ex"), "defmodule Said do")
-    assert [{"said", {:error, why}}] = Deploy.ship()
-    assert %{"said" => ^why} = Deploy.shipping()
+    # One that fails to deploy says why.
+    File.write!(Path.join(bundled, "server/said.ex"), "defmodule Said do")
+    assert [{"said", {:error, why}}] = Deploy.deploy_bundled()
+    assert %{"said" => ^why} = Deploy.deploying_bundled()
   end
 
   @tag :tmp_dir

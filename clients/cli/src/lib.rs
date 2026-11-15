@@ -45,7 +45,7 @@ pub fn main() -> ExitCode {
 const THIS_DEVICE: &str = "This device:\n\n\
                            one serve on       makes it a server of yours, which starts whenever it does\n\
                            one serve off      stops it being one, and removes it\n\
-                           one update         takes the newest builds\n\
+                           one update         takes the latest builds\n\
                            one restore        restores a whole network from a backup, with none running\n\
                            one --version      says which build it is";
 

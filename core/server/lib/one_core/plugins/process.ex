@@ -1,6 +1,6 @@
 defmodule OneCore.Plugins.Process do
   @moduledoc """
-  One process of a plugin's that keeps running on this server between calls, in its plugin's newest version: a
+  One process of a plugin's that keeps running on this server between calls, in its plugin's latest version: a
   service installed here, or a process a plugin's own code keeps (`OneCore.Call.process/4`). It's a GenServer the
   plugin wrote.
 
@@ -186,7 +186,7 @@ defmodule OneCore.Plugins.Process do
     Plugins.release(process.held)
   end
 
-  # Holds the plugin's newest version, says so where this process is registered, and gives its module in it.
+  # Holds the plugin's latest version, says so where this process is registered, and gives its module in it.
   # `:absent` if the plugin isn't running here, or no longer has the module.
   defp held(plugin, name, key) do
     with {:ok, held, version} <- Plugins.hold(plugin) do

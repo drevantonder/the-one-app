@@ -88,7 +88,7 @@ impl Views {
         }
     }
 
-    /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the newest files of
+    /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the latest files of
     /// `plugin` this client knows of. An app opened for a group or the network says so after its name, last part
     /// first (`notes.family.groups.localhost`), and its files are the ones listed for them. One a server didn't
     /// list, as a page loads none of them (a sourcemap), is read by name from the same version.
@@ -194,7 +194,7 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
     done.map_err(|error| format!("{error:#}"))
 }
 
-/// Takes the newest builds for this device, as `one update` does. Gives what it says.
+/// Takes the latest builds for this device, as `one update` does. Gives what it says.
 #[tauri::command]
 async fn update(views: State<'_, Views>) -> Result<String, String> {
     cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))

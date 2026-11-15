@@ -30,21 +30,21 @@ defmodule OneCore.Plugins.Installed do
     end
 
     with :ok <- named(name),
-         {number, code, _tag} <- Store.newest(artifact) || {:error, "There's no plugin #{artifact}"},
-         {:ok, version} <- newest_here(artifact, code) || Store.loaded(artifact, code),
+         {number, code, _tag} <- Store.latest(artifact) || {:error, "There's no plugin #{artifact}"},
+         {:ok, version} <- latest_here(artifact, code) || Store.loaded(artifact, code),
          :ok <- Deploy.fits(owner, name, version),
          :ok <- note(owner, installed) do
       Bucket.write("#{artifact}/installed/#{owner}", "")
       Plugins.reload(owner, [{artifact, number, {:ok, version}}])
       Server.notify_servers([owner])
     else
-      :error -> {:error, "#{artifact}'s newest version doesn't compile here, so it isn't installed."}
+      :error -> {:error, "#{artifact}'s latest version doesn't compile here, so it isn't installed."}
       {:error, why} -> {:error, why}
     end
   end
 
   # The version of the plugin `artifact` running here, if it's the set of files named `code`.
-  defp newest_here(artifact, code) do
+  defp latest_here(artifact, code) do
     with %Version{code: ^code} = version <- Plugins.version(artifact), do: {:ok, version}, else: (_ -> nil)
   end
 

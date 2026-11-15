@@ -438,7 +438,7 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
       IO.puts("    #{blob}: #{said}")
     end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
     users/bob/made/notes/list/text network/own/relations/log/0000000000000001 groups/family/own/diary/1 \
-    users/bob/installed network/plugins/notes/newest 2>&1 | grep -v "^$")
+    users/bob/installed network/plugins/notes/latest 2>&1 | grep -v "^$")
 else
   echo "  (on a folder nothing stands between a server and the bucket: with --edge, the signer refuses it the rest)"
 fi

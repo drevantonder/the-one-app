@@ -1,5 +1,5 @@
 // Devices: everything that acts as whoever's looking, and the servers that run their apps, each saying whether an
-// update is ready for it: the build itself is for agents, in `builds`. One that's behind the newest is updated here, and all of them at once; this device becomes a server and
+// update is ready for it: the build itself is for agents, in `builds`. One that's behind the latest is updated here, and all of them at once; this device becomes a server and
 // stops being one; a server's services are switched on and off; and a device is taken out, or this one signs out.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
@@ -19,10 +19,10 @@ const mine = createMemo(async () => {
     json("services"),
     json("services", {}, "network").catch(() => undefined),
   ])
-  const newest = { ...network?.newest, ...builds.newest }
-  /// Whether something is behind the newest build for its kind of machine, or `undefined` where there's none.
+  const latest = { ...network?.latest, ...builds.latest }
+  /// Whether something is behind the latest build for its kind of machine, or `undefined` where there's none.
   const behind = (kind, said) => {
-    const out = said?.build && newest[`${kind}/${said.target}`]
+    const out = said?.build && latest[`${kind}/${said.target}`]
     return out ? out.build !== said.build : undefined
   }
   const built = new Map(builds.devices.map((said) => [said.device, said]))
@@ -37,7 +37,7 @@ const mine = createMemo(async () => {
     for (const server of list?.servers ?? []) {
       if (servers.has(server.server)) continue
       const runs = (theirs?.services ?? []).map((service) => ({ ...service, on: service.servers.includes(server.server) }))
-      // Only a server that was installed takes the newest build when it's asked.
+      // Only a server that was installed takes the latest build when it's asked.
       const updates = server.installed ? behind("server", server) : undefined
       servers.set(server.server, { ...server, id: server.server, for: who, here: server.server === here.server, behind: updates, services: runs })
     }
@@ -71,7 +71,7 @@ async function doing(does) {
   }
 }
 
-/// Has a server take the newest builds, or this device: `one update`.
+/// Has a server take the latest builds, or this device: `one update`.
 const update = (thing) => (thing.kind ? client({ update: true }).then(({ said }) => toast(said)) : call("update", { server: thing.id }, { for: thing.for }))
 
 /// Takes a device out once its person has said so. Taking this one out is signing out, and the client starts again

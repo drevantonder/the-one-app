@@ -65,7 +65,7 @@ defmodule OneCore.ServicesTest do
   end
 
   @tag :tmp_dir
-  test "a service keeps what it holds through its plugin's updates, in the newest code", %{earlier: earlier} do
+  test "a service keeps what it holds through its plugin's updates, in the latest code", %{earlier: earlier} do
     assert Calls.call("counter", "add", %{}, OneCore.Test.owner()) == {:ok, [1, 1]}
     # The plugin was installed for the network, so that's who its service has it run for.
     assert_receive {:counted, "network", 1}

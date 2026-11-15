@@ -384,7 +384,7 @@ defmodule OneCore.WhoTest do
     assert {:error, "users/alice/own/counts is a plugin's own artifact, which only that plugin reaches"} =
              call("tally_peek", %{"artifact" => "users/alice/own/counts"}, alice)
 
-    # Everyone using a plugin runs its newest version.
+    # Everyone using a plugin runs its latest version.
     newer = String.replace(@counts, "for \#{call.for}", "now \#{call.for}")
     assert {:ok, 2, ""} = Deploy.deploy(alice, "counts", %{"server/counts.ex" => newer})
     assert call("counts_count", %{}, bob) == {:ok, "users/bob/own/counts: 2 now users/bob"}
