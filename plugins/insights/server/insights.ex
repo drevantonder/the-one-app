@@ -147,6 +147,9 @@ defmodule Insights do
   def hook("called", about, call), do: Recorded.called(call, about)
   def hook("measured", said, call), do: Recorded.measured(call, said)
 
+  @doc "Keeps a batch that a server recorded (`Insights.Recorded`), on a server acting for whoever Insights is installed for."
+  def keep(call, batch), do: Store.keep(call.own, batch)
+
   @impl true
   def call("overview", inputs, call) do
     {batches, from, to} = read(call, inputs["hours"] || 24)

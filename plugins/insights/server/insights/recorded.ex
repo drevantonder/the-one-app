@@ -1,8 +1,10 @@
 defmodule Insights.Recorded do
   @moduledoc """
-  What this server heard for Insights, in OpenTelemetry's shapes, held here and kept as one blob a minute, or as
-  often as `OTEL_BSP_SCHEDULE_DELAY` says in milliseconds: so a call costs a few microseconds and writes nothing,
-  and an idle server writes nothing at all. There's one of these on each server, for whoever Insights was installed for.
+  What this server heard for Insights, in OpenTelemetry's shapes, held here and handed to a server acting for
+  whoever Insights was installed for as one batch a minute, or as often as `OTEL_BSP_SCHEDULE_DELAY` says in
+  milliseconds, which keeps it (`Insights.keep/2`): so a call costs a few microseconds, writes nothing and asks no
+  other server, and an idle server sends nothing at all. There's one of these on each server where something
+  Insights hears happened, for whoever Insights was installed for, and its batches carry that server's name.
 
   - A span for each tool call, from the hook `called`: its plugin, its tool, whose it was as an owner's prefix
     (`users/alice`), how long it took and how it ended. A call passed on is a span on both servers, the one that
@@ -16,7 +18,7 @@ defmodule Insights.Recorded do
   None of it is inputs, answers, secrets or anything a person wrote: names, sizes, durations and outcomes only.
   """
   use GenServer
-  alias OneCore.{Call, Servers, Trace, User}
+  alias OneCore.{Call, Servers, Service, Trace, User}
 
   # How much of each a batch holds at most. Past that, only spans that failed are kept, and the rest are counted:
   # the numbers still count every call.
@@ -122,7 +124,7 @@ defmodule Insights.Recorded do
   end
 
   defp heard(call, heard) do
-    process = Call.process(call, __MODULE__, call.installed, {call.own, call.installed, call.server})
+    process = Call.process(call, __MODULE__, call.installed, {call.installed, call.server})
     GenServer.cast(process, {:heard, heard})
   end
 
@@ -178,10 +180,10 @@ defmodule Insights.Recorded do
   ## The batch
 
   @impl true
-  def init({own, added, server}) do
+  def init({added, server}) do
     every = every()
     Process.send_after(self(), :flush, every)
-    state = %{own: own, added: added, server: server, every: every, from: System.os_time(:nanosecond)}
+    state = %{added: added, server: server, every: every, from: System.os_time(:nanosecond)}
     listen(state)
     {:ok, Map.merge(state, empty())}
   end
@@ -212,10 +214,8 @@ defmodule Insights.Recorded do
     if Enum.any?(Map.values(batch), &(&1 != [])) do
       machine = Servers.name(state.server) || String.slice(state.server, 0, 8)
 
-      Insights.Store.keep(
-        state.own,
-        Map.merge(batch, %{"server" => state.server, "machine" => machine, "from" => state.from, "to" => to})
-      )
+      batch = Map.merge(batch, %{"server" => state.server, "machine" => machine, "from" => state.from, "to" => to})
+      Service.plugin(self(), state.added, :keep, [batch])
     end
 
     Process.send_after(self(), :flush, state.every)

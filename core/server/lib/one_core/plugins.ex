@@ -29,7 +29,7 @@ defmodule OneCore.Plugins do
   # versions here.
   def child_spec(_) do
     children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
-    children = children ++ __MODULE__.Process.children() ++ [{Task.Supervisor, name: Hooks}]
+    children = children ++ __MODULE__.Process.children() ++ Hooks.Hearer.children()
     start = {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}
     %{id: __MODULE__, type: :supervisor, start: start}
   end

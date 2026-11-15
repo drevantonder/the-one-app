@@ -43,8 +43,9 @@ defmodule OneCore.Hooks do
 
   @kinds [
     hears: """
-    is told after it happened, apart from what happened and from every other plugin that hears it. What it answers
-    is ignored, and so is its raising.
+    is told after it happened, on the server where it happened, apart from what happened and from every other
+    plugin that hears it, in the order it happened. What it answers is ignored, and so is its raising. One that
+    needs a server acting for whoever it was installed for passes it there (`OneCore.Call.forward/2`).
     """,
     changes: """
     is handed it as it was asked, as every other plugin that changes it is, and answers only what it changes, by
@@ -260,9 +261,7 @@ defmodule OneCore.Hooks do
 
   @doc "Tells each plugin that hears `hook` what it's about, for `asked`."
   def heard(hook, about, {_by, who} = asked) do
-    for {at, name} <- hooking(hook, who),
-        do: Task.Supervisor.start_child(__MODULE__, fn -> Calls.hook(at, name, hook, about, asked) end)
-
+    for {at, name} <- hooking(hook, who), do: __MODULE__.Hearer.tell(at, name, hook, about, asked)
     :ok
   end
 

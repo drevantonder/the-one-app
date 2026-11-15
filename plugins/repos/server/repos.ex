@@ -162,7 +162,9 @@ defmodule Repos do
   end
 
   @impl true
-  def hook("removed", %{"artifact" => name, "what" => what}, _call) do
+  def hook("removed", %{"artifact" => name, "what" => what}, call) do
+    # It's heard where the repo was removed, and its list is kept by a server acting for whoever Repos is installed for.
+    if not OneCore.Servers.here?(call.installed), do: Call.forward(call, call.installed)
     if name =~ @repo, do: indexed(name, what)
     :ok
   end

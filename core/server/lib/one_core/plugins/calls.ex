@@ -239,6 +239,35 @@ defmodule OneCore.Plugins.Calls do
     end)
   end
 
+  @doc """
+  Tells the plugin that `name` is for `at` what it heard, each a hook, what it's about and who asked, in turn and
+  under one hold of its version, as `hook/6` would. It's told here, where it happened: a plugin that needs a server
+  acting for whoever it was installed for passes it there itself (`OneCore.Call.forward/2`), and one that keeps what
+  it heard on this server for a while needn't. It has ten seconds for all of it; what it answers or raises is
+  ignored.
+  """
+  def hear(at, name, heard) do
+    Plugins.run([at], name, fn at, versions ->
+      version = versions[name]
+
+      Hooks.within(name, "what it heard", fn ->
+        for {hook, about, asked} <- heard, hook in version.hooks do
+          ask = {"hooks/call", %{installed: at, plugin: name, hook: hook, about: about}}
+          call = call(at, name, versions, ask, asked, false)
+
+          try do
+            if hears?(call, about), do: version.plugin.hook(hook, about, call)
+          catch
+            :throw, {Call, _forwarded} -> :ok
+            kind, reason -> Logger.error(Exception.format(kind, reason, __STACKTRACE__))
+          end
+        end
+      end)
+
+      {:ok, nil}
+    end)
+  end
+
   defp hears?(call, %{"artifact" => artifact, "by" => by}),
     do: call.who != by and Call.refused(call, artifact, "viewer") == nil
 
@@ -286,10 +315,16 @@ defmodule OneCore.Plugins.Calls do
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. The
   # plugin's own artifact is the one for whoever it was installed for, so the call is run by a server acting for them:
   # this one, or one that it's passed on to.
-  defp called(at, name, versions, ask, {by, who}, forwarded) do
+  defp called(at, name, versions, ask, asked, forwarded) do
+    call = call(at, name, versions, ask, asked, forwarded)
+    if Servers.here?(at), do: call, else: Call.forward(call, at)
+  end
+
+  # The call as this server would run it.
+  defp call(at, name, versions, ask, {by, who}, forwarded) do
     own = "#{at}/own/#{name}"
 
-    call = %Call{
+    %Call{
       own: %Artifact{prefix: own <> "/"},
       installed: at,
       folder: Path.join(Server.home(), own),
@@ -302,8 +337,6 @@ defmodule OneCore.Plugins.Calls do
       uses: for({used, version} <- versions, used != name, into: %{}, do: {used, {version.artifact, version.plugin}}),
       forwarded: forwarded
     }
-
-    if Servers.here?(at), do: call, else: Call.forward(call, at)
   end
 
   # Who asked and who for: one who is both.
