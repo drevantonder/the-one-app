@@ -38,7 +38,7 @@ const ask = (method, params = {}) =>
 
 let reads;
 const sizes = { phone: { width: 390, height: 844 }, desktop: { width: 1280, height: 800 } };
-const page_files = { "index.html": "text/html", "client.js": "text/javascript", "client.css": "text/css" };
+const page_files = { "index.html": "text/html", "client.js": "text/javascript", "client.css": "text/css", "Logo.png": "image/png" };
 /** What a request says of who it's for: a group or the network, or nothing for the client's own user. */
 const said = (who) => (who ? { _meta: { for: who } } : {});
 
@@ -79,7 +79,8 @@ for (const [size, viewport] of Object.entries(sizes)) {
     });
     await page.route("http://tauri.localhost/**", (route) => {
       const file = new URL(route.request().url()).pathname.slice(1);
-      const from = ["tokens.css", "ui.css"].includes(file) ? `${root}/ui/src/${file}` : `${root}/client/shell/page/${file}`;
+      // Where each comes from is what tauri.conf.json's frontendDist says.
+      const from = ["tokens.css", "ui.css"].includes(file) ? `${root}/ui/src/${file}` : file === "Logo.png" ? `${root}/icons/Logo.png` : `${root}/client/shell/page/${file}`;
       route.fulfill({ contentType: page_files[file] ?? "text/css", body: readFileSync(from) });
     });
     // An app's file, as the app's window finds it: among the newest files of its plugin that a server lists for
