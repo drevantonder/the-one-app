@@ -103,7 +103,7 @@ defmodule OneCore.RelationsTest do
 
     # Being in a group is a tuple, and a group in a group brings its members.
     assert {:ok, "groups/family"} = call("relations_group", %{"name" => "family"}, @alice)
-    assert {:error, "There's a group named family already."} = call("relations_group", %{"name" => "family"}, @bob)
+    assert {:error, "There's a group called family already."} = call("relations_group", %{"name" => "family"}, @bob)
     assert {:ok, _} = share(note, "viewer", "groups/family", @alice)
     assert not reads?(note, @bob)
     assert {:error, "users/bob isn't an editor of groups/family."} = share("groups/family", "member", @bob, @bob)

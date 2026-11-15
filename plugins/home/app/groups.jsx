@@ -28,13 +28,13 @@ async function change(tool, inputs) {
 function Naming(props) {
   const send = async (event) => {
     event.preventDefault()
-    if (await props.onName(new FormData(event.currentTarget).get("name").trim().toLowerCase())) props.onClose()
+    if (await props.onName(new FormData(event.currentTarget).get("name").trim())) props.onClose()
   }
   return (
     <Sheet heading={props.heading} open={props.open} onClose={props.onClose}>
       <form onSubmit={send}>
         <Field label="Name" hint={props.hint}>
-          <Input name="name" required autofocus autocapitalize="none" autocorrect="off" pattern="[a-zA-Z][a-zA-Z0-9\-]*" />
+          <Input name="name" required autofocus autocapitalize={props.pattern ? "none" : "words"} autocorrect="off" pattern={props.pattern} />
         </Field>
         <Button type="submit">{props.action}</Button>
       </form>
@@ -44,11 +44,11 @@ function Naming(props) {
 
 function Group(props) {
   const remove = async (member) => {
-    if (await confirm({ heading: `Remove ${named(member)} from ${named(props.group.group)}?`, text: "They stop seeing its page and what's the group's.", action: "Remove", destructive: true }))
+    if (await confirm({ heading: `Remove ${named(member)} from ${props.group.called}?`, text: "They stop seeing its page and what's the group's.", action: "Remove", destructive: true }))
       change("relations_unshare", { artifact: props.group.group, relation: "member", who: member })
   }
   return (
-    <Screen heading={named(props.group.group)} back action={<Button variant="outline" onClick={() => setAdding("member")}>Add Member</Button>}>
+    <Screen heading={props.group.called} back action={<Button variant="outline" onClick={() => setAdding("member")}>Add Member</Button>}>
       <Section heading="Members">
         <List>
           <For each={props.group.members}>
@@ -80,15 +80,15 @@ function Groups(props) {
             <List>
               <For each={props.groups} keyed={({ group }) => group}>
                 {(group) => (
-                  <Row heading={named(group().group)} text={new Intl.ListFormat("en").format(group().members.map(named))} current={open() === group().group} onClick={() => setOpen(group().group)} />
+                  <Row heading={group().called} text={new Intl.ListFormat("en").format(group().members.map(named))} current={open() === group().group} onClick={() => setOpen(group().group)} />
                 )}
               </For>
             </List>
           </Show>
         </Screen>
       </Split>
-      <Naming heading="New Group" hint="Lowercase letters, digits and hyphens." action="Make Group" open={adding() === "group"} onClose={() => setAdding()} onName={(name) => change("relations_group", { name })} />
-      <Naming heading="Add Member" hint="Their name in this network." action="Add" open={adding() === "member"} onClose={() => setAdding()} onName={(name) => change("relations_share", { artifact: open(), relation: "member", who: `users/${name}` })} />
+      <Naming heading="New Group" action="Make Group" open={adding() === "group"} onClose={() => setAdding()} onName={(name) => change("relations_group", { name })} />
+      <Naming heading="Add Member" hint="Their name in this network." pattern="[a-zA-Z][a-zA-Z0-9\-]*" action="Add" open={adding() === "member"} onClose={() => setAdding()} onName={(name) => change("relations_share", { artifact: open(), relation: "member", who: `users/${name.toLowerCase()}` })} />
     </>
   )
 }

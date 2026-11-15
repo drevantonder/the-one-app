@@ -24,10 +24,11 @@ plugin deciding, nobody but the network's first owner does anything.
 - `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
   adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
   and `check` says whether someone may reach it.
-- `groups` lists the groups whoever asks is in, each with its members and owners.
-- `group` makes a group, with whoever asks as its owner and first member. A member has a call run for the
-  group, with the group's artifacts: `ONE_FOR=groups/family` before a command, and an app opened from the
-  group's home page. Every user is a member of the network.
+- `groups` lists the groups whoever asks is in, each with what it's called, its members and owners.
+- `group` makes a group called what it's given (The Smiths is `groups/the-smiths`), with whoever asks as its
+  owner and first member. A member has a call run for the group, with the group's artifacts:
+  `ONE_FOR=groups/family` before a command, and an app opened from the group's home page. Every user is a member
+  of the network.
 - `link` makes a sharing link to an artifact, as a viewer or an editor. Whoever holds the link reaches the
   artifact without signing in, through the tools that take a link's holder, until its tuple is removed with
   `unshare`. The link is answered once and kept nowhere, so pass it on then. It starts with whose the artifact

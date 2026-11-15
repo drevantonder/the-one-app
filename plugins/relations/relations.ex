@@ -17,7 +17,10 @@ defmodule Relations do
       artifact text not null, relation text not null, who text not null, primary key (artifact, relation, who)
     ) without rowid
     """,
-    "create index tuples_by_who on tuples (who, relation)"
+    "create index tuples_by_who on tuples (who, relation)",
+    # What each group is called, as whoever made it wrote it. A group made before this is called what it's named.
+    "create table names (artifact text primary key, called text not null) without rowid",
+    "insert into names select distinct artifact, substr(artifact, 8) from tuples where artifact like 'groups/%'"
   ]
 
   # What's followed from one who or artifact to the next: the groups a who is a member of, and an artifact's
@@ -83,14 +86,14 @@ defmodule Relations do
         description: "Makes a group, with you as its owner and its first member",
         inputs: %{
           type: "object",
-          properties: %{name: %{type: "string", description: "Its name: lowercase letters, digits and hyphens"}},
+          properties: %{name: %{type: "string", description: "What it's called, as people write it: The Smiths"}},
           required: ["name"]
         }
       },
       %{
         name: "groups",
         read_only: true,
-        description: "Lists the groups you're in, each with its members and its owners",
+        description: "Lists the groups you're in, each with what it's called, its members and its owners",
         inputs: %{type: "object", properties: %{}}
       },
       %{
@@ -196,17 +199,23 @@ defmodule Relations do
 
   def call("members", %{"of" => of}, _call), do: raise("#{of} isn't a group or the network.")
 
-  def call("group", %{"name" => name}, call) do
-    if not (name =~ ~r/^[a-z][a-z0-9-]*$/), do: raise("A group's name is lowercase letters, digits and hyphens.")
+  # A group is named after what it's called, in lowercase letters, digits and hyphens: The Smiths is
+  # groups/the-smiths, and Wiśniewski groups/wisniewski.
+  def call("group", %{"name" => called}, call) do
+    called = String.trim(called)
+    plain = called |> String.normalize(:nfd) |> String.replace(~r/\p{Mn}/u, "") |> String.downcase()
+    name = plain |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
+    if not (name =~ ~r/^[a-z]/), do: raise("A group's name starts with a letter.")
     group = "groups/" <> name
 
     transaction(call, fn db ->
       if query(db, "select 1 from tuples where artifact = ? limit 1", [group]) != [],
-        do: raise("There's a group named #{name} already.")
+        do: raise("There's a group called #{called} already.")
 
       for relation <- ["owner", "member"],
           do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, call.for])
 
+      query(db, "insert into names (artifact, called) values (?, ?)", [group, called])
       group
     end)
   end
@@ -215,7 +224,11 @@ defmodule Relations do
     transaction(call, fn db ->
       for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.for], []) -- [call.for]) do
         having = &for %{"who" => who} <- query(db, @having, [group, &1]), do: who
-        %{group: group, members: having.("member"), owners: having.("owner")}
+        # A group that sharing with it made, and not `group`, is called what it's named.
+        called = with [%{"called" => called}] <- query(db, "select called from names where artifact = ?", [group]),
+                      do: called, else: (_ -> String.replace_prefix(group, "groups/", ""))
+
+        %{group: group, called: called, members: having.("member"), owners: having.("owner")}
       end
     end)
   end

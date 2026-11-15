@@ -7,14 +7,14 @@ import { call, changed, client, confirm, Empty, Icon, List, open, Problem, Row, 
 import "./home.css"
 
 const SIZES = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
-const named = (who) => (!who ? "You" : who === "network" ? "Everyone" : who.replace("groups/", "").replace(/^./, (first) => first.toUpperCase()))
 const json = (tool, inputs, who) => call(tool, inputs, { for: who }).then(JSON.parse)
 
 /// Every page this user sees, and the parts of Settings. A network with nothing that keeps groups has none.
 const home = createMemo(async () => {
   const groups = await json("relations_groups").catch(() => [])
-  const whos = [undefined, ...groups.map(({ group }) => group), "network"]
-  const [settings, ...pages] = await Promise.all([json("home_settings"), ...whos.map((who) => json("home_page", {}, who).then((page) => ({ ...page, for: who, name: named(who) })))])
+  // Each page is named for whose it is: a group by what it's called.
+  const whos = [{ name: "You" }, ...groups.map(({ group, called }) => ({ for: group, name: called })), { for: "network", name: "Everyone" }]
+  const [settings, ...pages] = await Promise.all([json("home_settings"), ...whos.map((who) => json("home_page", {}, who.for).then((page) => ({ ...page, ...who })))])
   return { pages, settings }
 })
 changed(() => refresh(home))

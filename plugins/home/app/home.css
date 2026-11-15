@@ -146,13 +146,17 @@ footer p {
   font-weight: 500;
   line-height: 1.25;
 }
-.network {
+/* A long name ends in an ellipsis, once whose network it's in has given up its room. */
+footer p span {
   min-width: 0;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.network {
+  flex-shrink: 1000;
+  color: var(--muted-foreground);
+  font-weight: 400;
 }
 .dots {
   display: flex;
