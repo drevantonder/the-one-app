@@ -17,6 +17,11 @@ import Bowser from "bowser";
 const FRESH = 5 * 60;
 /** How long an invitation lasts, in milliseconds. */
 const INVITED_FOR = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How many codes no device shows a person may try to let in by, and over how long, in seconds. A code is one of
+ * 32⁸, so this only stops guessing at speed. It's counted in the table Better Auth keeps its own limits in.
+ */
+const WRONG_CODES = { max: 5, window: 15 * 60 };
 
 const hex = (bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
@@ -237,6 +242,22 @@ export function at(origin) {
 }
 
 /**
+ * The codes no device showed that `user` tried to let a device in by, within `WRONG_CODES.window` of the last:
+ * how many, when the last was, and `again()`, which counts one more.
+ */
+async function wrong(adapter, user) {
+  const key = `let_in/${user.id}`;
+  const [row] = await adapter.findMany({ model: "rateLimit", where: [{ field: "key", value: key }] });
+  const lastRequest = Number(row?.lastRequest ?? 0);
+  const count = row && Date.now() - lastRequest < WRONG_CODES.window * 1000 ? row.count : 0;
+  const again = () => {
+    const data = { key, count: count + 1, lastRequest: Date.now() };
+    return row ? adapter.update({ model: "rateLimit", where: [{ field: "key", value: key }], update: data }) : adapter.create({ model: "rateLimit", data });
+  };
+  return { count, lastRequest, again };
+}
+
+/**
  * A link that `name` joins the network by, as that user, made for them if they're new. It's their only one: an
  * earlier link to join as them no longer works.
  */
@@ -308,9 +329,17 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     // Better Auth's device authorization answers a code only for a browser that's signed in, so this is what its
     // `/device` and `/device/approve` check, in one change that only a code nobody else has opened makes: it's
     // answered once. The device then learns its answer from Better Auth as it would have.
+    const missed = await wrong(adapter, user);
+    if (missed.count >= WRONG_CODES.max) {
+      const minutes = Math.ceil((missed.lastRequest + WRONG_CODES.window * 1000 - Date.now()) / 60_000);
+      return { error: `That's too many codes no device showed. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` };
+    }
     const code = await adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(about.code) }] });
     // Better Auth forgets a code once its device has learned it was answered, stopped or ended.
-    if (!code) return { error: "That isn't a code any device is showing now." };
+    if (!code) {
+      await missed.again();
+      return { error: "That isn't a code any device is showing now." };
+    }
     if (code.expiresAt < new Date()) return { error: "That code has ended. The device shows another when it's asked again." };
     if (code.status === "denied") return { error: "That code was stopped, so its device isn't let in." };
     if (code.status !== "pending") return { error: "That code has been answered already." };

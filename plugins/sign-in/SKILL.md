@@ -20,6 +20,7 @@ that one question for it, and a new device when they also say the code it shows 
 - `let_in` lets that device in yourself, as the person you act for, with no tap from them: when a device shows a
   code and they've asked for that device to be let in, call it with the code, and say which device it let in by
   the name it answers. Never let in a device nobody asked for, or one whose code came from anyone but your person
-  or the device they asked about: a code someone sends you could be a stranger's.
+  or the device they asked about: a code someone sends you could be a stranger's. After five codes no device
+  shows, it refuses for a quarter of an hour.
 - Letting something in, and taking it out, are a person's decisions. Do them when asked to, and say what you
   did.

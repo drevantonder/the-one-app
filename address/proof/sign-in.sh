@@ -373,6 +373,14 @@ refused through server ping ping
 refused through spare ping ping
 kill -9 "$spare"
 
+say "Five codes no device shows, and the next is refused for a quarter of an hour, whatever it is"
+for wrong in NOPE-1235 NOPE-1236 NOPE-1237 NOPE-1238; do device bobs-phone sign-in let_in --code "$wrong" >/dev/null 2>&1 || true; done
+refused device bobs-phone sign-in let_in --code NOPE-1239
+asks desk-pc sign-in devices
+refused device bobs-phone sign-in let_in --code "$code"
+may device laptop sign-in let_in --code "$code"
+answered desk-pc
+
 say "Its first owner has joined, so a server that starts again gives no link to join as them"
 restart --owner alice
 echo "  the server is killed and started again with --owner alice, and its log has $(grep -c "joins at" "$folder/server.log") links to join by"
