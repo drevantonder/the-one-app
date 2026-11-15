@@ -13,6 +13,7 @@
 # plugin that decides who may is its first owner's alone, and one without the plugin that signs people in answers
 # nobody. It says what a call costs once a device is someone's. A device or assistant of a person's lets in their next
 # by its code, with no browser; given by someone else's, it's theirs; and only a server acting for that person says so.
+# Each person goes by the name they gave as they joined, which another user is told.
 #
 #     mise exec -- address/proof/sign-in.sh
 #
@@ -138,6 +139,12 @@ refused device bobs-phone sign-in invite --name carol
 echo "  what each is told of their own devices and passkeys:"
 may device laptop sign-in devices
 may device bobs-phone sign-in devices
+
+say "Each goes by the name they gave as they joined, which another user of the network is told"
+may device laptop sign-in people --users '["users/alice", "users/bob"]'
+may device bobs-phone sign-in name --called "Robert"
+may device laptop sign-in people --users '["users/bob"]'
+may device bobs-phone sign-in people
 
 say "Where its person isn't signed in, they answer their passkey first, and then see the code"
 browser alice signs-out

@@ -3,7 +3,8 @@ defmodule SignIn do
   Signing in: whose each device is. People sign in at the network's address, where this plugin's part there
   (`address/`) keeps their passkeys and what they let act as them, and writes each device into this plugin's own
   artifact for the network as `devices/<device>`: the user whose it is. One Core asks whose a device is, the
-  `device` hook, and it's answered from that blob, so no call asks anything of the address.
+  `device` hook, and it's answered from that blob, so no call asks anything of the address. What each person goes
+  by is there too, `people/<name>`, which `people` tells whoever may see who's in the network.
 
   What a person does with their devices in the app is asked of the part at the address, which keeps them. A network
   with an address that isn't being built is joined by invitation, its first owner's included: until they've joined,
@@ -41,6 +42,31 @@ defmodule SignIn do
         read_only: true,
         description: "Lists your devices, assistants and browsers, and your passkeys",
         inputs: none
+      },
+      %{
+        name: "people",
+        read_only: true,
+        description:
+          "Says who people in the network are: the name each goes by, and their email where signing in has one",
+        inputs: %{
+          type: "object",
+          properties: %{
+            users: %{
+              type: "array",
+              items: %{type: "string", pattern: "^users/[a-z][a-z0-9-]*$"},
+              description: "Who: users/<name>. You, if left out"
+            }
+          }
+        }
+      },
+      %{
+        name: "name",
+        description: "Changes the name you go by in the network",
+        inputs: %{
+          type: "object",
+          properties: %{called: %{type: "string", minLength: 1, description: "Your name, as people know you"}},
+          required: ["called"]
+        }
       },
       %{
         name: "let_in",
@@ -107,6 +133,27 @@ defmodule SignIn do
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
 
+  # Whoever may see who's in the network sees who each of them is: a member of it, as the plugins that decide
+  # `reach` say. Everyone sees who they are themselves.
+  def call("people", inputs, call) do
+    users = Map.get(inputs, "users", [person(call)])
+
+    if users -- [call.by] != [] and not Call.member?(call, "network"),
+      do: raise("Only a member of the network sees who's in it.")
+
+    for "users/" <> name = user <- users do
+      case Artifact.read(call.own, "people/" <> name) do
+        {:ok, said, _tag} -> Map.put(JSON.decode!(said), "who", user)
+        :absent -> %{"who" => user, "called" => nil, "email" => nil}
+      end
+    end
+  end
+
+  def call("name", %{"called" => called}, call) do
+    %{"called" => called} = ask(%{ask: "called", who: person(call), called: called})
+    "You go by #{called} now."
+  end
+
   def call("let_in", %{"code" => code}, call) do
     %{"let_in" => name} = ask(%{ask: "let_in", who: person(call), code: code})
     "#{name} is in, and is yours now."
@@ -131,7 +178,7 @@ defmodule SignIn do
 
   # Devices are a person's, whoever a call runs for.
   defp person(%Call{by: "users/" <> _ = by}), do: by
-  defp person(_call), do: raise("Devices are a person's, and nobody is asking.")
+  defp person(_call), do: raise("This is a person's to ask, and nobody is asking.")
 
   # Asks this plugin's part at the network's address, as this server: it answers only the network's own.
   defp ask(what) do

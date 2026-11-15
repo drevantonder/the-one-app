@@ -3,7 +3,8 @@
 // for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
 // device authorization has it, or when a device or assistant of theirs lets it in by that code. Each is then a line
 // in this plugin's own artifact, `devices/<device>`, saying whose it is: that's where a server reads it, so no call
-// asks anything here.
+// asks anything here. What a person goes by is a line there too, `people/<name>`: the name they chose as they
+// joined, and their email where how they signed in has one, which a server tells plugins of by `people`.
 import { env } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
@@ -58,6 +59,16 @@ async function place(adapter, device, kind, name, user) {
   if (was) await remove(adapter, was);
   await adapter.create({ model: "device", data: { id: device, userId: user.id, kind, name, createdAt: new Date() }, forceAllowId: true });
   await env.OWN.write(`devices/${device}`, who(user));
+}
+
+/**
+ * Writes what `user` goes by where a server reads it: the name they chose, and their email where it's one they
+ * proved. Better Auth keeps an email for everyone, made up for whoever signs in only with a passkey, which isn't one.
+ */
+async function goesBy(user) {
+  const said = { called: user.called ?? null, email: user.emailVerified ? user.email : null };
+  await env.OWN.remove(`people/${user.name}`);
+  await env.OWN.write(`people/${user.name}`, JSON.stringify(said));
 }
 
 /** Makes a device nobody's, on every server. */
@@ -186,6 +197,10 @@ async function made(origin) {
     // The JWT plugin signs the tokens an assistant is given, and hands out none of its own.
     disabledPaths: ["/token"],
     session: { freshAge: FRESH },
+    // The name a person chose as they joined, which they can change: the one they're `users/<name>` by is chosen
+    // for them, as they're invited, and never changes.
+    user: { additionalFields: { called: { type: "string", required: false, input: true } } },
+    databaseHooks: { user: { update: { after: goesBy } } },
     // Better Auth limits how often an address asks only where NODE_ENV says production, which a Worker's doesn't,
     // and counts in memory, which each copy of a Worker has its own of.
     rateLimit: { enabled: true, storage: "database" },
@@ -288,6 +303,13 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
   }
   if (!user) return { error: `${name} hasn't joined this network.` };
   const mine = [{ field: "userId", value: user.id }];
+
+  if (ask === "called") {
+    const called = String(about.called ?? "").trim().slice(0, 100);
+    if (!called) return { error: "A name can't be empty." };
+    await internalAdapter.updateUser(user.id, { called });
+    return { called };
+  }
 
   if (ask === "devices") {
     const [devices, browsers, passkeys] = await Promise.all([

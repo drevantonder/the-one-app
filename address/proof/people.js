@@ -53,6 +53,12 @@ for await (const line of createInterface({ input: process.stdin })) {
     said.push(await read(screen));
     const signIn = screen.locator(".ui-button", { hasText: /^(Sign in|Create a passkey)$/ });
     if (await signIn.count()) {
+      // Someone joining says the name they go by first: theirs, as a person writes it.
+      const called = screen.locator("input[name=name]");
+      if (await called.count()) {
+        await called.fill(name[0].toUpperCase() + name.slice(1));
+        said.push(`types ${name[0].toUpperCase() + name.slice(1)}`);
+      }
       await signIn.click();
       await Promise.race([screen.locator(":is(.done, .problem, .code)").first().waitFor(), page.waitForURL(left)]);
       await settled();

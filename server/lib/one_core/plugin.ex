@@ -104,6 +104,11 @@ defmodule OneCore.Plugin do
     plugin's own, such as an inbox, is one of its tools, which any plugin calls as whoever its call runs for:
     `OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})` gives the answer, or raises
     with why. A plugin that provides such a tool can give a function that calls it, as `Notifications.send/2` does.
+  - Who someone is, a plugin asks `sign-in`, the plugin that signs people in, by its tool:
+    `OneCore.Call.tool(call, "sign-in", "people", %{"users" => ["users/alice"]})` gives each one's `called`, the
+    name they chose, and their `email` where how the network signs in has one, either `nil` where there's none.
+    Left out, `users` is whoever asked. It answers about others only to a member of the network, as the plugins
+    that decide `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
     the server running this one: a GenServer of the plugin's, one for each `key`, started with `argument` when
     first asked for. It's for what is slow to open and belongs to no machine in particular, as a database is. What

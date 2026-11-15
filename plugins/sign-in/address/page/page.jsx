@@ -6,7 +6,7 @@
 // button opens the page in the device's browser instead.
 import { createSignal } from "solid-js"
 import { render } from "@solidjs/web"
-import { SignIn } from "ui"
+import { Field, Input, SignIn } from "ui"
 import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
@@ -39,6 +39,8 @@ const [acts, setActs] = createSignal()
 const [signedIn, setSignedIn] = createSignal()
 const [problem, setProblem] = createSignal()
 const [done, setDone] = createSignal()
+/// The name someone joining goes by, as they type it.
+const [called, setCalled] = createSignal("")
 if (request) ask("/oauth2/public-client-prelogin", { client_id: asked.get("client_id"), oauth_query: request }).then((client) => setActs(client.client_name))
 
 /// Claims the device's code for whoever is signed in here, which only they can then answer, and learns what it is.
@@ -61,9 +63,11 @@ if (code && !app)
 /// The passkey question, and what answering it lets in. Someone joining makes their passkey, and is signed in
 /// with it. Whoever was signed in here before no longer is.
 async function signIn() {
+  if (invite && !called().trim()) throw new Error("Say your name first.")
   await auth.signOut()
   const { error } = invite ? await auth.passkey.addPasskey({ context: invite, createSession: true }) : await auth.signIn.passkey()
   if (error) throw new Error(error.message ?? "That passkey didn't work. Try again.")
+  if (invite) await ask("/update-user", { called: called().trim() })
   if (request) {
     // Signing in was saying yes, so the assistant is sent back with what it came for.
     const { url } = await ask("/oauth2/consent", { accept: true, oauth_query: request })
@@ -107,7 +111,13 @@ render(
       stop={answering() && "Stop"}
       onStop={() => answer(false)}
       done={done()}
-    />
+    >
+      {invite && !done() && (
+        <Field label="Your name">
+          <Input name="name" autocomplete="name" required value={called()} onInput={(event) => setCalled(event.target.value)} />
+        </Field>
+      )}
+    </SignIn>
   ),
   document.body,
 )

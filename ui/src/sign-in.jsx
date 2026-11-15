@@ -7,7 +7,8 @@ import { Button, Icon } from "./button.jsx"
 /// `code` is shown big, under a grey `note` that says what to do with it. A `warning` says who will act as them if
 /// they do, and stays until they have. `stop` is a second button, for saying no, which `onStop` does. `done` is
 /// the one line that's left once they've answered. With `href` the button is a link to where signing in happens,
-/// for a screen that can't ask itself.
+/// for a screen that can't ask itself. What else it asks, such as a `Field` for their name, goes in it, above
+/// the button.
 export function SignIn(props) {
   const [working, setWorking] = createSignal()
   const [problem, setProblem] = createSignal()
@@ -43,6 +44,7 @@ export function SignIn(props) {
             <span>{props.warning}</span>
           </p>
         </Show>
+        {props.children}
         <Show when={problem() ?? props.problem}>
           <p class="problem" role="alert">
             <Icon name="warning-circle" />

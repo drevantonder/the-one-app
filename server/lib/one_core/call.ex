@@ -139,6 +139,18 @@ defmodule OneCore.Call do
   end
 
   @doc """
+  Whether whoever asked is a member of `of`, a group or the network, as the plugins that decide `reach` say. With
+  nobody asking, as for a scheduled job, it's whoever the call runs for. It's what a plugin asks before telling
+  someone what only a group's members, or the network's, may know.
+  """
+  def member?(%__MODULE__{for: who, by: by}, of) do
+    asking = by || who
+
+    asking == of or
+      Hooks.decide("reach", %{"who" => asking, "relation" => "member", "artifact" => of}, {by, who}) == :ok
+  end
+
+  @doc """
   Whether whoever asked owns whoever this call runs for: themselves, or the group or the network they asked for,
   as its `owner`. It's who changes what's added for them, so a plugin asks it before changing what's a group's
   or the network's as a whole, where being a member isn't enough.

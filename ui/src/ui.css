@@ -1407,6 +1407,11 @@ button.ui-box {
   font: 650 var(--text-title) / 1.15 ui-monospace, "SF Mono", "Cascadia Mono", monospace;
   letter-spacing: 0.08em;
 }
+.ui-sign-in .ui-field {
+  width: 100%;
+  min-width: 16rem;
+  text-align: start;
+}
 .ui-sign-in .answers {
   display: grid;
   gap: 0.5rem;

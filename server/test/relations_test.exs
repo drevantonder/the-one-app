@@ -316,4 +316,29 @@ defmodule OneCore.RelationsTest do
     assert {:ok, _} = unshare(own, "editor", @bob, OneCore.Test.owner())
     assert {:error, "Only an editor" <> _} = call("approvals_approve", %{}, @bob)
   end
+
+  @tag :tmp_dir
+  test "what only the network's members may know is told to its users, and not to a sharing link's holder" do
+    asks = """
+    defmodule Asks do
+      @behaviour OneCore.Plugin
+
+      @impl true
+      def tools, do: [%{name: "member", by_link: true, description: "Says if they're in", inputs: %{type: "object"}}]
+
+      @impl true
+      def call("member", %{"of" => of}, call), do: OneCore.Call.member?(call, of)
+    end
+    """
+
+    assert {:ok, 1, ""} = Deploy.deploy("network", "asks", %{"asks.ex" => asks})
+    note = write("note", @alice)
+    assert {:ok, %{link: link}} = call("relations_link", %{"artifact" => note}, @alice)
+    assert {:ok, "groups/family"} = call("relations_group", %{"name" => "family"}, @alice)
+
+    assert {:ok, true} = call("asks_member", %{"of" => "network"}, @bob)
+    assert {:ok, false} = call("asks_member", %{"of" => "network"}, User.link(link))
+    assert {:ok, true} = call("asks_member", %{"of" => "groups/family"}, @alice)
+    assert {:ok, false} = call("asks_member", %{"of" => "groups/family"}, @bob)
+  end
 end
