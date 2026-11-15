@@ -85,7 +85,8 @@ fn sign(key_file: String, message: Binary) -> Result<String, String> {
 /// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
 /// `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, its address and the pass
 /// shown there, it's reached through the relay at that address too, and hears what outsiders ask there, whose `from`
-/// is `nil`. Gives the endpoint and its address, as the JSON a client is told it in.
+/// is `nil`. It gives the endpoint once it's connected there, since until then the network's other servers know it as
+/// off and don't pass it what they're asked: its address, as the JSON a client is told it in, and the endpoint.
 #[rustler::nif(schedule = "DirtyIo")]
 fn start(
     key_file: String,
@@ -98,6 +99,7 @@ fn start(
         let endpoint = client::endpoint(key, network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
+            endpoint.online().await;
             tokio::spawn(outside::hear(network, endpoint.secret_key().clone(), asked));
         }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;

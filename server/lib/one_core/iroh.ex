@@ -11,8 +11,9 @@ defmodule OneCore.Iroh do
   @doc """
   Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
   `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, `{address, pass}`, it's
-  reached through the relay at that address too, and hears what outsiders ask there, whose `from` is `nil`. Gives
-  the endpoint, open while it's held, and its address as the JSON a client is told it in.
+  reached through the relay at that address too, and hears what outsiders ask there, whose `from` is `nil`, and it
+  returns once it's connected there, so a server that says it's running is one the others know is on. Gives the
+  endpoint, open while it's held, and its address as the JSON a client is told it in.
   """
   def start(_key_file, _network, _asked), do: :erlang.nif_error(:nif_not_loaded)
 
