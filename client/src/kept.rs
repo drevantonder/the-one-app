@@ -139,11 +139,6 @@ impl Shown {
         self.again_for(asked).await
     }
 
-    /// Forgets what the view was answered: it closed, or loaded again.
-    pub fn close(&self) {
-        self.answered.lock().expect("no view panics").clear()
-    }
-
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
         let asked = json!([method, params]).to_string();
         if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get(&asked) {

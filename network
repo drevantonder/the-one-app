@@ -105,7 +105,7 @@ Its client's home is $folder/client, which is nobody's device until they sign in
 
     export ONE_HOME=$folder/client
     $one                                             opens the app, which signs in
-    $one tracker list                                says where to let this device in
+    $one sign-in devices                             says where to let this device in
 
 What each part says is in $folder/*.log. Ctrl-C stops it.
 SAID

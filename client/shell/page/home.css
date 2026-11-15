@@ -203,7 +203,7 @@ iframe[inert] {
   display: none !important;
 }
 
-/* Between the home screen and an app, as the kit moves between screens (ui/src/page.css): the app slides in over
+/* Between the home screen and an app, as the kit moves between screens (ui/src/ui.css): the app slides in over
    the home screen from the end of the line, and going back it slides out again. */
 :root {
   --toward-end: 1;

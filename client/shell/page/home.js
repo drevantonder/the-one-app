@@ -94,7 +94,7 @@ function load(app) {
 let shownByDevice = false
 
 /// Changes between the home screen and an app as a move, as the kit moves between an app's screens
-/// (ui/src/screen.js): the browser slides the app in over the home screen, or with `back`, back out from over
+/// (ui/src/screen.jsx): the browser slides the app in over the home screen, or with `back`, back out from over
 /// it. Where the browser can't, or the user asked for no motion, it's a plain swap.
 function move(change, back = false) {
   const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
