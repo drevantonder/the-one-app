@@ -191,6 +191,17 @@ defmodule OneCore.WhoTest do
     assert ask(%{}, other) == nobody
     assert %{"result" => %{"tools" => [_, _ | _]}} = list.("tools/list", %{}, stranger)
 
+    # A run of a client has a key of its own, and is from the device that signed it, and only that one.
+    {device, signing} = :crypto.generate_key(:eddsa, :ed25519)
+    {device, run} = {Base.encode16(device, case: :lower), String.duplicate("ef", 32)}
+    vouch = &Base.encode16(:crypto.sign(:eddsa, :none, "one/run/1\n" <> &1, [signing, :ed25519]), case: :lower)
+    assert {:ok, :ok} = call("placer_place", %{"device" => device, "who" => "users/alice"}, OneCore.Test.owner())
+    assert ask(%{device: device, vouch: vouch.(run)}, run) == "users/alice"
+    assert ask(%{device: device, vouch: vouch.(other)}, run) == nobody
+    assert ask(%{device: device, vouch: String.duplicate("00", 64)}, run) == nobody
+    assert ask(%{device: stranger, vouch: vouch.(run)}, run) == nobody
+    assert ask(%{device: device}, run) == nobody
+
     # Whose it is is kept, so a call asks nothing, until a tool of that plugin is called that doesn't only read:
     # a device that's removed is nobody's from the next call on.
     assert {:ok, :ok} = call("placer_remove", %{"device" => stranger}, OneCore.Test.owner())

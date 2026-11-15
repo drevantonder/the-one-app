@@ -94,8 +94,8 @@ fn start(
 ) -> Result<(ResourceArc<Reached>, String), String> {
     RUNTIME.block_on(async {
         let network = network.map(|(address, pass)| Network { address, pass });
-        let endpoint =
-            client::endpoint(Path::new(&key_file), network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
+        let key = client::key(Path::new(&key_file)).map_err(|error| format!("{error:#}"))?;
+        let endpoint = client::endpoint(key, network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
             tokio::spawn(outside::hear(network, endpoint.secret_key().clone(), asked));

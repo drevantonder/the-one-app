@@ -1,4 +1,4 @@
-//! The client's Rust half, with no window: it holds the client's key, reaches a server by its key, and keeps what
+//! The client's Rust half, with no window: it holds the device's key, reaches a server by its key, and keeps what
 //! servers answered (`kept`). The CLI (`cli`) and MCP (`mcp`) are this, run from a terminal or by an agent, and the
 //! app is a window on it (`shell`).
 //!
@@ -74,6 +74,12 @@ impl Network {
             ("one-signature", hex(&signature.to_bytes())),
             ("one-pass", self.pass.clone()),
         ])
+    }
+
+    /// What a run of the client on the device with the key `device` shows the relay here, which `vouch` is the
+    /// device's word for: the device's pass, the device's key and the vouch, joined by dots.
+    fn shown(&self, device: &SecretKey, vouch: &str) -> Self {
+        Self { address: self.address.clone(), pass: format!("{}.{}.{vouch}", self.pass, device.public()) }
     }
 
     /// The servers acting for `of`, a user's or a group's prefix, as the signer at the address says: the ones on their
@@ -296,12 +302,11 @@ fn hex(bytes: &[u8]) -> String {
     data_encoding::HEXLOWER.encode(bytes)
 }
 
-/// An endpoint holding the key kept in `key_file`, which is made on first use. It reaches others, and is reached, by
-/// key: straight to the addresses it's told and the ones it finds, and otherwise through the relay at its network's
-/// address, which is also the only thing it times. With no other relay and no address lookup, nothing about a
-/// network goes to anyone outside it. A network on one machine has no address, and so no relay. A server's add-on
-/// binds this same endpoint.
-pub async fn endpoint(key_file: &Path, network: Option<&Network>) -> Result<Endpoint> {
+/// An endpoint holding `key`. It reaches others, and is reached, by key: straight to the addresses it's told and the
+/// ones it finds, and otherwise through the relay at its network's address, which is also the only thing it times.
+/// With no other relay and no address lookup, nothing about a network goes to anyone outside it. A network on one
+/// machine has no address, and so no relay. A server's add-on binds this same endpoint.
+pub async fn endpoint(key: SecretKey, network: Option<&Network>) -> Result<Endpoint> {
     let mut probes = NetReportConfig::minimal();
     let relay = match network {
         Some(Network { address, pass }) => {
@@ -313,7 +318,7 @@ pub async fn endpoint(key_file: &Path, network: Option<&Network>) -> Result<Endp
         None => RelayMode::Disabled,
     };
     Endpoint::builder(presets::Minimal)
-        .secret_key(key(key_file)?)
+        .secret_key(key)
         .alpns(vec![ALPN.to_vec()])
         .transport_config(QuicTransportConfig::builder().max_idle_timeout(Some(SILENT.try_into()?)).build())
         .relay_mode(relay)
@@ -509,11 +514,30 @@ pub struct Client {
 /// act for its user, with the pass it shows there. A network on one machine has none, and whatever starts it tells
 /// the client where its servers are, in `servers`. `who` is whose device this is, once it's someone's: the user it
 /// signed in as.
+///
+/// The endpoint is this run's, with a key of its own that's made with it and kept nowhere, and `vouch` is the
+/// device's word for that key: its signature of `one/run/1`, a line, and the key. A device runs many clients at
+/// once, the app, each agent's MCP and every command, and iroh reaches one endpoint by a key, as the relay does: two
+/// with one key take each other's place there, and neither is answered. So each run is its own endpoint, and what it
+/// shows the relay and says to a server names the device it runs for, with the vouch (`Network::shown`, `saying`).
+/// The signer at the address and a server check it (`address/signer`, `OneCore.User`).
 #[derive(Clone)]
 struct Link {
     endpoint: Endpoint,
     network: Option<Network>,
     who: Option<String>,
+    vouch: String,
+}
+
+impl Link {
+    /// A new run's link for the device with the key `device`, on its `network`.
+    async fn run(device: &SecretKey, network: Option<Network>, who: Option<String>) -> Result<Self> {
+        let key = SecretKey::generate();
+        let vouch = hex(&device.sign(format!("one/run/1\n{}", key.public()).as_bytes()).to_bytes());
+        let shown = network.as_ref().map(|network| network.shown(device, &vouch));
+        let endpoint = endpoint(key, shown.as_ref()).await?;
+        Ok(Self { endpoint, network, who, vouch })
+    }
 }
 
 impl Client {
@@ -548,13 +572,13 @@ impl Client {
             }
             None => (None, None),
         };
-        let endpoint = endpoint(&home.join("key"), network.as_ref()).await?;
+        let link = Link::run(&key, network, who).await?;
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("for", "ONE_FOR")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
         let told = broadcast::channel(16).0;
-        accept(endpoint.clone(), told.clone());
-        let renews = network.is_some();
-        let link = std::sync::RwLock::new(Link { endpoint, network, who });
+        accept(link.endpoint.clone(), told.clone());
+        let renews = link.network.is_some();
+        let link = std::sync::RwLock::new(link);
         let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
         let client = Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering });
         // A pass that's about to end is renewed before anything is asked with it, and the next while this runs.
@@ -578,11 +602,12 @@ impl Client {
         Told { address: network.address, pass: Some(network.pass), who }
     }
 
-    /// Asks for this device's next pass, and makes its endpoint again to show it, since iroh shows a relay the pass
-    /// an endpoint was made with. A server gives it to a device that's someone's. One that can't be reached, as
-    /// where the pass this has ended, is asked at the network's address, which says where its person signs in for
-    /// a device that's nobody's now. The old endpoint goes once its pass ends, so what was asked over it finishes.
-    /// Gives how long the new pass lasts before it's renewed.
+    /// Asks for this device's next pass, and makes the run's endpoint again to show it, since iroh shows a relay the
+    /// pass an endpoint was made with. The new one has a key of its own too, as the old one is still there. A server
+    /// gives a pass to a device that's someone's. One that can't be reached, as where the pass this has ended, is
+    /// asked at the network's address, which says where its person signs in for a device that's nobody's now. The
+    /// old endpoint goes once its pass ends, so what was asked over it finishes. Gives how long the new pass lasts
+    /// before it's renewed.
     async fn renew(&self) -> Result<Duration> {
         let mut told = self.network();
         match self.request("one/pass", json!({})).await {
@@ -591,9 +616,8 @@ impl Client {
         }
         let pass = told.pass.clone().context("this device was given no pass")?;
         let network = Network { address: told.address.clone(), pass };
-        let endpoint = endpoint(&self.home.join("key"), Some(&network)).await?;
-        accept(endpoint.clone(), self.told.clone());
-        let new = Link { endpoint, network: Some(network), who: told.who.clone() };
+        let new = Link::run(&self.key, Some(network), told.who.clone()).await?;
+        accept(new.endpoint.clone(), self.told.clone());
         let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
         tokio::spawn(async move {
             sleep(RENEW).await;
@@ -697,12 +721,14 @@ impl Client {
         said.to_string().into_bytes()
     }
 
-    /// `message` with what this client says of who it's from, in the request's `_meta`.
+    /// `message` with what this client says of who it's from, in the request's `_meta`: the device this run is of,
+    /// with its vouch for the run's key, and what the environment says.
     fn saying<'a>(&self, message: &'a [u8]) -> std::borrow::Cow<'a, [u8]> {
         match serde_json::from_slice::<Value>(message) {
-            Ok(mut request) if !self.says.is_empty() && request["method"].is_string() => {
-                for (says, value) in &self.says {
-                    request["params"]["_meta"][*says] = json!(value);
+            Ok(mut request) if request["method"].is_string() => {
+                let device = [("device", self.key.public().to_string()), ("vouch", self.link().vouch)];
+                for (says, value) in device.into_iter().chain(self.says.iter().cloned()) {
+                    request["params"]["_meta"][says] = json!(value);
                 }
                 request.to_string().into_bytes().into()
             }

@@ -165,15 +165,19 @@ async function sign(env, by, pass, body) {
 
 /**
  * Whether `key` is one of the network's own, by the pass it shows: `null`, or `{until}` for a pass that ends. A
- * server's pass names a list it's on (`{list}`). A client's is signed by a server on a list, for that client's
- * key, until a time (`{list, by, until, signature}`): how a client gets one is the server's to decide.
+ * server's pass names a list it's on (`{list}`). A device's is signed by a server on a list, for that device's
+ * key, until a time (`{list, by, until, signature}`): how a device gets one is the server's to decide. A run of a
+ * client on a device has a key of its own, and shows the device's pass, the device's key and the device's word for
+ * the run's key, joined by dots (`client/src/lib.rs`).
  */
-async function admits(env, key, pass) {
+async function admits(env, key, shown) {
+  const [pass, device = key, vouch] = (shown ?? "").split(".");
   const { list, by, until, signature } = said(pass);
   if (!isKey(key) || owner(list) !== list) return null;
   if (by === undefined) return (await servers(env, list)).includes(key) ? {} : null;
   if (!(until > Date.now())) return null;
-  if (!(await signedBy(by, signature, `one/pass/1\n${key}\n${list}\n${until}`))) return null;
+  if (device !== key && !(await signedBy(device, vouch, `one/run/1\n${key}`))) return null;
+  if (!(await signedBy(by, signature, `one/pass/1\n${device}\n${list}\n${until}`))) return null;
   return (await servers(env, list)).includes(by) ? { until } : null;
 }
 

@@ -34,7 +34,8 @@ defmodule OneCore.User do
   - `as` names a user to act as. It's for a network being built, to show who may do what with nobody signing
     in, and is refused unless the server's `:development` setting is on.
   - `device`, in what came in at the network's address, is the device the address says it's from: it proved
-    that there, as a connection proves a key here.
+    that there, as a connection proves a key here. Over a connection, it's the device a run of a client runs for,
+    with `vouch` (`device/2`).
   - `for` names who else the request is for: a group, or the network.
 
   Otherwise it's from whoever's device `from` is.
@@ -79,9 +80,36 @@ defmodule OneCore.User do
     end
   end
 
-  defp by(nil, %{"device" => device}) when is_binary(device), do: whose(device)
-  defp by(from, _said) when is_binary(from), do: whose(from)
-  defp by(_from, _said), do: {:error, nobody(), @nobody}
+  defp by(from, said) do
+    case device(from, said) do
+      nil -> {:error, nobody(), @nobody}
+      device -> whose(device)
+    end
+  end
+
+  @doc """
+  The key of the device a request is from, or `nil`: the device the network's address says, for what came in
+  there over the web, and otherwise the key the connection proved. A run of a client has a key of its own, since
+  a device runs many at once and each is reached by its key, and a request from one names the device it runs for
+  with that device's signature of `one/run/1`, a line, and the run's key (`client/src/lib.rs`). A run whose device
+  doesn't vouch for it is nobody's.
+  """
+  def device(nil, %{"device" => device}) when is_binary(device), do: device
+
+  def device(from, %{"device" => device, "vouch" => vouch}) when is_binary(from) do
+    with true <- is_binary(device) and is_binary(vouch),
+         {:ok, key} <- Base.decode16(device, case: :lower),
+         {:ok, signature} <- Base.decode16(vouch, case: :lower),
+         true <- byte_size(key) == 32 and byte_size(signature) == 64,
+         true <- :crypto.verify(:eddsa, :none, "one/run/1\n" <> from, signature, [key, :ed25519]) do
+      device
+    else
+      _ -> nil
+    end
+  end
+
+  def device(from, _said) when is_binary(from), do: from
+  def device(_from, _said), do: nil
 
   defp whose(device) do
     case Hooks.whose(device) do
