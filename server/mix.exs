@@ -11,6 +11,7 @@ defmodule OneCore.MixProject do
         {:mime, "~> 2.0"},
         {:req, "~> 0.5"},
         {:rustler, "~> 0.38", runtime: false},
+        {:tz, "~> 0.28"},
         {:yaml_elixir, "~> 2.12"}
       ],
       # Tests start only what they test: the server's key and socket aren't theirs to take.

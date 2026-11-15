@@ -11,6 +11,8 @@ defmodule OneCore.Application do
   # newest version a server shipped from other files, once it's started (`OneCore.Plugins.Deploy.ship/0`).
   @impl true
   def start(_type, _args) do
+    # Plugins tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
+    Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
     {:ok, key} = Iroh.key(Server.key_file())
 
     if Servers.joined?(key, Application.get_env(:one_core, :for, "network")) do
