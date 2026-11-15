@@ -7,11 +7,17 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+# What an encrypted blob is encrypted with: XChaCha20-Poly1305, whose nonce is long enough to be random.
+chacha20poly1305 = "0.11"
 data-encoding = "2"
 dirs = "6"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # What this device is called, which its person is shown before they let it in.
 gethostname = "1"
+# One key from another: an artifact's from its owner's (RFC 5869).
+hkdf = "0.13"
+# Encrypting to a machine's key (RFC 9180): X25519, HKDF-SHA256 and ChaCha20-Poly1305.
+hpke = { version = "0.15", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
 # Reading a folder as git would keep it, leaving out what its .gitignore files do, with no git needed.
 ignore = "0.4"
 iroh.workspace = true
@@ -23,3 +29,5 @@ sha2 = "0.11"
 # Names the key file without replacing one that's there, on every system, a phone included.
 tempfile = "3"
 tokio.workspace = true
+# Keys are wiped from memory when they're let go of.
+zeroize = "1"

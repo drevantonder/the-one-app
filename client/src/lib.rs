@@ -7,7 +7,9 @@
 //! that: a client with an app on screen says it's watching, and a server connects to it when there's something to
 //! say.
 
+pub mod cipher;
 pub mod cli;
+mod encrypts;
 mod kept;
 pub mod mcp;
 
@@ -508,6 +510,8 @@ pub struct Client {
     watching: AtomicBool,
     /// Whether a server answered the last thing asked.
     answering: watch::Sender<bool>,
+    /// The inputs this device fills in of each tool, as a server last listed them (`encrypts`).
+    fills: std::sync::Mutex<Option<Arc<encrypts::Fills>>>,
 }
 
 /// A client's endpoint, and its network: the network's address, if it has one, where the client asks which servers
@@ -580,7 +584,9 @@ impl Client {
         let renews = link.network.is_some();
         let link = std::sync::RwLock::new(link);
         let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
-        let client = Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering });
+        let fills = std::sync::Mutex::default();
+        let client =
+            Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering, fills });
         // A pass that's about to end is renewed before anything is asked with it, and the next while this runs.
         if renews {
             let left = match client.network().left() {
@@ -681,7 +687,9 @@ impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
-        let message = self.saying(message);
+        let lists = message.windows(12).any(|part| part == b"\"tools/list\"");
+        let message = self.filled(message).await?;
+        let message = self.saying(&message);
         let asked = async {
             for _ in 0..2 {
                 match self.reached().await?.ask(&message).await {
@@ -698,7 +706,15 @@ impl Client {
         let answer = asked.await;
         self.answering.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
         match answer {
-            Ok(answer) => Ok(self.taken_out(answer).await),
+            Ok(answer) => {
+                // What a device fills in of each tool's inputs is what the newest list of them says.
+                if let Some(listed) = serde_json::from_slice::<Value>(&answer).ok().filter(|_| lists)
+                    && listed["result"]["tools"].is_array()
+                {
+                    *self.fills.lock().expect("no ask panics") = Some(Arc::new(encrypts::fills(&listed["result"])));
+                }
+                Ok(self.taken_out(answer).await)
+            }
             refused => refused,
         }
     }

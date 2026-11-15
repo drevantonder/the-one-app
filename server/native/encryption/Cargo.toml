@@ -1,0 +1,18 @@
+[package]
+name = "encryption"
+description = "Encryption for plugins on a server: something they import, and no part of One Core."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# An add-on has no tests of its own: it's only whole inside the VM that loads it, where the server's tests use it.
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+# What's encrypted is the client's to say (`client::cipher`), so a server and a device do the same thing.
+client = { path = "../../../client" }
+iroh.workspace = true
+rustler = "0.39"
