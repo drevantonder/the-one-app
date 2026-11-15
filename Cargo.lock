@@ -1360,9 +1360,8 @@ checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 name = "encryption"
 version = "0.1.0"
 dependencies = [
- "client",
  "encryption_client",
- "iroh",
+ "iroh-base",
  "rustler",
 ]
 
@@ -1377,7 +1376,7 @@ dependencies = [
  "futures-util",
  "hkdf",
  "hpke",
- "iroh",
+ "iroh-base",
  "serde_json",
  "sha2 0.11.1",
  "tokio",

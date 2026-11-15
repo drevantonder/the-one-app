@@ -176,9 +176,13 @@ echo "  the spare reads the same bytes, as a server of the network reads any, an
   Application.put_env(:one_core, :home, Path.join(folder, "spare"))
   Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, address})
   Application.ensure_all_started(:req)
+  {:ok, paths} = OneCore.Folder.files("../../plugins/encryption")
+  {:ok, _, _} = OneCore.Plugins.Version.load("encryption", Map.new(paths, &{&1, File.read!("../../plugins/encryption/" <> &1)}))
+  {:ok, own} = Cipher.key(OneCore.Server.key_file())
+  {:ok, spare} = Cipher.public(own)
   {:ok, slot, _tag} = OneCore.Bucket.read("#{artifact}/keys/#{chosen}")
   {:ok, entry, _tag} = OneCore.Bucket.read("#{artifact}/log/0000000000000002")
-  IO.puts("    #{artifact}/keys/<the server>: read, #{byte_size(slot)} bytes; opened with the spare'"'"'s key: #{inspect(Cipher.keys(OneCore.Server.key_file(), artifact, slot))}")
+  IO.puts("    #{artifact}/keys/<the server>: read, #{byte_size(slot)} bytes; opened with the spare'"'"'s key: #{inspect(Cipher.open_keys(own, "one/encryption/1/keys\n#{artifact}\n#{spare}", slot))}")
   IO.puts("    #{artifact}/log/0000000000000002: read, #{byte_size(entry)} bytes; as a log entry: #{try do :erlang.binary_to_term(entry, [:safe]); "read" rescue _ -> "not one it can read" end}")
 ' "$folder" "$address" "$vault" "${key[server]}" 2>&1 | grep -v "^$")
 echo "  log entries of her Vault's database written by the spare: $(grep -c "$vault/: taking its lease" "$folder/spare.log" || true)"
@@ -316,7 +320,11 @@ echo "  someone with the whole bucket, and a key of their own making:"
   slots = for server <- chosen, {:ok, slot, _tag} <- [OneCore.Bucket.read("#{artifact}/keys/#{server}")], do: slot
   theirs = Path.join(folder, "stranger/key")
   {:ok, _key} = OneCore.Iroh.key(theirs)
-  opened = for slot <- slots, match?({:ok, _keys}, Cipher.keys(theirs, artifact, slot)), do: slot
+  {:ok, paths} = OneCore.Folder.files("../../plugins/encryption")
+  {:ok, _, _} = OneCore.Plugins.Version.load("encryption", Map.new(paths, &{&1, File.read!("../../plugins/encryption/" <> &1)}))
+  {:ok, own} = Cipher.key(theirs)
+  {:ok, stranger} = Cipher.public(own)
+  opened = for slot <- slots, match?({:ok, _keys}, Cipher.open_keys(own, "one/encryption/1/keys\n#{artifact}\n#{stranger}", slot)), do: slot
   IO.puts("    of the #{length(slots)} copies of her Vault'"'"'s keys in the bucket, each encrypted to a server she chose, theirs opens #{length(opened)}")
 ' "$folder" "$address" "$vault" "${key[server]}" "${key[spare]}" 2>&1 | grep -v "^$")
 echo "  and no file of the bucket holds the marker, as below"

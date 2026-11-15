@@ -1,5 +1,5 @@
-//! SQLite for plugins on a server. A server gives it to plugins as something to import (`Sqlite`), and One Core
-//! doesn't use it: what a database is, beyond a file SQLite opens, is the database plugin's.
+//! SQLite for a server's plugins: the database plugin's NIF, which its Elixir loads as `Sqlite`. What a database is,
+//! beyond a file SQLite opens, is the plugin's.
 
 use std::sync::Mutex;
 

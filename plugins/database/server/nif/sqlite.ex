@@ -1,7 +1,7 @@
 defmodule Sqlite do
   @moduledoc """
-  SQLite, for plugins to import: a server's Rust NIF (`nif/sqlite`). It is what plugins run in giving them a
-  database engine, and no part of One Core, which uses none of it.
+  SQLite: the database plugin's NIF (`nif/sqlite`), which its Elixir calls, and so could a plugin that uses
+  `database`.
 
       db = Sqlite.open("/tmp/notes.sqlite")
       Sqlite.query(db, "create table notes (id integer primary key, text text)", [])
@@ -10,7 +10,10 @@ defmodule Sqlite do
 
   A value is a number, text, `nil`, a boolean (kept as 1 or 0) or `{:blob, binary}` for bytes that aren't text.
   """
-  use Rustler, otp_app: :one_core, crate: "sqlite", path: Path.join(__DIR__, "sqlite")
+  @on_load :load
+
+  @doc false
+  def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))
 
   @doc "Opens the database file at `path`, making it if there's none. It closes when nothing holds it."
   def open(_path), do: :erlang.nif_error(:nif_not_loaded)

@@ -5,19 +5,25 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["client"]
+# What a device does with a client (`device.rs`). A server's NIF leaves it out.
+client = ["dep:client", "dep:futures-util", "dep:serde_json"]
+
 [dependencies]
 anyhow.workspace = true
 # What an encrypted blob is encrypted with: XChaCha20-Poly1305, whose nonce is long enough to be random.
 chacha20poly1305 = "0.11"
-client = { path = "../../../../core/client" }
+client = { path = "../../../../core/client", optional = true }
 data-encoding = "2"
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"], optional = true }
 # One key from another: an artifact's from its owner's (RFC 5869).
 hkdf = "0.13"
 # Encrypting to a machine's key (RFC 9180): X25519, HKDF-SHA256 and ChaCha20-Poly1305.
 hpke = { version = "0.15", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
-iroh.workspace = true
-serde_json.workspace = true
+# A machine's key, as iroh has it, without the rest of iroh.
+iroh-base = { version = "1.4", default-features = false, features = ["key"] }
+serde_json = { workspace = true, optional = true }
 sha2 = "0.11"
 # Keys are wiped from memory when they're let go of.
 zeroize = "1"

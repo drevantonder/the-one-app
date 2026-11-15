@@ -9,9 +9,9 @@
 # machine; on a Mac, both for macos-aarch64. Naming kinds of machine builds those servers alone.
 #
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
-# and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), its
-# Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships with
-# and the kit's build, and the Bun it builds apps with named by its SHA-256, which it downloads the first time
+# and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), One
+# Core's Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships
+# with, with their NIFs built for every kind of machine, and the kit's build, and the Bun it builds apps with named by its SHA-256, which it downloads the first time
 # (`OneCore.App`). The builds are in target/builds/<build>.
 set -euo pipefail
 
@@ -54,6 +54,21 @@ fetched() {
 (cd core/server && mix deps.get --only prod >/dev/null)
 bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
 
+# The NIFs of the plugins it ships with, for every kind of machine a server runs on, whatever kinds are built here,
+# each beside its source as a plugin brings it (`OneCore.Plugin`): a plugin is the same files on every server of a
+# network. With zig, from one machine, and for Linux for the same glibc as the VM.
+plugin_nifs=($(dirname plugins/*/server/nif/*/Cargo.toml))
+nifs=$target/release-nifs
+rm -rf "$nifs"
+for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin; do
+  if [[ $triple == *linux* ]]; then os=linux glibc=.2.35 library=so; else os=macos glibc= library=dylib; fi
+  cargo zigbuild --release --target "$triple$glibc" $(printf -- '-p %s ' $(basename -a "${plugin_nifs[@]}"))
+  for crate in "${plugin_nifs[@]}"; do
+    mkdir -p "$nifs/${crate#plugins/}"
+    cp "$target/$triple/release/lib$(basename "$crate").$library" "$nifs/${crate#plugins/}/$os-${triple%%-*}.so"
+  done
+done
+
 for kind in "${kinds[@]}"; do
   echo "Building the server for $kind"
   case $kind in
@@ -80,8 +95,8 @@ for kind in "${kinds[@]}"; do
   # Hex's builds are made whole where they're put by their own script.
   [[ ! -x $vm/Install || -e $vm/bin/erl ]] || (cd "$vm" && ./Install -minimal "$vm" >/dev/null)
 
-  # Its Rust NIFs, One Core's and those of the plugins it ships with, for that machine.
-  crates=($(basename -a core/server/nif/*/ plugins/*/server/nif/*/))
+  # One Core's Rust NIFs, for that machine.
+  crates=($(basename -a core/server/nif/*/))
   if [[ $kind == linux-* ]]; then
     cargo zigbuild --release --target "$triple.2.35" "${crates[@]/#/-p}"
     native=$target/$triple/release
@@ -106,10 +121,11 @@ for kind in "${kinds[@]}"; do
   beam=$(echo "$release"/erts-*/bin/beam.smp)
   "$objcopy" --strip-all "$beam"
 
-  # What it ships with, which it deploys as a folder is (`client::files`), so not the plugins' native code, built
-  # in above, and the Bun it builds apps with.
+  # What it ships with, which it deploys as a folder is (`client::files`): the plugins, with their NIFs built above,
+  # the kit's build, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
   git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
+  cp -R "$nifs/." "$release/shipped/"
   cp -R ui/dist "$release/shipped/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 

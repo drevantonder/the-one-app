@@ -1082,16 +1082,17 @@ async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
 
 /// The files of `folder`, by their paths in it, as a plugin's folder is deployed: names starting with a dot are left
 /// out, and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not.
-/// So is a plugin's native code, its `server/nif/` and `client/native/`, which is built into the programs: a NIF
-/// into the server (`core/server/mix.exs`), and the rest into the clients (`clients/`). And so is its `test/`,
-/// which proves it where it's made. None of that is ever deployed. A server reads the plugins it ships with this way
-/// too (`core/server/nif/folder`).
+/// So is a plugin's `test/`, which proves it where it's made, and its native code but what a server loads: the clients
+/// are built with its `client/native/`, and a NIF's source, a folder of its `server/nif/`, stays here, but for the
+/// library built from it for each kind of machine, `<kind>.so` there, which is deployed though git ignores it as
+/// built (`OneCore.Plugin`). A server reads the plugins it ships with this way too (`core/server/nif/folder`).
 pub fn files(folder: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
     let root = folder.to_owned();
     let never = move |entry: &ignore::DirEntry| {
         let path = entry.path().strip_prefix(&root).unwrap_or(entry.path());
-        ["server/nif", "client/native", "test"].iter().any(|never| path == Path::new(never))
+        ["client/native", "test"].iter().any(|never| path == Path::new(never))
+            || path.parent() == Some(Path::new("server/nif")) && entry.file_type().is_some_and(|kind| kind.is_dir())
     };
     let walk = ignore::WalkBuilder::new(folder).require_git(false).filter_entry(move |entry| !never(entry)).build();
     for entry in walk {
@@ -1099,6 +1100,15 @@ pub fn files(folder: &Path) -> Result<Vec<String>> {
         if entry.file_type().is_some_and(|kind| kind.is_file()) {
             let path = entry.path().strip_prefix(folder)?;
             files.push(path.iter().map(|part| part.to_string_lossy()).collect::<Vec<_>>().join("/"));
+        }
+    }
+    for source in fs::read_dir(folder.join("server/nif")).into_iter().flatten() {
+        let source = source?;
+        for built in fs::read_dir(source.path()).into_iter().flatten() {
+            let built = built?.file_name().to_string_lossy().into_owned();
+            if built.ends_with(".so") && !built.starts_with('.') {
+                files.push(format!("server/nif/{}/{built}", source.file_name().to_string_lossy()));
+            }
         }
     }
     files.sort();

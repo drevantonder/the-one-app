@@ -41,8 +41,10 @@ defmodule Encryption.Keys do
       {:ok, slot, _tag} ->
         state = forgotten(state)
 
-        case Cipher.keys(OneCore.Server.key_file(), name, slot) do
-          {:ok, keys} -> %{state | keys: keys, slot: slot}
+        with {:ok, own} <- Cipher.key(OneCore.Server.key_file()),
+             {:ok, keys} <- Cipher.open_keys(own, "one/encryption/1/keys\n#{name}\n#{state.server}", slot) do
+          %{state | keys: keys, slot: slot}
+        else
           {:error, _why} -> state
         end
 

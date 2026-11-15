@@ -18,6 +18,10 @@
 //! - **A notification** is encrypted to a key of its device's, derived from the device's own (`notifications`), with
 //!   HPKE as above, so the push service that carries it reads nothing, and what shows it on a phone (its notification
 //!   extension) holds only that key.
+//!
+//! What each is encrypted for (the `for_` functions) a server's plugin says too, in its Elixir, as what it hands the
+//! NIF (`about`): the same text in both, which the proofs with a real device show agree (`plugins/vault/test/vault.sh`,
+//! `plugins/backups/test/backups.sh`).
 
 use anyhow::{Context, Result, anyhow, bail};
 use chacha20poly1305::aead::{Aead, Generate, Payload};
@@ -28,7 +32,7 @@ use hpke::aead::ChaCha20Poly1305;
 use hpke::kdf::HkdfSha256;
 use hpke::kem::X25519HkdfSha256;
 use hpke::{Deserializable, Kem, OpModeR, OpModeS, Serializable};
-use iroh::{PublicKey, SecretKey};
+use iroh_base::{PublicKey, SecretKey};
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
@@ -98,14 +102,10 @@ pub fn notifications(device: &SecretKey) -> SecretKey {
     SecretKey::from_bytes(&derived(&Zeroizing::new(device.to_bytes()), "one/notifications/1/key"))
 }
 
-/// What a notification is encrypted for: the key it's encrypted to, by its name.
+/// What a notification is encrypted for: the key it's encrypted to, by its name. A server seals it so
+/// (`plugins/notifications/server/notifications.ex`).
 pub fn for_notification(to: &str) -> String {
     format!("one/notifications/1/notification\n{to}")
-}
-
-/// A notification, encrypted to a device's notification key `to`, as a server sends it.
-pub fn seal_notification(to: &PublicKey, notification: &[u8]) -> Result<Vec<u8>> {
-    seal(to, &for_notification(&to.to_string()), notification)
 }
 
 /// A notification as the device it was sent to opens it, with its own key.
@@ -262,7 +262,8 @@ mod tests {
     fn a_device_opens_a_notification_sent_to_it_and_nothing_else_does() {
         let (device, other) = (SecretKey::generate(), SecretKey::generate());
         let said = br#"{"title":"Lunch is here","text":"At the door","app":"meals"}"#;
-        let sealed = seal_notification(&notifications(&device).public(), said).unwrap();
+        let to = notifications(&device).public();
+        let sealed = seal(&to, &for_notification(&to.to_string()), said).unwrap();
         assert!(!sealed.windows(5).any(|part| part == b"Lunch"));
         assert_eq!(open_notification(&device, &sealed).unwrap().as_slice(), said);
         assert!(open_notification(&other, &sealed).is_err());

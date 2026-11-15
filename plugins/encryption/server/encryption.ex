@@ -161,7 +161,8 @@ defmodule Encryption do
   def secret(%Call{server: server}, given) do
     with {:ok, %{^server => sealed}} <- JSON.decode(given),
          {:ok, sealed} <- Base.decode64(sealed),
-         {:ok, secret} <- Cipher.secret(Server.key_file(), sealed) do
+         {:ok, own} <- Cipher.key(Server.key_file()),
+         {:ok, secret} <- Cipher.open(own, "one/encryption/1/secret\n#{server}", sealed) do
       secret
     else
       _ ->

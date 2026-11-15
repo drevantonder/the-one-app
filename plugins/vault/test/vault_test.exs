@@ -9,6 +9,8 @@ defmodule OneCore.VaultTest do
   themselves and hand them over encrypted to the server, as her device would.
   """
   use ExUnit.Case
+  # The encryption plugin's NIF, which is there once the plugin is deployed.
+  @compile {:no_warn_undefined, Cipher}
   import ExUnit.CaptureLog
   alias OneCore.Bucket
   alias OneCore.Plugins.{Calls, Deploy}

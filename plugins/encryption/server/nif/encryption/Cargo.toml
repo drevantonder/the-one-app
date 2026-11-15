@@ -1,6 +1,6 @@
 [package]
 name = "encryption"
-description = "Encryption for plugins on a server: something they import, and no part of One Core."
+description = "The encryption plugin's NIF, `Cipher`: encryption for a server's plugins, built into none of the server."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -12,9 +12,9 @@ test = false
 doctest = false
 
 [dependencies]
-client = { path = "../../../../../core/client" }
 # What's encrypted is the plugin's client part's to say (`encryption_client::cipher`), so a server and a device do the
-# same thing.
-encryption_client = { path = "../../../client/native" }
-iroh.workspace = true
+# same thing. Without its feature `client`, which a device's needs, it's built for every kind of server from one
+# machine (`./release`).
+encryption_client = { path = "../../../client/native", default-features = false }
+iroh-base = { version = "1.4", default-features = false, features = ["key"] }
 rustler = "0.39"

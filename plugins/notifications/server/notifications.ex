@@ -7,7 +7,7 @@ defmodule Notifications do
   system's own notification: one that isn't running shows nothing, and its person sees the inbox when they open
   it. A phone or a browser registers where its push service reaches it (`register`), with its notification key,
   and this plugin's edge part (`edge/`) sends there, since only it holds the push services'
-  keys. What it's handed for each device is the notification encrypted to that key (`Cipher.notification/2`), so
+  keys. What it's handed for each device is the notification encrypted to that key (`Cipher.seal/3`), so
   neither it nor the push service reads it: the device opens it before it shows.
   """
   @behaviour OneCore.Plugin
@@ -45,7 +45,7 @@ defmodule Notifications do
   @shown 100
 
   @impl true
-  def uses, do: ["database"]
+  def uses, do: ["database", "encryption"]
 
   @impl true
   def apps do
@@ -360,7 +360,7 @@ defmodule Notifications do
   end
 
   defp sealed(key, said) do
-    {:ok, sealed} = Cipher.notification(key, said)
+    {:ok, sealed} = Cipher.seal(key, "one/notifications/1/notification\n" <> key, said)
     Base.encode64(sealed)
   end
 

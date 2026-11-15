@@ -5,8 +5,10 @@ node_modules/
 *.beam
 erl_crash.dump
 .DS_Store
-# The server's Rust NIFs as Rustler builds them, and its tests' folders
+# One Core's Rust NIFs as Rustler builds them, a plugin's as they're built beside their source, and the server's
+# tests' folders
 /core/server/priv/native/
+/plugins/*/server/nif/*/*.so
 /core/server/tmp/
 # What Tauri writes as it builds
 /clients/shell/gen/schemas/

@@ -19,7 +19,7 @@ defmodule OneCore.MixProject do
         {:yaml_elixir, "~> 2.12"}
       ],
       # Tests start only what they test: the server's key and socket aren't theirs to take.
-      aliases: [test: &test/1],
+      aliases: [test: &test/1] ++ if(Mix.env() == :prod, do: [], else: [compile: [&nifs/1, "compile"]]),
       # A server installed on a machine (`one serve on`) is this, as `./release` builds it for each kind of machine:
       # the VM it runs on, ERTS, is the one `ONE_ERTS` names when it's built for another kind of machine than this.
       # It runs with no distribution (`rel/env.sh.eex`): nothing reaches it as an Erlang node, so no cookie guards
@@ -45,17 +45,33 @@ defmodule OneCore.MixProject do
     ]
   end
 
-  # The program is One Core and the NIFs of the plugins it ships with, each in its plugin's `server/nif/`. On a
-  # developer's machine it's also `mix network`, which `./network` runs, at the repo's root.
-  defp elixirc_paths(:dev), do: elixirc_paths(:prod) ++ [Path.expand("../../network.ex", __DIR__)]
-  defp elixirc_paths(_env), do: ["lib" | Path.wildcard(Path.expand("../../plugins/*/server/nif", __DIR__))]
+  # The program is One Core. On a developer's machine it's also `mix network`, which `./network` runs, at the repo's
+  # root.
+  defp elixirc_paths(:dev), do: ["lib", Path.expand("../../network.ex", __DIR__)]
+  defp elixirc_paths(_env), do: ["lib"]
 
-  # One Core's tests, and the tests of the plugins it ships with, each in its plugin's `test/`, which run with it as
-  # its NIFs are built with it. Naming tests runs those alone.
+  # One Core's tests, and the tests of the plugins it ships with, each in its plugin's `test/`. Naming tests runs
+  # those alone.
   defp test(args) do
     named = Enum.filter(args, &File.exists?(String.replace(&1, ~r/:\d+$/, "")))
     plugins = Path.wildcard(Path.expand("../../plugins/*/test/*_test.exs", __DIR__))
     Mix.Task.run("test", ["--no-start" | args] ++ if(named == [], do: ["test" | plugins], else: []))
+  end
+
+  # The NIFs of the plugins The One App ships with, built for this machine and put beside their source, where a
+  # plugin brings them (`OneCore.Plugin`): here, its folder is what's deployed. `./release` builds them for every
+  # kind of machine, as a server built for one is.
+  defp nifs(_args) do
+    root = Path.expand("../..", __DIR__)
+    crates = for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"), do: Path.dirname(toml)
+    {_, 0} = System.cmd("cargo", ["build", "--release" | Enum.flat_map(crates, &["-p", Path.basename(&1)])], cd: root)
+    target = System.get_env("CARGO_TARGET_DIR", "#{root}/target")
+    # The kind of machine this is, as builds are named (`OneCore.Builds.target/0`).
+    [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
+    {os, extension} = if :os.type() == {:unix, :darwin}, do: {"macos", "dylib"}, else: {"linux", "so"}
+
+    for crate <- crates,
+        do: File.cp!("#{target}/release/lib#{Path.basename(crate)}.#{extension}", "#{crate}/#{os}-#{arch}.so")
   end
 
   # The build this is, as `build-name` names it from the commit it's built from, as a client's is.

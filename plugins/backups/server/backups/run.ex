@@ -297,8 +297,11 @@ defmodule Backups.Run do
       end
 
     {key, public} =
-      case Cipher.backup_key(OneCore.Server.key_file(), sealed) do
-        {:ok, opened} -> opened
+      with {:ok, own} <- Cipher.key(OneCore.Server.key_file()),
+           {:ok, key} <- Cipher.open_keys(own, "one/backups/1/restoring\n" <> call.server, sealed),
+           {:ok, public} <- Cipher.public(key) do
+        {key, public}
+      else
         {:error, _why} -> raise "The network's backup key wasn't handed to this server. Ask again from your device."
       end
 
@@ -341,7 +344,7 @@ defmodule Backups.Run do
   end
 
   defp open(key, about, sealed) do
-    case Cipher.backup_open(key, about, sealed) do
+    case Cipher.open(key, about, sealed) do
       {:ok, data} -> {:ok, data}
       {:error, _why} -> raise "Your backup key doesn't open that backup: it was changed."
     end

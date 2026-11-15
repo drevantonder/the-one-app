@@ -30,7 +30,7 @@ defmodule OneCore.Plugins.Version do
   `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
   which whatever loaded it says.
   """
-  alias OneCore.{App, Hooks, Server, Skills}
+  alias OneCore.{App, Builds, Hooks, Server, Skills}
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code]
   defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code, :kit, :artifact]
@@ -59,11 +59,13 @@ defmodule OneCore.Plugins.Version do
     if free == nil, do: raise("#{@names} versions of plugins are loaded, which is as many as a server runs at once")
     under = Module.concat(OneCore.Plugins, "Load#{free}")
     {sources, rest} = Enum.split_with(files, fn {path, _} -> server?(path) and Path.extname(path) == ".ex" end)
+    {nifs, sources} = Enum.split_with(sources, fn {path, _} -> Path.dirname(path) == "server/nif" end)
 
     {skills, rest} =
       Map.split_with(Map.new(rest), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
 
     with {:ok, skills} <- Skills.found(name, skills),
+         nil <- Enum.find_value(nifs, &compile_nif(&1, rest)),
          {:ok, modules, warnings} <- compile(under, sources),
          {:ok, version} <- describe(under, modules, rest) do
       hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
@@ -109,6 +111,51 @@ defmodule OneCore.Plugins.Version do
   end
 
   defp under?(module, under), do: String.starts_with?(Atom.to_string(module), Atom.to_string(under) <> ".")
+
+  # A NIF's module, `server/nif/<name>.ex`, is compiled under the name it gives it, which its library was built for,
+  # with that library as it's built for this kind of machine, `server/nif/<name>/<kind>.so`, written to a folder named
+  # by the build. A name holds one build in the VM, which nothing running on it may lose: the same build again is the
+  # one loaded, and another is refused. Gives nil, or what's wrong.
+  defp compile_nif({path, source}, rest) do
+    library = Path.rootname(path) <> "/#{Builds.target()}.so"
+    build = code({source, rest[library]})
+
+    with [name] <- defined(source),
+         module = Module.concat([name]),
+         {:built, true} <- {:built, is_map_key(rest, library)},
+         nil <- :persistent_term.get({__MODULE__, module}, nil),
+         :non_existing <- :code.which(module) do
+      file = Path.join([Server.home(), "nif", build, Path.basename(path, ".ex")])
+      File.mkdir_p!(Path.dirname(file))
+      # Renamed into place, as another VM on this home may have the same library loaded from it.
+      File.write!(file <> ".part", rest[library])
+      File.rename!(file <> ".part", file <> ".so")
+      :persistent_term.put({__MODULE__, module}, {build, file})
+      # What doesn't compile says why in its diagnostics.
+      compile = fn -> Code.compile_string(source, path) end
+      {_, diagnostics} = Code.with_diagnostics(fn -> try(do: compile.(), rescue: (_ in CompileError -> nil)) end)
+      {_, said} = :persistent_term.get({__MODULE__, module})
+
+      if :code.is_loaded(module) == false do
+        :persistent_term.erase({__MODULE__, module})
+        said = if said == file, do: Enum.map_join(diagnostics, "\n", & &1.message), else: said
+        {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{said}"}
+      end
+    else
+      {:built, false} -> {:error, "#{path} has no build for this kind of machine, #{library}"}
+      {^build, _} -> nil
+      names when is_list(names) -> {:error, "#{path} defines one module, which its library was built for"}
+      _ -> {:error, "#{path}'s module is loaded already as another build. A new build takes a new module name."}
+    end
+  end
+
+  @doc false
+  def nif(module, load) do
+    {build, file} = :persistent_term.get({__MODULE__, module})
+    loaded = load.(String.to_charlist(file))
+    with {:error, {_, why}} <- loaded, do: :persistent_term.put({__MODULE__, module}, {build, to_string(why)})
+    loaded
+  end
 
   # The files go to a folder of their own to be compiled together, so they can use each other's structs and macros
   # in any order. The aliases share each file's first line, which keeps its line numbers.

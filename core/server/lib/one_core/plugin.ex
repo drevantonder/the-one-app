@@ -7,8 +7,8 @@ defmodule OneCore.Plugin do
   whoever's deployed it, and is added for them: a user, or the group or the network they asked for. Someone else
   has it too once it's added for them (the `add` tool), and what's added for the network is everyone's. A plugin is
   updated by deploying it again. Calls already running finish on the version they started on, and the next call
-  gets the new one. A plugin a program ships with can have native code built into it, which is never deployed:
-  NIFs in `server/nif/`, and in `client/native/` what the clients are built with. So is its `test/`.
+  gets the new one. A plugin a program ships with can have native code that the clients are built with, in
+  `client/native/`, which is never deployed, and nor is its `test/`.
 
   One module in the plugin, in a file of `server/` such as `server/hello.ex`, says `@behaviour OneCore.Plugin`, and
   gives the plugin's tools:
@@ -129,6 +129,14 @@ defmodule OneCore.Plugin do
     as this version was deployed with it: `OneCore.Plugin.file(__MODULE__, "server/form.xlsx")` gives what's
     in it. `deploy` takes a file that isn't text as `{"base64": "..."}` in place of its text, as `code` gives it
     back, and `one deploy --files-from <folder>` sends each file as it is.
+
+  - A plugin brings native code as a NIF, which its Elixir calls: its source in a folder of `server/nif/`, say
+    `server/nif/sqlite/`, which is never deployed, and beside it the library built from it for each kind of machine
+    a server runs on, `linux-x86_64.so`, `linux-aarch64.so` and `macos-aarch64.so`, which are. The module the
+    library was built for is `server/nif/sqlite.ex`, which keeps its name rather than taking its version's, and
+    loads it with `@on_load :load` and `def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))`.
+    A deploy whose NIF doesn't load on the server fails, saying why. A name holds one build while the server runs:
+    deploying the same again keeps it, and a new build takes a new name. The plugin `database` brings `Sqlite`.
 
   A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
 
@@ -382,6 +390,12 @@ defmodule OneCore.Plugin do
     OneCore.Plugins.Version.own(module, path) ||
       raise "#{OneCore.Plugins.Version.own_name(module)}'s plugin has no file #{path} outside client/"
   end
+
+  @doc """
+  Loads a plugin's NIF into its module, from `@on_load`, which is `module` and hands `load`, as
+  `&:erlang.load_nif(&1, 0)`: its library for this machine, written out to load. Gives what loading said.
+  """
+  defdelegate nif(module, load), to: OneCore.Plugins.Version
 
   @doc "One Core's own skill, `building-plugins`, as its `SKILL.md`: how to write a plugin, which is this module's."
   def skill do

@@ -1,6 +1,6 @@
 [package]
 name = "sqlite"
-description = "SQLite for plugins on a server: something they import, and no part of One Core."
+description = "The database plugin's NIF, `Sqlite`: SQLite for a server's plugins, built into none of the server."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
