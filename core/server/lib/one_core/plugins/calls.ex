@@ -17,9 +17,23 @@ defmodule OneCore.Plugins.Calls do
   and `:forwarding_loop` that this one would pass it on in turn.
   """
   def call(name, tool, inputs, asked, forwarded \\ false) do
-    run(name, tool, inputs, asked(asked), forwarded)
+    asked = asked(asked)
+
+    case run(name, tool, inputs, asked, forwarded) do
+      {:ran, ended} ->
+        ended
+
+      # A tool that isn't there is heard as a call that failed, as one refused is.
+      {:error, why} ->
+        heard(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, asked, fn -> {:error, why} end)
+
+      forwarded ->
+        forwarded
+    end
   end
 
+  # `{:ran, ended}` where the plugin and the tool are there, `{:error, why}` where they aren't, and what `call/5`
+  # gives where another server runs it.
   defp run(name, tool, inputs, {_by, who} = asked, forwarded) do
     Plugins.run(Plugins.chain(who), name, fn at, versions ->
       version = versions[name]
@@ -40,7 +54,7 @@ defmodule OneCore.Plugins.Calls do
             call = called(at, name, versions, ask, asked, forwarded)
             answered = tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
             if kept != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", kept)
-            answered
+            {:ran, answered}
           after
             Hooks.forget(kept)
           end
@@ -61,6 +75,9 @@ defmodule OneCore.Plugins.Calls do
          :ok <- given(tool.takes, about["inputs"]),
          {:ok, about} <- hooked(about, tool.takes, asked, apart) do
       heard(about, asked, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
+    else
+      # A call refused is heard as one that failed, with why.
+      {:error, why} -> heard(about, asked, fn -> {:error, why} end)
     end
   end
 

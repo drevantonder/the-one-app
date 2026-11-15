@@ -85,12 +85,18 @@ defmodule OneCore.HooksTest do
     assert %{"changed" => %{"word" => "upper"}, "error" => nil, "took" => took} = about
     assert is_integer(took)
 
-    # One that decides refuses with its reason, and so does one that forgot to answer. The tool isn't called.
+    # One that decides refuses with its reason, and so does one that forgot to answer. The tool isn't called, and
+    # those that hear are told it was refused, and why.
     assert say("no") == {:error, "The gate says no to #{anyone}."}
+    assert_receive {:called, %{"tool" => "say", "error" => "The gate says no to " <> _}, ^anyone}
     assert {:error, "gate couldn't decide it: It answered nil" <> _} = say("forgot")
+    assert_receive {:called, %{"error" => "gate couldn't decide it" <> _}, ^anyone}
     # A change the tool doesn't take doesn't reach it.
     assert {:error, "Its inputs were changed (word by upper)" <> _} = say("seven")
-    refute_receive {:called, _about, _who}
+    assert_receive {:called, %{"error" => "Its inputs were changed" <> _}, ^anyone}
+    # Nor does a tool that isn't there.
+    assert {:error, "echo has no tool named shout" <> _} = Calls.call("echo", "shout", %{}, anyone)
+    assert_receive {:called, %{"tool" => "shout", "error" => "echo has no tool named shout" <> _}, ^anyone}
 
     # Two that change the same thing agree, or the call is refused: neither is the one that came last.
     assert {:ok, 1, ""} = Deploy.deploy("network", "lower", %{"server/lower.ex" => changes("Lower", "downcase")})
