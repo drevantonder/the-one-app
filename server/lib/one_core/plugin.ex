@@ -52,10 +52,11 @@ defmodule OneCore.Plugin do
     its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
     file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
   - A `SKILL.md` at the root of the folder, if the plugin has one, is its skill: text for agents on when and how
-    to use its tools, which an agent reads when it needs it, at `skill://hello/SKILL.md`, and `one hello` shows
-    with the plugin's tools. It's an Agent Skill (agentskills.io): it starts with the skill's `name`, which is the
-    plugin's, and its `description`, one line saying when an agent should read it, as YAML between two lines of
-    `---`:
+    to use its tools, which an agent reads when it needs it, at `skill://hello/hello/SKILL.md`, and `one hello`
+    shows with the plugin's tools. Its address starts with the name the plugin is added by, which is where an
+    agent finds it: added as `greeter`, it's `skill://greeter/hello/SKILL.md`. It's an Agent Skill (agentskills.io):
+    it starts with the skill's `name`, which is the plugin's, and its `description`, one line saying when an agent
+    should read it, as YAML between two lines of `---`:
 
         ---
         name: hello
@@ -165,7 +166,8 @@ defmodule OneCore.Plugin do
     nothing more installs nothing. Packages of its own are installed as it's built. It's built with the kit's own
     build, as the version of the kit that runs for whoever it's for holds it, and built again when that changes.
   - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`
-    (skill://solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names by its code.
+    (skill://ui/ui/skills/solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names
+    by its code.
     They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. What it renders
     with is `@solidjs/web`, not `solid-js/web`, and `Dynamic` is `dynamic` there.
   - The kit, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its skill,

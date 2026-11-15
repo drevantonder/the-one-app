@@ -87,8 +87,16 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
                 Err(_) => client.kept(method, &params),
             };
             // A plugin with no tools can still have a skill: the kit's says how an app is written with it. It's
-            // read as any skill is, and what's printed of it is what follows its name and description.
-            let skill = says("resources/read", json!({"uri": format!("skill://{name}/SKILL.md")})).await;
+            // read as any skill is, and what's printed of it is what follows its name and description. A plugin's
+            // own skill is named here by the plugin's name, as it's added, and One Core's by its name. Where both
+            // are, the plugin's is shown with its tools.
+            let skills = says("skills/list", json!({})).await.unwrap_or_default();
+            let skills = skills["skills"].as_array().map(Vec::as_slice).unwrap_or_default();
+            let uri = skills.iter().filter_map(|skill| skill["uri"].as_str()).filter(|uri| said(uri) == words).last();
+            let skill = match uri {
+                Some(uri) => says("resources/read", json!({"uri": uri})).await,
+                None => None,
+            };
             let skill = skill.as_ref().and_then(|skill| skill["contents"][0]["text"].as_str());
             let skill = skill.map(|skill| skill.split_once("\n---\n").map_or(skill, |(_, text)| text).trim());
             if within.is_empty() && skill.is_none() {
@@ -112,20 +120,28 @@ async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
             }
             println!("\n`one <tool> --help` shows a tool's inputs.");
             if name.is_empty() {
-                let skills = says("skills/list", json!({})).await.unwrap_or_default();
                 println!("\nA skill says when and how to use a plugin's tools, and `one <skill>` shows one:\n");
-                for skill in skills["skills"].as_array().into_iter().flatten() {
-                    let (name, about) = (&skill["frontmatter"]["name"], &skill["frontmatter"]["description"]);
-                    println!(
-                        "one {:width$}  {}",
-                        name.as_str().unwrap_or_default(),
-                        about.as_str().unwrap_or_default()
-                    );
+                for skill in skills {
+                    let words = said(skill["uri"].as_str().unwrap_or_default()).join(" ");
+                    let about = skill["frontmatter"]["description"].as_str().unwrap_or_default();
+                    println!("one {words:width$}  {about}");
                 }
             }
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The words that show a skill, from its address (`OneCore.Skills`): a plugin's own, `skill://<plugin>/<its own
+/// name>/SKILL.md`, by the plugin's name; one of its `skills/` by the plugin's name and the skill's; and One Core's
+/// own, `skill://<name>/SKILL.md`, by its name.
+fn said(uri: &str) -> Vec<&str> {
+    let path = uri.strip_prefix("skill://").and_then(|uri| uri.strip_suffix("/SKILL.md")).unwrap_or_default();
+    match path.split('/').collect::<Vec<_>>().as_slice() {
+        [plugin, _own] => vec![plugin],
+        [plugin, .., name] => vec![plugin, name],
+        parts => parts.to_vec(),
+    }
 }
 
 /// A tool's inputs from the command line: `--name value`, typed as the tool says, or `--name-from path` to read

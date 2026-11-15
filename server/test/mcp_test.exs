@@ -107,7 +107,7 @@ defmodule OneCore.McpTest do
     skill = "---\nname: notes\ndescription: Read before keeping a note.\nlicense: MIT\n---\n\nUse `add` to keep one.\n"
     assert {:ok, 1, ""} = Plugins.deploy("users/alice", "notes", %{"SKILL.md" => skill})
     digest = &("sha256:" <> Base.encode16(:crypto.hash(:sha256, &1), case: :lower))
-    {own, uri} = {"skill://building-plugins/SKILL.md", "skill://notes/SKILL.md"}
+    {own, uri} = {"skill://building-plugins/SKILL.md", "skill://notes/notes/SKILL.md"}
 
     # A server says it serves skills, and points at them without saying what they say.
     assert %{"capabilities" => capabilities, "instructions" => told} = ask("initialize", %{}, alice)
@@ -177,10 +177,31 @@ defmodule OneCore.McpTest do
 
     assert {:ok, 2, ""} = Plugins.deploy("users/alice", "notes", files)
     assert %{"skills" => [^core, ^notes, voice]} = ask("skills/list", %{}, alice)
-    {voice_uri, words} = {"skill://notes-by-voice/SKILL.md", "skill://notes-by-voice/WORDS.md"}
+    voice_uri = "skill://notes/notes/skills/notes-by-voice/SKILL.md"
+    words = "skill://notes/notes/skills/notes-by-voice/WORDS.md"
 
     assert %{"uri" => ^voice_uri, "resources" => [%{"uri" => ^voice_uri}, %{"uri" => ^words, "size" => 7}]} = voice
     assert %{"contents" => [%{"text" => "Say it."}]} = ask("resources/read", %{uri: words}, alice)
     refute Enum.any?(Plugins.running("users/alice")["notes"].files, &String.starts_with?(&1, "skills/"))
+
+    # A skill is found by the name its plugin is added by, so neither another plugin by the same own name nor one
+    # named as One Core's own skill takes its place.
+    assert :ok = Plugins.add("users/bob", "journal", "users/alice/plugins/notes")
+    other = String.replace(skill, "keep a note", "keep another note")
+    assert {:ok, 1, ""} = Plugins.deploy("users/bob", "notes", %{"SKILL.md" => other})
+    builder = String.replace(skill, "name: notes", "name: building-plugins")
+    assert {:ok, 1, ""} = Plugins.deploy("users/bob", "building-plugins", %{"SKILL.md" => builder})
+    bobs = for %{"uri" => uri} <- ask("skills/list", %{}, bob)["skills"], do: uri
+
+    assert bobs == [
+             own,
+             "skill://building-plugins/building-plugins/SKILL.md",
+             "skill://journal/notes/SKILL.md",
+             "skill://journal/notes/skills/notes-by-voice/SKILL.md",
+             "skill://notes/notes/SKILL.md"
+           ]
+
+    assert %{"contents" => [%{"text" => ^other}]} = ask("resources/read", %{uri: "skill://notes/notes/SKILL.md"}, bob)
+    assert %{"contents" => [%{"text" => ^skill}]} = ask("resources/read", %{uri: "skill://journal/notes/SKILL.md"}, bob)
   end
 end

@@ -9,8 +9,15 @@ defmodule OneCore.Skills do
   the skill points to. One Core has one of its own, `building-plugins`, which is `OneCore.Plugin.skill/0`.
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
-  `skill://<name>/<path>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
+  `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
   with each file's digest and size. Whoever asks sees One Core's own, and those of the plugins that run for them.
+
+  A skill's path ends with its name, as the extension has it, and what comes before is the plugin's, as it's found
+  where it runs: the name it's added by there, then the plugin's own name, as its folder is. So a plugin's skill is
+  `skill://<added by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
+  `skill://<added by>/<own name>/skills/<name>/SKILL.md`. One Core's own is `skill://building-plugins/SKILL.md`,
+  the only skill whose path is its name alone. No two plugins are added by one name, so no skill's address is
+  another's.
   """
   alias OneCore.{Plugin, Plugins}
 
@@ -88,46 +95,42 @@ defmodule OneCore.Skills do
   end
 
   @doc "The skills that whoever a request is for sees, each as the Skills Extension lists one."
-  def list(who), do: for({uri, skill, _file} <- found(who), do: listed(uri, skill))
+  def list(who), do: for({path, skill, _file} <- found(who), do: listed(path, skill))
 
   @doc """
-  A file of a skill by its address, `skill://<name>/<path>`, if whoever a request is for sees that skill: `{:ok,
+  A file of a skill by its address, `skill://<path>/<file>`, if whoever a request is for sees that skill: `{:ok,
   text}`, or `:absent`.
   """
   def text(who, uri) do
-    with "skill://" <> address <- uri,
-         [name, path] <- String.split(address, "/", parts: 2),
-         {_, skill, file} <- List.keyfind(found(who), "skill://#{name}/SKILL.md", 0),
-         true <- path == "SKILL.md" or Enum.any?(skill.files, &(&1.path == path)) do
-      case file do
-        :own -> {:ok, Plugin.skill()}
-        {artifact, code} -> Plugins.file(artifact, code, skill.at <> path)
-      end
-    else
-      _ -> :absent
+    found =
+      for {path, skill, file} <- found(who),
+          at <- ["SKILL.md" | Enum.map(skill.files, & &1.path)],
+          uri == "skill://#{path}/#{at}",
+          do: {skill, file, at}
+
+    case found do
+      [] -> :absent
+      [{_skill, :own, _at}] -> {:ok, Plugin.skill()}
+      [{skill, {artifact, code}, at}] -> Plugins.file(artifact, code, skill.at <> at)
     end
   end
 
-  # Each skill by its address, with where its files are: One Core's own, then the plugins' by their names. A name
-  # is one skill's, the first found.
+  # Each skill by its path, with where its files are: One Core's own, then the plugins' by the names they're added by.
   defp found(who) do
     {:ok, own} = read(@own, Plugin.skill())
 
     plugins =
-      for {_name, version} <- Enum.sort(Plugins.running(who)),
-          skill <- version.skills,
-          do: {skill, {version.artifact, version.code}}
+      for {added, version} <- Enum.sort(Plugins.running(who)), skill <- version.skills do
+        path = Enum.join([added, Path.basename(version.artifact) | Path.split(skill.at)], "/")
+        {path, skill, {version.artifact, version.code}}
+      end
 
-    for {skill, file} <-
-          Enum.uniq_by([{Map.merge(own, %{at: "", files: []}), :own} | plugins], fn {skill, _} ->
-            skill.frontmatter["name"]
-          end),
-        do: {"skill://#{skill.frontmatter["name"]}/SKILL.md", skill, file}
+    [{@own, Map.merge(own, %{at: "", files: []}), :own} | plugins]
   end
 
-  defp listed(uri, skill) do
-    base = String.replace_suffix(uri, "SKILL.md", "")
-    files = for file <- skill.files, do: %{uri: base <> file.path, digest: file.digest, size: file.size}
+  defp listed(path, skill) do
+    uri = "skill://#{path}/SKILL.md"
+    files = for file <- skill.files, do: %{uri: "skill://#{path}/#{file.path}", digest: file.digest, size: file.size}
 
     %{
       uri: uri,
