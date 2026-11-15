@@ -79,7 +79,7 @@ for (const [size, viewport] of Object.entries(sizes)) {
     });
     await page.route("http://tauri.localhost/**", (route) => {
       const file = new URL(route.request().url()).pathname.slice(1);
-      const from = file === "tokens.css" ? `${root}/ui/src/tokens.css` : `${root}/client/shell/page/${file}`;
+      const from = ["tokens.css", "ui.css"].includes(file) ? `${root}/ui/src/${file}` : `${root}/client/shell/page/${file}`;
       route.fulfill({ contentType: page_files[file] ?? "text/css", body: readFileSync(from) });
     });
     // An app's file, as the app's window finds it: among the newest files of its plugin that a server lists for

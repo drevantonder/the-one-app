@@ -81,8 +81,8 @@ pub fn recovery(owner: &Key) -> String {
 pub fn recovered(text: &str) -> Result<Key> {
     let typed: String = text.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_uppercase();
     let bytes =
-        Zeroizing::new(BASE32_NOPAD.decode(typed.as_bytes()).map_err(|_| anyhow!("That isn't a recovery key"))?);
-    key(&bytes).map_err(|_| anyhow!("That isn't a recovery key"))
+        Zeroizing::new(BASE32_NOPAD.decode(typed.as_bytes()).map_err(|_| anyhow!("That isn't a recovery key."))?);
+    key(&bytes).map_err(|_| anyhow!("That isn't a recovery key."))
 }
 
 type Sealed = <X25519HkdfSha256 as Kem>::EncappedKey;

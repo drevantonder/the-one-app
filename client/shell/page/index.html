@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>The One App</title>
   <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="client.css">
   <script type="module" src="client.js"></script>
 </head>
@@ -13,20 +14,22 @@
     <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg>
     <strong id="what"></strong>
     <p id="why"></p>
-    <button id="retry">Try again</button>
+    <button id="retry" class="ui-button press ring" data-variant="outline">Try Again</button>
   </section>
-  <dialog id="recovery" aria-labelledby="recovery-heading">
-    <form class="form">
-      <strong id="recovery-heading">Recovery Key</strong>
-      <p class="about shown">Write it down, and keep it off your devices. It lets a new device in when every device that holds your key is gone.</p>
-      <p class="about typed">Type it as you wrote it down. This device will hold your key.</p>
-      <output class="key shown"></output>
-      <textarea class="entry typed" rows="3" aria-labelledby="recovery-heading" autocapitalize="characters" autocomplete="off" spellcheck="false"></textarea>
-      <p class="wrong" role="alert"></p>
-      <button class="typed main">Let This Device In</button>
-      <button class="typed" value="cancel" formnovalidate>Cancel</button>
-      <button class="shown main">Done</button>
-    </form>
+  <dialog id="recovery" class="ui-dialog sheet" aria-labelledby="recovery-heading">
+    <div class="panel">
+      <header><h2 id="recovery-heading">Recovery Key</h2></header>
+      <form class="body">
+        <p class="about shown">Write it down, and keep it off your devices. It lets a new device in when every device that holds your key is gone.</p>
+        <p class="about typed">Type it as you wrote it down. This device will hold your key.</p>
+        <output class="key shown"></output>
+        <textarea class="entry typed ui-box ring" rows="3" aria-labelledby="recovery-heading" autocapitalize="characters" autocomplete="off" spellcheck="false"></textarea>
+        <p class="wrong" role="alert"></p>
+        <button class="typed ui-button press ring" data-variant="default">Let This Device In</button>
+        <button class="typed ui-button press ring" data-variant="outline" value="cancel" formnovalidate>Cancel</button>
+        <button class="shown ui-button press ring" data-variant="default">Done</button>
+      </form>
+    </div>
   </dialog>
 </body>
 </html>

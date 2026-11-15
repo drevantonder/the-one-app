@@ -153,9 +153,9 @@ function opened(view) {
 /// told only that.
 function recoveryKey(typed) {
   const dialog = document.getElementById("recovery")
-  const [key, entry, problem, form] = ["key", "entry", "wrong", "form"].map((part) => dialog.querySelector(`.${part}`))
+  const [key, entry, problem, form] = [".key", ".entry", ".wrong", "form"].map((part) => dialog.querySelector(part))
   dialog.dataset.typed = typed
-  entry.value = key.textContent = problem.textContent = ""
+  entry.value = key.textContent = problem.textContent = dialog.returnValue = ""
   if (!typed) invoke("recovery_key").then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
   dialog.showModal()
   return new Promise((answered) => {
