@@ -20,6 +20,10 @@ let moving
 export function go(change, { back = false, part } = {}) {
   if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || reduced.matches || shown) return void change()
   part?.style.setProperty("view-transition-name", "ui-screen")
+  // What's still fading in what moves (a row let go of a moment ago) is finished first, so the move takes the screen
+  // as it settles. Chromium's page crashed taking it mid-fade. What never ends, a spinner, keeps going.
+  const fading = part ? part.getAnimations({ subtree: true }) : document.getAnimations()
+  for (const fade of fading) if (fade.effect?.getComputedTiming().endTime !== Infinity) fade.finish()
   const move = (moving = document.startViewTransition({ update: change, types: [back ? "ui-back" : "ui-forward", part ? "ui-part" : "ui-page"] }))
   move.finished.finally(() => moving === move && part?.style.removeProperty("view-transition-name"))
 }
