@@ -1,6 +1,7 @@
 //! What a client keeps: every answer a server gave to something that only reads, as a file in the client's home.
 //! A view (an app, or the home screen) is shown what was kept at once and asked again behind it, so it opens as
-//! fast with no server up as with one.
+//! fast with no server up as with one. An answer is kept as whoever asked it: the device's person, or who the
+//! client says it acts as or for, so nobody is shown what was answered someone else.
 //!
 //! Something large isn't in an answer: the answer has a short-lived link to it in the bucket. The client fetches it
 //! while the link lasts and keeps it, and sends what's large the same way, by a link a server hands it.
@@ -37,7 +38,8 @@ impl Client {
     }
 
     fn kept_file(&self, method: &str, params: &Value) -> PathBuf {
-        self.home.join("kept").join(crate::hex(&Sha256::digest(json!([method, params]).to_string())))
+        let asked = json!([self.who, self.says, method, params]);
+        self.home.join("kept").join(crate::hex(&Sha256::digest(asked.to_string())))
     }
 
     /// Fetches each large file a tool answered with, by its link, and keeps it, unless it's kept already: a blob
@@ -95,7 +97,7 @@ impl Client {
 
 /// Writes a file whole, under a name no other write has, then gives it its name: another ask, or another program
 /// of this client, may be reading it or keeping the same thing.
-fn write(file: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
     fs::create_dir_all(file.parent().context("what's kept is kept in a folder")?)?;
     static WRITES: AtomicU64 = AtomicU64::new(0);
     let writing = file.with_extension(format!("{}-{}", process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));

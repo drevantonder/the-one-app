@@ -32,6 +32,7 @@ use tokio::sync::{Mutex, broadcast, watch};
 use tokio::time::{sleep, timeout};
 
 pub use kept::Shown;
+use kept::write;
 
 /// What servers and clients speak.
 pub const ALPN: &[u8] = b"one/mcp/1";
@@ -139,9 +140,11 @@ impl Told {
         until.is_some_and(|until| UNIX_EPOCH + Duration::from_millis(until) > SystemTime::now() + day)
     }
 
-    /// Asks the network's address for this device's pass, signed with its key, and keeps it in `file` with whose
-    /// device it is. A device that's nobody's there is told where its person makes it theirs.
-    async fn admit(&mut self, key: &SecretKey, file: &Path) -> Result<()> {
+    /// Asks the network's address for this device's pass, signed with its key, and keeps it in `home` with whose
+    /// device it is. A device that's nobody's there is told where its person makes it theirs. What it kept of
+    /// whoever's it was, it keeps no longer once it's nobody's or someone else's: the next person on it sees none of
+    /// it.
+    async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
         let name = gethostname::gethostname().to_string_lossy().into_owned();
         let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/pass", "params": {"name": name}}).to_string();
         let network = Network { address: self.address.clone(), pass: String::new() };
@@ -151,13 +154,29 @@ impl Told {
         }
         let answer: Value = asked.body(ask).send().await?.json().await?;
         if let Some(sign_in) = answer["error"]["data"]["sign_in"].as_str() {
+            if self.who.is_some() {
+                (self.pass, self.who) = (None, None);
+                self.keep(home)?;
+            }
             bail!(NotIn { sign_in: sign_in.to_owned() })
         }
         let (Some(pass), Some(who)) = (answer["result"]["pass"].as_str(), answer["result"]["who"].as_str()) else {
             bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's address gave this device no pass"))
         };
+        let someone_else = self.who.as_deref() != Some(who);
         (self.pass, self.who) = (Some(pass.to_owned()), Some(who.to_owned()));
-        fs::write(file, serde_json::to_vec(self)?).with_context(|| format!("couldn't write {}", file.display()))
+        if someone_else { self.keep(home) } else { write(&home.join("network"), &serde_json::to_vec(self)?) }
+    }
+
+    /// Keeps this in `home`, and nothing it kept for whoever's the device was before.
+    fn keep(&self, home: &Path) -> Result<()> {
+        for kept in ["kept", "files"] {
+            match fs::remove_dir_all(home.join(kept)) {
+                Err(error) if error.kind() != ErrorKind::NotFound => return Err(error.into()),
+                _ => {}
+            }
+        }
+        write(&home.join("network"), &serde_json::to_vec(self)?)
     }
 }
 
@@ -387,7 +406,7 @@ impl Client {
         let (network, who) = match told {
             Some(mut told) => {
                 if !told.lasts() {
-                    match told.admit(&key(&home.join("key"))?, &home.join("network")).await {
+                    match told.admit(&key(&home.join("key"))?, &home).await {
                         Err(error) if error.is::<NotIn>() => return Err(error),
                         Err(error) if told.pass.is_none() => {
                             return Err(error)
@@ -503,8 +522,8 @@ impl Client {
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let mut told = Told { address: network.address.clone(), pass: None, who: None };
-        let asked = told.admit(self.endpoint.secret_key(), &self.home.join("network")).await;
+        let mut told = Told { address: network.address.clone(), pass: None, who: self.who.clone() };
+        let asked = told.admit(self.endpoint.secret_key(), &self.home).await;
         match asked.as_ref().map_err(|error| error.downcast_ref::<NotIn>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
             _ => return answer,

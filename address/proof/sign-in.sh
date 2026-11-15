@@ -132,9 +132,13 @@ timeout 30 grep -q -m1 "home opened" <(tail -f -n +1 "$folder/app.log")
 echo "  alice comes back to the window, and it says: $(grep -o -m1 "home opened" "$folder/app.log")"
 kill -- "-$app"
 
-say "A device that's removed is refused the next thing it asks"
+say "A device that's removed is refused the next thing it asks, and keeps nothing of its person's"
 may device laptop sign-in remove_device --device "$(grep -o 'device=[0-9a-f]*' <<<"$link" | cut -d= -f2)"
 refused device desktop sign-in devices
+kept=$({ find "$folder/desktop/kept" "$folder/desktop/files" -type f 2>/dev/null || true; } | wc -l)
+[[ $kept == 0 ]] || { echo "the removed device still keeps $kept of what alice was answered" && exit 1; }
+! grep -q '"pass"' "$folder/desktop/network" || { echo "the removed device still keeps its pass" && exit 1; }
+echo "  it keeps none of what it was answered for alice, nor its pass"
 may device laptop sign-in devices
 
 say "A stranger who knows a server's key and where it is, and dials it with a key of their own, is refused"
