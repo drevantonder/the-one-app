@@ -283,10 +283,12 @@ fn tapped(app: AppHandle, tapped: Value) {
 }
 
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
-/// screen from when its page began to load, which the time since the program started is beside.
+/// screen from when its page began to load, which the time since the program started is beside. Insights is told.
 #[tauri::command]
 fn opened(views: State<'_, Views>, view: String, ms: u32) {
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
+    let client = views.client.clone();
+    tauri::async_runtime::spawn(async move { client.record(&view, ms).await });
 }
 
 /// Where the window starts, as the client last opened (`starts`): nothing until it first has.

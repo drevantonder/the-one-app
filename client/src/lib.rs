@@ -648,6 +648,9 @@ pub struct Client {
     answering: watch::Sender<bool>,
     /// The inputs this device fills in of each tool, as a server last listed them (`encrypts`).
     fills: std::sync::Mutex<Option<Arc<encrypts::Fills>>>,
+    /// The calls that failed before a server answered them, each by its tool and why, until a server is told
+    /// (`record`).
+    failed: std::sync::Mutex<Vec<Value>>,
 }
 
 /// A client's endpoint, and its network: the network's address, if it has one, where the client asks which servers
@@ -722,9 +725,9 @@ impl Client {
         let renews = link.network.is_some();
         let link = std::sync::RwLock::new(link);
         let (watching, answering) = (AtomicBool::new(false), watch::Sender::new(true));
-        let fills = std::sync::Mutex::default();
+        let (fills, failed) = (std::sync::Mutex::default(), std::sync::Mutex::default());
         let client =
-            Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering, fills });
+            Arc::new(Self { home, key, link, reach: Mutex::default(), told, says, watching, answering, fills, failed });
         // A pass that has ended is renewed before anything is asked with it. One that's about to end, or that a new
         // build hasn't renewed yet, is renewed behind what's asked, which it's still good for, so opening waits on
         // nothing over the network. Then the next while this runs.
@@ -853,14 +856,17 @@ impl Client {
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
         // A request is read once on its way out: for what this device fills in of it, and what it says of itself.
-        let (message, lists): (std::borrow::Cow<[u8]>, bool) = match serde_json::from_slice::<Value>(message) {
-            Ok(mut request) if request["method"].is_string() => {
-                self.fill(&mut request).await?;
-                self.say(&mut request);
-                (request.to_string().into_bytes().into(), request["method"] == "tools/list")
-            }
-            _ => (message.into(), false),
-        };
+        let (message, lists, tool): (std::borrow::Cow<[u8]>, bool, Option<String>) =
+            match serde_json::from_slice::<Value>(message) {
+                Ok(mut request) if request["method"].is_string() => {
+                    self.fill(&mut request).await?;
+                    self.say(&mut request);
+                    let calls = request["method"] == "tools/call";
+                    let tool = calls.then(|| request["params"]["name"].as_str().map(str::to_owned)).flatten();
+                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", tool)
+                }
+                _ => (message.into(), false, None),
+            };
         let asked = async {
             for _ in 0..2 {
                 match self.reached().await?.ask(&message).await {
@@ -875,6 +881,12 @@ impl Client {
             bail!(UNANSWERED)
         };
         let answer = asked.await;
+        if let (Err(why), Some(tool)) = (&answer, tool) {
+            let mut failed = self.failed.lock().expect("no ask panics");
+            if failed.len() < FAILED_KEPT {
+                failed.push(json!({"tool": tool, "why": why.to_string()}));
+            }
+        }
         self.answering.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
         match answer {
             Ok(answer) => {
@@ -919,6 +931,17 @@ impl Client {
             if request["params"]["_meta"][says].is_null() {
                 request["params"]["_meta"][says] = json!(value);
             }
+        }
+    }
+
+    /// Tells a server how long a view took to open, from its tap to its first drawing, and the calls that failed
+    /// before a server answered them since one was last told, for Insights. Says nothing of what was asked.
+    pub async fn record(&self, view: &str, ms: u32) {
+        let failed = std::mem::take(&mut *self.failed.lock().expect("no ask panics"));
+        let said = json!({"jsonrpc": "2.0", "method": "notifications/one/recorded", "params": {
+            "client": std::env::consts::OS, "opened": [{"view": view, "ms": ms}], "failed": failed.clone()}});
+        if self.ask(said.to_string().as_bytes()).await.is_err() {
+            self.failed.lock().expect("no ask panics").extend(failed);
         }
     }
 
@@ -1022,6 +1045,9 @@ const RENEW: Duration = Duration::from_secs(30 * 60);
 
 /// How soon a pass that couldn't be asked for is asked for again: the device may be offline.
 const AGAIN: Duration = Duration::from_secs(60);
+
+/// The most failed calls kept until a server is told of them.
+const FAILED_KEPT: usize = 50;
 
 /// What a person is told when no server answered: what went wrong, and what to do about it.
 const UNANSWERED: &str = "No server is answering. Check this device is online and a server is on, then try again.";
