@@ -92,6 +92,8 @@ defmodule OneCore.Plugin do
     group or the network as its `owner`. A tool that changes what's a group's as a whole asks it.
   - `OneCore.Call.plugins(call)` lists the plugins whoever the call runs for finds, theirs and the network's,
     each with who it was added for, its apps and its widgets. A home page is drawn from it.
+  - `OneCore.Call.deployed(call)` lists every plugin anyone in the network has deployed, with its apps, whether or
+    not it's added for anyone now: an app store is drawn from it.
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - `uses/0`, if the plugin has one, names the other plugins it uses, as they're added for whoever it's added for, or

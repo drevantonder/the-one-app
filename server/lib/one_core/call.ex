@@ -174,6 +174,13 @@ defmodule OneCore.Call do
   end
 
   @doc """
+  Every plugin anyone in the network has deployed, whether or not it's added for anyone now: each one's `plugin`,
+  as its artifact's name, and its `apps` as its newest version has them. A plugin's deployed code is open to
+  everyone in the network, so this is every app anyone may add, and an app store is drawn from it.
+  """
+  def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()
+
+  @doc """
   A process that keeps running on this server between calls: the GenServer `module`, which is one of this call's
   plugin's or of a plugin it uses. There's one for each `key`, started when first asked for, with `argument` given
   to its `init/1`, and found again by every call after. It carries on through its plugin's updates as a service

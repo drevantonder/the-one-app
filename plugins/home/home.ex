@@ -75,7 +75,7 @@ defmodule Home do
       %{
         name: "store",
         read_only: true,
-        description: "Lists every app this server knows of that could be added to a page, each with its plugin",
+        description: "Lists every app anyone has deployed, which could be added to a page, each with its plugin",
         inputs: none
       }
     ]
@@ -127,13 +127,11 @@ defmodule Home do
     Enum.sort_by(parts, &String.downcase(&1.name))
   end
 
-  # A plugin's deployed code is open to everyone in the network, so every plugin a server has looked at is one
-  # anyone may add.
-  def call("store", _inputs, _call) do
-    plugins = for {_who, added} <- OneCore.Plugins.added(), {_name, plugin} <- added, uniq: true, do: plugin
-
+  # A plugin's deployed code is open to everyone in the network, so every plugin anyone deployed is one anyone may
+  # add, whether or not it's on a page now.
+  def call("store", _inputs, call) do
     apps =
-      for plugin <- plugins, version = OneCore.Plugins.version(plugin), app <- version.apps, not app.settings do
+      for %{plugin: plugin, apps: apps} <- Call.deployed(call), app <- apps, not app.settings do
         %{plugin: plugin, name: app.name, icon: app.icon}
       end
 

@@ -13,6 +13,8 @@ defmodule OneCore.Plugins.Deploy do
   alias OneCore.Plugins.{Added, Calls, Kept, Version}
 
   @network "network"
+  # What each owner has deployed, as the network keeps it: `deployed/<owner>/<name>`.
+  @deployed "network/deployed/"
 
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
@@ -30,6 +32,7 @@ defmodule OneCore.Plugins.Deploy do
       with :ok <- fits(owner, name, version),
            {:ok, number} <- Kept.keep(artifact, name, kept, files),
            :ok <- Added.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
+        listed(owner, name, version)
         Plugins.look(owner, [{artifact, number, {:ok, version}}])
         Server.tell_servers(Enum.uniq([owner | Added.added_for(artifact)]))
         {:ok, number, warnings}
@@ -38,6 +41,36 @@ defmodule OneCore.Plugins.Deploy do
           Version.unload(version)
           {:error, why}
       end
+    end
+  end
+
+  @doc """
+  Every plugin anyone has deployed, with its apps as its newest version has them: `[%{plugin: artifact, apps:
+  [...]}]`. It's what lists every app there is, whether or not it's on anyone's page now.
+  """
+  def deployed do
+    blobs = Bucket.list(@deployed)
+
+    for {blob, {:ok, said, _tag}} <- Enum.zip(blobs, Bucket.read_all(blobs)) do
+      [_, owner, name] = Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob)
+
+      apps =
+        for app <- JSON.decode!(said)["apps"],
+            do: %{name: app["name"], page: app["page"], icon: app["icon"], settings: app["settings"]}
+
+      %{plugin: "#{owner}/plugins/#{name}", apps: apps}
+    end
+  end
+
+  # That `owner` deployed the plugin `name`, with the apps this version has, among what everyone has deployed.
+  defp listed(owner, name, version) do
+    blob = "#{@deployed}#{owner}/#{name}"
+    said = JSON.encode!(%{apps: version.apps})
+
+    case Bucket.read(blob) do
+      {:ok, ^said, _tag} -> :ok
+      {:ok, _was, tag} -> Bucket.replace(blob, said, tag)
+      :absent -> Bucket.write(blob, said)
     end
   end
 
