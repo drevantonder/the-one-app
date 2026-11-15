@@ -12,6 +12,8 @@ dirs = "6"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # What this device is called, which its person is shown before they let it in.
 gethostname = "1"
+# Reading a folder as git would keep it, leaving out what its .gitignore files do, with no git needed.
+ignore = "0.4"
 iroh.workspace = true
 # Asking the signer at a network's address, with the TLS iroh reaches the relay there with.
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls-no-provider"] }

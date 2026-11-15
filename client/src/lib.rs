@@ -841,3 +841,19 @@ async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
         });
     }
 }
+
+/// The files of `folder`, by their paths in it, as a folder is deployed: names starting with a dot are left out,
+/// and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not. A
+/// server reads the plugins it ships with this way too (`server/native/folder`).
+pub fn files(folder: &Path) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    for entry in ignore::WalkBuilder::new(folder).require_git(false).build() {
+        let entry = entry?;
+        if entry.file_type().is_some_and(|kind| kind.is_file()) {
+            let path = entry.path().strip_prefix(folder)?;
+            files.push(path.iter().map(|part| part.to_string_lossy()).collect::<Vec<_>>().join("/"));
+        }
+    }
+    files.sort();
+    Ok(files)
+}

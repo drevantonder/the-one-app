@@ -188,8 +188,8 @@ async fn inputs(client: &Client, tool: &Value, flags: &[String]) -> Result<Value
     Ok(Value::Object(inputs))
 }
 
-/// A file's text, or a folder as its files' text by their paths in it. Names starting with a dot are left out. A
-/// file for an input that says it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
+/// A file's text, or a folder as its files' text by their paths in it, as `crate::files` reads a folder. A file
+/// for an input that says it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
 fn read(path: &Path, base64: bool) -> Result<Value> {
     let couldnt = || format!("couldn't read {}", path.display());
     if base64 {
@@ -198,23 +198,11 @@ fn read(path: &Path, base64: bool) -> Result<Value> {
     if !path.is_dir() {
         return Ok(Value::String(fs::read_to_string(path).with_context(couldnt)?));
     }
-    fn files(folder: &Path, within: &str, into: &mut Map<String, Value>) -> Result<()> {
-        for entry in fs::read_dir(folder)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
-            }
-            if entry.file_type()?.is_dir() {
-                files(&entry.path(), &format!("{within}{name}/"), into)?;
-            } else {
-                into.insert(format!("{within}{name}"), read(&entry.path(), false)?);
-            }
-        }
-        Ok(())
-    }
     let mut into = Map::new();
-    files(path, "", &mut into)?;
+    for file in crate::files(path).with_context(couldnt)? {
+        let text = read(&path.join(&file), false)?;
+        into.insert(file, text);
+    }
     Ok(Value::Object(into))
 }
 
@@ -233,5 +221,5 @@ fn usage(tool: &Value) {
             if one_of.is_empty() { input["type"].as_str().unwrap_or("JSON").to_owned() } else { one_of.join("|") };
         println!("  --{name} <{kind}{optional}>  {about}");
     }
-    println!("\n--<input>-from <path> reads an input from a file, or from a folder as its files.");
+    println!("\n--<input>-from <path> reads an input from a file, or from a folder's files that git doesn't ignore.");
 }

@@ -8,7 +8,7 @@ defmodule OneCore.Plugins.Deploy do
   each one's folder by its name. Those are added for the network.
   """
   require Logger
-  alias OneCore.{App, Server, Servers}
+  alias OneCore.{App, Folder, Server, Servers}
   alias OneCore.Plugins
   alias OneCore.Plugins.{Added, Calls, Kept, Version}
 
@@ -124,11 +124,12 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # The files of a plugin this server ships with, or none if it ships with no such plugin.
+  # The files of a plugin this server ships with, as a deploy from its folder sends them, or none if it ships with
+  # no such plugin.
   defp shipped(name) do
-    with %{^name => folder} <- Application.get_env(:one_core, :shipped, %{}) do
-      files = Enum.filter(Path.wildcard(Path.join(folder, "**")), &File.regular?/1)
-      Map.new(files, &{Path.relative_to(&1, folder), File.read!(&1)})
+    with %{^name => folder} <- Application.get_env(:one_core, :shipped, %{}),
+         {:ok, paths} <- Folder.files(folder) do
+      Map.new(paths, &{&1, File.read!(Path.join(folder, &1))})
     else
       _ -> %{}
     end
