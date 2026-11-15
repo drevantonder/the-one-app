@@ -15,7 +15,8 @@ const HOME = "home/app/index.html"
 /// it shows it as it was.
 const open = new Map()
 const key = (app, who) => `${who ?? ""}|${app}`
-/// Each plugin's first app, by the plugin's name, among this user's: what a notification from it opens.
+/// Each plugin's first app, by the plugin's name, among this user's, and one that isn't a part of Settings if it
+/// has one: what a notification from it opens.
 let first = new Map()
 /// Who this client has listed files for: its user (`undefined`), and each group or the network an app was opened
 /// for.
@@ -69,8 +70,10 @@ async function list(who) {
     if (!who) {
       unlisted = undefined
       // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
-      const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app").map(({ uri }) => uri.slice("ui://".length).split("/"))
-      first = new Map(pages.reverse().map(([plugin, _version, ...page]) => [plugin, `${plugin}/${page.join("/")}`]))
+      const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
+      // The last one set for a plugin is the one kept: its first, and one that isn't a part of Settings before one that is.
+      const order = pages.toReversed().sort((a, b) => Boolean(b._meta?.settings) - Boolean(a._meta?.settings))
+      first = new Map(order.map(({ uri }) => uri.slice("ui://".length).split("/")).map(([plugin, _version, ...page]) => [plugin, `${plugin}/${page.join("/")}`]))
     }
   } catch (error) {
     if (!who) unlisted = `${error}`.replace(/[^.]$/, "$&.")

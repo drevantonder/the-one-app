@@ -52,9 +52,11 @@ function Apps(props) {
       </Show>
       <Sheet heading={app()?.name} open={!!app()} onClose={() => setManaging()}>
         <Show when={app()}>
-          <For each={props.store.pages} keyed={(page) => page.who}>
-            {(page) => <Switch label={page().name} checked={!!on(page(), app())} disabled={!page().arranges} onChange={(event) => put(page(), app(), event.currentTarget.checked)} />}
-          </For>
+          <form>
+            <For each={props.store.pages} keyed={(page) => page.who}>
+              {(page) => <Switch label={page().name} checked={!!on(page(), app())} disabled={!page().arranges} onChange={(event) => put(page(), app(), event.currentTarget.checked)} />}
+            </For>
+          </form>
         </Show>
       </Sheet>
     </>

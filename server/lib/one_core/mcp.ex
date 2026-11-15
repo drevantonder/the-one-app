@@ -198,8 +198,15 @@ defmodule OneCore.Mcp do
         resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
 
         case Enum.find(version.apps, &(&1.page == path)) do
-          nil -> %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
-          app -> Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}]})
+          nil ->
+            %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
+
+          # A part of Settings says so, so a client that opens a plugin's app opens the one that isn't.
+          %{settings: true} = app ->
+            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}], _meta: %{settings: true}})
+
+          app ->
+            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}]})
         end
       end
 

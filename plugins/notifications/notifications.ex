@@ -36,7 +36,12 @@ defmodule Notifications do
   def uses, do: ["database"]
 
   @impl true
-  def apps, do: [%{name: "Notifications", page: "app/index.html", icon: "icon.svg"}]
+  def apps do
+    [
+      %{name: "Notifications", page: "app/index.html", icon: "icon.svg"},
+      %{name: "Notifications", page: "app/hear.html", icon: "icon.svg", settings: true}
+    ]
+  end
 
   @doc """
   Notifies whoever `call` runs for, as the plugin making the call, so a tap opens its app and its person can
