@@ -1,6 +1,8 @@
+# The app is named by its build's identifier, ONE_IDENTIFIER, which `generate` reads from its Tauri config: the
+# app, its notification extension and the App Group they share.
 name: shell
 options:
-  bundleIdPrefix: app.theone.client
+  bundleIdPrefix: ${ONE_IDENTIFIER}
   deploymentTarget:
     iOS: 15.0
 fileGroups: [../../src]
@@ -11,7 +13,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: The One App
-      PRODUCT_BUNDLE_IDENTIFIER: app.theone.client
+      PRODUCT_BUNDLE_IDENTIFIER: ${ONE_IDENTIFIER}
 targetTemplates:
   app:
     type: application
@@ -34,7 +36,9 @@ targets:
       # otherwise turns the per-configuration libapp.a copies into colliding
       # resources ("Multiple commands produce …/libapp.a"). They are linked
       # via LIBRARY_SEARCH_PATHS, never bundled as resources.
+      # It's there once the Rust code has been built.
       - path: Externals
+        optional: true
         excludes: ["**/*.a"]
       - path: shell_iOS
       - path: assets
@@ -126,18 +130,18 @@ targets:
         # What's built says the build's number (Name the Build).
         CFBundleShortVersionString: 1.0.0
         CFBundleVersion: "1.0.0"
-        AppGroup: group.app.theone.client
+        AppGroup: group.${ONE_IDENTIFIER}
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
     entitlements:
       path: Notifications/Notifications.entitlements
       properties:
-        com.apple.security.application-groups: [group.app.theone.client]
+        com.apple.security.application-groups: ["group.${ONE_IDENTIFIER}"]
     settings:
       base:
         PRODUCT_NAME: Notifications
-        PRODUCT_BUNDLE_IDENTIFIER: app.theone.client.notifications
+        PRODUCT_BUNDLE_IDENTIFIER: ${ONE_IDENTIFIER}.notifications
         # Tauri's CLI names the team in the app's target alone; xcodebuild has what it was told in its environment.
         DEVELOPMENT_TEAM: $(APPLE_DEVELOPMENT_TEAM)
         ARCHS: [arm64]

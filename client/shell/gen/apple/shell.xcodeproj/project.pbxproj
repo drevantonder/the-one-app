@@ -103,13 +103,6 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		1D360B9342644FD20D0BD7CE /* Externals */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Externals;
-			sourceTree = "<group>";
-		};
 		27745AE08ECE899648E5CF18 /* Notifications */ = {
 			isa = PBXGroup;
 			children = (
@@ -160,7 +153,6 @@
 				FC153C86C8EFDCDAA4F3F200 /* assets */,
 				E97CE87427868B979BD1994F /* Assets.xcassets */,
 				CEDEE05E768CFAC47668112A /* LaunchScreen.storyboard */,
-				1D360B9342644FD20D0BD7CE /* Externals */,
 				27745AE08ECE899648E5CF18 /* Notifications */,
 				6D5588B4B8CB9EBC0643E8F2 /* shell_iOS */,
 				14A7EED1BA4C2B9750A30A9D /* Sources */,
@@ -198,20 +190,6 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
-		"TEMP_0E377054-29D3-4889-9445-3707E84D4A0B" /* arm64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = arm64;
-			sourceTree = "<group>";
-		};
-		"TEMP_2E12A3A5-CDD8-41AE-880F-4A9B2F366290" /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = x86_64;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -220,6 +198,7 @@
 			buildConfigurationList = A8BEC51A265A9C98BD78A3C3 /* Build configuration list for PBXNativeTarget "Notifications" */;
 			buildPhases = (
 				569BA5B656AEA74C646B5112 /* Sources */,
+				FE7011340CC1D7ACA9036525 /* Name the Build */,
 			);
 			buildRules = (
 			);
@@ -241,6 +220,7 @@
 				C30249AE15295426D7AD5C6C /* Resources */,
 				330EF511E9AD9C260E10F14B /* Frameworks */,
 				F843C31C97EBE6AAEBE2ED87 /* Embed Foundation Extensions */,
+				D29E2B46CDCB1E4FC3501313 /* Name the Build */,
 			);
 			buildRules = (
 			);
@@ -322,6 +302,44 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "cargo tauri ios xcode-script -v --platform \"${PLATFORM_DISPLAY_NAME:?}\" --sdk-root \"${SDKROOT:?}\" --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration \"${CONFIGURATION:?}\" ${FORCE_COLOR} ${ARCHS:?}\n";
+		};
+		D29E2B46CDCB1E4FC3501313 /* Name the Build */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Name the Build";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "number=$(sh \"${SRCROOT:?}/../../../../build-name\" | cut -d- -f1)\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $number\" -c \"Set :CFBundleVersion $number\" \"${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}\"\n";
+		};
+		FE7011340CC1D7ACA9036525 /* Name the Build */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Name the Build";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "number=$(sh \"${SRCROOT:?}/../../../../build-name\" | cut -d- -f1)\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $number\" -c \"Set :CFBundleVersion $number\" \"${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
