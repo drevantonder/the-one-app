@@ -312,7 +312,8 @@ pub fn address(endpoint: &Endpoint, network: Option<&Network>) -> Result<Endpoin
 
 /// The key kept in `file`, which is made on first use. It's made whole under a name of its own and then given its
 /// name only if nothing has it yet, so of two programs that start at once in a new home, as the app and a command
-/// can, one makes it and the other reads it whole.
+/// can, one makes it and the other reads it whole. `tempfile` gives it that name without a hard link where the
+/// system has a rename that won't replace, which a phone needs: Android lets an app make no hard links.
 pub fn key(file: &Path) -> Result<SecretKey> {
     let read = || -> Result<SecretKey> {
         let bytes = fs::read(file)?.try_into().map_err(|_| anyhow!("{} doesn't hold a key", file.display()))?;
@@ -323,18 +324,15 @@ pub fn key(file: &Path) -> Result<SecretKey> {
             if error.downcast_ref::<std::io::Error>().is_some_and(|error| error.kind() == ErrorKind::NotFound) => {}
         read => return read,
     }
-    fs::create_dir_all(file.parent().context("a key is kept in a folder")?)?;
+    let folder = file.parent().context("a key is kept in a folder")?;
+    fs::create_dir_all(folder)?;
     let key = SecretKey::generate();
-    static MAKING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let making = file.with_extension(format!("{}-{}", std::process::id(), MAKING.fetch_add(1, Ordering::Relaxed)));
-    let mut new = fs::OpenOptions::new();
-    new.write(true).create_new(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut new, 0o600);
-    new.open(&making)?.write_all(&key.to_bytes()).with_context(|| format!("couldn't make {}", file.display()))?;
-    let named = fs::hard_link(&making, file);
-    fs::remove_file(&making)?;
-    match named {
+    let made = || -> std::io::Result<()> {
+        let mut making = tempfile::NamedTempFile::new_in(folder)?;
+        making.write_all(&key.to_bytes())?;
+        making.persist_noclobber(file).map(drop).map_err(|error| error.error)
+    };
+    match made() {
         Ok(()) => Ok(key),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => read(),
         Err(error) => Err(error).with_context(|| format!("couldn't make {}", file.display())),

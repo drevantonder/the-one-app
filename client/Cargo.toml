@@ -18,4 +18,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11"
+# Names the key file without replacing one that's there, on every system, a phone included.
+tempfile = "3"
 tokio.workspace = true
