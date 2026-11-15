@@ -147,6 +147,12 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     let key = here.key()?;
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
     let who = env::var("ONE_FOR").context("ONE_FOR says who the server is for")?;
+    // What the server says goes on, in what the system keeps of this program's output.
+    let log = here.folder.join("server.log");
+    let say = |line: &str| {
+        println!("{line}");
+        system::bound(&log)
+    };
     loop {
         let trying = here.next();
         let build = match &trying {
@@ -167,7 +173,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         let mut said = BufReader::new(server.stdout.take().context("the server's output")?).lines();
         let running = async {
             while let Some(line) = said.next_line().await? {
-                println!("{line}");
+                say(&line)?;
                 if line.starts_with(RUNNING) {
                     return Ok::<_, anyhow::Error>(true);
                 }
@@ -197,7 +203,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         }
         system::ready()?;
         while let Some(line) = said.next_line().await? {
-            println!("{line}");
+            say(&line)?;
             if line == UPDATE_ASKED {
                 match take(&client, &here, &program).await {
                     Ok(true) => {
@@ -437,6 +443,11 @@ mod system {
         systemctl(&["disable", &name(key)])
     }
 
+    /// What the server says is in systemd's journal, which keeps it within its own bounds.
+    pub fn bound(_log: &Path) -> Result<()> {
+        Ok(())
+    }
+
     /// Tells systemd the server is running, as `Type=notify` has it wait for.
     pub fn ready() -> Result<()> {
         use std::os::linux::net::SocketAddrExt;
@@ -531,6 +542,29 @@ mod system {
         Ok(fs::remove_file(agent(key)?)?)
     }
 
+    /// Keeps `server.log` under `LOG`, as launchd keeps no bounds of its own: past it, the log is `server.log.1`, in
+    /// place of the one before, and this program's output and errors go to a new one, as a daemon opens its log
+    /// again. Only while its output is that file, as launchd started it.
+    pub fn bound(log: &Path) -> Result<()> {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::MetadataExt;
+
+        const LOG: u64 = 10 << 20;
+        let Ok(kept) = fs::metadata(log) else { return Ok(()) };
+        let mut out: libc::stat = unsafe { std::mem::zeroed() };
+        let writing = unsafe { libc::fstat(1, &mut out) } == 0
+            && (out.st_dev as u64, out.st_ino as u64) == (kept.dev(), kept.ino());
+        if kept.len() < LOG || !writing {
+            return Ok(());
+        }
+        fs::rename(log, log.with_extension("log.1"))?;
+        let new = fs::OpenOptions::new().create(true).append(true).open(log)?;
+        for written in [1, 2] {
+            ensure!(unsafe { libc::dup2(new.as_raw_fd(), written) } >= 0, "couldn't write a new {}", log.display());
+        }
+        Ok(())
+    }
+
     /// Tells `start` the server is running. Nothing hears it when launchd started it by itself, as at a login.
     pub fn ready() -> Result<()> {
         let Some(socket) = env::var_os("NOTIFY_SOCKET") else { return Ok(()) };
@@ -569,6 +603,10 @@ mod system {
     }
 
     pub fn ready() -> Result<()> {
+        bail!(NONE)
+    }
+
+    pub fn bound(_log: &Path) -> Result<()> {
         bail!(NONE)
     }
 }
