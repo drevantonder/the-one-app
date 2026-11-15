@@ -1,10 +1,14 @@
-// Notifications: what you've been told, newest first. Tapping one marks it read and opens the app it's from.
+// Notifications, a part of Settings: what you've been told, newest first, and the apps that have told you
+// something, each of which you hear from or not. Tapping one marks it read and opens the app it's from.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, confirm, Empty, leave, List, Menu, open, Problem, Row, Screen, Section, Skeleton, toast } from "ui"
+import { call, changed, confirm, Empty, leave, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Switch, toast } from "ui"
 import "./app.css"
 
-const inbox = createMemo(() => call("notifications_inbox").then(JSON.parse))
+const inbox = createMemo(async () => {
+  const [{ notifications }, apps] = await Promise.all(["notifications_inbox", "notifications_apps"].map((tool) => call(tool).then(JSON.parse)))
+  return { notifications, apps }
+})
 changed(() => refresh(inbox))
 
 /// How long ago, as a person says it: "now", "5 min", "3 h", then the day.
@@ -70,6 +74,15 @@ render(
               </List>
             </Show>
           </Section>
+          <Show when={inbox().apps.length}>
+            <Section heading="Hear From">
+              <form>
+                <For each={inbox().apps} keyed={(app) => app.app}>
+                  {(app) => <Switch label={app().name} checked={app().hear} onChange={(event) => change("notifications_hear", { app: app().app, hear: event.currentTarget.checked })} />}
+                </For>
+              </form>
+            </Section>
+          </Show>
         </Loading>
       </Errored>
     </Screen>
