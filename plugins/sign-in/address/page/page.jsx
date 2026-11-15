@@ -20,6 +20,8 @@ const invite = opened.get("invite")
 /// The code a new device shows, which its link carries.
 const code = asked.get("user_code")
 const app = asked.has("app")
+/// Why the app shows a new code, in the words the device says it in (`NotLetIn` in `client/src/lib.rs`).
+const why = app && { stopped: "It was stopped where you signed in.", ended: "Its code ended before it was let in. Try again." }[asked.get("why")]
 /// A code as it's shown, in two halves: WDJB-MJHT.
 const shown = code && code.replace(/(.{4})(?=.)/g, "$1-")
 
@@ -81,6 +83,7 @@ async function answer(yes) {
 /// The link the device gives, as it's opened in the device's own browser.
 const link = new URL(location.href)
 link.searchParams.delete("app")
+link.searchParams.delete("why")
 /// Whether this person is answering a device: they're signed in, and its code is theirs to answer.
 const answering = () => code && !app && signedIn() && acts()
 
@@ -96,7 +99,7 @@ render(
           ? "It will act as you. If the code differs, or you didn't ask for this, stop."
           : request && acts() && `${acts()} will act as you. Sign in only if you asked for this.`
       }
-      problem={problem()}
+      problem={problem() ?? why}
       // Someone who's signed in has nothing to press until the code is theirs, or it couldn't be.
       button={app ? "Sign in" : answering() ? "It matches" : code && signedIn() !== false ? undefined : invite ? "Create a passkey" : "Sign in"}
       href={app ? link.href : undefined}

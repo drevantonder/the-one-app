@@ -181,13 +181,42 @@ impl NotIn {
                 _ if given => return Ok(()),
                 Some("authorization_pending") => {}
                 Some("slow_down") => self.interval += Duration::from_secs(5),
-                Some("access_denied") => bail!("It was stopped where you signed in."),
-                Some("expired_token") => bail!("Its code ended before it was let in. Try again."),
+                Some("access_denied") => bail!(NotLetIn::Stopped),
+                Some("expired_token") => bail!(NotLetIn::Ended),
                 _ => bail!("{}", said["error_description"].as_str().unwrap_or("the network's address didn't answer")),
             }
         }
     }
 }
+
+/// Why a device's person didn't let it in: they stopped it where they signed in, or its code ended first. The app
+/// says it on the sign-in page it shows the next code on, told it as `why`, in these same words.
+#[derive(Debug, Clone, Copy)]
+pub enum NotLetIn {
+    Stopped,
+    Ended,
+}
+
+impl NotLetIn {
+    /// How the sign-in page is told it.
+    pub fn why(self) -> &'static str {
+        match self {
+            Self::Stopped => "stopped",
+            Self::Ended => "ended",
+        }
+    }
+}
+
+impl std::fmt::Display for NotLetIn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Stopped => "It was stopped where you signed in.",
+            Self::Ended => "Its code ended before it was let in. Try again.",
+        })
+    }
+}
+
+impl std::error::Error for NotLetIn {}
 
 /// Asks the network's address at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
 async fn ask_address(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {

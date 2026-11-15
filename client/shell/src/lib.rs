@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use client::{Client, NotIn, Shown};
+use client::{Client, NotIn, NotLetIn, Shown};
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
 use tauri::ipc::{InvokeBody, Request};
@@ -209,8 +209,8 @@ const HOME: &str = "http://tauri.localhost/index.html";
 const HOME: &str = "tauri://localhost/index.html";
 
 /// Opens the client and gives the window its views, or if this device isn't in its network yet, gives what lets it
-/// in, and the window starts on its link.
-async fn entered(app: &AppHandle) -> anyhow::Result<Option<NotIn>> {
+/// in, and the window starts on its link, which says `why` it shows a new code, if it does.
+async fn entered(app: &AppHandle, why: Option<NotLetIn>) -> anyhow::Result<Option<NotIn>> {
     // A phone gives each app a folder of its own, which only the app is told.
     #[cfg(mobile)]
     let home = app.path().app_data_dir()?;
@@ -222,6 +222,9 @@ async fn entered(app: &AppHandle) -> anyhow::Result<Option<NotIn>> {
             let not_in = error.downcast::<NotIn>()?;
             let mut start: Url = not_in.link.parse()?;
             start.query_pairs_mut().append_key_only("app");
+            if let Some(why) = why {
+                start.query_pairs_mut().append_pair("why", why.why());
+            }
             *app.state::<Start>().0.lock().expect("no view panics") = Some(start);
             return Ok(Some(not_in));
         }
@@ -261,10 +264,14 @@ async fn entered(app: &AppHandle) -> anyhow::Result<Option<NotIn>> {
 /// to a new code if they stopped it or the last one ended.
 async fn let_in(app: AppHandle, mut not_in: NotIn) {
     loop {
-        if let Err(error) = not_in.answered().await {
-            eprintln!("{error:#}");
-        }
-        let (to, next) = match entered(&app).await {
+        let why = match not_in.answered().await {
+            Ok(()) => None,
+            Err(error) => {
+                eprintln!("{error:#}");
+                error.downcast_ref::<NotLetIn>().copied()
+            }
+        };
+        let (to, next) = match entered(&app, why).await {
             Ok(None) => (HOME.parse().expect("the home screen has an address"), None),
             Ok(Some(next)) => (start(&app), Some(next)),
             Err(error) => return eprintln!("{error:#}"),
@@ -310,7 +317,7 @@ pub fn run() {
             app.manage(Start(Mutex::default()));
             app.manage(started);
             // A device that isn't in its network yet starts on the page that signs it in.
-            let page = match tauri::async_runtime::block_on(entered(app.handle()))? {
+            let page = match tauri::async_runtime::block_on(entered(app.handle(), None))? {
                 None => WebviewUrl::default(),
                 Some(not_in) => {
                     tauri::async_runtime::spawn(let_in(app.handle().clone(), not_in));
