@@ -31,6 +31,11 @@ defmodule OneCore.DatabaseTest do
     def list(simulation, prefix), do: wait(simulation, {:list, prefix})
     @impl true
     def remove(simulation, key), do: wait(simulation, {:remove, key})
+    # A database keeps nothing large, which is all these are for.
+    @impl true
+    def size(_simulation, _key), do: raise("The simulation keeps nothing large")
+    @impl true
+    def link(_simulation, _key, _mode), do: raise("The simulation keeps nothing large")
 
     defp wait({blobs, simulation}, operation) do
       if self() == simulation do
@@ -104,7 +109,10 @@ defmodule OneCore.DatabaseTest do
       call = %{call(simulated, server) | passed_on: true}
 
       fire = fn _job ->
-        if wait, do: send(test, {:calling, self()}) && receive(do: (:go -> :ok))
+        if wait do
+          send(test, {:calling, self()})
+          receive(do: (:go -> :ok))
+        end
 
         database.transaction(call, schema, fn db ->
           database.query(db, "insert into ticks (server, at) values (?, ?)", [server, div(now, 10) * 10])

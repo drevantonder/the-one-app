@@ -13,7 +13,9 @@ defmodule OneCore.MixProject do
         {:yaml_elixir, "~> 2.12"}
       ],
       # Tests start only what they test: the server's key and socket aren't theirs to take.
-      aliases: [test: "test --no-start"]
+      aliases: [test: "test --no-start"],
+      # The plugins the proofs deploy are files to deploy, not tests.
+      test_ignore_filters: [~r{^test/plugins/}]
     ]
   end
 
