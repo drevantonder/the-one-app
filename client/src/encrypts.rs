@@ -84,7 +84,7 @@ impl Client {
                 ("device", None) => self.key.public().to_string(),
                 ("device-name", None) => gethostname::gethostname().to_string_lossy().into_owned(),
                 ("secret", Some(text)) => self.secret(plugin, says, text, who).await?,
-                ("owner-key", typed) => self.owner_key_for(inputs, typed).await?,
+                ("owner-key", typed) => self.owner_key_for(inputs, typed, who).await?,
                 ("artifact-keys", None) => self.artifact_keys(plugin, says, inputs, who).await?,
                 ("backup-recipient", None) => self.backups_key(plugin, says, who).await?.0.public().to_string(),
                 ("backup-key", None) => self.backup_key(plugin, says, who).await?,
@@ -93,11 +93,6 @@ impl Client {
             inputs.insert(name.clone(), filled.into());
         }
         Ok(())
-    }
-
-    /// Calls a tool, and gives what it answered, which is JSON.
-    async fn tool(&self, name: &str, inputs: Value) -> Result<Value> {
-        self.tool_for(name, inputs, None).await
     }
 
     /// Calls a tool for someone, if it says who, and gives what it answered.
@@ -139,13 +134,8 @@ impl Client {
         Ok(Value::Object(sealed).to_string())
     }
 
-    /// This device's copy of the key of whoever it asks for, with who that is. It's kept encrypted to this device,
-    /// and opened here each time it's needed.
-    async fn owner_key(&self) -> Result<(Key, String)> {
-        self.owner_key_of(None).await
-    }
-
-    /// This device's copy of the key of `who`, or of whoever it asks for.
+    /// This device's copy of the key of `who`, or of whoever it asks for, with who that is: a person, a group or the
+    /// network. It's kept encrypted to this device, and opened here each time it's needed.
     async fn owner_key_of(&self, who: Option<&str>) -> Result<(Key, String)> {
         let holds = self.tool_for(HOLDS, json!({}), who).await?;
         let (owner, me) = (holds["owner"].as_str().unwrap_or_default().to_owned(), self.key.public().to_string());
@@ -157,10 +147,11 @@ impl Client {
         Ok((cipher::key(&key)?, owner))
     }
 
-    /// The owner's key, encrypted to the device the input `device` names: the one typed as a recovery key, this
-    /// device's copy, or for someone who has none yet, a new one, for this device itself.
-    async fn owner_key_for(&self, inputs: &Map<String, Value>, typed: Option<&str>) -> Result<String> {
-        let holds = self.tool(HOLDS, json!({})).await?;
+    /// The key of `who`, or of whoever this client asks for, encrypted to the device the input `device` names: the
+    /// one typed as a recovery key, this device's copy, or for someone who has none yet, a new one, for this device
+    /// itself.
+    async fn owner_key_for(&self, inputs: &Map<String, Value>, typed: Option<&str>, who: Option<&str>) -> Result<String> {
+        let holds = self.tool_for(HOLDS, json!({}), who).await?;
         let (owner, me) = (holds["owner"].as_str().unwrap_or_default(), self.key.public().to_string());
         let device = inputs.get("device").and_then(Value::as_str).unwrap_or(&me);
         let key = match (typed, holds["check"].as_str()) {
@@ -172,7 +163,7 @@ impl Client {
                 key
             }
             (Some(_), None) => bail!("There's no key to recover: nothing of yours is encrypted yet."),
-            (None, Some(_)) => self.owner_key().await?.0,
+            (None, Some(_)) => self.owner_key_of(who).await?.0,
             (None, None) if device == me => cipher::owner(),
             (None, None) => bail!("You have no key yet. It's made on the first device you set up, for itself."),
         };
@@ -234,14 +225,16 @@ impl Client {
         Ok(Value::Object(sealed).to_string())
     }
 
-    /// The recovery key of whoever this client asks for, which is their key as a person writes it down. Only a
-    /// device that holds the key gives it, and only its window asks: no command or tool answers with one.
-    pub async fn recovery_key(&self) -> Result<String> {
-        Ok(cipher::recovery(&self.owner_key().await?.0))
+    /// The recovery key of `who`, or of whoever this client asks for: a person, or a group or the network they own.
+    /// It's their key as a person writes it down. Only a device that holds the key gives it, and only its window
+    /// asks: no command or tool answers with one.
+    pub async fn recovery_key(&self, who: Option<&str>) -> Result<String> {
+        Ok(cipher::recovery(&self.owner_key_of(who).await?.0))
     }
 
-    /// Lets this device in with the recovery key its person typed in its window.
-    pub async fn recover(&self, recovery_key: &str) -> Result<()> {
-        self.tool("encryption_let_in", json!({"key": recovery_key})).await.map(drop)
+    /// Lets this device hold the key of `who`, or of whoever this client asks for, with the recovery key its person
+    /// typed in its window.
+    pub async fn recover(&self, recovery_key: &str, who: Option<&str>) -> Result<()> {
+        self.tool_for("encryption_let_in", json!({"key": recovery_key}), who).await.map(drop)
     }
 }

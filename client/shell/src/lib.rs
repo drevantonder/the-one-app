@@ -216,17 +216,18 @@ async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, 
     sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
 }
 
-/// The recovery key of this device's person, for the home screen to show them. It's the client's own page that
-/// shows it, so no app's page is handed one.
+/// The recovery key of this device's person, or of a group or the network an app was opened for (`who`), for the
+/// client's own page to show them. It's that page that shows it, so no app's page is handed one.
 #[tauri::command]
-async fn recovery_key(views: State<'_, Views>) -> Result<String, String> {
-    views.client.recovery_key().await.map_err(|error| error.to_string())
+async fn recovery_key(views: State<'_, Views>, who: Option<String>) -> Result<String, String> {
+    views.client.recovery_key(who.as_deref()).await.map_err(|error| error.to_string())
 }
 
-/// Lets this device in with the recovery key its person typed on the home screen, and has every view ask again.
+/// Lets this device hold its person's key, or `who`'s, with the recovery key they typed on the client's own page,
+/// and has every view ask again.
 #[tauri::command]
-async fn recover(views: State<'_, Views>, key: String) -> Result<(), String> {
-    views.client.recover(&key).await.map_err(|error| error.to_string())?;
+async fn recover(views: State<'_, Views>, key: String, who: Option<String>) -> Result<(), String> {
+    views.client.recover(&key, who.as_deref()).await.map_err(|error| error.to_string())?;
     views.again().await;
     Ok(())
 }

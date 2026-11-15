@@ -77,12 +77,12 @@ export const upload = (file) => greet().then(() => ask("one/upload", { file })).
 
 /// `await showRecoveryKey()`: has the client show its person their recovery key, over the app. The app is told
 /// only that they've seen it: no app's page is handed one. → whether it was shown, which only a device that
-/// holds their key can.
-export const showRecoveryKey = () => greet().then(() => ask("one/recovery-key")).then(({ done }) => done)
+/// holds their key can. It's the key of whoever the app is for, or as a call says it, `{ for: "network" }`'s.
+export const showRecoveryKey = (who = {}) => greet().then(() => ask("one/recovery-key", { for: who.for })).then(({ done }) => done)
 
 /// `await useRecoveryKey()`: has the client ask its person for their recovery key, and let this device in with
-/// it. → whether the device holds their key now.
-export const useRecoveryKey = () => greet().then(() => ask("one/recovery-key", { typed: true })).then(({ done }) => done)
+/// it. → whether the device holds their key now. Whose, as `showRecoveryKey` says.
+export const useRecoveryKey = (who = {}) => greet().then(() => ask("one/recovery-key", { typed: true, for: who.for })).then(({ done }) => done)
 
 /// `changed(() => refresh(notes))`: runs what it's given whenever what this page was answered has changed, to ask
 /// again and draw it. → the function that stops it.

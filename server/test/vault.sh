@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Proves, on a whole network with a spare and its address on this machine (`./network <folder> --spare --address`),
-# what encryption and the Vault promise, by trying each. What's typed on a device is encrypted there, and the
+# what encryption and the Vault promise, by trying each, for a person, a group and the network. What's typed on a device is encrypted there, and the
 # bytes in the bucket hold none of it, for a blob and for a database. A server that wasn't chosen can't open
 # either and takes no lease; a chosen one can, and stops when it's taken off. The network's owner writes every
 # relation tuple there is and still reads nothing. An agent's tools never answer a secret. A plugin uses an item
@@ -44,7 +44,7 @@ free_port() { (cd "$root/address" && bun -e 'const server = Bun.serve({ port: 0,
 # The secrets: each a file, whose text starts with the marker.
 marker=vault-proof-$(random 8)
 mkdir "$folder/secrets"
-for secret in note github stripe pasted; do printf '%s-%s-%s' "$marker" "$secret" "$(random 8)" >"$folder/secrets/$secret"; done
+for secret in note github stripe pasted wifi storage; do printf '%s-%s-%s' "$marker" "$secret" "$(random 8)" >"$folder/secrets/$secret"; done
 # The one the outside service knows its client by.
 printf '%s-client-secret' "$marker" >"$folder/secrets/client"
 # How many files under these hold the marker.
@@ -111,7 +111,7 @@ up() {
   echo "  the $1 is started again"
 }
 
-for name in phone laptop tablet desk bobs; do device $name; done
+for name in phone laptop tablet desk bobs den attic; do device $name; done
 vault=users/alice/made/vault/items
 locker=users/alice/made/locker/notes
 servers() { local list; list=$(printf '"%s",' "${@/#/}"); echo "[${list%,}]"; }
@@ -320,6 +320,29 @@ echo "  someone with the whole bucket, and a key of their own making:"
   IO.puts("    of the #{length(slots)} copies of her Vault'"'"'s keys in the bucket, each encrypted to a server she chose, theirs opens #{length(opened)}")
 ' "$folder" "$address" "$vault" "${key[server]}" "${key[spare]}" 2>&1 | grep -v "^$")
 echo "  and no file of the bucket holds the marker, as below"
+
+say "A group's Vault and the network's, each set up and opened by an owner, and the network's by its recovery key"
+may on den as alice relations group --name family
+may on den as alice relations share --artifact groups/family --relation member --who users/bob
+may on den as alice for groups/family encryption let_in
+may on den as alice for groups/family vault grant --servers "$(servers "${key[server]}")"
+may on den as alice for groups/family vault set --item Wifi --field password --value-from "$folder/secrets/wifi"
+may on den as alice for groups/family vault list
+[[ $said == *Wifi* ]]
+refused on bobs as bob for groups/family vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+refused on bobs as bob for groups/family encryption let_in
+may on den as owner for network encryption let_in
+ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/devices/den "$root/target/release/examples/recovery_key" "$folder/secrets/network-recovery"
+echo "  the den's window shows the network's recovery key once, which its owner writes down"
+may on den as owner for network vault grant --servers "$(servers "${key[server]}")"
+may on den as owner for network vault set --item Storage --field secret_key --value-from "$folder/secrets/storage"
+rm -rf "$folder/devices/den"
+echo "  the den is gone, with its keys. On the attic, the network's owner:"
+refused on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+may on attic as owner for network encryption let_in --key-from "$folder/secrets/network-recovery"
+may on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[spare]}")"
+may on attic as owner for network vault list
+[[ $said == *Storage* && $said != *Wifi* && $said != *GitHub* ]]
 
 say "No secret was answered, logged or stored anywhere but encrypted"
 # The chosen servers each keep a working copy of a database they write, on their own disk, which is the one place

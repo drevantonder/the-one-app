@@ -1,23 +1,42 @@
-// The Vault: someone's keys, sign-ins and accounts. A list of items, each opening beside it: its fields (a secret
+// The Vault: someone's keys, sign-ins and accounts, or a group's or the network's, for whoever owns them. A list of items, each opening beside it: its fields (a secret
 // one is typed and never shown again), the sites its secrets go to, and what may use it. Above them, what's been
 // asked for and waits for an answer. Below, the servers that open the Vault, and which devices hold its person's
 // key, since only one of those chooses the servers.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import "./app.css"
-import { Button, call, changed, Checkbox, confirm, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Sheet, showRecoveryKey, Skeleton, Split, Switch, toast, useRecoveryKey } from "ui"
+import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Split, Switch, toast, useRecoveryKey } from "ui"
 
-/// Which servers open the Vault and which may, what this device holds of its person's key, and the items.
-const opened = createMemo(() => call("vault_opened_by").then(JSON.parse))
-const key = createMemo(() => call("encryption_key").then(JSON.parse))
-const kept = createMemo(() => (opened().servers.length ? call("vault_list").then(JSON.parse) : { items: [], requests: [], plugins: [] }))
+/// Whose Vault this is: a person's, a group's or the network's. Left unchosen, it's whoever the app was opened for.
+const [whose, setWhose] = createSignal()
+const ask = (tool, inputs) => call(tool, inputs, { for: whose() }).then(JSON.parse)
+
+/// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
+const opened = createMemo(() => ask("vault_opened_by"))
+const key = createMemo(() => ask("encryption_key"))
+const kept = createMemo(() => (opened().servers.length ? ask("vault_list") : { items: [], requests: [], plugins: [] }))
 const again = () => [opened, key, kept].forEach(refresh)
 changed(again)
+
+/// Whose Vaults its person can open here: theirs, each group they own, and the network if they own it.
+const owners = createMemo(async () => {
+  const me = (await call("sign-in_people").then(JSON.parse, () => []))[0]?.who
+  if (!me) return []
+  const [groups, network] = await Promise.all([
+    call("relations_groups", {}, { for: me }).then(JSON.parse, () => []),
+    call("relations_check", { artifact: "network", relation: "owner" }, { for: me }).then((said) => JSON.parse(said).may, () => false),
+  ])
+  const theirs = groups.filter((group) => group.owners.includes(me)).map((group) => ({ value: group.group, label: group.called, whose: /s$/i.test(group.called) ? `${group.called}'` : `${group.called}'s` }))
+  return [{ value: me, label: "Yours", whose: "your" }, ...theirs, ...(network ? [{ value: "network", label: "The network's", whose: "the network's" }] : [])]
+})
+/// Whose the Vault is, in a sentence: "your", "The Smiths's", "the network's".
+const whom = () => owners().find((owner) => owner.value === key().owner)?.whose ?? "your"
+const Whom = () => whom()[0].toUpperCase() + whom().slice(1)
 
 /// Does something that changes the Vault, and says what the server said if it wouldn't. → whether it did.
 async function does(tool, inputs) {
   try {
-    await call(tool, inputs)
+    await call(tool, inputs, { for: whose() })
     again()
     return true
   } catch (error) {
@@ -211,7 +230,7 @@ function OpenedBy() {
           {(server) => (
             <Row
               heading={server.name ?? "A server"}
-              text="Holds your Vault's key"
+              text={`Holds ${whom()} Vault's key`}
               end={<Switch aria-label={server.name ?? "A server"} checked={opened().servers.includes(server.key)} disabled={!holds()} onChange={(event) => choose(server.key, event.target.checked)} />}
             />
           )}
@@ -225,20 +244,20 @@ function OpenedBy() {
 function YourKey() {
   const others = () => key().devices.filter((device) => device.device !== key().device)
   return (
-    <Section heading="Your key">
+    <Section heading={`${Whom()} key`}>
       <Show
         when={holds()}
         fallback={
           <Problem
             warn
-            heading="This device doesn't hold your key"
-            text="It adds and uses items. Choosing the servers that open your Vault takes a device that holds your key."
+            heading={`This device doesn't hold ${whom()} key`}
+            text={`It adds and uses items. Choosing the servers that open ${whom()} Vault takes a device that holds the key.`}
             action={
               <>
-                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => asked && toast("Asked. Open Vault on a device that holds your key."))}>
+                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => asked && toast("Asked. Open Vault on a device that holds the key."))}>
                   Ask Another Device
                 </Button>
-                <Button variant="outline" onClick={() => useRecoveryKey().then(again)}>
+                <Button variant="outline" onClick={() => useRecoveryKey({ for: whose() }).then(again)}>
                   Use Recovery Key
                 </Button>
               </>
@@ -251,7 +270,7 @@ function YourKey() {
             {(device) => (
               <Row
                 heading={device.name}
-                text="Asks to hold your key"
+                text="Asks to hold the key"
                 end={
                   <Button variant="secondary" onClick={() => does("encryption_let_in", { device: device.device, name: device.name })}>
                     Let In
@@ -260,19 +279,37 @@ function YourKey() {
               />
             )}
           </For>
-          <Row heading="This device" text="Holds your key" />
-          <For each={others()}>{(device) => <Row heading={device.name} text="Holds your key" />}</For>
-          <Row heading="Recovery Key" text="For when every device is gone" onClick={showRecoveryKey} />
+          <Row heading="This device" text="Holds the key" />
+          <For each={others()}>{(device) => <Row heading={device.name} text="Holds the key" />}</For>
+          <Row heading="Recovery Key" text="For when every device is gone" onClick={() => showRecoveryKey({ for: whose() })} />
         </List>
       </Show>
     </Section>
   )
 }
 
-/// Making someone's key is the first thing, on the device they open the Vault on first. It shows them their
-/// recovery key then, which is the one time they're asked to write something down.
+/// Making someone's key is the first thing, on the device they open the Vault on first: theirs, or a group's or
+/// the network's, by one of its owners. It shows them its recovery key then, which is the one time they're asked
+/// to write something down.
 async function setUp() {
-  if (await does("encryption_let_in", {})) await showRecoveryKey()
+  if (await does("encryption_let_in", {})) await showRecoveryKey({ for: whose() })
+}
+
+/// Which Vault shows, where its person owns more than their own.
+function Whose() {
+  const collection = createMemo(() => createListCollection({ items: owners() }))
+  const pick = ({ value }) => {
+    setOpen()
+    setSheet()
+    setWhose(value[0])
+  }
+  return (
+    <Show when={owners().length > 1}>
+      <Field label="Whose">
+        <Select collection={collection()} value={[key().owner]} onValueChange={pick} />
+      </Field>
+    </Show>
+  )
 }
 
 function Vault() {
@@ -290,9 +327,10 @@ function Vault() {
           </Show>
         }
       >
-        <Show when={key().check} fallback={<Empty action={<Button onClick={setUp}>Set Up</Button>}>Keys and sign-ins are kept here, encrypted. Yours aren't set up yet.</Empty>}>
+        <Whose />
+        <Show when={key().check} fallback={<Empty action={<Button onClick={setUp}>Set Up</Button>}>Keys and sign-ins are kept here, encrypted. Set up {whom()} key first.</Empty>}>
           <Show when={!opened().servers.length}>
-            <Problem warn heading="No server opens your Vault" text={holds() ? "Choose one below. Until then it keeps nothing." : "Choose one from a device that holds your key. Until then it keeps nothing."} />
+            <Problem warn heading={`No server opens ${whom()} Vault`} text={holds() ? "Choose one below. Until then it keeps nothing." : "Choose one from a device that holds the key. Until then it keeps nothing."} />
           </Show>
           <Show when={kept().requests.length}>
             <Section heading="Asked for">
