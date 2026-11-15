@@ -53,7 +53,7 @@ defmodule Mix.Tasks.Network do
   """
   use Mix.Task
   alias OneCore.{Edge, Iroh, Server, Servers, User}
-  alias OneCore.Plugins.Installed
+  alias OneCore.Plugins.{Deploy, Installed}
 
   @root Path.expand("..", __DIR__)
 
@@ -119,6 +119,8 @@ defmodule Mix.Tasks.Network do
 
     # The plugins are there first, so the ones that keep who may do what and who signs in are told who the first
     # owner is, and the server's log says where they join.
+    Deploy.await_bundled()
+
     if owner = options[:owner] do
       case User.make_first_owner("users/" <> owner) do
         :ok -> Mix.shell().info("users/#{owner} is the network's first owner.")
