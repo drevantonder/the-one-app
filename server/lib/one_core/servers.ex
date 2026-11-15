@@ -12,7 +12,8 @@ defmodule OneCore.Servers do
   So a server acts for someone once both said so: they put it on their list, which is what gives it their blobs,
   and its owner chose them as a member, which is what has it run their plugins on its machine.
 
-  What's read of this is kept until this server next looks (`forget/0`), so a call asks the bucket nothing.
+  What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
+  (`look/1`) or forgets it all (`forget/0`).
   """
   alias OneCore.{Bucket, Server}
 
@@ -139,6 +140,22 @@ defmodule OneCore.Servers do
     end
   end
 
+  @doc """
+  Reads again what's kept of the servers acting for `owner`: their list, and what each server on it acts for and
+  has installed. Until it's read, what was kept is what's asked. The network's first owner is the network's.
+  """
+  def look(owner) do
+    again({:listed, owner})
+    servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}], do: what
+    Enum.each(if(owner == @network, do: [:first_owner | servers], else: servers), &again/1)
+  end
+
+  defp again(what) do
+    with true <- :ets.whereis(__MODULE__) != :undefined,
+         [{^what, _kept, read}] <- :ets.lookup(__MODULE__, what),
+         do: :ets.insert(__MODULE__, {what, read.(), read})
+  end
+
   @doc "Forgets what was read, so that it's read again when next asked for."
   def forget do
     if :ets.whereis(__MODULE__) != :undefined, do: :ets.delete_all_objects(__MODULE__)
@@ -151,12 +168,12 @@ defmodule OneCore.Servers do
   @doc "What `read` gave for `what` when it was last asked, which is asked again where nothing keeps it."
   def kept(what, read) do
     case :ets.whereis(__MODULE__) != :undefined and :ets.lookup(__MODULE__, what) do
-      [{^what, kept}] ->
+      [{^what, kept, _read}] ->
         kept
 
       [] ->
         kept = read.()
-        :ets.insert(__MODULE__, {what, kept})
+        :ets.insert(__MODULE__, {what, kept, read})
         kept
 
       false ->

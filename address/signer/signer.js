@@ -25,6 +25,11 @@ const SERVER = /^servers\/([0-9a-f]{64})\//;
  * anything where no plugin decides who may.
  */
 const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|added|servers)|network\/owner)$/;
+/**
+ * That a user, a group or the network added a plugin is a blob under the plugin, `added/<who>`, which a server
+ * acting for them writes and removes, whoever's the plugin is: a deploy of it tells their servers.
+ */
+const ADDED = /^(?:(?:users|groups)\/[^/]+\/|network\/)plugins\/[^/]+\/added\/((?:users|groups)\/[^/]+|network)$/;
 /** A blob's key says whose it is by how it starts: a user's or a group's prefix, or the network's. */
 const OWNER = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
 const owner = (key) => OWNER.exec(key)?.[0];
@@ -139,7 +144,9 @@ async function sign(env, by, pass, body) {
   const server = SERVER.exec(key)?.[1];
   const reads = ask.read !== undefined || ask.list !== undefined;
   const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await admits(env, by, pass));
-  if (!listed && !first && !open) return refuse(403, "You aren't on its list of servers");
+  const adder = (ask.write !== undefined || ask.remove !== undefined) && ADDED.exec(key)?.[1];
+  const added = adder && (await list(env, adder + "/"))?.includes(by);
+  if (!listed && !first && !open && !added) return refuse(403, "You aren't on its list of servers");
 
   const url = new URL(env.BUCKET);
   const headers = {};

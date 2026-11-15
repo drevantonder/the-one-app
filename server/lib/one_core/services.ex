@@ -5,8 +5,8 @@ defmodule OneCore.Services do
   A service runs on each server whose owner installed it there. What a server has installed is a blob of its own,
   `servers/<its key>/services`: each service's name with its plugin, by its artifact's name. Only that server
   writes it. Every server keeps what the servers it asked about have installed, as it last read it
-  (`OneCore.Servers`), so calling a service asks the bucket nothing. It reads again when a server tells it to, and
-  when it knows of none that runs a service.
+  (`OneCore.Servers`), so calling a service asks the bucket nothing. It reads again when it looks at whoever the
+  servers act for (`OneCore.Server.look/1`), and when it knows of none that runs a service.
 
   Each service installed here is a process (`OneCore.Plugins.Process`) for as long as its plugin has it. One that
   stops is started again, whatever stopped it, and the server carries on meanwhile. This process only keeps
@@ -33,15 +33,12 @@ defmodule OneCore.Services do
     Enum.sort_by(running, &(&1 != Server.key()))
   end
 
-  @doc "Forgets which servers act for whom and what each has installed, so that it's read again."
-  def look, do: Servers.forget()
-
   @doc """
   The services of the plugins something that runs for `who` finds, as the bucket has them now: each one's
   `plugin`, its `service` name, what it `needs` of a machine, and the `servers` that run it.
   """
   def list(who) do
-    look()
+    Servers.forget()
     acting = Servers.acting(owner(who))
 
     for {plugin, version} <- Enum.sort(Plugins.running(who)), %{name: name, needs: needs} <- version.services do

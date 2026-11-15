@@ -11,6 +11,9 @@ defmodule OneCore.Plugins.Kept do
   alias OneCore.Bucket
   alias OneCore.Plugins.Version
 
+  @doc "Whose the plugin `artifact` is: a user, a group or the network."
+  def whose(artifact), do: String.replace_suffix(artifact, "/plugins/" <> Path.basename(artifact), "")
+
   @doc "One file of the set of the plugin `artifact`'s files named `code`, which needn't be the set running now."
   def file(artifact, code, path) do
     with {:ok, text, _tag} <- Bucket.read("#{artifact}/code/#{code}/#{path}"), do: {:ok, text}

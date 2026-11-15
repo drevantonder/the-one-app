@@ -6,6 +6,9 @@ defmodule OneCore.Plugins.Added do
   them, and then among what's added for the network, which is for everyone in it (`OneCore.Plugins.chain/1`). A
   plugin has an artifact of its own for each one it was added for, `<theirs>/own/<name>`, and the plugins it uses
   are found the same way from whoever it was added for.
+
+  That someone added a plugin is kept with the plugin too, as the blob `added/<who>` in its artifact, which a
+  server acting for them writes: so a deploy tells their servers that it has a new version.
   """
   alias OneCore.{Bucket, Plugins, Server}
   alias OneCore.Plugins.{Deploy, Kept, Version}
@@ -31,6 +34,7 @@ defmodule OneCore.Plugins.Added do
          {:ok, version} <- newest_here(artifact, code) || Kept.loaded(artifact, code),
          :ok <- Deploy.fits(owner, name, version),
          :ok <- note(owner, added) do
+      Bucket.write("#{artifact}/added/#{owner}", "")
       Plugins.look(owner, [{artifact, number, {:ok, version}}])
       Server.tell_servers([owner])
     else
@@ -53,10 +57,22 @@ defmodule OneCore.Plugins.Added do
       _ -> {:error, "No plugin named #{name} is added for #{owner}"}
     end
 
-    case used_by do
-      [] -> with :ok <- note(owner, removed), do: Plugins.look(owner) && Server.tell_servers([owner])
-      _ -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
+    with [] <- used_by,
+         artifact = Plugins.plugin(owner, name),
+         :ok <- note(owner, removed) do
+      {added, _tag} = read(owner)
+      if artifact not in Map.values(added), do: Bucket.remove("#{artifact}/added/#{owner}")
+      Plugins.look(owner)
+      Server.tell_servers([owner])
+    else
+      {:error, why} -> {:error, why}
+      used_by -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
     end
+  end
+
+  @doc "Who the plugin `artifact` is added for, besides whoever's it is, as they added it."
+  def added_for(artifact) do
+    for blob <- Bucket.list("#{artifact}/added/"), do: String.replace_prefix(blob, "#{artifact}/added/", "")
   end
 
   @doc "Whether `name` is one a plugin is added by: `:ok`, or `{:error, why}`."

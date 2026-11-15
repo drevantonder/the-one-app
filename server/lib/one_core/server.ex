@@ -8,7 +8,7 @@ defmodule OneCore.Server do
   Everything a server keeps on its machine is in its home.
   """
   use GenServer
-  alias OneCore.{Address, Hooks, Iroh, Mcp, Plugins, Servers, Services}
+  alias OneCore.{Address, Hooks, Iroh, Mcp, Plugins, Servers}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -72,15 +72,31 @@ defmodule OneCore.Server do
   end
 
   @doc """
-  Looks in the bucket for what other servers put there: the servers acting and the services they run, and the
-  newer versions of the plugins added for `owners` and for everyone this server has looked at before. Its clients
-  are told if a plugin changed.
+  Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
+  and the services it runs, and what's added for them, running the newest version of each plugin. Looking at the
+  network forgets whose each device is too, which the network's plugins say. Its clients are told if a plugin
+  changed.
+
+  A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
+  ago (`OneCore.Plugins`), and when it comes back (`came_back/0`). Nothing else has it look, so someone nobody
+  uses costs nothing.
   """
-  def look(owners \\ []) do
-    Hooks.forget()
-    Services.look()
-    if Enum.any?(Enum.map(owners, &Plugins.look/1) ++ [Plugins.look()]), do: changed()
+  def look(owner) do
+    Servers.look(owner)
+    if owner == "network", do: Hooks.forget(["device"])
+    if Plugins.look(owner), do: changed()
     :ok
+  end
+
+  @doc """
+  This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
+  missed being told something: it forgets what it kept of servers and hooks, looks at once at who it acts for, and
+  at everyone else it has looked at behind the next request for them (`OneCore.Plugins.look_again/0`).
+  """
+  def came_back do
+    Hooks.forget()
+    Servers.forget()
+    Enum.each(Plugins.look_again(), &look/1)
   end
 
   # A connection is opened when there's none, to where the server says it is now. A server whose connection no

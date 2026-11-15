@@ -31,7 +31,7 @@ defmodule OneCore.Plugins.Deploy do
            {:ok, number} <- Kept.keep(artifact, name, kept, files),
            :ok <- Added.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
         Plugins.look(owner, [{artifact, number, {:ok, version}}])
-        Server.tell_servers([owner])
+        Server.tell_servers(Enum.uniq([owner | Added.added_for(artifact)]))
         {:ok, number, warnings}
       else
         {:error, why} ->
@@ -96,7 +96,7 @@ defmodule OneCore.Plugins.Deploy do
         built_with != nil,
         kit = Plugins.running(owner)["ui"],
         kit != nil and kit.code != built_with,
-        whose = String.replace_suffix(artifact, "/plugins/" <> Path.basename(artifact), ""),
+        whose = Kept.whose(artifact),
         Servers.here?(whose) and Plugins.plugin(whose, Path.basename(artifact)) == artifact,
         uniq: true do
       with {:error, why} <- deploy(whose, Path.basename(artifact), Kept.source(artifact, version.code)),

@@ -2,11 +2,13 @@
 # Proves, with two real servers on this machine and a folder as their bucket, that a plugin's service runs on the
 # machine it's installed on and is called from wherever the rest of its plugin runs. The services are the two
 # plugins': `folder`, a test plugin that watches a folder, and `load`, which brings a program in Rust. They're installed on
-# server b only, and called through server a.
+# server b only, and called through server a. It also proves that a network nobody uses reads nothing from its
+# bucket, and that b picks up what it wasn't told: behind the next call, and when it starts again.
 #
 #     cargo build --release && mise exec -- server/test/services.sh
 #
-# The machine needs rustc, for `load`.
+# The machine needs rustc, for `load`, and Python, to count what's read of the bucket. It takes about seven minutes,
+# five of them with nothing used.
 source "$(dirname "$0")/servers.sh"
 
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.2f", all[int((NR + 1) / 2)] / 1000 }'; }
@@ -31,6 +33,25 @@ timed() {
   exec {MCP[1]}>&-
   wait "$MCP_PID"
   [[ $answer == *'"result"'* && $answer != *isError* ]] || { echo "$2 through $1 wasn't answered: $answer"; exit 1; }
+}
+
+# How many times the bucket is read in the seconds given: files and folders opened in it, by anything.
+reads() {
+  python3 -I - "$bucket" "$1" <<'EOF'
+import ctypes, os, select, struct, sys, time
+libc = ctypes.CDLL(None)
+watch = libc.inotify_init()
+for folder in [here for here, _, _ in os.walk(sys.argv[1])]:
+    libc.inotify_add_watch(watch, folder.encode(), 0x20)  # IN_OPEN
+end, opened = time.time() + float(sys.argv[2]), 0
+while (left := end - time.time()) > 0:
+    if select.select([watch], [], [], left)[0]:
+        events = os.read(watch, 65536)
+        while events:
+            opened += 1
+            events = events[16 + struct.unpack_from("iIII", events)[3]:]
+print(opened)
+EOF
 }
 
 # A plugin of this proof's own: a tool that calls nothing, to time the others against, one that kills a service's
@@ -190,6 +211,52 @@ echo "it answered again $(since "$began") later, from the process $(program): $(
 kill -0 "${group[b]}"
 echo "server b is the process it was all along, and answers: $(ask b proof ping)"
 
+say "Nobody uses the network for five minutes, which is how long a server goes before looking again at whoever it's asked for"
+echo "the bucket was read $(reads 305) times meanwhile"
+
+say "b is frozen, and proof is deployed again through a, which can't tell b"
+kill -STOP -- "-${group[b]}"
+sed -i 's/{:reply, 2, state}/{:reply, 3, state}/' "$folder/proof/proof.ex"
+began=$(now)
+ONE_FOR=network ask a deploy --name proof --files-from "$folder/proof"
+echo "the deploy took $(since "$began"): a gave up on b after 3 seconds"
+kill -CONT -- "-${group[b]}"
+seen[b]=$(wc -l <"$folder/b.log")
+echo "b wakes, and nothing tells it. Asked through b, a call runs on what b has: $(ask b proof version)"
+grep -q -m1 "proof: version" <(tail -f --pid="${group[b]}" -n +$((seen[b] + 1)) "$folder/b.log")
+echo "and b looked behind it: $(tail -n +$((seen[b] + 1)) "$folder/b.log" | grep -o "network/plugins/proof: version.*")"
+echo "the next call runs on that: $(ask b proof version)"
+
+say "The owner deploys a plugin of their own, whose service is installed on b, and nobody calls it through b"
+mkdir "$folder/echo"
+cat >"$folder/echo/echo.ex" <<'EOF'
+defmodule Echo do
+  @behaviour OneCore.Plugin
+
+  @impl true
+  def tools, do: [%{name: "hello", read_only: true, description: "Asks this plugin's service", inputs: %{type: "object"}}]
+
+  @impl true
+  def call("hello", _inputs, call), do: OneCore.Service.call(call, Echo.Hello, :hello)
+end
+
+defmodule Echo.Hello do
+  use GenServer
+  @behaviour OneCore.Service
+
+  @impl OneCore.Service
+  def needs, do: "Nothing"
+
+  def hello(_service), do: "Hello from version 1 on #{OneCore.Service.server()}"
+
+  @impl GenServer
+  def init(_), do: {:ok, nil}
+end
+EOF
+ask a deploy --name echo --files-from "$folder/echo"
+ask a install_service --plugin echo --service Echo.Hello --server "${key[b]}"
+ask a echo hello
+
 say "The server that runs the services is stopped, and the caller is told"
 stop b
 began=$(now)
@@ -201,7 +268,12 @@ echo "and again: $(ask a load now || true) ($(since "$began"))"
 echo "what arrived is still listed, through a: $(ask a folder list | grep -o '"name":"[^"]*"' | tr '\n' ' ')"
 echo "nothing of b is left running: $(program | wc -l) programs"
 
-say "The server comes back, and its services with it"
+say "While b is stopped, the owner's plugin is deployed again through a"
+sed -i 's/version 1/version 2/' "$folder/echo/echo.ex"
+ask a deploy --name echo --files-from "$folder/echo"
+
+say "The server comes back, and its services with it, on what was deployed while it was stopped"
 start b
 ask a folder watching | sed "s|$folder|...|g"
 ask a load now
+ask a echo hello

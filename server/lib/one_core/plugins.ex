@@ -11,7 +11,9 @@ defmodule OneCore.Plugins do
   A server looks in the bucket at what's added for the network and for whoever it acts for when it starts, and at
   what's added for anyone else when it's first asked for them. Only a server acting for whoever a plugin was added for
   runs it for them: another passes the call on to one that does. It looks again when it's told to, when it's asked for
-  a plugin it doesn't run, and every so often (`OneCore.Server.look/0`).
+  a plugin it doesn't run, when it comes back (`OneCore.Server.came_back/0`), and behind a request for someone it
+  last looked at more than five minutes ago: the request runs on what the server has, and the look is for what it
+  wasn't told. So nothing is read for someone nobody uses.
   """
   use GenServer
   require Logger
@@ -19,6 +21,9 @@ defmodule OneCore.Plugins do
   alias OneCore.Plugins.{Added, Deploy, Kept, Version}
 
   @network "network"
+
+  # How long after looking at someone a request for them has this server look again, behind it, in milliseconds.
+  @looks_after :timer.minutes(5)
 
   # This, and after it what runs plugins' processes and what tells the plugins that hear a hook, which hold
   # versions here.
@@ -121,10 +126,20 @@ defmodule OneCore.Plugins do
   def used(owner, names), do: GenServer.call(__MODULE__, {:used, owner, names})
 
   @doc """
-  Looks in the bucket at what's added for everyone this server has looked at before, and runs each plugin's newest
-  version. Gives whether anything changed.
+  Has everyone this server has looked at looked at again behind the next request for them, and gives who to look
+  at now: the network, whoever this server acts for, and whoever's plugins have services installed here.
   """
-  def look, do: Enum.any?(Enum.map(GenServer.call(__MODULE__, :owners), &look(&1)))
+  def look_again do
+    GenServer.call(__MODULE__, :look_again)
+    here(Server.key())
+  end
+
+  # Whose plugins a server runs whether or not it's asked for them: the network's, those of whoever it acts for, and
+  # the plugins whose services it runs, which are added for whoever's they are.
+  defp here(key) do
+    services = for {plugin, _service} <- Servers.installed(key), do: Kept.whose(plugin)
+    Enum.uniq([@network | Servers.acts_for(key)] ++ services)
+  end
 
   @doc """
   Looks in the bucket at what's added for `owner`, and runs each plugin's newest version. Gives whether anything
@@ -143,6 +158,10 @@ defmodule OneCore.Plugins do
       for process <- __MODULE__.Process.all(artifact), process != self(), do: __MODULE__.Process.follow(process)
       Services.start(artifact)
     end
+
+    for {artifact, number, {:ok, _version}} <- loaded ++ newer,
+        artifact in changed,
+        do: Logger.info("#{artifact}: version #{number} runs here")
 
     if any do
       Hooks.forget()
@@ -165,17 +184,16 @@ defmodule OneCore.Plugins do
     end
   end
 
-  # A server starts with the newest version of every plugin added for the network and for whoever it acts for.
-  # `added` is what's added for each owner it has looked at, `running` and `newest` are by plugin, and `calls` are
-  # the versions each call holds.
+  # A server starts with the newest version of every plugin it runs whether or not it's asked for them. `added` is
+  # what's added for each owner it has looked at, and `looked` when it last did; `running` and `newest` are by
+  # plugin, and `calls` are the versions each call holds.
   @impl true
   def init(nil) do
     Hooks.keep()
     {:ok, key} = Iroh.key(Server.key_file())
 
     state =
-      for owner <- Enum.uniq([@network | Servers.acts_for(key)]),
-          reduce: %{added: %{}, running: %{}, newest: %{}, calls: %{}} do
+      for owner <- here(key), reduce: %{added: %{}, looked: %{}, running: %{}, newest: %{}, calls: %{}} do
         state ->
           {added, _tag} = Added.read(owner)
           newer = Kept.newer(Enum.uniq(Map.values(added)), state.newest)
@@ -193,7 +211,7 @@ defmodule OneCore.Plugins do
   end
 
   def handle_call(:newest, _from, state), do: {:reply, state.newest, state}
-  def handle_call(:owners, _from, state), do: {:reply, Map.keys(state.added), state}
+  def handle_call(:look_again, _from, state), do: {:reply, :ok, %{state | looked: %{}}}
   def handle_call(:added, _from, state), do: {:reply, state.added, state}
   def handle_call({:version, artifact}, _from, state), do: {:reply, state.running[artifact], state}
 
@@ -202,6 +220,8 @@ defmodule OneCore.Plugins do
   end
 
   def handle_call({:running, owners}, _from, state) do
+    state = behind(state, owners)
+
     if Enum.all?(owners, &is_map_key(state.added, &1)) do
       # Their own are found before the network's.
       {:reply, running(state, Enum.reduce(Enum.reverse(owners), %{}, &Map.merge(&2, state.added[&1]))), state}
@@ -224,6 +244,8 @@ defmodule OneCore.Plugins do
 
   # The caller is watched, so a call that dies has ended too.
   def handle_call({:begin, owners, name}, {caller, _}, state) do
+    state = behind(state, owners)
+
     with {at, _artifact} <- found(state, owners, name),
          {:ok, versions} <- used(state, [at, @network], [name], %{}) do
       call = Process.monitor(caller)
@@ -252,6 +274,22 @@ defmodule OneCore.Plugins do
   @impl true
   def handle_info({:DOWN, call, :process, _, _}, state), do: {:noreply, ended(state, call)}
 
+  # Whoever a request is for, and the network, whose plugins it may run, are looked at behind it if this server last
+  # looked at them more than five minutes ago, once however many requests come meanwhile. One it has never looked at
+  # is looked at before the request instead.
+  defp behind(state, owners) do
+    now = System.monotonic_time(:millisecond)
+
+    stale =
+      for owner <- Enum.uniq(owners ++ [@network]),
+          is_map_key(state.added, owner),
+          Map.get(state.looked, owner, now - @looks_after) <= now - @looks_after,
+          do: owner
+
+    for owner <- stale, do: Task.start(fn -> Server.look(owner) end)
+    %{state | looked: Map.merge(state.looked, Map.new(stale, &{&1, now}))}
+  end
+
   # What's added for `owner` is `added` now, and each version in `loaded` takes over from its plugin's if it's
   # newer: deploys that finish out of order still leave the one with the highest number, as the bucket has it. A
   # version that doesn't compile here leaves the one before it running. A plugin that's added for nobody this
@@ -275,7 +313,8 @@ defmodule OneCore.Plugins do
       end)
 
     any = changed != [] or state.added[owner] != added
-    state = put_in(state.added[owner], added)
+    state = %{state | added: Map.put(state.added, owner, added)}
+    state = put_in(state.looked[owner], System.monotonic_time(:millisecond))
     kept = for {_owner, added} <- state.added, {_name, artifact} <- added, into: MapSet.new(), do: artifact
     {running, dropped} = Map.split_with(state.running, fn {artifact, _version} -> artifact in kept end)
 

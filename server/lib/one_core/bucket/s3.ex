@@ -5,7 +5,8 @@ defmodule OneCore.Bucket.S3 do
   the blob belongs to, and the server sends what was signed. The address is `where`.
 
   The signer signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
-  tag is its ETag. What the signer won't sign for this server raises `OneCore.Bucket.Refused`.
+  tag is its ETag. What the signer won't sign for this server raises `OneCore.Bucket.Refused`, and a signer or
+  bucket that can't be reached `OneCore.Bucket.Unreachable`.
   """
   @behaviour OneCore.Bucket
   require Record
@@ -99,13 +100,13 @@ defmodule OneCore.Bucket.S3 do
   # Has the signer sign `ask`, and sends what it signed.
   defp request(address, ask, data \\ nil) do
     %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask)
-    Req.request!(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
+    sent(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
   end
 
   defp signed(address, ask) do
     ask = JSON.encode!(ask)
 
-    case Req.post!(address <> "/signer/sign", body: ask, headers: Address.signed("/signer/sign", ask)) do
+    case sent(method: :post, url: address <> "/signer/sign", body: ask, headers: Address.signed("/signer/sign", ask)) do
       %{status: 200, body: %{"method" => _method} = signed} ->
         signed
 
@@ -118,6 +119,12 @@ defmodule OneCore.Bucket.S3 do
       refused ->
         raise refusal(refused)
     end
+  end
+
+  defp sent(request) do
+    Req.request!(request)
+  rescue
+    unreachable in Req.TransportError -> raise OneCore.Bucket.Unreachable, Exception.message(unreachable)
   end
 
   defp tag(got), do: got |> Req.Response.get_header("etag") |> hd()

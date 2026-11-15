@@ -22,8 +22,9 @@ there.
 
 `cd server && mix test` runs the tests. The proofs run real servers and the real app and say what happened:
 `server/test/takeover.sh` stops servers in the middle of writes, `server/test/services.sh` runs services on one of
-two servers, `server/test/who.sh` shows who may do what as several users, each with their own plugins and servers,
-and a scheduled job across a takeover, on a folder or with `--address` through the signer,
+two servers, with one that picks up what it wasn't told and a network nobody uses reading nothing,
+`server/test/who.sh` shows who may do what as several users, each with their own plugins and servers, and a
+scheduled job across a takeover, on a folder or with `--address` through the signer,
 `address/proof/proof.sh` runs a whole address with nothing deployed, `address/proof/sign-in.sh` has people sign in
 with passkeys in real browsers and let in devices and an assistant, and `client/shell/test/isolation.sh` has an app
 try everything it mustn't reach.

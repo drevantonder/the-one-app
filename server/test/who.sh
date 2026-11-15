@@ -384,6 +384,9 @@ start_for alices users/alice
 grep -q "A server is running" "$folder/alices.log" && echo "  started again, it's running"
 may via alices as alice diary write --text "At home"
 may via alices as alice journal write --text "With everyone"
+may as owner relations share --artifact network/plugins/reader --relation viewer --who users/alice
+may via alices as alice add --plugin network/plugins/reader --name mine
+may via alices as alice remove --name mine
 refused via alices as bob diary write --text "At alice's"
 refused as bob add_server --key "${key[alices]}"
 refused as bob add_member --server "${key[alices]}" --who users/bob

@@ -26,6 +26,11 @@ defmodule OneCore.Bucket do
     defexception [:message]
   end
 
+  defmodule Unreachable do
+    @moduledoc "What a bucket raises when it couldn't be reached, so it was asked nothing."
+    defexception [:message]
+  end
+
   @doc "A blob and its tag."
   def read(key), do: bucket(:read, [key])
 
@@ -50,8 +55,21 @@ defmodule OneCore.Bucket do
   """
   def link(key, mode) when mode in [:read, :write], do: bucket(:link, [key, mode])
 
+  # A server that couldn't reach the bucket may have missed being told something meanwhile, so the first answer
+  # after has it look again (`OneCore.Server.came_back/0`).
   defp bucket(function, arguments) do
     {module, where} = Application.fetch_env!(:one_core, :bucket)
-    apply(module, function, [where | arguments])
+    answer = apply(module, function, [where | arguments])
+
+    if :persistent_term.get(Unreachable, false) do
+      :persistent_term.erase(Unreachable)
+      Task.start(&OneCore.Server.came_back/0)
+    end
+
+    answer
+  rescue
+    unreachable in Unreachable ->
+      if not :persistent_term.get(Unreachable, false), do: :persistent_term.put(Unreachable, true)
+      reraise unreachable, __STACKTRACE__
   end
 end

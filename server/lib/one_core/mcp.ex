@@ -58,9 +58,14 @@ defmodule OneCore.Mcp do
         Hooks.forget(for hook <- List.wrap(said["params"]["hooks"]), is_binary(hook), do: hook)
         ""
 
-      # Another server saying there's something new in the bucket.
+      # Another server saying there's something new in the bucket for some owners, or with none, this server saying
+      # it can reach its network's address again.
       {:ok, %{"method" => "notifications/one/look"} = said} ->
-        Server.look(for(owner <- List.wrap(said["params"]["for"]), User.owner?(owner), do: owner))
+        case said["params"]["for"] do
+          nil -> Server.came_back()
+          owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Server.look(owner)
+        end
+
         ""
 
       {:ok, %{"method" => _notification}} ->
