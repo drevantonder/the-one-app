@@ -3,7 +3,7 @@
 // Touch and hold, or right-click, for what an app or a widget offers; hold and move to put it somewhere else.
 import { createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, client, confirm, Empty, Icon, List, open, Problem, Row, Search, Section, Sheet, toast, Widget } from "ui"
+import { call, changed, client, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 
 const SIZES = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
@@ -210,47 +210,9 @@ function Adding() {
   )
 }
 
-/// Every page's apps and all of Settings, each a section that folds, narrowed by what's typed.
-function Find(props) {
-  const [typed, setTyped] = createSignal("")
-  const found = (apps) => apps.filter((app) => app.name.toLowerCase().includes(typed().trim().toLowerCase()))
-  const sections = () => [
-    ...props.home.pages.map((page) => ({ name: page.name, for: page.for, apps: found(page.items.filter((item) => item.app)) })),
-    { name: "Settings", apps: found(props.home.settings) },
-  ].filter(({ apps }) => apps.length)
-  const go = (section, app) => (props.onClose(), open(app.app, { for: section.for }))
-  const first = (event) => {
-    event.preventDefault()
-    const [section] = sections()
-    if (section) go(section, section.apps[0])
-  }
-  return (
-    <Sheet heading="Search" open={props.open} onClose={props.onClose}>
-      <form class="find" onSubmit={first}>
-        <Search placeholder="Apps and Settings" aria-label="Search apps and Settings" autofocus onInput={(event) => setTyped(event.target.value)} />
-        <Show when={sections().length} fallback={<Empty>Nothing by that name.</Empty>}>
-          <For each={sections()} keyed={(section) => section.name}>
-            {(section) => (
-              <details open>
-                <summary><Icon name="caret-right" />{section().name}</summary>
-                <List>
-                  <For each={section().apps} keyed={(app) => app.app}>
-                    {(app) => <Row heading={app().name} start={<img src={app().icon} alt="" />} onClick={() => go(section(), app())} />}
-                  </For>
-                </List>
-              </details>
-            )}
-          </For>
-        </Show>
-      </form>
-    </Sheet>
-  )
-}
-
 function Home(props) {
   let strip
   const [at, setAt] = createSignal(0)
-  const [finding, setFinding] = createSignal(false)
   const [network, setNetwork] = createSignal("")
   const names = () => [...props.home.pages.map((page) => page.name), "Settings"]
   const go = (to, smooth = true) => strip.scrollTo({ left: Math.max(0, Math.min(names().length - 1, to)) * strip.clientWidth * (document.dir === "rtl" ? -1 : 1), behavior: smooth ? "smooth" : "instant" })
@@ -262,7 +224,6 @@ function Home(props) {
       if (event.target.closest?.("input, textarea, dialog")) return
       if (event.key === "ArrowRight") go(at() + 1)
       else if (event.key === "ArrowLeft") go(at() - 1)
-      else if (event.key === "/" || ((event.metaKey || event.ctrlKey) && event.key === "k")) (event.preventDefault(), setFinding(true))
     }
     addEventListener("keydown", keys)
     return () => removeEventListener("keydown", keys)
@@ -306,14 +267,12 @@ function Home(props) {
       <footer>
         <p><span>{names()[at()]}</span><span class="network">{network()}</span></p>
         <nav class="dots" onPointerDown={slide} aria-label="Pages">
-          <button type="button" aria-label="Search" onClick={press(() => setFinding(true))}><Icon name="magnifying-glass" /></button>
           <For each={props.home.pages} keyed={(page) => page.who}>
             {(page, index) => <button type="button" class="dot" aria-label={page().name} aria-current={at() === index() ? "page" : undefined} onClick={press(() => go(index()))}><i /></button>}
           </For>
           <button type="button" aria-label="Settings" aria-current={at() === names().length - 1 ? "page" : undefined} onClick={press(() => go(names().length - 1))}><Icon name="gear-six" /></button>
         </nav>
       </footer>
-      <Find home={props.home} open={finding()} onClose={() => setFinding(false)} />
       <Offers />
       <Adding />
     </main>
