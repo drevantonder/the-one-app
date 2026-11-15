@@ -6,8 +6,8 @@ defmodule SignIn do
   `device` hook, and it's answered from that blob, so no call asks anything of the address.
 
   What a person does with their devices in the app is asked of the part at the address, which keeps them. A network
-  with an address is joined by invitation, its first owner's included: when it gets its first owner, the server's
-  log says where they join.
+  with an address that isn't being built is joined by invitation, its first owner's included: when it gets its first
+  owner, the server's log says where they join.
   """
   @behaviour OneCore.Plugin
   require Logger
@@ -70,9 +70,11 @@ defmodule SignIn do
     end
   end
 
-  # A network without an address has nobody to sign in, and is built with whoever a client says it acts as.
+  # Only a network that has an address and isn't being built has people sign in. One being built acts as whoever a
+  # client says, so its first owner joins nowhere.
   def hook("owner", %{"who" => "users/" <> name}, _call) do
-    if Application.get_env(:one_core, :address), do: Logger.info(invite(name))
+    signs_in = Application.get_env(:one_core, :address) && !Application.get_env(:one_core, :development, false)
+    if signs_in, do: Logger.info(invite(name))
     :ok
   end
 
