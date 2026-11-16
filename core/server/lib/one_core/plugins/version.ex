@@ -158,6 +158,8 @@ defmodule OneCore.Plugins.Version do
   listed of it is taken, and what each tool takes is read from its inputs again.
   """
   def described(artifact, description) do
+    # Its skills are as `OneCore.Skills` says them, whose names a server that has just started may not know yet.
+    Code.ensure_loaded!(Skills)
     said = :erlang.binary_to_term(description, [:safe])
     under = {:described, artifact, said.code}
 

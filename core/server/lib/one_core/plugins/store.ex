@@ -121,8 +121,7 @@ defmodule OneCore.Plugins.Store do
   The versions in the bucket of the plugins `artifacts` that are newer than the ones in `latest`: each one's
   plugin, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
   false the version described (`described/2`), leaving out one not described yet. One in sandbox mode is never
-  loaded here: it's described, by its own VM if no server has yet. Read at once: a bucket at an address is asked
-  for each over the internet.
+  loaded here, only described. Read at once: a bucket at an address is asked for each over the internet.
   """
   def newer(artifacts, latest, load \\ true) do
     artifacts
@@ -139,21 +138,11 @@ defmodule OneCore.Plugins.Store do
 
   @doc """
   The set of the plugin `artifact`'s files named `code`, as this server would run it: loaded, or described where
-  `load` is false, and in `sandbox` mode always described. `{:ok, version}`, or `:error`.
+  `load` is false, and in `sandbox` mode always described, as the server that deployed it described it in its own VM.
+  `{:ok, version}`, or `:error`.
   """
   def version(artifact, code, _load, true) do
-    with :error <- described(artifact, code),
-         {:ok, version} <- OneCore.Sandbox.describe(artifact, files(artifact, code)) do
-      describe(version)
-      {:ok, version}
-    else
-      {:ok, version} ->
-        {:ok, %{version | sandbox: true}}
-
-      {:error, why} ->
-        Logger.error("#{artifact} isn't updated here, because its latest version doesn't describe itself:\n#{why}")
-        :error
-    end
+    with {:ok, version} <- described(artifact, code), do: {:ok, %{version | sandbox: true}}
   end
 
   def version(artifact, code, true, false), do: loaded(artifact, code)

@@ -465,7 +465,15 @@ defmodule OneCore.Sandbox do
 
   @impl true
   def handle_continue({:start, sets}, state) do
-    cached = with path when is_binary(path) <- state.context.cache, {:ok, said} <- File.read(Path.join(path, "modules")), do: JSON.decode!(said), else: (_ -> nil)
+    # A VM started from what's kept marks it as in use.
+    cached =
+      with path when is_binary(path) <- state.context.cache,
+           {:ok, said} <- File.read(Path.join(path, "modules")) do
+        File.touch(path)
+        JSON.decode!(said)
+      else
+        _ -> nil
+      end
 
     case started(cached && state.context.cache) do
       {:ok, port} ->
@@ -699,6 +707,14 @@ defmodule OneCore.Sandbox do
     File.write!(Path.join(writing, "modules"), JSON.encode!(Map.delete(modules, "runtime")))
     File.rm_rf!(cache)
     File.rename!(writing, cache)
+
+    # What no VM has been started from for a month goes: its version, or this server's build, is long gone.
+    month_ago = System.os_time(:second) - 30 * 24 * 3600
+
+    for kept <- Path.wildcard(Path.join(Path.dirname(cache), "*")),
+        {:ok, %{mtime: used}} <- [File.stat(kept, time: :posix)],
+        used < month_ago,
+        do: File.rm_rf!(kept)
   rescue
     error -> Logger.warning("What a plugin's VM compiled wasn't kept: #{Exception.message(error)}")
   end
