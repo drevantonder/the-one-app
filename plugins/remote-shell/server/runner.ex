@@ -45,8 +45,7 @@ defmodule RemoteShell.Runner do
         cd: dir
       ])
 
-    {:os_pid, pid} = Port.info(program, :os_pid)
-    {exit, stdout} = read(program, pid, System.monotonic_time(:millisecond) + timeout * 1000, [])
+    {exit, stdout} = read(program, System.monotonic_time(:millisecond) + timeout * 1000, [])
     stderr = File.read!(errors)
     File.rm!(errors)
     stderr = if exit == -1, do: stopped(stderr, timeout), else: stderr
@@ -57,12 +56,14 @@ defmodule RemoteShell.Runner do
   end
 
   # Reads what the command prints until it ends, or stops it and everything it started once `until` passes.
-  defp read(program, pid, until, printed) do
+  # Its program's id is asked for only then: one that has ended already has none.
+  defp read(program, until, printed) do
     receive do
-      {^program, {:data, data}} -> read(program, pid, until, [printed | data])
+      {^program, {:data, data}} -> read(program, until, [printed | data])
       {^program, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
     after
       max(0, until - System.monotonic_time(:millisecond)) ->
+        {:os_pid, pid} = Port.info(program, :os_pid)
         System.cmd("kill", ["-KILL", "--", "-#{pid}"])
         Port.close(program)
         {-1, IO.iodata_to_binary(printed)}
