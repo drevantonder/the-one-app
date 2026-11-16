@@ -20,6 +20,8 @@ defmodule Backups.Run do
 
   # How many blobs are read from the bucket at once.
   @together 32
+  # How many objects are sent at once: more fill a home connection's upload, and each is slower.
+  @sending 8
 
   @doc "Backs up to `destination` now, and says what was sent and how long it took. A failure is kept as its problem."
   def back_up(call, destination) do
@@ -143,7 +145,7 @@ defmodule Backups.Run do
             failed -> {:failed, failed}
           end
         end,
-        max_concurrency: @together,
+        max_concurrency: @sending,
         timeout: :infinity
       )
       |> Enum.each(fn
