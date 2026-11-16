@@ -24,7 +24,7 @@
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
 # with them, One Core's Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships
-# with, with their NIFs built for every kind of machine (`tooling/nifs`), and the UI library's build, and the Bun it
+# with, with their NIFs and programs built for every kind of machine (`tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
 # target/builds/<build>.
 set -euo pipefail
@@ -215,7 +215,7 @@ for kind in "${servers[@]}"; do
   # their source, the UI library's build, which it builds apps against and serves, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
   git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
-  for nif in plugins/*/server/nif/*/*.so; do cp "$nif" "$release/shipped/${nif#plugins/}"; done
+  for built in plugins/*/server/nif/*/*.so plugins/*/server/bin/*/{linux,macos,windows}-*; do cp "$built" "$release/shipped/${built#plugins/}"; done
   cp -R core/ui/dist "$release/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 

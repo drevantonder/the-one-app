@@ -2,7 +2,7 @@
 # client and its server's NIFs, the clients, and the native code of the plugins The One App ships with.
 [workspace]
 resolver = "3"
-members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "plugins/*/server/nif/*", "plugins/*/client/native"]
+members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "plugins/*/server/nif/*", "plugins/*/server/bin/*", "plugins/*/client/native"]
 
 [workspace.package]
 version = "0.1.0"

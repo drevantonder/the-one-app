@@ -115,8 +115,18 @@ defmodule OneCore.Sandbox do
       {^port, {:exit_status, status}} -> {IO.iodata_to_binary(output), status}
     after
       :timer.minutes(5) ->
-        with {:os_pid, pid} <- Port.info(port, :os_pid), do: System.cmd("kill", ["-KILL", to_string(pid)])
+        kill(port)
         {IO.iodata_to_binary(output) <> "\nIt was stopped after five minutes.", 1}
+    end
+  end
+
+  # Kills what a port runs, the wall, and with it the program behind it, which goes with the wall everywhere.
+  defp kill(port) do
+    with {:os_pid, pid} <- Port.info(port, :os_pid) do
+      case :os.type() do
+        {:win32, _} -> System.cmd("taskkill", ["/F", "/PID", to_string(pid)], stderr_to_stdout: true)
+        _ -> System.cmd("kill", ["-KILL", to_string(pid)])
+      end
     end
   end
 
@@ -564,7 +574,8 @@ defmodule OneCore.Sandbox do
         do: "",
         else:
           "{ok, _, _} = 'Elixir.Kernel.ParallelCompiler':compile_to_path([<<\"#{child}/child.ex\"/utf8>>], " <>
-            "<<\"/tmp/runtime\">>, [{return_diagnostics, true}]), "
+            "unicode:characters_to_binary(filename:join(os:getenv(\"TMPDIR\"), \"runtime\")), " <>
+            "[{return_diagnostics, true}]), "
 
     arguments =
       ~w(-noshell -noinput +fnu +S 1:1 +SDcpu 1:1 +SDio 1 +A 1 +MIscs 128 -boot) ++
@@ -584,7 +595,9 @@ defmodule OneCore.Sandbox do
 
     policy = %{read: Enum.uniq([erts, boot <> ".boot", child | apps] ++ List.wrap(cache)), env: env, memory: @memory}
 
-    walled(Path.join(erts, "bin/erlexec"), arguments, policy)
+    # The VM's own program, which on Windows is `erl.exe`, with the VM in it rather than started by it.
+    vm = if match?({:win32, _}, :os.type()), do: "bin/erl.exe", else: "bin/erlexec"
+    walled(Path.join(erts, vm), arguments, policy)
   end
 
   @impl true
@@ -624,7 +637,7 @@ defmodule OneCore.Sandbox do
 
   @impl true
   def terminate(_why, %{port: port}) when is_port(port) do
-    with {:os_pid, pid} <- Port.info(port, :os_pid), do: System.cmd("kill", ["-KILL", to_string(pid)])
+    kill(port)
     Port.close(port)
   catch
     _, _ -> :ok

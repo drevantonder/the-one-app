@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the NIFs of the plugins The One App ships with for every kind of machine a server runs on, each beside its
-# source as a plugin brings it (`OneCore.Plugin`): `plugins/<name>/server/nif/<crate>/<kind>.so`. A plugin is the same
+# Builds the NIFs and programs of the plugins The One App ships with for every kind of machine a server runs on, each
+# beside its source as a plugin brings it (`OneCore.Plugin`): `plugins/<name>/server/nif/<crate>/<kind>.so`, and
+# `plugins/<name>/server/bin/<crate>/<kind>`. A plugin is the same
 # files on every server of a network, so it's deployed with all of them:
 #
 #     tooling/nifs && ONE_FOR=network one deploy --name <name> --files-from plugins/<name>
@@ -14,7 +15,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
-crates=($(dirname plugins/*/server/nif/*/Cargo.toml))
+crates=($(dirname plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml))
 # Each kind of machine needs Rust's standard library for it, which a Mac or a new machine may not have yet.
 rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc >/dev/null
 target=${CARGO_TARGET_DIR:-$root/target}
@@ -26,6 +27,11 @@ for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-d
   esac
   cargo $build --release $(printf -- '-p %s ' $(basename -a "${crates[@]}"))
   for crate in "${crates[@]}"; do
-    cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$crate/$os-${triple%%-*}.so"
+    if [[ $crate == */bin/* ]]; then
+      program=$target/$triple/release/$(basename "$crate")
+      cp "$program" "$crate/$os-${triple%%-*}" 2>/dev/null || cp "$program.exe" "$crate/$os-${triple%%-*}"
+    else
+      cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$crate/$os-${triple%%-*}.so"
+    fi
   done
 done

@@ -3,11 +3,15 @@ defmodule Sandbox do
   The wall a plugin in sandbox mode runs behind: this machine's own process sandbox, around a program One Core
   starts (`OneCore.Sandbox`). On Linux it's bubblewrap, the distro's own `bwrap` (Ubuntu's AppArmor lets that one
   make the namespaces it needs), in new namespaces with no network, under an address-space limit (`prlimit`). On a
-  Mac it's a Seatbelt profile (`sandbox-exec`). Windows servers have none yet.
+  Mac it's a Seatbelt profile (`sandbox-exec`). On Windows it's an AppContainer, Windows' own sandbox for apps, under
+  a job object's memory limit, which this plugin's own program starts the program in (`server/bin/wall/`), as
+  Windows has no program of its own for that.
 
   Microsoft's MXC was tried first and works, but a server would have to ship its executor as Microsoft's prebuilt
   binaries or build it for every kind of machine, and its Linux baseline gives the program a shell, `/usr` and
-  `/etc`. These walls give it only what's asked for.
+  `/etc`. On Windows its executor passes a program's standard input and output through, but it has no memory limit,
+  needs Windows 11 as updated from August 2026, comes only in a 534 MB release or a 118 MB package, and sends Microsoft
+  four required telemetry events with no way to turn them off. These walls give it only what's asked for.
   """
   @behaviour OneCore.Plugin
 
@@ -24,8 +28,8 @@ defmodule Sandbox do
     but its system libraries, and write only a folder of its own, which `TMPDIR` names and which goes when it stops.
   - `write`, if it's given: paths it may also write, each where it is on this machine.
   - `env`: its environment, by name. Nothing else of this server's is passed on.
-  - `memory`: the most memory it may have, in bytes, where the machine can say so (Linux), or `nil` for no limit
-    but the machine's.
+  - `memory`: the most memory it may have, in bytes, where the machine can say so (Linux and Windows), or `nil` for
+    no limit but the machine's.
 
   Its standard error comes with its output. It has no network, can start no program outside `read`, and stops when
   the calling process does.
@@ -36,6 +40,7 @@ defmodule Sandbox do
     case :os.type() do
       {:unix, :linux} -> linux(program, arguments, read, write, env, memory)
       {:unix, :darwin} -> mac(program, arguments, read, write, env)
+      {:win32, _} -> windows(program, arguments, read, write, env, memory)
       other -> {:error, "This server's machine (#{inspect(other)}) has no sandbox for plugins yet"}
     end
   end
@@ -92,6 +97,26 @@ defmodule Sandbox do
       env = Map.merge(unset(), Map.put(env, "TMPDIR", folder))
       opened("/usr/bin/sandbox-exec", ["-p", profile, program | arguments], env, folder)
     end
+  end
+
+  # This plugin's program, the wall, written out where the server keeps its own files the first time, by its SHA-256.
+  defp windows(program, arguments, read, write, env, memory) do
+    built = OneCore.Plugin.file(__MODULE__, "server/bin/wall/windows-x86_64")
+    wall = Path.join([OneCore.Server.home(), "sandbox", "wall-#{Base.encode16(:crypto.hash(:sha256, built), case: :lower)}.exe"])
+
+    if not File.exists?(wall) do
+      File.mkdir_p!(Path.dirname(wall))
+      File.write!(wall <> ".part", built)
+      File.rename!(wall <> ".part", wall)
+    end
+
+    walled =
+      Enum.flat_map(read, &["--read", &1]) ++
+        Enum.flat_map(write, &["--write", &1]) ++
+        Enum.flat_map(env, fn {name, value} -> ["--env", "#{name}=#{value}"] end) ++
+        if(memory, do: ["--memory", to_string(memory)], else: []) ++ ["--", program | arguments]
+
+    opened(wall, walled, unset(), nil)
   end
 
   # Each of this server's environment variables, unset.

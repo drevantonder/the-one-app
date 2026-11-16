@@ -181,6 +181,9 @@ defmodule OneCore.Plugin do
     A deploy whose NIF doesn't load on the server fails, saying why. A name holds the first build loaded until the
     server restarts: a deploy with another build is kept, says so in its warnings, and runs from the next start.
     The plugin `database` brings `Sqlite`.
+  - A plugin brings a program the same way, from its source in a folder of `server/bin/`, built for each kind of
+    machine as `<kind>` beside it, which its code reads with `file/2` and writes out to run: the plugin `sandbox`
+    brings its wall on Windows, `server/bin/wall/windows-x86_64`.
 
   A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
 
