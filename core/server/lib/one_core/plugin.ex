@@ -21,7 +21,7 @@ defmodule OneCore.Plugin do
   it needs no server of yours, and whatever its code tries, it reaches only what's offered it, as whoever it runs
   for. What's offered is this interface, each function a message to the server: `tools/0`, `call/3`, `apps/0`,
   `widgets/0`, `uses/0`, `jobs/0` and `permissions/0`; `OneCore.Artifact`'s functions but `link`;
-  `OneCore.Call`'s `tool`, `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
+  `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
   `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks that hear. The plugins it uses
   run in its VM too, as it, `database` among them. It has no services, no hooks that change or decide, no other
   plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
@@ -136,6 +136,11 @@ defmodule OneCore.Plugin do
     plugin's own, such as an inbox, is one of its tools, which any plugin calls as whoever its call runs for:
     `OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})` gives the answer, or raises
     with why. A plugin that provides such a tool can give a function that calls it, as `Notifications.send/2` does.
+  - A tool another plugin called is told which, as `call.caller`, the plugin's artifact's name, which One Core
+    sets and nothing asked can say: `nil` when a person, an app or an agent called it. A tool that does something
+    for whichever plugin called it calls others in turn on behalf of it, as OAuth's on-behalf-of flow does:
+    `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`. That's how a plugin uses an
+    account without ever being handed its secret (`vault`'s skill).
   - Who someone is, a plugin asks `sign-in`, the plugin that signs people in, by its tool:
     `OneCore.Call.tool(call, "sign-in", "people", %{"users" => ["users/alice"]})` gives each one's `called`, the
     name they chose, and their `email` where how the network signs in has one, either `nil` where there's none.

@@ -28,7 +28,7 @@ defmodule OneCore.Sandbox do
   replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, plugins,
   deployed, process (its own VM's) and forward_to; `OneCore.Plugin.file/2` and `nif/2`; Logger; and `fetch`, a
   web request this server makes for it. An artifact it's given is a handle this server looks up, never a prefix
-  it could rewrite, and a call is one this server is running, never a subject or actor it could name. It hooks
+  it could rewrite, and a call is one this server is running, never a subject, actor or caller it could name. It hooks
   only into what it hears: a mutate or validate hook asks it nothing. It has no services, no other plugins'
   functions, no network, no programs, and no files but a folder of its own that goes when it stops.
 
@@ -157,6 +157,7 @@ defmodule OneCore.Sandbox do
         "installed" => call.installed,
         "subject" => call.subject,
         "actor" => call.actor,
+        "caller" => call.caller,
         "plugin" => call.plugin,
         "who" => call.who,
         "server" => call.server,
@@ -236,7 +237,7 @@ defmodule OneCore.Sandbox do
   defp op("fire", request, _call, context), do: fire(request, context)
   defp op(op, _request, nil, _context), do: raise("#{op} is asked within a call, and that call has ended")
 
-  defp op("tool", %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}, call, context)
+  defp op("tool", %{"plugin" => plugin, "tool" => tool, "inputs" => inputs} = request, call, context)
        when is_binary(plugin) and is_binary(tool) and is_map(inputs) do
     if not permitted?(context.permissions, plugin, tool),
       do:
@@ -245,7 +246,8 @@ defmodule OneCore.Sandbox do
             "mode calls only the tools it says it uses."
         )
 
-    Call.tool(call, plugin, tool, inputs)
+    options = if is_map_key(request, "on_behalf_of"), do: [on_behalf_of: request["on_behalf_of"]], else: []
+    Call.tool(call, plugin, tool, inputs, options)
   end
 
   defp op("make", %{"id" => made}, call, context), do: named(context, Call.make(call, made))

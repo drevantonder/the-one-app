@@ -13,6 +13,9 @@ defmodule OneCore.Call do
     scheduled job runs for whoever its plugin was installed for.
   - `actor`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
     job is called by the clock, so by nobody: `nil`.
+  - `caller`: the plugin that called this tool (`tool/5`), as its artifact's name, or the plugin that one acts on
+    behalf of. One Core sets it from whose call made the call, wherever it runs, never from what's asked. A tool
+    called by a person, an app or an agent has none: `nil`.
 
   The rest is One Core's: the plugin's name where it was installed and the plugin as a who, what was asked of it, the
   plugins it uses, and whether another server passed it on.
@@ -25,7 +28,7 @@ defmodule OneCore.Call do
   alias OneCore.Plugins.{Calls, Version}
 
   @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
-  defstruct [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
+  defstruct [:own, :installed, :folder, :server, :subject, :actor, :caller, :plugin, :who, :request, :uses, :forwarded]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
@@ -48,10 +51,22 @@ defmodule OneCore.Call do
   Gives its answer as it would reach a client over JSON, a file it answers as the file (`{:blob, kind, data}`), or
   raises with what that plugin said.
 
+  The tool is told this call's plugin called it, as its `caller`. A tool that another plugin called can call one in
+  turn on behalf of that plugin, as OAuth's on-behalf-of flow does, with `on_behalf_of: call.caller`: then that
+  one is its `caller`, so a plugin that does something for others, as `google-account` does, uses the Vault for
+  whichever called it.
+
       OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})
   """
-  def tool(%__MODULE__{actor: by, subject: who}, plugin, tool, inputs) do
-    case Calls.call(plugin, tool, inputs, {by, who}) do
+  def tool(%__MODULE__{actor: by, subject: who} = call, plugin, tool, inputs, options \\ []) do
+    caller =
+      case Keyword.fetch(options, :on_behalf_of) do
+        :error -> call.who
+        {:ok, caller} when caller == call.caller and caller != nil -> caller
+        {:ok, _} -> raise "#{call.plugin} acts on behalf only of the plugin that called it, and #{inspect(call.caller)} did"
+      end
+
+    case Calls.call(plugin, tool, inputs, {by, who}, false, caller) do
       {:ok, answer} when is_binary(answer) ->
         answer
 
@@ -336,7 +351,9 @@ defmodule OneCore.Call do
   defp asks({method, params}, {by, who}, server, forwarded) do
     forwarding_loop = Server.forwarding_loop()
 
-    case Server.request(server, method, Map.put(params, :_meta, %{forwarded: forwarded, who: by, for: who})) do
+    meta = %{forwarded: forwarded, who: by, for: who}
+
+    case Server.request(server, method, Map.update(params, :_meta, meta, &Map.merge(&1, meta))) do
       {:ok, result} -> throw({__MODULE__, {:forwarded, result}})
       {:error, ^forwarding_loop, _why} -> :no_answer
       {:error, _code, why} -> raise why

@@ -8,7 +8,7 @@ defmodule OneCore.Call do
   # the server. `id` is the call's, which the server knows it by: a call that has ended asks nothing more.
   alias OneCore.Sandbox.Child
 
-  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :uses]
+  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :plugin, :who, :uses]
 
   def plugin(%__MODULE__{uses: uses, plugin: plugin}, name) do
     case uses do
@@ -17,8 +17,15 @@ defmodule OneCore.Call do
     end
   end
 
-  def tool(%__MODULE__{id: id}, plugin, tool, inputs) do
-    case Child.request("tool", %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}, id) do
+  def tool(%__MODULE__{id: id}, plugin, tool, inputs, options \\ []) do
+    asked = %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}
+
+    asked =
+      if Keyword.has_key?(options, :on_behalf_of),
+        do: Map.put(asked, "on_behalf_of", options[:on_behalf_of]),
+        else: asked
+
+    case Child.request("tool", asked, id) do
       {:blob, kind, data} -> {:blob, kind, data}
       answer -> answer
     end
@@ -275,6 +282,7 @@ defmodule OneCore.Sandbox.Child do
       server: about["server"],
       subject: about["subject"],
       actor: about["actor"],
+      caller: about["caller"],
       plugin: about["plugin"],
       who: about["who"],
       uses: Map.new(about["uses"], &{&1, :persistent_term.get({__MODULE__, :plugin, &1})})

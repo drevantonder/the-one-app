@@ -126,8 +126,12 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], asked, true) end)
   end
 
+  # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
+  # asks for (a request that says `who`). A client calls as nobody's plugin.
   defp result("tools/call", %{"name" => name} = params, _from, asked, forwarded) do
-    case call(name, Map.get(params, "arguments", %{}), asked, forwarded) do
+    caller = if Map.has_key?(said(params), "who"), do: said(params)["caller"]
+
+    case call(name, Map.get(params, "arguments", %{}), asked, forwarded, caller) do
       {:ok, answer} -> changed(name, %{content: content(name, answer)}, asked)
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
@@ -303,10 +307,10 @@ defmodule OneCore.Mcp do
   defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
-  defp call(name, inputs, asked, forwarded) do
+  defp call(name, inputs, asked, forwarded, caller) do
     with :none <- Tools.call(name, inputs, asked, forwarded),
          [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Calls.call(plugin, tool, inputs, asked, forwarded) do
+         {:ok, answer} <- Calls.call(plugin, tool, inputs, asked, forwarded, caller) do
       case answer do
         text when is_binary(text) -> {:ok, text}
         {:blob, _kind, _data} -> {:ok, answer}

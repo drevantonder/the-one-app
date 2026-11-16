@@ -14,12 +14,13 @@ defmodule OneCore.Plugins.Calls do
   Calls a plugin's tool for `asked`: who asked and who it's for, `{by, for}`, or one who that is both. Gives
   `{:ok, answer}`, or `{:error, why}` with what the caller is told. A call another server ran instead gives
   `{:forwarded, result}`, that server's result. `forwarded` says another server passed this call on to this one,
-  and `:forwarding_loop` that this one would pass it on in turn.
+  and `:forwarding_loop` that this one would pass it on in turn. `caller` is the plugin that called it, if one did
+  (`OneCore.Call.tool/5`).
   """
-  def call(name, tool, inputs, asked, forwarded \\ false) do
+  def call(name, tool, inputs, asked, forwarded \\ false, caller \\ nil) do
     asked = asked(asked)
 
-    case run(name, tool, inputs, asked, forwarded) do
+    case run(name, tool, inputs, asked, forwarded, caller) do
       {:ran, ended} ->
         ended
 
@@ -34,7 +35,7 @@ defmodule OneCore.Plugins.Calls do
 
   # `{:ran, ended}` where the plugin and the tool are there, `{:error, why}` where they aren't, and what `call/5`
   # gives where another server runs it.
-  defp run(name, tool, inputs, {_by, who} = asked, forwarded) do
+  defp run(name, tool, inputs, {_by, who} = asked, forwarded, caller) do
     Plugins.run(Plugins.chain(who), name, fn at, versions ->
       version = versions[name]
 
@@ -43,15 +44,16 @@ defmodule OneCore.Plugins.Calls do
           {:error, "#{name} has no tool named #{tool}. It has: #{Enum.map_join(version.tools, ", ", & &1.name)}"}
 
         found ->
-          # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
-          ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs}}
+          # What's passed on is what was asked, so the server it's passed to hooks into the same thing, and is told
+          # which plugin called it.
+          ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs, _meta: %{caller: caller}}}
           about = %{"plugin" => name, "tool" => tool, "inputs" => inputs}
           # What a plugin answered a hook that's kept, it answered from what its tools change. So after one of those
           # that doesn't only read, it's forgotten: here, and by the servers this one tells.
           kept = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           try do
-            call = called(at, name, versions, ask, asked, forwarded)
+            call = %{called(at, name, versions, ask, asked, forwarded) | caller: caller}
             answered = tool(found, about, asked, version, &invoked(versions, name, {:tool, tool, &1}, call))
             if kept != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", kept)
             {:ran, answered}
@@ -271,7 +273,7 @@ defmodule OneCore.Plugins.Calls do
           call =
             if Version.described?(version),
               do: called(at, name, versions, ask, asked, false),
-              else: call(at, name, versions, ask, asked, false)
+              else: new_call(at, name, versions, ask, asked, false)
 
           try do
             if hears?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
@@ -347,7 +349,7 @@ defmodule OneCore.Plugins.Calls do
   # by a server that runs the plugins of whoever it was installed for, or by any server acting for them where the
   # plugin is in sandbox mode: this one, or one that it's passed on to.
   defp called(at, name, versions, ask, asked, forwarded) do
-    call = call(at, name, versions, ask, asked, forwarded)
+    call = new_call(at, name, versions, ask, asked, forwarded)
 
     if Servers.runs?(at) or (versions[name].sandbox and Servers.here?(at)),
       do: call,
@@ -355,7 +357,7 @@ defmodule OneCore.Plugins.Calls do
   end
 
   # The call as this server would run it.
-  defp call(at, name, versions, ask, {by, who}, forwarded) do
+  defp new_call(at, name, versions, ask, {by, who}, forwarded) do
     own = "#{at}/own/#{name}"
 
     %Call{
