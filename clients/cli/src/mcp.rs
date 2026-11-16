@@ -7,45 +7,53 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
 use client::Client;
 
-/// Serves MCP until stdin closes and every answer is written, in code mode with `code`.
+/// Serves MCP until stdin closes and every answer is written, in code mode with `code`. What the server notifies
+/// about a request while it runs is passed on ahead of its answer, as MCP's progress is, where the request asked for
+/// it with a `progressToken`.
 pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
     let mut messages = BufReader::new(tokio::io::stdin()).lines();
-    let out = Arc::new(Mutex::new(tokio::io::stdout()));
+    let (lines, mut written) = mpsc::unbounded_channel::<Vec<u8>>();
+    let writing = tokio::spawn(async move {
+        let mut out = tokio::io::stdout();
+        while let Some(mut line) = written.recv().await {
+            line.push(b'\n');
+            out.write_all(&line).await?;
+            out.flush().await?;
+        }
+        anyhow::Ok(())
+    });
     let mut asks = JoinSet::new();
     while let Some(message) = messages.next_line().await? {
-        let (client, out) = (client.clone(), out.clone());
+        let (client, lines) = (client.clone(), lines.clone());
         asks.spawn(async move {
             let mut asked: Value = serde_json::from_str(&message).unwrap_or_default();
             if code && asked["method"].is_string() {
                 asked["params"]["_meta"]["mode"] = json!("code");
             }
             let message = if asked.is_object() { asked.to_string() } else { message };
-            let mut answer = if asked["method"] == "tools/call" && asked["params"]["name"] == "execute" {
+            let progress = !asked["params"]["_meta"]["progressToken"].is_null();
+            let answer = if asked["method"] == "tools/call" && asked["params"]["name"] == "execute" {
                 execute(&client, &asked).await
             } else {
-                match client.ask(message.as_bytes()).await {
+                let notified = |line: &[u8]| drop(progress.then(|| lines.send(line.to_vec())));
+                match client.ask_notified(message.as_bytes(), notified).await {
                     Ok(answer) => answer,
                     Err(error) => refusal(&message, &error),
                 }
             };
             if !answer.is_empty() {
-                answer.push(b'\n');
-                let mut out = out.lock().await;
-                out.write_all(&answer).await?;
-                out.flush().await?;
+                let _ = lines.send(answer);
             }
-            anyhow::Ok(())
         });
     }
-    while let Some(asked) = asks.join_next().await {
-        asked??;
-    }
-    Ok(())
+    drop(lines);
+    while asks.join_next().await.transpose()?.is_some() {}
+    writing.await?
 }
 
 /// The answer to a call of `execute`: its script, run here. It says it's a complete result, as MCP has every result say

@@ -45,11 +45,11 @@ defmodule OneCore.Server do
   stopped answering after it was asked, so it may have done what was asked.
   """
   def request(server, method, params) do
-    # A call that's passed on is one trace on both servers.
-    params =
-      if parent = Trace.traceparent(),
-        do: Map.update(params, :_meta, %{traceparent: parent}, &Map.put(&1, :traceparent, parent)),
-        else: params
+    # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
+    # this one knows the other is still running it, however long it takes (`client::Reached::ask`).
+    said = %{progressToken: System.unique_integer([:positive])}
+    said = if parent = Trace.traceparent(), do: Map.put(said, :traceparent, parent), else: said
+    params = Map.update(params, :_meta, said, &Map.merge(&1, said))
 
     with true <- Servers.seen(server) in [:on, nil] or :unreachable,
          {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do

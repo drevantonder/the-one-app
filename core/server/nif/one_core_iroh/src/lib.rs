@@ -17,6 +17,7 @@ use iroh::{Endpoint, EndpointAddr};
 use rustler::{Atom, Binary, Encoder, Env, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc, Term};
 use tokio::runtime::Runtime;
 use tokio::sync::{RwLock, oneshot};
+use tokio::time::{Instant, MissedTickBehavior, interval_at};
 
 mod outside;
 
@@ -183,7 +184,30 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients, asks: Ask
                     // A stream ended unanswered is reset, so whoever asked knows it wasn't answered, and whether it
                     // was taken.
                     let Ok(_answering) = asks.try_read_owned() else { return drop(send.reset(client::REFUSED)) };
-                    match ask(&asked, Some(&from), &message).await {
+                    let answer = ask(&asked, Some(&from), &message);
+                    tokio::pin!(answer);
+                    // While it runs, whoever asked with a progress token is told so every `THERE`, which is how
+                    // they know it's still running, however long it takes (`client::Reached::ask`). How far it
+                    // is, is the seconds it's run, since nothing says how far a call is.
+                    let answer = match client::progress_token(&message) {
+                        None => answer.await,
+                        Some(token) => {
+                            let started = Instant::now();
+                            let mut every = interval_at(started + client::THERE, client::THERE);
+                            every.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                            let mut telling = true;
+                            loop {
+                                tokio::select! {
+                                    answer = &mut answer => break answer,
+                                    _ = every.tick(), if telling => {
+                                        let ran = started.elapsed().as_secs();
+                                        telling = send.write_all(&client::progress(&token, ran)).await.is_ok();
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    match answer {
                         Ok(answer) if send.write_all(&answer).await.is_ok() => drop(send.finish()),
                         Ok(_) => {}
                         Err(unanswered) => drop(send.reset(unanswered)),
@@ -318,7 +342,7 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
     let reference = Reference::keep(reference);
     RUNTIME.spawn(async move {
         let answer = match open {
-            Some((address, Some(open))) => match open.ask(&message).await {
+            Some((address, Some(open))) => match open.ask(&message, |_| {}).await {
                 Ok(answer) => Ok(answer),
                 Err(unanswered) => {
                     let mut servers = reached.servers.lock().expect("no connection panics");

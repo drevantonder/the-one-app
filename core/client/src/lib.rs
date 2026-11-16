@@ -16,7 +16,7 @@ use std::io::{ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
@@ -25,7 +25,7 @@ use data_encoding::BASE64URL_NOPAD;
 use futures_util::StreamExt;
 use futures_util::future::join_all;
 use futures_util::stream::FuturesUnordered;
-use iroh::endpoint::{Connection, QuicTransportConfig, ReadError, ReadToEndError, RecvStream, RelayMode, VarInt, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig, ReadError, RecvStream, RelayMode, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -60,7 +60,8 @@ pub const LIMIT: usize = 64 << 20;
 pub const CONNECT: Duration = Duration::from_secs(3);
 /// How long a server that's there takes, at most, to say so. Nothing is sent over a connection that's asked nothing,
 /// so a server that has gone is found out by asking it, and this soon. A server taken for gone that wasn't is only
-/// asked again over a new connection, or has its lease taken by a standby, and neither loses anything.
+/// asked again over a new connection, or has its lease taken by a standby, and neither loses anything. A server
+/// running what it was asked says so this often too, as MCP's progress notifications, on the request's stream.
 pub const THERE: Duration = Duration::from_secs(1);
 /// What a server ends a stream with when it doesn't answer what was asked on it: `REFUSED` where it took nothing of
 /// it, as one that's stopping takes nothing new, and `STOPPED` where it went away after it took it, so it may have
@@ -71,11 +72,13 @@ pub const STOPPED: VarInt = VarInt::from_u32(2);
 /// few seconds, and through a relay each of those wakes the relay. So a connection is let go once it's idle, and
 /// made again when there's something to ask.
 const IDLE: Duration = Duration::from_secs(2);
-/// How long a connection lasts once nothing arrives over it: longer than `IDLE`, so that one that's let go says so,
-/// and sooner than iroh would say anything to keep it. iroh sends what it has for a machine only where a
-/// connection it still has with it last was, so the one a server that stopped left behind has to end before that
-/// server is found where it starts again.
-const SILENT: Duration = Duration::from_secs(3);
+/// How long a connection lasts once nothing arrives over it, which is how a server that went away while it ran a
+/// call is found out: one that's running it says so every `THERE`. It's many of those, since one running a long
+/// call may be filling its own uplink, as a backup does, and what it says then waits behind what it sends. Whoever
+/// opens a connection closes it once it's `IDLE`, so one a server that stopped left behind ends then, and that
+/// server is found where it starts again: iroh sends what it has for a machine only where a connection it still has
+/// with it last was.
+const SILENT: Duration = Duration::from_secs(15);
 
 /// A network's address, and the token this machine shows there: what says it's one of the network's own.
 #[derive(Clone, Deserialize)]
@@ -564,7 +567,24 @@ pub enum RequestError {
 pub struct Reached {
     connection: Connection,
     heard: Arc<std::sync::Mutex<Instant>>,
+    asking: Arc<AtomicUsize>,
     gone: AtomicBool,
+}
+
+/// One message being asked over a connection, for as long as it's held: a connection that's asking isn't idle.
+struct Asking(Arc<AtomicUsize>);
+
+impl Asking {
+    fn new(asking: &Arc<AtomicUsize>) -> Self {
+        asking.fetch_add(1, Ordering::Relaxed);
+        Self(asking.clone())
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl Reached {
@@ -572,17 +592,19 @@ impl Reached {
     pub async fn connect(endpoint: &Endpoint, address: EndpointAddr, within: Duration) -> Option<Self> {
         let connection = timeout(within, endpoint.connect(address, ALPN)).await.ok()?.ok()?;
         let heard = Arc::new(std::sync::Mutex::new(Instant::now()));
-        let (open, last) = (connection.clone(), heard.clone());
+        let asking = Arc::new(AtomicUsize::new(0));
+        let (open, last, busy) = (connection.clone(), heard.clone(), asking.clone());
         tokio::spawn(async move {
             while open.close_reason().is_none() {
                 let idle = last.lock().expect("no ask panics").elapsed();
                 match IDLE.checked_sub(idle) {
                     Some(left) => sleep(left).await,
+                    None if busy.load(Ordering::Relaxed) > 0 => sleep(IDLE).await,
                     None => open.close(0u32.into(), b"idle"),
                 }
             }
         });
-        Some(Self { connection, heard, gone: AtomicBool::new(false) })
+        Some(Self { connection, heard, asking, gone: AtomicBool::new(false) })
     }
 
     pub fn connection(&self) -> &Connection {
@@ -608,33 +630,42 @@ impl Reached {
         self.gone.load(Ordering::Relaxed)
     }
 
-    /// Asks the server one message, and gives its answer. A server that hasn't answered anything lately is first
-    /// asked whether it's there, and so is one that's taking its time over this. One that ends the stream without
-    /// an answer is going: what's asked over this connection from now on is asked elsewhere, while what was asked
-    /// already is still answered.
-    pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>, RequestError> {
+    /// Asks the server one message, and gives its answer, handing `notified` each notification the server sends
+    /// about it first, as MCP has a server send them before its response: one a line, with the response last. A
+    /// server that hasn't answered anything lately is first asked whether it's there. One running a request that
+    /// carries a `progressToken` sends a progress notification every `THERE` while it runs, which keeps the
+    /// connection from being `IDLE` or `SILENT` however long it takes. One that goes silent, or ends the stream
+    /// without an answer, is gone: what's asked over this connection from now on is asked elsewhere, while what was
+    /// asked already is still answered.
+    pub async fn ask(&self, message: &[u8], mut notified: impl FnMut(&[u8])) -> Result<Vec<u8>, RequestError> {
         if !self.open() || (self.heard.lock().expect("no ask panics").elapsed() > THERE && !self.there().await) {
             return Err(RequestError::Unreachable);
         }
+        let _asking = Asking::new(&self.asking);
         let mut receive = self.send(message).await.ok_or(RequestError::Unreachable)?;
-        let answer = receive.read_to_end(LIMIT);
-        tokio::pin!(answer);
+        let (mut read, mut scanned) = (Vec::new(), 0);
         loop {
-            tokio::select! {
-                answer = &mut answer => {
-                    *self.heard.lock().expect("no ask panics") = Instant::now();
-                    return answer.map_err(|unanswered| {
-                        self.gone.store(true, Ordering::Relaxed);
-                        match unanswered {
-                            ReadToEndError::Read(ReadError::Reset(REFUSED)) => RequestError::Unreachable,
-                            _ => RequestError::Stopped,
-                        }
-                    });
+            let chunk = receive.read_chunk(LIMIT).await.map_err(|unanswered| {
+                self.gone.store(true, Ordering::Relaxed);
+                match unanswered {
+                    ReadError::Reset(REFUSED) => RequestError::Unreachable,
+                    _ => RequestError::Stopped,
                 }
-                _ = sleep(THERE) => if !self.there().await {
-                    return Err(RequestError::Stopped);
-                }
+            })?;
+            *self.heard.lock().expect("no ask panics") = Instant::now();
+            let Some(chunk) = chunk else { return Ok(read) };
+            if read.len() + chunk.len() > LIMIT {
+                self.gone.store(true, Ordering::Relaxed);
+                return Err(RequestError::Stopped);
             }
+            read.extend_from_slice(&chunk);
+            // A response is JSON on one line, so whatever ends in a newline before it is a notification.
+            while let Some(end) = read[scanned..].iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = read.drain(..=scanned + end).collect();
+                notified(&line[..line.len() - 1]);
+                scanned = 0;
+            }
+            scanned = read.len();
         }
     }
 
@@ -658,6 +689,36 @@ impl Reached {
         send.finish().ok()?;
         Some(receive)
     }
+}
+
+/// The `progressToken` a request carries, with which MCP asks for progress notifications while it runs.
+pub fn progress_token(message: &[u8]) -> Option<Value> {
+    #[derive(Deserialize)]
+    struct Request {
+        params: Option<Params>,
+    }
+    #[derive(Deserialize)]
+    struct Params {
+        #[serde(rename = "_meta")]
+        meta: Option<Meta>,
+    }
+    #[derive(Deserialize)]
+    struct Meta {
+        #[serde(rename = "progressToken")]
+        progress_token: Option<Value>,
+    }
+    let token = serde_json::from_slice::<Request>(message).ok()?.params?.meta?.progress_token?;
+    (token.is_string() || token.is_number()).then_some(token)
+}
+
+/// MCP's progress notification for the request whose `token` it is, `progress` being how far it is, on a line of its
+/// own as it's sent ahead of the response (`Reached::ask`).
+pub fn progress(token: &Value, progress: u64) -> Vec<u8> {
+    let mut line = json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": progress}})
+        .to_string()
+        .into_bytes();
+    line.push(b'\n');
+    line
 }
 
 /// The connection to a server, once one is open, and when trying to open one last failed.
@@ -906,7 +967,7 @@ impl Client {
             if let Some(open) = self.connect(server).await
                 && !watching
             {
-                let _ = open.ask(json!({"jsonrpc": "2.0", "method": WATCH, "params": {}}).to_string().as_bytes()).await;
+                let _ = open.ask(json!({"jsonrpc": "2.0", "method": WATCH, "params": {}}).to_string().as_bytes(), |_| {}).await;
             }
         });
         join_all(told).await;
@@ -922,7 +983,7 @@ impl Client {
         if self.watching.load(Ordering::Relaxed) {
             let here = address(&link.endpoint, link.network.as_ref()).ok()?;
             let watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
-            open.ask(watch.to_string().as_bytes()).await.ok()?;
+            open.ask(watch.to_string().as_bytes(), |_| {}).await.ok()?;
         }
         Some(open)
     }
@@ -935,11 +996,22 @@ impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
+        self.ask_notified(message, |_| {}).await
+    }
+
+    /// Asks as `ask` does, handing `notified` each notification the server sends about the request while it runs,
+    /// as MCP's progress notifications. A request is asked for them with a `progressToken` of its own where it
+    /// carries none, since they're what keeps a long one from being taken for a server that went away.
+    pub async fn ask_notified(&self, message: &[u8], notified: impl Fn(&[u8])) -> Result<Vec<u8>> {
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
         let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<Value>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
+                    if request.get("id").is_some() && request["params"]["_meta"]["progressToken"].is_null() {
+                        static TOKENS: AtomicU64 = AtomicU64::new(0);
+                        request["params"]["_meta"]["progressToken"] = json!(TOKENS.fetch_add(1, Ordering::Relaxed));
+                    }
                     self.resolve(&mut request).await?;
                     let reads = self.reads(&request).await?;
                     self.say(&mut request);
@@ -957,7 +1029,7 @@ impl Client {
             for _ in 0..2 {
                 let open = self.reached().await?;
                 *reached.lock().expect("no ask panics") = open.path();
-                match open.ask(&message).await {
+                match open.ask(&message, &notified).await {
                     Ok(answer) => return Ok(answer),
                     Err(RequestError::Unreachable) => {}
                     Err(RequestError::Stopped) if reads => stopped = true,
