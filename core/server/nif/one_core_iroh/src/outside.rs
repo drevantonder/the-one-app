@@ -11,7 +11,7 @@ use iroh::SecretKey;
 use rustler::LocalPid;
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-use tokio::time::{Instant, interval, sleep};
+use tokio::time::{Instant, interval, sleep, timeout};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -37,10 +37,12 @@ async fn heard(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<(
         request.headers_mut().insert(name, value.parse()?);
     }
 
-    let (socket, _) = connect_async(request).await?;
+    let (socket, _) = timeout(EVERY, connect_async(request)).await??;
     // What the network's servers and the pieces of the edge told this one while it wasn't there, it didn't hear.
-    // So it looks again, as a server that comes back does (`OneCore.Server.reconnected/0`).
-    let _ = crate::ask(asked, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#).await;
+    // So it looks again, as a server that comes back does (`OneCore.Server.reconnected/0`), meanwhile answering
+    // what it's asked here: looking again reads the bucket and starts plugins, which can take minutes.
+    let reload = *asked;
+    tokio::spawn(async move { crate::ask(&reload, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#).await });
     let (mut up, mut down) = socket.split();
     let (answers, mut answered) = mpsc::unbounded_channel();
     let mut say = interval(EVERY);
