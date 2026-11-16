@@ -297,7 +297,8 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
 }
 
 /// Deploys the plugin `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked. With
-/// `sandbox` it runs in sandbox mode; left out, as the version before did.
+/// `sandbox` it runs in sandbox mode; left out, as the version before did. With `new` it's made where one by that
+/// name is installed for someone else `of` is in, as `deploy`'s `new` says.
 async fn deploy(
     client: &Client,
     of: &str,
@@ -306,6 +307,7 @@ async fn deploy(
     from: &Source,
     commit: &str,
     sandbox: bool,
+    new: bool,
 ) -> Result<Locked> {
     let plugin = folder.join("plugins").join(name);
     // Deployed over someone else's plugin, it would be changed for everyone who has it, not copied.
@@ -332,6 +334,9 @@ async fn deploy(
         json!({"name": name, "files": files, "from": {"source": from.spec, "ref": from.reference, "commit": commit}});
     if sandbox {
         deployed["sandbox"] = json!(true);
+    }
+    if new {
+        deployed["new"] = json!(true);
     }
     println!("{}", call(client, Some(of), "deploy", deployed).await?);
     let (_, plugins) = installed(client, Some(of)).await?;
@@ -372,18 +377,20 @@ async fn report(from: &Source, name: &str, commit: &str) {
     let _ = tokio::time::timeout(Duration::from_secs(3), post).await;
 }
 
-/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--sandbox]`, for whoever `ONE_FOR` says, or this
-/// device's user. `--sandbox` runs them in sandbox mode, which needs no server of the user's.
+/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--sandbox] [--new]`, for whoever `ONE_FOR` says, or
+/// this device's user. `--sandbox` runs them in sandbox mode, which needs no server of the user's; `--new` makes a
+/// second copy where one by that name is installed for the network or a group they're in, which is refused without.
 pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
     let source = Source::parse(&args[0])?;
-    let (mut names, mut list, mut sandbox) = (Vec::new(), false, false);
+    let (mut names, mut list, mut sandbox, mut new) = (Vec::new(), false, false, false);
     let mut flags = args[1..].iter();
     while let Some(flag) = flags.next() {
         match flag.as_str() {
             "--list" => list = true,
             "--sandbox" => sandbox = true,
+            "--new" => new = true,
             "--plugin" => names.push(flags.next().context("--plugin needs a plugin's name")?.clone()),
-            other => bail!("`{other}` isn't something `one install` takes: --plugin <name>, --sandbox or --list"),
+            other => bail!("`{other}` isn't something `one install` takes: --plugin <name>, --sandbox, --new or --list"),
         }
     }
     let (folder, commit) = source.fetch(None)?;
@@ -434,7 +441,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         None => BTreeMap::new(),
     };
     for name in &order {
-        let it = deploy(client, &of, name, &folder, &source, &commit, sandbox).await?;
+        let it = deploy(client, &of, name, &folder, &source, &commit, sandbox, new).await?;
         if let Some(file) = &lock {
             locked.insert(name.clone(), it);
             write_lock(file, &locked)?;
@@ -464,7 +471,7 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
             if uses(&folder.join("plugins").join(name)).iter().any(|used| used != name && waiting.contains_key(used)) {
                 continue;
             }
-            let now = deploy(client, &it.of, name, &folder, &source, &commit, false).await?;
+            let now = deploy(client, &it.of, name, &folder, &source, &commit, false, false).await?;
             if now.hash != it.hash {
                 println!(
                     "{name}'s files hash differently from what {LOCK} says, from the same commit: a NIF built again does."
@@ -574,7 +581,7 @@ pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
         }
         let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
         let (folder, commit) = source.fetch(Some(&newer))?;
-        let updated = deploy(client, &it.of, &name, &folder, &source, &commit, false).await?;
+        let updated = deploy(client, &it.of, &name, &folder, &source, &commit, false, false).await?;
         if let Some(file) = &lock {
             all.insert(name, updated);
             write_lock(file, &all)?;
