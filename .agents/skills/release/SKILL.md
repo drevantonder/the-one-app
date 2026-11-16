@@ -7,13 +7,13 @@ Release from `main` as it is now, never an older commit, and only what your chan
 
 | Changed | Release |
 | --- | --- |
-| A plugin (`plugins/<name>/`) | `ONE_FOR=network one deploy --name <name> --files-from plugins/<name>` (about 12 s) |
+| A plugin (`plugins/<name>/`, here or in a network's repo) | `ONE_FOR=network one deploy --name <name> --files-from plugins/<name>`, from that repo (about 12 s) |
 | A plugin with a NIF (`server/nif/`) | `tooling/nifs`, then the same deploy |
 | The UI library (`ui/`) | `bun build.js` in `ui/`, then `ONE_FOR=network one deploy --name ui --files-from ui/dist`, then the edge |
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |
 | The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
-| A phone's app | Not from here: a phone takes a build from its store. Say one is needed |
+| A phone's app | Not from here: a phone takes a build from its store, built from the network's repo (`app/`). Say one is needed |
 | Docs, tests, `tooling/`, `.agents/` | Nothing |
 
 A plugin change that uses something new in `core/server/` (often in the same commit) waits for the server release:

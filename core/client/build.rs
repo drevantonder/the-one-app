@@ -17,7 +17,7 @@ fn main() {
     println!("cargo:rustc-env=ONE_BUILD={build}");
 
     // What the app is to the system it's on is its build's Tauri identifier: `clients/app/tauri.conf.json`'s, or the
-    // one a build merges over it, as a workplace's own does with `cargo tauri build --config <its file>`, which hands
+    // one a build merges over it, as a network's own does with `cargo tauri build --config <its file>`, which hands
     // it on as `TAURI_CONFIG`. It names the folder a client on a computer is kept in (`NAME`), so the CLI, built
     // without Tauri, keeps what the app does.
     println!("cargo:rerun-if-env-changed=TAURI_CONFIG");

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Makes app.xcodeproj from project.yml for the app a Tauri config names, which is The One App's own
-# (`clients/app/tauri.conf.json`), or a workplace's, as `cargo tauri ios build --config <its file>` merges it:
+# (`clients/app/tauri.conf.json`), or a network's, as `cargo tauri ios build --config <its file>` merges it:
 #
 #     ./generate [<its file>]
 #
