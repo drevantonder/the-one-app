@@ -1,6 +1,6 @@
 {
   "name": "network-vault",
-  "main": "worker.js",
+  "main": "worker.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   // Its one page as it's built (`page/`, an app's page built against the UI library), which the Worker hands out itself:

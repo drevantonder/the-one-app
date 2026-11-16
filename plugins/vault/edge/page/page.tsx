@@ -7,7 +7,7 @@ import { SignIn } from "ui"
 
 const callback = location.pathname === "/vault/callback"
 /// What the server said of the sign-in: `{ done }` or `{ problem }`.
-const [said, setSaid] = createSignal()
+const [said, setSaid] = createSignal<{ done?: string; problem?: string }>()
 if (callback)
   fetch(location.href, { method: "POST" })
     .then((answer) => answer.json())

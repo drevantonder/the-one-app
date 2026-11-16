@@ -6,13 +6,24 @@
 // page that says where it's answered.
 import { env } from "cloudflare:workers";
 
+declare global {
+  namespace Cloudflare {
+    /** Its bindings: its page's files, and what the edge gives every plugin's part (`core/edge/edge.js`). */
+    interface Env {
+      ASSETS: Fetcher;
+      NETWORK: { servers(of: string): Promise<string[]> };
+      RELAY: { forward(server: string, message: string): Promise<string | null> };
+    }
+  }
+}
+
 /** A server on this list acts for the network, and so for everyone in it. */
 const NETWORK = "network/";
 /** Whose something is: a user, a group or the network, as relation tuples name them. */
 const OWNER = /^(?:(?:users|groups)\/[a-z][a-z0-9-]*|network)$/;
 
 /** Whose sign-in a `state` says it is, or nothing if it isn't one a server here made. */
-function whose(state) {
+function whose(state: string) {
   try {
     const owner = atob(state.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"));
     return OWNER.test(owner) ? owner : null;
@@ -22,7 +33,7 @@ function whose(state) {
 }
 
 /** Finishes a sign-in: has a server acting for whoever's it is take the code. Gives what the page then says. */
-async function callback(asked) {
+async function callback(asked: URLSearchParams) {
   const state = asked.get("state") ?? "";
   const owner = whose(state);
   if (!owner) return { problem: "This sign-in isn't one this network began." };
@@ -35,7 +46,7 @@ async function callback(asked) {
   for (const server of servers) {
     const answer = await env.RELAY.forward(server, message);
     if (answer === null) continue;
-    const { result, error } = JSON.parse(answer);
+    const { result, error }: { result?: { isError?: boolean; content?: { text?: string }[] }; error?: { message?: string } } = JSON.parse(answer);
     const text = result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened.";
     return result && !result.isError ? { done: text } : { problem: text };
   }
@@ -43,11 +54,11 @@ async function callback(asked) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request: Request) {
     const url = new URL(request.url);
     // The page asks for what it shows once it's open, so the answer is words in the page, never a page of its own.
     if (url.pathname === "/vault/callback" && request.method === "POST") return Response.json(await callback(url.searchParams));
     if (["/vault/callback", "/vault/request"].includes(url.pathname)) return env.ASSETS.fetch(new URL("/vault/", url));
     return env.ASSETS.fetch(request);
   },
-};
+} satisfies ExportedHandler;
