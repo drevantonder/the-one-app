@@ -13,6 +13,6 @@
     }
   },
   "bundle": {
-    "icon": ["../../icons/AppIcon.png"]
+    "icon": ["../../icons/AppIcon@2x.png"]
   }
 }
