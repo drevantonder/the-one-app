@@ -370,4 +370,3 @@ else if (!signIn) {
   invoke("visible", { onScreen: !document.hidden })
   if (taps) hearTaps()
 }
-
