@@ -89,6 +89,9 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         // A plugin from a git repo, as `npx skills add` adds a skill; with no repo, the plugin is the network's own.
         ["install", repo, ..] if !repo.starts_with("--") => install::install(&client, &args[1..]).await?,
         ["install"] if std::path::Path::new("plugins.lock").exists() => install::locked(&client).await?,
+        ["uninstall", "--name", name] if std::path::Path::new("plugins.lock").exists() => {
+            install::uninstall(&client, name).await?
+        }
         ["plugins", "check", ..] => install::check(&client, &args[2..]).await?,
         ["plugins", "update", ..] => install::update(&client, &args[2..]).await?,
         _ => command(&client, &args).await?,

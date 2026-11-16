@@ -567,3 +567,18 @@ pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
     }
     Ok(if kept { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
+
+/// `one uninstall --name <name>` in a network's repo: uninstalls it, and takes it out of `plugins.lock` if that
+/// records it for whoever it was uninstalled for, so `one install` there doesn't install it again.
+pub async fn uninstall(client: &Client, name: &str) -> Result<ExitCode> {
+    let (of, _) = installed(client, None).await?;
+    println!("{}", call(client, None, "uninstall", json!({"name": name})).await?);
+    let file = PathBuf::from(LOCK);
+    let mut locked = read_lock(&file)?;
+    if locked.get(name).is_some_and(|it| it.of == of) {
+        locked.remove(name);
+        write_lock(&file, &locked)?;
+        println!("Removed from {LOCK}.");
+    }
+    Ok(ExitCode::SUCCESS)
+}
