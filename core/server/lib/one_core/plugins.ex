@@ -151,7 +151,8 @@ defmodule OneCore.Plugins do
   end
 
   # Whose plugins a server runs whether or not it's asked for them: the network's, those of whoever it acts for, and
-  # the plugins whose services it runs, which are installed for whoever's they are.
+  # the plugins whose services it runs, which are installed for whoever's they are. Its owner installed those on its
+  # machine, so they're loaded as it starts, before anything could say whose plugins it runs.
   defp here(key) do
     services = for {plugin, _service} <- Servers.installed(key), do: Store.whose(plugin)
     Enum.uniq([@network | Servers.acts_for(key)] ++ services)
@@ -223,13 +224,9 @@ defmodule OneCore.Plugins do
   @impl true
   def handle_continue(:start, state) do
     {:ok, key} = Iroh.key(Server.key_file())
-    # Whether the network's servers run someone else's plugins, those of the network's owners, is asked of the
-    # network's plugins, which are started first: so they're looked at once this has.
-    {now, after_start} = Enum.split_with(here(key), &(&1 in [@network | Servers.acts_for(key)]))
-    for owner <- after_start, do: Task.start(fn -> Server.reload(owner) end)
 
     state =
-      for owner <- now, reduce: state do
+      for owner <- here(key), reduce: state do
         state ->
           {installed, _tag} = Installed.read(owner)
           newer = Store.newer(Enum.uniq(Map.values(installed)), state.latest)
