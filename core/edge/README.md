@@ -7,7 +7,7 @@ address is a name on a zone of that Cloudflare account, which deploying attaches
 root:
 
     cd core/ui && bun install && bun build.js
-    cd ../core/edge && bun install && bun run deploy https://<the network's address>
+    cd ../edge && bun install && bun run deploy https://<the network's address>
     cd ../server && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
 
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
