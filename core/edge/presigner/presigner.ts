@@ -129,6 +129,27 @@ export class Own extends WorkerEntrypoint<PresignerEnv, { plugin: string }> {
     return wrote.ok;
   }
 
+  /**
+   * Changes the blob `name` in one step, as `OneCore.Artifact.update/3` does, and gives what it wrote: `change` is
+   * given what's there, or null for nothing, and gives what's to be there. If someone else wrote it meanwhile,
+   * `change` is given theirs and asked again, so neither change is lost: the bucket writes only on a condition, its
+   * ETag or nothing there.
+   */
+  async update(name: string, change: (was: string | null) => string | Promise<string>): Promise<string> {
+    const at = this.blob(name);
+    for (;;) {
+      const got = await bucket(this.env).fetch(at);
+      if (!got.ok && got.status !== 404) throw new Error(`The bucket answered ${got.status} for ${name}`);
+      const was = got.ok ? await got.text() : null;
+      const now = await change(was);
+      if (now === was) return now;
+      const condition: Record<string, string> = was === null ? { "if-none-match": "*" } : { "if-match": got.headers.get("etag")! };
+      const wrote = await bucket(this.env).fetch(at, { method: "PUT", body: now, headers: condition });
+      if (wrote.ok) return now;
+      if (wrote.status !== 412 && wrote.status !== 404) throw new Error(`The bucket answered ${wrote.status} for ${name}`);
+    }
+  }
+
   /** Removes the blob `name`. */
   async remove(name: string): Promise<void> {
     const removed = await bucket(this.env).fetch(this.blob(name), { method: "DELETE" });

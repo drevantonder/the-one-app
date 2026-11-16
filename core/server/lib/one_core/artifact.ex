@@ -1,7 +1,7 @@
 defmodule OneCore.Artifact do
   @moduledoc """
   A couple of blobs together in the bucket. A plugin reads a blob, or several at once, writes one only if it's absent, replaces one only
-  if it's unchanged, lists them and removes one, by their names in the artifact.
+  if it's unchanged, updates one, lists them and removes one, by their names in the artifact.
 
       case OneCore.Artifact.read(artifact, "notes.json") do
         {:ok, data, tag} -> OneCore.Artifact.replace(artifact, "notes.json", change(data), tag)
@@ -9,8 +9,13 @@ defmodule OneCore.Artifact do
       end
 
   `write` answers `:exists` and `replace` answers `:changed` when someone else got there first: read again and
-  decide again. `remove` is for a blob nothing reads any more, since nothing brings it back. `size` gives
-  `{:ok, bytes}` or `:absent` without reading the blob.
+  decide again. `update` does that for a record that's kept changing, in one step:
+
+      OneCore.Artifact.update(artifact, "notes.json", fn was -> change(was || first()) end)
+
+  `remove` is for a blob nothing reads any more, since nothing brings it back, so a record is never removed to be
+  written again: one that fails between the two is lost. `size` gives `{:ok, bytes}` or `:absent` without reading
+  the blob.
 
   A blob that's large doesn't pass through the server. A tool answers with one as `{:file, "image/jpeg", artifact,
   name}`, and takes one a client sent as an upload: the server hands the client a short-lived link to the bucket
@@ -66,6 +71,24 @@ defmodule OneCore.Artifact do
     key = writes(artifact) <> name
     changed(artifact, name, Bucket.replace(key, passed(artifact, :encode, name, data), tag))
   end
+
+  @doc """
+  Changes a blob in one step, and gives what it wrote: `change` is given what's there, or `nil` for nothing, and
+  gives what's to be there. If someone else wrote it meanwhile, `change` is given theirs and asked again, so neither
+  change is lost: a bucket offers only writes on a condition (ETags, as S3 and R2 do), so that's how a change to
+  what's there is made. One that gives what's there already writes nothing.
+  """
+  def update(artifact, name, change) do
+    {was, tag} = with {:ok, was, tag} <- read(artifact, name), do: {was, tag}, else: (:absent -> {nil, nil})
+
+    case change.(was) do
+      ^was -> was
+      now -> if write_or_replace(artifact, name, now, tag) == :ok, do: now, else: update(artifact, name, change)
+    end
+  end
+
+  defp write_or_replace(artifact, name, data, nil), do: write(artifact, name, data)
+  defp write_or_replace(artifact, name, data, tag), do: replace(artifact, name, data, tag)
 
   def remove(artifact, name), do: changed(artifact, name, Bucket.remove(writes(artifact) <> name))
   def size(%__MODULE__{prefix: prefix}, name), do: Bucket.size(prefix <> name)

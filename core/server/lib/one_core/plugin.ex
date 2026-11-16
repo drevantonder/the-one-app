@@ -121,8 +121,9 @@ defmodule OneCore.Plugin do
     installed for, which only this plugin reaches: one installed for a user keeps that user's, and one installed for the network
     keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok,
     data, tag}` or `:absent`, `write/3` writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that
-    tag, replaces only if unchanged and gives `:ok` or `:changed`, `list/2` gives the names that start with what it's
-    given, and `remove/2` removes one for good. Its `folder` is a folder of the plugin's own on the machine running
+    tag, replaces only if unchanged and gives `:ok` or `:changed`, `update/3` changes a record in one step (it's
+    given what's there, and given it again if someone else wrote it meanwhile), `list/2` gives the names that start
+    with what it's given, and `remove/2` removes one for good, so never to write it again. Its `folder` is a folder of the plugin's own on the machine running
     the call, for files that needn't outlive that machine.
   - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.subject`, under an id the
     plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
@@ -458,7 +459,8 @@ defmodule OneCore.Plugin do
     (`core/edge/edge.js`), so it's for the plugins a network is set up with.
   - It keeps what it needs in storage of its own, which its `wrangler.jsonc` binds, and is given three bindings
     besides. `env.OWN.write(name, data)` writes a blob of the plugin's own artifact for the network, only if
-    there's none, and `env.OWN.remove(name)` removes one: that's where the plugin's server-side code reads what this
+    there's none, `env.OWN.update(name, change)` changes one in one step as `OneCore.Artifact.update/3` does, and
+    `env.OWN.remove(name)` removes one: that's where the plugin's server-side code reads what this
     part has to tell it, as `call.own` of the plugin installed for the network. `env.NETWORK.servers(of)` gives the
     keys of the servers acting for a user, a group or the network, by their prefix (`users/alice/`).
     `env.RELAY.forward(server, message)` passes one JSON-RPC message to a server and gives its answer, or `null` if

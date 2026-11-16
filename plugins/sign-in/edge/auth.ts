@@ -22,7 +22,11 @@ declare global {
     interface Env {
       DB: D1Database;
       ASSETS: Fetcher;
-      OWN: { write(name: string, data: string): Promise<boolean>; remove(name: string): Promise<void> };
+      OWN: {
+        write(name: string, data: string): Promise<boolean>;
+        update(name: string, change: (was: string | null) => string): Promise<string>;
+        remove(name: string): Promise<void>;
+      };
       NETWORK: {
         verifiedKey(url: string, headers: Record<string, string>, body: string): Promise<string | null>;
         servers(of: string): Promise<string[]>;
@@ -128,8 +132,7 @@ async function place(adapter: Adapter, device: string, kind: Device["kind"], nam
  */
 async function goesBy(user: User) {
   const person = { called: user.called ?? null, email: user.emailVerified ? user.email : null };
-  await env.OWN.remove(`people/${user.name}`);
-  await env.OWN.write(`people/${user.name}`, JSON.stringify(person));
+  await env.OWN.update(`people/${user.name}`, () => JSON.stringify(person));
 }
 
 /** Makes a browser's session one of its person's devices, as a server reads whose a device is. */

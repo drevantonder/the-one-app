@@ -377,7 +377,7 @@ defmodule Chrome do
         carry(call, inputs, %{"state" => "packing", "from" => name, "container" => other(name, session)})
 
       {_, nil} ->
-        record(call, session, %{"container" => name, "state" => "running"})
+        record(call, session, fn _ -> %{"container" => name, "state" => "running"} end)
         create(call, inputs)
     end
   end
@@ -445,7 +445,7 @@ defmodule Chrome do
   # Carries a stopped browser on into its other container, a step at a time from the one `record` is at, each saved
   # before it's taken (the moduledoc).
   defp carry(call, %{"session" => session} = inputs, %{"state" => "packing", "from" => from} = record) do
-    record(call, session, record)
+    record(call, session, fn _ -> record end)
 
     if not match?(%{"state" => "running"}, Enum.find(containers(call), &(&1["name"] == from))),
       do: on(call, "start", from)
@@ -456,7 +456,7 @@ defmodule Chrome do
   end
 
   defp carry(call, %{"session" => session} = inputs, %{"state" => "moving", "from" => from, "container" => to} = record) do
-    record(call, session, record)
+    record(call, session, fn _ -> record end)
     # One a try before this made holds nothing the old one doesn't.
     if Enum.any?(containers(call), &(&1["name"] == to)), do: on(call, "remove", to)
     make(call, session, inputs)
@@ -467,10 +467,10 @@ defmodule Chrome do
   end
 
   defp carry(call, %{"session" => session} = inputs, %{"state" => "starting", "from" => from, "container" => to}) do
-    record(call, session, %{"state" => "starting", "from" => from, "container" => to})
+    record(call, session, fn _ -> %{"state" => "starting", "from" => from, "container" => to} end)
     launched = launch(call, session, inputs["url"])
     if Enum.any?(containers(call), &(&1["name"] == from)), do: on(call, "remove", from)
-    record(call, session, %{"state" => "running", "container" => to})
+    record(call, session, fn _ -> %{"state" => "running", "container" => to} end)
     launched
   end
 
@@ -525,7 +525,7 @@ defmodule Chrome do
     case request(call, session, id, request) do
       # The MCP server forgets its sessions when its container stops, so one kept from before is begun again.
       %{"status" => 404} when again? ->
-        record(call, session, Map.delete(record(call, session), "mcp"))
+        record(call, session, &Map.delete(&1, "mcp"))
         mcp(call, session, tool, arguments, false)
 
       %{"body" => body} ->
@@ -557,7 +557,7 @@ defmodule Chrome do
     }
 
     %{"status" => 200, "headers" => %{"mcp-session-id" => id}} = request(call, session, nil, request)
-    record(call, session, Map.put(record(call, session), "mcp", id))
+    record(call, session, &Map.put(&1, "mcp", id))
     id
   rescue
     e ->
@@ -591,10 +591,9 @@ defmodule Chrome do
     end
   end
 
-  # A blob is written only where there's none, so the one before goes first.
-  defp record(call, session, record) do
-    Artifact.remove(call.own, key(call, session))
-    :ok = Artifact.write(call.own, key(call, session), JSON.encode!(record))
+  # Changes the session's record in one step: `change` is given it as it is now.
+  defp record(call, session, change) do
+    Artifact.update(call.own, key(call, session), fn was -> JSON.encode!(change.(if(was, do: JSON.decode!(was), else: %{}))) end)
   end
 
   defp key(call, session), do: "browsers/#{call.subject}/#{session}"

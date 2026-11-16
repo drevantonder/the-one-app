@@ -251,7 +251,7 @@ defmodule ChromeProfiles do
     fields = Map.new(names, &{&1, value(call, from, &1)})
     vault(call).keep(call, @item <> to, fields)
     vault(call).remove(call, @item <> from)
-    for {session, %{"profile" => ^from} = note} <- notes(call), do: note(call, session, %{note | "profile" => to})
+    for {session, %{"profile" => ^from}} <- notes(call), do: note(call, session, &%{&1 | "profile" => to})
     %{profile: to, was: from}
   end
 
@@ -266,7 +266,7 @@ defmodule ChromeProfiles do
   def call("open", %{"profile" => name, "session" => session} = inputs, call) do
     name = profile!(call, name)
     open!(call, session, name)
-    note(call, session, %{"profile" => name, "save" => Map.get(inputs, "save", true), "update" => nil})
+    note(call, session, fn _ -> %{"profile" => name, "save" => Map.get(inputs, "save", true), "update" => nil} end)
     opened = Call.tool(call, "chrome", "open", Map.take(inputs, ~w(session description url)))
     Map.put(opened, "profile", name)
   end
@@ -445,22 +445,21 @@ defmodule ChromeProfiles do
   # Takes an update one step (`event`, by `@steps`) from the state its note is in, with `changes` to the note, and
   # gives the note. A `nil` event only changes the note.
   defp step(call, session, event, changes \\ %{}) do
-    note = note(call, session)
-    was = note && note["state"]
-
-    state =
-      cond do
-        event == nil -> was
-        to = @steps[{was, event}] -> to
-        true -> raise "#{(note || changes)["profile"]} can't #{event} while it's #{was || "not being updated"}"
-      end
-
-    note = Map.merge(note || %{}, changes) |> Map.put("state", state)
-
     note =
-      if state in ~w(starting ready saving discarding) and event != "fail", do: Map.put(note, "why", nil), else: note
+      note(call, session, fn note ->
+        was = note && note["state"]
 
-    note(call, session, note)
+        state =
+          cond do
+            event == nil -> was
+            to = @steps[{was, event}] -> to
+            true -> raise "#{(note || changes)["profile"]} can't #{event} while it's #{was || "not being updated"}"
+          end
+
+        note = Map.merge(note || %{}, changes) |> Map.put("state", state)
+        if state in ~w(starting ready saving discarding) and event != "fail", do: Map.put(note, "why", nil), else: note
+      end)
+
     Call.changed(call)
     note
   end
@@ -502,9 +501,9 @@ defmodule ChromeProfiles do
     end
   end
 
-  defp note(call, session, note) do
-    forget(call, session)
-    Artifact.write(call.own, at(call, session), JSON.encode!(note))
+  # Changes the session's note in one step, and gives it: `change` is given it as it is now, or `nil`.
+  defp note(call, session, change) do
+    JSON.decode!(Artifact.update(call.own, at(call, session), &JSON.encode!(change.(&1 && JSON.decode!(&1)))))
   end
 
   defp forget(call, session), do: Artifact.remove(call.own, at(call, session))
