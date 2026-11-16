@@ -246,7 +246,17 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         while let Some(line) = said.next_line().await? {
             say(&line)?;
             if line == UPDATE_ASKED {
-                match take(&client, &here, &program).await {
+                // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops
+                // where it was told the device is nobody's, and its timer doesn't count while the machine sleeps.
+                let took = match Client::open(client::home()?, Vec::new()).await {
+                    Ok(now) => {
+                        let took = take(&now, &here, &program).await;
+                        now.close().await;
+                        took
+                    }
+                    Err(error) => Err(error),
+                };
+                match took {
                     Ok(true) => {
                         server.kill().await?;
                         return Err(again(&program));
