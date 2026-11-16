@@ -37,6 +37,15 @@ const PONG = 10;
 const SILENT = 45_000;
 /** What a server is told when one of the network's servers comes or goes: to ask who's on again. */
 const SEEN = JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/seen" });
+/**
+ * How long a server has to answer a ping before a call goes to another: a server that's registered here may be a
+ * machine that has just gone to sleep or is restarting, whose connection hasn't ended yet. It's well inside what an
+ * MCP client waits for (Claude's 30 seconds), and long enough for a server across the world. How long the call
+ * itself then takes is its tool's.
+ */
+const REACH = 5_000;
+/** MCP's ping, which a server answers at once, whoever asks. */
+const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
 
 /** Who's on: `"on"` for one connected now, when the last one that was left (ms since 1970), or `null` for one never seen. */
 type Seen = "on" | number | null;
@@ -145,20 +154,19 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   }
 
   /**
-   * Passes an outsider's `message` to the server whose key is `server` and gives its answer, or `null` if that
-   * server isn't here. The wait is this Worker's, on a connection the relay holds asleep, so nothing is billed
-   * for it.
+   * Passes an outsider's `message` to one of `servers`, by their keys, and gives `{server, answer}`: the first of
+   * them to show it's there by answering a ping within `REACH`, or `null` if none does. The wait for the answer is
+   * this Worker's, on a connection the relay holds asleep, so nothing is billed for it, and it's as long as the
+   * call takes.
    */
-  async forward(server: string, message: string): Promise<string | null> {
-    const { webSocket } = await this.relay().fetch(`https://relay/token?to=${server}`, { headers: { upgrade: "websocket" } });
-    if (!webSocket) return null;
-    webSocket.accept();
-    const answered = new Promise<string | null>((resolve) => {
-      webSocket.addEventListener("message", (event) => resolve(event.data as string));
-      webSocket.addEventListener("close", () => resolve(null));
-    });
-    webSocket.send(message);
-    return answered;
+  async forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null> {
+    const tries = servers.map((server) => reach(this.relay(), server));
+    const reached = await Promise.any(tries).catch(() => null);
+    for (const tried of tries) tried.then((other) => other !== reached && other.close(), () => {});
+    if (!reached) return null;
+    const answer = await reached.ask(message);
+    reached.close();
+    return answer === null ? null : { server: reached.server, answer };
   }
 
   /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
@@ -186,6 +194,30 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   relay() {
     return this.env.RELAY.get(this.env.RELAY.idFromName("relay"));
   }
+}
+
+/**
+ * A connection to `server` through `relay`, once it has answered a ping within `REACH`: `ask` sends a message and
+ * gives its answer, or `null` if the server left first. Rejects for a server that isn't here or didn't answer.
+ */
+async function reach(relay: DurableObjectStub<Relay>, server: string) {
+  const { webSocket } = await relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } });
+  if (!webSocket) throw new Error("That server isn't here");
+  webSocket.accept();
+  let answered: ((answer: string | null) => void) | undefined;
+  webSocket.addEventListener("message", (event) => answered?.(event.data as string));
+  webSocket.addEventListener("close", () => answered?.(null));
+  const ask = (message: string) => {
+    webSocket.send(message);
+    return new Promise<string | null>((resolve) => (answered = resolve));
+  };
+  const close = () => webSocket.close(1000, "Done");
+  const pong = await Promise.race([ask(MCP_PING), scheduler.wait(REACH).then(() => null)]);
+  if (pong === null) {
+    close();
+    throw new Error("That server didn't answer");
+  }
+  return { server, ask, close };
 }
 
 export class Relay extends DurableObject<RelayEnv> {
@@ -247,7 +279,7 @@ export class Relay extends DurableObject<RelayEnv> {
     return new Response(null, { status: 204 });
   }
 
-  /** A piece here connects to pass one call to the server `to`, and waits on the connection for its answer. */
+  /** A piece here connects to pass calls to the server `to`, one at a time, and waits on the connection for each answer. */
   call(to: string) {
     if (!this.ctx.getWebSockets(`outside ${to}`).length) return refuse(404, "That server isn't here");
     const call = crypto.randomUUID();
@@ -266,10 +298,7 @@ export class Relay extends DurableObject<RelayEnv> {
     }
     if (said.outside) {
       const { call, answer } = JSON.parse(message as string);
-      for (const waiting of this.ctx.getWebSockets(`call ${call}`)) {
-        waiting.send(answer);
-        waiting.close(1000, "Answered");
-      }
+      for (const waiting of this.ctx.getWebSockets(`call ${call}`)) waiting.send(answer);
       return;
     }
     if (!said.key) return;

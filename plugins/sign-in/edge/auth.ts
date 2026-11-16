@@ -27,7 +27,7 @@ declare global {
         servers(of: string): Promise<string[]>;
       };
       RELAY: {
-        forward(server: string, message: string): Promise<string | null>;
+        forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null>;
         notify(message: string): Promise<void>;
         seen(keys: string[]): Promise<Record<string, "on" | number | null>>;
       };

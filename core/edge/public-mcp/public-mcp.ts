@@ -31,13 +31,10 @@ export default {
     }
     // Whose a request is, is a server's to say: one acting for whoever the link leads to, or for the network.
     const servers = new Set([...(await env.NETWORK.servers(of)), ...(await env.NETWORK.servers(NETWORK))]);
-    for (const server of servers) {
-      const answer = await env.RELAY.forward(server, message);
-      if (answer === null) continue;
-      // A notification has no answer.
-      if (answer === "") return new Response(null, { status: 202 });
-      return new Response(answer, { headers: { "content-type": "application/json" } });
-    }
-    return refuse(503, "None of this network's servers is up");
+    const reached = await env.RELAY.forward([...servers], message);
+    if (!reached) return refuse(503, "None of this network's servers answered. Try again once one is on.");
+    // A notification has no answer.
+    if (reached.answer === "") return new Response(null, { status: 202 });
+    return new Response(reached.answer, { headers: { "content-type": "application/json" } });
   },
 } satisfies ExportedHandler<PublicMcpEnv>;

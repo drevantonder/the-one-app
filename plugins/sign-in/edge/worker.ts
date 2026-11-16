@@ -101,15 +101,12 @@ async function forward(message: string, device: string, of: string[]) {
   const asks_for = call.params?._meta?.for;
   const said = { device, ...(typeof asks_for === "string" && { for: asks_for }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
-  const servers = new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat());
-  for (const server of servers) {
-    const answer = await env.RELAY.forward(server, message);
-    if (answer === null) continue;
-    // A notification has no answer.
-    if (answer === "") return new Response(null, { status: 202 });
-    return new Response(answer, { headers: { "content-type": "application/json" } });
-  }
-  return refuse(503, "None of this network's servers is up");
+  const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
+  const reached = await env.RELAY.forward(servers, message);
+  if (!reached) return refuse(503, "None of this network's servers answered. Try again once one is on.");
+  // A notification has no answer.
+  if (reached.answer === "") return new Response(null, { status: 202 });
+  return new Response(reached.answer, { headers: { "content-type": "application/json" } });
 }
 
 /** Whether a server answered that the device is nobody's. The answer is left to be sent on if it isn't. */

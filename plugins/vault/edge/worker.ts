@@ -12,7 +12,7 @@ declare global {
     interface Env {
       ASSETS: Fetcher;
       NETWORK: { servers(of: string): Promise<string[]> };
-      RELAY: { forward(server: string, message: string): Promise<string | null> };
+      RELAY: { forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null> };
     }
   }
 }
@@ -43,14 +43,11 @@ async function callback(asked: URLSearchParams) {
   const call = { name: "vault_oauth_callback", arguments: said, _meta: { link: `${owner}/${state}` } };
   const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call });
   const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers(NETWORK))]);
-  for (const server of servers) {
-    const answer = await env.RELAY.forward(server, message);
-    if (answer === null) continue;
-    const { result, error }: { result?: { isError?: boolean; content?: { text?: string }[] }; error?: { message?: string } } = JSON.parse(answer);
-    const text = result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened.";
-    return result && !result.isError ? { done: text } : { problem: text };
-  }
-  return { problem: "None of this network's servers is up. Start the sign-in again once one is." };
+  const reached = await env.RELAY.forward([...servers], message);
+  if (!reached) return { problem: "None of this network's servers answered. Start the sign-in again once one is on." };
+  const { result, error }: { result?: { isError?: boolean; content?: { text?: string }[] }; error?: { message?: string } } = JSON.parse(reached.answer);
+  const text = result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened.";
+  return result && !result.isError ? { done: text } : { problem: text };
 }
 
 export default {
