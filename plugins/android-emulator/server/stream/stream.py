@@ -13,7 +13,9 @@
 # `{"t": "key", "key", "mods"}`, a key as X names it; and `{"t": "text", "text"}`.
 import json
 import os
+import re
 import secrets
+import socket
 import struct
 import sys
 
@@ -43,7 +45,7 @@ import asyncio  # noqa: E402
 from fractions import Fraction  # noqa: E402
 
 import av  # noqa: E402
-from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpSender, RTCSessionDescription  # noqa: E402
+from aiortc import RTCConfiguration, RTCIceServer, RTCIceTransportPolicy, RTCPeerConnection, RTCRtpSender, RTCSessionDescription  # noqa: E402
 from aiortc.mediastreams import MediaStreamTrack  # noqa: E402
 
 adb = [asked["adb"], "-s", asked["serial"]]
@@ -168,9 +170,18 @@ async def main():
                     data = line.encode()
                     send(struct.pack(">BI", 1, len(data)) + data)
 
+    # TURN over TCP, by its IPv4 address: aiortc takes one TURN server, half the allocations over UDP to Cloudflare's
+    # get no answer from a machine here, by the port they're from, and one over IPv6 can go nowhere, where TCP over
+    # IPv4 always answers.
+    tcp = [
+        (re.sub(r"^turn:([^:?]+)", lambda host: "turn:" + socket.gethostbyname(host[1]), url), s)
+        for s in asked["iceServers"]
+        for url in ([s["urls"]] if isinstance(s["urls"], str) else s["urls"])
+        if url.startswith("turn:") and url.endswith("transport=tcp")
+    ]
     pc = RTCPeerConnection(RTCConfiguration(
-        iceServers=[RTCIceServer(urls=s["urls"], username=s.get("username"), credential=s.get("credential")) for s in asked["iceServers"]],
-        iceTransportPolicy="relay",
+        iceServers=[RTCIceServer(urls=url, username=s.get("username"), credential=s.get("credential")) for url, s in tcp],
+        iceTransportPolicy=RTCIceTransportPolicy.RELAY,
     ))
     channel = pc.createDataChannel("input", negotiated=True, id=0)
     channel.on("message", act)
@@ -178,6 +189,7 @@ async def main():
 
     @pc.on("connectionstatechange")
     def state():
+        print(f"{asked['serial']}: the connection is {pc.connectionState}", flush=True)
         if pc.connectionState in ("failed", "closed"):
             done.set()
 
@@ -186,13 +198,12 @@ async def main():
         if pc.connectionState != "connected":
             done.set()
 
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=asked["offer"], type="offer"))
-    transceiver = next(t for t in pc.getTransceivers() if t.kind == "video")
-    transceiver.direction = "sendonly"
-    transceiver.sender.replaceTrack(screen)
+    # H.264 only, as the phone sends it: aiortc chooses the codecs as the offer is taken, from the transceiver's.
+    transceiver = pc.addTransceiver(screen, direction="sendonly")
     transceiver.setCodecPreferences([c for c in RTCRtpSender.getCapabilities("video").codecs if c.mimeType in ("video/H264", "video/rtx")])
     # A viewer that lost a frame asks for a whole one: scrcpy's server starts its encoder again, which begins with one.
     transceiver.sender._send_keyframe = lambda: send(bytes([17]))
+    await pc.setRemoteDescription(RTCSessionDescription(sdp=asked["offer"], type="offer"))
     await pc.setLocalDescription(await pc.createAnswer())
     sdp = "".join(line + "\r\n" for line in pc.localDescription.sdp.splitlines() if not line.startswith("a=candidate:") or " typ relay" in line)
     if " typ relay" not in sdp:
