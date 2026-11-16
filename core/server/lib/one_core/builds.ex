@@ -15,6 +15,7 @@ defmodule OneCore.Builds do
   pass (`seen/3`).
   """
   alias OneCore.{Bucket, Server, Servers}
+  alias OneCore.Plugins.{Deploy, Store}
 
   @builds "network/builds/"
   @latest @builds <> "latest"
@@ -73,7 +74,9 @@ defmodule OneCore.Builds do
   Makes `builds` the latest of their names: each `%{\"name\", \"build\", \"sha256\", \"size\"}`. While the bucket lacks
   any of their files, gives a link to send each one it lacks by, `{:send, %{name => link}}`, and changes nothing:
   sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more
-  are removed.
+  are removed: a machine downloads only the latest, and one whose update doesn't take goes back to the build it
+  kept of its own. So are the files of every plugin's versions before its last few (`OneCore.Plugins.Store.prune/1`),
+  since each server release deploys the plugins it ships with again, each a new version with its apps and NIFs.
   """
   def publish(builds) do
     missing =
@@ -100,6 +103,8 @@ defmodule OneCore.Builds do
     if written == :ok do
       named = for {_name, build} <- now, do: @builds <> build["sha256"]
       for blob <- Bucket.list(@builds), blob != @latest, blob not in named, do: Bucket.remove(blob)
+      plugins = for %{plugin: artifact} <- Deploy.deployed(), do: artifact
+      Stream.run(Task.async_stream(plugins, &Store.prune/1, max_concurrency: 16, timeout: :infinity))
       now
     else
       latest(builds)

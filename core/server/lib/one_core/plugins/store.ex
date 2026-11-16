@@ -5,7 +5,7 @@ defmodule OneCore.Plugins.Store do
   some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `latest` says
   which set it runs now, with that version's number. A deploy replaces `latest` only if it's unchanged, so two
   deploys at once can't both be the plugin's next version, and first writes the version it replaces to
-  `versions/<number>`, so a plugin keeps its history. `latest` names the files it was deployed from too, by their
+  `versions/<number>`; only the last few versions keep their files (`prune/1`). `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
   version after keeps its `from`, so one whose `source` isn't that hash was changed since. `sandbox` says it runs in
@@ -115,6 +115,36 @@ defmodule OneCore.Plugins.Store do
     if wrote == :ok,
       do: {:ok, number},
       else: {:error, "#{name} was deployed by someone else just now. Look at it, and do this again."}
+  end
+
+  # How many of a plugin's versions keep their files: the latest, which every server runs, and the two before it, which
+  # a server may still hold while it moves to the latest, and an app open on a device may still be reading.
+  @kept 3
+
+  @doc """
+  Removes the files of the plugin `artifact`'s versions before its last few (`@kept`): the set each ran, the files
+  it was deployed from and what it said of itself, and its entry in `versions/`. Nothing runs them, and nothing
+  goes back to one: a plugin goes back by being deployed again from its git repo. A set a kept version runs too
+  stays. Gives how many blobs went.
+  """
+  def prune(artifact) do
+    with {number, latest, _tag} <- latest(artifact) do
+      history = Bucket.list("#{artifact}/versions/")
+      codes = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, code, _tag} -> {blob, code} end)
+      {old, kept} = Enum.split_with(codes, fn {blob, _code} -> String.to_integer(Path.basename(blob)) <= number - @kept end)
+      kept = MapSet.new([latest | Enum.map(kept, &elem(&1, 1))])
+
+      files =
+        for code <- Enum.uniq(Enum.map(old, &elem(&1, 1))), code not in kept, prefix <- ~w(code source described) do
+          Bucket.list("#{artifact}/#{prefix}/#{code}")
+        end
+
+      gone = List.flatten(files) ++ Enum.map(old, &elem(&1, 0))
+      Stream.run(Task.async_stream(gone, &Bucket.remove/1, max_concurrency: 16, timeout: :infinity))
+      length(gone)
+    else
+      nil -> 0
+    end
   end
 
   @doc """
