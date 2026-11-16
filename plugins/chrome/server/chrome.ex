@@ -7,8 +7,8 @@ defmodule Chrome do
 
   A session is the container `chrome-<session>`, created through Containers' tools for whoever opened it, so whose
   it is and who reaches it is what Containers says, and Containers stops it once it's gone unused for its
-  `idle_hours`. The MCP server's own session id for each is kept in the plugin's own artifact, under
-  `sessions/<whose>/<session>`.
+  `idle_hours`. Opening a stopped one carries its user data dir on into a new container, on the image as it is now.
+  The MCP server's own session id for each is kept in the plugin's own artifact, under `sessions/<whose>/<session>`.
 
   A browser's profile is its user data dir, `/root/.chromium` in its container. As one is created it offers
   `chrome.starting`, for a plugin to hand it a user data dir to start from, and as it closes `chrome.closing`, with
@@ -102,7 +102,7 @@ defmodule Chrome do
         description: "Your browsers: each one's session, what it's for, its state (running or exited), its machine, and when it was created and last used (ms since 1970).",
         inputs: %{type: "object", properties: %{}}
       },
-      %{name: "close", description: "Close a browser and remove its container, for good.", inputs: object()},
+      %{name: "close", description: "Close a browser and remove its container, for good. One that's gone already is closed.", inputs: object()},
       %{name: "navigate", description: "Navigate to a URL.", inputs: object(%{url: %{type: "string"}}, ["url"])},
       %{name: "navigate_back", description: "Go back to the previous page in the history.", inputs: object()},
       %{
@@ -269,12 +269,15 @@ defmodule Chrome do
       %{"state" => "running"} ->
         if inputs["url"], do: mcp(call, session, "browser_navigate", %{"url" => inputs["url"]}), else: "Opened #{session}"
 
-      # A container started again keeps its files, its user data dir with them, and has a new MCP server, which knows
-      # none of the sessions kept from before.
+      # A browser that was stopped carries on in a new container, so on the image as it is now: with the user data
+      # dir it stopped with, and a new MCP server, which knows none of the sessions kept from before.
       %{} ->
         forget(call, session)
         containers(call, "start", session)
-        launch(call, session, inputs["url"])
+        pack!(call, session)
+        {:blob, _type, user_data} = containers(call, "read_file", session, %{"path" => @tarball})
+        containers(call, "remove", session)
+        create(call, inputs, user_data)
 
       nil ->
         forget(call, session)
@@ -284,20 +287,21 @@ defmodule Chrome do
 
   def call("close", %{"session" => session}, call) do
     case Enum.find(containers(call), &(session(&1) == session)) do
+      # Containers lists only the machines that are on, so a browser it doesn't list is gone only if none is off.
       nil ->
-        raise "You have no browser called #{session}"
+        off = for %{"on" => false, "machine" => machine} <- Call.tool(call, "containers", "machines", %{}), do: machine
+        if off != [], do: raise("#{session} isn't on a machine that's on: #{Enum.join(off, ", ")} is off. Close it once that's back")
 
       %{"state" => "running"} = c ->
-        packed = containers(call, "exec", session, %{"command" => @pack, "timeout" => 120})
-        if packed["exit"] != 0, do: raise("Couldn't close #{session}: #{String.trim(packed["stderr"])}")
+        pack!(call, session)
         about = %{"session" => session, "description" => c["description"], "container" => c["name"], "user_data" => @tarball}
         run_hook(call, "closing", about)
+        containers(call, "remove", session)
 
       %{} ->
-        :ok
+        containers(call, "remove", session)
     end
 
-    containers(call, "remove", session)
     forget(call, session)
     "Closed #{session}"
   end
@@ -308,9 +312,9 @@ defmodule Chrome do
     mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session"))
   end
 
-  # Creates the browser's container, with its display and no Chrome yet, puts in the user data dir a plugin hands
-  # it, if one does, and starts Chrome on it.
-  defp create(call, %{"session" => session} = inputs) do
+  # Creates the browser's container, with its display and no Chrome yet, puts in the user data dir it carries on
+  # with, or else the one a plugin hands it, if one does, and starts Chrome on it.
+  defp create(call, %{"session" => session} = inputs, user_data \\ nil) do
     c =
       Call.tool(call, "containers", "create", %{
         "image" => "desktop",
@@ -323,7 +327,15 @@ defmodule Chrome do
 
     about = %{"session" => session, "description" => inputs["description"], "url" => inputs["url"], "container" => c["name"], "user_data" => nil}
 
-    case run_hook(call, "starting", about)["user_data"] do
+    tarball =
+      if user_data do
+        containers(call, "write_file", session, %{"path" => @tarball, "data" => Base.encode64(user_data)})
+        @tarball
+      else
+        run_hook(call, "starting", about)["user_data"]
+      end
+
+    case tarball do
       nil ->
         :ok
 
@@ -334,6 +346,12 @@ defmodule Chrome do
     end
 
     launch(call, session, inputs["url"])
+  end
+
+  # Packs the browser's user data dir into its container's #{@tarball}, as Chrome quits.
+  defp pack!(call, session) do
+    packed = containers(call, "exec", session, %{"command" => @pack, "timeout" => 120})
+    if packed["exit"] != 0, do: raise("Couldn't pack #{session}'s user data dir: #{String.trim(packed["stderr"])}")
   end
 
   defp launch(call, session, url) do

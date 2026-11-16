@@ -202,13 +202,7 @@ defmodule ChromeProfiles do
     now = System.system_time(:millisecond)
 
     for {session, %{"update" => until, "profile" => name}} <- notes(call), until && until < now do
-      try do
-        close_update(call, name)
-      rescue
-        # Its browser is gone already, so it closed without saying so: there's nothing to save.
-        _ -> forget(call, session)
-      end
-
+      close_update(call, name)
       session
     end
   end
@@ -308,7 +302,10 @@ defmodule ChromeProfiles do
   defp close_update(call, name) do
     session = update_session(name)
     if not match?(%{"update" => until} when until != nil, note(call, session)), do: raise("#{name} isn't being updated")
+    # A browser that had stopped closes without `chrome.closing`, so its note goes here. One that didn't close keeps
+    # its note, and the next `save_updates` closes it.
     Call.tool(call, "chrome", "close", %{"session" => session})
+    forget(call, session)
   end
 
   # A browser that's open already is only carried on with on the same profile: Chrome hands it a profile as it starts.
