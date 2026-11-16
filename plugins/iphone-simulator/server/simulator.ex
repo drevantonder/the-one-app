@@ -257,7 +257,7 @@ defmodule IphoneSimulator.Simulator do
     File.write!(file, JSON.encode!(config))
 
     case cmd([python(service), Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do
-      %{exit: 0, stdout: answer} -> answer
+      %{exit: 0, stdout: output} -> output
       %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
     end
   end

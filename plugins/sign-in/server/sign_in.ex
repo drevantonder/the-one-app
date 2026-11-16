@@ -243,7 +243,7 @@ defmodule SignIn do
 
     case Edge.send!(request ++ [retry: false]) do
       %{status: 200, body: %{"error" => why}} -> raise why
-      %{status: 200, body: answer} -> answer
+      %{status: 200, body: response} -> response
       %{status: status} -> raise "The network's edge answered #{status}"
     end
   end

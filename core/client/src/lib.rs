@@ -119,8 +119,8 @@ impl Network {
         for (name, value) in self.signed(key, "/presigner/servers", "")? {
             ask = ask.header(name, value);
         }
-        let answer = ask.send().await?;
-        let (status, response): (_, Value) = (answer.status(), answer.json().await?);
+        let sent = ask.send().await?;
+        let (status, response): (_, Value) = (sent.status(), sent.json().await?);
         if !status.is_success() {
             bail!("{}", response["error"].as_str().unwrap_or("the presigner refused"))
         }
@@ -239,7 +239,7 @@ impl DeviceAuthorization {
 
     /// Waits for this device's person to answer, asking the network's authorization server as often as it allows. It's an
     /// error if they stopped it, or its code ended first.
-    pub async fn answered(mut self) -> Result<()> {
+    pub async fn wait_for_approval(mut self) -> Result<()> {
         loop {
             sleep(self.interval).await;
             let ask = serde_urlencoded::to_string([
@@ -377,8 +377,8 @@ async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) 
     for (name, value) in network.signed(key, parsed.path(), &body)? {
         request = request.header(name, value);
     }
-    let answer = request.body(body).send().await?;
-    Ok((answer.status().is_success(), answer.json().await?))
+    let response = request.body(body).send().await?;
+    Ok((response.status().is_success(), response.json().await?))
 }
 
 impl NetworkConfig {
@@ -406,8 +406,8 @@ impl NetworkConfig {
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
         let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/token", "params": {"build": device_info()}});
         let mcp = format!("{}/mcp", self.address.trim_end_matches('/'));
-        let (_, answer) = ask_edge(&mcp, key, "application/json", ask.to_string()).await?;
-        if answer["error"]["code"] == NOBODY {
+        let (_, response) = ask_edge(&mcp, key, "application/json", ask.to_string()).await?;
+        if response["error"]["code"] == NOBODY {
             if self.who.is_some() {
                 (self.token, self.who) = (None, None);
                 self.keep(home)?;
@@ -422,10 +422,10 @@ impl NetworkConfig {
             write(&home.join("network"), &serde_json::to_vec(self)?)?;
             bail!(requested?)
         }
-        if answer["result"].is_null() {
-            bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
+        if response["result"].is_null() {
+            bail!("{}", response["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
         }
-        self.took(&answer["result"], home)
+        self.took(&response["result"], home)
     }
 
     /// Keeps a token this device was given, `{token, who}`, in `home`. Once the device is someone else's, what it kept
@@ -676,7 +676,7 @@ impl Reached {
     /// in time is gone, and so is this connection to it.
     async fn there(&self) -> bool {
         let probe = async { self.send(b"").await?.read_to_end(LIMIT).await.ok() };
-        let there = timeout(THERE, probe).await.is_ok_and(|answer| answer.is_some());
+        let there = timeout(THERE, probe).await.is_ok_and(|response| response.is_some());
         if there {
             *self.received.lock().expect("no ask panics") = Instant::now();
         } else {
@@ -1033,7 +1033,7 @@ impl Client {
                 let open = self.reached().await?;
                 *reached.lock().expect("no ask panics") = open.path();
                 match open.ask(&message, &notified).await {
-                    Ok(answer) => return Ok(answer),
+                    Ok(response) => return Ok(response),
                     Err(RequestError::Unreachable) => {}
                     Err(RequestError::Stopped) if reads => stopped = true,
                     Err(RequestError::Stopped) => bail!(
@@ -1047,12 +1047,12 @@ impl Client {
                 false => bail!(UNANSWERED),
             }
         };
-        let answer = request.await;
-        self.answered(answer.is_ok());
+        let response = request.await;
+        self.set_answering(response.is_ok());
         if let Some(mut span) = span {
-            let refused = match &answer {
+            let refused = match &response {
                 Err(why) => Some(why.to_string()),
-                Ok(answer) => refused(answer),
+                Ok(response) => refused(response),
             };
             let took = started.elapsed();
             if refused.is_some() || took > SLOW {
@@ -1064,20 +1064,20 @@ impl Client {
                 self.report(span);
             }
         }
-        if answer.is_ok() {
+        if response.is_ok() {
             self.send_soon();
         }
-        match answer {
-            Ok(answer) => {
+        match response {
+            Ok(response) => {
                 // What a device fills in of each tool's inputs is what the latest list of them says.
                 if lists
-                    && let Ok(listed) = serde_json::from_slice::<Value>(&answer)
+                    && let Ok(listed) = serde_json::from_slice::<Value>(&response)
                     && listed["result"]["tools"].is_array()
                 {
                     let known = resolve::listed(&listed["result"], &self.formats());
                     *self.listed.lock().expect("no ask panics") = Some(Arc::new(known));
                 }
-                Ok(self.taken_out(answer).await)
+                Ok(self.taken_out(response).await)
             }
             refused => refused,
         }
@@ -1085,12 +1085,12 @@ impl Client {
 
     /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
     /// it got its token. Then the answer says where its person lets it in again, as the network's edge says it.
-    async fn taken_out(&self, answer: Vec<u8>) -> Vec<u8> {
-        let (Some(network), Ok(mut response)) = (self.link().network, serde_json::from_slice::<Value>(&answer)) else {
-            return answer;
+    async fn taken_out(&self, bytes: Vec<u8>) -> Vec<u8> {
+        let (Some(network), Ok(mut response)) = (self.link().network, serde_json::from_slice::<Value>(&bytes)) else {
+            return bytes;
         };
         if response["error"]["code"] != NOBODY {
-            return answer;
+            return bytes;
         }
         let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
         let mut config =
@@ -1098,7 +1098,7 @@ impl Client {
         let admitted = config.admit(&self.key, &self.home).await;
         match admitted.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
             Err(Some(not_in)) => response["error"]["message"] = json!(not_in.to_string()),
-            _ => return answer,
+            _ => return bytes,
         }
         response.to_string().into_bytes()
     }
@@ -1119,12 +1119,12 @@ impl Client {
     /// Asks the server for `method`, and gives its result.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let message = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-        let answer = self.ask(message.to_string().as_bytes()).await?;
-        let mut answer: Value = serde_json::from_slice(&answer).context("the server's answer isn't JSON")?;
-        if let Some(error) = answer.get("error") {
+        let response = self.ask(message.to_string().as_bytes()).await?;
+        let mut response: Value = serde_json::from_slice(&response).context("the server's answer isn't JSON")?;
+        if let Some(error) = response.get("error") {
             bail!("{}", error["message"].as_str().unwrap_or("the server refused"))
         }
-        let mut result = answer["result"].take();
+        let mut result = response["result"].take();
         self.keep_files(&mut result).await?;
         Ok(result)
     }
@@ -1163,7 +1163,7 @@ impl Client {
 
     /// Says whether a server answered what was just asked, and once one does after none did for longer than a
     /// person is shown nothing of it, reports how long none did.
-    fn answered(&self, now: bool) {
+    fn set_answering(&self, now: bool) {
         if self.connected.send_if_modified(|answering| std::mem::replace(answering, now) != now) {
             let mut since = self.unanswered.lock().expect("no ask panics");
             match (now, since.take()) {
@@ -1444,15 +1444,15 @@ fn keep(home: &Path, record: &Value) {
 
 /// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
 /// A refusal is short, and a long answer isn't read twice to find it isn't one.
-fn refused(answer: &[u8]) -> Option<String> {
-    if answer.len() > 16 << 10 {
+fn refused(response: &[u8]) -> Option<String> {
+    if response.len() > 16 << 10 {
         return None;
     }
-    let answer: Value = serde_json::from_slice(answer).ok()?;
-    if let Some(why) = answer["error"]["message"].as_str() {
+    let response: Value = serde_json::from_slice(response).ok()?;
+    if let Some(why) = response["error"]["message"].as_str() {
         return Some(why.to_owned());
     }
-    let result = &answer["result"];
+    let result = &response["result"];
     (result["isError"] == true).then(|| result["content"][0]["text"].as_str().unwrap_or("The tool failed").to_owned())
 }
 

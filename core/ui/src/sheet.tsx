@@ -147,20 +147,20 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
 }
 
 /// A question that stops everything until it's answered: the one the page has, asked through `confirm`.
-function Alert(props: { question: Question | null; onAnswer: (yes: boolean, reset: false) => void }) {
-  let answer = false
+function Alert(props: { question: Question | null; onResult: (yes: boolean, reset: false) => void }) {
+  let confirmed = false
   return (
-    <Dialog class="ui-dialog alert" role="alertdialog" labelledby="ui-alert-heading" describedby="ui-alert-text" open={!!props.question} onClose={() => props.onAnswer(answer, (answer = false))}>
+    <Dialog class="ui-dialog alert" role="alertdialog" labelledby="ui-alert-heading" describedby="ui-alert-text" open={!!props.question} onClose={() => props.onResult(confirmed, (confirmed = false))}>
       <div class="panel">
         <h2 id="ui-alert-heading">{props.question?.heading}</h2>
         <Show when={props.question?.text}>
           <p id="ui-alert-text">{props.question?.text}</p>
         </Show>
         <footer>
-          <Button variant="outline" autofocus onClick={(event) => ((answer = false), event.currentTarget.closest("dialog")!.close())}>
+          <Button variant="outline" autofocus onClick={(event) => ((confirmed = false), event.currentTarget.closest("dialog")!.close())}>
             {messages.cancel}
           </Button>
-          <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((answer = true), event.currentTarget.closest("dialog")!.close())}>
+          <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((confirmed = true), event.currentTarget.closest("dialog")!.close())}>
             {props.question?.action || messages.ok}
           </Button>
         </footer>
@@ -185,10 +185,10 @@ let ask: ((question: Question) => Promise<boolean>) | undefined
 export function confirm(question: Question): Promise<boolean> {
   if (!ask) {
     const [question, setQuestion] = createSignal<Question | null>(null)
-    let answered: (yes: boolean) => void
+    let resolve: (yes: boolean) => void
     const host = document.body.appendChild(document.createElement("div"))
-    render(() => <Alert question={question()} onAnswer={(yes) => (setQuestion(null), answered(yes))} />, host)
-    ask = (question) => new Promise<boolean>((done) => ((answered = done), setQuestion(question)))
+    render(() => <Alert question={question()} onResult={(yes) => (setQuestion(null), resolve(yes))} />, host)
+    ask = (question) => new Promise<boolean>((done) => ((resolve = done), setQuestion(question)))
   }
   return ask(question)
 }

@@ -122,7 +122,7 @@ defmodule GoogleAccount do
     for email <- emails(call) do
       case vault(call, "fetch", Map.put(get(@userinfo), "item", item(email))) do
         %{"status" => 200} -> %{account: email, ok: true}
-        answer -> %{account: email, ok: false, why: trouble(call, title, email, answer)}
+        response -> %{account: email, ok: false, why: trouble(call, title, email, response)}
       end
     end
   end
@@ -171,12 +171,12 @@ defmodule GoogleAccount do
 
     request = if body, do: Map.put(request, "body", body), else: request
 
-    answer = vault(call, "fetch", request)
+    response = vault(call, "fetch", request)
 
-    if answer["status"] not in 200..299,
-      do: raise(trouble(call, title, email, answer, Map.take(inputs, ["missing", "hint"])))
+    if response["status"] not in 200..299,
+      do: raise(trouble(call, title, email, response, Map.take(inputs, ["missing", "hint"])))
 
-    %{status: answer["status"], headers: answer["headers"], body: decoded(answer["body"])}
+    %{status: response["status"], headers: response["headers"], body: decoded(response["body"])}
   end
 
   defp decoded(nil), do: nil
@@ -224,9 +224,9 @@ defmodule GoogleAccount do
   end
 
   # What went wrong with a call, said for whoever's reading.
-  defp trouble(call, title, email, answer, hints \\ %{}) do
-    status = answer["status"]
-    message = message(answer["body"]) || "#{status}"
+  defp trouble(call, title, email, response, hints \\ %{}) do
+    status = response["status"]
+    message = message(response["body"]) || "#{status}"
     again = "#{email} needs signing in again, to let #{title} in: #{app(call)}_sign_in with account #{email}."
 
     cond do

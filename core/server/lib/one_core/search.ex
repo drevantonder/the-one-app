@@ -44,7 +44,7 @@ defmodule OneCore.Search do
   @doc """
   The answer to `query` for `who`, at most `limit` tools, its calls written for `mode`: `:mcp`, `:code` or `:cli`.
   """
-  def answer(query, limit, who, mode) do
+  def run(query, limit, who, mode) do
     running = Plugins.running(who)
     # What anyone has deployed is read from the bucket, meanwhile.
     deployed = Task.async(&Deploy.deployed/0)

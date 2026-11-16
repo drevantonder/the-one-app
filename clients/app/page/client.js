@@ -273,7 +273,7 @@ function recoveryKey(typed, who) {
   entry.value = key.textContent = problem.textContent = dialog.returnValue = ""
   if (!typed) invoke("recovery_key", { who }).then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
   dialog.showModal()
-  return new Promise((answered) => {
+  return new Promise((resolve) => {
     form.onsubmit = async (event) => {
       event.preventDefault()
       const pressed = /** @type {HTMLButtonElement | null} */ (event.submitter)
@@ -289,7 +289,7 @@ function recoveryKey(typed, who) {
     }
     dialog.onclose = () => {
       entry.value = key.textContent = ""
-      answered({ done: dialog.returnValue === "done" })
+      resolve({ done: dialog.returnValue === "done" })
     }
   })
 }
@@ -299,7 +299,7 @@ const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc:
 
 /// What this page answers an app itself. The rest is the client's to answer.
 /** @param {View} view @param {string} method @param {Record<string, any>} params */
-async function answer(view, method, params) {
+async function respond(view, method, params) {
   if (method === "ui/initialize") {
     return {
       protocolVersion: "2026-01-26",
@@ -378,7 +378,7 @@ addEventListener("message", async ({ source, data }) => {
     return
   }
   try {
-    post(view, { id, result: await answer(view, method, params) })
+    post(view, { id, result: await respond(view, method, params) })
   } catch (error) {
     const { code, message } = /** @type {{ code?: number, message?: string }} */ (error)
     post(view, { id, error: { code: code ?? -32000, message: message ?? String(error) } })

@@ -48,7 +48,7 @@ defmodule Backups.Destination do
     case s3(opened, :get, name) do
       %{status: 200, body: data} -> data
       %{status: 404} -> nil
-      answered -> ok(answered, name)
+      result -> ok(result, name)
     end
   end
 
@@ -79,8 +79,8 @@ defmodule Backups.Destination do
           [] -> names
         end
 
-      answered ->
-        ok(answered, prefix)
+      result ->
+        ok(result, prefix)
     end
   end
 

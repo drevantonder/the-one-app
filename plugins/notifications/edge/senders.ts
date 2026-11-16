@@ -81,7 +81,7 @@ async function apns(fetch: Fetch, env: Keys, device: string, sealed: string): Pr
     lasts: 50 * 60_000,
   }));
   const host = env.APNS_SANDBOX ? "api.sandbox.push.apple.com" : "api.push.apple.com";
-  const answer = await fetch(`https://${host}/3/device/${device}`, {
+  const response = await fetch(`https://${host}/3/device/${device}`, {
     method: "POST",
     headers: {
       authorization: `bearer ${bearer}`,
@@ -92,11 +92,11 @@ async function apns(fetch: Fetch, env: Keys, device: string, sealed: string): Pr
     },
     body: JSON.stringify({ aps: { alert: { body: FIXED }, "mutable-content": 1, sound: "default" }, n: sealed }),
   });
-  if (answer.ok) return {};
-  const { reason = "" } = await answer.json<{ reason?: string }>().catch(() => ({}) as { reason?: string });
-  if (answer.status === 410 || ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"].includes(reason)) return { gone: true };
+  if (response.ok) return {};
+  const { reason = "" } = await response.json<{ reason?: string }>().catch(() => ({}) as { reason?: string });
+  if (response.status === 410 || ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"].includes(reason)) return { gone: true };
   if (["ExpiredProviderToken", "InvalidProviderToken"].includes(reason)) cache.delete("apns");
-  return { failed: `APNs answered ${answer.status} ${reason}`.trim() };
+  return { failed: `APNs answered ${response.status} ${reason}`.trim() };
 }
 
 /** FCM's HTTP v1 API, with an OAuth token for the Firebase service account, from its RS256 JWT. */
@@ -113,24 +113,24 @@ async function fcm(fetch: Fetch, env: Keys, device: string, sealed: string): Pro
       .setExpirationTime("1h")
       .sign(await importPKCS8(account.private_key, "RS256"));
     const grant = { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion };
-    const answer = await fetch(at, { method: "POST", body: new URLSearchParams(grant) });
-    const given = await answer.json<{ access_token?: string; expires_in: number; error_description?: string }>().catch(() => ({}) as { access_token?: undefined; expires_in: number; error_description?: string });
-    if (!given.access_token) throw new Error(`Google gave FCM no token: ${given.error_description ?? answer.status}`);
+    const response = await fetch(at, { method: "POST", body: new URLSearchParams(grant) });
+    const given = await response.json<{ access_token?: string; expires_in: number; error_description?: string }>().catch(() => ({}) as { access_token?: undefined; expires_in: number; error_description?: string });
+    if (!given.access_token) throw new Error(`Google gave FCM no token: ${given.error_description ?? response.status}`);
     return { token: given.access_token, lasts: (given.expires_in - 300) * 1000 };
   });
   const message = { token: device, data: { n: sealed }, android: { priority: "HIGH", ttl: "86400s" } };
-  const answer = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
     method: "POST",
     headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
     body: JSON.stringify({ message }),
   });
-  if (answer.ok) return {};
-  type Answer = { error?: { status?: string; details?: { errorCode?: string }[] } };
-  const { error = {} } = await answer.json<Answer>().catch(() => ({}) as Answer);
+  if (response.ok) return {};
+  type ErrorBody = { error?: { status?: string; details?: { errorCode?: string }[] } };
+  const { error = {} } = await response.json<ErrorBody>().catch(() => ({}) as ErrorBody);
   const code = error.details?.find((detail) => detail.errorCode)?.errorCode ?? error.status ?? "";
-  if (answer.status === 404 || code === "UNREGISTERED") return { gone: true };
-  if (answer.status === 401) cache.delete("fcm");
-  return { failed: `FCM answered ${answer.status} ${code}`.trim() };
+  if (response.status === 404 || code === "UNREGISTERED") return { gone: true };
+  if (response.status === 401) cache.delete("fcm");
+  return { failed: `FCM answered ${response.status} ${code}`.trim() };
 }
 
 /** Web Push: RFC 8291's encryption to the browser's subscription, which is the token, and RFC 8292's VAPID. */
@@ -139,10 +139,10 @@ async function webpush(fetch: Fetch, env: Keys, device: string, sealed: string):
   const subscription = JSON.parse(device);
   const vapid = { subject: env.VAPID_SUBJECT ?? "", publicKey: env.VAPID_PUBLIC_KEY ?? "", privateKey: env.VAPID_PRIVATE_KEY };
   const message = { data: JSON.stringify({ n: sealed }), options: { ttl: 86_400, urgency: "high" as const } };
-  const answer = await fetch(subscription.endpoint, await buildPushPayload(message, subscription, vapid));
-  if (answer.ok) return {};
-  if (answer.status === 404 || answer.status === 410) return { gone: true };
-  return { failed: `the browser's push service answered ${answer.status}` };
+  const response = await fetch(subscription.endpoint, await buildPushPayload(message, subscription, vapid));
+  if (response.ok) return {};
+  if (response.status === 404 || response.status === 410) return { gone: true };
+  return { failed: `the browser's push service answered ${response.status}` };
 }
 
 const SENDERS = { apns, fcm, webpush };

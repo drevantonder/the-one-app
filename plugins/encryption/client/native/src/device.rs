@@ -40,9 +40,9 @@ async fn tool_for(client: &Client, name: &str, inputs: Value, who: Option<&str>)
     if let Some(who) = who {
         params["_meta"]["for"] = who.into();
     }
-    let answer = Box::pin(client.request("tools/call", params)).await?;
-    let text = answer["content"][0]["text"].as_str().unwrap_or_default();
-    if answer["isError"] == true {
+    let response = Box::pin(client.request("tools/call", params)).await?;
+    let text = response["content"][0]["text"].as_str().unwrap_or_default();
+    if response["isError"] == true {
         bail!("{text}")
     }
     Ok(serde_json::from_str(text).unwrap_or_else(|_| text.into()))

@@ -47,13 +47,13 @@ defmodule Telemetry.Read do
     all = Enum.flat_map(batches, & &1["spans"])
     # A client's request that a server answered with an error is that server's span, said to be from the client.
     clients = for %{"kind" => "client"} = span <- all, into: %{}, do: {span["traceId"], from(span)}
-    answered = for span <- all, span["kind"] == "server", failed?(span), into: MapSet.new(), do: span["traceId"]
+    failed_traces = for span <- all, span["kind"] == "server", failed?(span), into: MapSet.new(), do: span["traceId"]
 
     spans =
       for span <- all,
           failed?(span),
           span["attributes"]["one.forwarded"] != true,
-          span["kind"] != "client" or not MapSet.member?(answered, span["traceId"]) do
+          span["kind"] != "client" or not MapSet.member?(failed_traces, span["traceId"]) do
         %{
           where: span["name"],
           message: span["status"]["message"],

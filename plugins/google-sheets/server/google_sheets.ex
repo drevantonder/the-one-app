@@ -174,12 +174,12 @@ defmodule GoogleSheets do
 
     rows = read["values"] || []
     most = inputs["limit"] || 500
-    answer = %{range: read["range"], values: Enum.take(rows, most)}
+    result = %{range: read["range"], values: Enum.take(rows, most)}
     left = length(rows) - most
 
     if left > 0,
-      do: Map.put(answer, :more, "#{left} more #{if left == 1, do: "row", else: "rows"}: read a smaller range, like one starting at row #{most + 1}"),
-      else: answer
+      do: Map.put(result, :more, "#{left} more #{if left == 1, do: "row", else: "rows"}: read a smaller range, like one starting at row #{most + 1}"),
+      else: result
   end
 
   defp run("append", %{"spreadsheetId" => given, "values" => rows} = inputs, at) do

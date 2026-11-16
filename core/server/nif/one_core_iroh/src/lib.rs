@@ -148,15 +148,15 @@ fn start(
 /// answer. There's none if the Elixir is gone: `REFUSED` if it was before it took the message, and `STOPPED` if it
 /// went after, so it may have done what was asked.
 async fn ask(handler: &LocalPid, from: Option<&str>, message: &[u8]) -> Result<Vec<u8>, VarInt> {
-    let (answer, answered) = oneshot::channel();
-    let ask = ResourceArc::new(Ask(Mutex::new(Some(answer))));
+    let (reply_sender, reply_receiver) = oneshot::channel();
+    let ask = ResourceArc::new(Ask(Mutex::new(Some(reply_sender))));
     let sent = OwnedEnv::new().send_and_clear(handler, |env| {
         let mut binary = NewBinary::new(env, message.len());
         binary.as_mut_slice().copy_from_slice(message);
         (atoms::ask(), ask, from, Binary::from(binary))
     });
     sent.map_err(|_| client::REFUSED)?;
-    answered.await.map_err(|_| client::STOPPED)
+    reply_receiver.await.map_err(|_| client::STOPPED)
 }
 
 async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: Asks) {
@@ -184,13 +184,13 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
                     // A stream ended unanswered is reset, so whoever asked knows it wasn't answered, and whether it
                     // was taken.
                     let Ok(_answering) = asks.try_read_owned() else { return drop(send.reset(client::REFUSED)) };
-                    let answer = ask(&handler, Some(&from), &message);
-                    tokio::pin!(answer);
+                    let response = ask(&handler, Some(&from), &message);
+                    tokio::pin!(response);
                     // While it runs, whoever asked with a progress token is told so every `THERE`, which is how
                     // they know it's still running, however long it takes (`client::Reached::ask`). How far it
                     // is, is the seconds it's run, since nothing says how far a call is.
-                    let answer = match client::progress_token(&message) {
-                        None => answer.await,
+                    let response = match client::progress_token(&message) {
+                        None => response.await,
                         Some(token) => {
                             let started = Instant::now();
                             let mut every = interval_at(started + client::THERE, client::THERE);
@@ -198,7 +198,7 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
                             let mut telling = true;
                             loop {
                                 tokio::select! {
-                                    answer = &mut answer => break answer,
+                                    response = &mut response => break response,
                                     _ = every.tick(), if telling => {
                                         let ran = started.elapsed().as_secs();
                                         telling = send.write_all(&client::progress(&token, ran)).await.is_ok();
@@ -207,8 +207,8 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
                             }
                         }
                     };
-                    match answer {
-                        Ok(answer) if send.write_all(&answer).await.is_ok() => drop(send.finish()),
+                    match response {
+                        Ok(response) if send.write_all(&response).await.is_ok() => drop(send.finish()),
                         Ok(_) => {}
                         Err(unanswered) => drop(send.reset(unanswered)),
                     }
@@ -288,7 +288,7 @@ fn notify(reached: ResourceArc<Reached>, message: Binary) -> Atom {
 #[rustler::nif(schedule = "DirtyIo")]
 fn close(reached: ResourceArc<Reached>, within: u64) -> Atom {
     RUNTIME.block_on(async {
-        let _answered = tokio::time::timeout(Duration::from_millis(within), reached.asks.write()).await;
+        let _locked = tokio::time::timeout(Duration::from_millis(within), reached.asks.write()).await;
         reached.endpoint.close().await;
     });
     atoms::ok()
@@ -296,10 +296,10 @@ fn close(reached: ResourceArc<Reached>, within: u64) -> Atom {
 
 /// Sends `message` back to whoever asked `ask`. An empty answer only ends the stream.
 #[rustler::nif]
-fn answer(ask: ResourceArc<Ask>, message: Binary) -> Atom {
-    if let Some(answer) = ask.0.lock().expect("no answer panics").take() {
+fn reply(ask: ResourceArc<Ask>, message: Binary) -> Atom {
+    if let Some(reply_sender) = ask.0.lock().expect("no answer panics").take() {
         // Whoever asked may have gone, and then nobody is left to tell.
-        let _ = answer.send(message.as_slice().to_vec());
+        let _ = reply_sender.send(message.as_slice().to_vec());
     }
     atoms::ok()
 }
@@ -341,9 +341,9 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
     let message = message.as_slice().to_vec();
     let reference = Reference::keep(reference);
     RUNTIME.spawn(async move {
-        let answer = match open {
+        let response = match open {
             Some((address, Some(open))) => match open.ask(&message, |_| {}).await {
-                Ok(answer) => Ok(answer),
+                Ok(response) => Ok(response),
                 Err(unanswered) => {
                     let mut servers = reached.servers.lock().expect("no connection panics");
                     // Another connection may have been made since this one was asked, and that one stays.
@@ -360,10 +360,10 @@ fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to
             },
             _ => Err(None),
         };
-        reference.send(&to, |env| match answer {
-            Ok(answer) => {
-                let mut binary = NewBinary::new(env, answer.len());
-                binary.as_mut_slice().copy_from_slice(&answer);
+        reference.send(&to, |env| match response {
+            Ok(response) => {
+                let mut binary = NewBinary::new(env, response.len());
+                binary.as_mut_slice().copy_from_slice(&response);
                 (atoms::ok(), Binary::from(binary)).encode(env)
             }
             Err(Some((RequestError::Stopped, _gone))) => atoms::stopped().encode(env),

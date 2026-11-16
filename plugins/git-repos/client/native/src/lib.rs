@@ -43,7 +43,7 @@ pub async fn helper(client: Arc<Client>, args: &[String]) -> Result<ExitCode> {
             let carried = carried.clone();
             let serve = hyper::service::service_fn(move |request| {
                 let carried = carried.clone();
-                async move { Ok::<_, Infallible>(carried.answer(request).await) }
+                async move { Ok::<_, Infallible>(carried.serve(request).await) }
             });
             tokio::spawn(
                 hyper::server::conn::http1::Builder::new()
@@ -116,7 +116,7 @@ struct Carried {
 }
 
 impl Carried {
-    async fn answer(&self, request: Request<Incoming>) -> Response<Full<Bytes>> {
+    async fn serve(&self, request: Request<Incoming>) -> Response<Full<Bytes>> {
         match self.carry(request).await {
             Ok((kind, body)) => Response::builder()
                 .header("content-type", kind)
@@ -155,11 +155,11 @@ impl Carried {
         }
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                            "params": {"name": "git-repos_git", "arguments": inputs}});
-        let answer = self.client.ask(request.to_string().as_bytes()).await.map_err(gone)?;
-        let answer: Value = serde_json::from_slice(&answer).map_err(|error| gone(error.into()))?;
-        let result = &answer["result"];
+        let response = self.client.ask(request.to_string().as_bytes()).await.map_err(gone)?;
+        let response: Value = serde_json::from_slice(&response).map_err(|error| gone(error.into()))?;
+        let result = &response["result"];
         let part = &result["content"][0];
-        if let Some(why) = answer["error"]["message"].as_str() {
+        if let Some(why) = response["error"]["message"].as_str() {
             return Err((StatusCode::FORBIDDEN, anyhow::anyhow!("{why}")));
         }
         if result["isError"] == true {

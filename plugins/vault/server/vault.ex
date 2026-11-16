@@ -709,7 +709,7 @@ defmodule Vault do
     quietly("Answering the request", fn ->
       values = if given = inputs["values"], do: JSON.decode!(encryption(call).secret(call, given))
 
-      answered =
+      result =
         transaction(call, artifact, fn db ->
           request =
             case query(db, "select * from requests where id = ? and state = 'waiting' and at > ?", [
@@ -741,7 +741,7 @@ defmodule Vault do
           end
         end)
 
-      {message, plugin} = answered
+      {message, plugin} = result
       if plugin, do: share(call, "share", Artifact.name(artifact), plugin)
       message
     end)
@@ -757,17 +757,17 @@ defmodule Vault do
     }
 
     by = if call.caller, do: {:plugin, call.caller}, else: :agents
-    answer = fetched(call, own(call), item, request, by)
+    response = fetched(call, own(call), item, request, by)
 
     # What an agent reads is cut short, and what a plugin's code reads is whole.
     {body, cut} =
-      case {by, answer.body} do
+      case {by, response.body} do
         {:agents, <<body::binary-size(@most), rest::binary>>} -> {body, "#{byte_size(rest)} more bytes were left out"}
         {_by, body} -> {body, nil}
       end
 
     body = if String.valid?(body), do: %{body: body}, else: %{body_base64: Base.encode64(body)}
-    Map.merge(%{status: answer.status, headers: answer.headers, cut: cut}, body)
+    Map.merge(%{status: response.status, headers: response.headers, cut: cut}, body)
   end
 
   # Whoever the service sent back is nobody the network knows: what says whose sign-in this finishes is its
@@ -842,11 +842,11 @@ defmodule Vault do
       {item, fields, secret} = read.()
       oauth = item["oauth"] && JSON.decode!(item["oauth"])
       fields = if oauth && oauth["expires"] <= now() + 60, do: renewed(call, artifact, item, fields), else: fields
-      answer = OAuth.request(request, fields, secret, JSON.decode!(item["hosts"]))
+      response = OAuth.request(request, fields, secret, JSON.decode!(item["hosts"]))
 
-      if oauth && answer.status == 401,
+      if oauth && response.status == 401,
         do: OAuth.request(request, renewed(call, artifact, item, fields), secret, JSON.decode!(item["hosts"])),
-        else: answer
+        else: response
     end)
   end
 

@@ -165,8 +165,8 @@ function RequestSheet() {
   const allow = async (event: SubmitEvent) => {
     event.preventDefault()
     const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement))
-    const answer = picked() ? { item: picked() } : { values: JSON.stringify(Object.fromEntries(request()!.fields.map(({ name }) => [name, typed[name]]))) }
-    if (await does("vault_answer", { id: request()!.id, ...answer })) shut()
+    const response_inputs = picked() ? { item: picked() } : { values: JSON.stringify(Object.fromEntries(request()!.fields.map(({ name }) => [name, typed[name]]))) }
+    if (await does("vault_answer", { id: request()!.id, ...response_inputs })) shut()
   }
   const decline = async () => (await does("vault_answer", { id: request()!.id, decline: true })) && shut()
   return (

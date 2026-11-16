@@ -49,12 +49,12 @@ configureClientErrors({
   },
 })
 
-const ask = <Result>(method: string, params: object = {}) => new Promise<Result>((answered, refused) => {
+const ask = <Result>(method: string, params: object = {}) => new Promise<Result>((resolve, refused) => {
   const id = ++requests
   waiting.set(id, ({ result, error }) => {
     waiting.delete(id)
     if (error) refused(new Error(error.message))
-    else answered(result as Result)
+    else resolve(result as Result)
   })
   parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
 })

@@ -52,8 +52,8 @@ defmodule OneCore.Server do
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
 
     with true <- Servers.seen(server) in [:on, nil] or Servers.seen_again(server) in [:on, nil] or :unreachable,
-         {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
-      case JSON.decode(answer) do
+         {:ok, response} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
+      case JSON.decode(response) do
         {:ok, %{"result" => result}} -> {:ok, result}
         {:ok, %{"error" => %{"code" => code, "message" => why}}} -> {:error, code, why}
         # An answer cut short, or none, is from a server that went away after it was asked.
@@ -140,7 +140,7 @@ defmodule OneCore.Server do
     case request.() do
       :closed -> connect(endpoint, server, request)
       {:gone, _address} -> connect(endpoint, server, request)
-      answered -> answered
+      response -> response
     end
   end
 
@@ -150,7 +150,7 @@ defmodule OneCore.Server do
       case request.() do
         :closed -> :unreachable
         {:gone, _address} -> :unreachable
-        answered -> answered
+        response -> response
       end
     else
       _ -> :unreachable
@@ -191,12 +191,12 @@ defmodule OneCore.Server do
   # say whose a device is: so whoever asks while they start waits for them, and isn't told it can't be reached.
   @impl true
   def handle_info({:ask, ask, from, message}, server) do
-    answer = fn ->
+    reply = fn ->
       Plugins.started()
-      Iroh.answer(ask, Mcp.answer(message, from))
+      Iroh.reply(ask, Mcp.handle(message, from))
     end
 
-    Task.Supervisor.start_child(OneCore.Asks, answer)
+    Task.Supervisor.start_child(OneCore.Asks, reply)
     {:noreply, server}
   end
 end

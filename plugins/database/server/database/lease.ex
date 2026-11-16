@@ -39,7 +39,7 @@ defmodule Database.Lease do
   # How long, in milliseconds, a server answers from its copy after it last saw the log's next entry free, and how
   # long one that has just opened the database waits before it writes to it. The second is longer by far more than
   # two machines' clocks drift apart in that time.
-  @answers_for 4_000
+  @lease_ttl 4_000
   @writes_after 5_000
 
   @doc """
@@ -159,7 +159,7 @@ defmodule Database.Lease do
   @impl true
   def code_change(_was, lease, _extra) do
     {monotonic, system} = clocks()
-    long_ago = %{opened: monotonic - @writes_after, proved: {monotonic - @answers_for, system - @answers_for}}
+    long_ago = %{opened: monotonic - @writes_after, proved: {monotonic - @lease_ttl, system - @lease_ttl}}
     {:ok, Map.merge(%{firing: %{}}, Map.merge(long_ago, lease, fn _key, long_ago, stored -> stored || long_ago end))}
   end
 
@@ -312,7 +312,7 @@ defmodule Database.Lease do
   defp proved(%{proved: {monotonic, system}} = lease) do
     {now_monotonic, now_system} = now = clocks()
 
-    if now_monotonic < monotonic + @answers_for and now_system >= system and now_system < system + @answers_for do
+    if now_monotonic < monotonic + @lease_ttl and now_system >= system and now_system < system + @lease_ttl do
       {:ok, lease}
     else
       case Log.entry(lease.artifact, lease.number + 1) do

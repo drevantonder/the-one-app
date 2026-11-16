@@ -27,7 +27,7 @@ defmodule OneCore.Call do
 
     case Child.request("tool", request, id) do
       {:blob, kind, data} -> {:blob, kind, data}
-      answer -> answer
+      result -> result
     end
   end
 
@@ -182,7 +182,7 @@ defmodule OneCore.Sandbox.Child do
     send(__MODULE__, {:request, self(), ref, Map.merge(args, %{"op" => op, "call" => call})})
 
     receive do
-      {^ref, {:ok, answer}} -> answer
+      {^ref, {:ok, result}} -> result
       {^ref, {:raise, why}} -> raise why
     end
   end
@@ -205,7 +205,7 @@ defmodule OneCore.Sandbox.Child do
         case Enum.find(state.calls, fn {_id, called} -> called == pid end) do
           {id, _} ->
             if why != :normal,
-              do: answer(state.port, id, {:raised, "It stopped: #{Exception.format_exit(OneCore.Redact.redact(why))}"})
+              do: reply(state.port, id, {:raised, "It stopped: #{Exception.format_exit(OneCore.Redact.redact(why))}"})
 
             loop(%{state | calls: Map.delete(state.calls, id)})
 
@@ -225,7 +225,7 @@ defmodule OneCore.Sandbox.Child do
   end
 
   defp received({:load, sets, target, cache}, state) do
-    answer(state.port, :load, loaded(sets, target, cache))
+    reply(state.port, :load, loaded(sets, target, cache))
     state
   end
 
@@ -240,8 +240,8 @@ defmodule OneCore.Sandbox.Child do
     %{state | calls: Map.delete(state.calls, id)}
   end
 
-  defp answer(port, id, {:answered, answer}), do: Port.command(port, JSON.encode!(%{"answer" => id, "ok" => answer}))
-  defp answer(port, id, {:raised, why}), do: Port.command(port, JSON.encode!(%{"answer" => id, "raised" => why}))
+  defp reply(port, id, {:returned, value}), do: Port.command(port, JSON.encode!(%{"answer" => id, "ok" => value}))
+  defp reply(port, id, {:raised, why}), do: Port.command(port, JSON.encode!(%{"answer" => id, "raised" => why}))
 
   # A call runs in a process of its own, which answers it. `server-debug` traces this function to hear one begin.
   defp called(id, what, about) do
@@ -252,7 +252,7 @@ defmodule OneCore.Sandbox.Child do
     result =
       try do
         call = call(id, about)
-        {:answered, encoded(run(what, call))}
+        {:returned, encoded(run(what, call))}
       rescue
         # What it raised is redacted (`OneCore.Redact`), as a call on the server is (`OneCore.Plugins.held/3`).
         error -> {:raised, Exception.message(OneCore.Redact.redact(error))}
@@ -260,11 +260,11 @@ defmodule OneCore.Sandbox.Child do
         kind, reason -> {:raised, Exception.format_banner(kind, OneCore.Redact.redact(reason))}
       end
 
-    send(__MODULE__, {:send, JSON.encode!(Map.merge(%{"answer" => id}, answered(result)))})
+    send(__MODULE__, {:send, JSON.encode!(Map.merge(%{"answer" => id}, reply_body(result)))})
   end
 
-  defp answered({:answered, answer}), do: %{"ok" => answer}
-  defp answered({:raised, why}), do: %{"raised" => why}
+  defp reply_body({:returned, result}), do: %{"ok" => result}
+  defp reply_body({:raised, why}), do: %{"raised" => why}
 
   defp run({:tool, tool, inputs}, call), do: plugin().call(tool, inputs, call)
   defp run({:hook, hook, about}, call), do: plugin().hook(hook, about, call)
@@ -347,7 +347,7 @@ defmodule OneCore.Sandbox.Child do
   defp encoded({:blob, kind, data}), do: %{"blob" => [kind, Base.encode64(data)]}
   defp encoded({:file, kind, %OneCore.Artifact{handle: handle}, name}), do: %{"file" => [kind, handle, name]}
   defp encoded(text) when is_binary(text), do: %{"text" => text}
-  defp encoded(answer), do: %{"json" => JSON.decode!(JSON.encode!(answer))}
+  defp encoded(result), do: %{"json" => JSON.decode!(JSON.encode!(result))}
 
   defp plugin, do: :persistent_term.get({__MODULE__, :main})
 
@@ -370,7 +370,7 @@ defmodule OneCore.Sandbox.Child do
         for {name, module} <- plugins, do: :persistent_term.put({__MODULE__, :plugin, name}, module)
         :persistent_term.put({__MODULE__, :main}, plugin)
         described = described(plugin, main, modules[main], Map.keys(modules) -- [main])
-        {:answered, if(cache, do: described, else: Map.put(described, "beams", beams(modules)))}
+        {:returned, if(cache, do: described, else: Map.put(described, "beams", beams(modules)))}
 
       found ->
         raise "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"

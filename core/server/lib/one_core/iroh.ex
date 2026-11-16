@@ -40,7 +40,7 @@ defmodule OneCore.Iroh do
   def close(_endpoint, _within), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Sends `answer` back to whoever asked `ask`."
-  def answer(_ask, _answer), do: :erlang.nif_error(:nif_not_loaded)
+  def reply(_ask, _response), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Connects to the server at `address`, and sends `to` the message `{reference, :ok}`, or `{reference, :unreachable}`

@@ -84,9 +84,9 @@ defmodule OneCore.CodeMode do
             listen(port, call, running, "", [part <> more | output], until)
         end
 
-      {ref, answer} when is_map_key(running, ref) ->
+      {ref, result} when is_map_key(running, ref) ->
         Process.demonitor(ref, [:flush])
-        Port.command(port, JSON.encode!(Map.put(answer, :reply, running[ref])) <> "\n")
+        Port.command(port, JSON.encode!(Map.put(result, :reply, running[ref])) <> "\n")
         listen(port, call, Map.delete(running, ref), part, output, until)
 
       {^port, {:exit_status, _}} ->

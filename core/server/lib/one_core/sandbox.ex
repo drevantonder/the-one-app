@@ -216,8 +216,8 @@ defmodule OneCore.Sandbox do
         command(port, {:reply, request["request"], handled(request, call, context)})
         waited(child, port, id, call, context)
 
-      {__MODULE__, :answer, ^id, answer} ->
-        answered(answer, context)
+      {__MODULE__, :reply, ^id, reply} ->
+        decoded(reply, context)
 
       {__MODULE__, :stopped, ^child, why} ->
         raise "#{context.name} stopped while it ran this call: #{why}"
@@ -228,18 +228,18 @@ defmodule OneCore.Sandbox do
     end
   end
 
-  defp answered(%{"ok" => %{"text" => text}}, _context) when is_binary(text), do: text
-  defp answered(%{"ok" => %{"json" => json}}, _context), do: json
+  defp decoded(%{"ok" => %{"text" => text}}, _context) when is_binary(text), do: text
+  defp decoded(%{"ok" => %{"json" => json}}, _context), do: json
 
-  defp answered(%{"ok" => %{"blob" => [kind, data]}}, _context) when is_binary(kind) and is_binary(data),
+  defp decoded(%{"ok" => %{"blob" => [kind, data]}}, _context) when is_binary(kind) and is_binary(data),
     do: {:blob, kind, Base.decode64!(data)}
 
-  defp answered(%{"ok" => %{"file" => [kind, handle, name]}}, context) when is_binary(kind) and is_binary(name),
+  defp decoded(%{"ok" => %{"file" => [kind, handle, name]}}, context) when is_binary(kind) and is_binary(name),
     do: {:file, kind, artifact!(context, handle), name}
 
-  defp answered(%{"ok" => nil}, _context), do: nil
-  defp answered(%{"raised" => why}, _context) when is_binary(why), do: raise(String.slice(why, 0, 8000))
-  defp answered(_answer, context), do: raise("#{context.name} answered what isn't an answer")
+  defp decoded(%{"ok" => nil}, _context), do: nil
+  defp decoded(%{"raised" => why}, _context) when is_binary(why), do: raise(String.slice(why, 0, 8000))
+  defp decoded(_reply, context), do: raise("#{context.name} answered what isn't an answer")
 
   # What a request is answered with: `{:ok, result}`, or `{:raise, why}`. Moving the call to another server ends it
   # here (`OneCore.Call.forward_to/2`), which isn't caught.
@@ -537,7 +537,7 @@ defmodule OneCore.Sandbox do
         {:noreply, %{state | port: port, context: context}}
 
       {:error, why} ->
-        {:stop, :normal, answer_loaded(state, {:error, why})}
+        {:stop, :normal, reply_loaded(state, {:error, why})}
     end
   end
 
@@ -634,7 +634,7 @@ defmodule OneCore.Sandbox do
     do: {:stop, :normal, stopped(state, "it didn't load within #{div(@silent, 1000)} seconds")}
 
   def handle_info(:loading, state), do: {:noreply, state}
-  def handle_info(:answered, state), do: {:noreply, %{state | requests: state.requests - 1}}
+  def handle_info(:replied, state), do: {:noreply, %{state | requests: state.requests - 1}}
 
   @impl true
   def terminate(_why, %{port: port}) when is_port(port) do
@@ -686,9 +686,9 @@ defmodule OneCore.Sandbox do
   defp received(%{"answer" => "load"}, %{loaded: loaded} = state) when loaded != nil,
     do: {:stop, "it said what it is again", state}
 
-  defp received(%{"answer" => "load"} = answer, state) do
+  defp received(%{"answer" => "load"} = reply, state) do
     loaded =
-      case answer do
+      case reply do
         %{"ok" => description} when is_map(description) ->
           {beams, description} = Map.pop(description, "beams")
           if beams && state.context.cache, do: keep(state.context.cache, beams)
@@ -702,13 +702,13 @@ defmodule OneCore.Sandbox do
           {:error, "#{state.context.name} said what isn't what it is"}
       end
 
-    state = answer_loaded(state, loaded)
+    state = reply_loaded(state, loaded)
     state = with {:ok, _, _, context} <- loaded, do: %{state | context: context}
     if match?({:error, _}, loaded), do: {:stop, "it didn't load", state}, else: {:ok, state}
   end
 
-  defp received(%{"answer" => id} = answer, state) when is_integer(id) do
-    with %{^id => {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :answer, id, answer})
+  defp received(%{"answer" => id} = reply, state) when is_integer(id) do
+    with %{^id => {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :reply, id, reply})
     {:ok, state}
   end
 
@@ -729,7 +729,7 @@ defmodule OneCore.Sandbox do
 
         Task.start(fn ->
           command(port, {:reply, request, handled(message, nil, context)})
-          send(child, :answered)
+          send(child, :replied)
         end)
 
         {:ok, %{state | requests: state.requests + 1}}
@@ -782,7 +782,7 @@ defmodule OneCore.Sandbox do
     error -> Logger.warning("What a plugin's VM compiled wasn't kept: #{Exception.message(error)}")
   end
 
-  defp answer_loaded(state, loaded) do
+  defp reply_loaded(state, loaded) do
     for from <- state.waiting, do: GenServer.reply(from, loaded)
     %{state | loaded: loaded, waiting: []}
   end
@@ -792,7 +792,7 @@ defmodule OneCore.Sandbox do
     for {_id, {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :stopped, self(), why})
 
     if state.loaded == nil,
-      do: answer_loaded(state, {:error, "#{state.context.name} stopped as it loaded: #{why}"}),
+      do: reply_loaded(state, {:error, "#{state.context.name} stopped as it loaded: #{why}"}),
       else: state
   end
 end

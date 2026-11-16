@@ -507,8 +507,8 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, ...abo
       { field: "status", value: "pending" },
       { field: "userId", operator: "eq" as const, value: code.userId ?? null },
     ];
-    const answered = await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: "approved", userId: user.id } });
-    if (!answered) return { error: "Already approved." };
+    const updated = await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: "approved", userId: user.id } });
+    if (!updated) return { error: "Already approved." };
     await place(adapter, code.clientId, "app", code.name, user);
     return { approved: code.name };
   }

@@ -366,18 +366,18 @@ echo "  the working copies a chosen server keeps of the databases it writes, on 
 say "What a call costs, over one connection as an agent's MCP session keeps"
 # A tool called 300 times as alice through the server, each call timed: each line is the median.
 timed() {
-  local times=$folder/times-$1 began answer
+  local times=$folder/times-$1 began response
   printf '[%s]' "$(reached server)" >"$folder/devices/tablet/servers"
   coproc MCP { ONE_AS=alice ONE_HOME=$folder/devices/tablet "$one" mcp; }
   for _ in $(seq 300); do
     began=$(now)
     echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$1\",\"arguments\":$2}}" >&"${MCP[1]}"
-    read -r answer <&"${MCP[0]}"
+    read -r response <&"${MCP[0]}"
     echo $(($(now) - began)) >>"$times"
   done
   exec {MCP[1]}>&-
   wait "$MCP_PID"
-  [[ $answer == *'"result"'* && $answer != *isError* ]] || { echo "$1 wasn't answered"; exit 1; }
+  [[ $response == *'"result"'* && $response != *isError* ]] || { echo "$1 wasn't answered"; exit 1; }
   median "$times"
 }
 echo "    $(timed locker_ping "{}")  a tool that does nothing"

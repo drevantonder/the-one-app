@@ -457,8 +457,8 @@ defmodule Containers do
   # Runs a function of the service on the container called `inputs["container"]`, where it is.
   defp on(call, inputs, function, arguments \\ []) do
     c = container!(call, inputs)
-    answer = Service.call(call, Podman, function, [c.id | arguments], c.server)
-    if answer == "ok", do: "#{String.capitalize(to_string(function))}: #{c.name}", else: answer
+    result = Service.call(call, Podman, function, [c.id | arguments], c.server)
+    if result == "ok", do: "#{String.capitalize(to_string(function))}: #{c.name}", else: result
   end
 
   defp container!(call, %{"container" => name}),

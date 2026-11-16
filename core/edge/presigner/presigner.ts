@@ -199,14 +199,14 @@ async function read(env: PresignerEnv, by: string, token: string | null, body: s
   }
   const { method, url, headers } = request(env, ask);
   const stop = new AbortController();
-  const answer = bucket(env).fetch(url, { method, headers, signal: stop.signal });
+  const response = bucket(env).fetch(url, { method, headers, signal: stop.signal });
   // One dropped for a server that may not have it isn't an error; awaited below, one that failed still throws.
-  answer.catch(() => {});
+  response.catch(() => {});
   if (!(await allowed(env, by, token, ask))) {
     stop.abort();
     return refuse(403, "You aren't on its list of servers");
   }
-  const got = await answer;
+  const got = await response;
   const tag = got.headers.get("etag");
   // Only what the presigner says itself is JSON, so a server tells it from the bucket's answer by its type. A blob's
   // own type isn't passed on, so nothing between here and the server takes it for a page to change.

@@ -22,7 +22,7 @@ defmodule GitRepos do
   # Larger than this, what git sends or is answered goes through the bucket instead of in the call.
   @inline 4_194_304
   # How long an answer kept in the bucket for git to fetch is kept.
-  @answers_ttl :timer.minutes(10)
+  @responses_ttl :timer.minutes(10)
   # The most of a file that's shown, and of a commit's changes.
   @shown 1_048_576
   @page 25
@@ -359,7 +359,7 @@ defmodule GitRepos do
     by = call.actor || call.subject
     [person] = Call.tool(call, "sign-in", "people", %{"users" => [by]})
 
-    {answer, _state} =
+    {result, _state} =
       Mirror.change(Mirror.of(call, repo), repo, nil, fn state, folder ->
         about = open!(state, pull_request)
         tip = state["refs"]["refs/pull/#{pull_request}"]
@@ -381,7 +381,7 @@ defmodule GitRepos do
       end)
 
     pushed(name)
-    answer
+    result
   end
 
   def call("close", %{"repo" => name, "pull_request" => pull_request}, call) do
@@ -389,7 +389,7 @@ defmodule GitRepos do
     by = call.actor || call.subject
     editor = Call.reaches?(call, name, "editor")
 
-    {answer, _state} =
+    {result, _state} =
       Mirror.change(Mirror.of(call, repo), repo, nil, fn state, _folder ->
         about = open!(state, pull_request)
 
@@ -408,7 +408,7 @@ defmodule GitRepos do
          "Closed #{pull_request}."}
       end)
 
-    answer
+    result
   end
 
   def call(tool, %{"repo" => name}, call) when tool in ["remove", "restore"] do
@@ -426,7 +426,7 @@ defmodule GitRepos do
     process = Mirror.of(call, repo)
     body = body(call, inputs)
 
-    {type, answer} =
+    {type, result} =
       case String.split(path, "?", parts: 2) do
         ["info/refs", "service=git-receive-pack"] ->
           {_folder, state} = Mirror.sync(process, repo)
@@ -443,7 +443,7 @@ defmodule GitRepos do
           raise "#{path} isn't a request of git's smart HTTP protocol"
       end
 
-    answered(call, type, answer)
+    response_for(call, type, result)
   end
 
   # A push: each ref moves only from where its pusher saw it. Whoever only reads the repo pushes pull_requests.
@@ -645,18 +645,18 @@ defmodule GitRepos do
 
   # What git is answered: in the call, or if it's large, kept in the bucket a few minutes for it to fetch, which
   # removes what was kept for answers before.
-  defp answered(_call, type, answer) when byte_size(answer) <= @inline, do: {:blob, type, answer}
+  defp response_for(_call, type, result) when byte_size(result) <= @inline, do: {:blob, type, result}
 
-  defp answered(call, type, answer) do
+  defp response_for(call, type, result) do
     now = now()
 
     for "answers/" <> name = blob <- Artifact.list(call.own, "answers/"),
         [at | _] = String.split(name, "-"),
-        now - String.to_integer(at) > @answers_ttl,
+        now - String.to_integer(at) > @responses_ttl,
         do: Artifact.remove(call.own, blob)
 
     blob = "answers/#{now}-#{random()}"
-    :ok = Artifact.write(call.own, blob, answer)
+    :ok = Artifact.write(call.own, blob, result)
     {:file, type, call.own, blob}
   end
 

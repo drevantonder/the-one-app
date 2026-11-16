@@ -435,7 +435,7 @@ fn home(app: &AppHandle) {
 /// to a new code if they stopped it or the last one ended.
 async fn await_approval(app: AppHandle, mut not_in: DeviceAuthorization) {
     loop {
-        let why = match not_in.answered().await {
+        let why = match not_in.wait_for_approval().await {
             Ok(()) => None,
             Err(error) => {
                 eprintln!("{error:#}");

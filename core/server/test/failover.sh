@@ -7,8 +7,8 @@
 #     cargo build --release && mise exec -- core/server/test/failover.sh
 #
 source "$(dirname "$0")/servers.sh"
-answered=$folder/answered
-touch "$answered"
+responded=$folder/responded
+touch "$responded"
 
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.1f ms", all[int((NR + 1) / 2)] / 1000 }'; }
 
@@ -27,7 +27,7 @@ logs() {
 number=0
 attempt() {
   if ONE_HOME=$folder/$1 "$one" tally add --note "write $2" >/dev/null 2>"$folder/refused-$2"; then
-    echo "$2" >>"$answered"
+    echo "$2" >>"$responded"
   else
     echo "write $2 wasn't answered: $(head -c 120 "$folder/refused-$2")"
     return 1
@@ -43,13 +43,13 @@ stream() {
   coproc MCP { ONE_HOME=$folder/$1 "$one" mcp; }
   for _ in $(seq "$2"); do
     number=$((number + 1))
-    local began answer
+    local began response
     began=$(now)
     echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"tally_add","arguments":' \
       "{\"note\":\"write $number\"}}}" >&"${MCP[1]}"
-    read -r answer <&"${MCP[0]}"
+    read -r response <&"${MCP[0]}"
     echo $(($(now) - began)) >>"$3"
-    [[ $answer == *'"result"'* && $answer != *isError* ]] && echo "$number" >>"$answered"
+    [[ $response == *'"result"'* && $response != *isError* ]] && echo "$number" >>"$responded"
   done
   exec {MCP[1]}>&-
   wait "$MCP_PID"
@@ -60,9 +60,9 @@ check() {
   ONE_HOME=$folder/$1 "$one" tally list |
     grep -o '"write [0-9]*"' | grep -o '[0-9]*' | sort >"$folder/there"
   local lost twice
-  lost=$(comm -23 <(sort "$answered") "$folder/there" | wc -l)
+  lost=$(comm -23 <(sort "$responded") "$folder/there" | wc -l)
   twice=$(uniq -d "$folder/there" | wc -l)
-  echo "$number written, $(wc -l <"$answered") answered, $(wc -l <"$folder/there") there: $lost lost, $twice twice"
+  echo "$number written, $(wc -l <"$responded") answered, $(wc -l <"$folder/there") there: $lost lost, $twice twice"
   [ "$lost" = 0 ] && [ "$twice" = 0 ]
 }
 

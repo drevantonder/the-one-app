@@ -10,7 +10,7 @@ const callback = location.pathname === "/vault/callback"
 const [result, setResult] = createSignal<{ done?: string; problem?: string }>()
 if (callback)
   fetch(location.href, { method: "POST" })
-    .then((answer) => answer.json())
+    .then((response) => response.json())
     .then(setResult, () => setResult({ problem: "Couldn't reach the network. Start the sign-in again." }))
 
 render(

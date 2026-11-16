@@ -61,21 +61,21 @@ async function mcp(method, params = {}) {
     const took = performance.now() - started
     if ((error && (was || answering)) || took > SLOW) report({ ...span, took, error })
   }
-  let answer
+  let response
   try {
     const headers = { "content-type": "application/json", traceparent: `00-${span.traceId}-${span.spanId}-01` }
-    answer = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
+    response = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
   } catch {
     setAnswering(false)
     ended("Can't reach your network")
     throw new Error("Can't reach your network. Check this device is online.")
   }
-  if (answer.status === 401) {
+  if (response.status === 401) {
     location.replace(await signIn())
     throw new Error("Sign in again.")
   }
-  setAnswering(answer.status !== 503)
-  const { result, error } = await answer.json()
+  setAnswering(response.status !== 503)
+  const { result, error } = await response.json()
   ended(error?.message ?? (result?.isError ? (result.content?.[0]?.text ?? "The tool failed") : undefined))
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return result
@@ -129,19 +129,19 @@ function setAnswering(now) {
 
 /// What each open app was answered that only reads, by what it asked: it's answered that again until something
 /// changes, as the app's client answers a view (`Subscription` in `core/client`).
-/** @type {Map<string, Map<string, { method: string, params: Record<string, unknown>, answer: unknown }>>} */
+/** @type {Map<string, Map<string, { method: string, params: Record<string, unknown>, response: unknown }>>} */
 const views = new Map()
 /** @param {string} view */
-const answered = (view) => /** @type {NonNullable<ReturnType<typeof views.get>>} */ (views.get(view) ?? views.set(view, new Map()).get(view))
+const responses = (view) => /** @type {NonNullable<ReturnType<typeof views.get>>} */ (views.get(view) ?? views.set(view, new Map()).get(view))
 
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function read(view, method, params) {
   const request = JSON.stringify([method, params])
-  const cached = answered(view).get(request)
-  if (cached) return cached.answer
-  const answer = await mcp(method, params)
-  answered(view).set(request, { method, params, answer })
-  return answer
+  const cached = responses(view).get(request)
+  if (cached) return cached.response
+  const response = await mcp(method, params)
+  responses(view).set(request, { method, params, response })
+  return response
 }
 
 /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
@@ -160,9 +160,9 @@ async function refresh(view) {
   await Promise.all(
     [...(views.get(view)?.values() ?? [])].map(async (cached) => {
       // With no server answering, what was answered stays what's shown.
-      const fresh = await mcp(cached.method, cached.params).catch(() => cached.answer)
-      if (JSON.stringify(fresh) === JSON.stringify(cached.answer)) return
-      cached.answer = fresh
+      const fresh = await mcp(cached.method, cached.params).catch(() => cached.response)
+      if (JSON.stringify(fresh) === JSON.stringify(cached.response)) return
+      cached.response = fresh
       changed = true
     }),
   )
@@ -195,15 +195,15 @@ const commands = {
   /// Signed in here, or sent to sign in. A browser keeps nothing of a network's, so with its address not answering
   /// there's nothing to show.
   async start() {
-    let answer
+    let response
     try {
-      answer = await fetch("/apps")
+      response = await fetch("/apps")
     } catch {
       return { unreached: "Your network's address didn't answer" }
     }
-    if (answer.status === 401) return { signIn: await signIn() }
-    if (!answer.ok) return { unreached: `Your network's address answered ${answer.status}` }
-    ;({ apps, device } = await answer.json())
+    if (response.status === 401) return { signIn: await signIn() }
+    if (!response.ok) return { unreached: `Your network's address answered ${response.status}` }
+    ;({ apps, device } = await response.json())
     sendReports()
     return {}
   },
@@ -214,11 +214,11 @@ const commands = {
   },
   async request({ view, method, params }) {
     if (await reads(view, method, params)) return read(view, method, params)
-    const answer = await mcp(method, params)
+    const response = await mcp(method, params)
     // A server tells every client it's connected to that something changed. A browser isn't connected, so it asks
     // again itself, for every open app.
     for (const view of views.keys()) refresh(view)
-    return answer
+    return response
   },
   refresh: ({ view }) => refresh(view),
   close: ({ view }) => void views.delete(view),

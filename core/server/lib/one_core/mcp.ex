@@ -71,7 +71,7 @@ defmodule OneCore.Mcp do
   @cacheable ~w(server/discover tools/list resources/list resources/read)
 
   @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
-  def answer(message, from) do
+  def handle(message, from) do
     case JSON.decode(message) do
       {:ok, %{"method" => method, "id" => id} = request} ->
         params = Map.get(request, "params", %{})
@@ -225,7 +225,7 @@ defmodule OneCore.Mcp do
     caller = if Map.has_key?(meta(params), "who"), do: meta(params)["caller"]
 
     case call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller) do
-      {:ok, answer} -> changed(name, %{content: content(name, answer)}, principal)
+      {:ok, result} -> changed(name, %{content: content(name, result)}, principal)
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
       {:forwarded, %{"isError" => true} = result} -> {:ok, result}
@@ -387,7 +387,7 @@ defmodule OneCore.Mcp do
   # for them is believed about. This server runs it if it acts for whoever it's for too.
   defp between(forwarded, run) when forwarded in [true, :to] do
     case run.() do
-      {:ok, answer} -> {:ok, %{answer: answer}}
+      {:ok, result} -> {:ok, %{answer: result}}
       {:error, why} -> {:error, -32000, why}
       {:forwarded, result} -> {:ok, result}
       :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass that on in turn"}
@@ -397,7 +397,7 @@ defmodule OneCore.Mcp do
   defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
   defp own("search", %{"query" => query} = inputs, params, _from, {_by, who}, _forwarded) do
-    text = Search.answer(query, Map.get(inputs, "limit", 8), who, mode(params))
+    text = Search.run(query, Map.get(inputs, "limit", 8), who, mode(params))
     {:ok, %{content: [%{type: "text", text: text}]}}
   end
 
@@ -451,12 +451,12 @@ defmodule OneCore.Mcp do
   defp call(name, inputs, principal, forwarded, caller) do
     with :none <- Tools.call(name, inputs, principal, forwarded),
          [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Calls.call(plugin, tool, inputs, principal, forwarded, caller) do
-      case answer do
+         {:ok, result} <- Calls.call(plugin, tool, inputs, principal, forwarded, caller) do
+      case result do
         text when is_binary(text) -> {:ok, text}
-        {:blob, _kind, _data} -> {:ok, answer}
-        {:file, _kind, %Artifact{}, _name} -> {:ok, answer}
-        _ -> {:ok, JSON.encode!(answer)}
+        {:blob, _kind, _data} -> {:ok, result}
+        {:file, _kind, %Artifact{}, _name} -> {:ok, result}
+        _ -> {:ok, JSON.encode!(result)}
       end
     else
       [_] -> {:error, "#{name} isn't a tool. tools/list says what there is."}

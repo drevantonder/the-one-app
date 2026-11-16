@@ -373,11 +373,11 @@ defmodule HomeScreen do
         case OneCore.Tools.call("install", %{"plugin" => request["plugin"]}, {call.actor, "network"}) do
           {:error, why} -> raise why
           {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
-          _installed -> answered(call, request, "approved")
+          _installed -> decided(call, request, "approved")
         end
 
       installed(call, request) ->
-        answered(call, request, "approved")
+        decided(call, request, "approved")
 
       true ->
         "Install it for everyone, then approve it again, which tells #{request["by"]}: " <>
@@ -385,7 +385,7 @@ defmodule HomeScreen do
     end
   end
 
-  def call("decline", %{"id" => id}, call), do: answered(call, answering!(call, id), "declined")
+  def call("decline", %{"id" => id}, call), do: decided(call, answering!(call, id), "declined")
 
   # The size a widget is drawn at: the one it was put on the page at, if it still comes in it.
   defp size(widget, item), do: if(item["size"] in widget.sizes, do: item["size"], else: hd(widget.sizes))
@@ -431,7 +431,7 @@ defmodule HomeScreen do
     end
   end
 
-  defp answered(call, request, state) do
+  defp decided(call, request, state) do
     noted(call, fn requests ->
       {for(
          r <- requests,
@@ -458,14 +458,14 @@ defmodule HomeScreen do
         :absent -> {[], nil}
       end
 
-    {next, answer} = change.(requests)
+    {next, result} = change.(requests)
 
     wrote =
       if tag,
         do: Artifact.replace(call.own, "requests", JSON.encode!(next), tag),
         else: Artifact.write(call.own, "requests", JSON.encode!(next))
 
-    if wrote == :ok, do: answer, else: noted(call, change)
+    if wrote == :ok, do: result, else: noted(call, change)
   end
 
   defp store(call, items) do

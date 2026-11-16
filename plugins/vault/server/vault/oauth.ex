@@ -112,10 +112,10 @@ defmodule Vault.OAuth do
            decode_body: false,
            receive_timeout: (request[:timeout] || 15) * 1000
          ) do
-      {:ok, answer} ->
+      {:ok, response} ->
         blot = fn text -> Enum.reduce(secret, text, &String.replace(&2, fields[&1] || "\0", "[secret]")) end
-        headers = Map.new(answer.headers, fn {name, values} -> {name, blot.(Enum.join(values, ", "))} end)
-        %{status: answer.status, headers: headers, body: blot.(answer.body)}
+        headers = Map.new(response.headers, fn {name, values} -> {name, blot.(Enum.join(values, ", "))} end)
+        %{status: response.status, headers: headers, body: blot.(response.body)}
 
       {:error, _unreached} ->
         raise "#{site} couldn't be reached."

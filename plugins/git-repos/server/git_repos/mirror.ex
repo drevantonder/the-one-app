@@ -39,7 +39,7 @@ defmodule GitRepos.Mirror do
   end
 
   @doc "Brings the mirror up to date with the bucket. Gives its folder and `repo.json` as it is."
-  def sync(process, repo), do: answered(GenServer.call(process, {:sync, repo}, :infinity))
+  def sync(process, repo), do: unwrap(GenServer.call(process, {:sync, repo}, :infinity))
 
   @doc """
   Changes the repo. `pack`, a file of a pack a push brought, or `nil`, is indexed into the mirror first.
@@ -48,10 +48,10 @@ defmodule GitRepos.Mirror do
   Gives what it answered, and `repo.json` as it is after.
   """
   def change(process, repo, pack, decide),
-    do: answered(GenServer.call(process, {:change, repo, pack, decide}, :infinity))
+    do: unwrap(GenServer.call(process, {:change, repo, pack, decide}, :infinity))
 
-  defp answered({:ok, answer}), do: answer
-  defp answered({:error, why}), do: raise(why)
+  defp unwrap({:ok, result}), do: result
+  defp unwrap({:error, why}), do: raise(why)
 
   @impl true
   def init(folder), do: {:ok, folder}
@@ -74,9 +74,9 @@ defmodule GitRepos.Mirror do
        indexed = pack && index(folder, pack)
 
        try do
-         {answer, state} = attempt(folder, repo, state, tag, indexed, MapSet.new(), decide, @tries)
+         {result, state} = attempt(folder, repo, state, tag, indexed, MapSet.new(), decide, @tries)
          if length(state["packs"]) > @packs, do: send(self(), {:merge, repo})
-         {answer, state}
+         {result, state}
        after
          # The mirror is what the bucket says, whatever was decided: a pack nothing names goes.
          {state, _tag} = read!(repo)
@@ -121,17 +121,17 @@ defmodule GitRepos.Mirror do
 
   defp attempt(folder, repo, state, tag, indexed, stored, decide, tries) do
     case decide.(state, folder) do
-      {nil, _made, answer} ->
-        {answer, state}
+      {nil, _made, result} ->
+        {result, state}
 
-      {changed, made, answer} ->
+      {changed, made, result} ->
         packs = Enum.reject([indexed | made], &is_nil/1)
         for pack <- packs, pack not in stored, do: store(folder, repo, pack)
         changed = %{changed | "packs" => Enum.uniq(changed["packs"] ++ packs)}
 
         case Artifact.replace(repo, "repo.json", JSON.encode!(changed), tag) do
           :ok ->
-            {answer, changed}
+            {result, changed}
 
           :changed ->
             {state, tag} = read!(repo)

@@ -104,8 +104,8 @@ defmodule ServerDebug do
     target = target!(call, inputs)
     on!(call, inputs, target)
     request = inputs |> Map.drop(["plugin", "for", "server"]) |> Map.merge(%{"op" => tool, "follower" => call.actor})
-    answer = probed(target, request, tool == "logs")
-    "#{target.name} on #{Servers.name(Server.key()) || Server.key()}, for #{target.whose}. " <> shown(tool, answer)
+    result = probed(target, request, tool == "logs")
+    "#{target.name} on #{Servers.name(Server.key()) || Server.key()}, for #{target.whose}. " <> shown(tool, result)
   end
 
   # The plugin `plugin` as whoever `for` is finds it, if whoever asked may look into it.
@@ -174,7 +174,7 @@ defmodule ServerDebug do
 
     case Plugins.run([target.at], target.name, &Sandbox.debug(&1, &2, target.name, request, start)) do
       {:error, why} -> raise why
-      answer -> answer
+      result -> result
     end
   end
 

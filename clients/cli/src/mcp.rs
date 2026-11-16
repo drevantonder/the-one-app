@@ -37,17 +37,17 @@ pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
             }
             let message = if request.is_object() { request.to_string() } else { message };
             let progress = !request["params"]["_meta"]["progressToken"].is_null();
-            let answer = if request["method"] == "tools/call" && request["params"]["name"] == "execute" {
+            let response = if request["method"] == "tools/call" && request["params"]["name"] == "execute" {
                 execute(&client, &request).await
             } else {
                 let notified = |line: &[u8]| drop(progress.then(|| lines.send(line.to_vec())));
                 match client.ask_notified(message.as_bytes(), notified).await {
-                    Ok(answer) => answer,
+                    Ok(response) => response,
                     Err(error) => refusal(&message, &error),
                 }
             };
-            if !answer.is_empty() {
-                let _ = lines.send(answer);
+            if !response.is_empty() {
+                let _ = lines.send(response);
             }
         });
     }

@@ -40,13 +40,13 @@ pub fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     // Run by git as its remote helper, it's that, under the name git found it by, with `.exe` after it on Windows.
     let named = env::args().next().map(|program| Path::new(&program).file_stem().map(|name| name.to_owned()));
-    let answered = if named.flatten().is_some_and(|name| name == git_repos_client::HELPER) {
+    let result = if named.flatten().is_some_and(|name| name == git_repos_client::HELPER) {
         runtime.block_on(async { git_repos_client::helper(Client::open(client::home()?, resolvers()).await?, &args).await })
     } else {
         git_repos_client::beside();
         runtime.block_on(run(args))
     };
-    answered.unwrap_or_else(|error| {
+    result.unwrap_or_else(|error| {
         eprintln!("{error:#}");
         ExitCode::FAILURE
     })
@@ -78,7 +78,7 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         Err(error) if error.is::<DeviceAuthorization>() => {
             let not_in = error.downcast::<DeviceAuthorization>()?;
             eprintln!("{not_in}");
-            not_in.answered().await?;
+            not_in.wait_for_approval().await?;
             Client::open(client::home()?, resolvers()).await?
         }
         opened => opened?,
@@ -133,7 +133,7 @@ fn printed(text: String) -> ExitCode {
 pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
     let (words, flags) = args.split_at(args.iter().take_while(|arg| !arg.starts_with("--")).count());
     let name = words.join("_");
-    let (listed, answered) = match client.fresh("tools/list", &json!({})).await {
+    let (listed, listed_result) = match client.fresh("tools/list", &json!({})).await {
         Ok(listed) => (listed, Ok(())),
         Err(error) => (client.cached("tools/list", &json!({})).unwrap_or_default(), Err(error)),
     };
@@ -142,7 +142,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
     match tools.iter().find(|tool| tool["name"] == name.as_str()) {
         Some(tool) if flags.iter().any(|flag| flag == "--help") => usage(tool),
         Some(tool) => {
-            answered?;
+            listed_result?;
             let inputs = inputs(client, tool, flags).await?;
             let result = client.request("tools/call", json!({"name": name, "arguments": inputs})).await?;
             let parts = result["content"].as_array().map(Vec::as_slice).unwrap_or_default();
@@ -177,7 +177,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
                 })
                 .collect();
             // What a server says now, or what one last said if none is answering.
-            let says = async |method: &str, params: Value| match answered {
+            let says = async |method: &str, params: Value| match listed_result {
                 Ok(()) => client.fresh(method, &params).await.ok(),
                 Err(_) => client.cached(method, &params),
             };
@@ -195,10 +195,10 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
             let skill = skill.as_ref().and_then(|skill| skill["contents"][0]["text"].as_str());
             let skill = skill.map(|skill| skill.split_once("\n---\n").map_or(skill, |(_, text)| text).trim());
             if within.is_empty() && skill.is_none() {
-                answered?;
+                listed_result?;
                 bail!("There's no tool, plugin or skill named `{}`. `one --help` lists them.", words.join(" "));
             }
-            if answered.is_err() {
+            if listed_result.is_err() {
                 eprintln!("No server is answering, so this is what one last listed.\n");
             }
             if let Some(skill) = skill {

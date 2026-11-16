@@ -218,7 +218,7 @@ defmodule Containers.Podman do
     end)
 
     case run(service, ["exec", id, "webrtc-stream", file], 30) do
-      %{exit: 0, stdout: answer} -> answer
+      %{exit: 0, stdout: output} -> output
       %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
     end
   end

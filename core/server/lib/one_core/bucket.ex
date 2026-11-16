@@ -80,14 +80,14 @@ defmodule OneCore.Bucket do
   # `OneCore.Edge.Unreachable`, since what isn't on this machine is reached through the network's edge.
   defp bucket(function, arguments) do
     {module, where} = Application.fetch_env!(:one_core, :bucket)
-    answer = apply(module, function, [where | arguments])
+    result = apply(module, function, [where | arguments])
 
     if :persistent_term.get(Edge.Unreachable, false) do
       :persistent_term.erase(Edge.Unreachable)
       Task.start(&OneCore.Server.reconnected/0)
     end
 
-    answer
+    result
   rescue
     unreachable in Edge.Unreachable ->
       if not :persistent_term.get(Edge.Unreachable, false), do: :persistent_term.put(Edge.Unreachable, true)

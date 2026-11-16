@@ -67,14 +67,14 @@ defmodule OneCore.Call do
       end
 
     case Calls.call(plugin, tool, inputs, {by, who}, false, caller) do
-      {:ok, answer} when is_binary(answer) ->
-        answer
+      {:ok, result} when is_binary(result) ->
+        result
 
       {:ok, {:blob, _kind, _data} = file} ->
         file
 
-      {:ok, answer} ->
-        JSON.decode!(JSON.encode!(answer))
+      {:ok, result} ->
+        JSON.decode!(JSON.encode!(result))
 
       {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} ->
         raise why
@@ -117,7 +117,7 @@ defmodule OneCore.Call do
   # What another server answered is text: JSON where the tool answered more than text.
   defp decoded(text) do
     case JSON.decode(text) do
-      {:ok, answer} -> answer
+      {:ok, result} -> result
       {:error, _} -> text
     end
   end
@@ -265,7 +265,7 @@ defmodule OneCore.Call do
     if method not in ~w(GET HEAD POST PUT PATCH DELETE OPTIONS),
       do: raise(ArgumentError, "a request's method is GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS")
 
-    answer =
+    response =
       Req.request!(
         method: method |> String.downcase() |> String.to_existing_atom(),
         url: request["url"],
@@ -277,8 +277,8 @@ defmodule OneCore.Call do
         receive_timeout: 30_000
       )
 
-    headers = Map.new(answer.headers, fn {name, values} -> {name, Enum.join(values, ", ")} end)
-    %{status: answer.status, headers: headers, body: answer.body}
+    headers = Map.new(response.headers, fn {name, values} -> {name, Enum.join(values, ", ")} end)
+    %{status: response.status, headers: headers, body: response.body}
   end
 
   @doc """
@@ -307,7 +307,7 @@ defmodule OneCore.Call do
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
     for server <- servers -- [Server.key()], do: asks(call.request, {call.actor, call.subject}, server, "to")
-    :no_answer
+    :no_response
   end
 
   def forward(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :forwarding_loop})
@@ -362,8 +362,8 @@ defmodule OneCore.Call do
       {:ok, result} -> throw({__MODULE__, {:forwarded, result}})
       {:error, ^forwarding_loop, _why} -> :forwarding_loop
       {:error, _code, why} -> raise why
-      :unreachable -> :no_answer
-      :stopped -> if again?(method, params, who), do: :no_answer, else: raise(Server.error_message(:stopped, server))
+      :unreachable -> :no_response
+      :stopped -> if again?(method, params, who), do: :no_response, else: raise(Server.error_message(:stopped, server))
     end
   end
 

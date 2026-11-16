@@ -37,7 +37,7 @@ defmodule OneCore.Service do
     ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: meta}
 
     case ask(servers, call.server, ask) do
-      {:ok, answer} -> answer
+      {:ok, response} -> response
       {:error, why} -> raise why
     end
   end
@@ -74,15 +74,15 @@ defmodule OneCore.Service do
     {installed, name} =
       Plugins.installed(who, plugin) || raise "#{plugin} isn't installed for #{who}, or for the network"
 
-    answer =
+    response =
       case Calls.function(installed, name, "#{function}", json(arguments), {nil, who}) do
-        {:ok, answer} -> json(answer)
-        {:forwarded, %{"answer" => answer}} -> answer
+        {:ok, response} -> json(response)
+        {:forwarded, %{"answer" => response}} -> response
         {:error, why} -> raise why
       end
 
     Server.changed()
-    answer
+    response
   end
 
   @doc """
@@ -169,12 +169,12 @@ defmodule OneCore.Service do
   end
 
   defp ask([here | _], here, %{plugin: plugin, service: service, function: function, arguments: arguments}, _down) do
-    with {:ok, answer} <- Services.run(plugin, service, function, arguments), do: {:ok, json(answer)}
+    with {:ok, response} <- Services.run(plugin, service, function, arguments), do: {:ok, json(response)}
   end
 
   defp ask([server | servers], here, ask, down) do
     case Server.request(server, "services/call", ask) do
-      {:ok, %{"answer" => answer}} -> {:ok, answer}
+      {:ok, %{"answer" => response}} -> {:ok, response}
       {:error, _code, why} -> {:error, why}
       :unreachable -> ask(servers, here, ask, down ++ [server])
       :stopped -> {:error, Server.error_message(:stopped, server)}

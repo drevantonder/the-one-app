@@ -54,9 +54,9 @@ defmodule OneCore.Plugins.Calls do
 
           try do
             call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller}
-            answered = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
+            result = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
             if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", cached)
-            {:ran, answered}
+            {:ran, result}
           after
             Hooks.forget(cached)
           end
@@ -129,7 +129,7 @@ defmodule OneCore.Plugins.Calls do
         about = Map.merge(about, %{"trace" => trace, "took" => took})
 
         case ended do
-          {:ok, _answer} ->
+          {:ok, _result} ->
             Hooks.observe("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), principal)
 
           {:error, why} ->
@@ -246,12 +246,12 @@ defmodule OneCore.Plugins.Calls do
       if hook in version.hooks and observes?(call, about) and (kind == :observe or not version.sandbox),
         do:
           {:ok,
-           Hooks.answer(
+           Hooks.check_result(
              kind,
              hook,
              Hooks.within(name, hook, fn -> invoked(versions, name, {:hook, hook, about}, call) end)
            )},
-        else: {:ok, Hooks.answer(kind, hook, Hooks.nothing(kind))}
+        else: {:ok, Hooks.check_result(kind, hook, Hooks.nothing(kind))}
     end)
   end
 

@@ -165,7 +165,7 @@ defmodule OneCore.Hooks do
   # the slowest answer is one whose plugin's server has just gone: finding that out and taking over from it
   # takes about three seconds (`core/server/test/failover.sh`), and more where the bucket is far away. This is that
   # with room to spare, and still short of a person giving up on what they asked.
-  @answers_within 10_000
+  @timeout 10_000
 
   @doc """
   Runs `fun`, a plugin's `hook/3` at `hook`, and gives what it answered, or raises what it raised. One that hasn't
@@ -175,16 +175,16 @@ defmodule OneCore.Hooks do
     task =
       Task.async(fn ->
         try do
-          {:answered, fun.()}
+          {:returned, fun.()}
         catch
           kind, reason -> {kind, reason, __STACKTRACE__}
         end
       end)
 
-    case Task.yield(task, @answers_within) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:answered, answer}} -> answer
+    case Task.yield(task, @timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:returned, result}} -> result
       {:ok, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
-      _ -> raise "#{plugin} didn't answer #{hook} within #{div(@answers_within, 1000)} seconds"
+      _ -> raise "#{plugin} didn't answer #{hook} within #{div(@timeout, 1000)} seconds"
     end
   end
 
@@ -246,8 +246,8 @@ defmodule OneCore.Hooks do
   What a plugin's `hook/3` answered `hook`, of `kind`, as it's passed between servers: what JSON holds. Raises if it
   isn't an answer of that kind.
   """
-  def answer(kind, hook, answer) do
-    case {kind, answer} do
+  def check_result(kind, hook, result) do
+    case {kind, result} do
       {:observe, _} ->
         nil
 
@@ -264,10 +264,10 @@ defmodule OneCore.Hooks do
         JSON.decode!(JSON.encode!(part))
 
       {:mutate, _} ->
-        raise "It answered #{inspect(answer)} to #{hook}, which is answered with what it changes, by name"
+        raise "It answered #{inspect(result)} to #{hook}, which is answered with what it changes, by name"
 
       {:validate, _} ->
-        raise "It answered #{inspect(answer)} to #{hook}, which is answered :ok or {:refuse, why}"
+        raise "It answered #{inspect(result)} to #{hook}, which is answered :ok or {:refuse, why}"
     end
   end
 
@@ -291,7 +291,7 @@ defmodule OneCore.Hooks do
   def mutate(hook, about, {_by, who} = principal, apart \\ nil) do
     Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed,
                                                                          {:ok, changes, by} ->
-      with {:ok, changed} <- answered(installed, :mutate, hook, about, principal),
+      with {:ok, changed} <- call_hook(installed, :mutate, hook, about, principal),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
         {:cont, {:ok, Map.merge(changes, changed), by}}
@@ -324,7 +324,7 @@ defmodule OneCore.Hooks do
       decided =
         with :ok <- if(undecided, do: undecided(by), else: :ok) do
           Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = installed ->
-            case answered(installed, :validate, hook, about, principal) do
+            case call_hook(installed, :validate, hook, about, principal) do
               {:ok, "ok"} ->
                 nil
 
@@ -352,7 +352,7 @@ defmodule OneCore.Hooks do
   """
   def collect(hook, about, {_by, who} = principal) do
     Enum.reduce(hooking(hook, who), {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, parts, failed} ->
-      case answered(installed, :collect, hook, about, principal) do
+      case call_hook(installed, :collect, hook, about, principal) do
         {:ok, nil} -> {:ok, parts, failed}
         {:ok, part} -> {:ok, Map.put(parts, plugin, part), failed}
         {:error, why} -> {:ok, parts, Map.put(failed, plugin, why)}
@@ -403,10 +403,10 @@ defmodule OneCore.Hooks do
   end
 
   # A hook whose plugin keeps what it needs where another server writes it is answered there.
-  defp answered({at, plugin}, kind, hook, about, principal) do
+  defp call_hook({at, plugin}, kind, hook, about, principal) do
     case Calls.hook(at, plugin, kind, hook, about, principal) do
-      {:ok, answer} -> {:ok, answer}
-      {:forwarded, %{"answer" => answer}} -> {:ok, answer}
+      {:ok, result} -> {:ok, result}
+      {:forwarded, %{"answer" => result}} -> {:ok, result}
       {:error, why} -> {:error, why}
     end
   end

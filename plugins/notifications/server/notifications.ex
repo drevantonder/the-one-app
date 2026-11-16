@@ -393,7 +393,7 @@ defmodule Notifications do
     path = "/notifications/send"
 
     case Req.post(address <> path, body: body, headers: Edge.signed(path, body), retry: false) do
-      {:ok, %{status: 200, body: answer}} -> {:ok, answer}
+      {:ok, %{status: 200, body: response}} -> {:ok, response}
       {:ok, %{status: status, body: %{"error" => why}}} -> {:error, "the network's edge answered #{status}: #{why}"}
       {:ok, %{status: status}} -> {:error, "the network's edge answered #{status}"}
       {:error, error} -> {:error, Exception.message(error)}

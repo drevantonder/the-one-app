@@ -377,13 +377,13 @@ defmodule Chrome do
 
       %{"body" => body} ->
         case decode(body) do
-          %{"result" => %{"content" => content} = result} -> answer(content, result["isError"])
+          %{"result" => %{"content" => content} = result} -> tool_result(content, result["isError"])
           %{"error" => %{"message" => why}} -> raise why
         end
     end
   end
 
-  defp answer(content, error?) do
+  defp tool_result(content, error?) do
     text = Enum.join(for(%{"type" => "text", "text" => t} <- content, do: t), "\n")
 
     case for(%{"type" => "image"} = image <- content, do: image) do

@@ -115,8 +115,8 @@ defmodule OneCore.Servers do
     if at = Application.get_env(:one_core, :address) do
       cached({:seen, key}, fn ->
         path = "/relay/seen"
-        answer = Edge.send!(method: :get, url: at <> path, params: [keys: key], headers: Edge.signed(path, ""))
-        if answer.status == 200, do: on(answer.body[key]), else: nil
+        response = Edge.send!(method: :get, url: at <> path, params: [keys: key], headers: Edge.signed(path, ""))
+        if response.status == 200, do: on(response.body[key]), else: nil
       end)
     end
   end

@@ -68,12 +68,12 @@ start_for() {
 # One tool call over the web at the network's address, as whoever holds a sharing link, with what it's answered.
 # What it says of itself is someone else, which the edge doesn't pass on.
 web() {
-  local arguments answer
+  local arguments response
   arguments="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"owner\",\"for\":\"network\",\"who\":\"users/owner\"}}"
-  answer=$(curl -s -m 20 -X POST "${at_address[1]}/link/$2" -H 'content-type: application/json' \
+  response=$(curl -s -m 20 -X POST "${at_address[1]}/link/$2" -H 'content-type: application/json' \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":$arguments}")
-  sed -E 's/.*"(text|message)":"(([^"\\]|\\.)*)".*/\2/' <<<"$answer"
-  [[ $answer == *'"content"'* && $answer != *'"isError":true'* ]]
+  sed -E 's/.*"(text|message)":"(([^"\\]|\\.)*)".*/\2/' <<<"$response"
+  [[ $response == *'"content"'* && $response != *'"isError":true'* ]]
 }
 # What a command says is shown with it. `may` is one that has to be answered, and `refused` one that mustn't be.
 shown() {
@@ -575,17 +575,17 @@ say "What a check costs a call, over one connection as an agent's MCP session ke
 # first call of each asks and the rest don't: each line is the median of 300 calls.
 # A tool called 300 times as a user through one server, each call timed.
 timed() {
-  local times=$folder/times-$1-$2-$3 began answer
+  local times=$folder/times-$1-$2-$3 began response
   coproc MCP { ONE_AS=$2 ONE_HOME=$folder/only-$1 "$one" mcp; }
   for _ in $(seq 300); do
     began=$(now)
     echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$3\",\"arguments\":$4}}" >&"${MCP[1]}"
-    read -r answer <&"${MCP[0]}"
+    read -r response <&"${MCP[0]}"
     echo $(($(now) - began)) >>"$times"
   done
   exec {MCP[1]}>&-
   wait "$MCP_PID"
-  [[ $answer == *'"result"'* && $answer != *isError* ]] || { echo "$3 as $2 wasn't answered: $answer"; exit 1; }
+  [[ $response == *'"result"'* && $response != *isError* ]] || { echo "$3 as $2 wasn't answered: $response"; exit 1; }
   median "$times"
 }
 reads="{\"note\":\"$note\"}"

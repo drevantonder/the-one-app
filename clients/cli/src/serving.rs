@@ -222,7 +222,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         if let Some(build) = &trying {
             fs::remove_file(here.folder.join("next"))?;
             let why = match running {
-                Started::Running if answers(&client, &key, build).await => None,
+                Started::Running if responds(&client, &key, build).await => None,
                 Started::Running => Some(format!("it was running but didn't answer by its key within {} s", START.as_secs())),
                 Started::Late => Some(format!("it didn't report running within {} s", START.as_secs())),
                 Started::Stopped => Some(format!("it stopped before it was running ({})", server.wait().await?)),
@@ -391,7 +391,7 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
 
 /// Whether the server whose key is `key` answers by it, saying it's `build`, within `START`. It's asked again
 /// until then: the network's relay passes calls to a server that's just started only once it has seen it there.
-async fn answers(client: &Client, key: &str, build: &str) -> bool {
+async fn responds(client: &Client, key: &str, build: &str) -> bool {
     let asking = async {
         loop {
             let response = tool(client, "builds", json!({"server": key})).await.ok();
@@ -424,10 +424,10 @@ async fn fetch(build: &Value, file: &Path) -> Result<()> {
     for (name, value) in link["headers"].as_object().into_iter().flatten() {
         request = request.header(name, value.as_str().unwrap_or_default());
     }
-    let mut answer = request.send().await?.error_for_status()?;
+    let mut response = request.send().await?.error_for_status()?;
     let mut out = tokio::fs::File::create(file).await?;
     let (mut hash, mut size) = (Sha256::new(), 0);
-    while let Some(part) = answer.chunk().await? {
+    while let Some(part) = response.chunk().await? {
         hash.update(&part);
         size += part.len() as u64;
         out.write_all(&part).await?;

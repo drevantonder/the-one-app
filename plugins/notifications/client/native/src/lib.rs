@@ -20,10 +20,10 @@ use tauri::{AppHandle, Runtime};
 /// What the inbox answers: its notifications, newest first.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn inbox(client: &Client, after: i64) -> anyhow::Result<Vec<Value>> {
-    let answer =
+    let response =
         client.request("tools/call", json!({"name": "notifications_inbox", "arguments": {"after": after}})).await?;
-    let text = answer["content"][0]["text"].as_str().unwrap_or_default();
-    if answer["isError"] == true {
+    let text = response["content"][0]["text"].as_str().unwrap_or_default();
+    if response["isError"] == true {
         anyhow::bail!("{text}");
     }
     let inbox: Value = serde_json::from_str(text)?;
@@ -142,8 +142,8 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
     let register =
         json!({"name": "notifications_register", "arguments": {"via": via, "token": token, "name": name, "key": key}});
     match client.request("tools/call", register).await {
-        Ok(answer) if answer["isError"] != true => eprintln!("this phone is woken by notifications"),
-        Ok(answer) => eprintln!("this phone isn't woken by notifications: {}", answer["content"][0]["text"]),
+        Ok(response) if response["isError"] != true => eprintln!("this phone is woken by notifications"),
+        Ok(response) => eprintln!("this phone isn't woken by notifications: {}", response["content"][0]["text"]),
         Err(error) => eprintln!("this phone isn't woken by notifications: {error:#}"),
     }
 }

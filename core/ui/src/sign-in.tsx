@@ -28,7 +28,7 @@ export function SignIn(props: {
   const [working, setWorking] = createSignal<"sign-in" | "stop">()
   const [problem, setProblem] = createSignal<string>()
 
-  const answer = (which: "sign-in" | "stop", does: () => unknown) => async () => {
+  const respond = (which: "sign-in" | "stop", does: () => unknown) => async () => {
     setProblem()
     setWorking(which)
     try {
@@ -71,7 +71,7 @@ export function SignIn(props: {
             <Show
               when={props.href}
               fallback={
-                <Button loading={working() === "sign-in"} disabled={!!working()} onClick={answer("sign-in", () => props.onSignIn?.())}>
+                <Button loading={working() === "sign-in"} disabled={!!working()} onClick={respond("sign-in", () => props.onSignIn?.())}>
                   {props.button}
                 </Button>
               }
@@ -81,7 +81,7 @@ export function SignIn(props: {
               </a>
             </Show>
             <Show when={props.stop}>
-              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onClick={answer("stop", () => props.onStop?.())}>
+              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onClick={respond("stop", () => props.onStop?.())}>
                 {props.stop}
               </Button>
             </Show>

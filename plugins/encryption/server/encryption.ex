@@ -43,7 +43,7 @@ defmodule Encryption do
         # A server that's no longer chosen lets go of the keys it held, whatever still holds them.
         with {:refuse, _why} <- refused, do: GenServer.call(keys, :forget)
         chosen = servers(artifact)
-        :no_answer = Call.forward(call, chosen)
+        :no_response = Call.forward(call, chosen)
 
         if chosen == [],
           do:

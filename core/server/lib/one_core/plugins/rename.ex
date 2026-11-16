@@ -72,7 +72,7 @@ defmodule OneCore.Plugins.Rename do
            files = skill(Store.source(is, code), name, to),
            {:ok, _number, _warnings} <- Deploy.deploy(owner, to, files, :stored, :stored, fn _ -> installed? end),
            :ok <- each(moved, fn {at, _as, now} -> if(at == owner, do: :ok, else: Installed.install(at, now, is)) end),
-           :ok <- answers(moved, is) do
+           :ok <- runs_renamed(moved, is) do
         each(moved, fn {at, as, now} -> copy("#{at}/own/#{as}/", "#{at}/own/#{now}/") end)
       end
     end
@@ -172,7 +172,7 @@ defmodule OneCore.Plugins.Rename do
   end
 
   # Whether the new name runs for each of them, as the plugin renamed.
-  defp answers(moved, is) do
+  defp runs_renamed(moved, is) do
     each(moved, fn {at, _as, now} ->
       case Plugins.versions([at]) do
         %{^now => %{artifact: ^is}} -> :ok

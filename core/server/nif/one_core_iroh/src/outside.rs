@@ -44,7 +44,7 @@ async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Resu
     let reload = *handler;
     tokio::spawn(async move { crate::ask(&reload, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#).await });
     let (mut up, mut down) = socket.split();
-    let (answers, mut answered) = mpsc::unbounded_channel();
+    let (responses, mut pending) = mpsc::unbounded_channel();
     let mut say = interval(EVERY);
     // The edge answers each thing said, so one that has said nothing for this long is gone.
     let quiet = sleep(EVERY * 2);
@@ -53,13 +53,13 @@ async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Resu
         tokio::select! {
             message = down.next() => match message {
                 Some(Ok(Message::Text(call))) => {
-                    let (handler, answers) = (*handler, answers.clone());
+                    let (handler, responses) = (*handler, responses.clone());
                     tokio::spawn(async move {
                         let Ok(call) = serde_json::from_str::<Value>(call.as_str()) else { return };
                         let Some(message) = call["message"].as_str() else { return };
-                        if let Ok(answer) = crate::ask(&handler, None, message.as_bytes()).await {
-                            let answer = json!({"call": call["call"], "answer": String::from_utf8_lossy(&answer)});
-                            let _ = answers.send(answer.to_string());
+                        if let Ok(response) = crate::ask(&handler, None, message.as_bytes()).await {
+                            let response = json!({"call": call["call"], "answer": String::from_utf8_lossy(&response)});
+                            let _ = responses.send(response.to_string());
                         }
                     });
                 }
@@ -68,7 +68,7 @@ async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Resu
                 Some(Err(error)) => bail!(error),
                 None => bail!("the edge closed it"),
             },
-            Some(answer) = answered.recv() => up.send(Message::text(answer)).await?,
+            Some(response) = pending.recv() => up.send(Message::text(response)).await?,
             _ = say.tick() => up.send(Message::Ping(Default::default())).await?,
             _ = &mut quiet => bail!("the edge went quiet"),
         }

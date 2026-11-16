@@ -18,7 +18,7 @@ defmodule OneCore.Bucket.S3 do
 
   @impl true
   def read(address, key) do
-    case answered(address, %{read: key}) do
+    case send_request(address, %{read: key}) do
       %{status: 200, body: data} = got -> {:ok, data, tag(got)}
       %{status: 404} -> :absent
       refused -> raise refusal(refused)
@@ -66,7 +66,7 @@ defmodule OneCore.Bucket.S3 do
   # A bucket lists a thousand keys at a time, and says where the next ones start.
   @impl true
   def list(address, prefix, next \\ nil) do
-    case answered(address, %{list: prefix, after: next}) do
+    case send_request(address, %{list: prefix, after: next}) do
       %{status: 200, body: listed} ->
         {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
 
@@ -97,7 +97,7 @@ defmodule OneCore.Bucket.S3 do
   # A blob's size is listed with its key.
   @impl true
   def size(address, key) do
-    case answered(address, %{list: key}) do
+    case send_request(address, %{list: key}) do
       %{status: 200, body: listed} ->
         {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
 
@@ -124,10 +124,10 @@ defmodule OneCore.Bucket.S3 do
 
   # Has the presigner send `ask`, a read or a list, and gives what the bucket answered. What the presigner says
   # itself, why it won't, is JSON, and is raised.
-  defp answered(address, ask) do
+  defp send_request(address, ask) do
     ask = JSON.encode!(ask)
 
-    answer =
+    response =
       sent(
         method: :post,
         url: address <> "/presigner/read",
@@ -139,9 +139,9 @@ defmodule OneCore.Bucket.S3 do
         receive_timeout: @reads_within
       )
 
-    case Req.Response.get_header(answer, "content-type") do
-      ["application/json" <> _] -> raise refused_by(address, answer.status, JSON.decode!(answer.body)["error"])
-      _ -> answer
+    case Req.Response.get_header(response, "content-type") do
+      ["application/json" <> _] -> raise refused_by(address, response.status, JSON.decode!(response.body)["error"])
+      _ -> response
     end
   end
 

@@ -54,9 +54,9 @@ defmodule Fake do
 
   def call("me", _inputs, call) do
     request = %{"item" => "Fake", "url" => "http://127.0.0.1:PORT/me", "headers" => %{"authorization" => "Bearer {{access_token}}"}}
-    answer = OneCore.Call.tool(call, "vault", "fetch", request)
-    if answer["status"] != 200, do: raise("Fake answered #{answer["status"]}")
-    "Fake says you're #{JSON.decode!(answer["body"])["account"]}."
+    response = OneCore.Call.tool(call, "vault", "fetch", request)
+    if response["status"] != 200, do: raise("Fake answered #{response["status"]}")
+    "Fake says you're #{JSON.decode!(response["body"])["account"]}."
   end
 
   def call("keep", %{"item" => item}, call) do

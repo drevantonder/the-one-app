@@ -22,14 +22,14 @@ use crate::Client;
 impl Client {
     /// Asks the server for `method`, which only reads, and keeps its answer.
     pub async fn fresh(&self, method: &str, params: &Value) -> Result<Value> {
-        let answer = self.request(method, params.clone()).await?;
-        self.keep(method, params, &answer)?;
-        Ok(answer)
+        let response = self.request(method, params.clone()).await?;
+        self.keep(method, params, &response)?;
+        Ok(response)
     }
 
     /// Keeps `answer` as what `method` was last answered with.
-    pub(crate) fn keep(&self, method: &str, params: &Value, answer: &Value) -> Result<()> {
-        write(&self.cache_file(method, params), answer.to_string().as_bytes())
+    pub(crate) fn keep(&self, method: &str, params: &Value, response: &Value) -> Result<()> {
+        write(&self.cache_file(method, params), response.to_string().as_bytes())
     }
 
     /// What a server last answered `method` with.
@@ -75,9 +75,9 @@ impl Client {
     /// Sends a file that's too large to go in a call to where the network keeps it, for a tool of `plugin`: a
     /// server gives a short-lived link to send it by. Gives the name that tool takes for it.
     pub async fn upload(&self, plugin: &str, file: Vec<u8>) -> Result<String> {
-        let answer = self.request("tools/call", json!({"name": "upload", "arguments": {"plugin": plugin}})).await?;
-        let text = answer["content"][0]["text"].as_str().unwrap_or_default();
-        if answer["isError"] == true {
+        let response = self.request("tools/call", json!({"name": "upload", "arguments": {"plugin": plugin}})).await?;
+        let text = response["content"][0]["text"].as_str().unwrap_or_default();
+        if response["isError"] == true {
             bail!("{text}")
         }
         let to: Value = serde_json::from_str(text).context("the server didn't say where to send the file")?;
@@ -113,14 +113,14 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
 pub struct Subscription {
     client: Arc<Client>,
     /// What only reads, by what was asked, with the answer the view was last given.
-    answered: Mutex<HashMap<String, (String, Value, Value)>>,
+    responses: Mutex<HashMap<String, (String, Value, Value)>>,
     /// Tells the view that what it was answered has changed.
     changed: Box<dyn Fn() + Send + Sync>,
 }
 
 impl Subscription {
     pub fn new(client: Arc<Client>, changed: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
-        Arc::new(Self { client, answered: Mutex::default(), changed: Box::new(changed) })
+        Arc::new(Self { client, responses: Mutex::default(), changed: Box::new(changed) })
     }
 
     /// Answers what the view asks: the result of `method`.
@@ -128,50 +128,50 @@ impl Subscription {
         if self.reads(method, &params).await {
             return self.read(method, params).await;
         }
-        let answer = self.client.request(method, params).await?;
+        let response = self.client.request(method, params).await?;
         self.refresh().await;
-        Ok(answer)
+        Ok(response)
     }
 
     /// Asks the server again for everything the view was answered, and tells the view if any of it changed.
     pub async fn refresh(&self) {
-        let requests: Vec<String> = self.answered.lock().expect("no view panics").keys().cloned().collect();
+        let requests: Vec<String> = self.responses.lock().expect("no view panics").keys().cloned().collect();
         self.refresh_for(requests).await
     }
 
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
         let request = json!([method, params]).to_string();
-        if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get(&request) {
-            return Ok(answer.clone());
+        if let Some((_, _, response)) = self.responses.lock().expect("no view panics").get(&request) {
+            return Ok(response.clone());
         }
-        let (answer, cached) = match self.client.cached(method, &params) {
-            Some(answer) => (answer, true),
+        let (response, cached) = match self.client.cached(method, &params) {
+            Some(response) => (response, true),
             None => (self.client.fresh(method, &params).await?, false),
         };
-        self.answered
+        self.responses
             .lock()
             .expect("no view panics")
-            .insert(request.clone(), (method.to_owned(), params, answer.clone()));
+            .insert(request.clone(), (method.to_owned(), params, response.clone()));
         if cached {
             let shown = self.clone();
             tokio::spawn(async move { shown.refresh_for(vec![request]).await });
         }
-        Ok(answer)
+        Ok(response)
     }
 
     async fn refresh_for(&self, requests: Vec<String>) {
         let asks = requests.into_iter().filter_map(|request| {
-            let (method, params, _) = self.answered.lock().expect("no view panics").get(&request)?.clone();
+            let (method, params, _) = self.responses.lock().expect("no view panics").get(&request)?.clone();
             Some(async move { (request, self.client.fresh(&method, &params).await) })
         });
         let mut changed = false;
         for (request, fresh) in join_all(asks).await {
             // With no server answering, what was kept stays what's shown.
             let Ok(fresh) = fresh else { continue };
-            if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get_mut(&request)
-                && *answer != fresh
+            if let Some((_, _, response)) = self.responses.lock().expect("no view panics").get_mut(&request)
+                && *response != fresh
             {
-                *answer = fresh;
+                *response = fresh;
                 changed = true;
             }
         }

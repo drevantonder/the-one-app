@@ -30,10 +30,10 @@ const shown = code && code.replace(/(.{4})(?=.)/g, "$1-")
 
 /// What this page asks Better Auth besides the passkey.
 async function ask<T = unknown>(path: string, body: object): Promise<T> {
-  const answer = await fetch(`/sign-in/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-  const response = await answer.json()
-  if (!answer.ok) throw new Error(response.message ?? "That didn't work. Try again.")
-  return response
+  const response = await fetch(`/sign-in/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.message ?? "That didn't work. Try again.")
+  return data
 }
 
 /// The assistant that asked to be let in, or the device whose code this is once this person is shown it.
@@ -77,12 +77,12 @@ async function signIn() {
   }
   if (invite && !called().trim()) throw new Error("Say your name first.")
   await auth.signOut()
-  const answered = invite ? await auth.passkey.addPasskey({ context: invite, createSession: true }) : await auth.signIn.passkey({ returnWebAuthnResponse: true })
-  const { error } = answered
+  const result = invite ? await auth.passkey.addPasskey({ context: invite, createSession: true }) : await auth.signIn.passkey({ returnWebAuthnResponse: true })
+  const { error } = result
   if ((error as { code?: string } | null)?.code === "PASSKEY_NOT_FOUND") {
     // The browser offered a passkey this network doesn't have: one since removed, or one an earlier network at this
     // address made. WebAuthn's Signal API has the password manager remove it, so it isn't offered again.
-    const { webauthn } = answered as { webauthn?: { response: { id: string } } }
+    const { webauthn } = result as { webauthn?: { response: { id: string } } }
     if (webauthn && PublicKeyCredential.signalUnknownCredential) PublicKeyCredential.signalUnknownCredential({ rpId: location.hostname, credentialId: webauthn.response.id })
     throw new Error("This passkey is no longer valid for this network. Try again and choose another one, or ask to be invited again if you have no other.")
   }
@@ -100,7 +100,7 @@ async function signIn() {
 }
 
 /// This person's answer to the device whose code they compared.
-async function answer(yes: boolean) {
+async function respond(yes: boolean) {
   await ask(yes ? "/device/approve" : "/device/deny", { userCode: code })
   setDone(yes ? `It's yours now: ${acts()}. Go back to it.` : `Denied: ${acts()} wasn't approved.`)
 }
@@ -128,9 +128,9 @@ render(
       // Someone who's signed in has nothing to press until the code is theirs, or it couldn't be.
       button={app ? "Sign in" : answering() ? "It matches" : code && signedIn() !== false ? undefined : invite || another ? "Create a passkey" : "Sign in"}
       href={app ? link.href : undefined}
-      onSignIn={answering() ? () => answer(true) : signIn}
+      onSignIn={answering() ? () => respond(true) : signIn}
       stop={answering() && "Stop"}
-      onStop={() => answer(false)}
+      onStop={() => respond(false)}
       done={done()}
     >
       {invite && !done() && (
