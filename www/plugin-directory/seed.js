@@ -13,9 +13,9 @@ for (const skill of [...new Glob("*/SKILL.md").scanSync(plugins)].sort()) {
   const folder = `${plugins}${dirname(skill)}`;
   const servers = [...new Glob("server/*.ex").scanSync(folder)].map((file) => Bun.file(`${folder}/${file}`).text());
   if ((await Promise.all(servers)).some((source) => /def essential, do: true/.test(source))) continue;
-  const { name, description } = frontMatter(await Bun.file(`${plugins}${skill}`).text());
+  const { name, description, subtitle, about } = frontMatter(await Bun.file(`${plugins}${skill}`).text());
   console.log(
-    `INSERT INTO plugins (owner, repo, name, description, checked) VALUES ('drevantonder', 'the-one-app', ${quote(name)}, ${quote(description)}, ${quote(now)})` +
-      ` ON CONFLICT DO UPDATE SET description = excluded.description, checked = excluded.checked;`,
+    `INSERT INTO plugins (owner, repo, name, description, subtitle, about, checked) VALUES ('drevantonder', 'the-one-app', ${quote(name)}, ${quote(description)}, ${quote(subtitle)}, ${quote(about)}, ${quote(now)})` +
+      ` ON CONFLICT DO UPDATE SET description = excluded.description, subtitle = excluded.subtitle, about = excluded.about, checked = excluded.checked;`,
   );
 }

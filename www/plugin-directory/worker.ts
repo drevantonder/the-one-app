@@ -8,11 +8,11 @@ const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const COMMIT = /^[0-9a-f]{7,40}$/;
 const DAY = 24 * 60 * 60 * 1000;
 
-/** A SKILL.md's front matter: its `name:` and `description:` lines. */
-export function frontMatter(text: string): { name?: string; description?: string } {
+/** A SKILL.md's front matter: its `name:` and `description:` lines, and its `metadata`'s `subtitle:` and `about:`. */
+export function frontMatter(text: string): { name?: string; description?: string; subtitle?: string; about?: string } {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
-  const field = (key: string) => block.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1].trim().replace(/^(["'])(.*)\1$/, "$2");
-  return { name: field("name"), description: field("description") };
+  const field = (key: string, indent = "") => block.match(new RegExp(`^${indent}${key}:\\s*(.+)$`, "m"))?.[1].trim().replace(/^(["'])(.*)\1$/, "$2");
+  return { name: field("name"), description: field("description"), subtitle: field("subtitle", "[ \\t]+"), about: field("about", "[ \\t]+") };
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -25,6 +25,8 @@ interface Row {
   repo: string;
   name: string;
   description: string;
+  subtitle: string | null;
+  about: string | null;
   installs: number;
 }
 
@@ -34,7 +36,7 @@ type Plugin = Row & { source: string };
 async function ranked(env: Env, period: Period): Promise<Plugin[]> {
   const since = period === "week" ? day(Date.now() - 6 * DAY) : "";
   const { results } = await env.DB.prepare(
-    `SELECT p.owner, p.repo, p.name, p.description, COALESCE(SUM(i.count), 0) AS installs
+    `SELECT p.owner, p.repo, p.name, p.description, p.subtitle, p.about, COALESCE(SUM(i.count), 0) AS installs
      FROM plugins p LEFT JOIN installs i ON i.owner = p.owner AND i.repo = p.repo AND i.name = p.name AND i.day >= ?1
      GROUP BY p.owner, p.repo, p.name ORDER BY installs DESC, p.name`,
   ).bind(since).all<Row>();
@@ -61,12 +63,12 @@ async function install(request: Request, env: Env): Promise<Response> {
   const known = await env.DB.prepare("SELECT checked FROM plugins WHERE owner = ?1 AND repo = ?2 AND name = ?3").bind(...key).first<{ checked: string }>();
   if (!known || Date.parse(known.checked) < Date.now() - DAY) {
     const response = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${commit ?? "HEAD"}/plugins/${name}/SKILL.md`);
-    const { description } = response.ok ? frontMatter(await response.text()) : {};
+    const { description, subtitle, about } = response.ok ? frontMatter(await response.text()) : {};
     if (description) {
       await env.DB.prepare(
-        `INSERT INTO plugins (owner, repo, name, description, checked) VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT DO UPDATE SET description = excluded.description, checked = excluded.checked`,
-      ).bind(...key, description, new Date().toISOString()).run();
+        `INSERT INTO plugins (owner, repo, name, description, subtitle, about, checked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT DO UPDATE SET description = excluded.description, subtitle = excluded.subtitle, about = excluded.about, checked = excluded.checked`,
+      ).bind(...key, description, subtitle ?? null, about ?? null, new Date().toISOString()).run();
     } else if (!known) {
       return Response.json({ error: `No plugins/${name}/SKILL.md with a description in github.com/${owner}/${repo}.` }, { status: 404 });
     }
@@ -142,10 +144,10 @@ function list(plugins: Plugin[], period: Period) {
   const tab = (value: Period, label: string) => `<a href="/plugins${value === "all" ? "" : `?period=${value}`}"${period === value ? ' aria-current="page"' : ""}>${label}</a>`;
   const rows = plugins
     .map(
-      (p, i) => `<li data-search="${escape(`${p.name} ${p.source} ${p.description}`.toLowerCase())}">
+      (p, i) => `<li data-search="${escape(`${p.name} ${p.source} ${p.subtitle ?? ""} ${p.about ?? ""}`.toLowerCase())}">
   <a href="/plugins/${p.source}/${p.name}">
     <span class="rank">${i + 1}</span>
-    <span class="what"><span class="name">${escape(p.name)}</span> <span class="source">${escape(p.source)}</span><span class="description">${escape(p.description)}</span></span>
+    <span class="what"><span class="name">${escape(p.name)}</span> <span class="source">${escape(p.source)}</span><span class="subtitle">${escape(p.subtitle ?? "")}</span></span>
     <span class="count">${number(p.installs)}</span>
   </a>
 </li>`,
@@ -181,9 +183,8 @@ function plugin(p: Plugin) {
     `${p.name} · Plugins · The One App`,
     `<p class="back"><a href="/plugins">Plugins</a></p>
 <h1>${escape(p.name)}</h1>
-<p class="source"><a href="https://github.com/${p.source}">${escape(p.source)}</a> · ${installs(p.installs)}</p>
-<p>${escape(p.description)}</p>
-<h2>Install</h2>
+${p.subtitle ? `<p class="subtitle">${escape(p.subtitle)}</p>\n` : ""}<p class="source"><a href="https://github.com/${p.source}">${escape(p.source)}</a> · ${installs(p.installs)}</p>
+${p.about ? `<p>${escape(p.about)}</p>\n` : ""}<h2>Install</h2>
 <div class="command"><code>${escape(command(p))}</code><button type="button">Copy</button></div>
 <h2>Code</h2>
 <p><a href="${code(p)}">${escape(`github.com/${p.source}/tree/HEAD/plugins/${p.name}`)}</a></p>
@@ -195,7 +196,7 @@ function plugin(p: Plugin) {
     setTimeout(() => (button.textContent = "Copy"), 1500);
   });
 </script>`,
-    [p.description, `/plugins/${p.source}/${p.name}`],
+    [p.about ?? "", `/plugins/${p.source}/${p.name}`],
   );
 }
 
@@ -211,7 +212,7 @@ export default {
     }
     if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET" } });
     if (path === "/plugins/api/plugins") {
-      const plugins = (await ranked(env, period)).map((p) => ({ source: p.source, name: p.name, description: p.description, installs: p.installs, code: code(p), install: command(p) }));
+      const plugins = (await ranked(env, period)).map((p) => ({ source: p.source, name: p.name, description: p.description, subtitle: p.subtitle, about: p.about, installs: p.installs, code: code(p), install: command(p) }));
       return Response.json({ period, plugins }, { headers: { "access-control-allow-origin": "*" } });
     }
     if (path === "/plugins") return list(await ranked(env, period), period);

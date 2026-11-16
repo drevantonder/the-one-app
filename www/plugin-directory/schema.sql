@@ -3,7 +3,9 @@ CREATE TABLE IF NOT EXISTS plugins (
   owner TEXT NOT NULL,
   repo TEXT NOT NULL,
   name TEXT NOT NULL,
-  description TEXT NOT NULL,
+  description TEXT NOT NULL, -- its SKILL.md's, for agents
+  subtitle TEXT, -- its metadata's, for people: a few words under its name
+  about TEXT, -- its metadata's, for people: a few sentences on its page
   checked TEXT NOT NULL, -- when its SKILL.md was last read, ISO 8601
   PRIMARY KEY (owner, repo, name)
 );

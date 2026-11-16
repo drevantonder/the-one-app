@@ -2,7 +2,7 @@
 
 Every plugin anyone has installed, ranked by installs, at <https://one.drevan.me/plugins>. Nobody submits a plugin:
 it lives in any GitHub repo at `plugins/<name>/`, with a `SKILL.md` whose front matter has its `name` and
-`description`, and it's listed the first time an installer says it installed it. `seed.js` lists the plugins in this
+`description`, and what a person reads of it in its `metadata`'s `subtitle` and `about`, each on one line, and it's listed the first time an installer says it installed it. `seed.js` lists the plugins in this
 repo that a network may choose to install, so the list isn't empty before anyone has.
 
 ## The installer's call
@@ -27,13 +27,13 @@ An installer doesn't wait on it or retry it, and nothing it installs depends on 
     GET https://one.drevan.me/plugins/api/plugins[?period=week]
 
     {"period": "all", "plugins": [{"source": "drevantonder/the-one-app", "name": "gmail", "description": "…",
-      "installs": 12, "code": "https://github.com/…/tree/HEAD/plugins/gmail",
+      "subtitle": "…", "about": "…", "installs": 12, "code": "https://github.com/…/tree/HEAD/plugins/gmail",
       "install": "one install drevantonder/the-one-app --plugin gmail"}]}
 
 Most installs first; `week` counts the last seven days (UTC). Any origin may read it.
 
 ## What's kept
 
-Per plugin, its source, name, description and when its `SKILL.md` was last read; per plugin per day, a count.
+Per plugin, its source, name, description, subtitle, about and when its `SKILL.md` was last read; per plugin per day, a count.
 Nothing about who installed it: no address, network, cookie or identifier. The rate limit is Cloudflare's rate
 limiting binding, keyed by the caller's address, which Cloudflare counts per location and we never store.
