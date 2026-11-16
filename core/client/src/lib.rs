@@ -1220,8 +1220,17 @@ impl Client {
             if tried.as_ref() == Some(&servers) {
                 continue;
             }
-            let mut connecting =
-                FuturesUnordered::from_iter(servers.iter().cloned().map(|server| self.connect(server)));
+            // As Happy Eyeballs has it (RFC 8305), the servers this device reached straight before are tried first,
+            // and the rest only if none of those answers within a moment: a server that was tried and then let go
+            // is what closing the client waits for.
+            let straight = |server: &EndpointAddr| server.ip_addrs().next().is_some();
+            let any_straight = servers.iter().any(straight);
+            let mut connecting = FuturesUnordered::from_iter(servers.iter().cloned().map(|server| async move {
+                if any_straight && !straight(&server) {
+                    sleep(ATTEMPT_DELAY).await;
+                }
+                self.connect(server).await
+            }));
             while let Some(connected) = connecting.next().await {
                 if let Some(open) = connected {
                     return Ok(reach.open.insert(Arc::new(open)).clone());
@@ -1318,6 +1327,10 @@ async fn straight(client: std::sync::Weak<Client>, connection: Connection) {
         }
     }
 }
+
+/// How long the servers a device reached straight before have to answer before the rest are tried too: Happy
+/// Eyeballs' recommended Connection Attempt Delay (RFC 8305).
+const ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 
 /// How long before a device's token ends it asks for the next one: half of what a server gives one
 /// (`OneCore.Edge`), so a device that's taken out of its network uses its relay for an hour at most.
