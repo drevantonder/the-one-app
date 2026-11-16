@@ -135,8 +135,8 @@ defmodule Backups.Run do
 
       for {object, data} <- Enum.reverse(new), do: Destination.put(opened, "objects/" <> object, data)
 
-      sent = for {object, data} <- new, into: sent, do: %{object: object, sha256: digest(data), stored: byte_size(data), digest: digest(data)}
-      {listed, sent, known}
+      new = for {object, data} <- new, do: %{object: object, sha256: digest(data), stored: byte_size(data), digest: digest(data)}
+      {listed, new ++ sent, known}
     end)
     |> then(fn {listed, sent, _known} -> {listed, sent} end)
   end
