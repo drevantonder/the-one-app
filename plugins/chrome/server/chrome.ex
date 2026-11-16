@@ -5,10 +5,17 @@ defmodule Chrome do
   Protocol. Its tools are that server's, named as it names them without `browser_`, and each takes the browser's
   `session`.
 
-  A session is the container `chrome-<session>`, created through Containers' tools for whoever opened it, so whose
-  it is and who reaches it is what Containers says, and Containers stops it once it's gone unused for its
-  `idle_hours`. Opening a stopped one carries its user data dir on into a new container, on the image as it is now.
-  The MCP server's own session id for each is kept in the plugin's own artifact, under `sessions/<whose>/<session>`.
+  A session is a container, `chrome-<session>` or `chrome.2-<session>`, created through Containers' tools for whoever
+  opened it, so whose it is and who reaches it is what Containers says, and Containers stops it once it's gone unused
+  for its `idle_hours`. Which of the two it is, and the MCP server's own session id, are a record in the plugin's own
+  artifact, `browsers/<whose>/<session>`; with none it's the first.
+
+  Opening a stopped one carries its user data dir on into a new container, under its other name, so on the image as
+  it is now. That's steps, each saved in its record before it's taken, so a call that fails carries on from there the
+  next time it's opened: `packing` (its Chrome started and quit, its user data dir packed in its container),
+  `moving` (a new container made, and the user data dir copied into it), `starting` (Chrome started in the new one,
+  and the old one removed), then `running`. The old container is removed only once the new one has the user data
+  dir, so nothing that fails loses it.
 
   A browser's profile is its user data dir, `/root/.chromium` in its container. As one is created it offers
   `chrome.starting`, for a plugin to hand it a user data dir to start from, and as it closes `chrome.closing`, with
@@ -334,55 +341,65 @@ defmodule Chrome do
 
   @impl true
   def call("list", _inputs, call) do
+    # One being carried on into its other container is listed once, by the one that's running if one is.
     browsers =
-      for c <- containers(call) do
-        %{session: session(c), description: c["description"], state: c["state"], machine: c["machine"], created: c["created"], last_used: c["last_used"]}
+      for c <- containers(call) |> Enum.sort_by(&(&1["state"] != "running")) |> Enum.uniq_by(&session(&1["name"])) do
+        %{
+          session: session(c["name"]),
+          description: c["description"],
+          state: c["state"],
+          machine: c["machine"],
+          created: c["created"],
+          last_used: c["last_used"]
+        }
       end
 
     %{browsers: browsers}
   end
 
   def call("open", %{"session" => session} = inputs, call) do
-    case Enum.find(containers(call), &(session(&1) == session)) do
-      %{"state" => "running"} ->
+    record = record(call, session)
+    name = container(record, session)
+
+    case {record["state"], Enum.find(containers(call), &(&1["name"] == name))} do
+      # A carry that didn't finish carries on from its step.
+      {state, _} when state in ~w(packing moving starting) ->
+        carry(call, inputs, record)
+
+      {_, %{"state" => "running"}} ->
         if inputs["url"],
           do: Map.put(mcp(call, session, "browser_navigate", %{"url" => inputs["url"]}), :session, session),
           else: %{session: session}
 
       # A browser that was stopped carries on in a new container, so on the image as it is now: with the user data
       # dir it stopped with, and a new MCP server, which knows none of the sessions kept from before.
-      %{} ->
-        forget(call, session)
-        containers(call, "start", session)
-        pack!(call, session)
-        {:blob, _type, user_data} = containers(call, "read_file", session, %{"path" => @tarball})
-        containers(call, "remove", session)
-        create(call, inputs, user_data)
+      {_, %{}} ->
+        carry(call, inputs, %{"state" => "packing", "from" => name, "container" => other(name, session)})
 
-      nil ->
-        forget(call, session)
+      {_, nil} ->
+        record(call, session, %{"container" => name, "state" => "running"})
         create(call, inputs)
     end
   end
 
   def call("close", %{"session" => session}, call) do
-    case Enum.find(containers(call), &(session(&1) == session)) do
+    case browser(call, session) do
       # Containers lists only the machines that are on, so a browser it doesn't list is gone only if none is off.
       nil ->
         off = for %{"on" => false, "machine" => machine} <- Call.tool(call, "containers", "machines", %{})["machines"], do: machine
         if off != [], do: raise("#{session} isn't on a machine that's on: #{Enum.join(off, ", ")} is off. Close it once that's back")
 
-      %{"state" => "running"} = c ->
+      %{"state" => "running", "name" => name} = c ->
         pack!(call, session)
-        about = %{"session" => session, "description" => c["description"], "container" => c["name"], "user_data" => @tarball}
+        about = %{"session" => session, "description" => c["description"], "container" => name, "user_data" => @tarball}
         run_hook(call, "closing", about)
-        containers(call, "remove", session)
+        remove(call, session)
 
       %{} ->
-        containers(call, "remove", session)
+        remove(call, session)
     end
 
-    forget(call, session)
+    Artifact.remove(call.own, key(call, session))
     %{session: session}
   end
 
@@ -392,40 +409,78 @@ defmodule Chrome do
     mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session"))
   end
 
-  # Creates the browser's container, with its display and no Chrome yet, puts in the user data dir it carries on
-  # with, or else the one a plugin hands it, if one does, and starts Chrome on it.
-  defp create(call, %{"session" => session} = inputs, user_data \\ nil) do
-    c =
-      Call.tool(call, "containers", "create", %{
-        "image" => "desktop",
-        "name" => "chrome-" <> session,
-        "description" => inputs["description"],
-        "size" => "medium",
-        "ports" => [@port],
-        "command" => ["desktop", "--no-browser"]
-      })
+  # Creates a new browser's container, with its display and no Chrome yet, puts in the user data dir a plugin hands
+  # it, if one does, and starts Chrome on it.
+  defp create(call, %{"session" => session} = inputs) do
+    name = make(call, session, inputs)
 
-    about = %{"session" => session, "description" => inputs["description"], "url" => inputs["url"], "container" => c["name"], "user_data" => nil}
+    about = %{
+      "session" => session,
+      "description" => inputs["description"],
+      "url" => inputs["url"],
+      "container" => name,
+      "user_data" => nil
+    }
 
-    tarball =
-      if user_data do
-        containers(call, "write_file", session, %{"path" => @tarball, "data" => Base.encode64(user_data)})
-        @tarball
-      else
-        run_hook(call, "starting", about)["user_data"]
-      end
-
-    case tarball do
-      nil ->
-        :ok
-
-      tarball ->
-        unpack = "mkdir -p #{@user_data} && tar -xzf #{shell(tarball)} -C #{@user_data} && rm #{shell(tarball)}"
-        unpacked = containers(call, "exec", session, %{"command" => unpack})
-        if unpacked["exit"] != 0, do: raise("Couldn't open the profile #{session} was handed: #{String.trim(unpacked["stderr"])}")
-    end
-
+    if tarball = run_hook(call, "starting", about)["user_data"], do: unpack!(call, session, tarball)
     launch(call, session, inputs["url"])
+  end
+
+  # The container the record names, made: the image `desktop`, with its display and no Chrome yet.
+  defp make(call, session, inputs) do
+    name = container(record(call, session), session)
+
+    Call.tool(call, "containers", "create", %{
+      "image" => "desktop",
+      "name" => name,
+      "description" => inputs["description"],
+      "size" => "medium",
+      "ports" => [@port],
+      "command" => ["desktop", "--no-browser"]
+    })
+
+    name
+  end
+
+  # Carries a stopped browser on into its other container, a step at a time from the one `record` is at, each saved
+  # before it's taken (the moduledoc).
+  defp carry(call, %{"session" => session} = inputs, %{"state" => "packing", "from" => from} = record) do
+    record(call, session, record)
+
+    if not match?(%{"state" => "running"}, Enum.find(containers(call), &(&1["name"] == from))),
+      do: on(call, "start", from)
+
+    packed = on(call, "exec", from, %{"command" => @pack, "timeout" => 120})
+    if packed["exit"] != 0, do: raise("Couldn't pack #{session}'s user data dir: #{String.trim(packed["stderr"])}")
+    carry(call, inputs, %{record | "state" => "moving"})
+  end
+
+  defp carry(call, %{"session" => session} = inputs, %{"state" => "moving", "from" => from, "container" => to} = record) do
+    record(call, session, record)
+    # One a try before this made holds nothing the old one doesn't.
+    if Enum.any?(containers(call), &(&1["name"] == to)), do: on(call, "remove", to)
+    make(call, session, inputs)
+    {:blob, _type, user_data} = on(call, "read_file", from, %{"path" => @tarball})
+    on(call, "write_file", to, %{"path" => @tarball, "data" => Base.encode64(user_data)})
+    unpack!(call, session, @tarball)
+    carry(call, inputs, %{record | "state" => "starting"})
+  end
+
+  defp carry(call, %{"session" => session} = inputs, %{"state" => "starting", "from" => from, "container" => to}) do
+    record(call, session, %{"state" => "starting", "from" => from, "container" => to})
+    launched = launch(call, session, inputs["url"])
+    if Enum.any?(containers(call), &(&1["name"] == from)), do: on(call, "remove", from)
+    record(call, session, %{"state" => "running", "container" => to})
+    launched
+  end
+
+  # Opens the user data dir handed over as `tarball` in the session's container.
+  defp unpack!(call, session, tarball) do
+    unpack = "mkdir -p #{@user_data} && tar -xzf #{shell(tarball)} -C #{@user_data} && rm #{shell(tarball)}"
+    unpacked = containers(call, "exec", session, %{"command" => unpack})
+
+    if unpacked["exit"] != 0,
+      do: raise("Couldn't open the profile #{session} was handed: #{String.trim(unpacked["stderr"])}")
   end
 
   # Packs the browser's user data dir into its container's #{@tarball}, as Chrome quits.
@@ -470,7 +525,7 @@ defmodule Chrome do
     case request(call, session, id, request) do
       # The MCP server forgets its sessions when its container stops, so one kept from before is begun again.
       %{"status" => 404} when again? ->
-        forget(call, session)
+        record(call, session, Map.delete(record(call, session), "mcp"))
         mcp(call, session, tool, arguments, false)
 
       %{"body" => body} ->
@@ -502,7 +557,7 @@ defmodule Chrome do
     }
 
     %{"status" => 200, "headers" => %{"mcp-session-id" => id}} = request(call, session, nil, request)
-    Artifact.write(call.own, key(call, session), id)
+    record(call, session, Map.put(record(call, session), "mcp", id))
     id
   rescue
     e ->
@@ -526,32 +581,65 @@ defmodule Chrome do
     end
   end
 
-  defp session_id(call, session) do
+  defp session_id(call, session), do: record(call, session)["mcp"]
+
+  # The session's record (the moduledoc): which container it is, its MCP session, and how far a carry got.
+  defp record(call, session) do
     case Artifact.read(call.own, key(call, session)) do
-      {:ok, id, _tag} -> id
-      :absent -> nil
+      {:ok, data, _tag} -> JSON.decode!(data)
+      :absent -> %{}
     end
   end
 
-  defp forget(call, session), do: Artifact.remove(call.own, key(call, session))
-  defp key(call, session), do: "sessions/#{call.subject}/#{session}"
+  # A blob is written only where there's none, so the one before goes first.
+  defp record(call, session, record) do
+    Artifact.remove(call.own, key(call, session))
+    :ok = Artifact.write(call.own, key(call, session), JSON.encode!(record))
+  end
+
+  defp key(call, session), do: "browsers/#{call.subject}/#{session}"
+
+  # A session's container, by its record, and the other name it's carried on into.
+  defp container(record, session), do: record["container"] || "chrome-" <> session
+  defp other("chrome-" <> session, _session), do: "chrome.2-" <> session
+  defp other(_name, session), do: "chrome-" <> session
+
+  # Removes every container of the session's.
+  defp remove(call, session),
+    do: for(%{"name" => name} <- containers(call), session(name) == session, do: on(call, "remove", name))
+
+  defp on(call, tool, name, inputs \\ %{}), do: Call.tool(call, "containers", tool, Map.put(inputs, "container", name))
 
   # Calls a tool of Containers on the session's container. What went wrong is said of the browser where it's that
   # there's none, or that it was stopped.
-  defp containers(call, tool, session, inputs \\ %{}) do
-    Call.tool(call, "containers", tool, Map.put(inputs, "container", "chrome-" <> session))
+  defp containers(call, tool, session, inputs) do
+    on(call, tool, container(record(call, session), session), inputs)
   rescue
     e ->
-      case Enum.find(containers(call), &(session(&1) == session)) do
+      case browser(call, session) do
         nil -> raise "You have no browser called #{session}"
         %{"state" => "running"} -> reraise e, __STACKTRACE__
         %{} -> raise "#{session} was stopped after going unused: `open` starts it again, afresh"
       end
   end
 
-  # The browsers whoever this call is for may use: their containers called chrome-<session>, of the image desktop.
-  defp containers(call),
-    do: Enum.filter(Call.tool(call, "containers", "list", %{})["containers"], &(String.starts_with?(&1["name"], "chrome-") and &1["image"] =~ "containers-desktop"))
+  # The session's container, as Containers lists it: the one its record names, else any of its two.
+  defp browser(call, session) do
+    mine = for c <- containers(call), session(c["name"]) == session, do: c
+    name = container(record(call, session), session)
+    Enum.find(mine, &(&1["name"] == name)) || List.first(mine)
+  end
 
-  defp session(%{"name" => "chrome-" <> session}), do: session
+  # The browsers whoever this call is for may use: their containers called chrome-<session> or chrome.2-<session>,
+  # of the image desktop.
+  defp containers(call),
+    do:
+      Enum.filter(
+        Call.tool(call, "containers", "list", %{})["containers"],
+        &(session(&1["name"]) && &1["image"] =~ "containers-desktop")
+      )
+
+  defp session("chrome-" <> session), do: session
+  defp session("chrome.2-" <> session), do: session
+  defp session(_name), do: nil
 end
