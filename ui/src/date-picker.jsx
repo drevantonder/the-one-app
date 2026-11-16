@@ -1,12 +1,12 @@
 import { children, createContext, For, omit, Show, useContext } from "solid-js"
-import { parseDate } from "./day.js"
-import { Icon } from "./button.jsx"
-import { useField } from "./field.jsx"
-import { said, touch } from "./shared.js"
-import { popover } from "./popover.js"
+import { parseDate } from "./day.ts"
+import { Icon } from "./button.tsx"
+import { useField } from "./field.tsx"
+import { said, touch } from "./shared.ts"
+import { popover } from "./popover.ts"
 import { machine } from "./zag.jsx"
 
-const { Ark, use, draw } = machine("date-picker", () => import("./zag/date-picker.js"), ["div", "getRootProps"], {
+const { Ark, use, draw } = machine("date-picker", () => import("./zag/date-picker.ts"), ["div", "getRootProps"], {
   Label: ["label", "getLabelProps"],
   Control: ["div", "getControlProps"],
   Input: ["input", "getInputProps", (zag) => zag.inputProps],

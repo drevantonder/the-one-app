@@ -10,7 +10,7 @@ const still = (root) => {
   }
 }
 
-const { Ark } = machine("tabs", () => import("./zag/tabs.js"), ["div", "getRootProps"], {
+const { Ark } = machine("tabs", () => import("./zag/tabs.ts"), ["div", "getRootProps"], {
   List: ["div", "getListProps"],
   Trigger: ["button", "getTriggerProps", (zag) => zag.triggerProps],
   Content: ["div", "getContentProps", (zag) => zag.contentProps],

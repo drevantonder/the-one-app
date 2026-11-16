@@ -1,11 +1,11 @@
 import { children, createContext, For, omit, Show, useContext } from "solid-js"
-import { Icon } from "./button.jsx"
-import { useField } from "./field.jsx"
-import { touch } from "./shared.js"
-import { popover } from "./popover.js"
+import { Icon } from "./button.tsx"
+import { useField } from "./field.tsx"
+import { touch } from "./shared.ts"
+import { popover } from "./popover.ts"
 import { machine } from "./zag.jsx"
 
-const { Ark, use, live, draw } = machine("select", () => import("./zag/select.js"), ["div", "getRootProps"], {
+const { Ark, use, live, draw } = machine("select", () => import("./zag/select.ts"), ["div", "getRootProps"], {
   Label: ["label", "getLabelProps"],
   Control: ["div", "getControlProps"],
   Trigger: ["button", "getTriggerProps"],

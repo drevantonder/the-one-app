@@ -1,32 +1,76 @@
 import { createSignal, For, Match, Show, Switch as Which } from "solid-js"
-import { Spinner } from "./button.jsx"
+import { Spinner } from "./button.tsx"
+
+/** A widget's layout, as its tool answers it (the skill `building-plugins` lists its parts): one part, which may hold
+ * others. It's what a plugin said, so what's a number is read as one where it's used. */
+export interface Layout {
+  part?: string
+  parts?: Layout[]
+  title?: string | false
+  tone?: string
+  grow?: boolean
+  dim?: boolean
+  width?: unknown
+  height?: unknown
+  gap?: unknown
+  align?: string
+  text?: string
+  size?: string
+  weight?: string
+  lines?: unknown
+  at?: unknown
+  style?: string
+  value?: unknown
+  unit?: string
+  label?: string
+  values?: unknown[]
+  labels?: unknown[]
+  max?: unknown
+  kind?: string
+  subtitle?: string
+  trailing?: string
+  url?: string
+  round?: boolean
+  path?: unknown
+  badge?: unknown
+  tool?: string
+  inputs?: Record<string, unknown>
+  on?: boolean
+}
+
+/** What a widget's button or switch calls: its plugin's tool, with its inputs. */
+type OnCall = (tool: string | undefined, inputs: Record<string, unknown>) => unknown
 
 /// A number from a layout, or `or` where it isn't one.
-const number = (value, or) => (value === null || value === "" || !Number.isFinite(Number(value)) ? or : Number(value))
-const share = (value) => Math.max(0, Math.min(1, number(value, 0)))
-const points = (value) => (number(value) === undefined ? undefined : `${number(value)}px`)
-const figure = (value) => (typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(value ?? "–"))
+function number(value: unknown): number | undefined
+function number(value: unknown, or: number): number
+function number(value: unknown, or?: number) {
+  return value === null || value === "" || !Number.isFinite(Number(value)) ? or : Number(value)
+}
+const share = (value: unknown) => Math.max(0, Math.min(1, number(value, 0)))
+const points = (value: unknown) => (number(value) === undefined ? undefined : `${number(value)}px`)
+const figure = (value: unknown) => (typeof value === "number" ? value.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(value ?? "–"))
 
 /// When something was, as a widget says it.
-function time(at, style) {
+function time(at: unknown, style?: string) {
   const date = new Date(number(at, 0))
   const ago = (Date.now() - date.getTime()) / 1000
   if (style === "date") return date.toLocaleDateString(undefined, { day: "numeric", month: "short" })
   if (style === "clock") return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-  const [count, unit] = Math.abs(ago) < 3600 ? [ago / 60, "minute"] : Math.abs(ago) < 86400 ? [ago / 3600, "hour"] : [ago / 86400, "day"]
+  const [count, unit]: [number, Intl.RelativeTimeFormatUnit] = Math.abs(ago) < 3600 ? [ago / 60, "minute"] : Math.abs(ago) < 86400 ? [ago / 3600, "hour"] : [ago / 86400, "day"]
   return new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" }).format(-Math.round(count), unit)
 }
 
 /// What every part may say of itself: how much room it takes, and whether it's faded.
-const room = (part) => ({ grow: part.grow, dim: part.dim })
-const sized = (part) => ({ width: points(part.width), flex: part.width ? "none" : undefined })
+const room = (part: Layout) => ({ grow: part.grow, dim: part.dim })
+const sized = (part: Layout) => ({ width: points(part.width), flex: part.width ? "none" : undefined })
 
 /// A line of values across a box `width` by `height`, as an SVG polyline's points.
-const line = (values, max, width, height) =>
+const line = (values: unknown[], max: number, width: number, height: number) =>
   values.map((value, at) => `${values.length > 1 ? (at / (values.length - 1)) * width : width / 2},${height - 1 - (Math.min(number(value, 0), max) / max) * (height - 2)}`).join(" ")
 
-function Spark(props) {
-  const values = () => (Array.isArray(props.part.values) ? props.part.values : [])
+function Spark(props: { part: Layout }) {
+  const values = () => (Array.isArray(props.part.values) ? (props.part.values as number[]) : [])
   const height = () => number(props.part.height, 28)
   return (
     <svg class={["spark", room(props.part)]} data-tone={props.part.tone} viewBox={`0 0 100 ${height()}`} preserveAspectRatio="none" style={{ width: points(props.part.width) ?? "100%", height: points(height()) }} role="img" aria-label={props.part.label}>
@@ -38,7 +82,7 @@ function Spark(props) {
   )
 }
 
-function Chart(props) {
+function Chart(props: { part: Layout }) {
   const values = () => (Array.isArray(props.part.values) ? props.part.values.map((value) => number(value, 0)) : [])
   const max = () => number(props.part.max, Math.max(...values(), 1))
   return (
@@ -62,7 +106,7 @@ function Chart(props) {
 }
 
 /// A ring filled to a share, no thicker than a sixth of itself.
-function Gauge(props) {
+function Gauge(props: { part: Layout }) {
   const size = () => number(props.part.width, 46)
   const stroke = () => Math.min(5, size() / 6)
   const radius = () => (size() - stroke()) / 2
@@ -72,16 +116,16 @@ function Gauge(props) {
       <circle cx={size() / 2} cy={size() / 2} r={radius()} stroke-width={stroke()} />
       <circle cx={size() / 2} cy={size() / 2} r={radius()} stroke-width={stroke()} stroke-linecap="round" stroke-dasharray={`${round() * share(props.part.value)} ${round()}`} transform={`rotate(-90 ${size() / 2} ${size() / 2})`} />
       <Show when={props.part.label && size() >= 36}>
-        <text x={size() / 2} y={size() / 2 + 3.5} text-anchor="middle" font-size={Math.min(10, size() / 4.6)}>{props.part.label}</text>
+        <text x={size() / 2} y={size() / 2 + 3.5} text-anchor="middle" font-size={String(Math.min(10, size() / 4.6))}>{props.part.label}</text>
       </Show>
     </svg>
   )
 }
 
 /// A button or a switch calls its plugin's tool, and shows that it's under way until the widget is drawn again.
-function acts(props) {
+function acts(props: { part: Layout; onCall?: OnCall }) {
   const [busy, setBusy] = createSignal(false)
-  const act = async (inputs) => {
+  const act = async (inputs: Record<string, unknown>) => {
     setBusy(true)
     try {
       await props.onCall?.(props.part.tool, inputs)
@@ -89,10 +133,10 @@ function acts(props) {
       setBusy(false)
     }
   }
-  return [busy, act]
+  return [busy, act] as const
 }
 
-function Press(props) {
+function Press(props: { part: Layout; onCall?: OnCall }) {
   const [busy, act] = acts(props)
   return (
     <button type="button" class="press" data-tone={props.part.tone} disabled={busy()} onClick={(event) => (event.stopPropagation(), act(props.part.inputs ?? {}))}>
@@ -101,7 +145,7 @@ function Press(props) {
   )
 }
 
-function Flip(props) {
+function Flip(props: { part: Layout; onCall?: OnCall }) {
   const [busy, act] = acts(props)
   return (
     <label class="ui-choice switch" onClick={(event) => event.stopPropagation()}>
@@ -112,9 +156,9 @@ function Flip(props) {
 }
 
 /// One part of a layout. A part the UI library doesn't have draws nothing.
-function Part(props) {
+function Part(props: { part: Layout; onCall?: OnCall }) {
   const part = () => props.part
-  const held = () => <For each={Array.isArray(part().parts) ? part().parts : []}>{(inside) => <Part part={inside} onCall={props.onCall} />}</For>
+  const held = () => <For each={Array.isArray(part().parts) ? part().parts! : []}>{(inside) => <Part part={inside} onCall={props.onCall} />}</For>
   return (
     <Which>
       <Match when={part().part === "column" || part().part === "row"}>
@@ -168,7 +212,14 @@ function Part(props) {
 /// skill `building-plugins` lists them), under its `name`, at a `size` of `2x2`, `4x2` or `4x4`. A button or a
 /// switch in it calls `onCall` with its tool and inputs, and pressing the card anywhere else calls `onOpen`. With a
 /// `problem` it says the widget stopped working, and why. With no layout yet it's a grey card.
-export function Widget(props) {
+export function Widget(props: {
+  name?: string
+  size?: "2x2" | "4x2" | "4x4"
+  layout?: Layout
+  problem?: string
+  onCall?: OnCall
+  onOpen?: () => void
+}) {
   return (
     <div class={["ui-widget", { opens: !!props.onOpen }]} data-size={props.size} onClick={() => props.onOpen?.()}>
       <Show when={props.problem || props.layout?.title !== false}>
@@ -176,7 +227,7 @@ export function Widget(props) {
       </Show>
       <Show when={!props.problem} fallback={<div class="text sm" data-tone="warn">This widget stopped working. {props.problem}</div>}>
         <Show when={props.layout}>
-          <Part part={props.layout} onCall={props.onCall} />
+          <Part part={props.layout!} onCall={props.onCall} />
         </Show>
       </Show>
     </div>

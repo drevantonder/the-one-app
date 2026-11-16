@@ -1,28 +1,29 @@
 import { createMemo, For } from "solid-js"
 import { render } from "@solidjs/web"
-import { popover } from "./popover.js"
+import { popover } from "./popover.ts"
+import type { GroupService, Options, Store } from "@zag-js/toast"
 
 // Ark UI's toast (ark-ui.com/docs/components/toast) has an app draw each toast. The UI library draws them itself, the
 // same in every app, so an app only says what happened: `toast`.
 
 /// Zag's toasts, loaded with the first toast; the toasts there are; and the one element of the page that shows
 /// them, from the first toast on.
-let zag
-let store
-let host
+let zag: typeof import("./zag/toast.ts")
+let store: Store
+let host: HTMLDivElement
 /// Where on the page the toaster is: the page itself, or the open sheet or alert that's on top (sheet.jsx).
-let home = document.body
+let home: HTMLElement = document.body
 
 /// Moves toasts to `where`, or back to the page. They go on showing as they were.
-export function hold(where = document.body) {
+export function hold(where: HTMLElement = document.body): void {
   home = where
   if (host && host.parentNode !== home) home.append(host)
 }
 
 /// `toast("Deleted", { action: { label: "Undo", run: restore } })`: one line about what just happened, at the foot
 /// of the window for a few seconds, with one thing to do about it. What went well needs none: fine is silent.
-export async function toast(text, { action } = {}) {
-  zag ??= await import("./zag/toast.js")
+export async function toast(text: string, { action }: { action?: { label: string; run: () => void } } = {}): Promise<void> {
+  zag ??= await import("./zag/toast.ts")
   if (!store) {
     store = zag.createStore({ placement: "bottom", gap: 8, max: 3, offsets: "1rem" })
     host = document.createElement("div")
@@ -45,7 +46,7 @@ function Toaster() {
   )
 }
 
-function Toast(props) {
+function Toast(props: { toast: Options; index: number; parent: GroupService }) {
   const service = zag.useMachine(zag.machine, () => ({ ...props.toast, index: props.index, parent: props.parent }))
   const api = createMemo(() => zag.connect(service, zag.normalizeProps))
   return (

@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js"
-import { Button, Icon } from "./button.jsx"
+import { Button, Icon } from "./button.tsx"
+import type { JSX } from "@solidjs/web"
 
 /// `<SignIn mark={<img src="mark.png" alt="" />} heading="Sign in" button="Sign in" onSignIn={passkey} />`: the one
 /// screen someone signs in on, wherever it's shown: the `mark` of whose it is, a `heading` and one `button`.
@@ -9,17 +10,31 @@ import { Button, Icon } from "./button.jsx"
 /// the one line that's left once they've answered. With `href` the button is a link to where signing in happens,
 /// for a screen that can't ask itself. What else it asks, such as a `Field` for their name, goes in it, above
 /// the button.
-export function SignIn(props) {
-  const [working, setWorking] = createSignal()
-  const [problem, setProblem] = createSignal()
+export function SignIn(props: {
+  mark?: JSX.Element
+  heading?: JSX.Element
+  button?: JSX.Element
+  onSignIn?: () => unknown
+  href?: string
+  problem?: JSX.Element
+  code?: JSX.Element
+  note?: JSX.Element
+  warning?: JSX.Element
+  stop?: JSX.Element
+  onStop?: () => unknown
+  done?: JSX.Element
+  children?: JSX.Element
+}) {
+  const [working, setWorking] = createSignal<"sign-in" | "stop">()
+  const [problem, setProblem] = createSignal<string>()
 
-  const answer = (which, does) => async () => {
+  const answer = (which: "sign-in" | "stop", does: () => unknown) => async () => {
     setProblem()
     setWorking(which)
     try {
       await does()
     } catch (error) {
-      setProblem(error.message)
+      setProblem((error as Error).message)
     } finally {
       setWorking()
     }
@@ -56,7 +71,7 @@ export function SignIn(props) {
             <Show
               when={props.href}
               fallback={
-                <Button loading={working() === "sign-in"} disabled={!!working()} onClick={answer("sign-in", () => props.onSignIn())}>
+                <Button loading={working() === "sign-in"} disabled={!!working()} onClick={answer("sign-in", () => props.onSignIn?.())}>
                   {props.button}
                 </Button>
               }
@@ -66,7 +81,7 @@ export function SignIn(props) {
               </a>
             </Show>
             <Show when={props.stop}>
-              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onClick={answer("stop", () => props.onStop())}>
+              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onClick={answer("stop", () => props.onStop?.())}>
                 {props.stop}
               </Button>
             </Show>

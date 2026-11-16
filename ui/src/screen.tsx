@@ -1,23 +1,24 @@
 import { createEffect, createSignal, onSettled, Show } from "solid-js"
-import { Icon } from "./button.jsx"
-import { reduced, said } from "./shared.js"
+import { Icon } from "./button.tsx"
+import { reduced, said } from "./shared.ts"
+import type { JSX } from "@solidjs/web"
 
 /// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
 /// mustn't show it a second time.
 let shown = false
 addEventListener("popstate", (event) => {
-  shown = !!event.hasUAVisualTransition
+  shown = event.hasUAVisualTransition
   setTimeout(() => (shown = false))
 }, true)
 
-let moving
+let moving: ViewTransition | undefined
 
 /// `go(() => setOpen(note))`: changes which screen shows, as a move. `change` puts the new screen in place, and the
 /// browser slides to it from what was there (its View Transitions): in over it, or with `back`, back out from over
 /// it. Ask the server first: the page holds still until `change` is done. `part` is what moves, when it isn't the
 /// whole page. Where the browser can't, or the user asked for no motion, it's a plain swap. From one page to
 /// another the browser does this by itself (ui.css).
-export function go(change, { back = false, part } = {}) {
+export function go(change: () => void, { back = false, part }: { back?: boolean; part?: HTMLElement } = {}): void {
   if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || reduced.matches || shown) return void change()
   part?.style.setProperty("view-transition-name", "ui-screen")
   // What's still fading in what moves (a row let go of a moment ago) is finished first, so the move takes the screen
@@ -30,14 +31,14 @@ export function go(change, { back = false, part } = {}) {
 
 // Back to a page left earlier is the device's to show. The browser would slide it in as if it were new.
 addEventListener("pageswap", ({ activation, viewTransition }) => {
-  if (activation?.navigationType === "traverse" && activation.entry.index < activation.from.index) viewTransition?.skipTransition()
+  if (activation?.navigationType === "traverse" && activation.from && activation.entry.index < activation.from.index) viewTransition?.skipTransition()
 })
 
 /// `<Screen heading="Notes" action={<Button>Add</Button>}>...</Screen>`: a whole view of an app: a bar across its
 /// top that stays as it scrolls, with its `heading` and what it does (`action`: its one main button, or a menu),
 /// then what's in it, one part under another. With `back` the bar starts with a Back button, which calls `onBack`,
 /// or goes back in the browser's history as the device's own back gesture does.
-export function Screen(props) {
+export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; class?: JSX.ClassValue; children?: JSX.Element }) {
   return (
     <div class={["ui-screen", props.class]}>
       <header>
@@ -55,7 +56,7 @@ export function Screen(props) {
 }
 
 /// `<Section heading="This week">...</Section>`: a part of a screen under a small grey heading.
-export function Section(props) {
+export function Section(props: { heading?: JSX.Element; children?: JSX.Element }) {
   return (
     <section class="ui-section">
       <Show when={props.heading}>
@@ -71,15 +72,15 @@ export function Section(props) {
 /// `open`. Each side scrolls by itself, and the split is as tall as the window unless the page says. While it's
 /// open the device's own back, and the detail's Back button, close it: it calls `onClose`, and the app sets
 /// `open` false. Beside its list a detail has no Back button.
-export function Split(props) {
-  let split
-  let panes
+export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; class?: JSX.ClassValue; children?: JSX.Element }) {
+  let split!: HTMLDivElement
+  let panes!: HTMLDivElement
   // What's drawn as open, which follows `open` as a move.
   const [open, setOpen] = createSignal(false)
   let byDevice = false
 
   // The device's back, or forward: what's open is what the history says.
-  const travelled = (event) => {
+  const travelled = (event: PopStateEvent) => {
     byDevice = event.hasUAVisualTransition
     if (!history.state?.uiSplit && props.open) props.onClose?.()
   }

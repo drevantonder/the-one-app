@@ -1,8 +1,8 @@
 import { children, omit, Show } from "solid-js"
-import { useField } from "./field.jsx"
+import { useField } from "./field.tsx"
 import { machine } from "./zag.jsx"
 
-const { Ark, use } = machine("number-input", () => import("./zag/number-input.js"), ["div", "getRootProps"], {
+const { Ark, use } = machine("number-input", () => import("./zag/number-input.ts"), ["div", "getRootProps"], {
   Label: ["label", "getLabelProps"],
   Control: ["div", "getControlProps"],
   Input: ["input", "getInputProps"],

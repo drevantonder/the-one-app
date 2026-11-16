@@ -23,7 +23,7 @@ await build({
     outDir: "dist/client",
     sourcemap: true,
     rolldownOptions: {
-      input: { ui: here("src/index.js"), solid: "solid-js", web: "@solidjs/web", zag: "@zag-js/solid" },
+      input: { ui: here("src/index.ts"), solid: "solid-js", web: "@solidjs/web", zag: "@zag-js/solid" },
       // What an app imports from each is what each exports, whether or not the UI library uses it.
       preserveEntrySignatures: "strict",
       output: { entryFileNames: "[name].js", chunkFileNames: "ui-[hash].js" },
@@ -34,15 +34,15 @@ await build({
 const css = text("src/tokens.css") + text("src/ui.css")
 writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 
-/// The UI library's skill: every `///` comment that starts with an example, from index.js and then from each file it
+/// The UI library's skill: every `///` comment that starts with an example, from index.ts and then from each file it
 /// exports from, in its order.
 function skill() {
-  const index = text("src/index.js")
-  const files = ["index.js", ...new Set([...index.matchAll(/from "\.\/(.+?)"/g)].map(([, file]) => file))]
+  const index = text("src/index.ts")
+  const files = ["index.ts", ...new Set([...index.matchAll(/from "\.\/(.+?)"/g)].map(([, file]) => file))]
   return files.flatMap((file) =>
     [...text(`src/${file}`).matchAll(/(?:^\/\/\/.*\n)+/gm)]
       .map(([comment]) => comment.replace(/^\/\/\/ ?/gm, ""))
-      .filter((comment) => file === "index.js" || comment.startsWith("`")),
+      .filter((comment) => file === "index.ts" || comment.startsWith("`")),
   )
 }
 

@@ -1,12 +1,13 @@
 import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { covers } from "./bridge.js"
-import { Button, Icon } from "./button.jsx"
-import { said } from "./shared.js"
-import { hold } from "./toast.jsx"
+import { covers } from "./bridge.ts"
+import { Button, Icon } from "./button.tsx"
+import { said } from "./shared.ts"
+import { hold } from "./toast.tsx"
+import type { JSX } from "@solidjs/web"
 
 /// The sheets and alerts that are open, the last opened last.
-const open = []
+const open: HTMLDialogElement[] = []
 
 /// Where a sheet is in the middle of the window, not at its foot (ui.css).
 const wide = matchMedia("(min-width: 40rem)")
@@ -14,14 +15,23 @@ const wide = matchMedia("(min-width: 40rem)")
 /// The browser's own `<dialog>`, shown over the page while `props.open`. The browser keeps focus inside it and
 /// closes it on Escape and on the device's back gesture; a press outside closes it too. It calls `onClose` once
 /// it's shut, however that came about.
-function Dialog(props) {
-  let dialog
-  let pressed
-  let shut
+function Dialog(props: {
+  open?: boolean
+  onClose?: () => void
+  class?: string
+  role?: "alertdialog"
+  labelledby?: string
+  describedby?: string
+  ref?: (dialog: HTMLDialogElement) => void
+  children?: JSX.Element
+}) {
+  let dialog!: HTMLDialogElement
+  let pressed: EventTarget | null = null
+  let shut: (() => void) | undefined
 
   /// An open dialog makes everything outside it inert, a toast too. So toasts show from inside the one that's on
   /// top, and from the page again once none is open. And an open dialog is what a device's own back closes.
-  const topmost = (is) => {
+  const topmost = (is: boolean) => {
     if (open.includes(dialog)) open.splice(open.indexOf(dialog), 1)
     if (is) open.push(dialog)
     hold(open.at(-1))
@@ -35,12 +45,12 @@ function Dialog(props) {
     dialog.showModal()
     topmost(true)
     // The keyboard doesn't come up on a phone unless the app asked for it, with `autofocus` on a field.
-    ;(dialog.querySelector("[autofocus]") ?? dialog).focus()
+    ;(dialog.querySelector<HTMLElement>("[autofocus]") ?? dialog).focus()
   })
   onSettled(() => () => topmost(false))
 
   /// A press that both starts and ends on the dialog itself was on what's around it.
-  const outside = (event) => {
+  const outside = (event: PointerEvent | MouseEvent) => {
     if (event.type === "pointerdown") pressed = event.target
     else if (event.target === dialog && pressed === dialog) dialog.close()
   }
@@ -54,7 +64,7 @@ function Dialog(props) {
 
   return (
     <dialog
-      ref={[(element) => (dialog = element), props.ref]}
+      ref={[(element: HTMLDialogElement) => (dialog = element), props.ref]}
       class={props.class}
       role={props.role}
       aria-labelledby={props.labelledby}
@@ -72,19 +82,19 @@ function Dialog(props) {
 /// or look at, over the page: up from the foot of a narrow window, in the middle of a wide one, while `open`.
 /// Escape, the device's back, a press outside and a pull down close it too: each calls `onClose`, which sets
 /// `open` false. `autofocus` on a field in it brings up a phone's keyboard as it opens.
-export function Sheet(props) {
-  let dialog
-  let pulling = null
+export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: () => void; children?: JSX.Element }) {
+  let dialog!: HTMLDialogElement
+  let pulling: { x: number; y: number; down: number; speed: number; at?: number; ours?: boolean } | null = null
   const id = `ui-sheet-${Math.random().toString(36).slice(2)}`
 
   /// A sheet at the foot of the window goes down with the finger that pulls it, and on letting go closes if it was
   /// pulled far or flicked, and comes back if not. A finger that's scrolling what's in the sheet isn't pulling it:
   /// only one that goes down with nothing above left to scroll to.
-  const pull = (event) => {
+  const pull = (event: TouchEvent) => {
     const finger = event.touches[0] ?? event.changedTouches[0]
     if (event.type === "touchstart") {
       const under = event.composedPath()
-      const scrolled = under.slice(0, under.indexOf(dialog)).some((element) => element.scrollTop > 0)
+      const scrolled = (under.slice(0, under.indexOf(dialog)) as Element[]).some((element) => element.scrollTop > 0)
       pulling = wide.matches || scrolled || event.touches.length > 1 ? null : { x: finger.clientX, y: finger.clientY, down: 0, speed: 0 }
       return
     }
@@ -102,11 +112,11 @@ export function Sheet(props) {
         dialog.setAttribute("data-pulled", "")
       }
       event.preventDefault()
-      was.speed = (down - was.down) / Math.max(1, event.timeStamp - was.at)
+      was.speed = (down - was.down) / Math.max(1, event.timeStamp - (was.at ?? 0))
       was.down = down
       was.at = event.timeStamp
       dialog.style.setProperty("--pulled", `${Math.max(0, down)}px`)
-      dialog.style.setProperty("--pulled-part", Math.min(1, Math.max(0, down) / dialog.offsetHeight))
+      dialog.style.setProperty("--pulled-part", String(Math.min(1, Math.max(0, down) / dialog.offsetHeight)))
       return
     }
     pulling = null
@@ -117,8 +127,8 @@ export function Sheet(props) {
     // Let go a third of the way down, or on the way down at a flick's speed (in px a millisecond).
     if (event.type === "touchend" && (down > dialog.offsetHeight / 3 || was.speed > 0.5)) dialog.close()
   }
-  const touched = (element) => {
-    for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"]) element.addEventListener(type, pull, { passive: false })
+  const touched = (element: HTMLDialogElement) => {
+    for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) element.addEventListener(type, pull, { passive: false })
   }
 
   return (
@@ -137,20 +147,20 @@ export function Sheet(props) {
 }
 
 /// A question that stops everything until it's answered: the one the page has, asked through `confirm`.
-function Alert(props) {
+function Alert(props: { question: Question | null; onAnswer: (yes: boolean, reset: false) => void }) {
   let answer = false
   return (
     <Dialog class="ui-dialog alert" role="alertdialog" labelledby="ui-alert-heading" describedby="ui-alert-text" open={!!props.question} onClose={() => props.onAnswer(answer, (answer = false))}>
       <div class="panel">
         <h2 id="ui-alert-heading">{props.question?.heading}</h2>
         <Show when={props.question?.text}>
-          <p id="ui-alert-text">{props.question.text}</p>
+          <p id="ui-alert-text">{props.question?.text}</p>
         </Show>
         <footer>
-          <Button variant="outline" autofocus onClick={(event) => ((answer = false), event.target.closest("dialog").close())}>
+          <Button variant="outline" autofocus onClick={(event) => ((answer = false), event.currentTarget.closest("dialog")!.close())}>
             {said.cancel}
           </Button>
-          <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((answer = true), event.target.closest("dialog").close())}>
+          <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((answer = true), event.currentTarget.closest("dialog")!.close())}>
             {props.question?.action || said.ok}
           </Button>
         </footer>
@@ -159,18 +169,26 @@ function Alert(props) {
   )
 }
 
-let ask
+/** What `confirm` asks. */
+export interface Question {
+  heading: string
+  text?: string
+  action?: string
+  destructive?: boolean
+}
+
+let ask: ((question: Question) => Promise<boolean>) | undefined
 
 /// `await confirm({ heading: "Delete this note?", text: "It can't be brought back.", action: "Delete", destructive: true })`:
 /// asks before doing what can't be undone. → whether `action` (OK unless said) was chosen; Cancel, Escape and a
 /// press outside are no.
-export function confirm(question) {
+export function confirm(question: Question): Promise<boolean> {
   if (!ask) {
-    const [asked, setAsked] = createSignal(null)
-    let answered
+    const [asked, setAsked] = createSignal<Question | null>(null)
+    let answered: (yes: boolean) => void
     const host = document.body.appendChild(document.createElement("div"))
     render(() => <Alert question={asked()} onAnswer={(yes) => (setAsked(null), answered(yes))} />, host)
-    ask = (question) => new Promise((done) => ((answered = done), setAsked(question)))
+    ask = (question) => new Promise<boolean>((done) => ((answered = done), setAsked(question)))
   }
   return ask(question)
 }

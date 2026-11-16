@@ -11,7 +11,7 @@
 // isn't drawn at all; then they're drawn again, alive.
 import { createContext, createMemo, createSignal, createUniqueId, merge, omit, Show, useContext } from "solid-js"
 import { Dynamic } from "@solidjs/web"
-import { dir } from "./shared.js"
+import { dir } from "./shared.ts"
 
 /// Once the page has first been drawn. What it didn't need for that is loaded then, so the first screen waits for
 /// none of it.

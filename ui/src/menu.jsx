@@ -1,10 +1,10 @@
 import { children, omit } from "solid-js"
-import { Icon } from "./button.jsx"
-import { said } from "./shared.js"
-import { popover } from "./popover.js"
+import { Icon } from "./button.tsx"
+import { said } from "./shared.ts"
+import { popover } from "./popover.ts"
 import { machine } from "./zag.jsx"
 
-const { Ark, use } = machine("menu", () => import("./zag/menu.js"), null, {
+const { Ark, use } = machine("menu", () => import("./zag/menu.ts"), null, {
   Trigger: ["button", "getTriggerProps"],
   Indicator: ["div", "getIndicatorProps"],
   Positioner: ["div", "getPositionerProps"],
