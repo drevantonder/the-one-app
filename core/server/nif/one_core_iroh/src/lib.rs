@@ -120,7 +120,7 @@ fn start(
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
             endpoint.online().await;
-            tokio::spawn(outside::hear(network, endpoint.secret_key().clone(), asked));
+            tokio::spawn(outside::listen(network, endpoint.secret_key().clone(), asked));
         }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
         let clients = Clients::default();

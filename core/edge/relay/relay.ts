@@ -95,16 +95,16 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     ours.binaryType = "arraybuffer";
     // What it sends before it's joined waits for that, in the order it was sent.
     let joined: Promise<Joined | undefined> | undefined;
-    let heard = Date.now();
+    let received = Date.now();
     const quiet = setInterval(async () => {
-      if (Date.now() - heard < SILENT) return;
+      if (Date.now() - received < SILENT) return;
       clearInterval(quiet);
       ours.close(1001, "It went quiet");
       (await joined)?.relay.close(1001, "It went quiet");
     }, SILENT / 3);
     ours.addEventListener("close", () => clearInterval(quiet));
     ours.addEventListener("message", async ({ data }) => {
-      heard = Date.now();
+      received = Date.now();
       if (typeof data === "string") return ours.close(1003, "The relay takes binary frames");
       const frame = new Uint8Array(data);
       if (!joined) return void (joined = this.join(ours, challenge, token, frame));

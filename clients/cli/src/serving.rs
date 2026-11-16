@@ -677,10 +677,10 @@ mod system {
         // launchd won't load an agent that's loaded already, as it is where `serve on` is run again.
         let _ = stop(here, key);
         let _ = fs::remove_file(&ready);
-        let heard = UnixDatagram::bind(&ready)?;
-        heard.set_read_timeout(Some(START))?;
+        let socket = UnixDatagram::bind(&ready)?;
+        socket.set_read_timeout(Some(START))?;
         launchctl(&["bootstrap", &format!("gui/{}", user()?), &agent.display().to_string()])?;
-        let running = heard.recv(&mut [0; 16]);
+        let running = socket.recv(&mut [0; 16]);
         fs::remove_file(&ready)?;
         running.with_context(|| {
             format!("The server didn't start: its log is {}", here.folder.join("server.log").display())

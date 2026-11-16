@@ -22,12 +22,12 @@ async function signIn() {
 /** @type {Map<string, Set<(event: { payload: unknown }) => void>>} */
 const hearing = new Map()
 /** @type {typeof import("../app/page/host.js").listen} */
-export const listen = (event, heard) => {
+export const listen = (event, handler) => {
   if (!hearing.has(event)) hearing.set(event, new Set())
-  hearing.get(event)?.add(/** @type {(event: { payload: unknown }) => void} */ (heard))
+  hearing.get(event)?.add(/** @type {(event: { payload: unknown }) => void} */ (handler))
 }
 /** @param {string} event @param {unknown} payload */
-const emit = (event, payload) => hearing.get(event)?.forEach((heard) => heard({ payload }))
+const emit = (event, payload) => hearing.get(event)?.forEach((handler) => handler({ payload }))
 
 /// Where this browser's apps' files are, and this browser as Devices lists it, once it's signed in (`start`).
 /** @type {string} */

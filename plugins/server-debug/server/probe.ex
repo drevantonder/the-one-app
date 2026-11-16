@@ -285,7 +285,7 @@ defmodule ServerDebug.Probe do
     if heard?(meta, scope) and :atomics.sub_get(left, 1, 1) >= 0 do
       at = meta |> Map.get(:time, :os.system_time(:microsecond)) |> div(1000)
       at = at |> DateTime.from_unix!(:millisecond) |> DateTime.to_time() |> Time.to_string()
-      send(to, {:heard, "#{at} [#{level}] #{String.slice(scope.name.(said(msg)), 0, 4000)}"})
+      send(to, {:received, "#{at} [#{level}] #{String.slice(scope.name.(said(msg)), 0, 4000)}"})
     end
   end
 
@@ -326,7 +326,7 @@ defmodule ServerDebug.Probe do
         until = DateTime.utc_now() |> DateTime.add(minutes, :minute) |> DateTime.truncate(:second)
 
         {:ok,
-         %{handler: :"server_debug_#{slot}", lines: [], heard: 0, most: lines, until: until, ended: nil, waiting: nil}}
+         %{handler: :"server_debug_#{slot}", lines: [], received: 0, most: lines, until: until, ended: nil, waiting: nil}}
       else
         {:stop, "#{@slots} follows are running on this server already; one ends within an hour"}
       end
@@ -341,9 +341,9 @@ defmodule ServerDebug.Probe do
       end
     end
 
-    def handle_info({:heard, line}, state) do
-      state = %{state | lines: [line | state.lines], heard: state.heard + 1}
-      state = if state.heard >= state.most, do: ended(state, "It heard #{state.most} lines, its most."), else: state
+    def handle_info({:received, line}, state) do
+      state = %{state | lines: [line | state.lines], received: state.received + 1}
+      state = if state.received >= state.most, do: ended(state, "It heard #{state.most} lines, its most."), else: state
 
       # What's waiting is answered a moment after the first line, with whatever else came.
       with {from, timer} <- state.waiting, true <- state.lines == [line] or state.ended != nil do

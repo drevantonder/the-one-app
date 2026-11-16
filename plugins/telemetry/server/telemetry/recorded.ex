@@ -61,7 +61,7 @@ defmodule Telemetry.Recorded do
           {"one.tool.duration", Map.put(attributes, "one.outcome", if(error, do: "error", else: "ok")), took / 1000}
         ]
 
-    heard(call, spans: [span], numbers: numbers)
+    received(call, spans: [span], numbers: numbers)
   end
 
   @doc """
@@ -79,7 +79,7 @@ defmodule Telemetry.Recorded do
         %{record | "attributes" => attributes} |> Map.put("time", time)
       end
 
-    heard(call, records(records, %{}))
+    received(call, records(records, %{}))
   end
 
   @doc """
@@ -91,7 +91,7 @@ defmodule Telemetry.Recorded do
     trace = Trace.current() || %{}
     now = System.os_time(:nanosecond)
 
-    heard(
+    received(
       call,
       records(Enum.map(records, &Map.put(&1, "time", now)), %{
         "traceId" => trace["traceId"],
@@ -148,9 +148,9 @@ defmodule Telemetry.Recorded do
     [spans: spans, numbers: numbers, logs: logs]
   end
 
-  defp heard(call, heard) do
+  defp received(call, received) do
     process = Call.process(call, __MODULE__, call.installed, {call.installed, call.server})
-    GenServer.cast(process, {:heard, heard})
+    GenServer.cast(process, {:received, received})
   end
 
   defp log(severity, name, body, attributes, trace) do
@@ -180,7 +180,7 @@ defmodule Telemetry.Recorded do
         end
 
       severity = if level == :warning, do: "WARN", else: "ERROR"
-      if body, do: GenServer.cast(to, {:heard, logs: [log(severity, nil, short(body), %{}, Trace.current())]})
+      if body, do: GenServer.cast(to, {:received, logs: [log(severity, nil, short(body), %{}, Trace.current())]})
     end
   end
 
@@ -224,10 +224,10 @@ defmodule Telemetry.Recorded do
   def terminate(_why, _state), do: :ok
 
   @impl true
-  def handle_cast({:heard, heard}, state) do
-    state = Enum.reduce(Keyword.get(heard, :spans, []), state, &span/2)
-    state = Enum.reduce(Keyword.get(heard, :numbers, []), state, &number/2)
-    logs = Enum.take(Keyword.get(heard, :logs, []), @most_logs - state.log_count)
+  def handle_cast({:received, received}, state) do
+    state = Enum.reduce(Keyword.get(received, :spans, []), state, &span/2)
+    state = Enum.reduce(Keyword.get(received, :numbers, []), state, &number/2)
+    logs = Enum.take(Keyword.get(received, :logs, []), @most_logs - state.log_count)
     {:noreply, %{state | logs: logs ++ state.logs, log_count: state.log_count + length(logs)}}
   end
 

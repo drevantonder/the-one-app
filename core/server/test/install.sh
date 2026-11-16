@@ -200,7 +200,7 @@ echo "its device: $key"
 echo "one --version: $(on_machine --version)"
 
 # Waits for the server to say something, from where it was when `mark` was last asked.
-heard() { timeout 600 grep -q -m1 -E "$1" <(said -f) || { said | tail -20; exit 1; }; }
+logged() { timeout 600 grep -q -m1 -E "$1" <(said -f) || { said | tail -20; exit 1; }; }
 build_of() { on_machine builds --server "$1" | grep -o '"build":"[^"]*"' | head -1 | cut -d'"' -f4; }
 
 say "one serve on"
@@ -264,7 +264,7 @@ mark
 pid=$(main_pid)
 kill_server "$pid"
 echo "killed $pid, as kill -9 does"
-heard "A server is running"
+logged "A server is running"
 echo "running again as $(main_pid), restarted $(restarts) time(s), answering as $(build_of "$server")"
 
 say "A newer build, published and taken when it's asked"
@@ -273,7 +273,7 @@ mark
 owner update --server "$server"
 began=$(now)
 echo "while it updates, the network's other server answers: $(owner builds | grep -o '"asked":"[^"]*"' | sed "s/$first/the network's first server/")"
-heard "The server is on the build"
+logged "The server is on the build"
 said | grep -E "^The server is on the build" | sed 's/^/  /'
 echo "in $(since "$began"); it answers as $(build_of "$server"), and the machine's one is $(on_machine --version)"
 echo "kept: $(there_ls "$home/server/builds")"
@@ -282,9 +282,9 @@ say "A build that can't start, which it goes back from by itself"
 c=$(release broken "perl -pi -e 's/  def serve do/  def serve do\n    raise \"this build can'\''t start\"/' core/server/lib/one_core/release.ex")
 mark
 owner update --server "$server"
-heard "Went back to"
+logged "Went back to"
 said | grep -E "can't start|Went back to" | sed 's/^/  /'
-heard "A server is running"
+logged "A server is running"
 echo "it answers as $(build_of "$server"), not $c"
 
 say "Sizes"

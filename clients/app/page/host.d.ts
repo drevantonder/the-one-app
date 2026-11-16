@@ -72,7 +72,7 @@ export interface Events {
   answering: boolean
 }
 
-export type Listen = <Event extends keyof Events>(event: Event, heard: (event: { payload: Events[Event] }) => void) => unknown
+export type Listen = <Event extends keyof Events>(event: Event, handler: (event: { payload: Events[Event] }) => void) => unknown
 
 /** Where an app's page is. */
 export type Address = (view: Pick<View, "host" | "app">) => string
@@ -81,7 +81,7 @@ declare global {
   /** Tauri's API, which the app gives its window's page (`withGlobalTauri`). */
   interface Window {
     __TAURI__: {
-      core: { invoke: Invoke; addPluginListener(plugin: string, event: string, heard: (payload: unknown) => void): Promise<unknown> }
+      core: { invoke: Invoke; addPluginListener(plugin: string, event: string, handler: (payload: unknown) => void): Promise<unknown> }
       event: { listen: Listen }
     }
     /** The device's own back (`client.js`). */

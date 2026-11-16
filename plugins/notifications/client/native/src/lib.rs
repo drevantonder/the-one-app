@@ -53,7 +53,7 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
     // What each notification shown opens, by its id.
     let opens = Arc::new(Mutex::new(HashMap::<i32, String>::new()));
     let (tapped, handle) = (opens.clone(), app.clone());
-    let heard = app.notification().on_action(move |action| {
+    let listener = app.notification().on_action(move |action| {
         let Some(id) = action.notification().map(|shown| shown.id()) else { return };
         if action.action_id() != "tap" {
             return;
@@ -67,7 +67,7 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
             drop(handle.emit("open", plugin));
         }
     });
-    if let Err(error) = heard {
+    if let Err(error) = listener {
         eprintln!("a tap on a notification opens nothing here: {error}");
     }
 

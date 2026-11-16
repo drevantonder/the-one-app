@@ -569,7 +569,7 @@ pub enum RequestError {
 /// stopped answering, or refused what it was asked, so nothing more is asked over it.
 pub struct Reached {
     connection: Connection,
-    heard: Arc<std::sync::Mutex<Instant>>,
+    received: Arc<std::sync::Mutex<Instant>>,
     asking: Arc<AtomicUsize>,
     gone: AtomicBool,
 }
@@ -594,9 +594,9 @@ impl Reached {
     /// Connects to the server at `address`, or gives nothing if it doesn't answer `within` that long.
     pub async fn connect(endpoint: &Endpoint, address: EndpointAddr, within: Duration) -> Option<Self> {
         let connection = timeout(within, endpoint.connect(address, ALPN)).await.ok()?.ok()?;
-        let heard = Arc::new(std::sync::Mutex::new(Instant::now()));
+        let received = Arc::new(std::sync::Mutex::new(Instant::now()));
         let asking = Arc::new(AtomicUsize::new(0));
-        let (open, last, busy) = (connection.clone(), heard.clone(), asking.clone());
+        let (open, last, busy) = (connection.clone(), received.clone(), asking.clone());
         tokio::spawn(async move {
             while open.close_reason().is_none() {
                 let idle = last.lock().expect("no ask panics").elapsed();
@@ -607,7 +607,7 @@ impl Reached {
                 }
             }
         });
-        Some(Self { connection, heard, asking, gone: AtomicBool::new(false) })
+        Some(Self { connection, received, asking, gone: AtomicBool::new(false) })
     }
 
     pub fn connection(&self) -> &Connection {
@@ -641,7 +641,7 @@ impl Reached {
     /// without an answer, is gone: what's asked over this connection from now on is asked elsewhere, while what was
     /// asked already is still answered.
     pub async fn ask(&self, message: &[u8], mut notified: impl FnMut(&[u8])) -> Result<Vec<u8>, RequestError> {
-        if !self.open() || (self.heard.lock().expect("no ask panics").elapsed() > THERE && !self.there().await) {
+        if !self.open() || (self.received.lock().expect("no ask panics").elapsed() > THERE && !self.there().await) {
             return Err(RequestError::Unreachable);
         }
         let _asking = Asking::new(&self.asking);
@@ -655,7 +655,7 @@ impl Reached {
                     _ => RequestError::Stopped,
                 }
             })?;
-            *self.heard.lock().expect("no ask panics") = Instant::now();
+            *self.received.lock().expect("no ask panics") = Instant::now();
             let Some(chunk) = chunk else { return Ok(read) };
             if read.len() + chunk.len() > LIMIT {
                 self.gone.store(true, Ordering::Relaxed);
@@ -678,7 +678,7 @@ impl Reached {
         let asked = async { self.send(b"").await?.read_to_end(LIMIT).await.ok() };
         let there = timeout(THERE, asked).await.is_ok_and(|answer| answer.is_some());
         if there {
-            *self.heard.lock().expect("no ask panics") = Instant::now();
+            *self.received.lock().expect("no ask panics") = Instant::now();
         } else {
             self.gone.store(true, Ordering::Relaxed);
             self.connection.close(0u32.into(), b"gone");
@@ -981,7 +981,7 @@ impl Client {
     async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
         let link = self.link();
         let open = Reached::connect(&link.endpoint, server, CONNECT).await?;
-        tokio::spawn(hear(open.connection().clone(), self.notifications.clone()));
+        tokio::spawn(receive_notifications(open.connection().clone(), self.notifications.clone()));
         tokio::spawn(straight(self.me.clone(), open.connection().clone()));
         if self.watching.load(Ordering::Relaxed) {
             let here = address(&link.endpoint, link.network.as_ref()).ok()?;
@@ -1476,7 +1476,7 @@ fn accept(endpoint: Endpoint, tell: broadcast::Sender<Value>) {
             let tell = tell.clone();
             tokio::spawn(async move {
                 if let Ok(connection) = incoming.await {
-                    hear(connection, tell).await
+                    receive_notifications(connection, tell).await
                 }
             });
         }
@@ -1534,7 +1534,7 @@ pub async fn tell(connection: &Connection, message: &[u8]) -> bool {
 }
 
 /// Passes on what a server tells this client over `connection`, until the connection ends.
-async fn hear(connection: Connection, told: broadcast::Sender<Value>) {
+async fn receive_notifications(connection: Connection, told: broadcast::Sender<Value>) {
     while let Ok(mut receive) = connection.accept_uni().await {
         let told = told.clone();
         tokio::spawn(async move {
