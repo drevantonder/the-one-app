@@ -150,6 +150,8 @@ export interface Client {
   network?: string
   build: string
   server?: string
+  /** What `client({ theme })` chose for every app here: `null` where it's as the device is. */
+  theme: "light" | "dark" | null
 }
 
 /** What `client(change)` changes. */
