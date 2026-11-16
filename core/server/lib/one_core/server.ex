@@ -113,6 +113,7 @@ defmodule OneCore.Server do
   """
   def reload(owner) do
     Servers.reload(owner)
+    OneCore.Plugins.Deploy.forget()
     if owner == "network", do: Hooks.forget(["device"])
     if Plugins.reload(owner), do: changed()
     :ok

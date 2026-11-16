@@ -15,6 +15,7 @@ defmodule OneCore.Plugins.Deploy do
   alias OneCore.Plugins.{Installed, Calls, Store, Version}
 
   @network "network"
+  @looks_after :timer.minutes(5)
   # What each owner has deployed, as the network keeps it: `deployed/<owner>/<name>`.
   @deployed "network/deployed/"
 
@@ -70,33 +71,59 @@ defmodule OneCore.Plugins.Deploy do
   `permissions/0` gives them
   and whether it runs in sandbox mode. It's what lists every app there is, whether or not it's on anyone's page
   now. One that was removed, by the plugin that keeps what's deleted, has no latest version, and isn't listed.
+
+  It's two trips to the bucket with a request for each plugin, and changes only when someone deploys, so it's kept:
+  read again behind a request once it's five minutes old, as `OneCore.Plugins` looks at what's installed, and
+  forgotten when this server deploys or is told to look again (`forget/0`).
   """
   def deployed do
+    now = System.monotonic_time(:millisecond)
+
+    case :ets.lookup(__MODULE__, :deployed) do
+      [{:deployed, deployed, at}] ->
+        if at <= now - @looks_after and :ets.insert_new(__MODULE__, {:reading}),
+          do: Task.start(fn -> try do: read_deployed(), after: :ets.delete(__MODULE__, :reading) end)
+
+        deployed
+
+      [] ->
+        read_deployed()
+    end
+  end
+
+  @doc "Forgets what was kept of what everyone has deployed, which has changed: the next ask reads it again."
+  def forget, do: :ets.delete(__MODULE__, :deployed)
+
+  defp read_deployed do
     blobs = Bucket.list(@deployed)
     named = for blob <- blobs, do: Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob, capture: :all_but_first)
     latest = for [owner, name] <- named, do: "#{owner}/plugins/#{name}/latest"
+    {said, latest} = Enum.split(Bucket.read_all(blobs ++ latest), length(blobs))
 
-    for {[owner, name], {:ok, said, _tag}, {:ok, _latest, _}} <-
-          Enum.zip([named, Bucket.read_all(blobs), Bucket.read_all(latest)]) do
-      said = JSON.decode!(said)
+    deployed =
+      for {[owner, name], {:ok, said, _tag}, {:ok, _latest, _}} <- Enum.zip([named, said, latest]) do
+        said = JSON.decode!(said)
 
-      apps =
-        for app <- said["apps"],
-            do: %{name: app["name"], page: app["page"], icon: app["icon"], category: app["category"]}
+        apps =
+          for app <- said["apps"],
+              do: %{name: app["name"], page: app["page"], icon: app["icon"], category: app["category"]}
 
-      %{
-        plugin: "#{owner}/plugins/#{name}",
-        title: said["title"] || name,
-        description: said["description"] || "",
-        subtitle: said["subtitle"],
-        about: said["about"],
-        icon: said["icon"],
-        apps: apps,
-        tools: said["tools"] || [],
-        permissions: said["permissions"] || [],
-        sandbox: said["sandbox"] == true
-      }
-    end
+        %{
+          plugin: "#{owner}/plugins/#{name}",
+          title: said["title"] || name,
+          description: said["description"] || "",
+          subtitle: said["subtitle"],
+          about: said["about"],
+          icon: said["icon"],
+          apps: apps,
+          tools: said["tools"] || [],
+          permissions: said["permissions"] || [],
+          sandbox: said["sandbox"] == true
+        }
+      end
+
+    :ets.insert(__MODULE__, {:deployed, deployed, System.monotonic_time(:millisecond)})
+    deployed
   end
 
   # That `owner` deployed the plugin `name`, with the apps this version has, among what everyone has deployed.
@@ -121,6 +148,8 @@ defmodule OneCore.Plugins.Deploy do
       {:ok, _was, tag} -> Bucket.replace(blob, said, tag)
       :absent -> Bucket.write(blob, said)
     end
+
+    forget()
   end
 
   @doc """
@@ -163,7 +192,13 @@ defmodule OneCore.Plugins.Deploy do
   def deploying_bundled, do: Agent.get(__MODULE__, & &1)
 
   @doc false
-  def child_spec(_), do: %{id: __MODULE__, start: {Agent, :start_link, [fn -> %{} end, [name: __MODULE__]]}}
+  def child_spec(_), do: %{id: __MODULE__, start: {Agent, :start_link, [&started/0, [name: __MODULE__]]}}
+
+  # What's deploying, and a table of what everyone has deployed (`deployed/0`), which the Agent holds.
+  defp started do
+    :ets.new(__MODULE__, [:named_table, :public, read_concurrency: true])
+    %{}
+  end
 
   defp deploying(name, nil), do: Agent.update(__MODULE__, &Map.delete(&1, name))
   defp deploying(name, said), do: Agent.update(__MODULE__, &Map.put(&1, name, said))
