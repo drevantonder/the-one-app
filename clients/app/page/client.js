@@ -188,8 +188,9 @@ function load(app, who) {
   const view = { ...place, frame: Object.assign(document.createElement("iframe"), { src: address(place), inert: true }) }
   view.frame.setAttribute("sandbox", sandbox)
   if (app === launcher) view.frame.className = "launcher"
-  // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`).
-  view.frame.allow = "clipboard-write; web-share"
+  // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`),
+  // and shows a part of itself full screen (a live screen's Full Screen).
+  view.frame.allow = "clipboard-write; web-share; fullscreen"
   open.set(at, view)
   document.body.append(view.frame)
   return view
