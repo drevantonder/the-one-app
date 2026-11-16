@@ -74,6 +74,9 @@ defmodule Containers.Podman do
   @doc """
   Creates a container and starts it. `spec` has its `id` and labels, the `image` (`desktop` for the plugin's own),
   `size`, `ports` to publish on this machine's loopback, a `command`, `env` and `mounts`.
+
+  Podman stops a container by sending its command SIGTERM and killing what's left once its stop timeout passes, which
+  is long enough here for a desktop's Chrome to write its profile down and quit.
   """
   def create(service, spec) do
     {cpus, memory} = Map.fetch!(@sizes, spec["size"])
@@ -83,7 +86,7 @@ defmodule Containers.Podman do
 
     args =
       ["create", "--name", spec["id"], "--init", "--tty", "--interactive", "--cpus", cpus, "--memory", memory] ++
-        ["--pids-limit", "4096", "--shm-size", "1g", "--stop-timeout", "5"] ++
+        ["--pids-limit", "4096", "--shm-size", "1g", "--stop-timeout", "30"] ++
         List.flatten(labels) ++
         Enum.flat_map(spec["ports"] || [], &["--publish", "127.0.0.1::#{&1}"]) ++
         Enum.flat_map(spec["env"] || %{}, fn {key, value} -> ["--env", "#{key}=#{value}"] end) ++

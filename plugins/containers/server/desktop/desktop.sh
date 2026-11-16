@@ -12,6 +12,15 @@ Xvnc "$DISPLAY" -geometry "${SCREEN%x*}" -depth "${SCREEN##*x}" -rfbport -1 -Sec
   -Log "*:stderr:0" -displayfd 3 3>/tmp/display-ready &
 display=$!
 read -r _ </tmp/display-ready
+# Podman stops the container with SIGTERM, which its init passes on to this. Chrome, whoever started it, is sent it
+# too, and quits as it would when its machine shuts down, writing its profile down, while its display is still
+# there; then the display goes. Podman kills whatever is left once the container's stop timeout passes.
+stop() {
+  chrome=$(pgrep -o -x chrome)
+  [ -z "$chrome" ] || { kill -TERM "$chrome"; tail --pid="$chrome" -f /dev/null; }
+  kill "$display"
+}
+trap stop TERM INT
 openbox &
 [ "$1" = --no-browser ] || browser about:blank &
 wait "$display"
