@@ -12,9 +12,16 @@ Release from `main` as it is now, never an older commit, and only what your chan
 | The UI library (`ui/`) | `bun build.js` in `ui/`, then `ONE_FOR=network one deploy --name ui --files-from ui/dist`, then the edge |
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |
-| The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device |
+| The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: a phone takes a build from its store. Say one is needed |
 | Docs, tests, `tooling/`, `.agents/` | Nothing |
+
+A plugin change that uses something new in `core/server/` (often in the same commit) waits for the server release:
+deploy it once every server is on that build, since a server on the old build refuses or breaks it.
+
+On a device that is also a server, `one update` asks the program keeping that server running (`one serve run`) to
+take the latest builds, the program's among them, and answers before it has. What it did is in that program's log,
+`journalctl --user -u one-server-<key's first 12>` on Linux: `one --version` then says the new build.
 
 A server leaves a plugin deployed by hand as it is, so a plugin deploy is always safe beside a server release: deploy
 it even when the server is released too.
