@@ -38,8 +38,8 @@ nothing more:
   `sign_in` that page as its `ui`, which is opened instead, with the account after a `#` when signing one in again.
 - `sign_out` takes `account` and signs it out.
 
-Its other tools take `account`, the first `accounts` lists when it's left out. It gives `title/0` and `icon/0` if
-it has no app.
+Its other tools take `account`, the first `accounts` lists when it's left out. Its icon is the file `icon/0` names,
+and it gives `title/0` if it has no app.
 
 Accounts is one screen, a folder at the end of the first page: a section for each plugin with accounts, its
 accounts with Sign In and Sign Out, and Add Account. A plugin with accounts is on a page only if it has an app a

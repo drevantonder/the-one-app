@@ -21,7 +21,7 @@ defmodule GoogleDrive do
   def title, do: google().title
 
   @impl true
-  def icon, do: "icon.svg"
+  def icon, do: "icon.png"
 
   @doc "What Google Drive asks of Google, for the `google-account` plugin."
   def google do

@@ -204,19 +204,24 @@ defmodule OneCore.Plugin do
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
-  and its edge function. `apps/0`, if the plugin has one, names its apps, as many as it has, each a page of `client/`
-  with an icon there:
+  and its edge function. A plugin's icon is its own, as an Android app's is: `icon/0` names its file, which goes
+  wherever the plugin is shown (Accounts, the App Store). `apps/0`, if the plugin has one, names its apps, as many
+  as it has, each a page of `client/`, with an icon of its own or else the plugin's:
 
       @impl true
-      def apps, do: [%{name: "Hello", page: "client/index.html", icon: "client/icon.svg"}]
+      def icon, do: "icon.png"
+
+      @impl true
+      def apps, do: [%{name: "Hello", page: "client/index.html"}]
 
   - An app may say its `category`, which One Core passes to clients as it is, as Android's intent categories are:
     what each means is the launcher's to say, in its skill (`category: "settings"` puts an app in Settings). One
     Core knows one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one,
     installed for the network, so installing a second is refused, and so is uninstalling it; deploying another as
     its new version replaces it.
-  - A plugin is called and drawn where a person reads it as its first app is. One with no app a person still sees
-    (one with accounts, say) gives `title/0`, its name, and `icon/0`, a file of its own: `def title, do: "Gmail"`.
+  - A plugin is called where a person reads it as its first app is, and one that names no icon is drawn as its first
+    app is. One with no app a person still sees (one with accounts, say) gives `title/0`, its name:
+    `def title, do: "Gmail"`.
   - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
     listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
     an app.
@@ -432,7 +437,7 @@ defmodule OneCore.Plugin do
 
   @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map}]
   @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
-  @callback apps() :: [%{name: String.t(), page: String.t(), icon: String.t()}]
+  @callback apps() :: [%{name: String.t(), page: String.t()}]
   @callback widgets() :: [%{name: String.t(), tool: String.t(), sizes: [String.t()]}]
   @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]

@@ -13,7 +13,7 @@ defmodule GoogleCalendar do
   def title, do: google().title
 
   @impl true
-  def icon, do: "icon.svg"
+  def icon, do: "icon.png"
 
   @doc "What Google Calendar asks of Google, for the `google-account` plugin."
   def google do

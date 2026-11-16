@@ -21,8 +21,9 @@ defmodule OneCore.Plugins.Version do
 
   `ui` is the code of the UI library its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
-  `title` is its name where a person reads it and `icon` its icon as a `data:` address, its first app's unless it
-  says (`OneCore.Plugin`). `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address,
+  `title` is its name where a person reads it, its first app's unless it says, and `icon` its icon as a `data:`
+  address, the file it names (`OneCore.Plugin`), or its first app's. `apps` lists its apps: each one's `name`, its
+  `page`, its `icon` as a `data:` address, its own or else the plugin's,
   and its `category`, which is the plugin's to say and nil where it says none. `widgets` lists its widgets: each
   one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
 
@@ -285,7 +286,7 @@ defmodule OneCore.Plugins.Version do
   defp describe(under, modules, rest) do
     case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
       [] when modules == [] ->
-        {:ok, version(under, nil, [], [], [], [], rest)}
+        {:ok, version(under, nil, [], [], [], [], rest, nil)}
 
       [plugin] ->
         tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
@@ -305,13 +306,13 @@ defmodule OneCore.Plugins.Version do
             {:error,
              "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and ui, if a tool has one, is a page of client/"}
 
-          not (is_list(apps) and Enum.all?(apps, &app?(&1, rest))) ->
-            {:error,
-             "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-               "here, and category, if it has one, is text"}
-
           not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
             {:error, "title/0 gives text, and icon/0 a file here"}
+
+          not (is_list(apps) and Enum.all?(apps, &app?(&1, rest, icon))) ->
+            {:error,
+             "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
+               "here, which icon/0 gives instead where an app has none, and category, if it has one, is text"}
 
           not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
             {:error,
@@ -347,13 +348,8 @@ defmodule OneCore.Plugins.Version do
               for tool <- tools,
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
-            version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest)
-
-            version = %{
-              version
-              | title: title || version.title,
-                icon: if(icon, do: data(icon, rest), else: version.icon)
-            }
+            version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest, icon)
+            version = %{version | title: title || version.title}
 
             with {:ok, jobs} <- jobs(jobs, tools),
                  do:
@@ -404,12 +400,12 @@ defmodule OneCore.Plugins.Version do
   # A module has one `behaviour` attribute for each behaviour it says it follows.
   defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
-  # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more. A
-  # plugin is called and drawn as its first app is, unless it says otherwise.
-  defp version(under, plugin, tools, apps, widgets, services, rest) do
+  # An icon goes to clients as a `data:` address, so a home screen asks for nothing more. The plugin's is the file it
+  # names, and an app's its own or else the plugin's; a plugin that names none is drawn as its first app is.
+  defp version(under, plugin, tools, apps, widgets, services, rest, icon) do
     apps =
-      for %{name: name, page: page, icon: icon} = app <- apps,
-          do: %{name: name, page: page, icon: data(icon, rest), category: app[:category]}
+      for %{name: name, page: page} = app <- apps,
+          do: %{name: name, page: page, icon: data(app[:icon] || icon, rest), category: app[:category]}
 
     widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
 
@@ -419,7 +415,7 @@ defmodule OneCore.Plugins.Version do
       tools: tools,
       apps: apps,
       title: List.first(for(app <- apps, do: app.name)),
-      icon: List.first(for(app <- apps, do: app.icon)),
+      icon: if(icon, do: data(icon, rest), else: List.first(for(app <- apps, do: app.icon))),
       widgets: widgets,
       uses: [],
       services: services,
@@ -456,10 +452,10 @@ defmodule OneCore.Plugins.Version do
 
   defp data(path, rest), do: "data:#{kind(path)};base64,#{Base.encode64(rest[path])}"
 
-  defp app?(%{name: name, page: page, icon: icon} = app, rest) when is_binary(name),
-    do: page?(page, rest) and is_map_key(rest, icon) and (app[:category] == nil or is_binary(app[:category]))
+  defp app?(%{name: name, page: page} = app, rest, icon) when is_binary(name),
+    do: page?(page, rest) and is_map_key(rest, app[:icon] || icon) and (app[:category] == nil or is_binary(app[:category]))
 
-  defp app?(_, _), do: false
+  defp app?(_, _, _), do: false
 
   # A widget is drawn from what one of the plugin's tools answers, which a Home Screen page asks again and again.
   defp widget?(%{name: name, tool: tool, sizes: [_ | _] = sizes}, tools) when is_binary(name),

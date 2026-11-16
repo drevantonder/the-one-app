@@ -109,7 +109,7 @@ defmodule HomeScreen do
         name: "store",
         read_only: true,
         description:
-          "Lists every plugin anyone has deployed that has an app or accounts, which could be added to a page: each with whether it has accounts (`accounts`)",
+          "Lists every plugin anyone has deployed that a person could add: one with an icon, and an app on a page if it has apps. Each says whether it has accounts (`accounts`)",
         inputs: none
       },
       %{
@@ -240,11 +240,11 @@ defmodule HomeScreen do
   # Every plugin anyone deployed, whether or not it's on a page now. One that isn't in use for a group someone's in
   # or the network, nor shared with them, is listed for them too, and adding it says why it can't be.
   def call("store", _inputs, call) do
+    # One whose apps are all somewhere else (Settings, this one) isn't added from here.
     plugins =
       for plugin <- Call.deployed(call),
-          accounts = accounts?(plugin.tools),
-          accounts or Enum.any?(plugin.apps, &(&1.category == nil)),
-          do: %{plugin: plugin.plugin, name: plugin.title, icon: plugin.icon, accounts: accounts}
+          plugin.icon != nil and (plugin.apps == [] or Enum.any?(plugin.apps, &(&1.category == nil))),
+          do: %{plugin: plugin.plugin, name: plugin.title, icon: plugin.icon, accounts: accounts?(plugin.tools)}
 
     Enum.sort_by(plugins, &String.downcase(&1.name))
   end
