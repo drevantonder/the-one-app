@@ -45,6 +45,10 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
   a database, a table) needs a one-time rename of what's stored first; say so in the commit and do it before
   `one update`.
 - Releasing from a worktree behind `origin/main`, which `tooling/release` refuses once a newer build is published.
+- Releasing a server again from a worktree that already released one: its `_build` kept the earlier build's name in
+  `one_core.app`, so the new build said it was the old one and every server stayed put ("says it's …, not what was
+  published"). Release from a worktree that hasn't, or remove its `core/server/_build/prod/lib/one_core` first. A
+  build released from a tree with changes not committed is `-dirty`, which servers refuse too.
 - Releasing a server whose calls to other servers (`hooks/call`, `plugins/call`) take new required params. Once one
   server is on it, the old ones can't decide anything that asks permissions there, their own update among them
   (`permissions couldn't decide it: This server has no method hooks/call`). Take each left behind by hand, as its
