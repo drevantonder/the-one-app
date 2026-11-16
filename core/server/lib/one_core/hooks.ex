@@ -120,6 +120,12 @@ defmodule OneCore.Hooks do
      takes one, with the `time` it was made, in milliseconds since 1970, and the client's own say of which it is in
      its `attributes`: what went wrong or was slow there, kept on the device until a server could be told.
      """},
+    {"renamed", :observe,
+     """
+     A plugin was renamed (`OneCore.Plugins.Rename`). It's about its artifact's name as it `was` and as it `is`, and,
+     for whoever it's installed `for`, the name it was installed by there, `from`, and is now, `to`. It's observed
+     for each of them: a plugin that keeps something of another plugin's by its name or its artifact's changes it.
+     """},
     {"joined", :observe,
      """
      A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the

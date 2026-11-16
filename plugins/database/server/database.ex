@@ -12,6 +12,18 @@ defmodule Database do
   alias Database.Lease
   alias OneCore.Call
 
+  @impl true
+  def hooks, do: ["renamed"]
+
+  # A renamed plugin's database is under its new name now. Each server that may hold the old one's lease lets go of
+  # it, so a plugin given the old name later starts from what the bucket has, not from this one's copy.
+  @impl true
+  def hook("renamed", %{"for" => at, "from" => from}, call) do
+    lease = OneCore.Plugins.Process.whereis(call.who, "Database.Lease", {call.server, "#{at}/own/#{from}/"})
+    if lease, do: OneCore.Plugins.Process.stop(lease)
+    if call.forwarded == false, do: Call.forward(call, OneCore.Servers.acting(at) -- [call.server])
+  end
+
   @doc """
   Runs `fun` in a transaction on the calling plugin's database, after the `schema` statements it hasn't run yet,
   and gives what `fun` returns once what it wrote is in the bucket.

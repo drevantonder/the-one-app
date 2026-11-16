@@ -409,6 +409,23 @@ defmodule Vault do
   @plugins ~w(fetch items sign_in stop_using)
 
   @impl true
+  def hooks, do: ["renamed"]
+
+  # The items switched on for a renamed plugin are switched on for it by its new name, in the Vault of whoever it's
+  # renamed for, if they have one.
+  @impl true
+  def hook("renamed", %{"was" => was, "is" => is}, %Call{subject: "users/" <> _} = call) do
+    if Artifact.list(made(call), "") != [] do
+      transaction(call, own(call), fn db ->
+        query(db, "update or ignore uses set plugin = ? where plugin = ?", [is, was])
+        query(db, "delete from uses where plugin = ?", [was])
+      end)
+    end
+  end
+
+  def hook("renamed", _about, _call), do: :ok
+
+  @impl true
   def call(tool, _inputs, %Call{caller: caller}) when caller != nil and tool not in @plugins,
     do: raise("vault_#{tool} is its person's, not a plugin's. A plugin calls #{Enum.join(@plugins, ", ")}.")
 

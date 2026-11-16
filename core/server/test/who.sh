@@ -6,7 +6,7 @@
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
 # someone with none adds none for themselves but in sandbox mode, where it calls only the tools it's permitted and a
-# stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does. One Core's own tools are whoever's may. Anyone brings a server,
+# stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does, renaming one among them. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. Whoever may deploy a plugin looks into it as it runs, at their own calls alone, and not into a sensitive
 # one. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
@@ -405,6 +405,8 @@ may as owner permissions share --artifact network --relation installer --who use
 may as bob permissions users --artifact network --relation installer
 may as carol for network install --plugin network/plugins/reader --name everyones
 refused as carol for network uninstall --name everyones
+# Renaming a plugin carries what it keeps for everyone who has it, so it's an owner's of the plugin, not an installer's.
+refused as carol for network rename --name reader --to books
 refused as carol permissions share --artifact network --relation installer --who users/bob
 may as owner for network uninstall --name everyones
 may as owner permissions unshare --artifact network --relation installer --who users/carol

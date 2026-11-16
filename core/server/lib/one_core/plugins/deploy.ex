@@ -28,8 +28,8 @@ defmodule OneCore.Plugins.Deploy do
   def deploy(owner, name, files, from \\ :kept, sandbox \\ :kept),
     do: deploy(owner, name, files, from, sandbox, fn _version -> true end)
 
-  # Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version.
-  defp deploy(owner, name, files, from, sandbox, install?) do
+  @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
+  def deploy(owner, name, files, from, sandbox, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
     sandbox = if sandbox == :kept, do: Store.about(artifact)["sandbox"] == true, else: sandbox == true
 

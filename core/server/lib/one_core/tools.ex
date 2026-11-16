@@ -17,7 +17,7 @@ defmodule OneCore.Tools do
   the call on to.
   """
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Installed, Calls, Deploy, Store}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Rename, Store}
 
   @tools [
     %{
@@ -133,6 +133,24 @@ defmodule OneCore.Tools do
           name: %{type: "string", description: "What to call it. Its own name, if left out"}
         },
         required: ["plugin"]
+      }
+    },
+    %{
+      name: "rename",
+      description: """
+      Renames a plugin of yours, as `git mv` does a file: asked for a group or for the network, theirs. Its history,
+      what it keeps and where it's installed, for everyone who has it, all go to the new name, and the plugins that
+      keep something of a plugin's follow it, such as a Home Screen page's places. The old name then names nothing.
+      An owner of the plugin renames it. One whose services are installed, or that makes artifacts for people, or
+      that another plugin names in its code, isn't renamed, and it says why.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{
+          name: %{type: "string", description: "The plugin's name"},
+          to: %{type: "string", description: "Its new name: lowercase letters, digits and hyphens"}
+        },
+        required: ["name", "to"]
       }
     },
     %{
@@ -337,7 +355,7 @@ defmodule OneCore.Tools do
 
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
-        apart = if name in ["deploy", "uninstall"], do: {User.owner(elem(asked, 1)), inputs["name"]}
+        apart = if name in ["deploy", "uninstall", "rename"], do: {User.owner(elem(asked, 1)), inputs["name"]}
 
         Calls.tool(tool, about, asked, nil, &run(name, &1, asked, forward), apart)
     end
@@ -446,6 +464,15 @@ defmodule OneCore.Tools do
     reaches!(asked, who, "installer")
     with {:error, why} <- Installed.install(who, name, plugin), do: raise(why)
     "#{plugin} is installed for #{who}, as #{name}. #{permitted(Plugins.running(who)[name])}"
+  end
+
+  # It's renamed where it runs, which is where it's deployed again.
+  defp run("rename", %{"name" => name, "to" => to}, {_by, who} = asked, forward) do
+    plugin = "#{who}/plugins/#{name}"
+    if Store.about(plugin)["sandbox"] == true, do: at(who, forward), else: runs(who, forward)
+    reaches!(asked, plugin, "owner")
+    with {:error, why} <- Rename.rename(who, name, to, asked), do: raise(why)
+    "#{name} is #{to} now, for everyone who has it."
   end
 
   defp run("uninstall", %{"name" => name}, {_by, who} = asked, forward) do

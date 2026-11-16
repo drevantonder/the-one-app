@@ -170,6 +170,25 @@ defmodule HomeScreen do
   end
 
   @impl true
+  def hooks, do: ["renamed"]
+
+  # The apps and widgets of a renamed plugin stay where they were on the page of whoever it's renamed for.
+  @impl true
+  def hook("renamed", %{"from" => from, "to" => to}, call) do
+    kept = kept(call)
+
+    renamed =
+      for item <- kept do
+        Map.new(item, fn
+          {kind, ^from <> "/" <> part} when kind in ["app", "widget"] -> {kind, "#{to}/#{part}"}
+          other -> other
+        end)
+      end
+
+    if renamed != kept, do: keep(call, JSON.encode!(renamed))
+  end
+
+  @impl true
   def call("page", _inputs, call) do
     kept = kept(call)
     put = for %{"app" => app} <- kept, do: app
