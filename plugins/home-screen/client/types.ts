@@ -10,8 +10,8 @@ export interface App {
   subject?: string
 }
 
-/** A plugin with accounts, in Accounts: its name there (what its tools start with), its title and icon, and the page its sign-in shows on, if it has one. */
-export interface Signs {
+/** A plugin with accounts, which Accounts lists. Not an app: its name there (what its tools start with), its own title and icon, and its `sign_in` tool's page, if it has one. */
+export interface PluginWithAccounts {
   plugin: string
   name: string
   title: string
@@ -40,7 +40,7 @@ export interface Page {
   who: string
   items: Item[]
   widgets: Widget[]
-  accounts: Signs[]
+  plugins_with_accounts: PluginWithAccounts[]
   arranges?: boolean
   subject?: string
   name: string

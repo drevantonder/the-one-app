@@ -1,29 +1,30 @@
-// Accounts: a section for each plugin with accounts (SKILL.md) on any of this user's pages, its accounts as its
+// Accounts: the outside accounts a person has signed plugins in to. A section for each plugin with accounts
+// (SKILL.md) on any of this user's pages, by its own title and icon, as it has no app, and its accounts as its
 // `accounts` lists them, each filling in as it answers. One that needs signing in again says why, with Sign In;
-// each has Sign Out, and each section Add Account. Add Account for Another App opens the App Store's plugins that
-// sign in.
+// each has Sign Out, and each section Add Account. Add Account for Another App opens the App Store at the plugins
+// that have accounts.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Icon, leave, List, open, Problem, Row, Screen, Section, Skeleton, toast } from "ui"
-import type { Account, Page, Signs } from "./types.ts"
+import type { Account, Page, PluginWithAccounts } from "./types.ts"
 
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
 /// Every page's plugins with accounts, each once, by its title.
-const signs = createMemo(async () => {
+const withAccounts = createMemo(async () => {
   const groups = await json<{ groups: { group: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string }[] => [])
   const pages = await Promise.all([undefined, ...groups.map(({ group }) => group), "network"].map((who) => json<Page>("home-screen_page", {}, who).then((page) => ({ ...page, subject: who }))))
-  const all = new Map(pages.flatMap((page) => page.accounts.map((one): [string, Signs] => [one.plugin, { ...one, subject: page.subject }])))
+  const all = new Map(pages.flatMap((page) => page.plugins_with_accounts.map((plugin): [string, PluginWithAccounts] => [plugin.plugin, { ...plugin, subject: page.subject }])))
   return [...all.values()].sort((a, b) => a.title.localeCompare(b.title))
 })
-changed(() => refresh(signs))
+changed(() => refresh(withAccounts))
 
 /// Does what the person asked, and says what the server said if it wouldn't.
 const does = (what: () => Promise<unknown>) => what().catch((error) => toast(error.message))
 
 /// Signs an account in to a plugin, or with `account`, signs that one in again: on the plugin's own page for it, or
 /// at the web address its `sign_in` answers, in the device's browser.
-const signIn = (plugin: Signs, account?: string) =>
+const signIn = (plugin: PluginWithAccounts, account?: string) =>
   does(async () => {
     if (plugin.sign_in) return open(account ? `${plugin.sign_in}#${encodeURIComponent(account)}` : plugin.sign_in, { subject: plugin.subject })
     const { url } = await json<{ url: string }>(`${plugin.name}_sign_in`, account ? { account } : {}, plugin.subject)
@@ -31,7 +32,7 @@ const signIn = (plugin: Signs, account?: string) =>
   })
 
 /// A plugin's section: its accounts, once its `accounts` answers, or why it couldn't. With none, Add Account is all.
-function Accounts(props: { plugin: Signs }) {
+function Accounts(props: { plugin: PluginWithAccounts }) {
   const accounts = createMemo(() => json<Account[]>(`${props.plugin.name}_accounts`, {}, props.plugin.subject))
   changed(() => refresh(accounts))
   const signOut = async (account: string) => {
@@ -77,16 +78,16 @@ function Accounts(props: { plugin: Signs }) {
   )
 }
 
-function All(props: { signs: Signs[] }) {
+function All(props: { plugins: PluginWithAccounts[] }) {
   return (
     <>
-      <Show when={props.signs.length} fallback={<Empty>No accounts yet.</Empty>}>
-        <For each={props.signs} keyed={(plugin) => plugin.plugin}>
+      <Show when={props.plugins.length} fallback={<Empty>No accounts yet.</Empty>}>
+        <For each={props.plugins} keyed={(plugin) => plugin.plugin}>
           {(plugin) => <Accounts plugin={plugin()} />}
         </For>
       </Show>
       <div class="another">
-        <Button variant="outline" onClick={() => open("home-screen/client/apps.html#accounts")}>Add Account for Another App</Button>
+        <Button variant="outline" onClick={() => open("home-screen/client/store.html#accounts")}>Add Account for Another App</Button>
       </div>
     </>
   )
@@ -105,7 +106,7 @@ render(
       `}</style>
       <Errored fallback={(error) => <Problem heading="Can't show your accounts" text={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Skeleton rows={4} />}>
-          <All signs={signs()} />
+          <All plugins={withAccounts()} />
         </Loading>
       </Errored>
     </Screen>

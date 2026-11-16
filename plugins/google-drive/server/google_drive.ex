@@ -2,7 +2,7 @@ defmodule GoogleDrive do
   @moduledoc """
   Google Drive: the person's own Drive, through Drive's API (v3) by its own names (files_get, files_list,
   files_create, files_upload, files_update, generate_ids), which agents already know. Signing in and the accounts
-  are the `google-account` plugin's, the same for every Google app.
+  are the `google-account` plugin's, the same for every Google plugin.
   """
   @behaviour OneCore.Plugin
 
@@ -16,7 +16,7 @@ defmodule GoogleDrive do
   @fields_hint "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink"
   @no_folder "No folder among its parents: folder ids come from google-drive_files_list (root is My Drive)."
 
-  # It has no app, so it says how it's called and drawn in Accounts and the App Store.
+  # It has accounts and no app, so it names and draws itself, in Accounts and the App Store.
   @impl true
   def title, do: google().title
 
@@ -104,7 +104,7 @@ defmodule GoogleDrive do
       %{
         name: "sign_in",
         description:
-          "Starts signing a Google account in to Google Drive, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
+          "Starts signing a Google account in to Google Drive, or letting it use one another Google plugin has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
         inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-drive_accounts lists it")}},
         outputs: %{
           type: "object",
@@ -114,7 +114,7 @@ defmodule GoogleDrive do
       },
       %{
         name: "sign_out",
-        description: "Signs a Google account out of Google Drive. Other Google apps that use it still do, and google-drive_sign_in signs it in again.",
+        description: "Signs a Google account out of Google Drive. Other Google plugins that use it still do, and google-drive_sign_in signs it in again.",
         inputs: with_account.(%{}, ["account"]),
         outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
@@ -325,7 +325,7 @@ defmodule GoogleDrive do
     google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
   end
 
-  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
+  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this plugin.
   defp google(call, tool, inputs) do
     inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
     OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))

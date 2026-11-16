@@ -1,14 +1,14 @@
 defmodule GoogleSheets do
   @moduledoc """
   Google Sheets: the person's own spreadsheets, through Sheets' API (v4). Signing in and the accounts are the
-  `google-account` plugin's, the same for every Google app.
+  `google-account` plugin's, the same for every Google plugin.
   """
   @behaviour OneCore.Plugin
 
   @api "https://sheets.googleapis.com/v4/"
   @range_hint "ranges are A1 notation, like Budget!A1:F20, Budget!A:C or Budget; google-sheets_spreadsheet lists the sheets"
 
-  # It has no app, so it says how it's called and drawn in Accounts and the App Store.
+  # It has accounts and no app, so it names and draws itself, in Accounts and the App Store.
   @impl true
   def title, do: google().title
 
@@ -73,7 +73,7 @@ defmodule GoogleSheets do
       %{
         name: "sign_in",
         description:
-          "Starts signing a Google account in to Google Sheets, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
+          "Starts signing a Google account in to Google Sheets, or letting it use one another Google plugin has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
         inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-sheets_accounts lists it")}},
         outputs: %{
           type: "object",
@@ -83,7 +83,7 @@ defmodule GoogleSheets do
       },
       %{
         name: "sign_out",
-        description: "Signs a Google account out of Google Sheets. Other Google apps that use it still do, and google-sheets_sign_in signs it in again.",
+        description: "Signs a Google account out of Google Sheets. Other Google plugins that use it still do, and google-sheets_sign_in signs it in again.",
         inputs: with_account.(%{}, ["account"]),
         outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
@@ -334,7 +334,7 @@ defmodule GoogleSheets do
     google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
   end
 
-  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
+  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this plugin.
   defp google(call, tool, inputs) do
     inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
     OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))

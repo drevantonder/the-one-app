@@ -21,6 +21,10 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   Avoid: module.
 - **App**: something with UI that the launcher shows, on a Home Screen page or in Settings. A plugin provides it. It can
   have server-side code where it needs it, which is its plugin's tools.
+- **Account**: a user's account at an outside service (a Gmail address, a WhatsApp number), which they sign a plugin
+  in to so its tools act there as them. The plugin lists, signs in and signs out its accounts with its tools, and the
+  launcher's Accounts lists every plugin's together. An account isn't an app, and nor is a plugin for having
+  accounts: its sign-in page, if it has one, is its `sign_in` tool's.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
 - **Sandbox mode**: a plugin run in a VM of its own, for each user, group or network it's installed for, behind its

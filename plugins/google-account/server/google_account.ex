@@ -1,24 +1,24 @@
 defmodule GoogleAccount do
   @moduledoc """
-  What the Google apps (gmail, google-calendar, google-drive, google-docs and google-sheets) share: Google's
-  sign-in and each account signed in, kept in the Vault, and their calls to Google's APIs. An app calls this
-  plugin's tools, which act for the app that called them (its `caller`), with the app's `title`, and `scopes` to
+  What the Google plugins (gmail, google-calendar, google-drive, google-docs and google-sheets) share: Google's
+  sign-in and each account signed in, kept in the Vault, and their calls to Google's APIs. A Google plugin calls
+  this one's tools, which act for the plugin that called them (its `caller`), with that plugin's `title`, and `scopes` to
   sign in with.
 
-  Each Google account is one item of its person's Vault, "Google <address>", shared by every Google app signed in
-  to it. Signing in to it for another app adds that app's scopes to it (Google's incremental authorization) and
-  switches the item on for that app too. Signing out of one app switches it off for that app alone. This plugin
-  uses the Vault's tools on behalf of the app, so the Vault ties each account to the apps it's switched on for, and
-  neither this plugin nor an app is ever handed a token: one in sandbox mode uses an account as safely as one
+  Each Google account is one item of its person's Vault, "Google <address>", shared by every Google plugin signed in
+  to it. Signing in to it for another plugin adds that plugin's scopes to it (Google's incremental authorization) and
+  switches the item on for that plugin too. Signing out of one plugin switches it off for that plugin alone. This plugin
+  uses the Vault's tools on behalf of the plugin, so the Vault ties each account to the plugins it's switched on for, and
+  neither this plugin nor a Google plugin is ever handed a token: one in sandbox mode uses an account as safely as one
   that isn't.
 
-  Every Google address is written here and in the apps as Google's own: a test points them at a fake Google by
+  Every Google address is written here and in the Google plugins as Google's own: a test points them at a fake Google by
   rewriting them.
   """
   @behaviour OneCore.Plugin
 
   # Google's OAuth: https://developers.google.com/identity/protocols/oauth2/web-server. Every API host a Google
-  # app calls is the account's, since one account's tokens serve every app signed in to it.
+  # plugin calls is the account's, since one account's tokens serve every plugin signed in to it.
   @service %{
     "name" => "Google",
     "authorize" => "https://accounts.google.com/o/oauth2/v2/auth",
@@ -35,21 +35,21 @@ defmodule GoogleAccount do
   @impl true
   def tools do
     string = &%{type: "string", description: &1}
-    title = string.("The app's name, as a person reads it, like Gmail")
+    title = string.("The calling plugin's name, as a person reads it, like Gmail")
     account = string.("Which account: its address, or a part of it only it has. The first if left out")
-    app = &%{type: "object", properties: Map.put(&1, :title, title), required: ["title" | &2]}
+    titled = &%{type: "object", properties: Map.put(&1, :title, title), required: ["title" | &2]}
 
     [
       %{
-        name: "apps",
+        name: "plugins",
         read_only: true,
         description:
-          "The Google apps you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Each one's accounts tool lists its accounts.",
+          "The Google plugins you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Each one's accounts tool lists its accounts.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
           properties: %{
-            apps: %{
+            plugins: %{
               type: "array",
               items: %{
                 type: "object",
@@ -61,15 +61,15 @@ defmodule GoogleAccount do
               }
             }
           },
-          required: ["apps"]
+          required: ["plugins"]
         }
       },
       %{
         name: "accounts",
         read_only: true,
         description:
-          "For a Google app's code: the Google accounts signed in for the app that calls this, each with ok, and why when it's false.",
-        inputs: app.(%{}, []),
+          "For a Google plugin's code: the Google accounts signed in for the plugin that calls this, each with ok, and why when it's false.",
+        inputs: titled.(%{}, []),
         outputs: %{
           type: "object",
           properties: %{
@@ -79,7 +79,7 @@ defmodule GoogleAccount do
                 type: "object",
                 properties: %{
                   account: string.("Its address"),
-                  ok: %{type: "boolean", description: "Whether the app can use it now"},
+                  ok: %{type: "boolean", description: "Whether the plugin can use it now"},
                   why: string.("Why it can't, and what fixes it, when ok is false")
                 },
                 required: ["account", "ok"]
@@ -92,11 +92,11 @@ defmodule GoogleAccount do
       %{
         name: "sign_in",
         description:
-          "For a Google app's code: starts signing a Google account in to the app that calls this, and gives the url its person opens.",
+          "For a Google plugin's code: starts signing a Google account in to the plugin that calls this, and gives the url its person opens.",
         inputs:
-          app.(
+          titled.(
             %{
-              scopes: %{type: "array", items: %{type: "string"}, description: "What the app asks of Google"},
+              scopes: %{type: "array", items: %{type: "string"}, description: "What the plugin asks of Google"},
               account: string.("The account's address, to suggest it to Google")
             },
             ["scopes"]
@@ -109,19 +109,19 @@ defmodule GoogleAccount do
       },
       %{
         name: "sign_out",
-        description: "For a Google app's code: signs a Google account out of the app that calls this.",
-        inputs: app.(%{account: account}, ["account"]),
+        description: "For a Google plugin's code: signs a Google account out of the plugin that calls this.",
+        inputs: titled.(%{account: account}, ["account"]),
         outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "request",
         description: """
-        For a Google app's code: calls a Google API as one of the accounts signed in for the app that calls this,
+        For a Google plugin's code: calls a Google API as one of the accounts signed in for the plugin that calls this,
         and gives its status, headers and body, decoded where it's JSON. An answer that isn't a success raises,
         saying what went wrong for whoever reads it.
         """,
         inputs:
-          app.(
+          titled.(
             %{
               account: account,
               method: string.("GET if left out"),
@@ -153,20 +153,18 @@ defmodule GoogleAccount do
   end
 
   @impl true
-  def call("apps", _inputs, call) do
-    apps =
+  def call("plugins", _inputs, call) do
+    plugins =
       for {name, version} <- OneCore.Plugins.running(call.subject),
           "google-account" in version.permissions,
           do: %{name: name, title: version.title}
 
-    %{apps: Enum.sort_by(apps, & &1.title)}
+    %{plugins: Enum.sort_by(plugins, & &1.title)}
   end
 
   def call(_tool, _inputs, %OneCore.Call{caller: nil}),
     do:
-      raise(
-        "google-account's tools are for the Google apps' code. Each app has its own accounts, sign_in and sign_out."
-      )
+      raise("google-account's tools are for the Google plugins' code. Each has its own accounts, sign_in and sign_out.")
 
   def call("accounts", %{"title" => title}, call) do
     accounts =
@@ -188,7 +186,7 @@ defmodule GoogleAccount do
     %{
       url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}"})["url"],
       then:
-        "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. #{app(call)}_accounts then lists the account."
+        "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. #{plugin(call)}_accounts then lists the account."
     }
   end
 
@@ -247,7 +245,7 @@ defmodule GoogleAccount do
   defp account(call, name) do
     case {emails(call), name} do
       {[], _} ->
-        raise "Sign in to a Google account first: #{app(call)}_sign_in gives the link."
+        raise "Sign in to a Google account first: #{plugin(call)}_sign_in gives the link."
 
       {[first | _], blank} when blank in [nil, ""] ->
         first
@@ -280,7 +278,7 @@ defmodule GoogleAccount do
   defp trouble(call, title, email, response, hints \\ %{}) do
     status = response["status"]
     message = message(response["body"]) || "#{status}"
-    again = "#{email} needs signing in again, to let #{title} in: #{app(call)}_sign_in with account #{email}."
+    again = "#{email} needs signing in again, to let #{title} in: #{plugin(call)}_sign_in with account #{email}."
 
     cond do
       status == 401 ->
@@ -294,7 +292,7 @@ defmodule GoogleAccount do
         hints["missing"]
 
       hints["missing"] && status == 403 ->
-        "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (#{app(call)}_accounts lists them), or ask its owner to share it."
+        "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (#{plugin(call)}_accounts lists them), or ask its owner to share it."
 
       hints["hint"] && status == 400 ->
         "#{title}: #{String.trim_trailing(message, ".")}: #{hints["hint"]}"
@@ -315,17 +313,17 @@ defmodule GoogleAccount do
 
   defp message(_body), do: nil
 
-  # The addresses of the Google accounts signed in for the app that called, by address.
+  # The addresses of the Google accounts signed in for the plugin that called, by address.
   defp emails(call) do
     for %{"name" => "Google " <> email, "sign_in" => "Google"} <- vault(call, "items", %{})["items"], do: email
   end
 
-  # The app that called, by the name its tools start with.
-  defp app(call), do: Path.basename(call.caller)
+  # The plugin that called, by the name its tools start with.
+  defp plugin(call), do: Path.basename(call.caller)
 
   defp item(email), do: "Google #{email}"
   defp get(url), do: %{"url" => url, "headers" => %{"authorization" => "Bearer {{access_token}}"}}
 
-  # The Vault's tools, for the app that called.
+  # The Vault's tools, for the plugin that called.
   defp vault(call, tool, inputs), do: OneCore.Call.tool(call, "vault", tool, inputs, on_behalf_of: call.caller)
 end

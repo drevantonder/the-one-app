@@ -277,9 +277,9 @@ defmodule OneCore.Plugin do
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
-  and its edge function. A plugin's icon is its own, as an Android app's is: `icon/0` names its file, which goes
-  wherever the plugin is shown (Accounts, the App Store). `apps/0`, if the plugin has one, names its apps, as many
-  as it has, each a page of `client/`, with an icon of its own or else the plugin's:
+  and its edge function. A plugin's icon is its own, as an Android package's is: `icon/0` names its file, which
+  goes wherever the plugin itself is shown (the App Store, Accounts). `apps/0`, if the plugin has one, names its apps,
+  as many as it has, each a page of `client/`, with an icon of its own or else the plugin's:
 
       @impl true
       def icon, do: "icon.png"
@@ -292,12 +292,14 @@ defmodule OneCore.Plugin do
     Core knows one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one,
     installed for the network, so installing a second is refused, and so is uninstalling it; deploying another as
     its new version replaces it.
-  - A plugin is called where a person reads it as its first app is, and one that names no icon is drawn as its first
-    app is. One with no app a person still sees (one with accounts, say) gives `title/0`, its name:
-    `def title, do: "Gmail"`.
+  - A plugin's name where a person reads it is `title/0`, and without one its first app's; one that names no icon
+    is drawn with its first app's. One with no app gives `title/0`: `def title, do: "Gmail"`.
+  - A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts, as the launcher's skill
+    says. Accounts aren't an app, and having them makes no app: a plugin has an app only for a screen a person
+    opens for something else.
   - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
     listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
-    an app.
+    an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's.
   - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
     2.0 with the UI library, and its source is the folder `client/`: each `.html` there is a page, whose script is the
     app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more

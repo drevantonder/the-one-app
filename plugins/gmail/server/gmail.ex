@@ -1,7 +1,7 @@
 defmodule Gmail do
   @moduledoc """
   Gmail: the person's own Gmail accounts, through Gmail's API (v1). Signing in and the accounts are the `google-account`
-  plugin's, the same for every Google app. Reading a message is `Gmail.Message`'s, and writing one is
+  plugin's, the same for every Google plugin. Reading a message is `Gmail.Message`'s, and writing one is
   `Gmail.Mime`'s.
   """
   @behaviour OneCore.Plugin
@@ -10,7 +10,7 @@ defmodule Gmail do
   @api "https://gmail.googleapis.com/gmail/v1/users/me/"
   @upload "https://gmail.googleapis.com/upload/gmail/v1/users/me/"
 
-  # It has no app, so it says how it's called and drawn in Accounts and the App Store.
+  # It has accounts and no app, so it names and draws itself, in Accounts and the App Store.
   @impl true
   def title, do: google().title
 
@@ -100,7 +100,7 @@ defmodule Gmail do
       %{
         name: "sign_in",
         description:
-          "Starts signing a Google account in to Gmail, or letting Gmail use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
+          "Starts signing a Google account in to Gmail, or letting Gmail use one another Google plugin has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
         inputs: %{type: "object", properties: %{account: string.("The account's address, like someone@gmail.com, to suggest it to Google: for one that needs signing in again, as gmail_accounts lists it")}},
         outputs: %{
           type: "object",
@@ -110,7 +110,7 @@ defmodule Gmail do
       },
       %{
         name: "sign_out",
-        description: "Signs a Google account out of Gmail. Other Google apps that use it still do, and gmail_sign_in signs it in again.",
+        description: "Signs a Google account out of Gmail. Other Google plugins that use it still do, and gmail_sign_in signs it in again.",
         inputs: with_account.(%{}, ["account"]),
         outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
@@ -627,7 +627,7 @@ defmodule Gmail do
     google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
   end
 
-  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
+  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this plugin.
   defp google(call, tool, inputs) do
     inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
     OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))

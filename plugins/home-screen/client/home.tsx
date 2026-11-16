@@ -7,7 +7,7 @@ import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettle
 import { render, type JSX } from "@solidjs/web"
 import { call, changed, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
-import type { Account, App, Item, Page, Signs, Size, Widget as WidgetItem } from "./types.ts"
+import type { Account, App, Item, Page, PluginWithAccounts, Size, Widget as WidgetItem } from "./types.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
 const HOME = "home-screen/client/index.html"
@@ -21,8 +21,8 @@ const home = createMemo(async () => {
   const whos: { subject?: string; name: string }[] = [{ name: "You" }, ...groups.map(({ group, called }) => ({ subject: group, name: called })), { subject: "network", name: "Everyone" }]
   const [settings, pages] = await Promise.all([json<{ parts: App[] }>("home-screen_settings").then(({ parts }) => parts), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who.subject).then((page): Page => ({ ...page, ...who }))))])
   // Every page's plugins with accounts, each once, are in the one Accounts folder.
-  const accounts = [...new Map(pages.flatMap((page) => page.accounts.map((signs): [string, Signs] => [signs.plugin, { ...signs, subject: page.subject }]))).values()]
-  return { pages, settings, accounts }
+  const withAccounts = [...new Map(pages.flatMap((page) => page.plugins_with_accounts.map((plugin): [string, PluginWithAccounts] => [plugin.plugin, { ...plugin, subject: page.subject }]))).values()]
+  return { pages, settings, withAccounts }
 })
 changed(() => refresh(home))
 
@@ -163,19 +163,21 @@ function collapse(section: string, shut: boolean) {
 
 /// Every page's apps, then Settings', each a section that collapses. A section's name shows its page; an app opens
 /// beside the sidebar. Arrow keys move through it, and left and right on a section's name collapse and open it.
-/** A section of the sidebar: a page's apps, or Settings'. */
+/** A section of the sidebar: a page's apps, then the first page's Accounts folder, or Settings'. */
 interface Section {
   key: string
   name: string
   apps: App[]
+  withAccounts?: PluginWithAccounts[]
 }
 
-function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => number; go: (index: number) => void }) {
+function Sidebar(props: { sections: Section[]; at: () => number; go: (index: number) => void }) {
   let nav!: HTMLElement
   const home = () => showing().app === HOME
-  const current = (app: App) => !home() && (showing().app === ACCOUNTS ? app.app === ACCOUNTS : (showing().subject ?? null) === (app.subject ?? null) && showing().app.split("#")[0] === app.app)
-  // A section's name is selected while its page shows, or while it's collapsed over the app that's open.
-  const selected = (section: Section, index: number) => (home() ? props.at() === index : collapsed().has(section.key) && section.apps.some(current))
+  const inAccounts = () => showing().app === ACCOUNTS
+  const current = (app: App) => !home() && (showing().subject ?? null) === (app.subject ?? null) && showing().app.split("#")[0] === app.app
+  // A section's name is selected while its page shows, or while it's collapsed over what's open.
+  const selected = (section: Section, index: number) => (home() ? props.at() === index : collapsed().has(section.key) && (section.apps.some(current) || (!!section.withAccounts && inAccounts())))
   const pick = (index: number) => {
     props.go(index)
     if (!home()) open(HOME)
@@ -214,8 +216,11 @@ function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => numb
             <Show when={!collapsed().has(section().key)}>
               <List>
                 <For each={section().apps} keyed={(app) => app.app}>
-                  {(app) => <Row start={app().app === ACCOUNTS ? <Folder signs={props.accounts} /> : <img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { subject: app().subject })} />}
+                  {(app) => <Row start={<img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { subject: app().subject })} />}
                 </For>
+                <Show when={section().withAccounts}>
+                  {(plugins) => <Row start={<Folder plugins={plugins()} />} heading="Accounts" current={inAccounts()} onClick={() => open(ACCOUNTS)} />}
+                </Show>
               </List>
             </Show>
           </div>
@@ -225,45 +230,53 @@ function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => numb
   )
 }
 
-/// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts.
-function Tile(props: { app: App; subject?: string; icon?: JSX.Element }) {
+/// An icon with its name under it, an app's or the Accounts folder's, and the page it opens. It starts as a finger
+/// lands on it, and shows as the finger lifts.
+function Tile(props: { opens: string; name: string; subject?: string; children: JSX.Element }) {
   return (
-    <button type="button" class="tile" onPointerDown={() => open(props.app.app, { subject: props.subject, behind: true })} onClick={() => Date.now() > quiet && open(props.app.app, { subject: props.subject })}>
-      <span class="icon">{props.icon ?? <img src={props.app.icon} alt="" />}</span>
-      <span>{props.app.name}</span>
+    <button type="button" class="tile" onPointerDown={() => open(props.opens, { subject: props.subject, behind: true })} onClick={() => Date.now() > quiet && open(props.opens, { subject: props.subject })}>
+      <span class="icon">{props.children}</span>
+      <span>{props.name}</span>
     </button>
   )
 }
 
+/// An app's tile.
+const AppTile = (props: { app: App; subject?: string }) => (
+  <Tile opens={props.app.app} name={props.app.name} subject={props.subject}>
+    <img src={props.app.icon} alt="" />
+  </Tile>
+)
+
 /// A folder, as a phone draws one: a frosted rounded square holding the icons of up to nine of its plugins, small,
 /// in a 3×3 grid from the top left.
-function Folder(props: { signs: Signs[] }) {
+function Folder(props: { plugins: PluginWithAccounts[] }) {
   return (
     <span class="folder">
-      <For each={props.signs.slice(0, 9)} keyed={(signs) => signs.plugin}>
-        {(signs) => <img src={signs().icon} alt="" />}
+      <For each={props.plugins.slice(0, 9)} keyed={(plugin) => plugin.plugin}>
+        {(plugin) => <img src={plugin().icon} alt="" />}
       </For>
     </span>
   )
 }
 
-/// The Accounts folder, last on the first page and not moved: it has a dot while an account in it needs its person.
-function AccountsTile(props: { signs: Signs[] }) {
-  const icon = (
-    <>
-      <Folder signs={props.signs} />
+/// The Accounts folder, last on the first page and not moved: the icons of the plugins with accounts, which aren't
+/// apps, and a dot while an account needs its person.
+function AccountsTile(props: { plugins: PluginWithAccounts[] }) {
+  return (
+    <Tile opens={ACCOUNTS} name="Accounts">
+      <Folder plugins={props.plugins} />
       <Loading>
-        <Attention signs={props.signs} />
+        <Attention plugins={props.plugins} />
       </Loading>
-    </>
+    </Tile>
   )
-  return <Tile app={{ app: ACCOUNTS, name: "Accounts", icon: "" }} icon={icon} />
 }
 
 /// A dot while any account of the folder's plugins is not ok, as each plugin's `accounts` answers.
-function Attention(props: { signs: Signs[] }) {
+function Attention(props: { plugins: PluginWithAccounts[] }) {
   const needed = createMemo(async () => {
-    const lists = await Promise.all(props.signs.map((signs) => json<Account[]>(`${signs.name}_accounts`, {}, signs.subject).catch((): Account[] => [])))
+    const lists = await Promise.all(props.plugins.map((plugin) => json<Account[]>(`${plugin.name}_accounts`, {}, plugin.subject).catch((): Account[] => [])))
     return lists.flat().some((account) => !account.ok)
   })
   onSettled(() => changed(() => refresh(needed)))
@@ -274,23 +287,23 @@ function Attention(props: { signs: Signs[] }) {
   )
 }
 
-function PageGrid(props: { page: Page; accounts?: Signs[] }) {
+function PageGrid(props: { page: Page; withAccounts?: PluginWithAccounts[] }) {
   return (
     <section class="page" ref={held(() => props.page)}>
-      <Show when={props.page.items.length || props.accounts} fallback={<Empty>No apps yet.</Empty>}>
+      <Show when={props.page.items.length || props.withAccounts} fallback={<Empty>No apps yet.</Empty>}>
         <div class="grid">
           <For each={props.page.items} keyed={(item) => (item.widget ?? item.app) + (item.size ?? "")}>
             {(item) => (
               <div class="cell" data-item={(item().widget ?? item().app) + (item().size ?? "")} data-size={item().size} ref={held(() => props.page, item)}>
-                <Show when={item().widget} fallback={<Tile app={item() as App} subject={props.page.subject} />}>
+                <Show when={item().widget} fallback={<AppTile app={item() as App} subject={props.page.subject} />}>
                   <Card item={item() as WidgetItem} page={props.page} />
                 </Show>
               </div>
             )}
           </For>
-          <Show when={props.accounts}>
+          <Show when={props.withAccounts}>
             <div class="cell">
-              <AccountsTile signs={props.accounts!} />
+              <AccountsTile plugins={props.withAccounts!} />
             </div>
           </Show>
         </div>
@@ -358,7 +371,7 @@ function Adding() {
   )
 }
 
-function Home(props: { home: { pages: Page[]; settings: App[]; accounts: Signs[] } }) {
+function Home(props: { home: { pages: Page[]; settings: App[]; withAccounts: PluginWithAccounts[] } }) {
   let strip!: HTMLDivElement
   const [at, setAt] = createSignal(0)
   const names = () => [...props.home.pages.map((page) => page.name), "Settings"]
@@ -399,7 +412,8 @@ function Home(props: { home: { pages: Page[]; settings: App[]; accounts: Signs[]
     ...props.home.pages.map((page, index) => ({
       key: page.subject ?? "you",
       name: page.name,
-      apps: [...page.items.filter((item): item is Extract<Item, App> => !!item.app).map((item) => ({ ...item, subject: page.subject })), ...(index ? [] : [{ app: ACCOUNTS, name: "Accounts", icon: "" }])],
+      apps: page.items.filter((item): item is Extract<Item, App> => !!item.app).map((item) => ({ ...item, subject: page.subject })),
+      withAccounts: index ? undefined : props.home.withAccounts,
     })),
     { key: "settings", name: "Settings", apps: props.home.settings },
   ]
@@ -407,17 +421,17 @@ function Home(props: { home: { pages: Page[]; settings: App[]; accounts: Signs[]
   return (
     <div class={["home", { beside: sidebar() }]}>
       <Show when={sidebar()}>
-        <Sidebar sections={sections()} accounts={props.home.accounts} at={at} go={(index) => go(index, false)} />
+        <Sidebar sections={sections()} at={at} go={(index) => go(index, false)} />
       </Show>
       <main class="pages">
         <div class="strip" ref={strip} onScroll={() => setAt(Math.round(Math.abs(strip.scrollLeft) / strip.clientWidth))}>
           <For each={props.home.pages} keyed={(page) => page.who}>
-            {(page, index) => <PageGrid page={page()} accounts={index() ? undefined : props.home.accounts} />}
+            {(page, index) => <PageGrid page={page()} withAccounts={index() ? undefined : props.home.withAccounts} />}
           </For>
           <section class="page">
             <div class="grid">
               <For each={props.home.settings} keyed={(part) => part.app}>
-                {(part) => <div class="cell"><Tile app={part()} /></div>}
+                {(part) => <div class="cell"><AppTile app={part()} /></div>}
               </For>
             </div>
           </section>

@@ -31,19 +31,21 @@ instead, on no page. `launcher` is this one's.
 
 ## Accounts
 
-A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts. That's an icon and three
-tools, and nothing more:
+An account is a person's account at an outside service (a Gmail address, a WhatsApp number) that they sign a
+plugin in to, so its tools act there as them. A plugin that does has accounts, and says so with three tools:
 
 - `accounts` lists them, the default first: `[%{account: "sam@example.com", ok: true}]`, and when `ok` is false,
   `why`, a few words saying what's wrong. It may add fields of its own.
 - `sign_in` signs one in, or with `account` signs that one in again. It answers `%{url: ...}`, the web address
   the person signs in at. One whose signing in needs a screen of its own (a QR code, a device to pick) gives
-  `sign_in` that page as its `ui`, which is opened instead, with the account after a `#` when signing one in again.
+  `sign_in` that page as its `ui`, named for what it is (`client/sign-in.html`), which is opened instead, with the
+  account after a `#` when signing one in again.
 - `sign_out` takes `account` and signs it out.
 
-Its other tools take `account`, the first `accounts` lists when it's left out. Its icon is the file `icon/0` names,
-and it gives `title/0` if it has no app.
+Its other tools take `account`, the first `accounts` lists when it's left out. It gives its own icon (`icon/0`)
+and, with no app to take it from, its name (`title/0`): the plugin's, which Accounts and the App Store show.
 
-Accounts is one screen, a folder at the end of the first page: a section for each plugin with accounts, its
-accounts with Sign In and Sign Out, and Add Account. A plugin with accounts is on a page only if it has an app a
-person opens for something else.
+Accounts, a folder at the end of the first page, lists them: a section for each plugin with accounts, by its name
+and icon, its accounts with Sign In and Sign Out, and Add Account. Neither an account nor a plugin with accounts is
+an app, so `page` gives them apart from its apps, as `plugins_with_accounts`. A plugin with accounts is on a page
+only if it also has an app, a screen a person opens for something else.

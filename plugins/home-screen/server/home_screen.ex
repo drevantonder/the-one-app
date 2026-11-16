@@ -17,8 +17,9 @@ defmodule HomeScreen do
   Every tool here is asked for whoever's page it is, as an app opened from that page is. What draws the pages is
   this plugin's `client/`: its app in the category `launcher`, which a client shows first.
 
-  A plugin has accounts when it has an icon and the tools `accounts`, `sign_in` and `sign_out` (SKILL.md). Those are in
-  Accounts, a folder at the end of the first page, rather than on a page, unless they have an app of their own.
+  A plugin has accounts, outside accounts a person signs it in to, when it has an icon and the tools `accounts`,
+  `sign_in` and `sign_out` (SKILL.md). Accounts, a folder at the end of the first page, lists them by plugin. Having
+  accounts doesn't make a plugin's app, nor put it on a page.
   """
   @behaviour OneCore.Plugin
 
@@ -33,7 +34,7 @@ defmodule HomeScreen do
   def apps do
     [
       %{name: "Home Screen", page: "client/index.html", icon: "client/home.svg", category: "launcher"},
-      %{name: "Apps", page: "client/apps.html", icon: "client/apps.svg", category: "settings"},
+      %{name: "Apps", page: "client/store.html", icon: "client/store.svg", category: "settings"},
       %{name: "Groups", page: "client/groups.html", icon: "client/groups.svg", category: "settings"},
       %{name: "Appearance", page: "client/appearance.html", icon: "client/appearance.svg", category: "settings"}
     ]
@@ -108,7 +109,7 @@ defmodule HomeScreen do
         read_only: true,
         description: """
         Gives your Home Screen page: its apps and widgets in order (`items`), the widgets that could be put on it
-        (`widgets`), the plugins with accounts (`accounts`), which are in the Accounts folder, and whether you may
+        (`widgets`), the plugins with accounts (`plugins_with_accounts`), which Accounts lists, and whether you may
         arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none,
@@ -123,23 +124,23 @@ defmodule HomeScreen do
               items: %{anyOf: [app, Map.put(widget, :required, ["widget", "name", "tool", "sizes", "size"])]}
             },
             widgets: %{type: "array", items: widget, description: "The widgets that could be put on it"},
-            accounts: %{
+            plugins_with_accounts: %{
               type: "array",
-              description: "The plugins with accounts, in the Accounts folder",
+              description: "The plugins with accounts, which Accounts lists. None is an app",
               items: %{
                 type: "object",
                 properties: %{
                   plugin: %{type: "string"},
                   name: %{type: "string", description: "What its tools start with"},
-                  title: %{type: "string"},
-                  icon: %{type: "string", description: "A data: address"},
-                  sign_in: %{type: "string", description: "The page its sign-in shows on, if it has one"}
+                  title: %{type: "string", description: "Its name, as a person reads it"},
+                  icon: %{type: "string", description: "Its own icon, as a data: address"},
+                  sign_in: %{type: "string", description: "Its sign_in tool's page, if signing in needs one"}
                 },
                 required: ["plugin", "name", "title", "icon"]
               }
             }
           },
-          required: ["who", "arranges", "items", "widgets", "accounts"]
+          required: ["who", "arranges", "items", "widgets", "plugins_with_accounts"]
         }
       },
       %{
@@ -172,7 +173,9 @@ defmodule HomeScreen do
         },
         outputs: %{
           type: "object",
-          properties: %{items: %{type: "array", items: %{type: "object"}, description: "What's on the page now, as given"}},
+          properties: %{
+            items: %{type: "array", items: %{type: "object"}, description: "What's on the page now, as given"}
+          },
           required: ["items"]
         }
       },
@@ -215,13 +218,13 @@ defmodule HomeScreen do
                 type: "object",
                 properties: %{
                   plugin: %{type: "string", description: "Its artifact: users/alice/plugins/notes"},
-                  name: %{type: "string", description: "What a person calls it"},
+                  title: %{type: "string", description: "Its name, as a person reads it"},
                   icon: %{type: "string", description: "A data: address"},
                   subtitle: %{type: ["string", "null"]},
                   about: %{type: ["string", "null"]},
                   accounts: %{type: "boolean", description: "Whether it has accounts"}
                 },
-                required: ["plugin", "name", "icon", "subtitle", "about", "accounts"]
+                required: ["plugin", "title", "icon", "subtitle", "about", "accounts"]
               }
             }
           },
@@ -271,14 +274,16 @@ defmodule HomeScreen do
             reason: %{type: "string", maxLength: 300, description: "Why, in a sentence"}
           }
         },
-        outputs: Map.merge(asked, %{
-          properties: Map.put(asked.properties, :told, %{
-            type: "array",
-            items: %{type: "string"},
-            description: "Who was told: whoever may install plugins for everyone"
-          }),
-          required: ["told" | asked.required]
-        })
+        outputs:
+          Map.merge(asked, %{
+            properties:
+              Map.put(asked.properties, :told, %{
+                type: "array",
+                items: %{type: "string"},
+                description: "Who was told: whoever may install plugins for everyone"
+              }),
+            required: ["told" | asked.required]
+          })
       },
       %{
         name: "requests",
@@ -298,10 +303,15 @@ defmodule HomeScreen do
         answers, and approving it again once it's installed marks it approved. The asker is told.
         """,
         inputs: request,
-        outputs: Map.put(asked, :properties, Map.put(asked.properties, :install, %{
-          type: "string",
-          description: "For one from a git repo, the command that installs it, after which approve again"
-        }))
+        outputs:
+          Map.put(
+            asked,
+            :properties,
+            Map.put(asked.properties, :install, %{
+              type: "string",
+              description: "For one from a git repo, the command that installs it, after which approve again"
+            })
+          )
       },
       %{
         name: "decline",
@@ -353,8 +363,8 @@ defmodule HomeScreen do
         }
       end
 
-    # A plugin with accounts is in Accounts, and signs one in on its `sign_in`'s page if it has one.
-    accounts =
+    # A plugin with accounts is listed in Accounts, and signs one in on its `sign_in`'s page if it has one.
+    plugins_with_accounts =
       for plugin <- here, names = Enum.map(plugin.tools, & &1.name), accounts?(plugin, names) do
         page = Enum.find_value(plugin.tools, &(&1.name == "sign_in" && &1[:ui]))
         signs_in = if page, do: %{sign_in: "#{plugin.name}/#{page}"}, else: %{}
@@ -376,8 +386,15 @@ defmodule HomeScreen do
 
     # An app added since the page was last arranged goes after the rest.
     items = placed ++ Enum.sort_by(apps -- placed, &String.downcase(&1.name))
-    accounts = Enum.sort_by(accounts, &String.downcase(&1.title))
-    %{who: call.subject, arranges: Call.owns?(call), items: items, widgets: widgets, accounts: accounts}
+    plugins_with_accounts = Enum.sort_by(plugins_with_accounts, &String.downcase(&1.title))
+
+    %{
+      who: call.subject,
+      arranges: Call.owns?(call),
+      items: items,
+      widgets: widgets,
+      plugins_with_accounts: plugins_with_accounts
+    }
   end
 
   def call("arrange", %{"items" => items}, call) do
@@ -407,15 +424,15 @@ defmodule HomeScreen do
       for plugin <- Call.deployed(call),
           plugin.icon != nil and (plugin.apps == [] or Enum.any?(plugin.apps, &(&1.category == nil))),
           do: %{
-                plugin: plugin.plugin,
-                name: plugin.title,
-                icon: plugin.icon,
-                subtitle: plugin.subtitle,
-                about: plugin.about,
-                accounts: accounts?(plugin, plugin.tools)
-              }
+            plugin: plugin.plugin,
+            title: plugin.title,
+            icon: plugin.icon,
+            subtitle: plugin.subtitle,
+            about: plugin.about,
+            accounts: accounts?(plugin, plugin.tools)
+          }
 
-    %{plugins: Enum.sort_by(plugins, &String.downcase(&1.name))}
+    %{plugins: Enum.sort_by(plugins, &String.downcase(&1.title))}
   end
 
   def call("add", %{"plugin" => plugin}, call) do
@@ -430,7 +447,7 @@ defmodule HomeScreen do
         apps = for app <- found.apps, app.category == nil, do: "#{found.name}/#{app.page}"
 
         if apps == [],
-          do: raise("#{plugin} has no app to put on a page. Its accounts, if it has any, are in Accounts already.")
+          do: raise("#{plugin} has no app to put on a page. If it has accounts, Accounts lists them already.")
 
         # One installed for whoever's page this is is on it already.
         if found.installed != call.subject,
@@ -494,7 +511,8 @@ defmodule HomeScreen do
     text = Enum.join(List.wrap(inputs["reason"]) ++ ["home-screen_approve or home-screen_decline answers it."], "\n")
 
     for to <- installers,
-        do: notify(call, if(to == "everyone", do: "network", else: to), "#{call.actor} asks for #{called(request)}", text)
+        do:
+          notify(call, if(to == "everyone", do: "network", else: to), "#{call.actor} asks for #{called(request)}", text)
 
     Map.put(request, "told", installers)
   end

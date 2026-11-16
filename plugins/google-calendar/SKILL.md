@@ -7,7 +7,7 @@ metadata:
 ---
 
 Google Calendar is the person's Google calendars, from any device. (A Mac's own calendars are the `apple-calendar`
-app's.) Signing in is the skill `google-account`'s.
+plugin's.) Signing in is the skill `google-account`'s.
 
 - `events` lists the events in a time range, the coming week if left out, and `event` shows one, with its
   guests and links. `calendars` lists the calendars, whose ids `calendarId` takes: primary if left out.

@@ -75,7 +75,7 @@ and never sees a secret, so a plugin in sandbox mode can use one too. It names t
   `[{"name": "Google a@example.com", "sign_in": "Google"}]`. `stop_using` switches one off for it, as signing
   out does, and leaves it to whatever else uses it.
 - The other tools are its person's, and refuse a plugin.
-- A plugin that does something for other plugins, as `google-account` does for the Google apps, calls these on
+- A plugin that does something for other plugins, as `google-account` does for the Google plugins, calls these on
   behalf of whichever called it: `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`.
 
 A plugin trusted with a secret itself, whose service hands it to a program, uses this plugin (`def uses, do:
