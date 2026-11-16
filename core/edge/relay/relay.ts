@@ -19,7 +19,7 @@
 // Servers are told when one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
-import { verifiedKey, hex, signedBy } from "../ask.js";
+import { verifiedKey, hex, signedBy } from "../ask.ts";
 
 const PROTOCOL = "iroh-relay-v2";
 /** What an endpoint signs to prove its key: a key derived from the relay's challenge under this name. */
@@ -38,11 +38,30 @@ const SILENT = 45_000;
 /** What a server is told when one of the network's servers comes or goes: to ask who's on again. */
 const SEEN = JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/seen" });
 
-const utf8 = new TextEncoder();
-const refuse = (status, why) => new Response(why, { status });
+/** Who's on: `"on"` for one connected now, when the last one that was left (ms since 1970), or `null` for one never seen. */
+type Seen = "on" | number | null;
 
-export default class extends WorkerEntrypoint {
-  async fetch(request) {
+/** An endpoint joined to the relay: the connection its datagrams are passed over, and when its token expires. */
+interface Joined {
+  relay: WebSocket;
+  until?: number;
+}
+
+/** What a connection to the Durable Object is: an endpoint's, a server's for outsiders' calls, or one call's. */
+interface Attachment {
+  key?: string;
+  device?: string;
+  server?: boolean;
+  outside?: string;
+  call?: string;
+  to?: string;
+}
+
+const utf8 = new TextEncoder();
+const refuse = (status: number, why: string) => new Response(why, { status });
+
+export default class extends WorkerEntrypoint<RelayEnv> {
+  async fetch(request: Request) {
     const url = new URL(request.url);
     // iroh times this to learn how far away the relay is. An endpoint with no answer has no relay.
     if (url.pathname === "/ping") return new Response(null, { status: 200 });
@@ -54,7 +73,7 @@ export default class extends WorkerEntrypoint {
   }
 
   /** An iroh endpoint connects: it's sent a challenge, and is nobody until it signs it. */
-  endpoint(request, url) {
+  endpoint(request: Request, url: URL) {
     const speaks = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((protocol) => protocol.trim());
     if (!speaks.includes(PROTOCOL)) return refuse(400, `The relay speaks ${PROTOCOL}`);
     // iroh shows its token as a bearer token, and in the URL from a browser, which can't set a header.
@@ -64,7 +83,7 @@ export default class extends WorkerEntrypoint {
     ours.accept();
     ours.binaryType = "arraybuffer";
     // What it sends before it's joined waits for that, in the order it was sent.
-    let joined;
+    let joined: Promise<Joined | undefined> | undefined;
     let heard = Date.now();
     const quiet = setInterval(async () => {
       if (Date.now() - heard < SILENT) return;
@@ -80,7 +99,7 @@ export default class extends WorkerEntrypoint {
       if (!joined) return void (joined = this.join(ours, challenge, token, frame));
       const { relay, until } = (await joined) ?? {};
       if (!relay) return;
-      if (until < Date.now()) return ours.close(1008, "Its token expired");
+      if (until !== undefined && until < Date.now()) return ours.close(1008, "Its token expired");
       if (frame[0] === PING) {
         frame[0] = PONG;
         ours.send(frame);
@@ -98,7 +117,7 @@ export default class extends WorkerEntrypoint {
    * joined to the relay: `{relay, until}`, the connection there that its datagrams are passed over, and when its
    * token expires if it does.
    */
-  async join(ours, challenge, token, frame) {
+  async join(ours: WebSocket, challenge: Uint8Array, token: string | null, frame: Uint8Array): Promise<Joined | undefined> {
     // The frame is postcard's: the type, the key's 32 bytes, then the signature as bytes with their length before.
     const key = hex.encode(frame.subarray(1, 33));
     const proved =
@@ -115,10 +134,10 @@ export default class extends WorkerEntrypoint {
     // A run of a client is on for the device it runs for, which its token names, and a server for itself.
     const [, device = key] = (token ?? "").split(".");
     const on = new URLSearchParams({ key, device, ...(admitted.until === undefined && { server: "yes" }) });
-    const { webSocket: relay } = await this.relay().fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } });
+    const relay = (await this.relay().fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } })).webSocket!;
     relay.accept();
     relay.binaryType = "arraybuffer";
-    relay.addEventListener("message", ({ data }) => ours.send(data));
+    relay.addEventListener("message", ({ data }) => ours.send(data as ArrayBuffer));
     relay.addEventListener("close", () => ours.close(1000, "It connected again"));
     ours.addEventListener("close", () => relay.close(1000, "It left"));
     ours.send(Uint8Array.of(SERVER_CONFIRMS_AUTH));
@@ -130,12 +149,12 @@ export default class extends WorkerEntrypoint {
    * server isn't here. The wait is this Worker's, on a connection the relay holds asleep, so nothing is billed
    * for it.
    */
-  async forward(server, message) {
+  async forward(server: string, message: string): Promise<string | null> {
     const { webSocket } = await this.relay().fetch(`https://relay/token?to=${server}`, { headers: { upgrade: "websocket" } });
     if (!webSocket) return null;
     webSocket.accept();
-    const answered = new Promise((resolve) => {
-      webSocket.addEventListener("message", (event) => resolve(event.data));
+    const answered = new Promise<string | null>((resolve) => {
+      webSocket.addEventListener("message", (event) => resolve(event.data as string));
       webSocket.addEventListener("close", () => resolve(null));
     });
     webSocket.send(message);
@@ -143,7 +162,7 @@ export default class extends WorkerEntrypoint {
   }
 
   /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
-  async notify(message) {
+  async notify(message: string): Promise<void> {
     await this.relay().fetch("https://relay/notify", { method: "POST", body: message });
   }
 
@@ -151,12 +170,12 @@ export default class extends WorkerEntrypoint {
    * Who's on, of `keys`, servers' and devices': `"on"` for one connected here now, when the last one that was left
    * (milliseconds since 1970), or `null` for one never seen.
    */
-  seen(keys) {
+  seen(keys: string[]): Promise<Record<string, Seen>> {
     return this.relay().seen(keys);
   }
 
   /** A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. */
-  async asked(request, url) {
+  async asked(request: Request, url: URL) {
     const key = await verifiedKey(request, "");
     if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
@@ -169,18 +188,18 @@ export default class extends WorkerEntrypoint {
   }
 }
 
-export class Relay extends DurableObject {
-  constructor(ctx, env) {
+export class Relay extends DurableObject<RelayEnv> {
+  constructor(ctx: DurableObjectState, env: RelayEnv) {
     super(ctx, env);
     console.log(JSON.stringify({ relay: "woke", connections: ctx.getWebSockets().length }));
   }
 
-  async fetch(request) {
+  async fetch(request: Request) {
     const url = new URL(request.url);
     if (url.pathname === "/endpoint") return this.endpoint(url.searchParams);
     if (url.pathname === "/relay/outside") return this.server(request);
     if (url.pathname === "/notify") return this.notify(await request.text());
-    return this.call(url.searchParams.get("to"));
+    return this.call(url.searchParams.get("to") ?? "");
   }
 
   /**
@@ -188,7 +207,7 @@ export class Relay extends DurableObject {
    * sends it goes back over it. One that connects again has left its old connection behind. It's on for its
    * `device`, and a `server` that comes is told to the others.
    */
-  endpoint(said) {
+  endpoint(said: URLSearchParams) {
     const [key, device, server] = [said.get("key"), said.get("device"), said.has("server")];
     for (const before of this.ctx.getWebSockets(`endpoint ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
@@ -199,18 +218,18 @@ export class Relay extends DurableObject {
   }
 
   /** Who's on, of `keys`, as the relay's `seen` says. */
-  async seen(keys) {
-    const left = await this.ctx.storage.get(keys.map((key) => `seen ${key}`));
+  async seen(keys: string[]): Promise<Record<string, Seen>> {
+    const left = await this.ctx.storage.get<number>(keys.map((key) => `seen ${key}`));
     return Object.fromEntries(keys.map((key) => [key, this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null)]));
   }
 
   /** Whether `device` has a connection here, other than `leaving`. */
-  on(device, leaving) {
+  on(device: string, leaving?: WebSocket) {
     return this.ctx.getWebSockets(`on ${device}`).some((ws) => ws !== leaving);
   }
 
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
-  async server(request) {
+  async server(request: Request) {
     const key = await verifiedKey(request, "");
     if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     for (const before of this.ctx.getWebSockets(`outside ${key}`)) before.close(1000, "It connected again");
@@ -221,7 +240,7 @@ export class Relay extends DurableObject {
   }
 
   /** Says `message` to every server that's here. Each takes it as a call, whose answer nothing waits for. */
-  notify(message) {
+  notify(message: string) {
     for (const server of this.ctx.getWebSockets()) {
       if (server.deserializeAttachment()?.outside) server.send(JSON.stringify({ message }));
     }
@@ -229,7 +248,7 @@ export class Relay extends DurableObject {
   }
 
   /** A piece here connects to pass one call to the server `to`, and waits on the connection for its answer. */
-  call(to) {
+  call(to: string) {
     if (!this.ctx.getWebSockets(`outside ${to}`).length) return refuse(404, "That server isn't here");
     const call = crypto.randomUUID();
     const [theirs, ours] = Object.values(new WebSocketPair());
@@ -238,15 +257,15 @@ export class Relay extends DurableObject {
     return new Response(null, { status: 101, webSocket: theirs });
   }
 
-  async webSocketMessage(ws, message) {
-    const said = ws.deserializeAttachment() ?? {};
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    const said: Attachment = ws.deserializeAttachment() ?? {};
     if (said.call) {
       const [server] = this.ctx.getWebSockets(`outside ${said.to}`);
       if (!server) return ws.close(1011, "That server left");
       return server.send(JSON.stringify({ call: said.call, message }));
     }
     if (said.outside) {
-      const { call, answer } = JSON.parse(message);
+      const { call, answer } = JSON.parse(message as string);
       for (const waiting of this.ctx.getWebSockets(`call ${call}`)) {
         waiting.send(answer);
         waiting.close(1000, "Answered");
@@ -256,7 +275,7 @@ export class Relay extends DurableObject {
     if (!said.key) return;
     // The key it's for becomes the key it's from, and the rest is passed on untouched. With nobody there it's
     // dropped, as a network drops a packet, and QUIC sends again.
-    const frame = new Uint8Array(message);
+    const frame = new Uint8Array(message as ArrayBuffer);
     const [to] = this.ctx.getWebSockets(`endpoint ${hex.encode(frame.subarray(1, 33))}`);
     if (!to) return;
     frame[0] += 2;
@@ -264,8 +283,8 @@ export class Relay extends DurableObject {
     to.send(frame);
   }
 
-  async webSocketClose(ws) {
-    const { outside, device, server } = ws.deserializeAttachment() ?? {};
+  async webSocketClose(ws: WebSocket) {
+    const { outside, device, server }: Attachment = ws.deserializeAttachment() ?? {};
     // The last connection a device or server had here ends, so it was last seen now.
     if (device && !this.on(device, ws)) {
       await this.ctx.storage.put(`seen ${device}`, Date.now());
@@ -278,7 +297,7 @@ export class Relay extends DurableObject {
     }
   }
 
-  webSocketError(ws) {
+  webSocketError(ws: WebSocket) {
     return this.webSocketClose(ws);
   }
 }

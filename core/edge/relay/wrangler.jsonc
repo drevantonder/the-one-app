@@ -1,6 +1,6 @@
 {
   "name": "network-relay",
-  "main": "relay.js",
+  "main": "relay.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   "services": [{ "binding": "NETWORK", "service": "network-presigner", "entrypoint": "Network" }],

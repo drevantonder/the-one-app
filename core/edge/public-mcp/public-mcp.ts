@@ -2,7 +2,7 @@
 // passed through the relay to a server acting for whoever the link leads to, by that server's key. Everyone else
 // outside signs in, which is a plugin's edge function.
 
-const refuse = (status, why) =>
+const refuse = (status: number, why: string) =>
   Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
 
 /** A server on this list acts for the network, and so for everyone in it. */
@@ -23,7 +23,7 @@ export default {
     if (!of) return refuse(404, "That isn't a sharing link");
     let message;
     try {
-      const asked = await request.json();
+      const asked = await request.json<{ method?: unknown; params?: object }>();
       if (typeof asked?.method !== "string") throw new Error("not a request");
       message = JSON.stringify({ ...asked, params: { ...asked.params, _meta: { link } } });
     } catch {
@@ -40,4 +40,4 @@ export default {
     }
     return refuse(503, "None of this network's servers is up");
   },
-};
+} satisfies ExportedHandler<PublicMcpEnv>;

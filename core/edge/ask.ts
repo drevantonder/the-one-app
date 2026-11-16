@@ -3,16 +3,16 @@
 // `core/server/nif/one_core_iroh/src/outside.rs`.
 
 export const hex = {
-  encode: (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(""),
-  decode: (text) => Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16)),
+  encode: (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+  decode: (text: string) => Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16)),
 };
 
-export const isKey = (key) => typeof key === "string" && /^[0-9a-f]{64}$/.test(key);
+export const isKey = (key: unknown): key is string => typeof key === "string" && /^[0-9a-f]{64}$/.test(key);
 
 const utf8 = new TextEncoder();
 
 /** Whether `signature` (hex) is `key`'s (hex) over `message` (text or bytes). */
-export async function signedBy(key, signature, message) {
+export async function signedBy(key: unknown, signature: unknown, message: string | Uint8Array): Promise<boolean> {
   if (!isKey(key) || typeof signature !== "string" || !/^[0-9a-f]{128}$/.test(signature)) return false;
   const bytes = typeof message === "string" ? utf8.encode(message) : message;
   try {
@@ -31,7 +31,7 @@ const FRESH = 60_000;
  * The key that signed `request`, whose body is `body`, or null. An ask carries `one-key`, `one-at` (ms) and
  * `one-signature`, over its path, when it was made and its body.
  */
-export async function verifiedKey(request, body) {
+export async function verifiedKey(request: Request, body: string): Promise<string | null> {
   const key = request.headers.get("one-key");
   const at = request.headers.get("one-at");
   if (!(Math.abs(Date.now() - Number(at)) <= FRESH)) return null;

@@ -130,7 +130,7 @@ const devices = () => ({
     // What a device that asked to be let in calls itself, which its person is shown with its code.
     deviceCode: { fields: { name: { type: "string", required: false } } },
   },
-  // Whatever names a key as `client_id` is signed with it (`core/edge/ask.js`).
+  // Whatever names a key as `client_id` is signed with it (`core/edge/ask.ts`).
   async onRequest(request) {
     if (!ASKS_BY_KEY.includes(new URL(request.url).pathname)) return;
     const body = await request.clone().text();

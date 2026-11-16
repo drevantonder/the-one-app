@@ -1,5 +1,5 @@
 //! A server's connection to its network's edge for outsiders' calls. What an assistant somewhere else asks at
-//! the address over the web is passed down this connection by the relay there (`core/edge/relay/relay.js`), and the
+//! the address over the web is passed down this connection by the relay there (`core/edge/relay/relay.ts`), and the
 //! server's answer goes back up it.
 
 use std::time::Duration;

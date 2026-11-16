@@ -7,7 +7,7 @@
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
-import { verifiedKey, isKey, signedBy } from "../ask.js";
+import { verifiedKey, isKey, signedBy } from "../ask.ts";
 
 /** How long a signed request works for, in seconds. */
 const SIGNED_FOR = 60;
@@ -39,19 +39,28 @@ const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)plugins\/[^/]+\/insta
 const DEPLOYED = /^network\/deployed\/((?:users|groups)\/[^/]+|network)\/[^/]+$/;
 /** A blob's key says whose it is by how it starts: a user's or a group's prefix, or the network's. */
 const OWNER = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
-const owner = (key) => OWNER.exec(key)?.[0];
+const owner = (key: unknown) => OWNER.exec(String(key))?.[0];
 /**
  * A key is parts joined by `/`, none empty or starting with a dot: a `..` would leave the prefix that says whose
  * it is. What's listed is the start of a key, so its last part can be empty.
  */
-const isBlob = (key, start) =>
+const isBlob = (key: unknown, start = false): key is string =>
   typeof key === "string" &&
   key.split("/").every((part, at, parts) => /^[^.]/.test(part) || (start && part === "" && at === parts.length - 1));
 
-const refuse = (status, why) => Response.json({ error: why }, { status });
+const refuse = (status: number, why: string) => Response.json({ error: why }, { status });
+
+/** What a token says: a server's names a list it's on, and a device's is signed by a server for a while. */
+interface Token {
+  list?: string
+  by?: string
+  until?: number
+  signature?: string
+  first?: string
+}
 
 /** What a token says, or nothing if it isn't one. */
-function said(token) {
+function said(token: string): Token {
   try {
     return JSON.parse(atob(token.replace(/-/g, "+").replace(/_/g, "/"))) ?? {};
   } catch {
@@ -61,7 +70,7 @@ function said(token) {
 
 const utf8 = new TextEncoder();
 /** Whether two secrets are the same, in a time that doesn't say how alike they are. */
-function same(one, other) {
+function same(one: unknown, other: unknown) {
   if (typeof one !== "string" || typeof other !== "string") return false;
   const [a, b] = [utf8.encode(one), utf8.encode(other)];
   return a.length === b.length && crypto.subtle.timingSafeEqual(a, b);
@@ -82,22 +91,22 @@ export default {
     }
     return refuse(404, "The presigner signs at /presigner/sign and lists servers at /presigner/servers");
   },
-};
+} satisfies ExportedHandler<PresignerEnv>;
 
 /** Who the network's own are, for another piece of the edge. */
-export class Network extends WorkerEntrypoint {
+export class Network extends WorkerEntrypoint<PresignerEnv> {
   /** The keys of the servers that act for a user or group, or for the network, by its prefix. */
-  servers(of) {
+  servers(of: string | null): Promise<string[]> {
     return servers(this.env, of);
   }
 
   /** Whether `key` is one of the network's own, by the token it shows: `null`, or `{until}` for a token that ends. */
-  admits(key, token) {
+  admits(key: string, token: string | null): Promise<Admitted | null> {
     return admits(this.env, key, token);
   }
 
   /** The key that signed what was asked at `url` with `body`, by the `one-` headers it came with, or null. */
-  verifiedKey(url, headers, body) {
+  verifiedKey(url: string, headers: HeadersInit, body: string): Promise<string | null> {
     return verifiedKey(new Request(url, { headers }), body);
   }
 }
@@ -107,21 +116,21 @@ export class Network extends WorkerEntrypoint {
  * plugin's servers read them, and reaches nothing else in the bucket. Which plugin is said by the binding it was
  * given (`props`), which only whoever deploys the edge sets.
  */
-export class Own extends WorkerEntrypoint {
+export class Own extends WorkerEntrypoint<PresignerEnv, { plugin: string }> {
   /** Writes the blob `name`, only if there's none. Gives whether it wrote it. */
-  async write(name, data) {
+  async write(name: string, data: BodyInit): Promise<boolean> {
     const wrote = await bucket(this.env).fetch(this.blob(name), { method: "PUT", body: data, headers: { "if-none-match": "*" } });
     if (!wrote.ok && wrote.status !== 412) throw new Error(`The bucket answered ${wrote.status} for ${name}`);
     return wrote.ok;
   }
 
   /** Removes the blob `name`. */
-  async remove(name) {
+  async remove(name: string): Promise<void> {
     const removed = await bucket(this.env).fetch(this.blob(name), { method: "DELETE" });
     if (!removed.ok && removed.status !== 404) throw new Error(`The bucket answered ${removed.status} for ${name}`);
   }
 
-  blob(name) {
+  blob(name: string) {
     if (!isBlob(name)) throw new Error("That isn't a blob's name");
     return `${this.env.BUCKET}/${NETWORK}own/${this.ctx.props.plugin}/${name.split("/").map(encodeURIComponent).join("/")}`;
   }
@@ -132,8 +141,19 @@ export class Own extends WorkerEntrypoint {
  * absent), `{replace: key, tag}` (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. Answers what to
  * send: its method, URL and headers.
  */
-async function sign(env, by, token, body) {
-  let ask;
+/** What a server asks the presigner to sign. */
+interface Ask {
+  read?: string
+  write?: string
+  replace?: string
+  tag?: unknown
+  list?: string
+  after?: string
+  remove?: string
+}
+
+async function sign(env: PresignerEnv, by: string, token: string | null, body: string) {
+  let ask: Ask;
   try {
     ask = JSON.parse(body);
   } catch {
@@ -147,7 +167,7 @@ async function sign(env, by, token, body) {
   // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
   // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
   // list. The secret opens nothing after that, since the bucket lets only the first write land.
-  const first = ask.write === NETWORK + "servers" && same(said(token).first, env.FIRST_SERVER);
+  const first = ask.write === NETWORK + "servers" && same(said(token ?? "").first, env.FIRST_SERVER);
   const server = SERVER.exec(key)?.[1];
   const reads = ask.read !== undefined || ask.list !== undefined;
   const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await admits(env, by, token));
@@ -156,15 +176,15 @@ async function sign(env, by, token, body) {
   if (!listed && !first && !open && !installed) return refuse(403, "You aren't on its list of servers");
 
   const url = new URL(env.BUCKET);
-  const headers = {};
+  const headers: Record<string, string> = {};
   if (ask.list !== undefined) {
-    url.search = new URLSearchParams({ "list-type": "2", prefix: key, ...(ask.after && { "continuation-token": ask.after }) });
+    url.search = new URLSearchParams({ "list-type": "2", prefix: key, ...(ask.after && { "continuation-token": ask.after }) }).toString();
   } else {
     url.pathname += "/" + key.split("/").map(encodeURIComponent).join("/");
     if (ask.write !== undefined) headers["if-none-match"] = "*";
     if (ask.replace !== undefined) headers["if-match"] = String(ask.tag);
   }
-  url.searchParams.set("X-Amz-Expires", SIGNED_FOR);
+  url.searchParams.set("X-Amz-Expires", String(SIGNED_FOR));
   const method = ask.remove !== undefined ? "DELETE" : ask.write !== undefined || ask.replace !== undefined ? "PUT" : "GET";
   const signed = await bucket(env).sign(url, { method, headers, aws: { signQuery: true } });
   return Response.json({ method, url: signed.url, headers });
@@ -177,24 +197,27 @@ async function sign(env, by, token, body) {
  * client on a device has a key of its own, and shows the device's token, the device's key and the device's word for
  * the run's key, joined by dots (`core/client/src/lib.rs`).
  */
-async function admits(env, key, shown) {
+/** What a token admits: a server's, for as long as it's on its list (`{}`), and a device's, until a time. */
+type Admitted = { until?: number }
+
+async function admits(env: PresignerEnv, key: string, shown: string | null): Promise<Admitted | null> {
   const [token, device = key, attestation] = (shown ?? "").split(".");
   const { list, by, until, signature } = said(token);
   if (!isKey(key) || owner(list) !== list) return null;
   if (by === undefined) return (await servers(env, list)).includes(key) ? {} : null;
-  if (!(until > Date.now())) return null;
+  if (!(until !== undefined && until > Date.now())) return null;
   if (device !== key && !(await signedBy(device, attestation, `one/run/1\n${key}`))) return null;
   if (!(await signedBy(by, signature, `one/token/1\n${device}\n${list}\n${until}`))) return null;
   return (await servers(env, list)).includes(by) ? { until } : null;
 }
 
 /** The keys of the servers that act for a user or group, or for the network, by its prefix. */
-async function servers(env, of) {
-  return (owner(of) === of && (await list(env, of))) || [];
+async function servers(env: PresignerEnv, of: unknown): Promise<string[]> {
+  return (owner(of) === of && (await list(env, of as string))) || [];
 }
 
 /** The list of servers kept under `prefix`, `null` if there's none yet, and nobody's for no prefix. */
-async function list(env, prefix) {
+async function list(env: PresignerEnv, prefix: string | undefined): Promise<string[] | null> {
   if (!prefix) return [];
   const got = await bucket(env).fetch(`${env.BUCKET}/${prefix}servers`);
   if (got.status === 404) return null;
@@ -202,6 +225,6 @@ async function list(env, prefix) {
   return got.json();
 }
 
-function bucket({ ACCESS_KEY_ID: accessKeyId, SECRET_ACCESS_KEY: secretAccessKey }) {
+function bucket({ ACCESS_KEY_ID: accessKeyId, SECRET_ACCESS_KEY: secretAccessKey }: PresignerEnv) {
   return new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" });
 }

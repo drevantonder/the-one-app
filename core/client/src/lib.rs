@@ -81,7 +81,7 @@ pub struct Network {
 
 impl Network {
     /// The headers of an ask of `path` at the address, with `body`: `key`'s signature of it, and the token. The pieces
-    /// there check both (`core/edge/ask.js`), and a server's Elixir signs the same bytes (`OneCore.Edge`).
+    /// there check both (`core/edge/ask.ts`), and a server's Elixir signs the same bytes (`OneCore.Edge`).
     pub fn signed(&self, key: &SecretKey, path: &str, body: &str) -> Result<[(&'static str, String); 4]> {
         let at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis().to_string();
         let signature = key.sign(format!("one/ask/1\n{path}\n{at}\n{body}").as_bytes());

@@ -82,7 +82,7 @@ for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins
   await Bun.write(`${part}/wrangler.jsonc`, JSON.stringify(worker, null, 2));
   parts.push(relative(here, `${part}/wrangler.jsonc`));
 }
-const gateway = { name: "network-gateway", main: relative(built, `${here}/gateway/gateway.js`), compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
+const gateway = { name: "network-gateway", main: relative(built, `${here}/gateway/gateway.ts`), compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
 if (at) gateway.routes = [{ pattern: at.hostname, custom_domain: true }];
 await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);

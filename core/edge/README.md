@@ -13,3 +13,6 @@ root:
 The network's first server shows `FIRST_SERVER` that once, and nobody without it can become the first. It opens
 nothing after. `--owner` names the network's first owner, and the server says where they join: a link they open to
 make their passkey.
+
+The Workers are TypeScript, which wrangler builds without checking. `bun run typecheck` checks them; `bun run types`
+makes each one's `worker-configuration.d.ts` again after its `wrangler.jsonc` changes.

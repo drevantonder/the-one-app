@@ -8,12 +8,16 @@
     "aws4fetch": "^1.0.20"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261116.1",
     "@modelcontextprotocol/sdk": "1.32.2",
     "playwright": "1.65.1",
+    "typescript": "7.0.2",
     "wrangler": "^4.161.0"
   },
   "scripts": {
     "dev": "bun edge.js dev",
-    "deploy": "bun edge.js deploy"
+    "deploy": "bun edge.js deploy",
+    "types": "wrangler types -c relay/wrangler.jsonc -c presigner/wrangler.jsonc relay/worker-configuration.d.ts --include-runtime=false --env-interface RelayEnv && wrangler types -c presigner/wrangler.jsonc presigner/worker-configuration.d.ts --include-runtime=false --env-interface PresignerEnv && wrangler types -c public-mcp/wrangler.jsonc -c relay/wrangler.jsonc -c presigner/wrangler.jsonc public-mcp/worker-configuration.d.ts --include-runtime=false --env-interface PublicMcpEnv",
+    "typecheck": "tsc"
   }
 }
