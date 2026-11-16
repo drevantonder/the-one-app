@@ -1,5 +1,5 @@
-// Chrome Profiles: your profiles, the sites each is signed in to, and signing in to a site on one yourself, on its
-// browser's page drawn here, which you click and type on.
+// Chrome Profiles: your profiles, the sites each was used on, and updating one yourself: its browser, drawn here, which
+// you click and type on as you would Chrome, then save.
 import { createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Field, Input, leave, List, Menu, Problem, Row, Screen, Section, Sheet, Skeleton, Split, toast } from "ui"
@@ -10,7 +10,7 @@ interface Profile {
   profile: string
   sites: { site: string; used: number }[]
   saved?: number
-  signing_in?: { site: string; session: string }
+  updating?: { session: string; until: number }
 }
 
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
@@ -21,20 +21,21 @@ function since(at: number) {
   if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
   return ago.format(Math.round(minutes / (24 * 60)), "day")
 }
+const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 const summary = (p: Profile) =>
-  p.signing_in
-    ? `Signing in to ${p.signing_in.site}`
+  p.updating
+    ? "Updating"
     : [p.sites.length ? p.sites.map((s) => s.site).join(", ") : "No sites yet", p.saved && `Saved ${since(p.saved)}`].filter(Boolean).join(" · ")
 
 const [open, setOpen] = createSignal<string>()
-const [asking, setAsking] = createSignal<"add" | "rename" | "sign-in">()
+const [asking, setAsking] = createSignal<"add" | "rename">()
 
 // Keys as the browser names them, as xdotool does, which is how a screen is told them.
 const KEYS: Record<string, string> = { Enter: "Return", Backspace: "BackSpace", Tab: "Tab", Escape: "Escape", Delete: "Delete", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", Home: "Home", End: "End", PageUp: "Prior", PageDown: "Next" }
 const WIDTH = 1280
 const HEIGHT = 800
 
-/// A browser's page, as it is now, which you click, scroll and type on: what you do is sent to it in order, and
+/// A browser's screen, as it is now, which you click, scroll and type on: what you do is sent to it in order, and
 /// what you type while one is on its way goes with the next.
 /** What's sent to a page, and how it's sent on: a click, a scroll, a key or what's typed. */
 type Inputs = Record<string, any>
@@ -96,12 +97,12 @@ function Page(props: { session: string }) {
       }}
     >
       <Show when={picture()}>
-        <img src={picture()} alt="The page" draggable={false} />
+        <img src={picture()} alt="The browser" draggable={false} />
       </Show>
       <input
         ref={field}
         class="keys"
-        aria-label="Type on the page"
+        aria-label="Type in the browser"
         autocomplete="off"
         autocapitalize="off"
         spellcheck={false}
@@ -112,19 +113,25 @@ function Page(props: { session: string }) {
   )
 }
 
-function SigningIn(props: { profile: Profile & { signing_in: {} } }) {
-  const p = () => props.profile as Required<Profile>
-  const done = () => {
-    const { profile, signing_in } = p()
-    return call("chrome_close", { session: signing_in.session })
-      .then(() => toast(`Saved to ${profile}`))
+/// The profile's browser, open for its person: the browser as it is, with its own address bar and tabs, then Save.
+function Updating(props: { profile: Profile }) {
+  const p = () => props.profile
+  const [busy, setBusy] = createSignal<"save" | "discard">()
+  const finish = async (tool: "save" | "discard") => {
+    setBusy(tool)
+    await call(`chrome-profiles_${tool}`, { profile: p().profile })
+      .then(() => toast(tool === "save" ? `Saved ${p().profile}` : `Closed ${p().profile} without saving`))
       .catch((error) => toast(error.message))
+    setBusy()
   }
   return (
-    <Section heading={`Signing in to ${p().signing_in.site}`}>
-      <Page session={p().signing_in.session} />
-      <p class="hint">Click the page and type as you would in Chrome. When you're signed in, tap Done.</p>
-      <Button onClick={done}>Done</Button>
+    <Section heading="Updating">
+      <Page session={p().updating!.session} />
+      <p class="hint">Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(p().updating!.until)}.</p>
+      <div class="actions">
+        <Button loading={busy() === "save"} disabled={!!busy()} onClick={() => finish("save")}>Save</Button>
+        <Button variant="outline" loading={busy() === "discard"} disabled={!!busy()} onClick={() => finish("discard")}>Discard</Button>
+      </div>
     </Section>
   )
 }
@@ -154,11 +161,11 @@ function Detail(props: { profile: Profile }) {
         </Menu.Root>
       }
     >
-      <Show when={p().signing_in} fallback={<Button onClick={() => setAsking("sign-in")}>Sign In to a Site</Button>}>
-        <SigningIn profile={p() as Required<Profile>} />
+      <Show when={p().updating} fallback={<Update profile={p().profile} />}>
+        <Updating profile={p()} />
       </Show>
       <Section heading="Sites">
-        <Show when={p().sites.length} fallback={<Empty>Not signed in to any sites yet.</Empty>}>
+        <Show when={p().sites.length} fallback={<Empty>Not used on any sites yet.</Empty>}>
           <List>
             <For each={p().sites} keyed={(s) => s.site}>
               {(s) => <Row heading={s().site} text={`Used ${since(s().used)}`} />}
@@ -170,43 +177,39 @@ function Detail(props: { profile: Profile }) {
   )
 }
 
-/// What the person's asked for: a name for a new profile or a renamed one, or the site to sign in to.
+/// Opens the profile's browser for its person to update.
+function Update(props: { profile: string }) {
+  const [busy, setBusy] = createSignal(false)
+  const update = async () => {
+    setBusy(true)
+    await call("chrome-profiles_update", { profile: props.profile }).catch((error) => toast(error.message))
+    setBusy(false)
+  }
+  return (
+    <Button loading={busy()} onClick={update}>Update Profile</Button>
+  )
+}
+
+/// What the person's asked for: a name for a new profile, or a profile's new name.
 function Ask() {
   const [busy, setBusy] = createSignal(false)
-  const heading = () => ({ add: "Add Profile", rename: "Rename Profile", "sign-in": "Sign In to a Site" })[asking()!]
   const send = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
     event.preventDefault()
     const typed = String(new FormData(event.currentTarget).get("value")).trim()
-    const [tool, inputs] = ({
-      add: ["create", { name: typed }],
-      rename: ["rename", { profile: open(), name: typed }],
-      "sign-in": ["sign_in", { profile: open(), url: /^https?:\/\//.test(typed) ? typed : `https://${typed}` }],
-    } as const)[asking()!]
+    const [tool, inputs] = asking() === "add" ? ["create", { name: typed }] : ["rename", { profile: open(), name: typed }]
     setBusy(true)
     await call(`chrome-profiles_${tool}`, inputs)
-      .then(() => {
-        if (tool !== "sign_in") setOpen(typed)
-        setAsking()
-      })
+      .then(() => (setOpen(typed), setAsking()))
       .catch((error) => toast(error.message))
     setBusy(false)
   }
   return (
-    <Sheet heading={heading()} open={!!asking()} onClose={() => setAsking()}>
+    <Sheet heading={asking() === "add" ? "Add Profile" : "Rename Profile"} open={!!asking()} onClose={() => setAsking()}>
       <form onSubmit={send}>
-        <Show
-          when={asking() === "sign-in"}
-          fallback={
-            <Field label="Name">
-              <Input name="value" required autofocus placeholder="Personal" value={asking() === "rename" ? open() : ""} />
-            </Field>
-          }
-        >
-          <Field label="Site" hint="You sign in yourself. Agents never see your password.">
-            <Input name="value" type="url" inputmode="url" required autofocus placeholder="github.com" />
-          </Field>
-        </Show>
-        <Button type="submit" loading={busy()}>{asking() === "sign-in" ? "Open" : asking() === "add" ? "Add" : "Rename"}</Button>
+        <Field label="Name">
+          <Input name="value" required autofocus placeholder="Personal" value={asking() === "rename" ? open() : ""} />
+        </Field>
+        <Button type="submit" loading={busy()}>{asking() === "add" ? "Add" : "Rename"}</Button>
       </form>
     </Sheet>
   )

@@ -27,3 +27,7 @@
 .hint {
   color: var(--muted-foreground);
 }
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
