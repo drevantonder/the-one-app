@@ -77,7 +77,10 @@ defmodule IphoneSimulator.Simulator do
 
   defp numbers(version), do: version |> String.split(".") |> Enum.map(&String.to_integer/1)
 
-  @doc "Boots a simulator and waits until it has."
+  @doc """
+  Boots a simulator and waits until it has, and until idb's companion for it has started, which takes seconds the
+  first time: Computer Use's list of screens, which asks idb for each, gives a plugin no longer than that.
+  """
   def start(service, udid) do
     touch(service, udid)
 
@@ -87,6 +90,7 @@ defmodule IphoneSimulator.Simulator do
     end
 
     simctl!(service, ["bootstatus", udid, "-b"], 600)
+    describe(service, udid) || raise "idb couldn't reach it"
     :ok
   end
 
@@ -131,12 +135,12 @@ defmodule IphoneSimulator.Simulator do
 
   @doc """
   Plays Computer Use's `action` on the simulator with idb's `ui`, its x and y in the screenshot's pixels, which idb
-  takes as points: a click is a tap, a right click a long press, a drag a swipe, a scroll a swipe the other way.
+  takes as whole points: a click is a tap, a right click a long press, a drag a swipe, a scroll a swipe the other way.
   """
   def act(service, udid, action, inputs) do
     touch(service, udid)
     %{"points" => points} = describe(service, udid) || raise "It isn't running: `start` starts it"
-    at = fn x, y -> [fmt(x * points), fmt(y * points)] end
+    at = fn x, y -> [round(x * points), round(y * points)] end
 
     plays =
       case {action, inputs} do
@@ -152,7 +156,7 @@ defmodule IphoneSimulator.Simulator do
       end
 
     for args <- plays do
-      case cmd(idb(service) ++ ["ui" | args] ++ ["--udid", udid], 60) do
+      case cmd(idb(service) ++ ["ui" | Enum.map(args, &to_string/1)] ++ ["--udid", udid], 60) do
         %{exit: 0} -> :ok
         %{stdout: out, stderr: why} -> raise "idb: #{String.trim(clip(why <> "\n" <> out))}"
       end
@@ -164,12 +168,9 @@ defmodule IphoneSimulator.Simulator do
   # A scroll is a swipe the other way, as a finger scrolls: 80 points for each step, at most 600.
   defp scroll([x, y], direction, amount) do
     far = min(80 * amount, 600)
-    {x, y} = {String.to_float(x), String.to_float(y)}
     {dx, dy} = %{"up" => {0, far}, "down" => {0, -far}, "left" => {far, 0}, "right" => {-far, 0}}[direction]
-    ["swipe", fmt(x), fmt(y), fmt(max(x + dx, 0)), fmt(max(y + dy, 0))] ++ ~w(--duration 0.3)
+    ["swipe", x, y, max(x + dx, 0), max(y + dy, 0)] ++ ~w(--duration 0.3)
   end
-
-  defp fmt(n), do: :erlang.float_to_binary(n * 1.0, decimals: 1)
 
   # A key or a combination, as xdotool names them (ctrl+a, Return), as idb presses it: the key's USB HID usage,
   # with its modifiers. A Mac's ⌘ is idb's --command.
