@@ -129,7 +129,7 @@ defmodule OneCore.Plugins do
   @doc "The version running here of the plugin `artifact`, or `nil`: also where it's only described here."
   def version(artifact), do: ask({:version, artifact})
 
-  @doc "Every plugin this server has looked at that has scheduled jobs: who it was installed for, its name there, and the jobs."
+  @doc "Every plugin this server has looked at that has scheduled jobs: who it was installed for, its name there, the jobs, and whether it runs in sandbox mode."
   def scheduled, do: ask(:scheduled)
 
   @doc "What's installed for everyone this server has looked at, by who: each plugin's name there, with the plugin."
@@ -179,9 +179,9 @@ defmodule OneCore.Plugins do
     end
 
     for {artifact, number, {:ok, version}} <- loaded ++ newer, artifact in changed do
-      if Version.described?(version),
+      if Version.described?(version) and not version.sandbox,
         do: Logger.info("#{artifact}: version #{number} is listed here, and runs on #{owner}'s own servers"),
-        else: Logger.info("#{artifact}: version #{number} runs here")
+        else: Logger.info("#{artifact}: version #{number} runs here#{if version.sandbox, do: ", in sandbox mode"}")
     end
 
     if any do
@@ -276,8 +276,8 @@ defmodule OneCore.Plugins do
     scheduled =
       for {owner, installed} <- state.installed,
           {name, artifact} <- installed,
-          %Version{jobs: [_ | _] = jobs} <- [state.running[artifact]],
-          do: {owner, name, jobs}
+          %Version{jobs: [_ | _] = jobs, sandbox: sandbox} <- [state.running[artifact]],
+          do: {owner, name, jobs, sandbox}
 
     {:reply, scheduled, state}
   end

@@ -35,8 +35,11 @@ defmodule OneCore.Jobs do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
 
+    # A plugin in sandbox mode runs on any server acting for whoever it's installed for.
     scheduled =
-      for {installed, _name, _jobs} = scheduled <- Plugins.scheduled(), Servers.runs?(installed), do: scheduled
+      for {installed, name, jobs, sandbox} <- Plugins.scheduled(),
+          Servers.runs?(installed) or (sandbox and Servers.here?(installed)),
+          do: {installed, name, jobs}
 
     for {installed, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(installed, name) end)
