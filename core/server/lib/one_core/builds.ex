@@ -127,26 +127,26 @@ defmodule OneCore.Builds do
   network, or failed to, and why (`OneCore.Plugins.Deploy.deploying_bundled/0`).
   """
   def list(by, owner) do
-    servers =
-      for key <- Servers.acting(owner) do
-        said =
-          case Bucket.read("servers/#{key}/build") do
-            {:ok, said, _tag} -> JSON.decode!(said)
-            :absent -> %{}
-          end
+    keys = Servers.acting(owner)
+    devices = Bucket.list("#{by}/devices/")
+    # Each blob is a trip across the internet where the bucket is far away, so they're all read at once.
+    [latest | read] = Bucket.read_all([@latest | Enum.map(keys, &"servers/#{&1}/build")] ++ devices)
+    {said, devices_said} = Enum.split(read, length(keys))
 
+    servers =
+      for {key, read} <- Enum.zip(keys, said) do
+        said = with {:ok, said, _tag} <- read, do: JSON.decode!(said), else: (:absent -> %{})
         Map.merge(said, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
       end
 
     devices =
-      for blob <- Bucket.list("#{by}/devices/"), {:ok, said, _tag} <- [Bucket.read(blob)] do
-        Map.put(JSON.decode!(said), "device", Path.basename(blob))
-      end
+      for {blob, {:ok, said, _tag}} <- Enum.zip(devices, devices_said),
+          do: Map.put(JSON.decode!(said), "device", Path.basename(blob))
 
     %{
       asked: Server.key(),
       build: build(),
-      latest: latest(),
+      latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
       devices: devices,
       bundled: OneCore.Plugins.Deploy.deploying_bundled()
