@@ -48,11 +48,12 @@ pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
     Ok(())
 }
 
-/// The answer to a call of `execute`: its script, run here.
+/// The answer to a call of `execute`: its script, run here. It says it's a complete result, as MCP has every result say
+/// from 2026-07-28, which a client of an earlier version ignores.
 async fn execute(client: &Arc<Client>, asked: &Value) -> Vec<u8> {
     let code = asked["params"]["arguments"]["code"].as_str().unwrap_or_default();
     let (ok, text) = crate::codemode::run(client, code).await.unwrap_or_else(|error| (false, format!("{error:#}")));
-    let result = json!({"content": [{"type": "text", "text": text}], "isError": !ok});
+    let result = json!({"resultType": "complete", "content": [{"type": "text", "text": text}], "isError": !ok});
     json!({"jsonrpc": "2.0", "id": asked["id"], "result": result}).to_string().into_bytes()
 }
 
