@@ -5,9 +5,7 @@ description: Use once your change is on main, to put it live on the network by t
 
 Release from `main` as it is now, never an older commit, and only what your change touched.
 
-A release is part of your change: it isn't done until it's live. `tooling/release` takes minutes, so run it in the
-foreground with a long timeout, or in the background and have your harness tell you when it ends. Ending your turn
-while it runs stops you there: nothing updates the servers afterwards.
+A release is part of your change: it isn't done until it's live.
 
 | Changed | Release |
 | --- | --- |

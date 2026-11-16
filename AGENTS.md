@@ -50,8 +50,7 @@ before choosing.
 - A change that adds to `core/` says in its commit why a plugin or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
-  the background and wait on it. Don't end your turn while something you started is still running: not every harness
-  wakes you when it ends, and work left running unfinished is lost.
+  the background and let your harness tell you when it ends.
 - Stop what you start once you're done with it, since every thread shares these machines, and remove your worktree.
 - The machines here also run the app as it was before, whose command is `one`. Never install over it or stop it.
 - How to do the common things is in `.agents/skills/`.
