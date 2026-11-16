@@ -197,7 +197,7 @@ function load(app, who) {
 let shownByDevice = false
 
 /// Changes between the Home Screen and an app as a move, as the UI library moves between an app's screens
-/// (ui/src/screen.jsx): the browser slides the app in over the Home Screen, or with `back`, back out from over
+/// (core/ui/src/screen.tsx): the browser slides the app in over the Home Screen, or with `back`, back out from over
 /// them. Where the browser can't, or the user asked for no motion, it's a plain swap.
 /** @param {() => void} change */
 function move(change, back = false) {

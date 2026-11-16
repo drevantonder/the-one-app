@@ -123,7 +123,7 @@ iframe[inert] {
   display: none !important;
 }
 
-/* Between the Home Screen and an app, as the UI library moves between screens (ui/src/ui.css): the app slides in over
+/* Between the Home Screen and an app, as the UI library moves between screens (core/ui/src/ui.css): the app slides in over
    the Home Screen from the end of the line, and going back it slides out again. */
 :root {
   --toward-end: 1;

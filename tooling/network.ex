@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Network do
   # The plugins The One App ships with, as this repo has them: each one's folder, and the UI library as it's built.
   defp bundled do
     plugins = Map.new(Path.wildcard(Path.join(@root, "plugins/*")), &{Path.basename(&1), &1})
-    Map.put(plugins, "ui", Path.join(@root, "ui/dist"))
+    Map.put(plugins, "ui", Path.join(@root, "core/ui/dist"))
   end
 
   defp start(folder, server, options) do

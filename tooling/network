@@ -51,7 +51,7 @@ folder=$(cd "$folder" && pwd)
 one=$root/target/release/one
 
 (cd "$root" && cargo build --release)
-(cd "$root/ui" && bun install --frozen-lockfile && bun build.js)
+(cd "$root/core/ui" && bun install --frozen-lockfile && bun build.js)
 (cd "$root/core/server" && mix deps.get && mix compile)
 
 started=()

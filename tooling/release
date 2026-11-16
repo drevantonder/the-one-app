@@ -125,7 +125,7 @@ if ((${#servers[@]})); then
   # What strips the VM's debugging symbols, for any kind of machine: Rust's own LLVM tools.
   objcopy=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-objcopy
   [[ -x $objcopy ]] || rustup component add llvm-tools
-  (cd ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
+  (cd core/ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
   (cd core/server && mix deps.get --only prod >/dev/null)
   bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
   tooling/nifs
@@ -190,7 +190,7 @@ for kind in "${servers[@]}"; do
   mkdir -p "$release/shipped"
   git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
   for nif in plugins/*/server/nif/*/*.so; do cp "$nif" "$release/shipped/${nif#plugins/}"; done
-  cp -R ui/dist "$release/shipped/ui"
+  cp -R core/ui/dist "$release/shipped/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 
   tar -czf "$out/server-$kind.tar.gz" -C "$release" .

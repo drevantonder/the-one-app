@@ -6,7 +6,7 @@ Make an R2 bucket and an S3 API token for it, and write the presigner's secrets 
 address is a name on a zone of that Cloudflare account, which deploying attaches to the gateway. Then, from the repo's
 root:
 
-    cd ui && bun install && bun build.js
+    cd core/ui && bun install && bun build.js
     cd ../core/edge && bun install && bun run deploy https://<the network's address>
     cd ../server && mix network /tmp/one-network --address https://<the network's address> --first <FIRST_SERVER> --owner <name>
 

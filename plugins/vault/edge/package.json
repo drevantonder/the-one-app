@@ -7,7 +7,7 @@
     "vault"
   ],
   "scripts": {
-    "build": "bun ../../../ui/app.js \"$PWD/page\" \"$PWD/files/vault\" && cp ../../../icons/Logo.png files/vault/mark.png",
+    "build": "bun ../../../core/ui/app.js \"$PWD/page\" \"$PWD/files/vault\" && cp ../../../icons/Logo.png files/vault/mark.png",
     "typecheck": "tsc && tsc -p page"
   },
   "devDependencies": {

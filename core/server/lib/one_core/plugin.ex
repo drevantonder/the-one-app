@@ -382,7 +382,7 @@ defmodule OneCore.Plugin do
   - The plugin's server-side code asks it over the web, signing what it asks as its server does at the edge
     (`OneCore.Edge.signed/2`). `env.NETWORK.verifiedKey(url, headers, body)` gives the key that signed it, or `null`.
   - Its `package.json`'s packages are installed and its `build` script run where the edge is deployed from. A
-    page it serves is built there as an app's is, against the UI library (`bun ../../../ui/app.js <source> <out>`), which
+    page it serves is built there as an app's is, against the UI library (`bun ../../../core/ui/app.js <source> <out>`), which
     the edge serves at `/ui/` as every client has it. `sign-in` does all of this.
 
   Undo follows what people ordinarily expect of an app. A plugin that wants more keeps its own history. What a tool

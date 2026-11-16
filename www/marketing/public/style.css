@@ -1,4 +1,4 @@
-/* The UI library's look (ui/src/tokens.css): shadcn's neutral, light and dark, and Geist. */
+/* The UI library's look (core/ui/src/tokens.css): shadcn's neutral, light and dark, and Geist. */
 /* Geist (vercel.com/font, the npm package geist 1.9.2, SIL Open Font License: fonts/LICENSE.txt), the app's typeface. */
 @font-face { font-family: "Geist"; src: url("fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 :root {
