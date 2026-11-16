@@ -5,7 +5,18 @@
 
 /** @import { Commands } from "../app/page/host.js" */
 
-const SIGN_IN = "/sign-in/"
+/// Where a person signs in: the authorization endpoint of the authorization server the network's metadata names (RFC
+/// 9728, RFC 8414), kept in this browser's storage once it's looked, so going to sign in asks nothing more.
+const AUTHORIZATION_ENDPOINT = "authorization_endpoint"
+async function signIn() {
+  const kept = localStorage.getItem(AUTHORIZATION_ENDPOINT)
+  if (kept) return kept
+  const { authorization_servers } = await (await fetch("/.well-known/oauth-protected-resource")).json()
+  const issuer = new URL(authorization_servers[0])
+  const { authorization_endpoint } = await (await fetch(`${issuer.origin}/.well-known/oauth-authorization-server${issuer.pathname}`.replace(/\/$/, ""))).json()
+  localStorage.setItem(AUTHORIZATION_ENDPOINT, authorization_endpoint)
+  return authorization_endpoint
+}
 
 /// What hears each event, by its name.
 /** @type {Map<string, Set<(event: { payload: unknown }) => void>>} */
@@ -41,7 +52,7 @@ async function mcp(method, params = {}) {
     throw new Error("Can't reach your network. Check this device is online.")
   }
   if (answer.status === 401) {
-    location.replace(SIGN_IN)
+    location.replace(await signIn())
     throw new Error("Sign in again.")
   }
   said(answer.status !== 503)
@@ -170,7 +181,7 @@ const commands = {
     } catch {
       return { unreached: "Your network's address didn't answer" }
     }
-    if (answer.status === 401) return { signIn: SIGN_IN }
+    if (answer.status === 401) return { signIn: await signIn() }
     if (!answer.ok) return { unreached: `Your network's address answered ${answer.status}` }
     ;({ apps, device } = await answer.json())
     sendReports()

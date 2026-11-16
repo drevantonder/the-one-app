@@ -132,11 +132,14 @@ impl Network {
 }
 
 /// What a client keeps of its network, in the file `network` of its home: the network's address, which whatever
-/// set the client up put there, and once the device is someone's, its token to the relay there, whose it is and
-/// the build it was when it got that, which it said as it asked.
+/// set the client up put there, where a device asks there to be let in, once it has looked, and once the device is
+/// someone's, its token to the relay there, whose it is and the build it was when it got that, which it said as it
+/// asked.
 #[derive(Clone, Serialize, Deserialize)]
 struct Told {
     address: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    authorization_server: Option<AuthorizationServer>,
     #[serde(skip_serializing_if = "Option::is_none")]
     token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,16 +148,50 @@ struct Told {
     build: Option<String>,
 }
 
+/// Where a device asks its network to be let in, as the network's metadata says: the authorization server that its
+/// protected resource names (RFC 9728), and that server's device authorization endpoint and token endpoint (RFC
+/// 8414, RFC 8628).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AuthorizationServer {
+    device_authorization_endpoint: String,
+    token_endpoint: String,
+}
+
+impl AuthorizationServer {
+    /// Looks for it at the network's address, `address`.
+    async fn discovered(address: &str) -> Result<Self> {
+        let web = web()?;
+        let read = |url: String| {
+            let web = web.clone();
+            async move {
+                anyhow::Ok(web.get(url).timeout(CONNECT * 3).send().await?.error_for_status()?.json::<Value>().await?)
+            }
+        };
+        let resource = read(format!("{}/.well-known/oauth-protected-resource", address.trim_end_matches('/'))).await?;
+        let issuer =
+            resource["authorization_servers"][0].as_str().context("the network names no authorization server")?;
+        let issuer: reqwest::Url = issuer.parse().with_context(|| format!("{issuer} isn't an address"))?;
+        let at = format!(
+            "{}/.well-known/oauth-authorization-server{}",
+            issuer.origin().ascii_serialization(),
+            issuer.path()
+        );
+        serde_json::from_value(read(at.trim_end_matches('/').to_owned()).await?)
+            .context("the network's authorization server lets no device in by a code")
+    }
+}
+
 /// Why a client that knows its network isn't in it: its device is nobody's there yet. It has asked the network's
-/// edge for a code to be let in by, as Better Auth's device authorization has it (`plugins/sign-in/edge`),
-/// naming its key and signing what it asks with it, so the code is only ever for this key.
+/// authorization server for a code to be let in by, as RFC 8628 has it, naming its key as its `client_id` and
+/// signing what it asks with it, so the code is only ever for this key.
 #[derive(Debug)]
 pub struct DeviceAuthorization {
     /// Where its person lets it in: a page at the network's address, carrying the code.
     pub link: String,
     /// The code, as it's shown: WDJB-MJHT.
     pub code: String,
-    address: String,
+    /// Where it asks for its answer.
+    token_endpoint: String,
     key: SecretKey,
     /// What the device asks for its answer with, which only it was given.
     device_code: String,
@@ -172,11 +209,11 @@ impl std::fmt::Display for DeviceAuthorization {
 impl std::error::Error for DeviceAuthorization {}
 
 impl DeviceAuthorization {
-    /// Asks the network's edge at `address` for a code to let the device with `key` in by, under this
+    /// Asks the network's authorization server for a code to let the device with `key` in by, under this
     /// machine's name.
-    async fn asked(address: &str, key: &SecretKey) -> Result<Self> {
-        let ask = json!({"client_id": key.public().to_string(), "name": name()});
-        let (given, said) = ask_edge(address, key, "/sign-in/auth/device/code", ask).await?;
+    async fn asked(server: &AuthorizationServer, key: &SecretKey) -> Result<Self> {
+        let ask = serde_urlencoded::to_string([("client_id", key.public().to_string()), ("name", name())])?;
+        let (given, said) = ask_edge(&server.device_authorization_endpoint, key, FORM, ask).await?;
         let (true, Some(link), Some(code), Some(device_code)) = (
             given,
             said["verification_uri_complete"].as_str(),
@@ -189,24 +226,24 @@ impl DeviceAuthorization {
         Ok(Self {
             link: link.to_owned(),
             code: halves.join("-"),
-            address: address.to_owned(),
+            token_endpoint: server.token_endpoint.clone(),
             key: key.clone(),
             device_code: device_code.to_owned(),
             interval: Duration::from_secs(said["interval"].as_u64().unwrap_or(5)),
         })
     }
 
-    /// Waits for this device's person to answer, asking the network's edge as often as it allows. It's an
+    /// Waits for this device's person to answer, asking the network's authorization server as often as it allows. It's an
     /// error if they stopped it, or its code ended first.
     pub async fn answered(mut self) -> Result<()> {
         loop {
             sleep(self.interval).await;
-            let ask = json!({
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                "device_code": self.device_code,
-                "client_id": self.key.public().to_string(),
-            });
-            let (given, said) = ask_edge(&self.address, &self.key, "/sign-in/auth/device/token", ask).await?;
+            let ask = serde_urlencoded::to_string([
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ("device_code", &self.device_code),
+                ("client_id", &self.key.public().to_string()),
+            ])?;
+            let (given, said) = ask_edge(&self.token_endpoint, &self.key, FORM, ask).await?;
             match said["error"].as_str() {
                 _ if given => return Ok(()),
                 Some("authorization_pending") => {}
@@ -325,15 +362,15 @@ impl std::fmt::Display for NotApproved {
 
 impl std::error::Error for NotApproved {}
 
-/// Asks the network's edge at `path`, with `body` signed by `key`. Gives whether it agreed, and what it said.
-async fn ask_edge(address: &str, key: &SecretKey, path: &str, body: Value) -> Result<(bool, Value)> {
-    let body = body.to_string();
-    let network = Network { address: address.to_owned(), token: String::new() };
-    let mut asked = web()?
-        .post(format!("{}{path}", address.trim_end_matches('/')))
-        .timeout(CONNECT * 3)
-        .header("content-type", "application/json");
-    for (name, value) in network.signed(key, path, &body)? {
+/// What a device sends where it asks to be let in, as RFC 8628 has it.
+const FORM: &str = "application/x-www-form-urlencoded";
+
+/// Asks the network's edge at `url`, with `body` signed by `key`. Gives whether it agreed, and what it said.
+async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) -> Result<(bool, Value)> {
+    let parsed: reqwest::Url = url.parse().with_context(|| format!("{url} isn't an address"))?;
+    let network = Network { address: parsed.origin().ascii_serialization(), token: String::new() };
+    let mut asked = web()?.post(url).timeout(CONNECT * 3).header("content-type", content_type);
+    for (name, value) in network.signed(key, parsed.path(), &body)? {
         asked = asked.header(name, value);
     }
     let answer = asked.body(body).send().await?;
@@ -341,6 +378,11 @@ async fn ask_edge(address: &str, key: &SecretKey, path: &str, body: Value) -> Re
 }
 
 impl Told {
+    /// What's kept in `home`, if it's there whole.
+    fn kept(home: &Path) -> Option<Self> {
+        serde_json::from_slice(&fs::read(home.join("network")).ok()?).ok()
+    }
+
     /// How long the token this client has lasts before it's renewed, by when it says it ends: nothing if it has none.
     fn left(&self) -> Duration {
         self.ends().duration_since(SystemTime::now() + RENEW).unwrap_or_default()
@@ -359,13 +401,22 @@ impl Told {
     /// whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
         let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/token", "params": {"build": said()}});
-        let (_, answer) = ask_edge(&self.address, key, "/mcp", ask).await?;
+        let mcp = format!("{}/mcp", self.address.trim_end_matches('/'));
+        let (_, answer) = ask_edge(&mcp, key, "application/json", ask.to_string()).await?;
         if answer["error"]["code"] == NOBODY {
             if self.who.is_some() {
                 (self.token, self.who) = (None, None);
                 self.keep(home)?;
             }
-            bail!(DeviceAuthorization::asked(&self.address, key).await?)
+            let server = match self.authorization_server.clone() {
+                Some(server) => server,
+                None => AuthorizationServer::discovered(&self.address).await?,
+            };
+            let asked = DeviceAuthorization::asked(&server, key).await;
+            // What it found is kept for the next time, and what didn't answer is looked for again then.
+            self.authorization_server = asked.is_ok().then_some(server);
+            write(&home.join("network"), &serde_json::to_vec(self)?)?;
+            bail!(asked?)
         }
         if answer["result"].is_null() {
             bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
@@ -689,9 +740,13 @@ impl Client {
                 Some(serde_json::from_slice::<Told>(&network).context("`network` isn't a network's address")?)
             }
             // An app built for one network knows its address.
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                BUILT_FOR.map(|address| Told { address: address.to_owned(), token: None, who: None, build: None })
-            }
+            Err(error) if error.kind() == ErrorKind::NotFound => BUILT_FOR.map(|address| Told {
+                address: address.to_owned(),
+                authorization_server: None,
+                token: None,
+                who: None,
+                build: None,
+            }),
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         // A device with no token yet asks for one at the network's address, and while it's nobody's, for a code to
@@ -762,7 +817,14 @@ impl Client {
     fn network(&self) -> Told {
         let Link { network, who, .. } = self.link();
         let network = network.expect("only a client of a network with an address has a token");
-        Told { address: network.address, token: Some(network.token), who, build: Some(BUILD.to_owned()) }
+        let authorization_server = Told::kept(&self.home).and_then(|told| told.authorization_server);
+        Told {
+            address: network.address,
+            authorization_server,
+            token: Some(network.token),
+            who,
+            build: Some(BUILD.to_owned()),
+        }
     }
 
     /// Asks for this device's next token, and makes the run's endpoint again to show it, since iroh shows a relay the
@@ -953,7 +1015,9 @@ impl Client {
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let mut told = Told { address: network.address, token: None, who: self.link().who, build: None };
+        let authorization_server = Told::kept(&self.home).and_then(|told| told.authorization_server);
+        let mut told =
+            Told { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
         let asked = told.admit(&self.key, &self.home).await;
         match asked.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),

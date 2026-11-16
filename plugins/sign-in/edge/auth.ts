@@ -9,8 +9,9 @@ import { env } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
-import { deviceAuthorization, jwt } from "better-auth/plugins";
+import { jwt } from "better-auth/plugins";
 import { mcp } from "@better-auth/mcp";
+import { DEVICE_CODE_GRANT_TYPE, oauthDeviceAuthorization } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import Bowser from "bowser";
 import type { BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
@@ -157,8 +158,17 @@ async function invited(adapter: Adapter, link: string | undefined) {
   return invite;
 }
 
-/** Where a device asks for a code and for its answer, each naming its key as `client_id`. */
-const ASKS_BY_KEY = ["/sign-in/auth/device/code", "/sign-in/auth/device/token"];
+/**
+ * Where a device asks for a code and for its answer, as the metadata says (RFC 8628): the device authorization
+ * endpoint, and the token endpoint with the device code grant. Each names its key as `client_id`.
+ */
+const DEVICE_CODE = "/sign-in/auth/device/code";
+const TOKEN = "/sign-in/auth/oauth2/token";
+/** Where Better Auth answers a device that isn't an OAuth client, with a session the device has no use for. */
+const DEVICE_TOKEN = "/sign-in/auth/device/token";
+/** Where a person signs in, which the authorization endpoint shows one who comes with nothing to authorize. */
+const AUTHORIZE = "/sign-in/auth/oauth2/authorize";
+const SIGN_IN = "/sign-in/";
 
 /** A device's code as Better Auth looks it up: its letters and digits, in capitals. */
 const plain = (code: unknown) => String(code).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
@@ -184,18 +194,26 @@ const devices = () => ({
     // What a device that asked to be let in calls itself, which its person is shown with its code.
     deviceCode: { fields: { name: { type: "string", required: false } } },
   },
-  // Whatever names a key as `client_id` is signed with it (`core/edge/ask.ts`).
   async onRequest(request: Request) {
-    if (!ASKS_BY_KEY.includes(new URL(request.url).pathname)) return;
+    const url = new URL(request.url);
+    // The web client sends a person who isn't signed in to the authorization endpoint the metadata names, with no
+    // OAuth client of its own: what it shows them is the page they sign in on.
+    if (url.pathname === AUTHORIZE && request.method === "GET" && !url.searchParams.has("client_id"))
+      return { response: Response.redirect(new URL(SIGN_IN, url.origin).href, 302) };
+    if (url.pathname !== DEVICE_CODE && url.pathname !== TOKEN) return;
+    // A device asks with a form, as RFC 8628 has it.
     const body = await request.clone().text();
-    let client: unknown;
-    try {
-      client = JSON.parse(body).client_id;
-    } catch {}
+    const said = Object.fromEntries(new URLSearchParams(body));
+    if (url.pathname === TOKEN && said.grant_type !== DEVICE_CODE_GRANT_TYPE) return;
+    // Whatever names a key as `client_id` is signed with it (`core/edge/ask.ts`).
     const key = await env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
-    if (key && key === client) return;
-    const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within a minute of the right time" };
-    return { response: Response.json(refused, { status: 401 }) };
+    if (!key || key !== said.client_id) {
+      const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within a minute of the right time" };
+      return { response: Response.json(refused, { status: 401 }) };
+    }
+    // A device is no OAuth client, so it's answered as Better Auth answers a device of its own, which takes JSON.
+    if (url.pathname === TOKEN)
+      return { request: new Request(new URL(DEVICE_TOKEN, url.origin), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(said) }) };
   },
   hooks: {
     before: [
@@ -266,8 +284,9 @@ async function made(origin: string) {
     basePath: "/sign-in/auth",
     secret: await secret(),
     database: env.DB,
-    // The JWT plugin signs the tokens an assistant is given, and hands out none of its own.
-    disabledPaths: ["/token"],
+    // The JWT plugin signs the tokens an assistant is given, and hands out none of its own. A device asks for its
+    // answer at the token endpoint, which passes it on to `/device/token` once it's checked its signature.
+    disabledPaths: ["/token", "/device/token"],
     session: { freshAge: FRESH },
     // The name a person chose as they joined, which they can change: the one they're `users/<name>` by is chosen
     // for them, as they're invited, and never changes.
@@ -306,8 +325,8 @@ async function made(origin: string) {
       // What lets an assistant somewhere else in at /mcp, as MCP's authorization says. Signing in and saying yes are
       // one page and one question.
       mcp({
-        loginPage: "/sign-in/",
-        consentPage: "/sign-in/",
+        loginPage: SIGN_IN,
+        consentPage: SIGN_IN,
         resource: `${origin}/mcp`,
         scopes: ["openid", "profile", "offline_access"],
         allowPublicClientPrelogin: true,
@@ -319,8 +338,9 @@ async function made(origin: string) {
         customAccessTokenClaims: ({ user }) => ({ who: who(user!) }),
       }),
       // A new device shows a code, and its link carries it. Its person opens that where they sign in, and says
-      // whether the code they're shown matches.
-      deviceAuthorization({ verificationUri: "/sign-in/" }),
+      // whether the code they're shown matches. The metadata names where it asks (RFC 8628).
+      // A device's `client_id` is its key, which it signed what it asked with (`onRequest` in `devices`).
+      oauthDeviceAuthorization({ verificationUri: SIGN_IN, validateClient: async () => true }),
       devices(),
     ],
   });

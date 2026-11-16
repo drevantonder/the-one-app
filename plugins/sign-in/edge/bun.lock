@@ -6,6 +6,7 @@
       "name": "sign-in",
       "dependencies": {
         "@better-auth/mcp": "1.7.25",
+        "@better-auth/oauth-provider": "1.7.25",
         "@better-auth/passkey": "1.7.25",
         "better-auth": "1.7.25",
         "bowser": "2.14.1",
