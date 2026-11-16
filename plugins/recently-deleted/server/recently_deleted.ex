@@ -11,7 +11,8 @@ defmodule RecentlyDeleted do
   whatever reads it, and stays under its owner's prefix, where the same servers reach it. An encrypted artifact's
   blobs go aside still encrypted, keys and all, and a database's log, snapshots and lease go together, so each
   opens again as it was once it's back. This plugin's own artifact keeps a line for each, `removed/<id>`: the
-  artifact it was, who removed it and when.
+  artifact it was, who removed it and when. A removed plugin has no latest version, so it leaves the App Store at once,
+  and its listing goes when it's purged.
 
   `restore` puts the blobs back at the artifact's name, only if nothing has been made there since, and `purge`,
   which the clock calls each day, erases what was removed more than 30 days ago. Who removes and restores an
@@ -99,6 +100,7 @@ defmodule RecentlyDeleted do
     moved(blobs, &(aside <> String.replace_prefix(&1, name <> "/", "")))
     line = %{"artifact" => name, "at" => now(), "by" => call.actor || call.subject}
     :ok = Artifact.write(call.own, "removed/" <> id, JSON.encode!(line))
+    relisted(name)
     notify(call, name, "removed")
     "Removed #{name}. `restore` brings it back as it was, for 30 days."
   end
@@ -126,6 +128,7 @@ defmodule RecentlyDeleted do
     aside = aside(name, id)
     moved(Bucket.list(aside), &(name <> "/" <> String.replace_prefix(&1, aside, "")))
     Artifact.remove(call.own, "removed/" <> id)
+    relisted(name)
     notify(call, name, "restored")
     "Restored #{name}. It's as it was."
   end
@@ -134,6 +137,7 @@ defmodule RecentlyDeleted do
     purged =
       for {id, line} <- removed(call), now() - line["at"] > @retention do
         for blob <- Bucket.list(aside(line["artifact"], id)), do: Bucket.remove(blob)
+        if line["artifact"] =~ @plugin, do: Bucket.remove(listing(line["artifact"]))
         Artifact.remove(call.own, "removed/" <> id)
         notify(call, line["artifact"], "purged")
         line["artifact"]
@@ -157,6 +161,18 @@ defmodule RecentlyDeleted do
     |> Stream.run()
 
     Task.async_stream(blobs, &Bucket.remove/1, max_concurrency: 16, timeout: :infinity) |> Stream.run()
+  end
+
+  # A plugin's listing in the App Store, which shows it only while it has a latest version: so it's kept while it's
+  # removed, for `restore`, and goes when it's purged.
+  defp listing(plugin), do: "network/deployed/#{User.owner(plugin)}/#{Path.basename(plugin)}"
+
+  # Servers look again at what's deployed, so a plugin removed or restored leaves the App Store or is back in it at once.
+  defp relisted(name) do
+    if name =~ @plugin do
+      OneCore.Plugins.Deploy.forget()
+      OneCore.Server.notify_servers([User.owner(name)])
+    end
   end
 
   # Every line of what's removed, by its id.

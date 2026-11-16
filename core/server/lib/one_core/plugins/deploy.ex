@@ -157,12 +157,15 @@ defmodule OneCore.Plugins.Deploy do
   Deploys for the network each plugin this server ships with that the network has never had, and each that runs
   what a server once shipped but not what this one ships: so an updated server brings its plugins along. One whose
   latest version came from files no server shipped was changed on purpose, and is left as it is. Gives what
-  `deploy/3` gave for each, by its name, and says each in the log and in `deploying_bundled/0` as it goes.
+  `deploy/3` gave for each, by its name, and says each in the log and in `deploying_bundled/0` as it goes. One a
+  server shipped that this one, the newest, doesn't, and that's still the repo's, isn't listed any more.
 
   What servers have shipped of a plugin is the plugin's blob `bundled`: the hashes of every set of files they
   deployed it from.
   """
   def deploy_bundled do
+    unlist_unshipped()
+
     names =
       for {name, _folder} <- Enum.sort(Application.get_env(:one_core, :bundled, %{})),
           deploy_bundled?(name, Version.code(bundled(name))),
@@ -246,8 +249,8 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   # Whether the plugin `name` that this server ships, from files whose hash is `source`, is to be deployed for the
-  # network: it never had it, or it runs what a server shipped once and that isn't this. One whose latest version
-  # doesn't say what it was deployed from is from before versions said so, and was shipped too.
+  # network: it never had it, it runs what a server shipped once and that isn't this, or it isn't listed. One whose
+  # latest version doesn't say what it was deployed from is from before versions said so, and was shipped too.
   defp deploy_bundled?(name, source) do
     artifact = "#{@network}/plugins/#{name}"
 
@@ -255,14 +258,62 @@ defmodule OneCore.Plugins.Deploy do
       nil ->
         true
 
+      # A server that didn't ship it stopped listing it.
       ^source ->
-        false
+        Bucket.size("#{@deployed}#{@network}/#{name}") == :absent
 
-      latest ->
-        case Bucket.read(artifact <> "/bundled") do
-          {:ok, json, _tag} -> latest in bundled_sources(json)
-          :absent -> false
+      _latest ->
+        shipped?(name)
+    end
+  end
+
+  # Whether the network's plugin `name` runs files a server shipped, rather than ones someone deployed on purpose.
+  defp shipped?(name) do
+    artifact = "#{@network}/plugins/#{name}"
+
+    case Bucket.read(artifact <> "/bundled") do
+      {:ok, json, _tag} -> Store.latest_source(artifact) in bundled_sources(json)
+      :absent -> false
+    end
+  end
+
+  # A plugin servers shipped that this one, the newest there is, doesn't, and that still runs what they shipped or
+  # what was deployed by hand from the repo they ship from, isn't listed in the App Store any more: it was renamed
+  # or taken out of the repo. One that moved to another repo is listed as it was. Whoever has it installed keeps it,
+  # and deploying it lists it again.
+  defp unlist_unshipped do
+    ships = Application.get_env(:one_core, :bundled, %{})
+    prefix = "#{@deployed}#{@network}/"
+    unshipped = for blob <- Bucket.list(prefix), not is_map_key(ships, Path.basename(blob)), do: Path.basename(blob)
+
+    if unshipped != [] and newest?() do
+      repos = MapSet.new(Map.keys(ships), &Store.about("#{@network}/plugins/#{&1}")["from"]["source"])
+
+      gone =
+        for name <- unshipped, ours?(name, MapSet.delete(repos, nil)) do
+          Logger.info("#{name} isn't shipped any more, so it isn't listed")
+          Bucket.remove(prefix <> name)
         end
+
+      if gone != [] do
+        forget()
+        Server.notify_servers([@network])
+      end
+    end
+  end
+
+  # Whether the network's plugin `name` is one servers shipped, and runs what they shipped or what was deployed from
+  # one of `repos`.
+  defp ours?(name, repos) do
+    artifact = "#{@network}/plugins/#{name}"
+
+    case Bucket.read(artifact <> "/bundled") do
+      {:ok, json, _tag} ->
+        about = Store.about(artifact)
+        about["source"] in bundled_sources(json) or about["from"]["source"] in repos
+
+      :absent ->
+        false
     end
   end
 
