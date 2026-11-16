@@ -15,10 +15,11 @@ defmodule OneCore.Builds do
   pass (`seen/3`).
   """
   alias OneCore.{Bucket, Server, Servers}
-  alias OneCore.Plugins.{Deploy, Store}
+  alias OneCore.Plugins.Store
 
   @builds "network/builds/"
   @latest @builds <> "latest"
+  @plugin ~r{^((?:network|(?:users|groups)/[^/]+)/plugins/[^/]+)/latest$}
 
   @doc "The build this server is: the commit it was built from."
   def build, do: Application.fetch_env!(:one_core, :build)
@@ -103,7 +104,8 @@ defmodule OneCore.Builds do
     if written == :ok do
       named = for {_name, build} <- now, do: @builds <> build["sha256"]
       for blob <- Bucket.list(@builds), blob != @latest, blob not in named, do: Bucket.remove(blob)
-      plugins = for %{plugin: artifact} <- Deploy.deployed(), do: artifact
+      # Every plugin in the bucket, whether or not anyone still has it: each one's `latest`.
+      plugins = for blob <- Bucket.list(""), [artifact] <- [Regex.run(@plugin, blob, capture: :all_but_first)], do: artifact
       Stream.run(Task.async_stream(plugins, &Store.prune/1, max_concurrency: 16, timeout: :infinity))
       now
     else
