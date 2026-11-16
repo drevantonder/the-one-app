@@ -210,8 +210,8 @@ defmodule OneCore.Sandbox.Child do
     %{state | waiting: waiting}
   end
 
-  defp received({:load, sets, target}, state) do
-    answer(state.port, :load, loaded(sets, target))
+  defp received({:load, sets, target, cache}, state) do
+    answer(state.port, :load, loaded(sets, target, cache))
     state
   end
 
@@ -293,13 +293,15 @@ defmodule OneCore.Sandbox.Child do
   defp plugin, do: :persistent_term.get({__MODULE__, :main})
 
   # Compiles each set of files in turn, the plugins it uses before the plugin, and says what the plugin is. What it
-  # uses runs here as it, as it would run as it on a server.
-  defp loaded(sets, target) do
+  # uses runs here as it, as it would run as it on a server. A VM of the same version that ran before compiled them
+  # already, and the server kept what it compiled in `cache`, where they're loaded from instead. Otherwise what was
+  # compiled is answered with, its own side of One Core among it, for the server to keep.
+  defp loaded(sets, target, cache) do
     {main, _files} = List.last(sets)
 
     modules =
       for {name, files} <- sets, reduce: %{} do
-        modules -> Map.put(modules, name, compiled(name, files, target))
+        modules -> Map.put(modules, name, compiled(name, files, target, cache))
       end
 
     plugins = for {name, mods} <- modules, module <- mods, OneCore.Plugin in behaviours(module), do: {name, module}
@@ -308,7 +310,8 @@ defmodule OneCore.Sandbox.Child do
       [plugin] ->
         for {name, module} <- plugins, do: :persistent_term.put({__MODULE__, :plugin, name}, module)
         :persistent_term.put({__MODULE__, :main}, plugin)
-        {:answered, described(plugin, modules[main], Map.keys(modules) -- [main])}
+        described = described(plugin, modules[main], Map.keys(modules) -- [main])
+        {:answered, if(cache, do: described, else: Map.put(described, "beams", beams(modules)))}
 
       found ->
         raise "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"
@@ -317,10 +320,24 @@ defmodule OneCore.Sandbox.Child do
     error -> {:raised, Exception.message(error)}
   end
 
-  defp compiled(name, files, target) do
+  defp beams(modules) do
+    runtime = Path.join(System.tmp_dir!(), "runtime")
+    modules = Map.put(modules, "runtime", for(file <- File.ls!(runtime), do: Module.concat([Path.rootname(file)])))
+
+    for {name, mods} <- modules, into: %{} do
+      {name, for(module <- mods, into: %{}, do: {Atom.to_string(module), Base.encode64(beam(name, module))})}
+    end
+  end
+
+  defp beam(name, module) do
+    out = if name == "runtime", do: "runtime", else: Path.join(["plugins", name, "ebin"])
+    File.read!(Path.join([System.tmp_dir!(), out, "#{module}.beam"]))
+  end
+
+  defp compiled(name, files, target, cache) do
     folder = Path.join([System.tmp_dir!(), "plugins", name])
-    out = Path.join(folder, "ebin")
-    File.mkdir_p!(out)
+    out = if cache, do: cache["ebin"], else: Path.join(folder, "ebin")
+    File.mkdir_p!(folder)
 
     sources =
       for {path, text} <- files, String.starts_with?(path, "server/"), Path.extname(path) == ".ex" do
@@ -343,8 +360,19 @@ defmodule OneCore.Sandbox.Child do
       :persistent_term.put({__MODULE__, :nif, Module.concat(parts)}, file)
     end
 
-    Code.prepend_path(out)
+    if cache do
+      modules = Enum.map(cache["modules"][name], &String.to_atom/1)
+      for module <- modules, do: :persistent_term.put({__MODULE__, :files, module}, {name, out, files})
+      Enum.each(modules, &Code.ensure_loaded!/1)
+      modules
+    else
+      File.mkdir_p!(out)
+      Code.prepend_path(out)
+      compiled(sources, name, out, files, folder)
+    end
+  end
 
+  defp compiled(sources, name, out, files, folder) do
     case Kernel.ParallelCompiler.compile_to_path(sources, out, return_diagnostics: true) do
       {:ok, modules, warnings} ->
         Process.put(

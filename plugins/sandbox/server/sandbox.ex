@@ -44,12 +44,11 @@ defmodule Sandbox do
       system = Enum.flat_map(~w(/usr/lib /usr/lib64 /lib /lib64), &["--ro-bind-try", &1, &1])
       vars = Enum.flat_map(Map.put(env, "TMPDIR", "/tmp"), fn {name, value} -> ["--setenv", name, value] end)
 
+      # Mounts are made in order, so its own /tmp comes first, beneath anything bound inside it.
       walled =
         ["--as=#{memory}", "--", bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--clearenv"] ++
-          binds ++
-          system ++
-          ["--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev", "--chdir", "/tmp", "--cap-drop", "ALL"] ++
-          vars ++ ["--", program | arguments]
+          ["--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev"] ++
+          binds ++ system ++ ["--chdir", "/tmp", "--cap-drop", "ALL"] ++ vars ++ ["--", program | arguments]
 
       # Nothing of this server's environment is passed on, to bubblewrap either: its process is the sandbox's first,
       # whose environment the program could read.

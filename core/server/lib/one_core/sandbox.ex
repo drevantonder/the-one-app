@@ -33,7 +33,7 @@ defmodule OneCore.Sandbox do
   """
   use GenServer, restart: :temporary
   require Logger
-  alias OneCore.{Artifact, Bucket, Builds, Call, Plugins}
+  alias OneCore.{Artifact, Bucket, Builds, Call, Plugins, Server}
   alias OneCore.Plugins.{Calls, Version}
 
   @registry __MODULE__.Children
@@ -405,10 +405,16 @@ defmodule OneCore.Sandbox do
     do: GenServer.start_link(__MODULE__, started, name: {:via, Registry, {@registry, key}})
 
   @impl true
-  def init({_key, name, sets, version}) do
+  def init({key, name, sets, version}) do
     handles = :ets.new(__MODULE__, [:public, read_concurrency: true])
 
+    # What a version's VM compiled is kept on this machine for its next VM, which loads it instead.
+    cache =
+      if version,
+        do: Path.join([Server.home(), "sandbox", Version.code(key)])
+
     context = %{
+      cache: cache,
       name: name,
       handles: handles,
       artifact: version && version.artifact,
@@ -423,9 +429,12 @@ defmodule OneCore.Sandbox do
 
   @impl true
   def handle_continue({:start, sets}, state) do
-    case started() do
+    cached = with path when is_binary(path) <- state.context.cache, {:ok, said} <- File.read(Path.join(path, "modules")), do: JSON.decode!(said), else: (_ -> nil)
+
+    case started(cached && state.context.cache) do
       {:ok, port} ->
-        command(port, {:load, sets.(), Builds.target()})
+        cache = cached && %{"ebin" => state.context.cache, "modules" => cached}
+        command(port, {:load, sets.(), Builds.target(), cache})
         Process.send_after(self(), :loading, @silent)
         {:noreply, %{state | port: port}}
 
@@ -435,7 +444,7 @@ defmodule OneCore.Sandbox do
   end
 
   # The program the child is: this server's own Erlang VM and Elixir, read-only, with the child's side of One Core.
-  defp started do
+  defp started(cache) do
     root = :code.root_dir() |> to_string()
     erts = Path.join(root, "erts-#{:erlang.system_info(:version)}")
 
@@ -451,15 +460,19 @@ defmodule OneCore.Sandbox do
     child = Application.app_dir(:one_core, "priv/sandbox")
     ebins = Enum.flat_map(libraries, &Path.wildcard(Path.join(&1, "*/ebin")))
 
+    # Its own side of One Core is compiled as it starts, unless it was kept.
+    compile =
+      if cache,
+        do: "",
+        else:
+          "{ok, _, _} = 'Elixir.Kernel.ParallelCompiler':compile_to_path([<<\"#{child}/child.ex\"/utf8>>], " <>
+            "<<\"/tmp/runtime\">>, [{return_diagnostics, true}]), "
+
     arguments =
       ~w(-noshell -noinput +fnu +S 1:1 +SDcpu 1:1 +SDio 1 +A 1 +MIscs 128 -boot) ++
         [boot] ++
-        Enum.flat_map(ebins, &["-pa", &1]) ++
-        [
-          "-eval",
-          "application:ensure_all_started(elixir), 'Elixir.Code':require_file(<<\"#{child}/child.ex\"/utf8>>), " <>
-            "'Elixir.OneCore.Sandbox.Child':main()."
-        ]
+        Enum.flat_map(List.wrap(cache) ++ ebins, &["-pa", &1]) ++
+        ["-eval", "application:ensure_all_started(elixir), #{compile}'Elixir.OneCore.Sandbox.Child':main()."]
 
     env = %{
       "ROOTDIR" => root,
@@ -471,7 +484,7 @@ defmodule OneCore.Sandbox do
       "ERL_CRASH_DUMP_SECONDS" => "0"
     }
 
-    policy = %{read: Enum.uniq([erts, boot <> ".boot", child | libraries]), env: env, memory: @memory}
+    policy = %{read: Enum.uniq([erts, boot <> ".boot", child | libraries] ++ List.wrap(cache)), env: env, memory: @memory}
 
     case Plugins.run(["network"], "sandbox", fn _at, versions ->
            versions["sandbox"].plugin.start(Path.join(erts, "bin/erlexec"), arguments, policy)
@@ -572,6 +585,8 @@ defmodule OneCore.Sandbox do
     loaded =
       case answer do
         %{"ok" => said} when is_map(said) ->
+          {beams, said} = Map.pop(said, "beams")
+          if beams && state.context.cache, do: keep(state.context.cache, beams)
           context = %{state.context | said: said}
           {:ok, self(), state.port, context}
 
@@ -630,6 +645,31 @@ defmodule OneCore.Sandbox do
   end
 
   defp received(message, state), do: {:stop, "it sent what isn't the protocol: #{inspect(message, limit: 5)}", state}
+
+  # Keeps what a VM compiled, each module by its name, for the next VM of the same version. It's written aside and
+  # moved into place, so a VM never loads half of it.
+  defp keep(cache, beams) do
+    writing = cache <> ".part"
+    File.rm_rf!(writing)
+    File.mkdir_p!(writing)
+
+    modules =
+      for {name, mods} <- beams, is_map(mods), into: %{} do
+        written =
+          for {module, data} <- mods, is_binary(module) and module =~ ~r/^[A-Za-z0-9_.]+$/ and is_binary(data) do
+            File.write!(Path.join(writing, module <> ".beam"), Base.decode64!(data))
+            module
+          end
+
+        {name, written}
+      end
+
+    File.write!(Path.join(writing, "modules"), JSON.encode!(Map.delete(modules, "runtime")))
+    File.rm_rf!(cache)
+    File.rename!(writing, cache)
+  rescue
+    error -> Logger.warning("What a plugin's VM compiled wasn't kept: #{Exception.message(error)}")
+  end
 
   defp answer_loaded(state, loaded) do
     for from <- state.waiting, do: GenServer.reply(from, loaded)
