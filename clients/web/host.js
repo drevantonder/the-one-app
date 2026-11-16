@@ -142,7 +142,7 @@ async function refresh(view) {
 /** @type {Map<string | undefined, Map<string, string>>} */
 const versions = new Map()
 /// The open apps for `who` whose plugins have a new version since the last list, each as its address names it
-/// (`<plugin>[.<who, last part first>]`): a new UI library is every app's.
+/// (`<plugin>[.<who, last part first>]`).
 /** @param {string | undefined} who @param {{ uri: string }[]} resources */
 function outdated(who, resources) {
   const now = new Map(resources.map(({ uri }) => /** @type {[string, string]} */ (uri.slice("ui://".length).split("/", 2))))
@@ -151,7 +151,7 @@ function outdated(who, resources) {
   if (!was) return []
   const changed = [...now].filter(([plugin, version]) => was.has(plugin) && was.get(plugin) !== version).map(([plugin]) => plugin)
   const whose = who ? `.${who.split("/").reverse().join(".")}` : ""
-  return (changed.includes("ui") ? [...now.keys()] : changed).map((plugin) => plugin + whose)
+  return changed.map((plugin) => plugin + whose)
 }
 
 /// What a browser can't do, as it's said where it's asked.

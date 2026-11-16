@@ -6,8 +6,8 @@ defmodule OneCore.Skills do
 
   A plugin's skill is the `SKILL.md` at the root of its folder, named as the plugin is. A plugin offers more as
   folders of `skills/`, each a skill named as its folder: its `SKILL.md`, and any other files in the folder, which
-  the skill points to. One Core has two of its own: `building-plugins`, which is `OneCore.Plugin.skill/1`, and
-  `installing-plugins`, which is here.
+  the skill points to. One Core has its own: `building-plugins`, which is `OneCore.Plugin.skill/1`,
+  `installing-plugins`, which is here, and the UI library's, `ui`, with Solid's beneath it (`OneCore.App`).
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
@@ -16,11 +16,12 @@ defmodule OneCore.Skills do
   A skill's path ends with its name, as the extension has it, and what comes before is the plugin's, as it's found
   where it runs: the name it's installed by there, then the plugin's own name, as its folder is. So a plugin's skill is
   `skill://<installed by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
-  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own are `skill://building-plugins/SKILL.md`
-  and `skill://installing-plugins/SKILL.md`, the only skills whose paths are their names alone. No two plugins are installed by one name, so no skill's address is
+  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own are `skill://building-plugins/SKILL.md`,
+  `skill://installing-plugins/SKILL.md` and `skill://ui/SKILL.md`, the only skills whose paths are their names alone,
+  and Solid's beneath the UI library's, `skill://ui/skills/<name>/SKILL.md`. No two plugins are installed by one name, so no skill's address is
   another's.
   """
-  alias OneCore.{Plugin, Plugins}
+  alias OneCore.{App, Plugin, Plugins}
   alias OneCore.Plugins.{Store, Version}
 
   @installing """
@@ -152,6 +153,7 @@ defmodule OneCore.Skills do
       [] -> :absent
       [{_skill, :own, _at}] -> {:ok, Plugin.skill(Plugins.running(who))}
       [{_skill, {:own, text}, _at}] -> {:ok, text}
+      [{skill, :ui, at}] -> {:ok, App.library().files[skill.at <> at]}
       [{skill, {artifact, code}, at}] -> Store.file(artifact, code, skill.at <> at)
     end
   end
@@ -167,10 +169,12 @@ defmodule OneCore.Skills do
         {path, skill, {version.artifact, version.code}}
       end
 
+    ui = for skill <- App.library().skills, do: {Enum.join(["ui" | Path.split(skill.at)], "/"), skill, :ui}
+
     [
       {@own, Map.merge(own, %{at: "", files: []}), :own},
       {"installing-plugins", Map.merge(installing, %{at: "", files: []}), {:own, @installing}}
-      | plugins
+      | ui ++ plugins
     ]
   end
 

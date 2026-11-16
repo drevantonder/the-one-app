@@ -8,7 +8,9 @@ defmodule OneCore.Application do
   # their list doesn't start: `{:not_joined, key}` says so, with its key. The plugins The One App ships with are
   # the network's, so a server acting for it deploys the ones the network has never had, and those whose
   # latest version a server bundled from other files, once it's started (`OneCore.Plugins.Deploy.deploy_bundled/0`), saying
-  # each in the log and to `builds` as it goes, and `OneCore.Plugins.Deploy.await_bundled/0` waits for them.
+  # each in the log and to `builds` as it goes. Then every server builds again the apps built against another UI library
+  # than the one it ships with (`OneCore.Plugins.Deploy.rebuild/0`), and `OneCore.Plugins.Deploy.await_bundled/0` waits
+  # for both.
   @impl true
   def start(_type, _args) do
     # Plugins tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
@@ -20,13 +22,12 @@ defmodule OneCore.Application do
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do
-        if Servers.here?("network"),
-          do:
-            Supervisor.start_child(
-              OneCore.Supervisor,
-              Supervisor.child_spec({Task, &Deploy.deploy_bundled/0}, id: :bundled)
-            )
+        shipped = fn ->
+          if Servers.here?("network"), do: Deploy.deploy_bundled()
+          Deploy.rebuild()
+        end
 
+        Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, shipped}, id: :bundled))
         started
       end
     else

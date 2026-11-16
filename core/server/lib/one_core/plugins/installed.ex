@@ -90,9 +90,17 @@ defmodule OneCore.Plugins.Installed do
 
   @doc "Whether `name` is one a plugin is installed by: `:ok`, or `{:error, why}`."
   def named(name) do
-    if is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/,
-      do: :ok,
-      else: {:error, "A plugin's name is lowercase letters, digits and hyphens, starting with a letter"}
+    cond do
+      not (is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/) ->
+        {:error, "A plugin's name is lowercase letters, digits and hyphens, starting with a letter"}
+
+      # A client finds the UI library where it finds a plugin's files, by this name (`OneCore.MCP`).
+      name == "ui" ->
+        {:error, "ui is the UI library's, which is One Core's own: name the plugin something else"}
+
+      true ->
+        :ok
+    end
   end
 
   @doc """

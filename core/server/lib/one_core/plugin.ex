@@ -242,14 +242,14 @@ defmodule OneCore.Plugin do
     around it with a `^` under the place.
   - Solid and the UI library are in every client already, so an app leaves them out and is small; an app that needs
     nothing more installs nothing. Packages of its own are installed as it's built. It's built with the UI library's own
-    build, as the version of the UI library that runs for whoever it's for holds it, and built again when that changes.
+    build, as the server it's deployed on ships it, and built again once a server's build brings another.
   - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`
-    (skill://ui/ui/skills/solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names
+    (skill://ui/skills/solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names
     by its code.
     They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. What it renders
     with is `@solidjs/web`, not `solid-js/web`, and `Dynamic` is `dynamic` there.
-  - The UI library, the plugin `ui`, is what an app's UI is written with, so every app looks and moves the same. Its skill,
-    `ui`, has every component with an example. It speaks to the client for the app: its `call` and `changed` are
+  - The UI library, One Core's own, is what an app's UI is written with, so every app looks and moves the same. Its
+    skill, `ui`, has every component with an example. It speaks to the client for the app: its `call` and `changed` are
     how an app asks and hears, done.
   - The UI library's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
     For something the UI library lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are

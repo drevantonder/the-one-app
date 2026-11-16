@@ -185,12 +185,12 @@ for kind in "${servers[@]}"; do
   beam=$(echo "$release"/erts-*/bin/beam.smp)
   "$objcopy" --strip-all "$beam"
 
-  # What it ships with, which it deploys as a folder is (`client::files`): the plugins, with their NIFs built beside
-  # their source, the UI library's build, and the Bun it builds apps with.
+  # What it ships with: the plugins, which it deploys as a folder is (`client::files`), with their NIFs built beside
+  # their source, the UI library's build, which it builds apps against and serves, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
   git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
   for nif in plugins/*/server/nif/*/*.so; do cp "$nif" "$release/shipped/${nif#plugins/}"; done
-  cp -R core/ui/dist "$release/shipped/ui"
+  cp -R core/ui/dist "$release/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 
   tar -czf "$out/server-$kind.tar.gz" -C "$release" .

@@ -78,11 +78,8 @@ defmodule Mix.Tasks.Network do
     end
   end
 
-  # The plugins The One App ships with, as this repo has them: each one's folder, and the UI library as it's built.
-  defp bundled do
-    plugins = Map.new(Path.wildcard(Path.join(@root, "plugins/*")), &{Path.basename(&1), &1})
-    Map.put(plugins, "ui", Path.join(@root, "core/ui/dist"))
-  end
+  # The plugins The One App ships with, as this repo has them: each one's folder.
+  defp bundled, do: Map.new(Path.wildcard(Path.join(@root, "plugins/*")), &{Path.basename(&1), &1})
 
   defp start(folder, server, options) do
     address = options[:address]
@@ -95,6 +92,7 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :home, Path.join(folder, server))
     Application.put_env(:one_core, :name, options[:name])
     Application.put_env(:one_core, :bundled, bundled())
+    Application.put_env(:one_core, :ui, Path.join(@root, "core/ui/dist"))
     Mix.Task.run("app.config")
 
     case Application.ensure_all_started(:one_core) do

@@ -1,34 +1,56 @@
 defmodule OneCore.App do
   @moduledoc """
   Builds a plugin's apps from their source, which is what's deployed: the folder `client/` of the plugin's files, apps
-  written in Solid with the UI library. The UI library is a plugin, `ui`, and an app is built with the build the UI library itself holds,
-  its folder `build/` (`ui/app.js` as the UI library was built), which Bun runs: so the UI library an app is built against is the
-  UI library it loads, whichever version of it runs for whoever the app is for. What a client is served at `client/` is what
-  that built. The code of the UI library it was built against is kept there too, as `client/ui`, which no page loads.
+  written in Solid with the UI library. The UI library is One Core's own (`core/ui`), and a server ships with its build,
+  its `:ui` setting, as an app ships with the framework it's written in: a server's build is what changes it. An app is
+  built with the build the UI library holds, its folder `build/` (`core/ui/app.js`), which Bun runs, so the UI library
+  an app is built against is the one its server serves it with. What a client is served at `client/` is what that
+  built. The code of the UI library it was built against is kept there too, as `client/ui`, which no page loads.
 
   The files deployed are kept beside the plugin's code as they were (`OneCore.Plugins`), to change and deploy again.
   An app that names packages of its own in `client/package.json` has them installed as it's built; one that names none
   installs nothing.
   """
-  alias OneCore.Server
-  alias OneCore.Plugins.{Store, Version}
+  alias OneCore.{Server, Skills}
+  alias OneCore.Plugins.Version
 
   @client "client/"
   @ui "client/ui"
   @build "build/"
 
   @doc """
+  The UI library this server ships with, as it's built: its `files` by their paths, its `code`, which names them, and
+  its `skills`. A client is served its `client/` (`OneCore.MCP`), and agents its skills (`OneCore.Skills`).
+  """
+  def library do
+    with nil <- :persistent_term.get({__MODULE__, :library}, nil) do
+      folder = Application.fetch_env!(:one_core, :ui)
+
+      files =
+        for path <- Path.wildcard(Path.join(folder, "**"), match_dot: true), File.regular?(path), into: %{} do
+          {Path.relative_to(path, folder), File.read!(path)}
+        end
+
+      skills = Map.filter(files, fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
+      {:ok, skills} = Skills.found("ui", skills)
+      library = %{files: files, code: Version.code(files), skills: skills}
+      :persistent_term.put({__MODULE__, :library}, library)
+      library
+    end
+  end
+
+  @doc """
   Whether a plugin's files hold an app's source to build: a page in `client/`. One whose `client/` has none was built
-  already, as the UI library's is.
+  already.
   """
   def app?(files), do: Enum.any?(Map.keys(files), &(String.starts_with?(&1, @client) and Path.extname(&1) == ".html"))
 
   @doc """
-  The files of a plugin with an app as a server keeps them, from the files deployed and `ui`, the version of the
-  UI library that runs for whoever it's deployed for. `{:error, why}` says why it didn't build: the compiler's own words, a
-  problem to a line, with its file and line.
+  The files of a plugin with an app as a server keeps them, from the files deployed, built against this server's UI
+  library. `{:error, why}` says why it didn't build: the compiler's own words, a problem to a line, with its file and
+  line.
   """
-  def build(files, %Version{} = ui) do
+  def build(files) do
     {app, rest} = Map.split_with(files, fn {path, _} -> String.starts_with?(path, @client) end)
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
@@ -38,7 +60,7 @@ defmodule OneCore.App do
       write(source, for({path, text} <- app, do: {String.replace_prefix(path, @client, ""), text}))
 
       with {:ok, bun} <- bun(),
-           {:ok, builder} <- builder(bun, ui),
+           {:ok, builder} <- builder(bun),
            :ok <- install(bun, source),
            :ok <- run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder) do
         built =
@@ -51,7 +73,7 @@ defmodule OneCore.App do
         as_is =
           Map.filter(app, fn {path, _} -> String.starts_with?(MIME.from_path(path), ~w(image/ audio/ video/ font/)) end)
 
-        {:ok, rest |> Map.merge(as_is) |> Map.merge(built) |> Map.put(@ui, ui.code)}
+        {:ok, rest |> Map.merge(as_is) |> Map.merge(built) |> Map.put(@ui, library().code)}
       end
     after
       File.rm_rf!(folder)
@@ -61,64 +83,33 @@ defmodule OneCore.App do
   @doc "The code of the UI library an app was built against, from the files a server keeps of its plugin, or `nil` for one with no app."
   def ui(kept), do: kept[@ui]
 
-  # The UI library's build, with what it builds with installed: its folder, made whole beside it and moved in, so a folder
-  # that's there is ready.
-  defp builder(bun, ui) do
-    {files, folder} = build(ui)
-
-    cond do
-      files == [] ->
-        {:error, "The UI library, #{ui.artifact}, has no build/ to build an app with. Deploy a UI library that has one."}
-
-      File.dir?(folder) ->
-        {:ok, folder}
-
-      true ->
-        writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-
-        try do
-          write(writing, for({path, _hash} <- files, do: {String.replace_prefix(path, @build, ""), read(ui, path)}))
-
-          with :ok <- run(bun, ~w(install --frozen-lockfile --production), "The UI library's build didn't install", writing) do
-            # Another build may have made it meanwhile, which is as good.
-            with {:error, _} <- File.rename(writing, folder), do: :ok
-            {:ok, folder}
-          end
-        after
-          File.rm_rf!(writing)
-        end
-    end
-  end
-
-  # A UI library's build/ files, each by its path with the hash of what's in it, and the folder on this server its build
-  # is installed in: one for each set of those files, which UI library versions that build alike share.
-  defp build(ui) do
-    files = for {path, hash} <- Enum.sort(Version.hashes(ui)), String.starts_with?(path, @build), do: {path, hash}
-    {files, Path.join([Server.home(), "ui-builds", binary_part(Version.code(files), 0, 16)])}
-  end
-
-  @doc """
-  Removes the UI libraries' builds on this server that none of `running` builds with, as a UI library stops running here: what's
-  kept is what the UI library versions that run need. A build being made is left to finish.
-  """
-  def keep_builds(running) do
+  # The UI library's build, with what it builds with installed: its folder, made whole beside it and moved in, so a
+  # folder that's there is ready. Those an earlier server build made go as this one's is made.
+  defp builder(bun) do
+    files = for {path, text} <- library().files, String.starts_with?(path, @build), into: %{}, do: {path, text}
     builds = Path.join(Server.home(), "ui-builds")
-    needed = for version <- Enum.uniq(running), {[_ | _], folder} <- [build(version)], do: folder
-    there = with {:ok, names} <- File.ls(builds), do: names, else: (_ -> [])
+    folder = Path.join(builds, binary_part(Version.code(files), 0, 16))
 
-    gone =
-      for name <- there,
-          not String.contains?(name, "."),
-          folder = Path.join(builds, name),
-          folder not in needed,
-          do: folder
+    if File.dir?(folder) do
+      {:ok, folder}
+    else
+      writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 
-    Task.start(fn -> Enum.each(gone, &File.rm_rf!/1) end)
-  end
+      try do
+        write(writing, for({path, text} <- files, do: {String.replace_prefix(path, @build, ""), text}))
 
-  defp read(ui, path) do
-    {:ok, text} = Store.file(ui.artifact, ui.code, path)
-    text
+        with :ok <- run(bun, ~w(install --frozen-lockfile --production), "The UI library's build didn't install", writing) do
+          # Another build may have made it meanwhile, which is as good.
+          with {:error, _} <- File.rename(writing, folder), do: :ok
+          for name <- File.ls!(builds), not String.contains?(name, "."), name != Path.basename(folder),
+              do: File.rm_rf!(Path.join(builds, name))
+
+          {:ok, folder}
+        end
+      after
+        File.rm_rf!(writing)
+      end
+    end
   end
 
   defp write(folder, files) do

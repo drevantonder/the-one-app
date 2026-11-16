@@ -432,9 +432,11 @@ defmodule OneCore.Plugins.Version do
   @doc "Whether `path` is of what runs on a server, its Elixir among it: the folder `server/`."
   def server?(path), do: String.starts_with?(path, "server/")
 
-  # Whether a page loads `path`: a client may load nothing it isn't served (`clients/app`'s `APP_MAY_LOAD`), and
-  # is served pages, scripts, stylesheets, pictures, sounds, videos and fonts.
-  defp loaded?(path) do
+  @doc """
+  Whether a page loads `path`: a client may load nothing it isn't served (`clients/app`'s `APP_MAY_LOAD`), and is
+  served pages, scripts, stylesheets, pictures, sounds, videos and fonts.
+  """
+  def loaded?(path) do
     client?(path) and
       (Path.extname(path) in ~w(.html .js .css) or
          String.starts_with?(MIME.from_path(path), ~w(image/ audio/ video/ font/)))

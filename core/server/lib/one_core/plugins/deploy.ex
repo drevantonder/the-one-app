@@ -10,7 +10,7 @@ defmodule OneCore.Plugins.Deploy do
   server ships with for whoever it's installed for, where they aren't there.
   """
   require Logger
-  alias OneCore.{App, Bucket, Folder, Server, Servers}
+  alias OneCore.{App, Bucket, Builds, Folder, Server, Servers}
   alias OneCore.Plugins
   alias OneCore.Plugins.{Installed, Calls, Store, Version}
 
@@ -259,27 +259,22 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # A plugin's app is built against the UI library that runs for whoever it's deployed for, which is brought along as a
-  # plugin it uses is.
+  # A plugin's app is built against this server's UI library (`OneCore.App`).
   defp built(owner, name, files) do
-    if App.app?(files) do
-      with :ok <- bring(owner, name, ["ui"]) do
-        ui = Plugins.running(owner)["ui"]
-        built_before(Plugins.plugin(owner, name), files, ui) || App.build(files, ui)
-      end
-    else
-      {:ok, files}
-    end
+    if App.app?(files),
+      do: built_before(Plugins.plugin(owner, name), files) || App.build(files),
+      else: {:ok, files}
   end
 
   # The apps as the plugin's running version built them, where that was from the same source against the same UI library,
   # since building it again would make the same: `{:ok, files}`, or `nil`.
-  defp built_before(nil, _files, _kit), do: nil
+  defp built_before(nil, _files), do: nil
 
-  defp built_before(artifact, files, ui) do
+  defp built_before(artifact, files) do
     client = &Map.filter(&1, fn {path, _} -> Version.client?(path) end)
 
-    with %Version{ui: code, code: kept} when code == ui.code <- Plugins.version(artifact),
+    with %Version{ui: ui, code: kept} <- Plugins.version(artifact),
+         true <- ui == App.library().code,
          true <- client.(Store.source(artifact, kept)) == client.(files) do
       {:ok,
        Map.merge(
@@ -292,22 +287,44 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Builds again, from its source, each app built against a UI library that has changed since, as a server acting for
-  whoever the plugin is, as they would deploy it again.
+  Builds again, from its source, the app of each plugin anyone has deployed that was built against another UI library
+  than this server's, installed or not, as a server acting for whoever the plugin is, as they would deploy it again. A server does it as it starts, on a build no published server
+  build is newer than: so a server release rebuilds every app once, on the first server to take it, the others finding
+  it done, and a server left on an older build never builds them back. One another server built meanwhile against the
+  same UI library is done, not a failure.
   """
   def rebuild do
-    for {owner, installed} <- Plugins.installed(),
-        {name, artifact} <- installed,
-        %Version{ui: built_with} = version <- [Plugins.version(artifact)],
-        built_with != nil,
-        ui = Plugins.running(owner)["ui"],
-        ui != nil and ui.code != built_with,
-        whose = Store.whose(artifact),
-        Servers.runs?(whose) and Plugins.plugin(whose, Path.basename(artifact)) == artifact,
-        uniq: true do
-      with {:error, why} <- deploy(whose, Path.basename(artifact), Store.source(artifact, version.code)),
-           do: Logger.error("#{name}'s app wasn't built again against the UI library that changed: #{why}")
-    end
+    code = App.library().code
+
+    for %{plugin: artifact} <- if(newest?(), do: deployed(), else: []),
+        {whose, name} = {Store.whose(artifact), Path.basename(artifact)},
+        Servers.runs?(whose),
+        built_with(artifact) not in [nil, code],
+        {_number, kept, _tag} <- [Store.latest(artifact)],
+        # It stays as installed, or not, as it was.
+        install? = fn _version -> Plugins.plugin(whose, name) == artifact end,
+        {:error, why} <- [deploy(whose, name, Store.source(artifact, kept), :kept, install?)],
+        built_with(artifact) != code,
+        do: Logger.error("#{artifact}'s app wasn't built again against this server's UI library: #{why}")
+  end
+
+  # The code of the UI library the latest version of a plugin's app was built against, as the bucket has it, or `nil`
+  # for one with no app.
+  defp built_with(artifact) do
+    with {_number, kept, _tag} <- Store.latest(artifact),
+         {:ok, code} <- Store.file(artifact, kept, "client/ui"),
+         do: code,
+         else: (_ -> nil)
+  end
+
+  # Whether no server build the network has published is newer than this server's, by the count a build is named with
+  # (`tooling/version`). A network that has published none, as one being built here, has none newer.
+  defp newest? do
+    count = &with({count, _commit} <- Integer.parse(&1), do: count, else: (_ -> 0))
+
+    Builds.latest()
+    |> Enum.filter(fn {name, _} -> String.starts_with?(name, "server/") end)
+    |> Enum.all?(fn {_name, %{"build" => build}} -> count.(build) <= count.(Builds.build()) end)
   end
 
   # The plugins a plugin uses are there before it is. One this server ships that's running from files a server

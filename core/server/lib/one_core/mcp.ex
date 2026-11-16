@@ -14,14 +14,15 @@ defmodule OneCore.Mcp do
 
   What of a plugin runs in a client, its folder `client/`, is MCP resources: `ui://<plugin>/<code>/<path>`, where
   `code` names the set of files a version runs, so a file at an address never changes. What a page loads is listed,
-  a plugin's apps among it as an MCP App is, and the rest of `client/` is read by name.
+  a plugin's apps among it as an MCP App is, and the rest of `client/` is read by name. The UI library every app
+  loads is One Core's own, the one this server ships with, at `ui://ui/<its code>/client/<path>` (`OneCore.App`).
 
   Skills are served as MCP's Skills Extension says (SEP-2640), in the shapes it gives for the protocol versions a
   server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each of a skill's files is
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
   """
   require Logger
-  alias OneCore.{Artifact, Builds, Edge, Hooks, Plugins, Server, Servers, Services, Skills, Tools, Trace, User}
+  alias OneCore.{App, Artifact, Builds, Edge, Hooks, Plugins, Server, Servers, Services, Skills, Tools, Trace, User}
   alias OneCore.Plugins.{Calls, Store, Version}
 
   # What a server speaks of MCP is the same in each of these.
@@ -223,6 +224,12 @@ defmodule OneCore.Mcp do
     uis =
       Map.new(for {plugin, version} <- running, %{ui: ui} when is_binary(ui) <- version.tools, do: {{plugin, ui}, true})
 
+    %{files: files, code: code} = App.library()
+
+    library =
+      for path <- Enum.sort(Map.keys(files)), Version.loaded?(path),
+          do: %{uri: "ui://ui/#{code}/#{path}", name: path, mimeType: Version.kind(path)}
+
     resources =
       for {plugin, version} <- running, path <- Version.files(version) do
         resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
@@ -244,7 +251,7 @@ defmodule OneCore.Mcp do
         end
       end
 
-    {:ok, %{resources: skills ++ resources}}
+    {:ok, %{resources: skills ++ library ++ resources}}
   end
 
   defp resources("resources/read", %{"uri" => "skill://" <> _ = uri}, who) do
@@ -254,20 +261,33 @@ defmodule OneCore.Mcp do
     end
   end
 
+  defp resources("resources/read", %{"uri" => "ui://ui/" <> _ = uri}, _who) do
+    library = App.library()
+
+    with ["ui:", "", "ui", code, path] when code == library.code <- String.split(uri, "/", parts: 5),
+         true <- Version.client?(path),
+         %{^path => data} <- library.files do
+      {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content(data))]}}
+    else
+      _ -> {:error, -32002, "There's nothing at #{uri}"}
+    end
+  end
+
   defp resources("resources/read", %{"uri" => uri}, who) do
     with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
          true <- Version.client?(path),
          %{^plugin => version} <- Plugins.running(who),
          {:ok, data} <- Store.file(version.artifact, code, path) do
-      # A file that isn't text, such as a picture or a font, is base64 as MCP's `blob`.
-      content = if String.valid?(data), do: %{text: data}, else: %{blob: Base.encode64(data)}
-      {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content)]}}
+      {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content(data))]}}
     else
       _ -> {:error, -32002, "There's nothing at #{uri}"}
     end
   end
 
   defp resources(method, _params, _who), do: {:error, -32601, "This server has no method #{method}"}
+
+  # A file that isn't text, such as a picture or a font, is base64 as MCP's `blob`.
+  defp content(data), do: if(String.valid?(data), do: %{text: data}, else: %{blob: Base.encode64(data)})
 
   # What one server asks of another is run only for a server that says who it asks for, which only one acting
   # for them is believed about. This server runs it if it acts for whoever it's for too.

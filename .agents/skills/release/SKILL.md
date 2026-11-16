@@ -13,7 +13,7 @@ while it runs stops you there: nothing updates the servers afterwards.
 | --- | --- |
 | A plugin (`plugins/<name>/`, here or in a network's repo) | `ONE_FOR=network one deploy --name <name> --files-from plugins/<name>`, from that repo (about 12 s) |
 | A plugin with a NIF (`server/nif/`) | `tooling/nifs`, then the same deploy |
-| The UI library (`core/ui/`) | `bun build.js` in `core/ui/`, then `ONE_FOR=network one deploy --name ui --files-from core/ui/dist`, then the edge |
+| The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |
 | The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
