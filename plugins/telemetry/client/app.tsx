@@ -7,6 +7,59 @@ import { render } from "@solidjs/web"
 import { call, changed, Empty, Icon, leave, List, Problem, Row, Screen, Section, Skeleton, Split, Tabs } from "ui"
 import "./app.css"
 
+/** A slow tool, or an app slow to open, as `telemetry_overview` answers it. */
+interface Slowest {
+  plugin: string
+  tool?: string
+  view?: string
+  called: string
+  p50: number
+  p95: number
+  p99: number
+  count: number
+  failed?: number
+  over_time: (number | null)[]
+}
+
+/** A failure, as `telemetry_overview` answers it. */
+interface Failure {
+  where: string
+  message?: string
+  span?: boolean
+  count: number
+  at: number
+  trace?: string
+}
+
+/** A day of a model's use of AI. */
+interface Spent {
+  model: string
+  input: number
+  output: number
+  cost?: number | null
+}
+
+/** What `telemetry_overview` answers for the range picked. */
+interface Overview {
+  calls: { calls: number; failed: number }[]
+  failing: Failure[]
+  slowest: Slowest[]
+  spending: Spent[]
+  names: Record<string, string>
+  kept: { days: number; bytes: number; most_bytes: number }
+}
+
+/** A span of a trace, as `telemetry_trace` answers it. */
+interface Span {
+  name: string
+  server: string
+  start: number
+  took: number
+  depth: number
+  outcome?: string
+  message?: string
+}
+
 const RANGES = [
   ["1", "Hour"],
   ["24", "Day"],
@@ -14,17 +67,17 @@ const RANGES = [
   ["336", "2 Weeks"],
 ]
 const [hours, setHours] = createSignal("24")
-const overview = createMemo(() => call("telemetry_overview", { hours: Number(hours()) }).then(JSON.parse))
+const overview = createMemo(() => call("telemetry_overview", { hours: Number(hours()) }).then((text): Overview => JSON.parse(text)))
 changed(() => refresh(overview))
 
 /// What's open beside the list: a failure's trace, `{ trace }`, or a slow tool or app, `{ slow }`.
-const [open, setOpen] = createSignal()
+const [open, setOpen] = createSignal<{ trace?: string; where?: string; slow?: Slowest & { key: string } }>()
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
-const count = (n) => compact.format(n ?? 0)
+const count = (n?: number) => compact.format(n ?? 0)
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
 /// How long ago `at` was, in the largest unit that's whole.
-function since(at) {
+function since(at: number) {
   const minutes = Math.round((at - Date.now()) / 60_000)
   if (minutes > -1) return "just now"
   if (minutes > -60) return ago.format(minutes, "minute")
@@ -32,7 +85,7 @@ function since(at) {
   return ago.format(Math.round(minutes / (24 * 60)), "day")
 }
 /// How long something took: "0.4 ms", "12 ms", "1.2 s", "3 min".
-function took(ms) {
+function took(ms?: number | null) {
   if (ms == null) return "–"
   if (ms < 10) return `${ms.toFixed(1)} ms`
   if (ms < 1000) return `${Math.round(ms)} ms`
@@ -40,27 +93,27 @@ function took(ms) {
   return `${Math.round(ms / 60_000)} min`
 }
 const units = ["bytes", "KB", "MB", "GB"]
-function size(bytes) {
+function size(bytes: number) {
   let n = bytes, unit = 0
   while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
   return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
 }
-const dollars = (cost) => cost.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cost < 1 ? 4 : 2 })
+const dollars = (cost: number) => cost.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cost < 1 ? 4 : 2 })
 
 /// A span's name as a person reads it: the plugin's app's name, then its tool.
 /// One Core's own tools are named by themselves.
-function named(where, names) {
+function named(where: string, names: Record<string, string>) {
   const [plugin, ...rest] = where.split(" ")
   if (!rest.length) return where
   return plugin === "one" ? rest.join(" ") : `${names[plugin] ?? plugin} › ${rest.join(" ")}`
 }
 /// A slow tool or app, as a person reads it.
-const slowName = (slow) => (slow.view ? `Opening ${slow.called}` : slow.plugin === "one" ? slow.tool : `${slow.called} › ${slow.tool}`)
+const slowName = (slow: Slowest) => (slow.view ? `Opening ${slow.called}` : slow.plugin === "one" ? slow.tool : `${slow.called} › ${slow.tool}`)
 /// A count of something, said as many or one.
-const many = (n, one, more = `${one}s`) => `${count(n)} ${n === 1 ? one : more}`
+const many = (n: number, one: string, more = `${one}s`) => `${count(n)} ${n === 1 ? one : more}`
 
 /// A line of values, as the widgets' sparkline draws one, with a gap where there are none.
-function Spark(props) {
+function Spark(props: { values: (number | null)[] }) {
   const height = 24
   const points = () => {
     const values = props.values.map((v) => v ?? 0)
@@ -76,7 +129,7 @@ function Spark(props) {
 }
 
 /// Calls in each step of the range, the failed ones at the foot of each bar, under a line saying how many.
-function Calls(props) {
+function Calls(props: { steps: Overview["calls"] }) {
   const max = () => Math.max(...props.steps.map((s) => s.calls), 1)
   const all = () => props.steps.reduce((sum, s) => sum + s.calls, 0)
   const failed = () => props.steps.reduce((sum, s) => sum + s.failed, 0)
@@ -99,13 +152,13 @@ function Calls(props) {
 }
 
 /// A trace whole, as a waterfall: each span under the one it's in, where it started and how long it took.
-function Trace(props) {
-  const trace = createMemo(() => call("telemetry_trace", { id: props.id, hours: 336 }).then(JSON.parse))
+function Trace(props: { id: string; where: string; names: Record<string, string> }) {
+  const trace = createMemo(() => call("telemetry_trace", { id: props.id, hours: 336 }).then((text): { spans: Span[] } => JSON.parse(text)))
   const total = () => Math.max(...trace().spans.map((s) => s.start + s.took), 0.001)
   const servers = () => new Set(trace().spans.map((s) => s.server)).size
   return (
     <Screen heading={named(props.where, props.names)} back>
-      <Errored fallback={(error) => <Problem heading="Can't show this trace" text={String(error().message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show this trace" text={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <p class="hint">
             {took(total())}
@@ -136,7 +189,7 @@ function Trace(props) {
 }
 
 /// How long a tool or an app took over the range: its 95th percentile over time, and its percentiles.
-function Slow(props) {
+function Slow(props: { slow: Slowest }) {
   return (
     <Screen heading={slowName(props.slow)} back>
       <figure class="over-time">
@@ -157,7 +210,7 @@ function Slow(props) {
 }
 
 /// What AI used, per model over the range: tokens in and out, and what it cost where the endpoint said.
-function Spending(props) {
+function Spending(props: { days: Spent[] }) {
   const models = () => {
     const by = Map.groupBy(props.days, (day) => day.model)
     return [...by].map(([model, days]) => ({
@@ -187,14 +240,14 @@ function Spending(props) {
   )
 }
 
-function Telemetry(props) {
+function Telemetry(props: { all: Overview }) {
   const all = () => props.all
   const failing = () => all().failing
   // Each slow tool or app by a key of its own, so the one that's open stays open as it's asked again.
   const slowest = () => all().slowest.map((slow) => ({ ...slow, key: slow.view ? `open|${slow.view}` : `${slow.plugin}|${slow.tool}` }))
   const opened = () => {
     const shown = open()
-    return shown?.slow ? { slow: slowest().find((slow) => slow.key === shown.slow.key) ?? shown.slow } : shown
+    return shown?.slow ? { slow: slowest().find((slow) => slow.key === shown.slow!.key) ?? shown.slow } : shown
   }
   return (
     <Split
@@ -203,15 +256,15 @@ function Telemetry(props) {
       detail={
         <Show when={opened()} fallback={<Show when={failing().length}><Empty>Pick a failure to see its trace.</Empty></Show>}>
           {(shown) => (
-            <Show when={shown().trace} fallback={<Slow slow={shown().slow} />}>
-              {(id) => <Trace id={id()} where={shown().where} names={all().names} />}
+            <Show when={shown().trace} fallback={<Slow slow={shown().slow!} />}>
+              {(id) => <Trace id={id()} where={shown().where!} names={all().names} />}
             </Show>
           )}
         </Show>
       }
     >
       <Screen heading="Telemetry" back onBack={leave}>
-        <Tabs.Root value={hours()} onValueChange={({ value }) => (setOpen(), setHours(value))}>
+        <Tabs.Root value={hours()} onValueChange={({ value }) => (setOpen(), setHours(value!))}>
           <Tabs.List>
             <For each={RANGES}>{(range) => <Tabs.Trigger value={range[0]}>{range[1]}</Tabs.Trigger>}</For>
             <Tabs.Indicator />
@@ -264,7 +317,7 @@ function Telemetry(props) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Telemetry" back onBack={leave}><Problem heading="Can't show Telemetry" text={String(error().message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Telemetry" back onBack={leave}><Problem heading="Can't show Telemetry" text={String((error() as Error).message ?? error())} /></Screen>}>
       <Loading fallback={<Screen heading="Telemetry" back onBack={leave}><Skeleton rows={6} /></Screen>}>
         <Telemetry all={overview()} />
       </Loading>
