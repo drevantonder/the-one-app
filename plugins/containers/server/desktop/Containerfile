@@ -1,0 +1,10 @@
+# The image `desktop`: a virtual display (Xvfb, :99) with a window manager (Openbox) and Chromium on it, for an agent
+# to see with `screenshot` and to drive with xdotool, or through Chromium's DevTools Protocol on port 9222.
+FROM docker.io/library/debian:bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends xvfb openbox chromium xdotool imagemagick x11-utils \
+    fonts-dejavu-core fonts-noto-color-emoji ca-certificates curl procps \
+ && rm -rf /var/lib/apt/lists/*
+ENV DISPLAY=:99 SCREEN=1280x800x24
+COPY --chmod=755 desktop.sh /usr/local/bin/desktop
+CMD ["desktop"]
