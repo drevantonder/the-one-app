@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use client::{Network, RequestError};
@@ -27,14 +27,27 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("toki
 
 /// A server's endpoint, open for as long as the server holds this, with the clients that have a connection open to
 /// it and the ones watching, by their keys, and its connections to other servers by theirs, each with the address
-/// it was made to. A server found gone leaves that address with no connection, and a connection that closed for
+/// it was made to. Where the ones watching are is kept in the file `watching` beside its key too, so a server that
+/// starts again still tells them what changes. A server found gone leaves that address with no connection, and a connection that closed for
 /// want of anything to ask leaves nothing. Nothing looks inside it after a panic, which is what Rustler needs to
 /// hear before it hands one to Elixir.
 struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
     clients: AssertUnwindSafe<Clients>,
     watchers: AssertUnwindSafe<Mutex<HashMap<String, Watcher>>>,
+    watching: AssertUnwindSafe<PathBuf>,
     servers: AssertUnwindSafe<Servers>,
+}
+
+impl Reached {
+    /// Keeps where the clients that are watching are, as `watchers` has them now.
+    fn keep(&self, watchers: &HashMap<String, Watcher>) {
+        let kept: HashMap<&String, &EndpointAddr> =
+            watchers.iter().map(|(key, watcher)| (key, &watcher.address)).collect();
+        if let Ok(kept) = serde_json::to_vec(&kept) {
+            let _ = std::fs::write(&*self.watching, kept);
+        }
+    }
 }
 
 /// The connection each client last made to this server, by the client's key.
@@ -105,10 +118,17 @@ fn start(
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
         let clients = Clients::default();
         tokio::spawn(accept(endpoint.clone(), asked, clients.clone()));
+        let watching = Path::new(&key_file).with_file_name("watching");
+        let kept = std::fs::read(&watching).ok();
+        let kept: HashMap<String, EndpointAddr> =
+            kept.and_then(|kept| serde_json::from_slice(&kept).ok()).unwrap_or_default();
+        let watchers =
+            kept.into_iter().map(|(key, address)| (key, Watcher { address, open: Arc::default() })).collect();
         let reached = Reached {
             endpoint: AssertUnwindSafe(endpoint),
             clients: AssertUnwindSafe(clients),
-            watchers: AssertUnwindSafe(Mutex::default()),
+            watchers: AssertUnwindSafe(Mutex::new(watchers)),
+            watching: AssertUnwindSafe(watching),
             servers: AssertUnwindSafe(Mutex::default()),
         };
         Ok((ResourceArc::new(reached), address))
@@ -161,14 +181,22 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients) {
 
 /// Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes, the
 /// JSON a client is told an address in, or with none, forgets it. A client says only where it is itself.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 fn watch(reached: ResourceArc<Reached>, client: String, address: Option<String>) -> Atom {
     let address = address.and_then(|address| serde_json::from_str::<EndpointAddr>(&address).ok());
     let mut watchers = reached.watchers.lock().expect("no connection panics");
-    match address.filter(|address| address.id.to_string() == client) {
-        Some(address) => watchers.insert(client, Watcher { address, open: Arc::default() }),
-        None => watchers.remove(&client),
+    let changed = match address.filter(|address| address.id.to_string() == client) {
+        // A client says it each time it connects, which changes nothing once it's said.
+        Some(address) if watchers.get(&client).is_some_and(|watcher| watcher.address == address) => false,
+        Some(address) => {
+            watchers.insert(client, Watcher { address, open: Arc::default() });
+            true
+        }
+        None => watchers.remove(&client).is_some(),
     };
+    if changed {
+        reached.keep(&watchers);
+    }
     atoms::ok()
 }
 
@@ -201,6 +229,7 @@ fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
                     // It may have said where it is again since.
                     if watchers.get(&key).is_some_and(|now| Arc::ptr_eq(&now.open, &watcher.open)) {
                         watchers.remove(&key);
+                        reached.keep(&watchers);
                     }
                 }
             }

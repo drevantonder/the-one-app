@@ -19,7 +19,8 @@ defmodule OneCore.Iroh do
 
   @doc """
   Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes:
-  `address`, the JSON a client is told one in. With `nil`, forgets it.
+  `address`, the JSON a client is told one in. With `nil`, forgets it. It's kept in the file `watching` beside the
+  server's key, which the endpoint starts with.
   """
   def watch(_endpoint, _client, _address), do: :erlang.nif_error(:nif_not_loaded)
 

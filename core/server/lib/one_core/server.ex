@@ -5,7 +5,8 @@ defmodule OneCore.Server do
   it when something changed, and the other servers when there's something to look for in the bucket. Its network's
   address, if the network has one, is its `:address` setting.
 
-  Everything a server keeps on its machine is in its home.
+  Everything a server keeps on its machine is in its home, where the clients watching it are among them, so one that
+  starts again tells them too.
   """
   use GenServer
   alias OneCore.{Edge, Hooks, Iroh, Mcp, Plugins, Servers, Trace}
@@ -159,6 +160,9 @@ defmodule OneCore.Server do
     {:ok, machine} = :inet.gethostname()
     name = Application.get_env(:one_core, :name) || to_string(machine)
     Servers.started(key, address, name, Application.get_env(:one_core, :for, "network"))
+    # The clients that were watching before it stopped may have missed something meanwhile, a new build of its
+    # plugins among them, so they're told to ask again.
+    changed()
     {:ok, %{endpoint: endpoint}}
   end
 
