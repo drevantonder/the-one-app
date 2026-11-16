@@ -132,63 +132,82 @@ export class Own extends WorkerEntrypoint<PresignerEnv, { plugin: string }> {
 
   blob(name: string) {
     if (!isBlob(name)) throw new Error("That isn't a blob's name");
-    return `${this.env.BUCKET}/${NETWORK}own/${this.ctx.props.plugin}/${name.split("/").map(encodeURIComponent).join("/")}`;
+    return blob(this.env, `${NETWORK}own/${this.ctx.props.plugin}/${name}`);
   }
+}
+
+const OPERATIONS = ["read", "write", "replace", "list", "remove"] as const;
+
+/** What a server asks of the bucket: one operation, on a blob's key, or for a list the start of the keys it lists. */
+interface Ask {
+  operation: (typeof OPERATIONS)[number]
+  key: string
+  /** A replace's: the tag of the blob it replaces. */
+  tag?: unknown
+  /** A list's: where the keys it lists start, as the bucket said with the ones before. */
+  after?: string
 }
 
 /**
- * Signs one request to the bucket for the server `by`, which shows `token`: `{read: key}`, `{write: key}` (only if
- * absent), `{replace: key, tag}` (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. Answers what to
- * send: its method, URL and headers.
+ * The ask in `body`, or null if it isn't one: `{read: key}`, `{write: key}` (only if absent), `{replace: key, tag}`
+ * (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. It names one operation, so that what's checked
+ * is what's signed.
  */
-/** What a server asks the presigner to sign. */
-interface Ask {
-  read?: string
-  write?: string
-  replace?: string
-  tag?: unknown
-  list?: string
-  after?: string
-  remove?: string
-}
-
-async function sign(env: PresignerEnv, by: string, token: string | null, body: string) {
-  let ask: Ask;
+function asked(body: string): Ask | null {
+  let ask;
   try {
     ask = JSON.parse(body);
   } catch {
-    return refuse(400, "An ask is JSON");
+    return null;
   }
-  const key = ask.read ?? ask.write ?? ask.replace ?? ask.list ?? ask.remove;
-  if (!isBlob(key, ask.list !== undefined)) return refuse(400, "That isn't a blob's key");
+  const named = OPERATIONS.filter((operation) => ask?.[operation] !== undefined);
+  if (named.length !== 1) return null;
+  const [operation] = named;
+  const key = ask[operation];
+  return isBlob(key, operation === "list") ? { operation, key, tag: ask.tag, after: ask.after } : null;
+}
+
+/**
+ * Signs one request to the bucket for the server `by`, which shows `token`, if it may send it. Answers what to send:
+ * its method, URL and headers.
+ */
+async function sign(env: PresignerEnv, by: string, token: string | null, body: string) {
+  const ask = asked(body);
+  if (!ask) return refuse(400, "An ask is JSON that names one blob's key, to read, write, replace, list or remove");
+  const { operation, key } = ask;
 
   const [network, owners] = await Promise.all([list(env, NETWORK), list(env, owner(key))]);
   const listed = network?.includes(by) || owners?.includes(by);
   // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
   // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
   // list. The secret opens nothing after that, since the bucket lets only the first write land.
-  const first = ask.write === NETWORK + "servers" && same(said(token ?? "").first, env.FIRST_SERVER);
+  const first = operation === "write" && key === NETWORK + "servers" && same(said(token ?? "").first, env.FIRST_SERVER);
   const server = SERVER.exec(key)?.[1];
-  const reads = ask.read !== undefined || ask.list !== undefined;
-  const open = (server === by || (server && ask.read !== undefined) || (OPEN.test(key) && reads)) && (await admits(env, by, token));
-  const installer = ((ask.write !== undefined || ask.remove !== undefined) && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
+  const reads = operation === "read" || operation === "list";
+  const open = (server === by || (server && operation === "read") || (OPEN.test(key) && reads)) && (await admits(env, by, token));
+  const installer = ((operation === "write" || operation === "remove") && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
   const installed = installer && (await list(env, installer + "/"))?.includes(by);
   if (!listed && !first && !open && !installed) return refuse(403, "You aren't on its list of servers");
 
-  const url = new URL(env.BUCKET);
-  const headers: Record<string, string> = {};
-  if (ask.list !== undefined) {
-    url.search = new URLSearchParams({ "list-type": "2", prefix: key, ...(ask.after && { "continuation-token": ask.after }) }).toString();
-  } else {
-    url.pathname += "/" + key.split("/").map(encodeURIComponent).join("/");
-    if (ask.write !== undefined) headers["if-none-match"] = "*";
-    if (ask.replace !== undefined) headers["if-match"] = String(ask.tag);
-  }
+  const { method, url, headers } = request(env, ask);
   url.searchParams.set("X-Amz-Expires", String(SIGNED_FOR));
-  const method = ask.remove !== undefined ? "DELETE" : ask.write !== undefined || ask.replace !== undefined ? "PUT" : "GET";
   const signed = await bucket(env).sign(url, { method, headers, aws: { signQuery: true } });
   return Response.json({ method, url: signed.url, headers });
 }
+
+/** The request to the bucket that `ask` is, unsigned: its method, URL and headers. */
+function request(env: PresignerEnv, { operation, key, tag, after }: Ask) {
+  const url = new URL(operation === "list" ? env.BUCKET : blob(env, key));
+  if (operation === "list") url.search = new URLSearchParams({ "list-type": "2", prefix: key, ...(after && { "continuation-token": after }) }).toString();
+  const headers: Record<string, string> = {};
+  if (operation === "write") headers["if-none-match"] = "*";
+  if (operation === "replace") headers["if-match"] = String(tag);
+  const method = operation === "remove" ? "DELETE" : operation === "write" || operation === "replace" ? "PUT" : "GET";
+  return { method, url, headers };
+}
+
+/** A blob's address in the bucket, each part of its key as it is, so the bucket reads no `%2F` in one as a `/`. */
+const blob = (env: PresignerEnv, key: string) => `${env.BUCKET}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
 /**
  * Whether `key` is one of the network's own, by the token it shows: `null`, or `{until}` for a token that ends. A
@@ -219,7 +238,7 @@ async function servers(env: PresignerEnv, of: unknown): Promise<string[]> {
 /** The list of servers kept under `prefix`, `null` if there's none yet, and nobody's for no prefix. */
 async function list(env: PresignerEnv, prefix: string | undefined): Promise<string[] | null> {
   if (!prefix) return [];
-  const got = await bucket(env).fetch(`${env.BUCKET}/${prefix}servers`);
+  const got = await bucket(env).fetch(blob(env, `${prefix}servers`));
   if (got.status === 404) return null;
   if (!got.ok) throw new Error(`The bucket answered ${got.status} for ${prefix}servers`);
   return got.json();

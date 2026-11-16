@@ -536,7 +536,13 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
         refused in OneCore.Bucket.Refused -> String.replace(refused.message, ~r/^.*refused: /, "refused by the presigner: ")
       end
       IO.puts("    #{blob}: #{said}")
-    end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
+    end
+    # What it may read it may not replace by asking for both at once.
+    ask = JSON.encode!(%{read: "network/servers", replace: "network/servers", tag: "*"})
+    said = Req.post!(address <> "/presigner/sign", body: ask, headers: OneCore.Edge.signed("/presigner/sign", ask))
+    said.status == 400 || raise "this was signed, and should not be: #{ask}"
+    IO.puts("    network/servers, read and replaced in one ask: refused by the presigner: #{said.body["error"]}")' \
+    "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
     users/bob/made/notes/list/text network/own/permissions/log/0000000000000001 groups/family/own/diary/1 \
     users/bob/installed network/plugins/notes/latest 2>&1 | grep -v "^$")
 else
