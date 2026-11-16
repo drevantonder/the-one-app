@@ -1055,7 +1055,8 @@ impl Client {
 
     /// Has `request` carry the span it is, as W3C's `traceparent` in its `_meta`, which a server's span of it is under,
     /// so a trace runs from this client on. Gives the span as a record for `report`, should it fail or be slow.
-    /// An MCP client's `initialize` says which it is, for what it reports.
+    /// An MCP client says which it is, for what it reports: in `initialize`, or in each request's `_meta` from MCP's
+    /// 2026-07-28 on.
     fn span(&self, request: &mut Value) -> Value {
         let ids = SecretKey::generate().to_bytes();
         let (trace, span) = (hex(&ids[..16]), hex(&ids[16..24]));
@@ -1064,10 +1065,14 @@ impl Client {
             meta["traceparent"] = json!(format!("00-{trace}-{span}-01"));
         }
         let method = request["method"].as_str().unwrap_or_default();
-        if method == "initialize" {
+        let client = match method {
+            "initialize" => &request["params"]["clientInfo"]["name"],
+            _ => &request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"]["name"],
+        };
+        if client.is_string() {
             let mut resource = self.resource.write().expect("no report panics");
             resource.insert("service.name".into(), json!("mcp"));
-            resource.insert("mcp.client.name".into(), request["params"]["clientInfo"]["name"].clone());
+            resource.insert("mcp.client.name".into(), client.clone());
         }
         // A span's name is MCP's: its method, and the tool it calls, if it calls one.
         let tool = request["params"]["name"].as_str().filter(|_| method == "tools/call");
