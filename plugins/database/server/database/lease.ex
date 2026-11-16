@@ -149,6 +149,16 @@ defmodule Database.Lease do
   @impl true
   def terminate(_reason, lease), do: close(lease)
 
+  # A database open under an earlier version of this module carries on open under this one, with what this one
+  # keeps that that one didn't filled in: it saw the log's next entry free too long ago to answer from its copy
+  # without looking again, and opened the database long enough ago to write at once.
+  @impl true
+  def code_change(_was, lease, _extra) do
+    {monotonic, system} = clocks()
+    long_ago = %{opened: monotonic - @writes_after, proved: {monotonic - @answers_for, system - @answers_for}}
+    {:ok, Map.merge(%{firing: %{}}, Map.merge(long_ago, lease, fn _key, long_ago, kept -> kept || long_ago end))}
+  end
+
   # Runs `fun` with the database in a transaction, and writes what it changed as the log's next entry. Gives
   # `{:ok, result, lease}` once that's written, `{:lost, lease}` if another server wrote that entry first, so
   # the lease has gone and what `fun` wrote with it, or `{{:raised, kind, reason, stacktrace}, lease}` if `fun`
