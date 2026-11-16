@@ -45,7 +45,7 @@ defmodule OneCore.Plugins.Deploy do
            {:ok, number} <- Store.keep(artifact, name, kept, files, from, sandbox),
            :ok <- Store.describe(version),
            :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
-        listed(owner, name, version)
+        listed(artifact, version)
         if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}]), else: Version.unload(version)
         Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
         {:ok, number, warnings}
@@ -126,9 +126,10 @@ defmodule OneCore.Plugins.Deploy do
     deployed
   end
 
-  # That `owner` deployed the plugin `name`, with the apps this version has, among what everyone has deployed.
-  defp listed(owner, name, version) do
-    blob = "#{@deployed}#{owner}/#{name}"
+  # The plugin `artifact`, with the apps this version has, among what everyone has deployed, under whose it is: a
+  # person who deploys the network's plugin updates the network's.
+  defp listed(artifact, version) do
+    blob = "#{@deployed}#{Store.whose(artifact)}/#{Path.basename(artifact)}"
 
     said =
       %{
