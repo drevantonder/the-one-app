@@ -2,6 +2,7 @@
 // the widgets put on it and its apps' icons. Swiping moves between them, and so does sliding along the dots.
 // Touch and hold, or right-click, for what an app or a widget offers; hold and move to put it somewhere else.
 // Where the window is wide, a sidebar lists every page's apps and Settings' beside them, and an app opens beside it.
+// There it is how you pick a page, so the page's name and the dots, which are for where there is none, aren't shown.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { call, changed, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
@@ -126,6 +127,12 @@ function Card(props) {
 /// What the window shows, as it says (`notifications/one/showing`): an app and who it's for, or this.
 const [showing, setShowing] = createSignal({ app: HOME })
 addEventListener("message", ({ source, data }) => source === parent && data?.method === "notifications/one/showing" && setShowing(data.params))
+
+/// Whether the window is wide and tall enough for the sidebar: the window's page (clients/app/page/client.js) keeps
+/// an app beside it on the same query.
+const beside = matchMedia("(min-width: 48rem) and (min-height: 30rem)")
+const [sidebar, setSidebar] = createSignal(beside.matches)
+beside.addEventListener("change", () => setSidebar(beside.matches))
 
 /// The sidebar's sections its user collapsed, kept on this device.
 const [collapsed, setCollapsed] = createSignal(new Set(stored("collapsed") ?? []))
@@ -320,7 +327,7 @@ function Home(props) {
 
   onSettled(() => {
     const keys = (event) => {
-      if (event.target.closest?.("input, textarea, dialog, .sidebar")) return
+      if (sidebar() || event.target.closest?.("input, textarea, dialog")) return
       if (event.key === "ArrowRight") go(at() + 1)
       else if (event.key === "ArrowLeft") go(at() - 1)
     }
@@ -354,8 +361,10 @@ function Home(props) {
   ]
 
   return (
-    <div class="home">
-      <Sidebar sections={sections()} at={at} go={(index) => go(index, false)} />
+    <div class={["home", { beside: sidebar() }]}>
+      <Show when={sidebar()}>
+        <Sidebar sections={sections()} at={at} go={(index) => go(index, false)} />
+      </Show>
       <main class="pages">
         <div class="strip" ref={strip} onScroll={() => setAt(Math.round(Math.abs(strip.scrollLeft) / strip.clientWidth))}>
           <For each={props.home.pages} keyed={(page) => page.who}>
@@ -369,15 +378,17 @@ function Home(props) {
             </div>
           </section>
         </div>
-        <footer>
-          <p>{names()[at()]}</p>
-          <nav class="dots" onPointerDown={slide} aria-label="Pages">
-            <For each={props.home.pages} keyed={(page) => page.who}>
-              {(page, index) => <button type="button" class="dot" aria-label={page().name} aria-current={at() === index() ? "page" : undefined} onClick={press(() => go(index()))}><i /></button>}
-            </For>
-            <button type="button" aria-label="Settings" aria-current={at() === names().length - 1 ? "page" : undefined} onClick={press(() => go(names().length - 1))}><Icon name="gear-six" /></button>
-          </nav>
-        </footer>
+        <Show when={!sidebar()}>
+          <footer>
+            <p>{names()[at()]}</p>
+            <nav class="dots" onPointerDown={slide} aria-label="Pages">
+              <For each={props.home.pages} keyed={(page) => page.who}>
+                {(page, index) => <button type="button" class="dot" aria-label={page().name} aria-current={at() === index() ? "page" : undefined} onClick={press(() => go(index()))}><i /></button>}
+              </For>
+              <button type="button" aria-label="Settings" aria-current={at() === names().length - 1 ? "page" : undefined} onClick={press(() => go(names().length - 1))}><Icon name="gear-six" /></button>
+            </nav>
+          </footer>
+        </Show>
       </main>
       <Offers />
       <Adding />

@@ -22,7 +22,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 ## Home Screen
 
 - A page has no title at its top. Its name is small above the dots.
-- The dots are a centred capsule. Swiping moves between pages, and so does sliding along the dots.
+- On a phone the dots are a centred capsule; a wide window has the Sidebar instead, and no dots or page name. Swiping moves between pages, and so does sliding along the dots.
 - The top of a page keeps the gap a phone's own home screen has.
 - Settings is a cog at the end of the dots, with no Back.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.

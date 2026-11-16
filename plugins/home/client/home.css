@@ -1,5 +1,5 @@
 /* The Home Screen: a strip of pages to swipe between, and under them the page's name and the dots. Where the window
-   is wide, the sidebar beside them. */
+   is wide (`.beside`), the sidebar beside them instead of the dots. */
 html,
 body {
   height: 100%;
@@ -17,25 +17,19 @@ body {
 }
 
 /* The sidebar, as wide as the window's page (clients/app/page/client.css) leaves it clear of the app beside it, and
-   only where it's that wide and tall enough not to be a phone on its side. Its parts are shadcn's sidebar's. */
-.sidebar {
-  display: none;
+   only where it's wide and tall enough not to be a phone on its side. Its parts are shadcn's sidebar's. */
+.home.beside {
+  grid-template-columns: auto minmax(0, 1fr);
 }
-@media (min-width: 48rem) and (min-height: 30rem) {
-  .home {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .sidebar {
-    box-sizing: border-box;
-    display: block;
-    width: 16rem;
-    padding: 0.5rem;
-    overflow-y: auto;
-    scrollbar-width: none;
-    border-inline-end: 1px solid var(--sidebar-border);
-    background: var(--sidebar);
-    color: var(--sidebar-foreground);
-  }
+.sidebar {
+  box-sizing: border-box;
+  width: 16rem;
+  padding: 0.5rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-inline-end: 1px solid var(--sidebar-border);
+  background: var(--sidebar);
+  color: var(--sidebar-foreground);
 }
 .sidebar .section {
   padding-block: 0.375rem;
