@@ -75,6 +75,11 @@ defmodule OneCore.Tools do
             type: "boolean",
             description:
               "Whether it runs in sandbox mode. Left out, it runs as the version before did, and a new one doesn't"
+          },
+          new: %{
+            type: "boolean",
+            description:
+              "Whether a new plugin is meant where one by this name is installed for someone else you're in: the network, a group of yours or you. Left out, that's refused, since the new one would answer first, empty"
           }
         },
         required: ["name", "files"]
@@ -385,6 +390,8 @@ defmodule OneCore.Tools do
       plugin -> reaches!(asked, plugin, "editor")
     end
 
+    if plugin == nil and inputs["new"] != true, do: elsewhere!(asked, name)
+
     case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :kept), sandbox) do
       {:ok, number, warnings} ->
         mode = if sandbox, do: ", in sandbox mode", else: ""
@@ -552,6 +559,25 @@ defmodule OneCore.Tools do
       IO.puts(Release.update_asked())
       "#{here()} is taking the latest builds, and answers again once it has."
     end)
+  end
+
+  # Raises where a plugin named `name` is installed for someone else whoever asked is in, whose plugins they find
+  # too: a new one would answer first for whoever it's deployed for, empty, as a second copy.
+  defp elsewhere!({by, who}, name) do
+    member = &(Hooks.validate("reach", %{"who" => by, "relation" => "member", "artifact" => &1}, {by, &1}) == :ok)
+    groups = for {"groups/" <> _ = group, %{^name => _}} <- Plugins.installed(), member.(group), do: group
+    others = for owner <- Enum.uniq([User.owner(by), "network" | groups]), owner not in [nil, who], do: owner
+
+    case for(owner <- others, Plugins.plugin(owner, name), do: owner) do
+      [] ->
+        :ok
+
+      [owner | _] ->
+        to = if owner == by, do: "without ONE_FOR", else: "with ONE_FOR=#{owner}"
+
+        raise "#{name} is installed for #{owner}, so this would make a second, empty #{name} for #{who} that answers " <>
+                "first. To update the one there is, deploy it #{to}; to make a second one, pass --new."
+    end
   end
 
   # This server, as a person picks it: what its machine is called, or its key where it has no name.
