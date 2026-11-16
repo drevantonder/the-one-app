@@ -7,17 +7,17 @@
 // `/llms.txt` tells an assistant that's pointed at the network how to come in, as Settings › Connect Your AI asks.
 import { env } from "cloudflare:workers";
 import { requireMcpAuth } from "@better-auth/mcp";
-import { asked, assistant, at, browserDevice, who } from "./auth.js";
+import { asked, assistant, at, browserDevice, who, type Ask, type Auth } from "./auth.ts";
 
 /** A server on this list acts for the network, and so for everyone in it. */
 const NETWORK = "network/";
 /** The JSON-RPC error a server answers a device that's nobody's (`OneCore.Mcp`). */
 const NOBODY = -32003;
 
-const refuse = (status, why) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
+const refuse = (status: number, why: string) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
 
 export default {
-  async fetch(request) {
+  async fetch(request: Request) {
     const url = new URL(request.url);
     const auth = await at(url.origin);
     if (url.pathname === "/llms.txt") return new Response(llms(url.origin), { headers: { "content-type": "text/markdown; charset=utf-8" } });
@@ -28,10 +28,10 @@ export default {
     if (url.pathname.startsWith("/sign-in/auth/") || url.pathname.startsWith("/.well-known/")) return auth.handler(request);
     return env.ASSETS.fetch(request);
   },
-};
+} satisfies ExportedHandler;
 
 /** What an assistant reads to come into the network at `origin`, as llmstxt.org has it. */
-const llms = (origin) => `# ${new URL(origin).host}
+const llms = (origin: string) => `# ${new URL(origin).host}
 
 > A One App network: a family's or a workplace's apps, files and devices. An assistant comes in as the person who
 > lets it in, and does what they can.
@@ -46,14 +46,14 @@ const llms = (origin) => `# ${new URL(origin).host}
 `;
 
 /** The key that signed what was asked, as the pieces of the edge check it, or null. */
-const signerKey = (request, body) => env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
+const signerKey = (request: Request, body: string) => env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
 
-async function mcp(request, auth, url) {
+async function mcp(request: Request, auth: Auth, url: URL) {
   // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
 
   // One of the network's own devices signs what it asks with its key. One that's nobody's is told so by the
-  // server, and asks for a code to be let in by (`auth.js`).
+  // server, and asks for a code to be let in by (`auth.ts`).
   if (request.headers.has("one-key")) {
     const body = await request.text();
     const device = await signerKey(request, body);
@@ -61,7 +61,7 @@ async function mcp(request, auth, url) {
     return forward(body, device, [NETWORK]);
   }
 
-  // A browser signed in here is the device its session is (`auth.js`). One that's nobody's signs in again.
+  // A browser signed in here is the device its session is (`auth.ts`). One that's nobody's signs in again.
   if (!request.headers.has("authorization")) {
     const signedIn = await auth.api.getSession({ headers: request.headers });
     if (signedIn) {
@@ -76,7 +76,7 @@ async function mcp(request, auth, url) {
   const approve = requireMcpAuth(
     auth,
     async (request, claims) => {
-      const answer = await forward(await request.text(), await assistant(claims.azp, claims.sub), [`${claims.who}/`, NETWORK]);
+      const answer = await forward(await request.text(), await assistant(claims.azp as string, claims.sub as string), [`${claims.who}/`, NETWORK]);
       if (!(await nobodys(answer))) return answer;
       const challenge = `Bearer error="invalid_token", resource_metadata="${url.origin}/.well-known/oauth-protected-resource/mcp"`;
       return new Response(null, { status: 401, headers: { "www-authenticate": challenge } });
@@ -90,8 +90,8 @@ async function mcp(request, auth, url) {
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `device`, and answers what the server
  * did. What's asked says which device it's from and who it's for, and nothing else of itself.
  */
-async function forward(message, device, of) {
-  let call;
+async function forward(message: string, device: string, of: string[]) {
+  let call: { method?: unknown; params?: { _meta?: { for?: unknown } } };
   try {
     call = JSON.parse(message);
     if (typeof call?.method !== "string") throw new Error("not a request");
@@ -113,9 +113,9 @@ async function forward(message, device, of) {
 }
 
 /** Whether a server answered that the device is nobody's. The answer is left to be sent on if it isn't. */
-async function nobodys(answer) {
+async function nobodys(answer: Response) {
   if (answer.status !== 200) return false;
-  const said = await answer.clone().json();
+  const said = await answer.clone().json<{ error?: { code?: number } }>();
   return said.error?.code === NOBODY;
 }
 
@@ -125,16 +125,16 @@ async function nobodys(answer) {
  * invitation, the first owner's included, is only the network's to make, since it can make someone nobody acts for
  * yet, and so is taking someone out and listing everyone, which a person's own server isn't told.
  */
-async function ask(request, auth, url) {
+async function ask(request: Request, auth: Auth, url: URL) {
   const body = await request.text();
   const server = await signerKey(request, body);
-  let what;
+  let what: Ask;
   try {
     what = JSON.parse(body);
   } catch {
     return Response.json({ error: "An ask is JSON" }, { status: 400 });
   }
-  const of = ["invite", "owner", "everyone", "remove_person"].includes(what.ask) ? [NETWORK] : [NETWORK, `${what.who}/`];
+  const of = ["invite", "owner", "everyone", "remove_person"].includes(what.ask ?? "") ? [NETWORK] : [NETWORK, `${what.who}/`];
   const acting = (await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat();
   if (!server || !acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
   return Response.json(await asked(auth, url.origin, what));
@@ -145,7 +145,7 @@ async function ask(request, auth, url) {
  * Devices lists it. An app's page has an origin of its own in the web client, so its files are asked for with no
  * cookie, and the signed session in their address says whose they are.
  */
-async function apps(request, auth) {
+async function apps(request: Request, auth: Auth) {
   const { headers, response: signedIn } = await auth.api.getSession({ headers: request.headers, returnHeaders: true });
   if (!signedIn) return Response.json({ error: "Sign in" }, { status: 401 });
   const { secret } = await auth.$context;
@@ -158,9 +158,9 @@ async function apps(request, auth) {
 }
 
 /** The key a session is signed with into the address of its apps' files: this Worker's secret, as HMAC's. */
-const signing = (secret) => crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+const signing = (secret: string) => crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
 /** What's signed for a session. */
-const signs = (session) => new TextEncoder().encode(`apps/${session}`);
+const signs = (session: string) => new TextEncoder().encode(`apps/${session}`);
 
 /**
  * What an app's page loads in the web client: `/apps/<session, signed>/<app>/<plugin>/<path>` is `path` among the
@@ -168,25 +168,25 @@ const signs = (session) => new TextEncoder().encode(`apps/${session}`);
  * address for each app (`clients/app/src/lib.rs`). An app opened for a group or the network says so after its name,
  * last part first (`notes.family.groups`).
  */
-async function file(auth, url) {
+async function file(auth: Auth, url: URL) {
   const [signed, app, plugin, ...path] = url.pathname.slice("/apps/".length).split("/");
   const [session, hex = ""] = signed.split(".");
   const { adapter, internalAdapter, secret } = await auth.$context;
   const signature = Uint8Array.from(hex.match(/../g) ?? [], (byte) => parseInt(byte, 16));
   const valid = await crypto.subtle.verify("HMAC", await signing(secret), signature, signs(session));
-  const kept = valid && (await adapter.findOne({ model: "session", where: [{ field: "id", value: session }] }));
+  const kept = valid && (await adapter.findOne<{ userId: string; expiresAt: Date }>({ model: "session", where: [{ field: "id", value: session }] }));
   if (!kept || kept.expiresAt < new Date()) return new Response("Sign in again", { status: 401 });
-  const user = await internalAdapter.findUserById(kept.userId);
+  const user = (await internalAdapter.findUserById(kept.userId))!;
   const [, ...whose] = app.split(".");
   const meta = whose.length ? { _meta: { for: whose.reverse().join("/") } } : {};
-  const ask = async (method, params) => {
+  const ask = async <Result,>(method: string, params: object): Promise<Result | null> => {
     const answer = await forward(JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, ...meta } }), await browserDevice(session), [`${who(user)}/`, NETWORK]);
     if (answer.status !== 200) return null;
-    return (await answer.json()).result;
+    return (await answer.json<{ result: Result }>()).result;
   };
-  const listed = await ask("resources/list", {});
+  const listed = await ask<{ resources: { uri: string }[] }>("resources/list", {});
   const version = listed?.resources.map(({ uri }) => uri.split("/")).find(([scheme, , of]) => scheme === "ui:" && of === plugin)?.[3];
-  const read = version && (await ask("resources/read", { uri: `ui://${plugin}/${version}/${path.join("/")}` }));
+  const read = version ? await ask<{ contents: { blob?: string; text?: string; mimeType: string }[] }>("resources/read", { uri: `ui://${plugin}/${version}/${path.join("/")}` }) : null;
   const found = read?.contents?.[0];
   if (!found) return new Response(`There's nothing at ${url.pathname}`, { status: 404 });
   const body = found.blob ? Uint8Array.from(atob(found.blob), (char) => char.charCodeAt(0)) : found.text;

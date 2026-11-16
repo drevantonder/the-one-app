@@ -1,6 +1,6 @@
 {
   "name": "network-sign-in",
-  "main": "worker.js",
+  "main": "worker.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them.

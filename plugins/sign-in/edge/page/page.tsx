@@ -24,12 +24,12 @@ const another = opened.get("passkey")
 const code = asked.get("user_code")
 const app = asked.has("app")
 /// Why the app shows a new code, in the words the device says it in (`NotApproved` in `core/client/src/lib.rs`).
-const why = app && { denied: "It was denied where you signed in.", expired: "Its code expired before it was approved. Try again." }[asked.get("why")]
+const why = app && { denied: "It was denied where you signed in.", expired: "Its code expired before it was approved. Try again." }[asked.get("why") ?? ""]
 /// A code as it's shown, in two halves: WDJB-MJHT.
 const shown = code && code.replace(/(.{4})(?=.)/g, "$1-")
 
 /// What this page asks Better Auth besides the passkey.
-async function ask(path, body) {
+async function ask<T = unknown>(path: string, body: object): Promise<T> {
   const answer = await fetch(`/sign-in/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
   const said = await answer.json()
   if (!answer.ok) throw new Error(said.message ?? "That didn't work. Try again.")
@@ -37,25 +37,27 @@ async function ask(path, body) {
 }
 
 /// The assistant that asked to be let in, or the device whose code this is once this person is shown it.
-const [acts, setActs] = createSignal()
+const [acts, setActs] = createSignal<string>()
 /// Whether this person is signed in here, for a device's code: they're asked for the passkey only if not.
-const [signedIn, setSignedIn] = createSignal()
-const [problem, setProblem] = createSignal()
-const [done, setDone] = createSignal()
+const [signedIn, setSignedIn] = createSignal<boolean>()
+const [problem, setProblem] = createSignal<string>()
+const [done, setDone] = createSignal<string>()
 /// The name someone joining goes by, as they type it.
 const [called, setCalled] = createSignal("")
-if (request) ask("/oauth2/public-client-prelogin", { client_id: asked.get("client_id"), oauth_query: request }).then((client) => setActs(client.client_name))
+if (request) ask<{ client_name: string }>("/oauth2/public-client-prelogin", { client_id: asked.get("client_id"), oauth_query: request }).then((client) => setActs(client.client_name))
 
 /// Claims the device's code for whoever is signed in here, which only they can then answer, and learns what it is.
 async function claim() {
-  const { data, error } = await auth.device({ query: { user_code: code } })
+  const { data, error } = await auth.device({ query: { user_code: code! } })
   if (error?.status === 429) throw new Error("That's too many tries. Try again later.")
-  if (error?.error === "expired_token") throw new Error("Expired. Start again on the device.")
+  // Better Auth's server answers an expired code `expired_token`, which its client's types leave out.
+  if ((error?.error as string | undefined) === "expired_token") throw new Error("Expired. Start again on the device.")
   if (error) throw new Error("No device is showing that code.")
   // Someone else opened this link first, and it's theirs to answer.
   if (!data.client_id) throw new Error("Someone else is approving this device.")
   if (data.status !== "pending") throw new Error("Already approved.")
-  setActs(data.name)
+  // What the device calls itself, which this network's hook adds (`edge/auth.ts`).
+  setActs((data as { name?: string }).name)
 }
 if (code && !app)
   auth.getSession().then(({ data }) => {
@@ -69,7 +71,7 @@ async function signIn() {
   if (another) {
     const { error } = await auth.passkey.addPasskey({ context: another, name: ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ") })
     // Better Auth's own words for a device that holds a passkey of theirs already, which is all the browser says.
-    if (error?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
+    if ((error as { code?: string } | null)?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
     if (error) throw new Error(error.message ?? "That passkey wasn't made. Try again.")
     return setDone("Your passkey is created. Go back to the app.")
   }
@@ -80,7 +82,7 @@ async function signIn() {
   if (invite) await ask("/update-user", { called: called().trim() })
   if (request) {
     // Signing in was saying yes, so the assistant is sent back with what it came for.
-    const { url } = await ask("/oauth2/consent", { accept: true, oauth_query: request })
+    const { url } = await ask<{ url: string }>("/oauth2/consent", { accept: true, oauth_query: request })
     return location.replace(url)
   }
   // Signed in, someone is shown their Home Screen: this browser has the app too, the web client.
@@ -90,7 +92,7 @@ async function signIn() {
 }
 
 /// This person's answer to the device whose code they compared.
-async function answer(yes) {
+async function answer(yes: boolean) {
   await ask(yes ? "/device/approve" : "/device/deny", { userCode: code })
   setDone(yes ? `It's yours now: ${acts()}. Go back to it.` : `Denied: ${acts()} wasn't approved.`)
 }

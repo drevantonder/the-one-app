@@ -13,6 +13,61 @@ import { deviceAuthorization, jwt } from "better-auth/plugins";
 import { mcp } from "@better-auth/mcp";
 import { passkey } from "@better-auth/passkey";
 import Bowser from "bowser";
+import type { BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
+
+declare global {
+  namespace Cloudflare {
+    /** Its bindings: its database and page, and what the edge gives every plugin's part (`core/edge/edge.js`). */
+    interface Env {
+      DB: D1Database;
+      ASSETS: Fetcher;
+      OWN: { write(name: string, data: string): Promise<boolean>; remove(name: string): Promise<void> };
+      NETWORK: {
+        verifiedKey(url: string, headers: Record<string, string>, body: string): Promise<string | null>;
+        servers(of: string): Promise<string[]>;
+      };
+      RELAY: {
+        forward(server: string, message: string): Promise<string | null>;
+        notify(message: string): Promise<void>;
+        seen(keys: string[]): Promise<Record<string, "on" | number | null>>;
+      };
+    }
+  }
+}
+
+/** What of Better Auth's database adapter is used here, whatever options it was made with. */
+type Adapter = Pick<DBAdapter, "findMany" | "findOne" | "create" | "update" | "delete" | "deleteMany" | "incrementOne">;
+
+/** Someone, as Better Auth keeps them here: `users/<name>`, and the name they go by. */
+type User = AuthUser & { called?: string | null };
+
+/** A device or an assistant someone let act as them. */
+interface Device {
+  id: string;
+  userId: string;
+  kind: "app" | "assistant";
+  name: string;
+  createdAt: Date;
+}
+
+/** A device's code, as Better Auth's device authorization keeps it, with what the device calls itself. */
+interface DeviceCode {
+  id: string;
+  deviceCode: string;
+  userCode: string;
+  clientId: string;
+  userId?: string | null;
+  status: "pending" | "approved" | "denied";
+  expiresAt: Date;
+  name: string;
+}
+
+/** An invitation: the hash of its link, whose it is, and when it ends. */
+interface Invite {
+  id: string;
+  userId: string;
+  expiresAt: Date;
+}
 
 /** How long ago someone may have answered the passkey question for it to count as them saying yes now, in seconds. */
 const FRESH = 5 * 60;
@@ -24,44 +79,44 @@ const INVITED_FOR = 7 * 24 * 60 * 60 * 1000;
  */
 const WRONG_CODES = { max: 5, window: 15 * 60 };
 
-const hex = (bytes) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-const sha256 = async (text) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+const hex = (bytes: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+const sha256 = async (text: string) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
 
 /** What a browser is called, from what it says of itself: "Chrome on Linux". */
-function browser(agent) {
+function browser(agent?: string | null) {
   const { browser, os } = Bowser.parse(agent || " ");
   return [browser.name, os.name].filter(Boolean).join(" on ") || "A browser";
 }
 
 /** A user as relation tuples name them. Their name here is the part after `users/`. */
-export const who = (user) => `users/${user.name}`;
+export const who = (user: { name: string }) => `users/${user.name}`;
 
 /**
  * The device an assistant somewhere else is, to a server: one for each program a person let in, named by both.
  * It's the size of a key and nobody's key, so it never names a device that connects by one.
  */
-export const assistant = (client, user) => sha256(`${client}\n${user}`);
+export const assistant = (client: string, user: string) => sha256(`${client}\n${user}`);
 
 /**
  * The device a browser that's signed in here is, to a server: one for each of its sessions, the size of a key and
  * nobody's key, as an assistant's is.
  */
-export const browserDevice = (session) => sha256(`browser\n${session}`);
+export const browserDevice = (session: string) => sha256(`browser\n${session}`);
 
 /** What signs this Worker's cookies and tokens, made on first use and kept beside what it protects. */
 async function secret() {
   await env.DB.exec("create table if not exists secret (secret text not null)");
   const made = hex(crypto.getRandomValues(new Uint8Array(32)));
   await env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(made).run();
-  return (await env.DB.prepare("select secret from secret").first()).secret;
+  return (await env.DB.prepare("select secret from secret").first<{ secret: string }>())!.secret;
 }
 
 /** Tells every server that whose a device is has changed, so each asks again. */
 const forget = () => env.RELAY.notify(JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/forget", params: { hooks: ["device"] } }));
 
 /** Makes `device` the user's, under `name`, from now on. */
-async function place(adapter, device, kind, name, user) {
-  const [was] = await adapter.findMany({ model: "device", where: [{ field: "id", value: device }] });
+async function place(adapter: Adapter, device: string, kind: Device["kind"], name: string, user: { id: string; name: string }) {
+  const [was] = await adapter.findMany<Device>({ model: "device", where: [{ field: "id", value: device }] });
   if (was) await remove(adapter, was);
   await adapter.create({ model: "device", data: { id: device, userId: user.id, kind, name, createdAt: new Date() }, forceAllowId: true });
   await env.OWN.write(`devices/${device}`, who(user));
@@ -71,34 +126,34 @@ async function place(adapter, device, kind, name, user) {
  * Writes what `user` goes by where a server reads it: the name they chose, and their email where it's one they
  * proved. Better Auth keeps an email for everyone, made up for whoever signs in only with a passkey, which isn't one.
  */
-async function goesBy(user) {
+async function goesBy(user: User) {
   const said = { called: user.called ?? null, email: user.emailVerified ? user.email : null };
   await env.OWN.remove(`people/${user.name}`);
   await env.OWN.write(`people/${user.name}`, JSON.stringify(said));
 }
 
 /** Makes a browser's session one of its person's devices, as a server reads whose a device is. */
-async function browserIn(session) {
-  const user = await env.DB.prepare("select name from user where id = ?").bind(session.userId).first();
-  await env.OWN.write(`devices/${await browserDevice(session.id)}`, who(user));
+async function browserIn(session: { id: string; userId: string }) {
+  const user = await env.DB.prepare("select name from user where id = ?").bind(session.userId).first<{ name: string }>();
+  await env.OWN.write(`devices/${await browserDevice(session.id)}`, who(user!));
 }
 
 /** Makes a browser's session nobody's, on every server. */
-async function browserOut(session) {
+async function browserOut(session: string) {
   await env.OWN.remove(`devices/${await browserDevice(session)}`);
   await forget();
 }
 
 /** Makes a device nobody's, on every server. */
-async function remove(adapter, device) {
+async function remove(adapter: Adapter, device: { id: string }) {
   await adapter.delete({ model: "device", where: [{ field: "id", value: device.id }] });
   await env.OWN.remove(`devices/${device.id}`);
   await forget();
 }
 
 /** The invitation a link carries, if it's one that still stands. The link is kept nowhere: only its hash is. */
-async function invited(adapter, link) {
-  const [invite] = await adapter.findMany({ model: "invite", where: [{ field: "id", value: await sha256(link ?? "") }] });
+async function invited(adapter: Adapter, link: string | undefined) {
+  const [invite] = await adapter.findMany<Invite>({ model: "invite", where: [{ field: "id", value: await sha256(link ?? "") }] });
   if (!invite || invite.expiresAt < new Date()) throw new APIError("FORBIDDEN", { message: "That invitation expired. Ask for another." });
   return invite;
 }
@@ -107,7 +162,7 @@ async function invited(adapter, link) {
 const ASKS_BY_KEY = ["/sign-in/auth/device/code", "/sign-in/auth/device/token"];
 
 /** A device's code as Better Auth looks it up: its letters and digits, in capitals. */
-const plain = (code) => String(code).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+const plain = (code: unknown) => String(code).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 
 /**
  * Devices, the invitations people join by, and what ties a device's code to its key, beside what Better Auth
@@ -131,10 +186,10 @@ const devices = () => ({
     deviceCode: { fields: { name: { type: "string", required: false } } },
   },
   // Whatever names a key as `client_id` is signed with it (`core/edge/ask.ts`).
-  async onRequest(request) {
+  async onRequest(request: Request) {
     if (!ASKS_BY_KEY.includes(new URL(request.url).pathname)) return;
     const body = await request.clone().text();
-    let client;
+    let client: unknown;
     try {
       client = JSON.parse(body).client_id;
     } catch {}
@@ -161,15 +216,15 @@ const devices = () => ({
         matcher: (ctx) => ctx.path === "/device/code" && !(ctx.context.returned instanceof Error),
         handler: createAuthMiddleware(async (ctx) => {
           const name = String(ctx.body.name ?? "").trim().slice(0, 100) || "A device";
-          await ctx.context.adapter.update({ model: "deviceCode", where: [{ field: "deviceCode", value: ctx.context.returned.device_code }], update: { name } });
+          await ctx.context.adapter.update({ model: "deviceCode", where: [{ field: "deviceCode", value: (ctx.context.returned as { device_code: string }).device_code }], update: { name } });
         }),
       },
       {
         // Whoever the code is shown to is told what it's for.
-        matcher: (ctx) => ctx.path === "/device" && ctx.context.returned?.client_id,
+        matcher: (ctx) => ctx.path === "/device" && !!(ctx.context.returned as { client_id?: string } | undefined)?.client_id,
         handler: createAuthMiddleware(async (ctx) => {
-          const code = await ctx.context.adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.query.user_code) }] });
-          return ctx.json({ ...ctx.context.returned, name: code.name });
+          const code = await ctx.context.adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.query?.user_code) }] });
+          return ctx.json({ ...(ctx.context.returned as object), name: code!.name });
         }),
       },
       {
@@ -177,17 +232,17 @@ const devices = () => ({
         matcher: (ctx) => ctx.path === "/device/approve" && !(ctx.context.returned instanceof Error),
         handler: createAuthMiddleware(async (ctx) => {
           const { adapter } = ctx.context;
-          const code = await adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.body.userCode) }] });
-          const { user } = await getSessionFromCtx(ctx);
-          await place(adapter, code.clientId, "app", code.name, user);
+          const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.body.userCode) }] });
+          const { user } = (await getSessionFromCtx(ctx))!;
+          await place(adapter, code!.clientId, "app", code!.name, user);
         }),
       },
       {
         // The device connects by its key, so the session Better Auth makes for it when it learns its answer would
         // only be listed as a browser that isn't one.
-        matcher: (ctx) => ctx.path === "/device/token" && ctx.context.newSession,
+        matcher: (ctx) => ctx.path === "/device/token" && !!ctx.context.newSession,
         handler: createAuthMiddleware(async (ctx) => {
-          await ctx.context.internalAdapter.deleteSession(ctx.context.newSession.session.token);
+          await ctx.context.internalAdapter.deleteSession(ctx.context.newSession!.session.token);
         }),
       },
       {
@@ -195,18 +250,18 @@ const devices = () => ({
         matcher: (ctx) => ctx.path === "/oauth2/consent" && ctx.body?.accept === true && !(ctx.context.returned instanceof Error),
         handler: createAuthMiddleware(async (ctx) => {
           const { adapter } = ctx.context;
-          const { user } = await getSessionFromCtx(ctx);
-          const client = new URLSearchParams(ctx.body.oauth_query).get("client_id");
-          const [{ name }] = await adapter.findMany({ model: "oauthClient", where: [{ field: "clientId", value: client }] });
+          const { user } = (await getSessionFromCtx(ctx))!;
+          const client = new URLSearchParams(ctx.body.oauth_query).get("client_id")!;
+          const [{ name }] = await adapter.findMany<{ name?: string }>({ model: "oauthClient", where: [{ field: "clientId", value: client }] });
           await place(adapter, await assistant(client, user.id), "assistant", name || "An assistant", user);
         }),
       },
     ],
   },
-});
+}) satisfies BetterAuthPlugin;
 
 /** Better Auth for the network at `origin`, with its tables made. */
-async function made(origin) {
+async function made(origin: string) {
   const auth = betterAuth({
     baseURL: origin,
     basePath: "/sign-in/auth",
@@ -240,8 +295,8 @@ async function made(origin) {
           // Whoever holds an invitation makes their first passkey with it, signed in as nobody yet.
           requireSession: false,
           resolveUser: async ({ ctx, context }) => {
-            const invite = await invited(ctx.context.adapter, context);
-            const user = await ctx.context.internalAdapter.findUserById(invite.userId);
+            const invite = await invited(ctx.context.adapter, context ?? undefined);
+            const user = (await ctx.context.internalAdapter.findUserById(invite.userId))!;
             return { id: user.id, name: user.name };
           },
           afterVerification: async ({ ctx, context }) => {
@@ -262,7 +317,7 @@ async function made(origin) {
         allowUnauthenticatedClientRegistration: true,
         clientRegistrationDefaultApplicationType: "infer",
         // Who the token's holder acts as, so that asking for their servers asks nothing of the database.
-        customAccessTokenClaims: ({ user }) => ({ who: who(user) }),
+        customAccessTokenClaims: ({ user }) => ({ who: who(user!) }),
       }),
       // A new device shows a code, and its link carries it. Its person opens that where they sign in, and says
       // whether the code they're shown matches.
@@ -275,20 +330,23 @@ async function made(origin) {
   return auth;
 }
 
-const auths = new Map();
+/** Better Auth, as this Worker sets it up. */
+export type Auth = Awaited<ReturnType<typeof made>>;
+
+const auths = new Map<string, Promise<Auth>>();
 /** Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. */
-export function at(origin) {
+export function at(origin: string): Promise<Auth> {
   if (!auths.has(origin)) auths.set(origin, made(origin).catch((error) => (auths.delete(origin), Promise.reject(error))));
-  return auths.get(origin);
+  return auths.get(origin)!;
 }
 
 /**
  * The codes no device showed that `user` tried to let a device in by, within `WRONG_CODES.window` of the last:
  * how many, when the last was, and `again()`, which counts one more.
  */
-async function wrong(adapter, user) {
+async function wrong(adapter: Adapter, user: User) {
   const key = `approve/${user.id}`;
-  const [row] = await adapter.findMany({ model: "rateLimit", where: [{ field: "key", value: key }] });
+  const [row] = await adapter.findMany<{ count: number; lastRequest: number | string }>({ model: "rateLimit", where: [{ field: "key", value: key }] });
   const lastRequest = Number(row?.lastRequest ?? 0);
   const count = row && Date.now() - lastRequest < WRONG_CODES.window * 1000 ? row.count : 0;
   const again = () => {
@@ -302,10 +360,10 @@ async function wrong(adapter, user) {
  * A link that `name` joins the network by, as that user, made for them if they're new. It's their only one: an
  * earlier link to join as them no longer works.
  */
-async function invite(adapter, internalAdapter, origin, name, user) {
+async function invite(adapter: Adapter, internalAdapter: Awaited<Auth["$context"]>["internalAdapter"], origin: string, name: string, user: User | undefined) {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
   // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
-  const invitee = user ?? (await internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }));
+  const invitee = user ?? (await internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }, { method: "admin" }));
   return { link: `${origin}/sign-in/#invite=${await invitation(adapter, invitee, INVITED_FOR)}` };
 }
 
@@ -313,7 +371,7 @@ async function invite(adapter, internalAdapter, origin, name, user) {
  * A new invitation for `user` to make a passkey by, lasting `lasts` milliseconds: what's carried after `#invite=` or
  * `#passkey=` in a link. It ends the one made for them before.
  */
-async function invitation(adapter, user, lasts) {
+async function invitation(adapter: Adapter, user: { id: string }, lasts: number) {
   await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: user.id }] });
   const link = hex(crypto.getRandomValues(new Uint8Array(24)));
   await adapter.create({ model: "invite", data: { id: await sha256(link), userId: user.id, expiresAt: new Date(Date.now() + lasts) }, forceAllowId: true });
@@ -321,29 +379,40 @@ async function invitation(adapter, user, lasts) {
 }
 
 /** Whether `user` has joined: they made a passkey. */
-const joined = async (adapter, user) => (await adapter.findMany({ model: "passkey", where: [{ field: "userId", value: user.id }] })).length > 0;
+const joined = async (adapter: Adapter, user: User) => (await adapter.findMany({ model: "passkey", where: [{ field: "userId", value: user.id }] })).length > 0;
 
 /**
  * What a server acting for the network asks, for a person in the app: `{ask, ...}`. Their name is theirs as
  * relation tuples have it, `users/<name>`.
  */
-export async function asked(auth, origin, { ask, who: name, ...about }) {
+/** What a server asks: `ask`, about whom, and what else that ask takes. */
+export interface Ask {
+  ask?: string;
+  who?: string;
+  called?: unknown;
+  device?: string;
+  code?: unknown;
+  passkey?: string;
+}
+
+export async function asked(auth: Auth, origin: string, { ask, who: name, ...about }: Ask) {
   const { adapter, internalAdapter } = await auth.$context;
   const named = String(name ?? "").replace(/^users\//, "");
-  const [user] = await adapter.findMany({ model: "user", where: [{ field: "name", value: named }] });
+  const [user] = await adapter.findMany<User>({ model: "user", where: [{ field: "name", value: named }] });
 
   if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user);
   // The network's first owner is invited only until they've joined, so a link to join as them isn't made after.
   if (ask === "owner") return user && (await joined(adapter, user)) ? { joined: true } : invite(adapter, internalAdapter, origin, named, user);
   // Everyone who has joined, and everyone invited who hasn't yet, with the name each goes by.
   if (ask === "everyone") {
-    const [users, passkeys, invites] = await Promise.all(["user", "passkey", "invite"].map((model) => adapter.findMany({ model })));
-    const has = (rows) => new Set(rows.filter(({ expiresAt }) => !expiresAt || expiresAt > new Date()).map(({ userId }) => userId));
+    type Row = { id: string; userId: string; expiresAt?: Date; name?: string; called?: string | null; email?: string; emailVerified?: boolean };
+    const [users, passkeys, invites] = await Promise.all(["user", "passkey", "invite"].map((model) => adapter.findMany<Row>({ model })));
+    const has = (rows: Row[]) => new Set(rows.filter(({ expiresAt }) => !expiresAt || expiresAt > new Date()).map(({ userId }) => userId));
     const [keyed, invited] = [has(passkeys), has(invites)];
     return {
       people: users
         .filter(({ id }) => keyed.has(id) || invited.has(id))
-        .map((user) => ({ who: who(user), called: user.called ?? null, email: user.emailVerified ? user.email : null, joined: keyed.has(user.id) })),
+        .map((user) => ({ who: who(user as { name: string }), called: user.called ?? null, email: user.emailVerified ? user.email : null, joined: keyed.has(user.id) })),
     };
   }
   if (!user) return { error: `${name} hasn't joined this network.` };
@@ -358,13 +427,13 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
 
   if (ask === "devices") {
     const [devices, browsers, passkeys] = await Promise.all([
-      adapter.findMany({ model: "device", where: mine }),
+      adapter.findMany<Device>({ model: "device", where: mine }),
       internalAdapter.listSessions(user.id),
-      adapter.findMany({ model: "passkey", where: mine }),
+      adapter.findMany<{ id: string; name?: string; createdAt: Date }>({ model: "passkey", where: mine }),
     ]);
     // An app is on while it's connected to the relay, which says when it was last seen otherwise.
     const seen = await env.RELAY.seen(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
-    const when = (id) => (seen[id] === "on" ? { seen: "on" } : seen[id] ? { seen: new Date(seen[id]) } : {});
+    const when = (id: string) => (seen[id] === "on" ? { seen: "on" } : seen[id] ? { seen: new Date(seen[id]) } : {});
     return {
       devices: [
         ...devices.map(({ id, kind, name, createdAt }) => ({ id, kind, name, added: createdAt, ...when(id) })),
@@ -375,12 +444,12 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     };
   }
   if (ask === "remove_device") {
-    const [device] = await adapter.findMany({ model: "device", where: [...mine, { field: "id", value: about.device }] });
+    const [device] = await adapter.findMany<Device>({ model: "device", where: [...mine, { field: "id", value: about.device! }] });
     if (device) {
       await remove(adapter, device);
       // What an assistant was given to come back with ends with it.
       if (device.kind === "assistant") {
-        const clients = await adapter.findMany({ model: "oauthConsent", where: mine });
+        const clients = await adapter.findMany<{ clientId: string }>({ model: "oauthConsent", where: mine });
         for (const { clientId } of clients) {
           if ((await assistant(clientId, user.id)) !== device.id) continue;
           const theirs = [...mine, { field: "clientId", value: clientId }];
@@ -404,7 +473,7 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
       const minutes = Math.ceil((missed.lastRequest + WRONG_CODES.window * 1000 - Date.now()) / 60_000);
       return { error: `That's too many codes no device showed. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` };
     }
-    const code = await adapter.findOne({ model: "deviceCode", where: [{ field: "userCode", value: plain(about.code) }] });
+    const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(about.code) }] });
     // Better Auth forgets a code once its device has learned it was answered, stopped or ended.
     if (!code) {
       await missed.again();
@@ -417,7 +486,7 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
     const where = [
       { field: "id", value: code.id },
       { field: "status", value: "pending" },
-      { field: "userId", operator: "eq", value: code.userId ?? null },
+      { field: "userId", operator: "eq" as const, value: code.userId ?? null },
     ];
     const answered = await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: "approved", userId: user.id } });
     if (!answered) return { error: "Already approved." };
@@ -426,8 +495,8 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
   }
   // Someone taken out of the network: nothing acts as them from then on, they sign in nowhere, and their name is free.
   if (ask === "remove_person") {
-    for (const device of await adapter.findMany({ model: "device", where: mine })) await remove(adapter, device);
-    for (const { id } of await adapter.findMany({ model: "session", where: mine })) await browserOut(id);
+    for (const device of await adapter.findMany<Device>({ model: "device", where: mine })) await remove(adapter, device);
+    for (const { id } of await adapter.findMany<{ id: string }>({ model: "session", where: mine })) await browserOut(id);
     for (const model of ["oauthRefreshToken", "oauthAccessToken", "oauthConsent", "session", "passkey", "invite", "account"])
       await adapter.deleteMany({ model, where: mine });
     await adapter.delete({ model: "user", where: [{ field: "id", value: user.id }] });
@@ -437,7 +506,7 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
   // A link that this person makes another passkey by, in a browser, within a quarter of an hour.
   if (ask === "passkey") return { link: `${origin}/sign-in/#passkey=${await invitation(adapter, user, 15 * 60 * 1000)}` };
   if (ask === "remove_passkey") {
-    const passkeys = await adapter.findMany({ model: "passkey", where: mine });
+    const passkeys = await adapter.findMany<{ id: string; name?: string }>({ model: "passkey", where: mine });
     const passkey = passkeys.find(({ id }) => id === about.passkey);
     if (!passkey) return { error: "That isn't one of your passkeys." };
     if (passkeys.length === 1) return { error: "That's your only passkey, and you sign in with it. Add another before it goes." };
