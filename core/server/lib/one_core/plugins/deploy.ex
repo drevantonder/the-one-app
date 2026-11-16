@@ -21,10 +21,10 @@ defmodule OneCore.Plugins.Deploy do
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
-  (`OneCore.App`). `from` is the git repo its files came from, if they did (`OneCore.Plugins.Store`). Gives its
+  (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/5` takes it. Gives its
   version's number and the compiler's warnings.
   """
-  def deploy(owner, name, files, from \\ nil), do: deploy(owner, name, files, from, fn _version -> true end)
+  def deploy(owner, name, files, from \\ :kept), do: deploy(owner, name, files, from, fn _version -> true end)
 
   # Deploys as `deploy/4` does, installing it for `owner` only where `install?` says so of the version.
   defp deploy(owner, name, files, from, install?) do

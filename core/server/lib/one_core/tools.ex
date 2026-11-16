@@ -51,9 +51,9 @@ defmodule OneCore.Tools do
             }
           },
           from: %{
-            type: "object",
+            type: ["object", "null"],
             description:
-              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, and the `commit`",
+              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, and the `commit`. Left out, the version before's stays; null says they came from none",
             properties: %{
               source: %{type: "string"},
               ref: %{type: ["string", "null"]},
@@ -324,7 +324,7 @@ defmodule OneCore.Tools do
       plugin -> at(User.owner(plugin), forward) && reaches!(asked, plugin, "editor")
     end
 
-    case Deploy.deploy(who, name, Store.received(files), inputs["from"]) do
+    case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :kept)) do
       {:ok, number, ""} -> "#{name} is running, at version #{number}."
       {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
       {:error, why} -> raise why

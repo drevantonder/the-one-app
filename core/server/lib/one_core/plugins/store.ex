@@ -75,8 +75,8 @@ defmodule OneCore.Plugins.Store do
   @doc """
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
-  latest is there, and `from`, the git repo its files came from, is kept with it (`nil` keeps what the version before
-  said). Gives the version's number.
+  latest is there, and `from`, the git repo its files came from, is kept with it (`:kept` keeps what the version
+  before said, and `nil` says they came from none). Gives the version's number.
   """
   def keep(artifact, name, files, deployed, from) do
     code = Version.code(files)
@@ -88,7 +88,14 @@ defmodule OneCore.Plugins.Store do
     was = latest(artifact)
     number = if was, do: elem(was, 0) + 1, else: 1
     source = Version.code(deployed)
-    from = if from, do: Map.put(from, "hash", source), else: about(artifact)["from"]
+
+    from =
+      case from do
+        :kept -> about(artifact)["from"]
+        nil -> nil
+        from -> Map.put(from, "hash", source)
+      end
+
     next = JSON.encode!(Map.reject(%{number: number, code: code, source: source, from: from}, &is_nil(elem(&1, 1))))
 
     wrote =
