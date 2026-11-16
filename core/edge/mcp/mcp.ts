@@ -1,12 +1,13 @@
-// The network's front door: its MCP endpoint over the web (`/mcp`), what tells an assistant how to come in
-// (`/llms.txt`), the web client's apps' files (`/apps`), and the endpoint for whoever holds a sharing link
-// (`/link/<link>`). Each call is passed through the relay to a server acting for whoever it's from, which is told
+// The network's front door: its MCP endpoint over the web (`/mcp`, or in code mode `/mcp?code`), what tells an
+// assistant how to come in (`/llms.txt`), the skills of whoever signed in (`/skills/<path>`), the web client's apps'
+// files (`/apps`), and the endpoint for whoever holds a sharing link (`/link/<link>`). Each call is passed through the relay to a server acting for whoever it's from, which is told
 // which device that is and decides whose it is itself.
 //
 // One of the network's own devices signs what it asks with its key, which is checked here. Anyone else has signed in,
 // and who they are is the plugin's to say that signs people in: it's bound here as WHO, by `edge.js`, and asked
 // `who(request)` (`plugins/sign-in/edge/worker.ts`). With no such plugin, only devices signing with their key come in.
 import { verifiedKey } from "../ask.ts";
+import rules from "../../server/priv/rules.md";
 
 /** Who a request is from, as the plugin that signs people in says. */
 interface Who {
@@ -42,6 +43,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/llms.txt") return new Response(llms(url.origin), { headers: { "content-type": "text/markdown; charset=utf-8" } });
+    if (url.pathname.startsWith("/skills/")) return skill(request, env, url);
     if (url.pathname === "/apps") return apps(request, env);
     if (url.pathname.startsWith("/apps/")) return file(request, env, url);
     // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
@@ -52,20 +54,80 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-/** What an assistant reads to come into the network at `origin`, as llmstxt.org has it. */
+/**
+ * What an assistant reads to come into the network at `origin`, as llmstxt.org has it. Anyone may read it, so it
+ * says nothing of what a network has: which plugins, and their skills, are for whoever signed in.
+ */
 const llms = (origin: string) => `# ${new URL(origin).host}
 
-> A One App network: a family's or a workplace's apps, files and devices. An assistant comes in as the person who
-> lets it in, and does what they can.
+> A One App network: a person's, a family's or a workplace's email, messages, calendar, files, devices and more,
+> each a plugin. An assistant comes in as the person who lets it in, and does what they can, through MCP or the
+> \`one\` command.
 
-## Connecting
+## Rules
 
-- Add ${origin}/mcp as a remote MCP server (a connector), over streamable HTTP. In Claude Code:
-  \`claude mcp add --transport http one ${origin}/mcp\`
-- It signs in with OAuth. The person is asked for their passkey once, and that's their yes.
-- Then their tools are yours: \`tools/list\` lists them. Read a plugin's skill before using its tools:
-  \`resources/list\` lists them, under \`skill://\`, and \`skill://building-plugins/SKILL.md\` says how to make one.
+${rules.trim()}
+
+## Connecting for a person
+
+When someone asks you to connect to this network, do it yourself, and tell them only what they need to do, one step
+at a time, in everyday words.
+
+- If you can run commands (Claude Code, Codex, OpenCode, Cursor): run \`one --version\`. If it answers, you're on one
+  of their computers already: use \`one\`, and add MCP as below. A computer that isn't in their network yet says so,
+  with a link and a code: give them the link, ask them to check it shows that code, and carry on once they've let it
+  in. If there's no \`one\`, add MCP over the web as below instead.
+- If you can't (ChatGPT, Claude and other chat apps): you can't add it yourself, so show them where their app adds a
+  connector (a custom MCP server) and have them add \`${origin}/mcp\`. They sign in when it asks, with their passkey,
+  and then you act as them.
+
+## Adding MCP
+
+There are two ways in, and you choose the one that fits you, or tell the person in one line which you're adding and why:
+
+- Every tool, and \`search\` to find them. For an agent that finds tools itself: Claude Code, OpenCode, Codex, Cursor.
+  On one of their computers, \`one mcp\` over stdio (\`claude mcp add --scope user one -- one mcp\`); anywhere else,
+  \`${origin}/mcp\` over streamable HTTP (\`claude mcp add --transport http one ${origin}/mcp\`).
+- Code mode: \`search\` finds what's possible, \`execute\` runs a short script that calls several tools in one go, and
+  \`deploy\`, \`vault_request\` and \`vault_status\` stay tools of their own. For every other agent. \`one mcp --code\`,
+  or \`${origin}/mcp?code\`.
+
+## Finding your way
+
+- Each plugin has a skill that says when and how to use its tools: read it before them. MCP's \`skills/list\` and
+  \`resources/list\` list them, under \`skill://\`, and \`one <plugin>\` prints one with its tools. Whoever signed in
+  reads them at \`${origin}/skills/<path>\` too, as \`${origin}/skills/building-plugins/SKILL.md\`.
+- \`search\` (\`one search "<words>"\`) finds the tools for a task across every plugin, each with how to call it and its
+  plugin's skill. Before saying you can't, search: a plugin they haven't installed yet may do it, and search offers it.
+- Every MCP tool is also a command: \`gmail_search\` is \`one gmail search\`. \`one run <file>\` runs a script as
+  \`execute\` does.
+- When the person asks for an app, tracker or tool, make it here as a plugin, where it's on all their devices: the
+  skill building-plugins says how.
 `;
+
+/**
+ * A file of a skill, `/skills/<path>/<file>` for `skill://<path>/<file>`, for whoever signed in or one of the
+ * network's own devices, as a server reads it for them. Skills say what plugins someone has, so nobody else reads one.
+ */
+async function skill(request: Request, env: Env, url: URL) {
+  if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
+  const read = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "resources/read", params: { uri: `skill://${url.pathname.slice("/skills/".length)}` } });
+  let answer: Response;
+  if (request.headers.has("one-key")) {
+    const device = await verifiedKey(request, "");
+    if (!device) return new Response("Sign what you ask with your key", { status: 401 });
+    answer = await forward(env, read, { device }, [NETWORK]);
+  } else {
+    const who = await signedIn(request, env);
+    if ("refused" in who) return new Response("Sign in to read a skill", { status: 401 });
+    answer = await forward(env, read, { device: who.device }, [`${who.who}/`, NETWORK]);
+  }
+  if (answer.status !== 200) return answer;
+  const said = await answer.json<{ result?: { contents: { text: string }[] }; error?: { code?: number; message: string } }>();
+  const text = said.result?.contents?.[0]?.text;
+  if (text === undefined) return new Response(said.error?.message ?? "There's no such skill", { status: said.error?.code === NOBODY ? 401 : 404 });
+  return new Response(text, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
+}
 
 /** Who signed in, as the plugin that signs people in says from what `request` carries, its body left here. */
 async function signedIn(request: Request, env: Env) {
@@ -81,15 +143,18 @@ async function mcp(request: Request, env: Env) {
     const body = await request.text();
     const device = await verifiedKey(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    return forward(env, body, { device }, [NETWORK], traceparent);
+    return forward(env, body, { device }, [NETWORK], traceparent, mode(new URL(request.url)));
   }
   // A browser or an assistant someone let in. One that's since become nobody's signs in, or is let in, again.
   const who = await signedIn(request, env);
   if ("refused" in who) return who.refused;
-  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], traceparent);
+  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], traceparent, mode(new URL(request.url)));
   if (!(await nobodys(answer))) return answer;
   return who.challenge ? new Response(null, { status: 401, headers: { "www-authenticate": who.challenge } }) : refuse(401, "Sign in again");
 }
+
+/** How an agent calls tools at `/mcp`: in code mode with `?code` (`OneCore.Mcp`), and otherwise as MCP's tools. */
+const mode = (url: URL) => (url.searchParams.has("code") ? "code" : undefined);
 
 /**
  * Whoever holds a sharing link needs no signing in: the link is all they are. What they ask says it's from the
@@ -109,7 +174,7 @@ async function link(request: Request, env: Env, url: URL) {
  * holder, and answers what the server did. What's asked says who it's from, who it's for (a device's) and the span
  * it's under, and nothing else of itself.
  */
-async function forward(env: Env, message: string, from: { device: string } | { link: string }, of: string[], header?: string) {
+async function forward(env: Env, message: string, from: { device: string } | { link: string }, of: string[], header?: string, mode?: string) {
   let call: { method?: unknown; params?: { _meta?: { for?: unknown; traceparent?: unknown } } };
   try {
     call = JSON.parse(message);
@@ -119,7 +184,7 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   }
   const asks_for = "device" in from ? call.params?._meta?.for : undefined;
   const traceparent = traced(call.params?._meta?.traceparent ?? header);
-  const said = { ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }) };
+  const said = { ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const reached = await env.RELAY.forward(servers, message);

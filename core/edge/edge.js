@@ -44,6 +44,7 @@ const PIECES = {
   // The network's front door.
   mcp: "MCP",
   "llms.txt": "MCP",
+  skills: "MCP",
   apps: "MCP",
   link: "MCP",
 };
