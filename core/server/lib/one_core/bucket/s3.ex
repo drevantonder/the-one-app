@@ -2,7 +2,8 @@ defmodule OneCore.Bucket.S3 do
   @moduledoc """
   A bucket that speaks S3, such as Cloudflare R2, used with no credentials of its own. For each request the server
   asks the presigner at the network's address, which signs that one request if this server is on the list of whoever
-  the blob belongs to, and the server sends what was signed. The address is `where`.
+  the blob belongs to, and the server sends what was signed. A read or a list the presigner sends itself, and answers
+  with what the bucket answered, so it's one trip across the internet rather than two. The address is `where`.
 
   The presigner signs a write only with its condition, so the bucket itself refuses one that would overwrite. A blob's
   tag is its ETag. What the presigner won't sign for this server raises `OneCore.Bucket.Refused`, and a presigner or
@@ -17,15 +18,15 @@ defmodule OneCore.Bucket.S3 do
 
   @impl true
   def read(address, key) do
-    case request(address, %{read: key}) do
+    case answered(address, %{read: key}) do
       %{status: 200, body: data} = got -> {:ok, data, tag(got)}
       %{status: 404} -> :absent
       refused -> raise refusal(refused)
     end
   end
 
-  # Each read is two trips across the internet, to the presigner and then to the bucket, so they're made at once. One
-  # that couldn't be made is raised as it would be alone.
+  # Each read is a trip across the internet, so they're made at once. One that couldn't be made is raised as it would
+  # be alone.
   @impl true
   def read_all(address, keys) do
     read = fn key ->
@@ -65,7 +66,7 @@ defmodule OneCore.Bucket.S3 do
   # A bucket lists a thousand keys at a time, and says where the next ones start.
   @impl true
   def list(address, prefix, next \\ nil) do
-    case request(address, %{list: prefix, after: next}) do
+    case answered(address, %{list: prefix, after: next}) do
       %{status: 200, body: listed} ->
         {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
 
@@ -96,7 +97,7 @@ defmodule OneCore.Bucket.S3 do
   # A blob's size is listed with its key.
   @impl true
   def size(address, key) do
-    case request(address, %{list: key}) do
+    case answered(address, %{list: key}) do
       %{status: 200, body: listed} ->
         {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
 
@@ -117,26 +118,45 @@ defmodule OneCore.Bucket.S3 do
     %{method: method, url: url, headers: headers}
   end
 
-  # A read changes nothing, so one the internet lost or held up is asked for again, as Req asks any GET again. The
-  # bucket starts answering a read well within a second, so one it's said nothing of for this many milliseconds is
-  # taken as lost.
+  # A read changes nothing, so one the internet lost or held up is asked for again. The presigner and the bucket start
+  # answering a read well within a second, so one they've said nothing of for this many milliseconds is taken as lost.
   @reads_within 5_000
 
-  # Has the presigner sign `ask`, and sends what it signed. Req says a request's method as an atom, which is how it
-  # tells a GET it may ask again.
+  # Has the presigner send `ask`, a read or a list, and gives what the bucket answered. What the presigner says
+  # itself, why it won't, is JSON, and is raised.
+  defp answered(address, ask) do
+    ask = JSON.encode!(ask)
+
+    answer =
+      sent(
+        method: :post,
+        url: address <> "/presigner/read",
+        body: ask,
+        headers: Edge.signed("/presigner/read", ask),
+        retry: :transient,
+        decode_body: false,
+        compressed: false,
+        receive_timeout: @reads_within
+      )
+
+    case Req.Response.get_header(answer, "content-type") do
+      ["application/json" <> _] -> raise refused_by(address, answer.status, JSON.decode!(answer.body)["error"])
+      _ -> answer
+    end
+  end
+
+  # Has the presigner sign `ask`, a write or a removal, and sends what it signed.
   defp request(address, ask, data \\ nil) do
     %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask)
-    method = method |> String.downcase() |> String.to_existing_atom()
-    timeout = if method == :get, do: @reads_within, else: :timer.seconds(15)
 
     sent(
-      method: method,
+      method: method |> String.downcase() |> String.to_existing_atom(),
       url: url,
       headers: headers,
       body: data,
       decode_body: false,
       compressed: false,
-      receive_timeout: timeout
+      receive_timeout: :timer.seconds(15)
     )
   end
 
@@ -150,19 +170,17 @@ defmodule OneCore.Bucket.S3 do
     headers = Edge.signed("/presigner/sign", ask)
 
     case sent(method: :post, url: url, body: ask, headers: headers, retry: :transient, receive_timeout: @signs_within) do
-      %{status: 200, body: %{"method" => _method} = signed} ->
-        signed
-
-      %{status: 403, body: %{"error" => why}} ->
-        raise OneCore.Bucket.Refused, "The presigner at #{address} refused: #{why}"
-
-      %{body: %{"error" => why}} ->
-        raise "The presigner at #{address} refused: #{why}"
-
-      refused ->
-        raise refusal(refused)
+      %{status: 200, body: %{"method" => _method} = signed} -> signed
+      %{status: status, body: %{"error" => why}} -> raise refused_by(address, status, why)
+      refused -> raise refusal(refused)
     end
   end
+
+  # What's raised when the presigner at `address` won't: `OneCore.Bucket.Refused` for a server on no list that may.
+  defp refused_by(address, 403, why),
+    do: %OneCore.Bucket.Refused{message: "The presigner at #{address} refused: #{why}"}
+
+  defp refused_by(address, _status, why), do: %RuntimeError{message: "The presigner at #{address} refused: #{why}"}
 
   defp sent(request), do: Edge.send!(request)
 

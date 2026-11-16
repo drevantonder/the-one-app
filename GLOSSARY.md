@@ -12,8 +12,8 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   alone. It is an artifact, holding its key and how to reach it, and is a subject.
 - **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks a
   server, keeps what servers answered, and keeps secrets safe on its device.
-- **Presigner**: the only holder of the bucket's credentials. It hands a server short-lived access to the blobs of those it
-  acts for.
+- **Presigner**: the only holder of the bucket's credentials. It hands a server the blobs of those it acts for, and
+  short-lived access to them.
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
   built on top of one: files, a database, a git repo. Avoid: space.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services, an
