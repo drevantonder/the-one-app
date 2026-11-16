@@ -32,7 +32,7 @@ defmodule Database do
     lease = Lease.of(call)
     if lease == self(), do: raise("A transaction is already running here: use `query` inside it")
 
-    case GenServer.call(lease, {call.own.codec, {:transaction, schema, fun}}, :infinity) do
+    case :gen_statem.call(lease, {call.own.codec, {:transaction, schema, fun}}) do
       {:ok, result} ->
         result
 
@@ -64,7 +64,7 @@ defmodule Database do
     began = System.monotonic_time(:millisecond)
     Call.forward_to(call, server)
     if System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server)
-    :ok = GenServer.call(lease, {:take_over, server}, :infinity)
+    :ok = :gen_statem.call(lease, {:take_over, server})
   end
 
   @doc """
@@ -76,9 +76,12 @@ defmodule Database do
   def schedule(%Call{} = call, jobs, fire) when is_list(jobs) and is_function(fire, 1) do
     lease = Lease.of(call)
 
-    case GenServer.call(lease, {call.own.codec, {:schedule, jobs, fire, System.os_time(:second)}}, :infinity) do
+    case :gen_statem.call(lease, {call.own.codec, {:schedule, jobs, fire, System.os_time(:second)}}) do
       :ok ->
         :ok
+
+      {:raised, kind, reason, stacktrace} ->
+        :erlang.raise(kind, reason, stacktrace)
 
       :codec_changed ->
         opened_again(lease)
