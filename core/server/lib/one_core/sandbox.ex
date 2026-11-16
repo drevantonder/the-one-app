@@ -492,9 +492,16 @@ defmodule OneCore.Sandbox do
 
     boot = Path.rootname(boot)
     elixir = :code.lib_dir(:elixir) |> to_string() |> Path.dirname()
-    libraries = Enum.uniq([Path.join(root, "lib"), elixir])
     child = Application.app_dir(:one_core, "priv/sandbox")
-    ebins = Enum.flat_map(libraries, &Path.wildcard(Path.join(&1, "*/ebin")))
+
+    # Erlang's and Elixir's applications, and the server's libraries, but not the server's own code, which an
+    # installed server's release keeps beside them.
+    apps =
+      for ebin <- Enum.uniq(Path.wildcard(Path.join(root, "lib/*/ebin")) ++ Path.wildcard(Path.join(elixir, "*/ebin"))),
+          not String.starts_with?(Path.basename(Path.dirname(ebin)), "one_core-"),
+          do: Path.dirname(ebin)
+
+    ebins = for app <- apps, do: Path.join(app, "ebin")
 
     # Its own side of One Core is compiled as it starts, unless it was kept.
     compile =
@@ -520,7 +527,7 @@ defmodule OneCore.Sandbox do
       "ERL_CRASH_DUMP_SECONDS" => "0"
     }
 
-    policy = %{read: Enum.uniq([erts, boot <> ".boot", child | libraries] ++ List.wrap(cache)), env: env, memory: @memory}
+    policy = %{read: Enum.uniq([erts, boot <> ".boot", child | apps] ++ List.wrap(cache)), env: env, memory: @memory}
 
     walled(Path.join(erts, "bin/erlexec"), arguments, policy)
   end
