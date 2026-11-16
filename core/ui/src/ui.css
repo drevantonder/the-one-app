@@ -1089,7 +1089,7 @@ button.ui-box {
 .ui-live-screen > .view > .ui-state:not(.over) {
   position: absolute;
   inset: 0;
-  background: var(--background);
+  background: var(--muted);
 }
 /* Where what's typed on it goes: unseen, but focused, so a phone shows its keyboard. */
 .ui-live-screen > .view > .keys {
