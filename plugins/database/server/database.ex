@@ -50,6 +50,10 @@ defmodule Database do
     end
   end
 
+  # How long, in milliseconds, a server that's there takes at most to answer a new connection: QUIC has sent what
+  # it sends again by then (`client::THERE`).
+  @waited 1_000
+
   # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
   # that needs what only another server has can't be passed on again (a Vault item only some servers open, say).
   # Either way this server takes the lease, if the log still names that one, and runs the call itself. But not
@@ -85,10 +89,6 @@ defmodule Database do
         schedule(call, jobs, fire)
     end
   end
-
-  # How long, in milliseconds, a server that's there takes at most to answer a new connection: QUIC has sent what
-  # it sends again by then (`client::THERE`).
-  @waited 1_000
 
   # A database that was open under its artifact's codec before has closed, for the next call to open it.
   defp opened_again(lease) do
