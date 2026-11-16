@@ -6,6 +6,11 @@ description: Read before writing a plugin that keeps data or has scheduled jobs,
 A plugin keeps its data in a database by using this plugin. The database is SQLite, kept in the plugin's own
 artifact for whoever it runs for, so each user and each group has their own.
 
+Its words:
+
+- **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
+  plugin.
+
     def uses, do: ["database"]
 
     @schema ["create table notes (id integer primary key, text text not null, at text not null)"]

@@ -6,7 +6,8 @@ before choosing.
 - Follow Jakob's Law. It is the first rule and comes before every other one here: developers and agents spend most
   of their time in other codebases, so ours works the way those already do. That's its words, its folders, its
   tools, how it's set up and how it's built and tested. A thing is called what its own ecosystem calls it: a NIF, a
-  test, a cache. A word of ours is only for what's ours, and it's in `GLOSSARY.md`.
+  test, a cache. A word of ours is only for what's ours, and it's in `GLOSSARY.md`, or in its plugin's `SKILL.md` where
+  a plugin owns it.
 - Plain English is for sentences. An identifier, a tool, a flag or a file is named with the word that ecosystem's own
   docs use for it (request, response, cache, token, forward, approve, create), never with an everyday verb chosen to
   avoid it.

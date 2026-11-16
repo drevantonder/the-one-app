@@ -1,5 +1,7 @@
 # Glossary
 
+A bundled plugin's own words are defined in that plugin's `SKILL.md`.
+
 - **Network**: one user's, one family's or one workplace's whole: its users, its bucket, its servers and its clients. A
   trusted boundary, not a social network. It is an artifact.
 - **User**: someone in the network, as relation tuples name them. How they sign in is not part of who they are.
@@ -14,18 +16,11 @@
   acts for.
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
   built on top of one: files, a database, a git repo. Avoid: space.
-- **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`, `viewer`,
-  `parent`, `member`) and a subject, as in SpiceDB and OpenFGA. An owner is an editor, and an editor is a viewer. A user, a group, everyone, a server, a
-  plugin and the holder of a sharing link are all a subject. Whoever asks for a call is its actor. Avoid: fact, grant.
-- **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
-  it. For passwords and the keys that reach devices. Avoid: sealed.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services, an
   edge function and kinds of artifact. It uses other artifacts, and is a subject. A git repo can be where its code comes from, but needn't be.
   Avoid: module.
 - **App**: something with UI that goes on a home screen. A plugin provides it. It can have server-side code where it needs
   it, which is its plugin's tools.
-- **Home Screen**: where apps and widgets sit, on its pages. A user has their own, and so does each group and the network. A user sees
-  theirs, their groups' and the network's.
 - **Widget**: what a plugin shows on a Home Screen page at a glance. The plugin returns a layout from a fixed list of parts, in
   a phone's own sizes, and each client draws it. So one widget shows in the client, on a phone's own home screen, and to
   an agent as text. A control in one calls a tool.
@@ -47,8 +42,6 @@
   whether a plugin observes it, mutates it, or validates it, as Kubernetes' admission webhooks do.
   One Core offers some, and a plugin offers its own, named with its name (`recently-deleted.removed`), for plugins it
   can't know of to hook into.
-- **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
-  plugin.
 - **Sharing link**: a subject that is whoever holds it, without signing in. Making one writes a relation tuple naming it.
 - **Gateway**: sends each request at the network's address where its path says.
 - **Relay**: passes traffic between a network's servers and clients when they can't reach each other directly. It

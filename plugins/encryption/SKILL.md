@@ -6,6 +6,11 @@ description: Read before a plugin keeps something that whoever stores the networ
 Encryption keeps an artifact's blobs encrypted in the bucket, so whoever runs the bucket can't read them, and nor
 can a server its owner didn't choose. The Vault keeps its items this way.
 
+Its words:
+
+- **Encrypted artifact**: an artifact whose blobs are encrypted before they're stored, so only holders of its key read
+  it. For passwords and the keys that reach devices. Avoid: sealed.
+
 - Someone's key is made on a device of theirs, and stays on their devices: `approve`, on a device, makes it the
   first time, and after that lets in another device, by the key `key` lists it under. A device that isn't in yet
   asks with `ask`, and a device that is lets it in. No server ever holds the key, and signing in gives none.

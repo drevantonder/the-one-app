@@ -7,6 +7,13 @@ Relations says who may do what, as relation tuples: an artifact, a relation, and
 artifact only if a tuple says so, both for whoever it runs for and for the plugin. Without it, or another
 plugin deciding, nobody but the network's first owner does anything.
 
+Its words:
+
+- **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`, `viewer`,
+  `parent`, `member`) and a subject, as in SpiceDB and OpenFGA. An owner is an editor, and an editor is a viewer. A
+  user, a group, everyone, a server, a plugin and the holder of a sharing link are all a subject. Whoever asks for a
+  call is its actor. Avoid: fact, grant.
+
 - An artifact is named by where its blobs are, and its name starts with whose it is:
   `users/alice/made/notes/7` is alice's, `groups/family/made/notes/2` is the group's. A plugin's tool that
   makes something answers with its name. A group is the artifact `groups/<name>`, and the network `network`.
