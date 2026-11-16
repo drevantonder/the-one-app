@@ -7,23 +7,30 @@ import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, leave, List, open, Problem, Row, Screen, Section, Skeleton, Switch, toast } from "ui"
 import "./app.css"
 
-const json = (tool, inputs) => call(tool, inputs).then(JSON.parse)
+/** A Google app, with the accounts it uses, each as its tool `<app>_accounts` answers it. */
+interface App {
+  name: string
+  title: string
+  accounts: { account: string; ok: boolean }[]
+}
+
+const json = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs).then(JSON.parse)
 const account = decodeURIComponent(location.hash.slice(1))
 
 /// Each Google app, with the accounts it uses.
 const apps = createMemo(() =>
-  json("google-account_apps").then((apps) => Promise.all(apps.map(async (app) => ({ ...app, accounts: await json(`${app.name}_accounts`) })))),
+  json<Omit<App, "accounts">[]>("google-account_apps").then((apps) => Promise.all(apps.map(async (app): Promise<App> => ({ ...app, accounts: await json(`${app.name}_accounts`) })))),
 )
 changed(() => refresh(apps))
 
 /// Does what the person asked, and says what the server said if it wouldn't.
-const does = (what) => what().catch((error) => toast(error.message))
-const signIn = (app) => does(async () => open((await json(`${app.name}_sign_in`, account ? { account } : {})).url))
-const signOut = (app) => does(async () => (await call(`${app.name}_sign_out`, { account }), refresh(apps)))
+const does = (what: () => Promise<unknown>) => what().catch((error) => toast(error.message))
+const signIn = (app: App) => does(async () => open((await json<{ url: string }>(`${app.name}_sign_in`, account ? { account } : {})).url))
+const signOut = (app: App) => does(async () => (await call(`${app.name}_sign_out`, { account }), refresh(apps)))
 
-function Account(props) {
+function Account(props: { apps: App[] }) {
   const using = () => props.apps.filter((app) => app.accounts.some((a) => a.account === account))
-  const out = () => using().filter((app) => !app.accounts.find((a) => a.account === account).ok)
+  const out = () => using().filter((app) => !app.accounts.find((a) => a.account === account)!.ok)
   const all = async () => {
     const sure = await confirm({ heading: `Sign out of ${account}?`, text: "No Google app here uses it any more.", action: "Sign Out", destructive: true })
     if (!sure) return
@@ -61,7 +68,7 @@ function Account(props) {
   )
 }
 
-function Adding(props) {
+function Adding(props: { apps: App[] }) {
   return (
     <Section>
       <p class="how">Sign in, then choose which apps use the account.</p>
@@ -75,7 +82,7 @@ function Adding(props) {
 function Google() {
   return (
     <Screen heading={account || "Google"} back onBack={leave}>
-      <Errored fallback={(error, reset) => <Problem heading="Couldn't show your accounts" text={error().message} action={<Button variant="outline" onClick={reset}>Try again</Button>} />}>
+      <Errored fallback={(error, reset) => <Problem heading="Couldn't show your accounts" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try again</Button>} />}>
         <Loading fallback={<Skeleton rows={3} />}>
           <Show when={apps().length} fallback={<Problem warn heading="No Google app yet" text="Add Gmail, Calendar, Drive, Docs or Sheets from the App Store." />}>
             <Show when={account} fallback={<Adding apps={apps()} />}>
