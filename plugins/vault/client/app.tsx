@@ -8,23 +8,59 @@ import "./app.css"
 import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Split, Switch, toast, useRecoveryKey } from "ui"
 
 /// Whose Vault this is: a person's, a group's or the network's. Left unchosen, it's whoever the app was opened for.
-const [whose, setWhose] = createSignal()
-const ask = (tool, inputs) => call(tool, inputs, { for: whose() }).then(JSON.parse)
+/** A field of an item: a secret one has no value here. */
+interface ItemField {
+  name: string
+  secret: boolean
+  value?: string
+}
+
+/** An item, as `vault_list` answers it. */
+interface Item {
+  name: string
+  fields: ItemField[]
+  hosts: string[]
+  plugins: string[]
+  agents: boolean
+  sign_in?: boolean
+}
+
+/** What a plugin or an agent asked for, waiting for an answer. */
+interface Request {
+  id: string
+  title: string
+  plugin?: string
+  why?: string
+  hosts: string[]
+  fields: { name: string; secret?: boolean }[]
+}
+
+/** A device, as `encryption_key` names it. */
+interface Device {
+  device: string
+  name: string
+}
+
+/** The sheet that's open over the page: a field to type, or a request to answer. */
+type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "request"; request: Request }
+
+const [whose, setWhose] = createSignal<string>()
+const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs, { for: whose() }).then(JSON.parse)
 
 /// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
-const opened = createMemo(() => ask("vault_unlocked_on"))
-const key = createMemo(() => ask("encryption_key"))
-const kept = createMemo(() => (opened().servers.length ? ask("vault_list") : { items: [], requests: [], plugins: [] }))
+const opened = createMemo(() => ask<{ servers: string[]; may: { key: string; name?: string }[] }>("vault_unlocked_on"))
+const key = createMemo(() => ask<{ owner: string; slot?: unknown; check?: unknown; device: string; devices: Device[]; asking: Device[] }>("encryption_key"))
+const kept = createMemo(() => (opened().servers.length ? ask<{ items: Item[]; requests: Request[]; plugins: string[] }>("vault_list") : { items: [], requests: [], plugins: [] }))
 const again = () => [opened, key, kept].forEach(refresh)
 changed(again)
 
 /// Whose Vaults its person can open here: theirs, each group they own, and the network if they own it.
 const owners = createMemo(async () => {
-  const me = (await call("sign-in_people").then(JSON.parse, () => []))[0]?.who
+  const me: string | undefined = (await call("sign-in_people").then(JSON.parse, () => []))[0]?.who
   if (!me) return []
   const [groups, network] = await Promise.all([
-    call("permissions_groups", {}, { for: me }).then(JSON.parse, () => []),
-    call("permissions_check", { artifact: "network", relation: "owner" }, { for: me }).then((said) => JSON.parse(said).may, () => false),
+    call("permissions_groups", {}, { for: me }).then((text): { group: string; called: string; owners: string[] }[] => JSON.parse(text), () => []),
+    call("permissions_check", { artifact: "network", relation: "owner" }, { for: me }).then((said): boolean => JSON.parse(said).may, () => false),
   ])
   const theirs = groups.filter((group) => group.owners.includes(me)).map((group) => ({ value: group.group, label: group.called, whose: /s$/i.test(group.called) ? `${group.called}'` : `${group.called}'s` }))
   return [{ value: me, label: "Yours", whose: "your" }, ...theirs, ...(network ? [{ value: "network", label: "The network's", whose: "the network's" }] : [])]
@@ -34,81 +70,81 @@ const whom = () => owners().find((owner) => owner.value === key().owner)?.whose 
 const Whom = () => whom()[0].toUpperCase() + whom().slice(1)
 
 /// Does something that changes the Vault, and says what the server said if it wouldn't. → whether it did.
-async function does(tool, inputs) {
+async function does(tool: string, inputs: object) {
   try {
     await call(tool, inputs, { for: whose() })
     again()
     return true
   } catch (error) {
-    toast(error.message)
+    toast((error as Error).message)
     return false
   }
 }
 
 /// A field's name as a person reads it: "api_key" is "API key".
-const label = (name) =>
+const label = (name: string) =>
   String(name)
     .split(/[_-]+/)
     .map((word, at) => (/^(api|url|id|ssh|aws|ip)$/i.test(word) ? word.toUpperCase() : at ? word.toLowerCase() : word[0].toUpperCase() + word.slice(1).toLowerCase()))
     .join(" ")
 /// A few things in a sentence: "fake, gmail and your agents".
-const listed = (things) => new Intl.ListFormat("en", { type: "conjunction" }).format(things)
-const sites = (typed) => String(typed ?? "").split(/[\s,]+/).filter(Boolean)
+const listed = (things: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(things)
+const sites = (typed: unknown) => String(typed ?? "").split(/[\s,]+/).filter(Boolean)
 /// What may use an item, in its grey line.
-const users = (item) => [...item.plugins, ...(item.agents ? ["your agents"] : [])]
+const users = (item: Item) => [...item.plugins, ...(item.agents ? ["your agents"] : [])]
 
 /// The item that's open beside the list, by its name, and the sheet that's open over the page.
-const [open, setOpen] = createSignal()
-const [sheet, setSheet] = createSignal()
+const [open, setOpen] = createSignal<string>()
+const [sheet, setSheet] = createSignal<Sheet>()
 const shut = () => setSheet()
 const holds = () => !!key().slot
 
 /// A field of an item to type: a new item's first, a new one of an item's, or one that's there to change.
 function FieldSheet() {
-  const at = () => (sheet()?.kind === "field" ? sheet() : undefined)
+  const at = () => { const open = sheet(); return open?.kind === "field" ? open : undefined }
   const [secret, setSecret] = createSignal(true)
-  const save = async (event) => {
+  const save = async (event: SubmitEvent) => {
     event.preventDefault()
-    const typed = Object.fromEntries(new FormData(event.target))
-    const item = at().item?.name ?? typed.item
-    const inputs = { item, field: at().field?.name ?? typed.field, value: typed.value, secret: at().field ? at().field.secret : secret() }
-    if (!at().item) inputs.hosts = sites(typed.hosts)
-    if ((await does("vault_set", inputs)) && !at().item) setOpen(item)
+    const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement)) as Record<string, string>
+    const item = at()!.item?.name ?? typed.item
+    const inputs: Record<string, unknown> = { item, field: at()!.field?.name ?? typed.field, value: typed.value, secret: at()!.field ? at()!.field!.secret : secret() }
+    if (!at()!.item) inputs.hosts = sites(typed.hosts)
+    if ((await does("vault_set", inputs)) && !at()!.item) setOpen(item)
     shut()
   }
   const remove = async () => {
-    const { item, field } = at()
+    const { item, field } = at() as { item: Item; field: ItemField }
     if (!(await confirm({ heading: `Delete ${label(field.name)}?`, text: "It can't be brought back.", action: "Delete", destructive: true }))) return
     await does("vault_remove", { item: item.name, field: field.name })
     shut()
   }
   return (
-    <Sheet heading={at()?.field ? label(at().field.name) : at()?.item ? "Add Field" : "Add Item"} open={!!at()} onClose={shut}>
+    <Sheet heading={at()?.field ? label(at()!.field!.name) : at()?.item ? "Add Field" : "Add Item"} open={!!at()} onClose={shut}>
       <Show when={at()}>
         <form onSubmit={save}>
-          <Show when={!at().item}>
+          <Show when={!at()!.item}>
             <Field label="Name">
               <Input name="item" placeholder="GitHub" required autofocus />
             </Field>
           </Show>
-          <Show when={!at().field}>
+          <Show when={!at()!.field}>
             <Field label="Field">
               <Input name="field" placeholder="token" pattern="[A-Za-z0-9_]+" autocapitalize="none" spellcheck={false} required />
             </Field>
           </Show>
-          <Field label={at().field ? "New value" : "Value"} hint={(at().field ? at().field.secret : secret()) ? "It's encrypted on this device, and never shown again." : undefined}>
-            <Input name="value" type={(at().field ? at().field.secret : secret()) ? "password" : "text"} value={at().field?.value ?? ""} autocomplete="off" spellcheck={false} required autofocus={!!at().item} />
+          <Field label={at()!.field ? "New value" : "Value"} hint={(at()!.field ? at()!.field!.secret : secret()) ? "It's encrypted on this device, and never shown again." : undefined}>
+            <Input name="value" type={(at()!.field ? at()!.field!.secret : secret()) ? "password" : "text"} value={at()!.field?.value ?? ""} autocomplete="off" spellcheck={false} required autofocus={!!at()!.item} />
           </Field>
-          <Show when={!at().field}>
-            <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.target.checked)} />
+          <Show when={!at()!.field}>
+            <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.currentTarget.checked)} />
           </Show>
-          <Show when={!at().item}>
+          <Show when={!at()!.item}>
             <Field label="Sites" hint="Where its secrets may be sent, like api.github.com.">
               <Input name="hosts" autocapitalize="none" spellcheck={false} />
             </Field>
           </Show>
           <Button type="submit">Save</Button>
-          <Show when={at().field}>
+          <Show when={at()!.field}>
             <Button variant="ghost" onClick={remove}>
               Delete Field
             </Button>
@@ -122,25 +158,25 @@ function FieldSheet() {
 /// A request for an item: who asks, what they'd get and where it goes, then one of this person's items that has
 /// what it needs, or new values to type. Allow is the only way to say yes.
 function RequestSheet() {
-  const asked = () => (sheet()?.kind === "request" ? sheet().request : undefined)
+  const asked = () => { const open = sheet(); return open?.kind === "request" ? open.request : undefined }
   const [picked, setPicked] = createSignal("")
-  const fits = () => kept().items.filter((item) => asked().fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
-  const who = () => asked().plugin ?? "Your agents"
-  const allow = async (event) => {
+  const fits = () => kept().items.filter((item) => asked()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
+  const who = () => asked()!.plugin ?? "Your agents"
+  const allow = async (event: SubmitEvent) => {
     event.preventDefault()
-    const typed = Object.fromEntries(new FormData(event.target))
-    const answer = picked() ? { item: picked() } : { values: JSON.stringify(Object.fromEntries(asked().fields.map(({ name }) => [name, typed[name]]))) }
-    if (await does("vault_answer", { id: asked().id, ...answer })) shut()
+    const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement))
+    const answer = picked() ? { item: picked() } : { values: JSON.stringify(Object.fromEntries(asked()!.fields.map(({ name }) => [name, typed[name]]))) }
+    if (await does("vault_answer", { id: asked()!.id, ...answer })) shut()
   }
-  const decline = async () => (await does("vault_answer", { id: asked().id, decline: true })) && shut()
+  const decline = async () => (await does("vault_answer", { id: asked()!.id, decline: true })) && shut()
   return (
-    <Sheet heading={asked() ? `${who()} ${asked().plugin ? "needs" : "need"} ${asked().title}` : ""} open={!!asked()} onClose={shut}>
+    <Sheet heading={asked() ? `${who()} ${asked()!.plugin ? "needs" : "need"} ${asked()!.title}` : ""} open={!!asked()} onClose={shut}>
       <Show when={asked()}>
         <form onSubmit={allow}>
           <p class="about">
-            {asked().why ? `${asked().why.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
-            {who()} can use {picked() || asked().title}
-            {!picked() && asked().hosts.length ? `, sent only to ${listed(asked().hosts)}` : ""}. Nobody is shown what you type.
+            {asked()!.why ? `${asked()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
+            {who()} can use {picked() || asked()!.title}
+            {!picked() && asked()!.hosts.length ? `, sent only to ${listed(asked()!.hosts)}` : ""}. Nobody is shown what you type.
           </p>
           <Show when={fits().length}>
             <Field label="Use">
@@ -148,7 +184,7 @@ function RequestSheet() {
             </Field>
           </Show>
           <Show when={!picked()}>
-            <For each={asked().fields}>
+            <For each={asked()!.fields}>
               {(field, at) => (
                 <Field label={label(field.name)}>
                   <Input name={field.name} type={field.secret ? "password" : "text"} autocomplete={field.secret ? "new-password" : "off"} spellcheck={false} required autofocus={at() === 0} />
@@ -167,7 +203,7 @@ function RequestSheet() {
 }
 
 /// One item: what it holds, where its secrets go, and what may use it, each switched on here.
-function Item(props) {
+function ItemScreen(props: { item: Item }) {
   const item = () => props.item
   const remove = async () => {
     if (!(await confirm({ heading: `Delete ${item().name}?`, text: "Whatever uses it stops working, and it can't be brought back.", action: "Delete", destructive: true }))) return
@@ -195,14 +231,14 @@ function Item(props) {
           <Row
             heading="Your agents"
             text="Use it, never see it"
-            end={<Switch aria-label="Your agents" checked={item().agents} onChange={(event) => does("vault_agents", { item: item().name, on: event.target.checked })} />}
+            end={<Switch aria-label="Your agents" checked={item().agents} onChange={(event) => does("vault_agents", { item: item().name, on: event.currentTarget.checked })} />}
           />
           <For each={kept().plugins}>
             {(plugin) => (
               <Row
                 heading={plugin}
                 text="Its code is handed it"
-                end={<Switch aria-label={plugin} checked={item().plugins.includes(plugin)} onChange={(event) => does("vault_use", { item: item().name, plugin, on: event.target.checked })} />}
+                end={<Switch aria-label={plugin} checked={item().plugins.includes(plugin)} onChange={(event) => does("vault_use", { item: item().name, plugin, on: event.currentTarget.checked })} />}
               />
             )}
           </For>
@@ -219,7 +255,7 @@ function Item(props) {
 
 /// The servers that open the Vault, each switched on by a device that holds its person's key.
 function OpenedBy() {
-  const choose = (server, on) => {
+  const choose = (server: string, on: boolean) => {
     const servers = opened().servers.filter((chosen) => chosen !== server)
     return does("vault_grant", { servers: on ? [...servers, server] : servers })
   }
@@ -231,7 +267,7 @@ function OpenedBy() {
             <Row
               heading={server.name ?? "A server"}
               text={`Holds ${whom()} Vault's key`}
-              end={<Switch aria-label={server.name ?? "A server"} checked={opened().servers.includes(server.key)} disabled={!holds()} onChange={(event) => choose(server.key, event.target.checked)} />}
+              end={<Switch aria-label={server.name ?? "A server"} checked={opened().servers.includes(server.key)} disabled={!holds()} onChange={(event) => choose(server.key, event.currentTarget.checked)} />}
             />
           )}
         </For>
@@ -254,7 +290,7 @@ function YourKey() {
             text={`It adds and uses items. Choosing the servers that open ${whom()} Vault takes a trusted device.`}
             action={
               <>
-                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => asked && toast("Asked. Open Vault on a trusted device."))}>
+                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => void (asked && toast("Asked. Open Vault on a trusted device.")))}>
                   Ask Another Device
                 </Button>
                 <Button variant="outline" onClick={() => useRecoveryKey({ for: whose() }).then(again)}>
@@ -298,7 +334,7 @@ async function setUp() {
 /// Which Vault shows, where its person owns more than their own.
 function Whose() {
   const collection = createMemo(() => createListCollection({ items: owners() }))
-  const pick = ({ value }) => {
+  const pick = ({ value }: { value: string[] }) => {
     setOpen()
     setSheet()
     setWhose(value[0])
@@ -316,7 +352,7 @@ function Vault() {
   const item = () => kept().items.find(({ name }) => name === open())
   return (
     <>
-      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={kept().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Item item={item()} />}</Show>}>
+      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={kept().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <ItemScreen item={item()} />}</Show>}>
         <Screen
         heading="Vault"
         back
@@ -372,7 +408,7 @@ function Vault() {
 
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your Vault" text={String(error().message ?? error())} />}>
+    <Errored fallback={(error) => <Problem heading="Can't show your Vault" text={String((error() as Error).message ?? error())} />}>
       <Loading fallback={<Skeleton rows={4} />}>
         <Vault />
       </Loading>
