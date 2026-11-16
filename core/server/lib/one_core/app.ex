@@ -49,8 +49,12 @@ defmodule OneCore.App do
   The files of a plugin with an app as a server keeps them, from the files deployed, built against this server's UI
   library. `{:error, why}` says why it didn't build: the compiler's own words, a problem to a line, with its file and
   line.
+
+  A plugin in `sandbox` mode is a stranger's, whose app's build could otherwise read the server's files (an import of
+  any path) or run its own code. So its packages install without their scripts, and it's built behind the machine's
+  sandbox (`OneCore.Sandbox.run/3`), which reads only Bun, the UI library's build and the app.
   """
-  def build(files) do
+  def build(files, sandbox \\ false) do
     {app, rest} = Map.split_with(files, fn {path, _} -> String.starts_with?(path, @client) end)
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
@@ -61,8 +65,8 @@ defmodule OneCore.App do
 
       with {:ok, bun} <- bun(),
            {:ok, builder} <- builder(bun),
-           :ok <- install(bun, source),
-           :ok <- run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder) do
+           :ok <- install(bun, source, sandbox),
+           :ok <- built(bun, builder, source, out, sandbox) do
         built =
           for path <- Path.wildcard(Path.join(out, "**"), match_dot: true), File.regular?(path), into: %{} do
             {@client <> Path.relative_to(path, out), File.read!(path)}
@@ -164,15 +168,45 @@ defmodule OneCore.App do
   end
 
   # An app's own packages, which it names in its package.json, and none for an app that names none.
-  defp install(bun, source) do
+  defp install(bun, source, sandbox) do
     with {:ok, text} <- File.read(Path.join(source, "package.json")),
          {:ok, about} <- JSON.decode(text),
          named when map_size(named) > 0 <- Map.merge(about["dependencies"] || %{}, about["devDependencies"] || %{}) do
-      run(bun, ["install"], "The app's packages didn't install", source)
+      scripts = if sandbox, do: ["--ignore-scripts"], else: []
+      run(bun, ["install" | scripts], "The app's packages didn't install", source)
     else
       {:error, %JSON.DecodeError{}} -> {:error, "client/package.json isn't JSON."}
       _ -> :ok
     end
+  end
+
+  defp built(bun, builder, source, out, false),
+    do: run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder)
+
+  defp built(bun, builder, source, out, true) do
+    File.mkdir_p!(out)
+    bun = real(bun)
+    policy = %{read: [Path.dirname(bun), builder], write: [source, out], env: %{"HOME" => "/tmp", "NO_COLOR" => "1"}, memory: nil}
+
+    case OneCore.Sandbox.run(bun, [Path.join(builder, "app.js"), source, out], policy) do
+      {:error, why} -> {:error, why}
+      {_, 0} -> :ok
+      {said, _} -> {:error, "The app didn't build:\n#{String.trim(said)}"}
+    end
+  end
+
+  # A path with each symlink in it followed, as a folder bound into the sandbox has to be.
+  defp real(path) do
+    path
+    |> Path.split()
+    |> Enum.reduce(fn part, at ->
+      next = Path.join(at, part)
+
+      case :file.read_link_all(next) do
+        {:ok, target} -> real(Path.expand(to_string(target), at))
+        _ -> next
+      end
+    end)
   end
 
   defp run(bun, args, failed, folder) do

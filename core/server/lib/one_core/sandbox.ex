@@ -96,6 +96,42 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
+  Runs `program` with `arguments` to its end behind this machine's sandbox, under `policy` as the plugin `sandbox`
+  takes it: what a sandboxed plugin's app is built with, say. Gives `{output, status}`, or `{:error, why}` where it
+  couldn't start. One that runs longer than five minutes is stopped.
+  """
+  def run(program, arguments, policy) do
+    with {:ok, port} <- walled(program, arguments, policy), do: ran(port, [])
+  end
+
+  defp ran(port, output) do
+    receive do
+      {^port, {:data, data}} -> ran(port, [output | data])
+      {^port, {:exit_status, status}} -> {IO.iodata_to_binary(output), status}
+    after
+      :timer.minutes(5) ->
+        with {:os_pid, pid} <- Port.info(port, :os_pid), do: System.cmd("kill", ["-KILL", to_string(pid)])
+        {IO.iodata_to_binary(output) <> "\nIt was stopped after five minutes.", 1}
+    end
+  end
+
+  # Starts a program behind the wall, which the plugin `sandbox` is, with its pipes as a port this process owns.
+  defp walled(program, arguments, policy) do
+    case Plugins.run(["network"], "sandbox", fn _at, versions ->
+           versions["sandbox"].plugin.start(program, arguments, policy)
+         end) do
+      {:ok, port} ->
+        {:ok, port}
+
+      {:error, "There's no plugin named sandbox"} ->
+        {:error, "Sandbox mode needs the plugin sandbox, which isn't installed for the network"}
+
+      {:error, why} ->
+        {:error, why}
+    end
+  end
+
+  @doc """
   Runs `what` of the plugin `name` among `versions` in its child: `{:tool, tool, inputs}`, `{:hook, hook, about}` or
   `{:schedule, jobs}`, for `call`. Gives what the plugin answered, or raises with why it didn't.
   """
@@ -470,7 +506,7 @@ defmodule OneCore.Sandbox do
 
     arguments =
       ~w(-noshell -noinput +fnu +S 1:1 +SDcpu 1:1 +SDio 1 +A 1 +MIscs 128 -boot) ++
-        [boot] ++
+        [boot, "-boot_var", "RELEASE_LIB", Path.join(root, "lib")] ++
         Enum.flat_map(List.wrap(cache) ++ ebins, &["-pa", &1]) ++
         ["-eval", "application:ensure_all_started(elixir), #{compile}'Elixir.OneCore.Sandbox.Child':main()."]
 
@@ -486,18 +522,7 @@ defmodule OneCore.Sandbox do
 
     policy = %{read: Enum.uniq([erts, boot <> ".boot", child | libraries] ++ List.wrap(cache)), env: env, memory: @memory}
 
-    case Plugins.run(["network"], "sandbox", fn _at, versions ->
-           versions["sandbox"].plugin.start(Path.join(erts, "bin/erlexec"), arguments, policy)
-         end) do
-      {:ok, port} ->
-        {:ok, port}
-
-      {:error, "There's no plugin named sandbox"} ->
-        {:error, "Sandbox mode needs the plugin sandbox, which isn't installed for the network"}
-
-      {:error, why} ->
-        {:error, why}
-    end
+    walled(Path.join(erts, "bin/erlexec"), arguments, policy)
   end
 
   @impl true

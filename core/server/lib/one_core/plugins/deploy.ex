@@ -34,7 +34,7 @@ defmodule OneCore.Plugins.Deploy do
     sandbox = if sandbox == :kept, do: Store.about(artifact)["sandbox"] == true, else: sandbox == true
 
     with :ok <- check(name, files),
-         {:ok, kept} <- built(owner, name, files),
+         {:ok, kept} <- built(owner, name, files, sandbox),
          {:ok, version, warnings} <- loaded(artifact, kept, sandbox) do
       version = %{version | artifact: artifact}
       install = install?.(version)
@@ -287,9 +287,9 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   # A plugin's app is built against this server's UI library (`OneCore.App`).
-  defp built(owner, name, files) do
+  defp built(owner, name, files, sandbox) do
     if App.app?(files),
-      do: built_before(Plugins.plugin(owner, name), files) || App.build(files),
+      do: built_before(Plugins.plugin(owner, name), files) || App.build(files, sandbox),
       else: {:ok, files}
   end
 

@@ -5,8 +5,8 @@
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
-# someone with none adds none for themselves, and an installer of the network adds them for it and does nothing else
-# an owner does. One Core's own tools are whoever's may. Anyone brings a server,
+# someone with none adds none for themselves but in sandbox mode, where it calls only the tools it's permitted, and an
+# installer of the network adds them for it and does nothing else an owner does. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
 # a tuple, and a job that's being called when the server calling it is killed is called once by the standby. It says
@@ -89,8 +89,25 @@ refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answ
 
 # The plugins this tests with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
-# due and which server made it.
-mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost}/server
+# due and which server made it. `boxed` runs in sandbox mode and may call only `notes`' `read`.
+mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed}/server
+cat >"$folder/boxed/server/boxed.ex" <<'EOF'
+defmodule Boxed do
+  @behaviour OneCore.Plugin
+
+  @impl true
+  def permissions, do: ["notes_read"]
+
+  @impl true
+  def tools do
+    inputs = %{plugin: %{type: "string"}, note: %{type: "string"}}
+    [%{name: "read", description: "Reads a note by a plugin's tool", inputs: %{type: "object", properties: inputs}}]
+  end
+
+  @impl true
+  def call("read", %{"plugin" => plugin, "note" => note}, call), do: OneCore.Call.tool(call, plugin, "read", %{"note" => note})
+end
+EOF
 # Two plugins that decide and are broken: one decides every call, and one who reaches what.
 for broken in "Stuck call" "Lost reach"; do
   set -- $broken
@@ -328,8 +345,11 @@ may as alice permissions share --artifact "$note" --relation viewer --who networ
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
 
-say "A plugin's code runs on a server of whoever it's for: with none, nobody adds one for them, and an installer adds them for the network"
+say "A plugin's code runs on a server of whoever it's for: with none, nobody adds one for them but in sandbox mode, and an installer adds them for the network"
 refused as alice deploy --name diary --files-from "$folder/diary"
+may as alice deploy --name boxed --files-from "$folder/boxed" --sandbox
+may as alice boxed read --plugin notes --note "$note"
+refused as alice boxed read --plugin reader --note "$note"
 refused as bob install --plugin network/plugins/reader --name mine
 refused as carol for network install --plugin network/plugins/reader --name everyones
 may as owner permissions share --artifact network --relation installer --who users/carol

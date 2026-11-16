@@ -22,46 +22,52 @@ defmodule Sandbox do
 
   - `read`: paths it may read, each where it is on this machine. It can read nothing else of the machine's files
     but its system libraries, and write only a folder of its own, which `TMPDIR` names and which goes when it stops.
+  - `write`, if it's given: paths it may also write, each where it is on this machine.
   - `env`: its environment, by name. Nothing else of this server's is passed on.
-  - `memory`: the most memory it may have, in bytes, where the machine can say so (Linux).
+  - `memory`: the most memory it may have, in bytes, where the machine can say so (Linux), or `nil` for no limit
+    but the machine's.
 
   Its standard error comes with its output. It has no network, can start no program outside `read`, and stops when
   the calling process does.
   """
-  def start(program, arguments, %{read: read, env: env, memory: memory}) do
+  def start(program, arguments, %{read: read, env: env, memory: memory} = policy) do
+    write = Map.get(policy, :write, [])
+
     case :os.type() do
-      {:unix, :linux} -> linux(program, arguments, read, env, memory)
-      {:unix, :darwin} -> mac(program, arguments, read, env)
+      {:unix, :linux} -> linux(program, arguments, read, write, env, memory)
+      {:unix, :darwin} -> mac(program, arguments, read, write, env)
       other -> {:error, "This server's machine (#{inspect(other)}) has no sandbox for plugins yet"}
     end
   end
 
-  defp linux(program, arguments, read, env, memory) do
+  defp linux(program, arguments, read, write, env, memory) do
     with {:ok, bwrap} <- found("bwrap", "bubblewrap"),
          {:ok, prlimit} <- found("prlimit", "util-linux") do
-      binds = Enum.flat_map(read, &["--ro-bind", &1, &1])
+      binds = Enum.flat_map(read, &["--ro-bind", &1, &1]) ++ Enum.flat_map(write, &["--bind", &1, &1])
       # The system's own libraries, which the program links against, wherever this distro keeps them.
       system = Enum.flat_map(~w(/usr/lib /usr/lib64 /lib /lib64), &["--ro-bind-try", &1, &1])
       vars = Enum.flat_map(Map.put(env, "TMPDIR", "/tmp"), fn {name, value} -> ["--setenv", name, value] end)
 
       # Mounts are made in order, so its own /tmp comes first, beneath anything bound inside it.
       walled =
-        ["--as=#{memory}", "--", bwrap, "--unshare-all", "--die-with-parent", "--new-session", "--clearenv"] ++
+        ["--unshare-all", "--die-with-parent", "--new-session", "--clearenv"] ++
           ["--tmpfs", "/tmp", "--proc", "/proc", "--dev", "/dev"] ++
           binds ++ system ++ ["--chdir", "/tmp", "--cap-drop", "ALL"] ++ vars ++ ["--", program | arguments]
 
       # Nothing of this server's environment is passed on, to bubblewrap either: its process is the sandbox's first,
       # whose environment the program could read.
-      opened(prlimit, walled, unset(), nil)
+      if memory,
+        do: opened(prlimit, ["--as=#{memory}", "--", bwrap | walled], unset(), nil),
+        else: opened(bwrap, walled, unset(), nil)
     end
   end
 
   # Seatbelt reads its profile from the command line. Paths go into it as string literals, which a path can't break
   # out of: they're quoted, and a quote or backslash in one is refused.
-  defp mac(program, arguments, read, env) do
+  defp mac(program, arguments, read, write, env) do
     folder = Path.join(System.tmp_dir!(), "one-sandbox-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower))
 
-    if Enum.any?([folder | read], &String.contains?(&1, ["\"", "\\"])) do
+    if Enum.any?([folder | read ++ write], &String.contains?(&1, ["\"", "\\"])) do
       {:error, "A path the sandbox is given has a quote or a backslash in it"}
     else
       File.mkdir_p!(folder)
@@ -76,7 +82,7 @@ defmodule Sandbox do
       (allow file-read* #{paths.(read ++ ["/usr/lib", "/System", "/private/var/db/timezone"])})
       (allow file-read* (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random"))
       (allow file-read-metadata)
-      (allow file-read* file-write* (subpath "#{folder}"))
+      (allow file-read* file-write* (subpath "#{folder}") #{paths.(write)})
       (allow file-write-data (literal "/dev/null"))
       (allow sysctl-read)
       (allow signal (target self))
