@@ -1086,7 +1086,7 @@ button.ui-box {
   object-fit: contain;
   user-select: none;
 }
-.ui-live-screen > .view > .ui-state {
+.ui-live-screen > .view > .ui-state:not(.over) {
   position: absolute;
   inset: 0;
   background: var(--background);
@@ -1437,6 +1437,79 @@ button.ui-box {
   background: var(--card);
   color: var(--destructive);
   line-height: 1.4;
+}
+/* A state in the middle of its place: what's under way, or a problem with what fills it. */
+.ui-state.middle, .ui-live-screen > .view > .ui-state {
+  place-content: center;
+  justify-items: center;
+  max-width: none;
+  min-height: 100%;
+  padding: var(--gutter);
+  text-align: center;
+}
+.ui-state.middle .problem, .ui-live-screen > .view > .ui-state .problem {
+  justify-self: center;
+  max-width: var(--readable);
+  text-align: start;
+}
+/* On what's there now, dimmed, as a card. */
+.ui-state.over {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklab, var(--background) 55%, transparent);
+}
+.ui-state .status {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+.ui-state.over .status {
+  padding: 1rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+.ui-state .status strong {
+  color: var(--foreground);
+  font-size: var(--text-base);
+  font-weight: 500;
+}
+.ui-state .status p {
+  margin: 0;
+}
+.ui-state .steps {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: start;
+}
+.ui-state .steps li {
+  display: grid;
+  grid-template-columns: var(--icon) auto;
+  gap: 0.625rem;
+  color: var(--muted-foreground);
+}
+.ui-state .steps li.now {
+  color: var(--foreground);
+}
+.ui-state .steps li > :first-child {
+  margin-top: 0.15em;
+}
+.ui-state .steps small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+.ui-state .steps .next {
+  width: 0.625rem;
+  height: 0.625rem;
+  margin: 0.2em auto 0;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
 }
 .ui-state .problem.warn {
   color: var(--warning);

@@ -1,6 +1,6 @@
 import { Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Icon } from "./button.tsx"
+import { Icon, Spinner } from "./button.tsx"
 import { messages } from "./shared.ts"
 
 /// `<Empty>No notes yet.</Empty>`: an empty screen or list: one grey line, and a button (`action`) only when
@@ -47,6 +47,47 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element; actio
           <div class="action">{props.action}</div>
         </Show>
       </div>
+    </div>
+  )
+}
+
+/// `<Status heading="Connecting…" />`: something under way where what it's about will be: a spinner, a short
+/// `heading` and, only if it helps, one sentence of `text`, in the middle of its place. With `over`, it's a card on
+/// what's there now, which it dims: a live view reconnecting, something saving. Its place is laid out by the UI
+/// library, or `position: relative`.
+export function Status(props: { heading: JSX.Element; text?: JSX.Element; over?: boolean }) {
+  return (
+    <div class={["ui-state", "middle", { over: props.over }]} role="status">
+      <div class="status">
+        <Spinner />
+        <strong>{props.heading}</strong>
+        <Show when={props.text}>
+          <p>{props.text}</p>
+        </Show>
+      </div>
+    </div>
+  )
+}
+
+/// `<Steps steps={["Getting a browser ready", "Opening Personal"]} at={0} text="The first time takes a few minutes." />`:
+/// something starting, as the steps it takes: those before `at` done, `at` under way with, only if it helps, one
+/// sentence of `text`, and the rest to come. In the middle of its place, as `Status` is.
+export function Steps(props: { steps: JSX.Element[]; at: number; text?: JSX.Element }) {
+  return (
+    <div class="ui-state middle" role="status">
+      <ol class="steps">
+        {props.steps.map((step, i) => (
+          <li class={{ done: i < props.at, now: i === props.at }}>
+            {i < props.at ? <Icon name="check" /> : i === props.at ? <Spinner /> : <span class="next" />}
+            <span>
+              {step}
+              <Show when={i === props.at && props.text}>
+                <small>{props.text}</small>
+              </Show>
+            </span>
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }
