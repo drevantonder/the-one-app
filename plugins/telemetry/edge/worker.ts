@@ -2,9 +2,9 @@
 // one of them handled for the network becomes a span, kept with what servers recorded, so a request that failed or
 // hung at the edge, and one that never reached a server, is in Telemetry too. A span has the request's route, status,
 // duration and outcome, and what the Worker said of it in a line of its own, `{"telemetry": …}`: its `traceparent`,
-// which a server it reached carried on, the `parent` it came in with, `attributes` such as `one.server`, and an
-// `error`. Nothing else of a request is kept: no query, header, cookie, body or other log line, so never a token or
-// a code.
+// which a server it reached carried on, the `parent` it came in with, `attributes` such as `one.server`, an
+// `error`, and the `start` and `end` of what it did, where that's less than the Worker's whole run. Nothing else of a
+// request is kept: no query, header, cookie, body or other log line, so never a token or a code.
 //
 // Spans are gathered a minute at a time in a Durable Object and kept as one blob of Telemetry's own artifact for
 // the network, `batches/<day>/<hour>/<to>-edge-<bytes>`, as a server keeps its batch (`Telemetry.Store`), in JSON.
@@ -40,6 +40,9 @@ interface LogLine {
   parent?: string;
   attributes?: Record<string, string | number | boolean>;
   error?: string;
+  /** When what the span is of began and ended, in milliseconds since 1970, where the Worker ran on past it. */
+  start?: number;
+  end?: number;
 }
 
 /**
@@ -86,8 +89,8 @@ function span(item: TraceItem): Span | null {
   if (!name || (!error && routine)) return null;
 
   const [, trace = hex(16), id = hex(8)] = PARENT.exec(record.traceparent ?? "") ?? [];
-  const start = Math.round((item.eventTimestamp ?? Date.now()) * 1e6);
-  const took = (item as { wallTime?: number }).wallTime ?? 0;
+  const start = Math.round((record.start ?? item.eventTimestamp ?? Date.now()) * 1e6);
+  const end = record.end !== undefined ? Math.round(record.end * 1e6) : start + Math.round(((item as { wallTime?: number }).wallTime ?? 0) * 1e6);
   return {
     traceId: trace,
     spanId: id,
@@ -95,7 +98,7 @@ function span(item: TraceItem): Span | null {
     name,
     kind: "server",
     start,
-    end: start + Math.round(took * 1e6),
+    end,
     attributes: {
       ...(worker && { "one.worker": worker }),
       ...(request && { "http.request.method": request.method, "http.route": path! }),

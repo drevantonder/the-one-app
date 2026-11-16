@@ -162,7 +162,9 @@ export default class extends WorkerEntrypoint<RelayEnv> {
    * call takes.
    */
   async forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null> {
-    // A span of its own under the caller's, which the server's is under in turn (W3C's Trace Context).
+    // A span of its own under the caller's, which the server's is under in turn (W3C's Trace Context). It runs from
+    // here to the answer: the Worker lives on past it while its connections close, which isn't the call's.
+    const start = Date.now();
     const call = JSON.parse(message);
     const parent: string | undefined = call.params?._meta?.traceparent;
     const traceparent = `00-${TRACE.exec(parent ?? "")?.[1] ?? hex.encode(crypto.getRandomValues(new Uint8Array(16)))}-${hex.encode(crypto.getRandomValues(new Uint8Array(8)))}-01`;
@@ -180,7 +182,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       : answer === null
         ? `${reached.server.slice(0, 8)} left before it answered`
         : undefined;
-    console.log(JSON.stringify({ telemetry: { traceparent, parent, attributes: { "one.servers": servers.length, ...(reached && { "one.server": reached.server.slice(0, 8) }) }, error } }));
+    console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length, ...(reached && { "one.server": reached.server.slice(0, 8) }) }, error } }));
     return reached && answer !== null ? { server: reached.server, answer } : null;
   }
 
