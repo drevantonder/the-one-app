@@ -31,7 +31,7 @@ export interface View {
 export interface Resource {
   uri: string
   mimeType?: string
-  _meta?: { settings?: boolean }
+  _meta?: { category?: string }
 }
 
 /** Each command the page invokes: what it's given, and what it answers. */
