@@ -25,7 +25,7 @@ say what they do and how to run them.
 | `clients/app/test/isolation.sh` | what a plugin's app may reach in the real app | the app's bridge, its web view, `clients/app/` |
 
 Once `cargo build --release` has run, `failover.sh` takes about 30 s and `isolation.sh` about 10 s here. `who.sh`,
-`vault.sh` and `backups.sh` each start a whole network with `tooling/network`, so minutes; `install.sh` about 15.
+`vault.sh` and `backups.sh` each start a whole network with `tooling/network`, so minutes; `install.sh` about 15. Run `install.sh` on its own: it builds into the repo's shared `target/`, which makes a test running beside it rebuild everything and time out.
 
 ## Mistakes already made
 
