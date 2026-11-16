@@ -385,7 +385,7 @@ async fn starts(app: &AppHandle, why: Option<NotApproved>) -> Option<DeviceAutho
         Ok(Some((link, not_in))) => (Opened::SignIn(link), Some(not_in)),
         Err(error) => {
             eprintln!("{error:#}");
-            (Opened::Unreachable(error.to_string()), None)
+            (Opened::Unreachable(format!("{error:#}")), None)
         }
     };
     eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());

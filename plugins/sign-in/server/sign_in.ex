@@ -132,7 +132,8 @@ defmodule SignIn do
          {:ok, who, _tag} <- Artifact.read(call.own, "devices/" <> device) do
       %{"who" => who}
     else
-      _ -> %{}
+      # A device it doesn't know is nobody's. A read that failed raises: that's not knowing, not nobody's.
+      not_known when not_known in [false, :absent] -> %{}
     end
   end
 

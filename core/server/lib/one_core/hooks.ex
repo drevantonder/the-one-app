@@ -340,7 +340,7 @@ defmodule OneCore.Hooks do
 
   @doc """
   Whose the device `device` is, as the plugins that change `device` say: a user, or `nil` for nobody's. Kept
-  once it's somebody's, so a call asks nothing.
+  once it's somebody's, so a call asks nothing. `{:error, why}` where a plugin couldn't say, which isn't nobody's.
   """
   def whose(device) do
     kept = {"device", device}
@@ -357,6 +357,7 @@ defmodule OneCore.Hooks do
           if forgotten == forgotten("device"), do: :ets.insert(@allowed, {kept, who})
           who
         else
+          {:refuse, why} -> {:error, why}
           _ -> nil
         end
     end

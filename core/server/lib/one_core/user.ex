@@ -115,6 +115,7 @@ defmodule OneCore.User do
   defp whose(device) do
     case Hooks.whose(device) do
       nil -> {:error, nobody(), @nobody}
+      {:error, why} -> {:error, "Couldn't check whose this device is, so nothing was done: #{why}. Try again."}
       who -> {:ok, who}
     end
   end
