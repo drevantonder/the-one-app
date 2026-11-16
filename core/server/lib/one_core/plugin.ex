@@ -16,6 +16,18 @@ defmodule OneCore.Plugin do
   gets the new one. A plugin a program ships with can have native code that the clients are built with, in
   `client/native/`, which is never deployed, and nor is its `test/`.
 
+  A plugin can run in sandbox mode instead (`deploy` with `sandbox: true`): its server code runs in an Erlang VM of
+  its own, behind its machine's sandbox, never in the server's. Any of the network's servers runs it for anyone, so
+  it needs no server of yours, and whatever its code tries, it reaches only what's offered it, as whoever it runs
+  for. What's offered is this interface, each function a message to the server: `tools/0`, `call/3`, `apps/0`,
+  `widgets/0`, `uses/0`, `jobs/0` and `permissions/0`; `OneCore.Artifact`'s functions but `link`;
+  `OneCore.Call`'s `tool`, `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
+  `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks that hear. The plugins it uses
+  run in its VM too, as it, `database` among them. It has no services, no hooks that change or decide, no other
+  plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
+  which goes when the VM stops, after a few idle minutes. Deploying one that uses what sandbox mode doesn't offer
+  says each, with its file and line, and what to do instead.
+
   One module in the plugin, in a file of `server/` such as `server/hello.ex`, says `@behaviour OneCore.Plugin`, and
   gives the plugin's tools:
 
@@ -129,6 +141,13 @@ defmodule OneCore.Plugin do
     name they chose, and their `email` where how the network signs in has one, either `nil` where there's none.
     Left out, `users` is whoever asked. It answers about others only to a member of the network, as the plugins
     that decide `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
+  - `permissions/0`, if the plugin has one, says what it may do beyond its own, as an Android app's manifest does:
+    the other plugins' tools it calls, by the plugin's name for all its tools or a tool's (`gmail`,
+    `notifications_send`), and the hosts it sends data to (`https://api.example.com`, `https://*.googleapis.com`).
+    `deploy`, `install` and `plugins` say them, and the App Store shows them: "Uses gmail · Sends data to
+    api.example.com". In sandbox mode they're enforced: a tool call or a fetch outside them is refused.
+  - `OneCore.Call.fetch(call, %{url: "https://api.example.com/x", method: "POST", headers: %{...}, body: "..."})`
+    makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
     the server running this one: a GenServer of the plugin's, one for each `key`, started with `argument` when
     first asked for. It's for what is slow to open and belongs to no machine in particular, as a database is. What
@@ -423,7 +442,8 @@ defmodule OneCore.Plugin do
   """
   def skill(versions) do
     offered =
-      for {name, version} <- Enum.sort(versions), %{name: hook, kind: kind, description: about} <- version.offers,
+      for {name, version} <- Enum.sort(versions),
+          %{name: hook, kind: kind, description: about} <- version.offers,
           do: {"#{name}.#{hook}", kind, about}
 
     """
@@ -432,7 +452,12 @@ defmodule OneCore.Plugin do
     description: Read before making or changing a plugin. It says how one is written, deployed and updated.
     ---
 
-    """ <> @text <> if(offered == [], do: "", else: "\nThe hooks the plugins you have offer:\n\n" <> OneCore.Hooks.listed(offered) <> "\n")
+    """ <>
+      @text <>
+      if(offered == [],
+        do: "",
+        else: "\nThe hooks the plugins you have offer:\n\n" <> OneCore.Hooks.listed(offered) <> "\n"
+      )
   end
 
   @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map}]
@@ -448,6 +473,7 @@ defmodule OneCore.Plugin do
   @callback essential() :: boolean
   @callback title() :: String.t()
   @callback icon() :: String.t()
+  @callback permissions() :: [String.t()]
   @optional_callbacks tools: 0,
                       call: 3,
                       apps: 0,
@@ -460,5 +486,6 @@ defmodule OneCore.Plugin do
                       schedule: 3,
                       essential: 0,
                       title: 0,
-                      icon: 0
+                      icon: 0,
+                      permissions: 0
 end

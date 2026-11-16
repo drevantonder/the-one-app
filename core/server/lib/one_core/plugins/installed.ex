@@ -31,7 +31,8 @@ defmodule OneCore.Plugins.Installed do
 
     with :ok <- named(name),
          {number, code, _tag} <- Store.latest(artifact) || {:error, "There's no plugin #{artifact}"},
-         {:ok, version} <- latest_here(artifact, code) || Store.loaded(artifact, code),
+         sandbox = Store.about(artifact)["sandbox"] == true,
+         {:ok, version} <- latest_here(artifact, code) || Store.version(artifact, code, true, sandbox),
          :ok <- Deploy.fits(owner, name, version),
          :ok <- note(owner, installed) do
       Bucket.write("#{artifact}/installed/#{owner}", "")

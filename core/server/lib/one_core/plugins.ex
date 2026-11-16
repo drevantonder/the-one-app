@@ -27,11 +27,11 @@ defmodule OneCore.Plugins do
   # How long after looking at someone a request for them has this server look again, behind it, in milliseconds.
   @looks_after :timer.minutes(5)
 
-  # This, and after it what runs plugins' processes and what tells the plugins that hear a hook, which hold
-  # versions here.
+  # This, and after it what runs plugins' processes, what tells the plugins that hear a hook, and the VMs of plugins in
+  # sandbox mode, which hold versions here.
   def child_spec(_) do
     children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
-    children = children ++ __MODULE__.Process.children() ++ Hooks.Hearer.children()
+    children = children ++ __MODULE__.Process.children() ++ Hooks.Hearer.children() ++ OneCore.Sandbox.children()
     start = {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}
     %{id: __MODULE__, type: :supervisor, start: start}
   end
@@ -200,7 +200,8 @@ defmodule OneCore.Plugins do
          {:absent, missing} <- ask({:begin, owners, name}) do
       if missing == name,
         do: {:error, "There's no plugin named #{name}"},
-        else: {:error, "#{name} needs #{missing}, which isn't installed for #{Enum.join(owners, " or ")} or the network"}
+        else:
+          {:error, "#{name} needs #{missing}, which isn't installed for #{Enum.join(owners, " or ")} or the network"}
     end
   end
 
@@ -246,7 +247,12 @@ defmodule OneCore.Plugins do
   # What a look at someone compares the bucket with: for someone whose plugins run here, the versions loaded, and
   # otherwise the ones described, leaving out the plugins loaded here for someone else, which serve them too.
   def handle_call({:latest, true}, _from, state), do: {:reply, {state.latest, []}, state}
-  def handle_call({:latest, false}, _from, state), do: {:reply, {state.described, Map.keys(state.latest)}, state}
+  # A plugin in sandbox mode runs here for anyone, so it's compared as one described is.
+  def handle_call({:latest, false}, _from, state) do
+    {sandboxed, loaded} = Map.split_with(state.latest, fn {artifact, _} -> sandboxed?(state.running[artifact]) end)
+    {:reply, {Map.merge(state.described, sandboxed), Map.keys(loaded)}, state}
+  end
+
   def handle_call(:refresh, _from, state), do: {:reply, :ok, %{state | reloaded: %{}}}
   def handle_call(:installed, _from, state), do: {:reply, state.installed, state}
   def handle_call({:version, artifact}, _from, state), do: {:reply, loaded(state.running[artifact]), state}
@@ -334,8 +340,12 @@ defmodule OneCore.Plugins do
     {state, changed, stale} =
       Enum.reduce(loaded, {state, [], []}, fn {artifact, number, loaded}, {state, changed, stale} ->
         version = with {:ok, version} <- loaded, do: version
-        # A version described is kept apart from the ones loaded, which it never takes over from.
-        numbers = if match?(%Version{}, version) and Version.described?(version), do: :described, else: :latest
+        # A version described is kept apart from the ones loaded, which it never takes over from. One in sandbox
+        # mode runs here as one loaded does.
+        numbers =
+          if match?(%Version{}, version) and Version.described?(version) and not sandboxed?(version),
+            do: :described,
+            else: :latest
 
         cond do
           numbers == :described and is_map_key(state.latest, artifact) ->
@@ -371,7 +381,8 @@ defmodule OneCore.Plugins do
 
     # Which of each owner's plugins hooks into what, and the hooks they offer, are kept for every call to find
     # without asking.
-    for {at, installed} <- state.installed, at == owner or Enum.any?(installed, fn {_name, artifact} -> artifact in changed end) do
+    for {at, installed} <- state.installed,
+        at == owner or Enum.any?(installed, fn {_name, artifact} -> artifact in changed end) do
       hooking =
         for {name, artifact} <- Enum.sort(installed),
             %Version{hooks: hooks} <- [running[artifact]],
@@ -393,9 +404,13 @@ defmodule OneCore.Plugins do
     {unload_unused(state, stale ++ Map.values(dropped)), changed, any}
   end
 
-  # A version loaded here, or `nil` for one only described.
-  defp loaded(%Version{} = version), do: if(Version.described?(version), do: nil, else: version)
+  # A version that runs here, or `nil` for one only described.
+  defp loaded(%Version{} = version),
+    do: if(Version.described?(version) and not sandboxed?(version), do: nil, else: version)
+
   defp loaded(nil), do: nil
+
+  defp sandboxed?(version), do: match?(%Version{sandbox: true}, version)
 
   # The versions running of the plugins `installed`, by their names there.
   defp running(state, installed) do

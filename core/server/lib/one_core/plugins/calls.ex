@@ -7,7 +7,7 @@ defmodule OneCore.Plugins.Calls do
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Plugins, Server, Servers, Trace, User}
+  alias OneCore.{Artifact, Call, Hooks, Plugins, Sandbox, Server, Servers, Trace, User}
   alias OneCore.Plugins.Version
 
   @doc """
@@ -52,7 +52,7 @@ defmodule OneCore.Plugins.Calls do
 
           try do
             call = called(at, name, versions, ask, asked, forwarded)
-            answered = tool(found, about, asked, version, &version.plugin.call(tool, &1, call))
+            answered = tool(found, about, asked, version, &invoked(versions, name, {:tool, tool, &1}, call))
             if kept != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", kept)
             {:ran, answered}
           after
@@ -240,8 +240,15 @@ defmodule OneCore.Plugins.Calls do
       ask = {"hooks/call", %{installed: at, plugin: name, kind: kind, hook: hook, about: about}}
       call = called(at, name, versions, ask, asked, forwarded)
 
-      if hook in version.hooks and hears?(call, about),
-        do: {:ok, Hooks.answer(kind, hook, Hooks.within(name, hook, fn -> version.plugin.hook(hook, about, call) end))},
+      # A plugin in sandbox mode only hears: it changes and decides nothing.
+      if hook in version.hooks and hears?(call, about) and (kind == :observe or not version.sandbox),
+        do:
+          {:ok,
+           Hooks.answer(
+             kind,
+             hook,
+             Hooks.within(name, hook, fn -> invoked(versions, name, {:hook, hook, about}, call) end)
+           )},
         else: {:ok, Hooks.answer(kind, hook, Hooks.nothing(kind))}
     end)
   end
@@ -267,7 +274,7 @@ defmodule OneCore.Plugins.Calls do
               else: call(at, name, versions, ask, asked, false)
 
           try do
-            if hears?(call, about), do: version.plugin.hook(hook, about, call)
+            if hears?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
           catch
             :throw, {Call, _forwarded} -> :ok
             kind, reason -> Logger.error(Exception.format(kind, reason, __STACKTRACE__))
@@ -303,7 +310,11 @@ defmodule OneCore.Plugins.Calls do
         Server.changed()
       end
 
-      for keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(asked, versions[name].jobs, fire)
+      # A plugin in sandbox mode has its jobs kept in its own VM, by the plugin it uses there.
+      if versions[name].sandbox,
+        do: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, asked),
+        else: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(asked, versions[name].jobs, fire))
+
       {:ok, :ok}
     end)
   end
@@ -323,11 +334,24 @@ defmodule OneCore.Plugins.Calls do
     end)
   end
 
+  # A plugin's tool or hook, run by its module here or, in sandbox mode, in its own VM.
+  defp invoked(versions, name, what, call) do
+    case {versions[name], what} do
+      {%Version{sandbox: true}, what} -> Sandbox.call(versions, name, what, call)
+      {version, {:tool, tool, inputs}} -> version.plugin.call(tool, inputs, call)
+      {version, {:hook, hook, about}} -> version.plugin.hook(hook, about, call)
+    end
+  end
+
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. It's run
-  # by a server that runs the plugins of whoever it was installed for: this one, or one that it's passed on to.
+  # by a server that runs the plugins of whoever it was installed for, or by any server acting for them where the
+  # plugin is in sandbox mode: this one, or one that it's passed on to.
   defp called(at, name, versions, ask, asked, forwarded) do
     call = call(at, name, versions, ask, asked, forwarded)
-    if Servers.runs?(at), do: call, else: Call.run_elsewhere(call, at)
+
+    if Servers.runs?(at) or (versions[name].sandbox and Servers.here?(at)),
+      do: call,
+      else: Call.run_elsewhere(call, at)
   end
 
   # The call as this server would run it.

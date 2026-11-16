@@ -52,14 +52,29 @@ defmodule OneCore.Call do
   """
   def tool(%__MODULE__{actor: by, subject: who}, plugin, tool, inputs) do
     case Calls.call(plugin, tool, inputs, {by, who}) do
-      {:ok, answer} when is_binary(answer) -> answer
-      {:ok, {:blob, _kind, _data} = file} -> file
-      {:ok, answer} -> JSON.decode!(JSON.encode!(answer))
-      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
-      {:forwarded, %{"content" => [%{"type" => "image", "mimeType" => kind, "data" => data}]}} -> {:blob, kind, Base.decode64!(data)}
-      {:forwarded, %{"content" => [%{"resource" => %{"mimeType" => kind, "blob" => data}}]}} -> {:blob, kind, Base.decode64!(data)}
-      {:forwarded, %{"content" => [%{"text" => text} | _]}} -> decoded(text)
-      {:error, why} -> raise why
+      {:ok, answer} when is_binary(answer) ->
+        answer
+
+      {:ok, {:blob, _kind, _data} = file} ->
+        file
+
+      {:ok, answer} ->
+        JSON.decode!(JSON.encode!(answer))
+
+      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} ->
+        raise why
+
+      {:forwarded, %{"content" => [%{"type" => "image", "mimeType" => kind, "data" => data}]}} ->
+        {:blob, kind, Base.decode64!(data)}
+
+      {:forwarded, %{"content" => [%{"resource" => %{"mimeType" => kind, "blob" => data}}]}} ->
+        {:blob, kind, Base.decode64!(data)}
+
+      {:forwarded, %{"content" => [%{"text" => text} | _]}} ->
+        decoded(text)
+
+      {:error, why} ->
+        raise why
     end
   end
 
@@ -216,6 +231,36 @@ defmodule OneCore.Call do
   def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()
 
   @doc """
+  Makes a web request from the server running this call: its `url`, and its `method`, `headers` and `body` if it
+  has them, by atoms or by text. Gives the answer's `status`, `headers` and `body`, as it came, without following a
+  redirect. In sandbox mode, only to a host the plugin's `permissions/0` names (`OneCore.Sandbox`).
+
+      OneCore.Call.fetch(call, %{url: "https://api.example.com/notes", method: "POST", body: JSON.encode!(note)})
+  """
+  def fetch(_call, request) do
+    request = Map.new(request, fn {key, value} -> {to_string(key), value} end)
+    method = String.upcase(Map.get(request, "method", "GET"))
+
+    if method not in ~w(GET HEAD POST PUT PATCH DELETE OPTIONS),
+      do: raise(ArgumentError, "a request's method is GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS")
+
+    answer =
+      Req.request!(
+        method: method |> String.downcase() |> String.to_existing_atom(),
+        url: request["url"],
+        headers: for({name, value} <- Map.get(request, "headers", %{}), do: {to_string(name), to_string(value)}),
+        body: request["body"],
+        decode_body: false,
+        redirect: false,
+        retry: false,
+        receive_timeout: 30_000
+      )
+
+    headers = Map.new(answer.headers, fn {name, values} -> {name, Enum.join(values, ", ")} end)
+    %{status: answer.status, headers: headers, body: answer.body}
+  end
+
+  @doc """
   A process that keeps running on this server between calls: the GenServer `module`, which is one of this call's
   plugin's or of a plugin it uses. There's one for each `key`, started when first asked for, with `argument` given
   to its `init/1`, and found again by every call after. It carries on through its plugin's updates as a service
@@ -240,7 +285,8 @@ defmodule OneCore.Call do
   ones that hold a key, say. `:no_answer` then means none of them ran it.
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
-    for server <- servers -- [Server.key()], do: :no_answer = asks(call.request, {call.actor, call.subject}, server, "to")
+    for server <- servers -- [Server.key()],
+        do: :no_answer = asks(call.request, {call.actor, call.subject}, server, "to")
 
     :no_answer
   end

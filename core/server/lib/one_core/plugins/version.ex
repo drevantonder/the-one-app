@@ -41,8 +41,26 @@ defmodule OneCore.Plugins.Version do
   alias OneCore.{App, Builds, Hooks, Server, Skills}
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code]
-  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :artifact,
-             :title, :icon, essential: false]
+  defstruct [
+    :under,
+    :plugin,
+    :tools,
+    :apps,
+    :widgets,
+    :uses,
+    :services,
+    :hooks,
+    :offers,
+    :jobs,
+    :code,
+    :ui,
+    :artifact,
+    :title,
+    :icon,
+    essential: false,
+    permissions: [],
+    sandbox: false
+  ]
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
   @sizes ~w(2x2 4x2 4x4)
@@ -112,8 +130,22 @@ defmodule OneCore.Plugins.Version do
     kept = :persistent_term.get({__MODULE__, under})
 
     said =
-      Map.take(version, [:tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential,
-                         :title, :icon])
+      Map.take(version, [
+        :tools,
+        :apps,
+        :widgets,
+        :uses,
+        :services,
+        :hooks,
+        :offers,
+        :jobs,
+        :code,
+        :ui,
+        :essential,
+        :title,
+        :icon,
+        :permissions
+      ])
 
     tools = for tool <- said.tools, do: Map.delete(tool, :takes)
     :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: kept.files, skills: kept.skills}))
@@ -135,12 +167,84 @@ defmodule OneCore.Plugins.Version do
     :persistent_term.put({__MODULE__, under}, %{files: said.files, hashes: %{}, skills: said.skills, own: %{}})
 
     fields =
-      Map.take(said, [:apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential, :title, :icon])
+      Map.take(said, [
+        :apps,
+        :widgets,
+        :uses,
+        :services,
+        :hooks,
+        :offers,
+        :jobs,
+        :code,
+        :ui,
+        :essential,
+        :title,
+        :icon,
+        :permissions
+      ])
 
     {:ok, struct!(__MODULE__, Map.merge(fields, %{under: under, plugin: nil, tools: tools, artifact: artifact}))}
   rescue
     _ -> :error
   end
+
+  @doc """
+  A version of the plugin `artifact` in sandbox mode, from its files as a server keeps them and what its code said of
+  itself in its own VM (`OneCore.Sandbox`): `{:ok, version}`, or `{:error, why}`. Its code never loads
+  here, so it's described as a version a server doesn't run is, and is checked as one that loads is.
+  """
+  def sandboxed(artifact, files, said) do
+    name = Path.basename(artifact)
+    code = code(files)
+    under = {:described, artifact, code}
+    rest = Map.reject(files, fn {path, _} -> server?(path) and Path.extname(path) == ".ex" end)
+
+    {skills, rest} =
+      Map.split_with(rest, fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
+
+    taken = fn list, keys ->
+      for item <- List.wrap(list),
+          is_map(item),
+          do: Map.new(Map.take(item, keys), &{String.to_existing_atom(elem(&1, 0)), elem(&1, 1)})
+    end
+
+    offers =
+      for offer <- taken.(said["offers"], ~w(name kind description)), do: Map.update(offer, :kind, nil, &hook_kind/1)
+
+    said = %{
+      tools: taken.(said["tools"], ~w(name description inputs read_only by_link ui)),
+      apps: taken.(said["apps"], ~w(name page icon category)),
+      title: said["title"],
+      icon: said["icon"],
+      widgets: taken.(said["widgets"], ~w(name tool sizes)),
+      uses: said["uses"],
+      hooks: said["hooks"],
+      offers: offers,
+      jobs: taken.(said["jobs"], ~w(tool every inputs)),
+      essential: false,
+      permissions: said["permissions"]
+    }
+
+    with {:ok, skills} <- Skills.found(name, skills),
+         {:ok, version} <- checked(under, nil, said, [], rest) do
+      served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
+      :persistent_term.put({__MODULE__, under}, %{files: served, hashes: %{}, skills: skills, own: %{}})
+
+      version = %{
+        version
+        | code: code,
+          ui: App.ui(files),
+          title: version.title || name,
+          artifact: artifact,
+          sandbox: true
+      }
+
+      {:ok, version}
+    end
+  end
+
+  defp hook_kind(kind) when kind in ["observe", "mutate", "validate"], do: String.to_existing_atom(kind)
+  defp hook_kind(_kind), do: nil
 
   @doc "Whether a version is only described here, not loaded (`described/2`)."
   def described?(%__MODULE__{under: under}), do: is_tuple(under)
@@ -267,6 +371,8 @@ defmodule OneCore.Plugins.Version do
   end
 
   @doc "A version's module that its plugin wrote as `name`, or `nil` if it has none by that name."
+  def module(%__MODULE__{under: {:described, _artifact, _code}}, _name), do: nil
+
   def module(%__MODULE__{under: under}, name) do
     module = Module.concat(under, name)
     if :code.is_loaded(module), do: module
@@ -282,6 +388,21 @@ defmodule OneCore.Plugins.Version do
   def own_names(text, %__MODULE__{under: under}), do: own_names(text, under)
   def own_names(text, under), do: String.replace(text, inspect(under) <> ".", "")
 
+  # What a plugin says of itself, by the functions that say it, with what each gives where it has none.
+  @said [
+    tools: [],
+    apps: [],
+    title: nil,
+    icon: nil,
+    widgets: [],
+    uses: [],
+    hooks: [],
+    offers: [],
+    jobs: [],
+    essential: false,
+    permissions: []
+  ]
+
   # `rest` is the files that aren't Elixir or skills. A plugin with no Elixir provides no tools and names no apps.
   defp describe(under, modules, rest) do
     case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
@@ -289,72 +410,22 @@ defmodule OneCore.Plugins.Version do
         {:ok, version(under, nil, [], [], [], [], rest, nil)}
 
       [plugin] ->
-        tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
-        apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
-        title = if function_exported?(plugin, :title, 0), do: plugin.title()
-        icon = if function_exported?(plugin, :icon, 0), do: plugin.icon()
-        widgets = if function_exported?(plugin, :widgets, 0), do: plugin.widgets(), else: []
-        uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
-        hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
-        offers = if function_exported?(plugin, :offers, 0), do: plugin.offers(), else: []
-        jobs = if function_exported?(plugin, :jobs, 0), do: plugin.jobs(), else: []
-        essential = function_exported?(plugin, :essential, 0) and plugin.essential() == true
+        said =
+          for {function, none} <- @said,
+              into: %{},
+              do: {function, if(function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none)}
+
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
-        cond do
-          not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
-            {:error,
-             "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and ui, if a tool has one, is a page of client/"}
+        if Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) do
+          services =
+            for module <- services, do: %{name: own_name(module), called: module.called(), needs: module.needs()}
 
-          not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
-            {:error, "title/0 gives text, and icon/0 a file here"}
-
-          not (is_list(apps) and Enum.all?(apps, &app?(&1, rest, icon))) ->
-            {:error,
-             "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-               "here, which icon/0 gives instead where an app has none, and category, if it has one, is text"}
-
-          not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
-            {:error,
-             "widgets/0 gives a list of %{name: ..., tool: ..., sizes: [...]}: one of this plugin's tools that only " <>
-               "reads, and the sizes it comes in, of #{Enum.join(@sizes, ", ")}"}
-
-          not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
-            {:error, "uses/0 gives a list of plugins' names"}
-
-          not (is_list(hooks) and Enum.all?(hooks, &Hooks.hook?/1) and
-                   (hooks == [] or function_exported?(plugin, :hook, 3))) ->
-            {:error,
-             "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
-               Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ") <>
-               ", and the ones plugins offer, each as <plugin>.<hook>: recently-deleted.removed"}
-
-          not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
-            {:error,
-             "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
-               "digits and _, and a kind of :observe, :mutate or :validate"}
-
-          not Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) ->
-            {:error,
-             "A service says `use GenServer`, its needs/0 gives what it needs of a machine, and its called/0 what " <>
-               "it's called, each as text"}
-
-          true ->
-            services =
-              for module <- services, do: %{name: own_name(module), called: module.called(), needs: module.needs()}
-
-            # What each tool takes is read once here, as the schema its inputs are checked against on every call.
-            tools =
-              for tool <- tools,
-                  do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
-
-            version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest, icon)
-            version = %{version | title: title || version.title}
-
-            with {:ok, jobs} <- jobs(jobs, tools),
-                 do:
-                   {:ok,
-                    %{version | uses: uses, hooks: Enum.uniq(hooks), offers: offers, jobs: jobs, essential: essential}}
+          checked(under, plugin, said, services, rest)
+        else
+          {:error,
+           "A service says `use GenServer`, its needs/0 gives what it needs of a machine, and its called/0 what " <>
+             "it's called, each as text"}
         end
 
       found ->
@@ -363,10 +434,92 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0, essential/0 or a service's needs/0 or " <>
-         "called/0 raised: " <>
+       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0, essential/0, permissions/0 or a service's " <>
+         "needs/0 or called/0 raised: " <>
          Exception.message(error)}
   end
+
+  # A version from what its plugin said of itself, if that's what a plugin says: `plugin` is its module, or nil for
+  # one in sandbox mode, whose module is in its own VM.
+  defp checked(under, plugin, said, services, rest) do
+    %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, uses: uses, hooks: hooks} = said
+    %{offers: offers, jobs: jobs, permissions: permissions} = said
+
+    cond do
+      not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
+        {:error,
+         "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and ui, if a tool has one, is a page of client/"}
+
+      not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
+        {:error, "title/0 gives text, and icon/0 a file here"}
+
+      not (is_list(apps) and Enum.all?(apps, &app?(&1, rest, icon))) ->
+        {:error,
+         "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
+           "here, which icon/0 gives instead where an app has none, and category, if it has one, is text"}
+
+      not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
+        {:error,
+         "widgets/0 gives a list of %{name: ..., tool: ..., sizes: [...]}: one of this plugin's tools that only " <>
+           "reads, and the sizes it comes in, of #{Enum.join(@sizes, ", ")}"}
+
+      not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
+        {:error, "uses/0 gives a list of plugins' names"}
+
+      not (is_list(hooks) and Enum.all?(hooks, &Hooks.hook?/1) and
+               (hooks == [] or plugin == nil or function_exported?(plugin, :hook, 3))) ->
+        {:error,
+         "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
+           Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ") <>
+           ", and the ones plugins offer, each as <plugin>.<hook>: recently-deleted.removed"}
+
+      not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
+        {:error,
+         "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
+           "digits and _, and a kind of :observe, :mutate or :validate"}
+
+      not (is_list(permissions) and Enum.all?(permissions, &permission?/1)) ->
+        {:error,
+         "permissions/0 gives a list of what the plugin may do beyond its own: another plugin's tools, by the " <>
+           "plugin's name or a tool's (`gmail`, `notifications_send`), and the hosts it sends data to " <>
+           "(`https://api.example.com`, `https://*.googleapis.com`)"}
+
+      true ->
+        # What each tool takes is read once here, as the schema its inputs are checked against on every call.
+        tools =
+          for tool <- tools,
+              do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
+
+        version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest, icon)
+        version = %{version | title: title || version.title}
+
+        with {:ok, jobs} <- jobs(jobs, tools),
+             do:
+               {:ok,
+                %{
+                  version
+                  | uses: uses,
+                    hooks: Enum.uniq(hooks),
+                    offers: offers,
+                    jobs: jobs,
+                    essential: said.essential == true,
+                    permissions: Enum.uniq(permissions)
+                }}
+    end
+  end
+
+  # What a plugin may do beyond its own: call another plugin's tools, all of them or one, or send data to a host.
+  defp permission?(permission) when is_binary(permission) do
+    case URI.parse(permission) do
+      %URI{scheme: scheme, host: host, path: nil, query: nil, userinfo: nil} when scheme in ["https", "http"] ->
+        is_binary(host) and host =~ ~r/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/
+
+      _ ->
+        permission =~ ~r/^[a-z0-9][a-z0-9-]*(_[a-z][a-z0-9_]*)?$/
+    end
+  end
+
+  defp permission?(_permission), do: false
 
   defp offer?(%{name: name, kind: kind, description: description}),
     do:
@@ -455,7 +608,9 @@ defmodule OneCore.Plugins.Version do
   defp data(path, rest), do: "data:#{kind(path)};base64,#{Base.encode64(rest[path])}"
 
   defp app?(%{name: name, page: page} = app, rest, icon) when is_binary(name),
-    do: page?(page, rest) and is_map_key(rest, app[:icon] || icon) and (app[:category] == nil or is_binary(app[:category]))
+    do:
+      page?(page, rest) and is_map_key(rest, app[:icon] || icon) and
+        (app[:category] == nil or is_binary(app[:category]))
 
   defp app?(_, _, _), do: false
 

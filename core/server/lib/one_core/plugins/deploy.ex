@@ -10,7 +10,7 @@ defmodule OneCore.Plugins.Deploy do
   server ships with for whoever it's installed for, where they aren't there.
   """
   require Logger
-  alias OneCore.{App, Bucket, Builds, Folder, Server, Servers}
+  alias OneCore.{App, Bucket, Builds, Folder, Sandbox, Server, Servers}
   alias OneCore.Plugins
   alias OneCore.Plugins.{Installed, Calls, Store, Version}
 
@@ -21,23 +21,27 @@ defmodule OneCore.Plugins.Deploy do
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
-  (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/5` takes it. Gives its
-  version's number and the compiler's warnings.
+  (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/6` takes it, and
+  `sandbox` whether it runs in sandbox mode (`OneCore.Sandbox`), each as the version before had it if `:kept`. Gives
+  its version's number and the compiler's warnings.
   """
-  def deploy(owner, name, files, from \\ :kept), do: deploy(owner, name, files, from, fn _version -> true end)
+  def deploy(owner, name, files, from \\ :kept, sandbox \\ :kept),
+    do: deploy(owner, name, files, from, sandbox, fn _version -> true end)
 
-  # Deploys as `deploy/4` does, installing it for `owner` only where `install?` says so of the version.
-  defp deploy(owner, name, files, from, install?) do
+  # Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version.
+  defp deploy(owner, name, files, from, sandbox, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
+    sandbox = if sandbox == :kept, do: Store.about(artifact)["sandbox"] == true, else: sandbox == true
 
     with :ok <- check(name, files),
          {:ok, kept} <- built(owner, name, files),
-         {:ok, version, warnings} <- Version.load(Path.basename(artifact), kept) do
+         {:ok, version, warnings} <- loaded(artifact, kept, sandbox) do
       version = %{version | artifact: artifact}
       install = install?.(version)
 
       with :ok <- if(install, do: fits(owner, name, version), else: :ok),
-           {:ok, number} <- Store.keep(artifact, name, kept, files, from),
+           {:ok, warnings} <- if(sandbox, do: Sandbox.check(owner, version, kept), else: {:ok, warnings}),
+           {:ok, number} <- Store.keep(artifact, name, kept, files, from, sandbox),
            :ok <- Store.describe(version),
            :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
         listed(owner, name, version)
@@ -52,10 +56,18 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
+  # A version's code, compiled and loaded here, or in sandbox mode only described, by its own VM.
+  defp loaded(artifact, kept, false), do: Version.load(Path.basename(artifact), kept)
+
+  defp loaded(artifact, kept, true) do
+    with {:ok, version} <- Sandbox.describe(artifact, kept), do: {:ok, version, ""}
+  end
+
   @doc """
   Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., icon: ...,
-  apps: [...], tools: [names]}]`. It's what lists every app there is, whether or not it's on anyone's page now.
-  One that was removed (Recently Deleted's `remove`) has no latest version, and isn't listed.
+  apps: [...], tools: [names], permissions: [...], sandbox: ...}]`, its permissions as `permissions/0` gives them
+  and whether it runs in sandbox mode. It's what lists every app there is, whether or not it's on anyone's page
+  now. One that was removed (Recently Deleted's `remove`) has no latest version, and isn't listed.
   """
   def deployed do
     blobs = Bucket.list(@deployed)
@@ -75,7 +87,9 @@ defmodule OneCore.Plugins.Deploy do
         title: said["title"] || name,
         icon: said["icon"],
         apps: apps,
-        tools: said["tools"] || []
+        tools: said["tools"] || [],
+        permissions: said["permissions"] || [],
+        sandbox: said["sandbox"] == true
       }
     end
   end
@@ -89,7 +103,9 @@ defmodule OneCore.Plugins.Deploy do
         apps: version.apps,
         title: version.title,
         icon: version.icon,
-        tools: Enum.map(version.tools, & &1.name)
+        tools: Enum.map(version.tools, & &1.name),
+        permissions: version.permissions,
+        sandbox: version.sandbox
       })
 
     case Bucket.read(blob) do
@@ -156,7 +172,7 @@ defmodule OneCore.Plugins.Deploy do
     with true <- files != %{} || {:error, "There are no files to deploy it from"},
          {installed, _tag} = Installed.read(@network),
          install? = &(&1.essential or is_map_key(installed, name)),
-         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, install?),
+         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, false, install?),
          :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")
       deploying(name, nil)
@@ -309,12 +325,12 @@ defmodule OneCore.Plugins.Deploy do
 
     for %{plugin: artifact} <- if(newest?(), do: deployed(), else: []),
         {whose, name} = {Store.whose(artifact), Path.basename(artifact)},
-        Servers.runs?(whose),
+        Servers.runs?(whose) or (Store.about(artifact)["sandbox"] == true and Servers.here?(whose)),
         built_with(artifact) not in [nil, code],
         {_number, kept, _tag} <- [Store.latest(artifact)],
         # It stays as installed, or not, as it was.
         install? = fn _version -> Plugins.plugin(whose, name) == artifact end,
-        {:error, why} <- [deploy(whose, name, Store.source(artifact, kept), :kept, install?)],
+        {:error, why} <- [deploy(whose, name, Store.source(artifact, kept), :kept, :kept, install?)],
         built_with(artifact) != code,
         do: Logger.error("#{artifact}'s app wasn't built again against this server's UI library: #{why}")
   end

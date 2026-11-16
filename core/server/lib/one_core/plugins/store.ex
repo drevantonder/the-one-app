@@ -8,8 +8,9 @@ defmodule OneCore.Plugins.Store do
   `versions/<number>`, so a plugin keeps its history. `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
-  version after keeps its `from`, so one whose `source` isn't that hash was changed since. What a set of files says of
-  itself once loaded is kept at `described/<its hash>`, for the servers that don't load it (`described/2`).
+  version after keeps its `from`, so one whose `source` isn't that hash was changed since. `sandbox` says it runs in
+  sandbox mode (`OneCore.Sandbox`). What a set of files says of itself once loaded is kept at `described/<its hash>`,
+  for the servers that don't load it (`described/2`).
   """
   require Logger
   alias OneCore.Bucket
@@ -77,9 +78,9 @@ defmodule OneCore.Plugins.Store do
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
   latest is there, and `from`, the git repo its files came from, is kept with it (`:kept` keeps what the version
-  before said, and `nil` says they came from none). Gives the version's number.
+  before said, and `nil` says they came from none), and whether it runs in `sandbox` mode. Gives the version's number.
   """
-  def keep(artifact, name, files, deployed, from) do
+  def keep(artifact, name, files, deployed, from, sandbox \\ false) do
     code = Version.code(files)
     for {path, text} <- files, do: Bucket.write("#{artifact}/code/#{code}/#{path}", text)
 
@@ -97,7 +98,10 @@ defmodule OneCore.Plugins.Store do
         from -> Map.put(from, "hash", source)
       end
 
-    next = JSON.encode!(Map.reject(%{number: number, code: code, source: source, from: from}, &is_nil(elem(&1, 1))))
+    next =
+      %{number: number, code: code, source: source, from: from, sandbox: sandbox || nil}
+      |> Map.reject(&is_nil(elem(&1, 1)))
+      |> JSON.encode!()
 
     wrote =
       with {before, code, tag} <- was do
@@ -116,21 +120,44 @@ defmodule OneCore.Plugins.Store do
   @doc """
   The versions in the bucket of the plugins `artifacts` that are newer than the ones in `latest`: each one's
   plugin, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
-  false the version described (`described/2`), leaving out one not described yet. Read at once: a bucket at an
-  address is asked for each over the internet.
+  false the version described (`described/2`), leaving out one not described yet. One in sandbox mode is never
+  loaded here: it's described, by its own VM if no server has yet. Read at once: a bucket at an address is asked
+  for each over the internet.
   """
   def newer(artifacts, latest, load \\ true) do
     artifacts
-    |> Task.async_stream(&{&1, latest(&1)}, max_concurrency: 16, timeout: :infinity)
+    |> Task.async_stream(&{&1, about(&1)}, max_concurrency: 16, timeout: :infinity)
     |> Enum.flat_map(fn {:ok, {artifact, in_bucket}} ->
-      with {number, code, _tag} <- in_bucket,
+      with %{"number" => number, "code" => code} <- in_bucket,
            true <- number > Map.get(latest, artifact, 0),
-           version = if(load, do: loaded(artifact, code), else: described(artifact, code)),
+           version = version(artifact, code, load, in_bucket["sandbox"] == true),
            true <- load or version != :error,
            do: [{artifact, number, version}],
            else: (_ -> [])
     end)
   end
+
+  @doc """
+  The set of the plugin `artifact`'s files named `code`, as this server would run it: loaded, or described where
+  `load` is false, and in `sandbox` mode always described. `{:ok, version}`, or `:error`.
+  """
+  def version(artifact, code, _load, true) do
+    with :error <- described(artifact, code),
+         {:ok, version} <- OneCore.Sandbox.describe(artifact, files(artifact, code)) do
+      describe(version)
+      {:ok, version}
+    else
+      {:ok, version} ->
+        {:ok, %{version | sandbox: true}}
+
+      {:error, why} ->
+        Logger.error("#{artifact} isn't updated here, because its latest version doesn't describe itself:\n#{why}")
+        :error
+    end
+  end
+
+  def version(artifact, code, true, false), do: loaded(artifact, code)
+  def version(artifact, code, false, false), do: described(artifact, code)
 
   @doc """
   The set of the plugin `artifact`'s files named `code` as it described itself where it was loaded, without its

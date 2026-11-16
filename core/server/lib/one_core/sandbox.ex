@@ -1,0 +1,647 @@
+defmodule OneCore.Sandbox do
+  @moduledoc """
+  Sandbox mode: a plugin version whose code runs in an Erlang VM of its own, a child of this server's, behind this
+  machine's process sandbox, never in this server's VM. Any of the network's servers runs one for anyone, since
+  what it reaches is only what this server hands it. The wall is the plugin `sandbox`, which One Core asks one
+  thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it, no plugin
+  runs in sandbox mode, and a call to one says why.
+
+  There's one child for each version of a sandboxed plugin on a server, with the versions of the plugins it uses,
+  which run inside it as it (`database` among them, its SQLite too). It's started by the first call, compiles the
+  code itself, behind the wall, and stops after five idle minutes. One that stops, or is stopped, fails the calls
+  it was running and nothing else; the next call starts another.
+
+  The protocol, over the child's standard input and output, each message a frame of a 4-byte length:
+
+  - This server sends Erlang terms, which the child trusts: `{:load, sets, target}`, the plugins' files to compile,
+    those it uses first; `{:call, id, what, about}`, a tool, a hook heard or a schedule to run, with who it's for;
+    `{:reply, request, result}`; and `{:cancel, id}`.
+  - The child sends JSON, which never reaches `binary_to_term`: `{"answer": id, "ok" | "raised": ...}`,
+    `{"request": n, "call": id, "op": ..., ...}`, one of the functions below, and `{"log": level, "text": ...}`.
+    A frame over 64 MB, or that isn't one of these, stops it.
+
+  What it's offered is what the plugin interface offers, as messages: `OneCore.Artifact`'s read, read_all, write,
+  replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, plugins,
+  deployed, process (its own VM's) and forward_to; `OneCore.Plugin.file/2` and `nif/2`; Logger; and `fetch`, a
+  web request this server makes for it. An artifact it's given is a handle this server looks up, never a prefix
+  it could rewrite, and a call is one this server is running, never a subject or actor it could name. It hooks
+  only into what it hears: a mutate or validate hook asks it nothing. It has no services, no other plugins'
+  functions, no network, no programs, and no files but a folder of its own that goes when it stops.
+
+  What it may call of other plugins, and where it may send data, are its permissions (`OneCore.Plugin`): a tool
+  call or a fetch outside them is refused.
+  """
+  use GenServer, restart: :temporary
+  require Logger
+  alias OneCore.{Artifact, Bucket, Builds, Call, Plugins}
+  alias OneCore.Plugins.{Calls, Version}
+
+  @registry __MODULE__.Children
+  @supervisor __MODULE__.Supervisor
+
+  # How long a child that runs no call is kept, in milliseconds.
+  @idle :timer.minutes(5)
+  # How long a call waits on its child saying nothing, in milliseconds, before it's cancelled.
+  @silent :timer.minutes(2)
+  # The largest frame a child may send, and the most memory it may have.
+  @largest 64 * 1024 * 1024
+  @memory 1024 * 1024 * 1024
+  # How many requests outside a call a child may have this server running at once, and how many lines it may log
+  # a minute.
+  @at_once 64
+  @logs 120
+
+  @doc "What runs the children: where they're registered, and what starts them."
+  def children, do: [{Registry, keys: :unique, name: @registry}, {DynamicSupervisor, name: @supervisor}]
+
+  @doc """
+  What a set of a sandboxed plugin's files says of itself, from a child that compiles only them: `{:ok, version}`
+  of the plugin `artifact`, or `{:error, why}`. The files are as the server keeps them.
+  """
+  def describe(artifact, files) do
+    name = Path.basename(artifact)
+    sets = [{name, Map.reject(files, fn {path, _} -> Version.client?(path) end)}]
+
+    with {:ok, said} <- once({:describe, Version.code(files)}, name, sets),
+         do: Version.sandboxed(artifact, files, said)
+  end
+
+  @doc """
+  Checks a sandboxed version, from its `files` as the server keeps them, as it will run, with the plugins it uses as
+  `owner` finds them: `{:ok, warnings}`, or `{:error, why}` with each thing it uses that sandbox mode doesn't offer,
+  a sentence each with its file and line.
+  """
+  def check(owner, %Version{} = version, files) do
+    with {:ok, used} <- used(owner, version),
+         {:ok, %{"problems" => problems, "warnings" => warnings}} <- loaded(version, used, files) do
+      case problems do
+        [] ->
+          {:ok, warnings}
+
+        _ ->
+          {:error,
+           "In sandbox mode, #{Path.basename(version.artifact)} can't run as it is:\n" <> Enum.join(problems, "\n")}
+      end
+    end
+  end
+
+  defp used(owner, version) do
+    case Plugins.used(owner, version.uses) do
+      {:ok, used} ->
+        {:ok, used}
+
+      {:absent, missing} ->
+        {:error, "#{Path.basename(version.artifact)} uses #{missing}, which isn't installed for #{owner}"}
+    end
+  end
+
+  @doc """
+  Runs `what` of the plugin `name` among `versions` in its child: `{:tool, tool, inputs}`, `{:hook, hook, about}` or
+  `{:schedule, jobs}`, for `call`. Gives what the plugin answered, or raises with why it didn't.
+  """
+  def call(versions, name, what, %Call{} = call) do
+    version = versions[name]
+
+    {child, port, context} =
+      case child(version, Map.delete(versions, name)) do
+        {:ok, child, port, context} -> {child, port, context}
+        {:error, why} -> raise why
+      end
+
+    id = System.unique_integer([:positive])
+    :ok = GenServer.call(child, {:begin, id})
+
+    try do
+      about = %{
+        "own" => [handle(context, call.own), Artifact.name(call.own)],
+        "installed" => call.installed,
+        "subject" => call.subject,
+        "actor" => call.actor,
+        "plugin" => call.plugin,
+        "who" => call.who,
+        "server" => call.server,
+        "uses" => Map.keys(versions) -- [name]
+      }
+
+      command(port, {:call, id, what, about})
+      waited(child, port, id, call, context)
+    after
+      GenServer.cast(child, {:ended, id})
+    end
+  end
+
+  defp waited(child, port, id, call, context) do
+    receive do
+      {__MODULE__, :request, ^id, request} ->
+        command(port, {:reply, request["request"], handled(request, call, context)})
+        waited(child, port, id, call, context)
+
+      {__MODULE__, :answer, ^id, answer} ->
+        answered(answer, context)
+
+      {__MODULE__, :stopped, ^child, why} ->
+        raise "#{context.name} stopped while it ran this call: #{why}"
+    after
+      @silent ->
+        GenServer.cast(child, {:cancel, id})
+        raise "#{context.name} said nothing for #{div(@silent, 1000)} seconds, so its call was stopped"
+    end
+  end
+
+  defp answered(%{"ok" => %{"text" => text}}, _context) when is_binary(text), do: text
+  defp answered(%{"ok" => %{"json" => json}}, _context), do: json
+
+  defp answered(%{"ok" => %{"blob" => [kind, data]}}, _context) when is_binary(kind) and is_binary(data),
+    do: {:blob, kind, Base.decode64!(data)}
+
+  defp answered(%{"ok" => %{"file" => [kind, handle, name]}}, context) when is_binary(kind) and is_binary(name),
+    do: {:file, kind, artifact!(context, handle), name}
+
+  defp answered(%{"ok" => nil}, _context), do: nil
+  defp answered(%{"raised" => why}, _context) when is_binary(why), do: raise(String.slice(why, 0, 8000))
+  defp answered(_answer, context), do: raise("#{context.name} answered what isn't an answer")
+
+  # What a request is answered with: `{:ok, result}`, or `{:raise, why}`. Moving the call to another server ends it
+  # here (`OneCore.Call.forward_to/2`), which isn't caught.
+  defp handled(request, call, context) do
+    {:ok, op(request["op"], request, call, context)}
+  rescue
+    error -> {:raise, Exception.message(error)}
+  end
+
+  # What needs only an artifact runs anywhere: a process of the child's that isn't a call, such as a database's,
+  # asks it too.
+  defp op("read", %{"handle" => handle, "name" => name}, _call, context),
+    do: Artifact.read(artifact!(context, handle), blob!(name))
+
+  defp op("read_all", %{"handle" => handle, "names" => names}, _call, context) when is_list(names),
+    do: Artifact.read_all(artifact!(context, handle), Enum.map(names, &blob!/1))
+
+  defp op("write", %{"handle" => handle, "name" => name, "data" => data}, _call, context),
+    do: Artifact.write(artifact!(context, handle), blob!(name), Base.decode64!(data))
+
+  defp op("replace", %{"handle" => handle, "name" => name, "data" => data, "tag" => tag}, _call, context),
+    do: Artifact.replace(artifact!(context, handle), blob!(name), Base.decode64!(data), tag)
+
+  defp op("remove", %{"handle" => handle, "name" => name}, _call, context),
+    do: Artifact.remove(artifact!(context, handle), blob!(name))
+
+  defp op("size", %{"handle" => handle, "name" => name}, _call, context),
+    do: Artifact.size(artifact!(context, handle), blob!(name))
+
+  defp op("list", %{"handle" => handle, "starting" => starting}, _call, context),
+    do: Artifact.list(artifact!(context, handle), listed!(starting))
+
+  defp op("fetch", %{"web" => request}, _call, context), do: fetch(request, context)
+  defp op("fire", request, _call, context), do: fire(request, context)
+  defp op(op, _request, nil, _context), do: raise("#{op} is asked within a call, and that call has ended")
+
+  defp op("tool", %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}, call, context)
+       when is_binary(plugin) and is_binary(tool) and is_map(inputs) do
+    if not permitted?(context.permissions, plugin, tool),
+      do:
+        raise(
+          "#{context.name} may not call #{plugin}_#{tool}: its permissions/0 doesn't name it. A plugin in sandbox " <>
+            "mode calls only the tools it says it uses."
+        )
+
+    Call.tool(call, plugin, tool, inputs)
+  end
+
+  defp op("make", %{"id" => made}, call, context), do: named(context, Call.make(call, made))
+
+  defp op("reach", %{"name" => name, "relation" => relation}, call, context),
+    do: named(context, Call.reach(call, artifact_name!(name), relation!(relation)))
+
+  defp op("reaches", %{"name" => name, "relation" => relation}, call, _context),
+    do: Call.reaches?(call, artifact_name!(name), relation!(relation))
+
+  defp op("member", %{"of" => of}, call, _context) when is_binary(of), do: Call.member?(call, of)
+  defp op("owns", _request, call, _context), do: Call.owns?(call)
+  defp op("plugins", _request, call, _context), do: Call.plugins(call)
+  defp op("deployed", _request, call, _context), do: Call.deployed(call)
+  defp op("forward_to", %{"server" => server}, call, _context) when is_binary(server), do: Call.forward_to(call, server)
+  defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered in sandbox mode")
+
+  defp named(context, artifact), do: [handle(context, artifact), Artifact.name(artifact)]
+
+  # A blob's name in an artifact, which can't step outside it: parts joined by /, none starting with a dot.
+  defp blob!(name) do
+    if is_binary(name) and name != "" and Enum.all?(String.split(name, "/"), &(&1 =~ ~r/^[^.]/)),
+      do: name,
+      else: raise(ArgumentError, "a blob's name is parts joined by /, none empty or starting with a dot")
+  end
+
+  defp listed!(""), do: ""
+
+  defp listed!(starting) when is_binary(starting) do
+    parts = String.split(starting, "/")
+
+    if Enum.all?(Enum.drop(parts, -1), &(&1 =~ ~r/^[^.]/)) and not String.starts_with?(List.last(parts), "."),
+      do: starting,
+      else: raise(ArgumentError, "what's listed starts with parts joined by /, none starting with a dot")
+  end
+
+  defp artifact_name!(name) when is_binary(name), do: name
+  defp relation!(relation) when relation in ["viewer", "editor", "owner"], do: relation
+  defp relation!(_), do: raise(ArgumentError, "a relation is viewer, editor or owner")
+
+  @doc """
+  Whether a plugin's `permissions` let it call `plugin`'s `tool`: they name the tool (`gmail_search`) or the
+  plugin, all its tools.
+  """
+  def permitted?(permissions, plugin, tool), do: plugin in permissions or "#{plugin}_#{tool}" in permissions
+
+  @doc "Whether a plugin's `permissions` let it send data to `url`: they name its host (`https://api.example.com`)."
+  def sends_to?(permissions, url) do
+    %URI{scheme: scheme, host: host} = URI.parse(url)
+
+    scheme in ["https", "http"] and is_binary(host) and
+      Enum.any?(permissions, fn permission ->
+        case URI.parse(permission) do
+          %URI{scheme: ^scheme, host: "*." <> domain, path: nil} -> String.ends_with?(host, "." <> domain)
+          %URI{scheme: ^scheme, host: ^host, path: nil} -> true
+          _ -> false
+        end
+      end)
+  end
+
+  # A redirect isn't followed, so one host can't send it on to another.
+  defp fetch(%{"url" => url} = request, context) when is_binary(url) do
+    if not sends_to?(context.permissions, url),
+      do:
+        raise(
+          "#{context.name} may not send data to #{url}: its permissions/0 doesn't name its host. A plugin in " <>
+            "sandbox mode fetches only from the hosts it says it sends data to."
+        )
+
+    body = with body when is_binary(body) <- request["body"], do: Base.decode64!(body)
+    Call.fetch(nil, Map.put(request, "body", body))
+  end
+
+  # A scheduled job's call, which the plugin's schedule keeper in the child makes as the clock, for whoever it's
+  # installed for, as One Core would: only one of the plugin's own jobs.
+  defp fire(%{"installed" => at, "plugin" => name, "tool" => tool, "inputs" => inputs}, context) do
+    with %{^name => %Version{artifact: artifact}} <- Plugins.versions([at]),
+         true <- artifact == context.artifact,
+         %{} <- Enum.find(context.jobs, &(&1.tool == tool and &1.inputs == inputs)) do
+      with {:error, why} <- Calls.call(name, tool, inputs, {nil, at}, true),
+           do: Logger.error("#{name}'s scheduled #{tool} for #{at} failed: #{why}")
+
+      OneCore.Server.changed()
+      nil
+    else
+      _ -> raise "That isn't one of #{context.name}'s scheduled jobs for #{at}"
+    end
+  end
+
+  # An artifact the child holds a handle to, kept here for as long as the child runs. The same artifact has the
+  # same handle.
+  defp handle(context, %Artifact{} = artifact) do
+    case :ets.lookup(context.handles, artifact) do
+      [{^artifact, handle}] ->
+        handle
+
+      [] ->
+        handle = :ets.update_counter(context.handles, :next, 1, {:next, 0})
+        :ets.insert(context.handles, [{handle, artifact}, {artifact, handle}])
+        handle
+    end
+  end
+
+  defp artifact!(context, handle) when is_integer(handle) do
+    case :ets.lookup(context.handles, handle) do
+      [{^handle, artifact}] -> artifact
+      [] -> raise "That isn't an artifact this plugin was given"
+    end
+  end
+
+  defp artifact!(_context, _handle), do: raise("That isn't an artifact this plugin was given")
+
+  defp command(port, term) do
+    frame = :erlang.term_to_binary(term)
+    Port.command(port, [<<byte_size(frame)::32>>, frame])
+  end
+
+  # The child of a version with the versions it uses, started if there's none: `{:ok, child, port, context}`, or
+  # `{:error, why}` with why it couldn't start or load.
+  defp child(version, used, files \\ nil) do
+    key = {version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
+
+    child =
+      case Registry.lookup(@registry, key) do
+        [{child, _}] ->
+          child
+
+        [] ->
+          sets = fn -> sets(version, used, files) end
+          spec = {__MODULE__, {key, Path.basename(version.artifact), sets, version}}
+
+          case DynamicSupervisor.start_child(@supervisor, spec) do
+            {:ok, child} -> child
+            {:error, {:already_started, child}} -> child
+          end
+      end
+
+    GenServer.call(child, :loaded, :infinity)
+  catch
+    :exit, _ -> {:error, "#{Path.basename(version.artifact)} stopped as it started"}
+  end
+
+  # A child that runs once, to say what a set of files is, and stops.
+  defp once(key, name, sets) do
+    {:ok, child} = DynamicSupervisor.start_child(@supervisor, {__MODULE__, {key, name, fn -> sets end, nil}})
+
+    try do
+      with {:ok, _child, _port, context} <- GenServer.call(child, :loaded, :infinity), do: {:ok, context.said}
+    after
+      DynamicSupervisor.terminate_child(@supervisor, child)
+    end
+  catch
+    :exit, _ -> {:error, "#{name} stopped as it started"}
+  end
+
+  defp loaded(version, used, files) do
+    case child(version, used, files) do
+      {:ok, _child, _port, context} -> {:ok, context.said}
+      {:error, why} -> {:error, why}
+    end
+  end
+
+  # The files of each plugin, those it uses first, from the bucket but the plugin's own where they're given: what
+  # isn't in client/, and of its NIFs' libraries only this machine's.
+  defp sets(version, used, files) do
+    own = Path.basename(version.artifact)
+
+    for {name, %Version{artifact: artifact, code: code}} <- Enum.to_list(used) ++ [{own, version}] do
+      prefix = "#{artifact}/code/#{code}/"
+
+      found =
+        if name == own and files,
+          do: files,
+          else: Map.new(Bucket.list(prefix), &{String.replace_prefix(&1, prefix, ""), &1})
+
+      paths =
+        for {path, _} <- found,
+            not Version.client?(path),
+            Path.extname(path) != ".so" or Path.basename(path) == "#{Builds.target()}.so",
+            do: path
+
+      read =
+        if name == own and files,
+          do: Map.take(files, paths),
+          else:
+            for(
+              {path, {:ok, data, _tag}} <- Enum.zip(paths, Bucket.read_all(Enum.map(paths, &found[&1]))),
+              into: %{},
+              do: {path, data}
+            )
+
+      {name, read}
+    end
+  end
+
+  def start_link({key, _name, _sets, _version} = started),
+    do: GenServer.start_link(__MODULE__, started, name: {:via, Registry, {@registry, key}})
+
+  @impl true
+  def init({_key, name, sets, version}) do
+    handles = :ets.new(__MODULE__, [:public, read_concurrency: true])
+
+    context = %{
+      name: name,
+      handles: handles,
+      artifact: version && version.artifact,
+      permissions: (version && version.permissions) || [],
+      jobs: (version && version.jobs) || [],
+      said: nil
+    }
+
+    state = %{context: context, port: nil, buffer: "", loaded: nil, waiting: [], calls: %{}, asked: 0, logged: {0, 0}}
+    {:ok, state, {:continue, {:start, sets}}}
+  end
+
+  @impl true
+  def handle_continue({:start, sets}, state) do
+    case started() do
+      {:ok, port} ->
+        command(port, {:load, sets.(), Builds.target()})
+        Process.send_after(self(), :loading, @silent)
+        {:noreply, %{state | port: port}}
+
+      {:error, why} ->
+        {:stop, :normal, answer_loaded(state, {:error, why})}
+    end
+  end
+
+  # The program the child is: this server's own Erlang VM and Elixir, read-only, with the child's side of One Core.
+  defp started do
+    root = :code.root_dir() |> to_string()
+    erts = Path.join(root, "erts-#{:erlang.system_info(:version)}")
+
+    boot =
+      hd(
+        Path.wildcard(Path.join(root, "bin/start_clean.boot")) ++
+          Path.wildcard(Path.join(root, "releases/*/start_clean.boot"))
+      )
+
+    boot = Path.rootname(boot)
+    elixir = :code.lib_dir(:elixir) |> to_string() |> Path.dirname()
+    libraries = Enum.uniq([Path.join(root, "lib"), elixir])
+    child = Application.app_dir(:one_core, "priv/sandbox")
+    ebins = Enum.flat_map(libraries, &Path.wildcard(Path.join(&1, "*/ebin")))
+
+    arguments =
+      ~w(-noshell -noinput +fnu +S 1:1 +SDcpu 1:1 +SDio 1 +A 1 +MIscs 128 -boot) ++
+        [boot] ++
+        Enum.flat_map(ebins, &["-pa", &1]) ++
+        [
+          "-eval",
+          "application:ensure_all_started(elixir), 'Elixir.Code':require_file(<<\"#{child}/child.ex\"/utf8>>), " <>
+            "'Elixir.OneCore.Sandbox.Child':main()."
+        ]
+
+    env = %{
+      "ROOTDIR" => root,
+      "BINDIR" => Path.join(erts, "bin"),
+      "EMU" => "beam",
+      "PROGNAME" => "erl",
+      "HOME" => "/tmp",
+      "LANG" => "C.UTF-8",
+      "ERL_CRASH_DUMP_SECONDS" => "0"
+    }
+
+    policy = %{read: Enum.uniq([erts, boot <> ".boot", child | libraries]), env: env, memory: @memory}
+
+    case Plugins.run(["network"], "sandbox", fn _at, versions ->
+           versions["sandbox"].plugin.start(Path.join(erts, "bin/erlexec"), arguments, policy)
+         end) do
+      {:ok, port} ->
+        {:ok, port}
+
+      {:error, "There's no plugin named sandbox"} ->
+        {:error, "Sandbox mode needs the plugin sandbox, which isn't installed for the network"}
+
+      {:error, why} ->
+        {:error, why}
+    end
+  end
+
+  @impl true
+  def handle_call(:loaded, from, %{loaded: nil} = state), do: {:noreply, %{state | waiting: [from | state.waiting]}}
+  def handle_call(:loaded, _from, state), do: {:reply, state.loaded, state}
+
+  def handle_call({:begin, id}, {caller, _}, state) do
+    monitor = Process.monitor(caller)
+    {:reply, :ok, %{state | calls: Map.put(state.calls, id, {caller, monitor})}}
+  end
+
+  @impl true
+  def handle_cast({:ended, id}, state), do: {:noreply, ended(state, id, false)}
+  def handle_cast({:cancel, id}, state), do: {:noreply, ended(state, id, true)}
+
+  @impl true
+  def handle_info({port, {:data, data}}, %{port: port} = state), do: frames(%{state | buffer: state.buffer <> data})
+
+  def handle_info({port, {:exit_status, status}}, %{port: port} = state),
+    do: {:stop, :normal, stopped(state, "its VM ended with status #{status}")}
+
+  def handle_info({:DOWN, monitor, :process, _caller, _why}, state) do
+    case Enum.find(state.calls, fn {_id, {_caller, watched}} -> watched == monitor end) do
+      {id, _} -> {:noreply, ended(state, id, true)}
+      nil -> {:noreply, state}
+    end
+  end
+
+  def handle_info(:idle, %{calls: calls} = state) when calls == %{}, do: {:stop, :normal, state}
+  def handle_info(:idle, state), do: {:noreply, state}
+
+  def handle_info(:loading, %{loaded: nil} = state),
+    do: {:stop, :normal, stopped(state, "it didn't load within #{div(@silent, 1000)} seconds")}
+
+  def handle_info(:loading, state), do: {:noreply, state}
+  def handle_info(:answered, state), do: {:noreply, %{state | asked: state.asked - 1}}
+
+  @impl true
+  def terminate(_why, %{port: port}) when is_port(port) do
+    with {:os_pid, pid} <- Port.info(port, :os_pid), do: System.cmd("kill", ["-KILL", to_string(pid)])
+    Port.close(port)
+  catch
+    _, _ -> :ok
+  end
+
+  def terminate(_why, _state), do: :ok
+
+  # A call ended, here or in the child: one the child may still be running is cancelled there. A child with none
+  # left stops after a while.
+  defp ended(state, id, cancel) do
+    case Map.pop(state.calls, id) do
+      {{_caller, monitor}, calls} ->
+        Process.demonitor(monitor, [:flush])
+        if cancel, do: command(state.port, {:cancel, id})
+        if calls == %{}, do: Process.send_after(self(), :idle, @idle)
+        %{state | calls: calls}
+
+      {nil, _calls} ->
+        state
+    end
+  end
+
+  # Its VM's own words, such as that it ran out of memory, aren't a frame either.
+  defp frames(%{buffer: <<size::32, _::binary>>} = state) when size > @largest,
+    do:
+      {:stop, :normal,
+       stopped(state, "it wrote what isn't the protocol: #{inspect(String.slice(state.buffer, 0, 200))}")}
+
+  defp frames(%{buffer: <<size::32, frame::binary-size(size), rest::binary>>} = state) do
+    case JSON.decode(frame) do
+      {:ok, message} ->
+        case received(message, %{state | buffer: rest}) do
+          {:ok, state} -> frames(state)
+          {:stop, why, state} -> {:stop, :normal, stopped(state, why)}
+        end
+
+      {:error, _} ->
+        {:stop, :normal, stopped(state, "it sent what isn't the protocol: #{inspect(String.slice(frame, 0, 200))}")}
+    end
+  end
+
+  defp frames(state), do: {:noreply, state}
+
+  defp received(%{"answer" => "load"} = answer, state) do
+    loaded =
+      case answer do
+        %{"ok" => said} when is_map(said) ->
+          context = %{state.context | said: said}
+          {:ok, self(), state.port, context}
+
+        %{"raised" => why} when is_binary(why) ->
+          {:error, why}
+
+        _ ->
+          {:error, "#{state.context.name} said what isn't what it is"}
+      end
+
+    state = answer_loaded(state, loaded)
+    state = with {:ok, _, _, context} <- loaded, do: %{state | context: context}
+    if match?({:error, _}, loaded), do: {:stop, "it didn't load", state}, else: {:ok, state}
+  end
+
+  defp received(%{"answer" => id} = answer, state) when is_integer(id) do
+    with %{^id => {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :answer, id, answer})
+    {:ok, state}
+  end
+
+  # A request within a call is run by the process running the call, and any other alongside, a few at once.
+  defp received(%{"request" => request, "call" => call, "op" => op} = asked, state)
+       when is_integer(request) and is_binary(op) do
+    cond do
+      is_map_key(state.calls, call) ->
+        {caller, _monitor} = state.calls[call]
+        send(caller, {__MODULE__, :request, call, asked})
+        {:ok, state}
+
+      state.asked >= @at_once ->
+        {:stop, "it asked for more than #{@at_once} things at once outside a call", state}
+
+      true ->
+        {port, context, child} = {state.port, state.context, self()}
+
+        Task.start(fn ->
+          command(port, {:reply, request, handled(asked, nil, context)})
+          send(child, :answered)
+        end)
+
+        {:ok, %{state | asked: state.asked + 1}}
+    end
+  end
+
+  # What it logs past its share of a minute is dropped.
+  defp received(%{"log" => level, "text" => text}, state)
+       when level in ["warning", "error", "critical", "alert", "emergency"] and is_binary(text) do
+    minute = div(System.monotonic_time(:second), 60)
+    {at, logged} = state.logged
+    logged = if at == minute, do: logged + 1, else: 1
+
+    if logged <= @logs,
+      do: Logger.log(String.to_existing_atom(level), "#{state.context.name}: #{String.slice(text, 0, 4000)}")
+
+    {:ok, %{state | logged: {minute, logged}}}
+  end
+
+  defp received(message, state), do: {:stop, "it sent what isn't the protocol: #{inspect(message, limit: 5)}", state}
+
+  defp answer_loaded(state, loaded) do
+    for from <- state.waiting, do: GenServer.reply(from, loaded)
+    %{state | loaded: loaded, waiting: []}
+  end
+
+  defp stopped(state, why) do
+    Logger.warning("#{state.context.name}'s sandbox stopped: #{why}")
+    for {_id, {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :stopped, self(), why})
+
+    if state.loaded == nil,
+      do: answer_loaded(state, {:error, "#{state.context.name} stopped as it loaded: #{why}"}),
+      else: state
+  end
+end

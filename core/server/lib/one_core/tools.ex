@@ -29,7 +29,10 @@ defmodule OneCore.Tools do
       running stays.
       The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
       or for the network, it's theirs. Its code runs on a server of yours, so you need one: set one up in Devices, or
-      ask for it to be installed for everyone, by the network's launcher (its skill says how). `recently-deleted remove --artifact <it>` removes one nobody has installed.
+      ask for it to be installed for everyone, by the network's launcher (its skill says how). In sandbox mode
+      (`sandbox`) it runs in a VM of its own behind its machine's sandbox, on any of the network's servers, so it needs
+      no server of yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0
+      names. It answers with them. `recently-deleted remove --artifact <it>` removes one nobody has installed.
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       """,
       inputs: %{
@@ -63,6 +66,11 @@ defmodule OneCore.Tools do
             },
             required: ["source", "commit"],
             additionalProperties: false
+          },
+          sandbox: %{
+            type: "boolean",
+            description:
+              "Whether it runs in sandbox mode. Left out, it runs as the version before did, and a new one doesn't"
           }
         },
         required: ["name", "files"]
@@ -88,7 +96,8 @@ defmodule OneCore.Tools do
       description: """
       Lists the plugins installed for you and for the network, as `npm ls` does packages: asked for a group, for it
       and the network. Each with the name it's installed by, who it's installed `for`, its artifact (`plugin`), its
-      latest version, the hash of the files that version was deployed from (`source`), and, if it was installed from
+      latest version, whether it runs in sandbox mode (`sandbox`), what it may do beyond its own (`permissions`), the hash
+      of the files that version was deployed from (`source`), and, if it was installed from
       a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, and the `hash` of the files
       as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
       have moved on upstream or changed since, and `one plugins update` installs the newer.
@@ -98,10 +107,11 @@ defmodule OneCore.Tools do
     %{
       name: "install",
       description: """
-      Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
-      Its code runs on a server of yours, so you need one; for the network, its owners and installers add plugins,
-      and anyone may ask them to, by the network's launcher (its skill says how), which also puts an app of a plugin
-      in use for the network on your page without installing anything.
+      Adds a plugin someone else deployed for you: asked for a group or for the network, for them. It answers with
+      what the plugin may do beyond its own (its permissions).
+      Its code runs on a server of yours, so you need one, unless it runs in sandbox mode; for the network, its owners
+      and installers add plugins, and anyone may ask them to, by the network's launcher (its skill says how), which
+      also puts an app of a plugin in use for the network on your page without installing anything.
       `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
       It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
@@ -324,6 +334,20 @@ defmodule OneCore.Tools do
     end
   end
 
+  # What a plugin may do beyond its own, as a person reads it: "Uses gmail · Sends data to api.example.com".
+  defp permitted(nil), do: ""
+
+  defp permitted(version) do
+    {hosts, tools} = Enum.split_with(version.permissions, &String.contains?(&1, "://"))
+    uses = for tool <- tools, do: "uses " <> tool
+    sends = for host <- hosts, do: "sends data to " <> URI.parse(host).host
+
+    case uses ++ sends do
+      [] -> "It does nothing beyond its own."
+      said -> "It " <> Enum.join(said, " · ") <> "."
+    end
+  end
+
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
 
@@ -336,7 +360,8 @@ defmodule OneCore.Tools do
 
       Servers.running(owner) == [] ->
         raise "A plugin for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
-                "Set one up in Devices, or #{Deploy.ask_to_install()}."
+                "Set one up in Devices, #{Deploy.ask_to_install()}, or run it in sandbox mode (deploy with " <>
+                "sandbox: true), which any of the network's servers runs for anyone."
 
       true ->
         forward.({:running, owner})
@@ -345,18 +370,25 @@ defmodule OneCore.Tools do
 
   # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
   # deployed for. Either way it's loaded where it will run.
+  # A plugin in sandbox mode runs on any server acting for whoever it's for, the network's among them.
   defp run("deploy", %{"name" => name, "files" => files} = inputs, {_by, who} = asked, forward) do
-    runs(who, forward)
+    plugin = Plugins.plugin(who, name)
+    sandbox = Map.get(inputs, "sandbox", plugin != nil and Store.about(plugin)["sandbox"] == true)
+    if sandbox, do: at(who, forward), else: runs(who, forward)
 
-    case Plugins.plugin(who, name) do
+    case plugin do
       nil -> reaches!(asked, who, "installer")
       plugin -> reaches!(asked, plugin, "editor")
     end
 
-    case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :kept)) do
-      {:ok, number, ""} -> "#{name} is running, at version #{number}."
-      {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
-      {:error, why} -> raise why
+    case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :kept), sandbox) do
+      {:ok, number, warnings} ->
+        mode = if sandbox, do: ", in sandbox mode", else: ""
+        warned = if warnings == "", do: "", else: " The compiler warns:\n#{warnings}"
+        "#{name} is running, at version #{number}#{mode}. #{permitted(Plugins.running(who)[name])}#{warned}"
+
+      {:error, why} ->
+        raise why
     end
   end
 
@@ -386,6 +418,8 @@ defmodule OneCore.Tools do
           for: at,
           plugin: version.artifact,
           version: about["number"],
+          sandbox: version.sandbox,
+          permissions: version.permissions,
           source: about["source"],
           from: about["from"]
         }
@@ -396,11 +430,11 @@ defmodule OneCore.Tools do
 
   defp run("install", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
-    runs(who, forward)
+    if Store.about(plugin)["sandbox"] == true, do: at(who, forward), else: runs(who, forward)
     opens!(asked, plugin)
     reaches!(asked, who, "installer")
     with {:error, why} <- Installed.install(who, name, plugin), do: raise(why)
-    "#{plugin} is installed for #{who}, as #{name}."
+    "#{plugin} is installed for #{who}, as #{name}. #{permitted(Plugins.running(who)[name])}"
   end
 
   defp run("uninstall", %{"name" => name}, {_by, who} = asked, forward) do
