@@ -7,6 +7,7 @@ import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
+import { $ } from "bun"
 
 const here = (path) => new URL(path, import.meta.url).pathname
 const text = (path) => readFileSync(here(path), "utf8")
@@ -54,6 +55,9 @@ description: Read before writing or changing an app's screens, which are written
 ---
 
 ${skill().join("\n")}`)
+
+// The UI library's types, for an app written in TypeScript: declarations only, unchecked (`bun run typecheck` checks).
+await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emitDeclarationOnly --noCheck --rewriteRelativeImportExtensions --rootDir src --outDir dist/types`.cwd(here("."))
 
 for (const file of ["app.js", "package.json", "bun.lock"]) cpSync(here(file), here(`dist/build/${file}`))
 
