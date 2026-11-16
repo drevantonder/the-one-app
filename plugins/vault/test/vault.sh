@@ -146,7 +146,7 @@ ONE_AS=alice ONE_HOME=$folder/devices/phone "$root/target/release/examples/recov
 echo "  her phone's window shows her recovery key once, which she writes down ($(wc -c <"$folder/secrets/recovery") characters, kept in a file here)"
 may on phone as alice vault grant --servers "$(servers "${key[server]}")"
 may on phone as alice locker grant --servers "$(servers "${key[server]}")"
-may on phone as alice relations shared --artifact $vault
+may on phone as alice permissions shared --artifact $vault
 
 say "What's typed on a device is encrypted there, and the bytes in the bucket hold none of it"
 may on phone as alice locker keep --text-from "$folder/secrets/note"
@@ -200,7 +200,7 @@ echo "  the standby took the lease of her Vault's database: $(grep -o "$vault/: 
 up server
 may on phone as alice vault grant --servers "$(servers "${key[server]}")"
 may on phone as alice locker grant --servers "$(servers "${key[server]}")"
-may on phone as alice relations shared --artifact $vault
+may on phone as alice permissions shared --artifact $vault
 may on phone as alice vault unlocked_on
 down server
 refused on phone as alice vault list
@@ -211,17 +211,17 @@ echo "  what's written since is under a new epoch's key, which the standby was n
 
 say "The network's owner writes any relation tuple, and reads nothing of hers"
 refused on desk as owner for users/alice vault list
-may on desk as owner relations share --artifact users/alice --relation member --who users/owner
-may on desk as owner relations share --artifact $vault --relation owner --who users/owner
+may on desk as owner permissions share --artifact users/alice --relation member --who users/owner
+may on desk as owner permissions share --artifact $vault --relation owner --who users/owner
 refused on desk as owner for users/alice vault list
 refused on desk as owner for users/alice encryption key
 refused on desk as owner for users/alice vault grant --servers "$(servers "${key[standby]}")"
-may on desk as owner relations share --artifact $vault --relation editor --who "servers/${key[standby]}"
+may on desk as owner permissions share --artifact $vault --relation editor --who "servers/${key[standby]}"
 echo "  a tuple names the standby now, which the owner wrote. No device of his holds her key, so it was handed none:"
 down server
 refused on phone as alice vault list
 up server
-may on desk as owner relations unshare --artifact $vault --relation editor --who "servers/${key[standby]}"
+may on desk as owner permissions unshare --artifact $vault --relation editor --who "servers/${key[standby]}"
 
 say "An agent keeps what's pasted, asks its person for the rest, and uses it without seeing it"
 service=$(free_port)
@@ -330,8 +330,8 @@ echo "  someone with the whole bucket, and a key of their own making:"
 echo "  and no file of the bucket holds the marker, as below"
 
 say "A group's Vault and the network's, each set up and opened by an owner, and the network's by its recovery key"
-may on den as alice relations group --name family
-may on den as alice relations share --artifact groups/family --relation member --who users/bob
+may on den as alice permissions group --name family
+may on den as alice permissions share --artifact groups/family --relation member --who users/bob
 may on den as alice for groups/family encryption approve
 may on den as alice for groups/family vault grant --servers "$(servers "${key[server]}")"
 may on den as alice for groups/family vault set --item Wifi --field password --value-from "$folder/secrets/wifi"

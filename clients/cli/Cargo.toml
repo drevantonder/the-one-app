@@ -19,7 +19,7 @@ tokio.workspace = true
 # The native code of the plugins it ships with, which is never deployed (`client::files`).
 backups_client = { path = "../../plugins/backups/client/native" }
 encryption_client = { path = "../../plugins/encryption/client/native" }
-repos_client = { path = "../../plugins/repos/client/native" }
+git_repos_client = { path = "../../plugins/git-repos/client/native" }
 
 # Who's running this, and their login shell (`serving`).
 [target.'cfg(unix)'.dependencies]

@@ -30,10 +30,10 @@ pub fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
     // Run by git as its remote helper, it's that, under the name git found it by, with `.exe` after it on Windows.
     let named = env::args().next().map(|program| Path::new(&program).file_stem().map(|name| name.to_owned()));
-    let answered = if named.flatten().is_some_and(|name| name == repos_client::HELPER) {
-        runtime.block_on(async { repos_client::helper(Client::open(client::home()?, resolvers()).await?, &args).await })
+    let answered = if named.flatten().is_some_and(|name| name == git_repos_client::HELPER) {
+        runtime.block_on(async { git_repos_client::helper(Client::open(client::home()?, resolvers()).await?, &args).await })
     } else {
-        repos_client::beside();
+        git_repos_client::beside();
         runtime.block_on(run(args))
     };
     answered.unwrap_or_else(|error| {

@@ -3,8 +3,8 @@ name: google-calendar
 description: Read before reading the person's Google calendars, or adding, changing or deleting an event in one.
 ---
 
-Google Calendar is the person's Google calendars, from any device. (A Mac's own calendars are the `calendar`
-app's.) Signing in is the skill `google`'s.
+Google Calendar is the person's Google calendars, from any device. (A Mac's own calendars are the `apple-calendar`
+app's.) Signing in is the skill `google-account`'s.
 
 - `events` lists the events in a time range, the coming week if left out, and `event` shows one, with its
   guests and links. `calendars` lists the calendars, whose ids `calendarId` takes: primary if left out.

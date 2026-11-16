@@ -888,11 +888,11 @@ defmodule Vault do
   defp random(bytes), do: Base.url_encode64(:crypto.strong_rand_bytes(bytes), padding: false)
   defp now, do: System.os_time(:second)
 
-  # A relation tuple is the relations plugin's to write, as whoever asked.
+  # A relation tuple is the permissions plugin's to write, as whoever asked.
   defp share(call, tool, artifact, who) do
     inputs = %{"artifact" => artifact, "relation" => "editor", "who" => who}
 
-    case Calls.call("relations", tool, inputs, {call.actor, call.subject}) do
+    case Calls.call("permissions", tool, inputs, {call.actor, call.subject}) do
       {:ok, _said} ->
         :ok
 

@@ -321,11 +321,11 @@ defmodule Notifications do
     end)
   end
 
-  # Who a notification goes to: a user, or the users in a group or the network, whom relations says.
+  # Who a notification goes to: a user, or the users in a group or the network, whom permissions says.
   defp users(_call, "users/" <> _ = user), do: [user]
 
-  defp users(call, "groups/" <> _ = to), do: Call.tool(call, "relations", "members", %{"of" => to})
-  defp users(call, "network"), do: Call.tool(call, "relations", "members", %{"of" => "network"})
+  defp users(call, "groups/" <> _ = to), do: Call.tool(call, "permissions", "members", %{"of" => to})
+  defp users(call, "network"), do: Call.tool(call, "permissions", "members", %{"of" => "network"})
 
   defp users(_call, to), do: raise("#{to} isn't a user, a group or the network.")
 

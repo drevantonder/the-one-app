@@ -14,14 +14,14 @@ Start a network (`local-network`), then the app as its owner, on a screen of its
 
     ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
       target/release/one >"$0/app.log" 2>&1 & app=$!
-      grep -q -m1 "home opened" <(tail -F --pid=$app "$0/app.log")
+      grep -q -m1 "^home-screen opened" <(tail -F --pid=$app -n +1 "$0/app.log")
       window=$(xdotool search --sync --onlyvisible --name "The One App" | head -1)
       # xdotool mousemove --window "$window" <x> <y> click 1, xdotool type ...
       import -window root "$0/<name>.png"
       kill $app' <scratch folder>
 
-Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. The app logs `home opened` once
-Home is up, though its opening mark is still fading then: take the picture after the press that shows your change.
+Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. The app logs `the client opened`, then `home-screen opened` once
+the Home Screen is up, though its opening mark is still fading then: take the picture after the press that shows your change.
 `xdotool` presses and types; `import` (ImageMagick) takes the picture. Look at every picture before you show it.
 
 ## Android

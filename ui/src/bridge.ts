@@ -88,7 +88,7 @@ interface Content {
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
 /// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
 /// An app opened from a group's Home Screen page is answered for the group, with nothing said. A page that shows more
-/// than one of them says who each call is for: `call("home_page", {}, { for: "groups/family" })`, or `network`.
+/// than one of them says who each call is for: `call("home-screen_page", {}, { for: "groups/family" })`, or `network`.
 export async function call(tool: string, inputs: object = {}, who: For = {}): Promise<string> {
   await greet()
   const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(who.for ? { _meta: { for: who.for } } : {}) })

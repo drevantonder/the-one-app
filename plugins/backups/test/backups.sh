@@ -69,8 +69,8 @@ holding() { { grep -r -a -l -F -e "$marker" "$@" 2>/dev/null || true; } | wc -l;
 
 say "A network with two people, a group, databases with rows, files and a Vault item"
 as owner for network deploy --name shelf --files-from "$root/plugins/backups/test/plugins/shelf" | shown
-as alice relations group --name family | shown
-as alice relations share --artifact groups/family --relation member --who users/bob | shown
+as alice permissions group --name family | shown
+as alice permissions share --artifact groups/family --relation member --who users/bob | shown
 for n in 1 2 3; do as alice shelf add --text "alice's note $n" >/dev/null; done
 as alice shelf put --name diary.txt --text "$marker, in a file nothing encrypts" >/dev/null
 as alice shelf put --name photo.jpg --size 2000000 >/dev/null

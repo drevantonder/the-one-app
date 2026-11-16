@@ -2,7 +2,7 @@
 //! holds the frames. The window always opens there, and asks where it starts (`start`): a device that isn't in its
 //! network yet is sent on to the network's sign-in page, with the code it's let in by, until its person has. Each app is a page of its plugin's, drawn in a frame of its own, which
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The Home Screen
-//! are an app too, the plugin `home`'s, which the window shows first and under every other.
+//! are an app too, the plugin `home-screen`'s, which the window shows first and under every other.
 
 #![cfg(feature = "window")]
 
@@ -287,7 +287,7 @@ fn tapped(app: AppHandle, tapped: Value) {
 }
 
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
-/// screen from when its page began to load, which the time since the program started is beside. Insights is told.
+/// screen from when its page began to load, which the time since the program started is beside. Telemetry is told.
 #[tauri::command]
 fn opened(views: State<'_, Views>, view: String, ms: u32) {
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());

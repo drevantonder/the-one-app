@@ -12,7 +12,7 @@ const people = createMemo(async () => {
     json("sign-in_everyone"),
     json("sign-in_people"),
     // The network's owners invite and take out, and are said to be its owners.
-    json("relations_shared", { artifact: "network" }).then((tuples) => tuples.filter(({ relation }) => relation === "owner").map(({ who }) => who), () => []),
+    json("permissions_shared", { artifact: "network" }).then((tuples) => tuples.filter(({ relation }) => relation === "owner").map(({ who }) => who), () => []),
   ])
   const named = (person) => person.called ?? person.who.replace("users/", "")
   const sorted = everyone.toSorted((a, b) => (b.who === me.who) - (a.who === me.who) || named(a).localeCompare(named(b)))

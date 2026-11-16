@@ -87,7 +87,7 @@ defmodule OneCore.Plugin do
     raises with the reason if it may not, which is then what the caller is told, and `OneCore.Call.reaches?/3`
     asks without raising. What the plugin made for whoever it runs for is reached without asking. Anything else
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
-    decide `reach` say. `relations` is the one The One App ships with, and its skill says how something is
+    decide `reach` say. `permissions` is the one The One App ships with, and its skill says how something is
     shared. With none, nothing is reached but by the network's first owner.
   - A tool runs for whoever asked, `call.subject`. Whoever asks
     can ask for a group they're a member of, or for the network: `call.subject` is then the group, what the tool
@@ -162,10 +162,10 @@ defmodule OneCore.Plugin do
     the plugin whose jobs they are, on every server, each time one of them is due, with the jobs and a function
     that makes a job's call on the server it's called on: `fire.(job)`. It's what has one server call it once.
 
-  What a plugin does shows in Insights, where it's installed, in Settings and to agents through its tools. Every tool
+  What a plugin does shows in Telemetry, where it's installed, in Settings and to agents through its tools. Every tool
   call is a span there already, with whose it was, how long it took and how it ended, and so is every warning, error
   and crash said to `Logger`: Logger's info and debug aren't kept, so they can say more. A plugin records more by
-  calling Insights' tool `record`, whose skill says how.
+  calling Telemetry' tool `record`, whose skill says how.
 
   A plugin hooks into a moment that isn't one of its own tools being called, to hear of it, to change it or to
   decide it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:

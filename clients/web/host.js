@@ -127,7 +127,7 @@ const commands = {
   update: cannot("A browser has the latest each time it opens."),
   recovery_key: cannot(NO_KEY),
   recover: cannot(NO_KEY),
-  // What the app does as it's seen, which a browser doesn't: its time to open goes to Insights, and it hears
+  // What the app does as it's seen, which a browser doesn't: its time to open goes to Telemetry, and it hears
   // notifications.
   visible() {},
   opened() {},

@@ -23,8 +23,8 @@ const owners = createMemo(async () => {
   const me = (await call("sign-in_people").then(JSON.parse, () => []))[0]?.who
   if (!me) return []
   const [groups, network] = await Promise.all([
-    call("relations_groups", {}, { for: me }).then(JSON.parse, () => []),
-    call("relations_check", { artifact: "network", relation: "owner" }, { for: me }).then((said) => JSON.parse(said).may, () => false),
+    call("permissions_groups", {}, { for: me }).then(JSON.parse, () => []),
+    call("permissions_check", { artifact: "network", relation: "owner" }, { for: me }).then((said) => JSON.parse(said).may, () => false),
   ])
   const theirs = groups.filter((group) => group.owners.includes(me)).map((group) => ({ value: group.group, label: group.called, whose: /s$/i.test(group.called) ? `${group.called}'` : `${group.called}'s` }))
   return [{ value: me, label: "Yours", whose: "your" }, ...theirs, ...(network ? [{ value: "network", label: "The network's", whose: "the network's" }] : [])]

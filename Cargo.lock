@@ -712,9 +712,9 @@ dependencies = [
  "data-encoding",
  "dirs 6.0.0",
  "encryption_client",
+ "git_repos_client",
  "iroh",
  "libc",
- "repos_client",
  "reqwest",
  "serde_json",
  "sha2 0.11.1",
@@ -1937,6 +1937,21 @@ dependencies = [
  "libc",
  "system-deps",
  "winapi",
+]
+
+[[package]]
+name = "git_repos_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "client",
+ "data-encoding",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "iroh",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4562,21 +4577,6 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
-
-[[package]]
-name = "repos_client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "client",
- "data-encoding",
- "http-body-util",
- "hyper",
- "hyper-util",
- "iroh",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "reqwest"

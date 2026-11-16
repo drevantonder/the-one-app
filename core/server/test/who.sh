@@ -281,61 +281,61 @@ note=$(as alice notes write --id shopping --text "Buy milk")
 echo "  alice wrote $note"
 may as alice notes read --note "$note"
 refused as bob notes read --note "$note"
-may as alice relations share --artifact "$note" --relation viewer --who users/bob
+may as alice permissions share --artifact "$note" --relation viewer --who users/bob
 may as bob notes read --note "$note"
 refused as bob notes change --note "$note" --text "Buy beer"
-refused as bob relations share --artifact "$note" --relation viewer --who users/carol
+refused as bob permissions share --artifact "$note" --relation viewer --who users/carol
 
 say "A group's member can"
-may as alice relations group --name family
-may as alice relations share --artifact "$note" --relation editor --who groups/family
+may as alice permissions group --name family
+may as alice permissions share --artifact "$note" --relation editor --who groups/family
 refused as carol notes read --note "$note"
-may as alice relations share --artifact groups/family --relation member --who users/carol
+may as alice permissions share --artifact groups/family --relation member --who users/carol
 may as carol notes change --note "$note" --text "Buy oat milk"
 may as alice notes read --note "$note"
 
 say "A sharing link's holder can, until its tuple is removed"
-made=$(as alice relations link --artifact "$note")
+made=$(as alice permissions link --artifact "$note")
 link=$(grep -o '"link":"[^"]*"' <<<"$made" | cut -d'"' -f4)
 holder=$(grep -o '"who":"[^"]*"' <<<"$made" | cut -d'"' -f4)
 echo "  alice made a link, whose holder the tuple names $holder"
 may as link "$link" notes read --note "$note"
 refused as link "${link}x" notes read --note "$note"
 refused as link "$link" notes change --note "$note" --text "Buy nothing"
-refused as link "$link" relations shared --artifact "$note"
+refused as link "$link" permissions shared --artifact "$note"
 if [[ ${#at_address[@]} -gt 0 ]]; then
   echo "  the same holder comes in at the network's address over the web, with no signing in, at /link/<the link>:"
   may web link "$link" notes_read "{\"note\":\"$note\"}"
   refused web link "$link" notes_change "{\"note\":\"$note\",\"text\":\"Buy nothing\"}"
   refused web link "$link" notes_write '{"id":"mine","text":"As the owner?"}'
-  refused web link "$link" relations_share "{\"artifact\":\"$note\",\"relation\":\"owner\",\"who\":\"everyone\"}"
-  refused web link "$link" remove '{"name":"relations"}'
+  refused web link "$link" permissions_share "{\"artifact\":\"$note\",\"relation\":\"owner\",\"who\":\"everyone\"}"
+  refused web link "$link" remove '{"name":"permissions"}'
   refused web link "${link}x" notes_read "{\"note\":\"$note\"}"
   refused web link "nobody/at-all" notes_read "{\"note\":\"$note\"}"
 else
   echo "  (with --edge, the same holder comes in at the network's address over the web)"
 fi
-may as alice relations unshare --artifact "$note" --relation viewer --who "$holder"
+may as alice permissions unshare --artifact "$note" --relation viewer --who "$holder"
 refused as link "$link" notes read --note "$note"
 [[ ${#at_address[@]} -eq 0 ]] || refused web link "$link" notes_read "{\"note\":\"$note\"}"
 
 say "A plugin can't reach what its user can't, or what it has no relation to itself"
 refused as dave notes read --note "$note"
 refused as alice reader read --note "$note"
-may as alice relations share --artifact "$note" --relation viewer --who network/plugins/reader
+may as alice permissions share --artifact "$note" --relation viewer --who network/plugins/reader
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
 
 say "A plugin's skill is listed for whoever the plugin is installed for, with One Core's own, and a link's holder sees none"
 may as alice deploy --name diary --files-from "$folder/diary"
-link=$(as alice relations link --artifact "$note" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
+link=$(as alice permissions link --artifact "$note" | grep -o '"link":"[^"]*"' | cut -d'"' -f4)
 may as link "$link" notes read --note "$note"
 listed=$(skills as alice)
 echo "  alice is listed: $listed"
-[[ " $listed " == *" diary "* && " $listed " == *" relations "* && " $listed " == *" building-plugins "* ]]
+[[ " $listed " == *" diary "* && " $listed " == *" permissions "* && " $listed " == *" building-plugins "* ]]
 listed=$(skills as bob)
 echo "  bob is listed: $listed"
-[[ " $listed " != *" diary "* && " $listed " == *" relations "* && " $listed " == *" building-plugins "* ]]
+[[ " $listed " != *" diary "* && " $listed " == *" permissions "* && " $listed " == *" building-plugins "* ]]
 listed=$(skills as link "$link")
 echo "  the holder of alice's link is listed: ${listed:-none}"
 [[ -z $listed ]]
@@ -350,7 +350,7 @@ say "A plugin is whoever's deployed it, and has an artifact of its own for each 
 may as alice diary write --text "Dear diary"
 refused as bob diary write --text "Dear diary"
 refused as bob install --plugin users/alice/plugins/diary
-may as alice relations share --artifact users/alice/plugins/diary --relation viewer --who everyone
+may as alice permissions share --artifact users/alice/plugins/diary --relation viewer --who everyone
 may as bob install --plugin users/alice/plugins/diary
 may as bob diary write --text "Mine"
 listed=$(skills as bob)
@@ -380,7 +380,7 @@ refused as dave install --plugin users/alice/plugins/recipes
 may as carol install --plugin users/alice/plugins/recipes
 may as carol code --name recipes
 refused as carol recipes read --note "$recipe"
-refused as carol relations shared --artifact users/alice/plugins/recipes
+refused as carol permissions shared --artifact users/alice/plugins/recipes
 may as alice for groups/family uninstall --name recipes
 refused as carol code --name recipes
 refused as carol install --plugin users/alice/plugins/recipes --name again
@@ -397,7 +397,7 @@ say "One Core's own tools are whoever's may, decided by the same hooks"
 refused as bob deploy --name diary --files-from "$folder/diary"
 refused as carol for groups/family uninstall --name diary
 refused as bob for network deploy --name notes --files-from "$folder/notes"
-refused as bob for network uninstall --name relations
+refused as bob for network uninstall --name permissions
 refused as bob for network add_server --key "$(printf 'ab%.0s' {1..32})"
 refused as bob install_service --plugin backups --service Backups.Disk
 may as alice for groups/family uninstall --name diary
@@ -411,7 +411,7 @@ start_for alices users/alice
 grep -q "A server is running" "$folder/alices.log" && echo "  started again, it's running"
 may via alices as alice diary write --text "At home"
 may via alices as alice journal write --text "With everyone"
-may as owner relations share --artifact network/plugins/reader --relation viewer --who users/alice
+may as owner permissions share --artifact network/plugins/reader --relation viewer --who users/alice
 may via alices as alice install --plugin network/plugins/reader --name mine
 may via alices as alice uninstall --name mine
 refused via alices as bob diary write --text "At alice's"
@@ -437,7 +437,7 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
       end
       IO.puts("    #{blob}: #{said}")
     end' "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
-    users/bob/made/notes/list/text network/own/relations/log/0000000000000001 groups/family/own/diary/1 \
+    users/bob/made/notes/list/text network/own/permissions/log/0000000000000001 groups/family/own/diary/1 \
     users/bob/installed network/plugins/notes/latest 2>&1 | grep -v "^$")
 else
   echo "  (on a folder nothing stands between a server and the bucket: with --edge, the presigner refuses it the rest)"
@@ -459,8 +459,8 @@ as owner for network uninstall --name gate >/dev/null
 say "Who may approve is whoever a tuple says"
 as owner for network deploy --name approvals --files-from "$folder/approvals" >/dev/null
 refused as bob approvals approve
-refused as alice relations share --artifact network/own/approvals --relation editor --who users/alice
-may as owner relations share --artifact network/own/approvals --relation editor --who users/bob
+refused as alice permissions share --artifact network/own/approvals --relation editor --who users/alice
+may as owner permissions share --artifact network/own/approvals --relation editor --who users/bob
 may as bob approvals approve
 
 say "What a check costs a call, over one connection as an agent's MCP session keeps"
@@ -484,10 +484,10 @@ timed() {
 }
 reads="{\"note\":\"$note\"}"
 for server in server standby; do
-  if grep -q "own/relations/: holds its lease" "$folder/$server.log"; then where="writes the tuples' database"; else where="passes each check on"; fi
+  if grep -q "own/permissions/: holds its lease" "$folder/$server.log"; then where="writes the tuples' database"; else where="passes each check on"; fi
   echo "  through the $server, which $where:"
   # Something else is shared, so what either server kept of who may is forgotten.
-  as alice relations share --artifact "$note" --relation viewer --who users/erin >/dev/null
+  as alice permissions share --artifact "$note" --relation viewer --who users/erin >/dev/null
   echo "    $(timed $server alice notes_ping "{}")  a tool that does nothing"
   echo "    $(timed $server alice notes_read "$reads")  alice reads her own note: nothing is asked"
   echo "    $(timed $server bob notes_read "$reads")  bob reads it: one check, of bob, asked once"

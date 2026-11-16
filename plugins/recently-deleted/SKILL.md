@@ -4,7 +4,7 @@ description: Read when someone wants back something they deleted, asks what they
 ---
 
 Recently Deleted keeps what's removed for 30 days, as it was, and then erases it for good. Anything an app made for someone
-is named by where it is, like `users/alice/made/repos/notes`, and its owner removes and restores it.
+is named by where it is, like `users/alice/made/git-repos/notes`, and its owner removes and restores it.
 
 - `list` lists what you own that was removed in the last 30 days, the latest first, with who removed it and when.
   For a group's things, ask for the group (`ONE_FOR=groups/<name>`).

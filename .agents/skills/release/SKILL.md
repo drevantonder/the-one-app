@@ -46,8 +46,8 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
   `one update`.
 - Releasing from a worktree behind `origin/main`, which `tooling/release` refuses once a newer build is published.
 - Releasing a server whose calls to other servers (`hooks/call`, `plugins/call`) take new required params. Once one
-  server is on it, the old ones can't decide anything that asks relations there, their own update among them
-  (`relations couldn't decide it: This server has no method hooks/call`). Take each left behind by hand, as its
+  server is on it, the old ones can't decide anything that asks permissions there, their own update among them
+  (`permissions couldn't decide it: This server has no method hooks/call`). Take each left behind by hand, as its
   program would: download the build `one download --target <kind>` links, unpack it in its `server/builds/<build>`
   past `bin/one_core eval "OneCore.Release.check()"` saying that build, write the build to `server/next`, and
   restart its unit (`systemctl --user restart one-server-<key's first 12>`, or on a Mac `launchctl kickstart -k

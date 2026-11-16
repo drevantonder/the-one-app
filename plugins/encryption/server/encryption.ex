@@ -136,11 +136,11 @@ defmodule Encryption do
     GenServer.call(Call.process(call, Keys, name, {%Artifact{prefix: name <> "/"}, call.server}), :look)
   end
 
-  # A relation tuple is the relations plugin's to write, as whoever asked.
+  # A relation tuple is the permissions plugin's to write, as whoever asked.
   defp share(call, tool, artifact, server) do
     inputs = %{"artifact" => artifact, "relation" => "editor", "who" => "servers/" <> server}
 
-    case Calls.call("relations", tool, inputs, {call.actor, call.subject}) do
+    case Calls.call("permissions", tool, inputs, {call.actor, call.subject}) do
       {:ok, _said} -> :ok
       {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
       {:forwarded, _result} -> :ok

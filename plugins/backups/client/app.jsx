@@ -172,7 +172,7 @@ function RestoreSheet() {
   const [what, setWhat] = createSignal("whose")
   const choices = createMemo(async () => {
     if (!destination()) return { whose: [], apps: [] }
-    const [people, groups, store] = await Promise.all(["sign-in_everyone", "relations_groups", "home_store"].map((tool) => call(tool).then(JSON.parse, () => [])))
+    const [people, groups, store] = await Promise.all(["sign-in_everyone", "permissions_groups", "home-screen_store"].map((tool) => call(tool).then(JSON.parse, () => [])))
     const whose = [
       ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
       ...groups.map((group) => ({ value: group.group, label: group.called })),

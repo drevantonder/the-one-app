@@ -3,7 +3,7 @@ name: gmail
 description: Read before searching, reading, labelling, drafting or sending email in the person's Gmail accounts.
 ---
 
-Gmail is the person's Gmail accounts. Signing in is the skill `google`'s.
+Gmail is the person's Gmail accounts. Signing in is the skill `google-account`'s.
 
 - `search` finds messages with Gmail's search syntax in `q` (from:, is:unread, in:inbox, newer_than:2d, ...).
   `read` reads one and `thread` a whole conversation. `attachment` gives one of a message's files.

@@ -5,12 +5,12 @@
 // where the page runs (`host.js`): the app's Rust half, or in a browser, the network's edge (`clients/web/host.js`),
 // which answers what only reads from what it kept and says when that has changed.
 //
-// The Home Screen are an app too: the plugin `home`'s, which reaches this client from a server as every plugin
+// The Home Screen are an app too: the plugin `home-screen`'s, which reaches this client from a server as every plugin
 // does. It's the one this page shows first, under every other, and it opens the rest (`one/open`).
 import { address, invoke, listen, openLink, sandbox } from "./host.js"
 
-const HOME = "home/client/index.html"
-/// Whether the window is wide enough for the Home Screen's sidebar, which the home plugin draws along the start of
+const HOME = "home-screen/client/index.html"
+/// Whether the window is wide enough for the Home Screen's sidebar, which the plugin `home-screen` draws along the start of
 /// its frame, 16rem wide, and the other apps' frames leave clear. Tall enough too, so a phone on its side has none,
 /// as home.css has it.
 const beside = matchMedia("(min-width: 48rem) and (min-height: 30rem)")
@@ -156,7 +156,7 @@ function opened(view) {
   const tapped = view.tapped
   view.tapped = undefined
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    const name = view.app === HOME ? "home" : view.app.split("/")[0]
+    const name = view.app.split("/")[0]
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
     // The device hears its person's notifications once they see their home, which has drawn over the mark.

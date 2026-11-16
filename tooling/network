@@ -124,8 +124,8 @@ A network is running in $folder. Its client's home is $folder/client:
 
     export ONE_HOME=$folder/client ONE_AS=owner
     $one                                             opens the app, as the network's first owner
-    $one relations group --name family               calls a tool
-    ONE_AS=alice $one relations group --name work    calls one as another user
+    $one permissions group --name family               calls a tool
+    ONE_AS=alice $one permissions group --name work    calls one as another user
     $one --help                                      lists every tool
     $one mcp                                         is the same tools as MCP over stdio
 ${at_address:+

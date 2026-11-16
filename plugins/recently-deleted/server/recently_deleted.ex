@@ -2,7 +2,7 @@ defmodule RecentlyDeleted do
   @moduledoc """
   Recently Deleted: where what someone removes waits for 30 days, so it can be brought back as it was, before it's erased
   for good. Anything a plugin made for someone (`OneCore.Call.make/2`) is removed with this plugin's `remove`, which a
-  plugin calls for its person as Repos does for a repo, and which an agent calls too. So is a plugin someone deployed
+  plugin calls for its person as Git Repos does for a repo, and which an agent calls too. So is a plugin someone deployed
   (`<owner>/plugins/<name>`), once nobody has it installed: removing it is how what's deployed is deleted, as
   `deploy` is how it's made.
 
@@ -56,7 +56,7 @@ defmodule RecentlyDeleted do
   def tools do
     artifact = %{
       type: "string",
-      description: "What was made, by its name: users/alice/made/repos/notes, or a plugin: users/alice/plugins/notes"
+      description: "What was made, by its name: users/alice/made/git-repos/notes, or a plugin: users/alice/plugins/notes"
     }
 
     only = fn properties, required -> %{type: "object", properties: properties, required: required} end
@@ -174,7 +174,7 @@ defmodule RecentlyDeleted do
     if not (name =~ @plugin or (name =~ @made and Enum.at(Regex.run(@made, name), 2) != "recently-deleted")),
       do:
         raise(
-          "#{name} isn't something an app made or a plugin, as its name says: users/alice/made/repos/notes, users/alice/plugins/notes"
+          "#{name} isn't something an app made or a plugin, as its name says: users/alice/made/git-repos/notes, users/alice/plugins/notes"
         )
 
     with {:refuse, why} <- owner(call, name), do: raise(why)

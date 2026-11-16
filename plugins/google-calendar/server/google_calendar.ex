@@ -1,14 +1,14 @@
 defmodule GoogleCalendar do
   @moduledoc """
   Google Calendar: the person's own Google calendars, through Calendar's API (v3), from any device. Signing in and
-  the accounts are the `google` plugin's, the same for every Google app. (A Mac's own calendars are another app's.)
+  the accounts are the `google-account` plugin's, the same for every Google app. (A Mac's own calendars are another app's.)
   """
   @behaviour OneCore.Plugin
 
   @api "https://www.googleapis.com/calendar/v3/"
   @day 86_400
 
-  @doc "What Google Calendar asks of Google, for the `google` plugin."
+  @doc "What Google Calendar asks of Google, for the `google-account` plugin."
   def google do
     %{
       title: "Google Calendar",
@@ -18,7 +18,7 @@ defmodule GoogleCalendar do
   end
 
   @impl true
-  def uses, do: ["google", "vault"]
+  def uses, do: ["google-account", "vault"]
 
   @impl true
   def tools do
@@ -359,7 +359,7 @@ defmodule GoogleCalendar do
 
   defp calendar(at, id), do: path(at, id || "primary")
   defp path(at, part), do: google(at.call).path(part)
-  defp google(call), do: OneCore.Call.plugin(call, "google")
+  defp google(call), do: OneCore.Call.plugin(call, "google-account")
 
   defp no_calendar(id), do: "No calendar #{id}: calendar ids come from google-calendar_calendars."
 

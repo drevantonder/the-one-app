@@ -1,6 +1,6 @@
 defmodule Gmail do
   @moduledoc """
-  Gmail: the person's own Gmail accounts, through Gmail's API (v1). Signing in and the accounts are the `google`
+  Gmail: the person's own Gmail accounts, through Gmail's API (v1). Signing in and the accounts are the `google-account`
   plugin's, the same for every Google app. Reading a message is `Gmail.Message`'s, and writing one is
   `Gmail.Mime`'s.
   """
@@ -10,7 +10,7 @@ defmodule Gmail do
   @api "https://gmail.googleapis.com/gmail/v1/users/me/"
   @upload "https://gmail.googleapis.com/upload/gmail/v1/users/me/"
 
-  @doc "What Gmail asks of Google, for the `google` plugin."
+  @doc "What Gmail asks of Google, for the `google-account` plugin."
   def google do
     %{
       title: "Gmail",
@@ -20,7 +20,7 @@ defmodule Gmail do
   end
 
   @impl true
-  def uses, do: ["google", "vault"]
+  def uses, do: ["google-account", "vault"]
 
   @impl true
   def tools do
@@ -517,7 +517,7 @@ defmodule Gmail do
     do: google(at.call).request(at.call, google(), at.email, method, @api <> path, options)
 
   defp path(at, part), do: google(at.call).path(part)
-  defp google(call), do: OneCore.Call.plugin(call, "google")
+  defp google(call), do: OneCore.Call.plugin(call, "google-account")
 
   defp most(nil), do: 20
   defp most(given), do: min(given, 100)
