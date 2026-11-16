@@ -3,8 +3,8 @@ defmodule ComputerUse do
   Computer Use: an agent looks at a screen and acts on it, and its person watches.
 
   It knows no kind of screen. It offers the hook `screens`, which a plugin with screens hooks into
-  (`computer-use.screens`): a hook that changes, answered with the plugin's own name and its list of the screens
-  the caller may use, so lists from many plugins sit side by side and none changes another's. Each screen there says
+  (`computer-use.screens`): a hook that collects, answered with the plugin's list of the screens the caller may
+  use, so lists from many plugins sit side by side, and one plugin that can't answer takes away only its own. Each screen there says
   which of that plugin's tools acts on it and with what inputs; acting is a call of that tool, as the same caller,
   with the action's inputs added. So who may use a screen is the plugin's to decide, and nothing here checks it again.
 
@@ -29,9 +29,9 @@ defmodule ComputerUse do
     [
       %{
         name: "screens",
-        kind: :mutate,
+        kind: :collect,
         description:
-          "The screens the caller may use. It's about nothing. A plugin with screens answers with its own name, `%{call.plugin => screens}`, so that each plugin's list is its own: each screen a map of its `name`, what it is (`description`, a few words), its `width` and `height` in pixels, and how it's acted on: the plugin's `tool` and the `inputs` that name the screen to it. That tool is then called as the caller, with those inputs and an `action`: `screenshot` (answered with a PNG as `{:blob, \"image/png\", data}`), `click` (x, y, button: left, right or middle), `double_click` (x, y), `move` (x, y), `drag` (path: a list of {x, y}), `scroll` (x, y, direction: up, down, left or right, amount: steps), `type` (text) or `key` (keys, as xdotool names them: ctrl+l, Return; space between presses one after another). It answers anything but a screenshot in a few words. A screen that a person's app can show as live video over WebRTC takes `stream` too: with no `offer`, it answers the ICE servers to connect with (WebRTC's `ice_servers`); with the app's whole SDP `offer`, `%{\"answer\" => sdp}`."
+          "The screens the caller may use. It's about nothing. A plugin with screens answers with its list of them: each screen a map of its `name`, what it is (`description`, a few words), its `width` and `height` in pixels, and how it's acted on: the plugin's `tool` and the `inputs` that name the screen to it. That tool is then called as the caller, with those inputs and an `action`: `screenshot` (answered with a PNG as `{:blob, \"image/png\", data}`), `click` (x, y, button: left, right or middle), `double_click` (x, y), `move` (x, y), `drag` (path: a list of {x, y}), `scroll` (x, y, direction: up, down, left or right, amount: steps), `type` (text) or `key` (keys, as xdotool names them: ctrl+l, Return; space between presses one after another). It answers anything but a screenshot in a few words. A screen that a person's app can show as live video over WebRTC takes `stream` too: with no `offer`, it answers the ICE servers to connect with (WebRTC's `ice_servers`); with the app's whole SDP `offer`, `%{\"answer\" => sdp}`."
       }
     ]
   end
@@ -46,7 +46,7 @@ defmodule ComputerUse do
         name: "screens",
         read_only: true,
         description:
-          "The screens you can use: each one's name, what it is, its width and height in pixels, the plugin it's from, and what it was last used for, by whom, when (ms since 1970).",
+          "The screens you can use, as `screens`: each one's name, what it is, its width and height in pixels, the plugin it's from, and what it was last used for, by whom, when (ms since 1970). A plugin that couldn't list its screens is in `failed`, with why.",
         inputs: %{type: "object", properties: %{}}
       },
       %{
@@ -121,12 +121,13 @@ defmodule ComputerUse do
 
   @impl true
   def call("screens", _inputs, call) do
-    screens = screens(call)
+    {screens, failed} = screens(call)
     used = used(call, screens)
 
-    for s <- screens do
-      Map.merge(Map.take(s, ~w(name description width height plugin)), %{"used" => used[key(call, s)]})
-    end
+    %{
+      "screens" => for(s <- screens, do: Map.merge(Map.take(s, ~w(name description width height plugin)), %{"used" => used[key(call, s)]})),
+      "failed" => failed
+    }
   end
 
   def call("wait", inputs, call) do
@@ -147,19 +148,21 @@ defmodule ComputerUse do
     Call.tool(call, s["plugin"], s["tool"], asked)
   end
 
-  # Every screen the caller may use, each with the plugin it's from.
+  # Every screen the caller may use, each with the plugin it's from, and why each plugin that couldn't say its own
+  # couldn't.
   defp screens(call) do
-    case Call.run_hook(call, "screens", %{}) do
-      {:ok, lists, by} -> for {name, list} <- lists, s <- List.wrap(list), do: Map.put(s, "plugin", by[name])
-      {:refuse, why} -> raise why
-    end
+    {:ok, lists, failed} = Call.run_hook(call, "screens", %{})
+    {for({plugin, list} <- lists, s <- List.wrap(list), do: Map.put(s, "plugin", plugin)), failed}
   end
 
   # A screen by its name, or by its plugin's name and its own (`containers/proof`) where two are called the same.
   defp screen(call, name) do
-    case Enum.filter(screens(call), &(&1["name"] == name or "#{&1["plugin"]}/#{&1["name"]}" == name)) do
+    {screens, failed} = screens(call)
+
+    case Enum.filter(screens, &(&1["name"] == name or "#{&1["plugin"]}/#{&1["name"]}" == name)) do
       [s] -> s
-      [] -> raise "You have no screen called #{name}: `screens` lists yours"
+      [] when failed == %{} -> raise "You have no screen called #{name}: `screens` lists yours"
+      [] -> raise "You have no screen called #{name}, and #{Enum.map_join(failed, ", ", fn {plugin, why} -> "#{plugin} couldn't list its screens: #{why}" end)}"
       two -> raise "#{Enum.map_join(two, " and ", &"#{&1["plugin"]}/#{name}")} are both called #{name}: name one so"
     end
   end

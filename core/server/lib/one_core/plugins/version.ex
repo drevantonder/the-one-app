@@ -270,7 +270,7 @@ defmodule OneCore.Plugins.Version do
     end
   end
 
-  defp hook_kind(kind) when kind in ["observe", "mutate", "validate"], do: String.to_existing_atom(kind)
+  defp hook_kind(kind) when kind in ["observe", "mutate", "validate", "collect"], do: String.to_existing_atom(kind)
   defp hook_kind(_kind), do: nil
 
   @doc "Whether a version is only described here, not loaded (`described/2`)."
@@ -521,7 +521,7 @@ defmodule OneCore.Plugins.Version do
       not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
         {:error,
          "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
-           "digits and _, and a kind of :observe, :mutate or :validate"}
+           "digits and _, and a kind of :observe, :mutate, :validate or :collect"}
 
       not (is_list(permissions) and Enum.all?(permissions, &permission?/1)) ->
         {:error,
@@ -568,7 +568,7 @@ defmodule OneCore.Plugins.Version do
 
   defp offer?(%{name: name, kind: kind, description: description}),
     do:
-      is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate] and
+      is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate, :collect] and
         is_binary(description)
 
   defp offer?(_offer), do: false

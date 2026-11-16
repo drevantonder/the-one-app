@@ -219,19 +219,16 @@ defmodule AndroidEmulator do
   # on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    screens =
-      for server <- Service.servers(call, Emulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do
-        %{
-          "name" => s["name"],
-          "description" => "#{s["description"]}, an Android emulator on #{Service.name(server)}",
-          "width" => s["width"],
-          "height" => s["height"],
-          "tool" => "screen",
-          "inputs" => %{"emulator" => s["name"]}
-        }
-      end
-
-    %{call.plugin => screens}
+    for server <- Service.servers(call, Emulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do
+      %{
+        "name" => s["name"],
+        "description" => "#{s["description"]}, an Android emulator on #{Service.name(server)}",
+        "width" => s["width"],
+        "height" => s["height"],
+        "tool" => "screen",
+        "inputs" => %{"emulator" => s["name"]}
+      }
+    end
   end
 
   # Computer Use's actions, as Android's `input` takes them: each a list of its words, run one after another.

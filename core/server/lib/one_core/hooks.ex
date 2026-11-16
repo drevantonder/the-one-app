@@ -8,14 +8,15 @@ defmodule OneCore.Hooks do
   `recently-deleted.removed`. A plugin's hook is run here as One Core's are, and only that plugin runs it
   (`OneCore.Call.run_hook/3`).
 
-  A hook is one of three kinds, as with Kubernetes' admission webhooks, which are mutating or validating, and its
-  observers: a plugin observes it, mutates it or validates it. How a kind is run is what keeps plugins from getting
-  in each other's way:
+  A hook is one of four kinds, as with Kubernetes' admission webhooks, which are mutating or validating, and its
+  observers, and as with a list each plugin adds its own part to: a plugin observes it, mutates it, validates it or
+  collects it. How a kind is run is what keeps plugins from getting in each other's way:
 
   - No hook is handed what happens next to run or to leave out. It answers, and One Core carries on: nothing is
     blocked by a plugin that forgot to pass it on.
   - Nothing depends on the order plugins are asked in. Plugins that observe are each told apart from the others,
-    every plugin that mutates is handed the same thing, and every plugin that validates has to agree.
+    every plugin that mutates is handed the same thing, every plugin that validates has to agree, and what each
+    plugin that collects answers is kept apart from the others'.
   - What a plugin mutated is said, with its name, to the plugins that validate and observe the same moment.
 
   A plugin hooks into the moments of whoever it was installed for. So a moment that runs for someone is hooked into
@@ -26,6 +27,7 @@ defmodule OneCore.Hooks do
   (`within/3`), has refused: nothing is let through for want of an answer. So a plugin that breaks blocks what it
   mutates or validates, for whoever it was installed for and nobody else, until it's removed or deployed again, and
   it has no say in either: a call that removes a plugin or deploys over it isn't that plugin's to mutate or validate.
+  One that can't answer what it collects is left out, and only its own part is missing.
 
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
   another server is validated on both.
@@ -61,6 +63,11 @@ defmodule OneCore.Hooks do
     validate: """
     answers `:ok` or `{:refuse, why}`. Every plugin that validates it has to answer `:ok`: one refusal refuses it,
     and whoever asked is told why. A plugin that raises, or answers anything else, refuses it too.
+    """,
+    collect: """
+    is asked, as every other plugin that collects it is, and answers its own part of what's collected, which is
+    kept apart from every other plugin's, by its name: `nil` is no part. One that can't answer is left out, and
+    whoever ran the hook is told which, and why: a plugin that breaks takes away its own part and nothing else.
     """
   ]
 
@@ -133,7 +140,7 @@ defmodule OneCore.Hooks do
      """}
   ]
 
-  @doc "Every one of One Core's hooks' names, with its kind: `:observe`, `:mutate` or `:validate`."
+  @doc "Every one of One Core's hooks' names, with its kind: `:observe`, `:mutate`, `:validate` or `:collect`."
   def kinds, do: Map.new(@hooks, fn {hook, kind, _about} -> {hook, kind} end)
 
   @doc """
@@ -253,6 +260,9 @@ defmodule OneCore.Hooks do
       {:validate, {:refuse, why}} when is_binary(why) ->
         %{"refuse" => why}
 
+      {:collect, part} ->
+        JSON.decode!(JSON.encode!(part))
+
       {:mutate, _} ->
         raise "It answered #{inspect(answer)} to #{hook}, which is answered with what it changes, by name"
 
@@ -265,6 +275,7 @@ defmodule OneCore.Hooks do
   def nothing(:observe), do: nil
   def nothing(:mutate), do: %{}
   def nothing(:validate), do: :ok
+  def nothing(:collect), do: nil
 
   @doc "Tells each plugin that observes `hook` what it's about, for `asked`."
   def observe(hook, about, {_by, who} = asked) do
@@ -333,6 +344,20 @@ defmodule OneCore.Hooks do
 
       decided
     end
+  end
+
+  @doc """
+  Asks each plugin that collects `hook` for its part, for `asked`. Gives `{:ok, parts, failed}`: each plugin's part
+  by its name, leaving out those that answered `nil`, and why each plugin that couldn't answer couldn't, by its name.
+  """
+  def collect(hook, about, {_by, who} = asked) do
+    Enum.reduce(hooking(hook, who), {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, parts, failed} ->
+      case answered(installed, :collect, hook, about, asked) do
+        {:ok, nil} -> {:ok, parts, failed}
+        {:ok, part} -> {:ok, Map.put(parts, plugin, part), failed}
+        {:error, why} -> {:ok, parts, Map.put(failed, plugin, why)}
+      end
+    end)
   end
 
   # What's decided where no plugin validates who may reach what.

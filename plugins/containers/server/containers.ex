@@ -388,19 +388,16 @@ defmodule Containers do
   # the container is, and acted on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    screens =
-      for server <- Service.servers(call, Podman), s <- each(call, server, :screens), reaches?(call, s) do
-        %{
-          "name" => s["name"],
-          "description" => "#{s["description"]}, a container on #{Service.name(server)}",
-          "width" => s["width"],
-          "height" => s["height"],
-          "tool" => "screen",
-          "inputs" => %{"container" => s["name"]}
-        }
-      end
-
-    %{call.plugin => screens}
+    for server <- Service.servers(call, Podman), s <- each(call, server, :screens), reaches?(call, s) do
+      %{
+        "name" => s["name"],
+        "description" => "#{s["description"]}, a container on #{Service.name(server)}",
+        "width" => s["width"],
+        "height" => s["height"],
+        "tool" => "screen",
+        "inputs" => %{"container" => s["name"]}
+      }
+    end
   end
 
   # Computer Use's actions, as xdotool's words.

@@ -194,7 +194,7 @@ defmodule OneCore.Mcp do
   end
 
   defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "kind" => kind, "hook" => hook} = params, _from, asked, forwarded)
-       when kind in ["observe", "mutate", "validate"] do
+       when kind in ["observe", "mutate", "validate", "collect"] do
     between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], asked, true) end)
   end
 

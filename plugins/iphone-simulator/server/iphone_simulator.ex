@@ -202,19 +202,16 @@ defmodule IphoneSimulator do
   # on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    screens =
-      for server <- Service.servers(call, Simulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do
-        %{
-          "name" => s["name"],
-          "description" => "#{s["description"]}, an #{s["model"]} simulator on #{Service.name(server)}",
-          "width" => s["width"],
-          "height" => s["height"],
-          "tool" => "screen",
-          "inputs" => %{"simulator" => s["name"]}
-        }
-      end
-
-    %{call.plugin => screens}
+    for server <- Service.servers(call, Simulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do
+      %{
+        "name" => s["name"],
+        "description" => "#{s["description"]}, an #{s["model"]} simulator on #{Service.name(server)}",
+        "width" => s["width"],
+        "height" => s["height"],
+        "tool" => "screen",
+        "inputs" => %{"simulator" => s["name"]}
+      }
+    end
   end
 
   defp did("click", %{"x" => x, "y" => y, "button" => "right"}), do: "Long-pressed at #{x}, #{y}"

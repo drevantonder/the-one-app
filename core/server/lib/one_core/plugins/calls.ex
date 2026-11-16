@@ -242,7 +242,7 @@ defmodule OneCore.Plugins.Calls do
       ask = {"hooks/call", %{installed: at, plugin: name, kind: kind, hook: hook, about: about}}
       call = called(at, name, versions, ask, asked, forwarded)
 
-      # A plugin in sandbox mode only observes: it mutates and validates nothing.
+      # A plugin in sandbox mode only observes: it mutates, validates and collects nothing.
       if hook in version.hooks and observes?(call, about) and (kind == :observe or not version.sandbox),
         do:
           {:ok,

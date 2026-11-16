@@ -234,7 +234,7 @@ defmodule OneCore.Plugin do
 
   A plugin that knows which plugin it needs calls it (`OneCore.Call.tool/4`, `OneCore.Call.plugin/2`). One that can't
   know who will answer offers a hook instead, and whoever wants to hooks into it. `offers/0` lists them, each with a
-  `name`, a `kind` (`:observe`, `:mutate` or `:validate`) and a `description`, and `OneCore.Call.run_hook/3` runs one,
+  `name`, a `kind` (`:observe`, `:mutate`, `:validate` or `:collect`) and a `description`, and `OneCore.Call.run_hook/3` runs one,
   as One Core runs its own of that kind, for whoever the call runs for. Another plugin hooks into it by its full name,
   the plugin's name and the hook's, in its `hooks/0`, and before the offering plugin is installed it's never run:
 
@@ -488,7 +488,7 @@ defmodule OneCore.Plugin do
   @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]
   @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
-  @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate, description: String.t()}]
+  @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate | :collect, description: String.t()}]
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
   @callback essential() :: boolean

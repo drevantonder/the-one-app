@@ -55,7 +55,7 @@ function Detail(props: { screen: AgentScreen }) {
 }
 
 function App() {
-  const screens = createMemo(() => call("computer-use_screens").then((text): AgentScreen[] => JSON.parse(text)))
+  const screens = createMemo(() => call("computer-use_screens").then((text): AgentScreen[] => JSON.parse(text).screens))
   changed(() => refresh(screens))
   const opened = () => screens().find((screen) => address(screen) === open())
   return (
