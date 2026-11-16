@@ -3,7 +3,7 @@
   "productName": "The One App",
   "identifier": "app.theone.client",
   "build": {
-    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "page/host.js", "../../icons/Logo.png", "../../core/ui/src/tokens.css", "../../core/ui/src/ui.css", "../../core/ui/src/Geist-Variable.woff2", "../../core/ui/src/GeistMono-Variable.woff2", "../../core/ui/src/Geist-LICENSE.txt"]
+    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "page/host.js", "../../icons/Logo.png", "../../core/ui/src/tokens.css", "../../core/ui/src/ui.css", "../../core/ui/src/Allo-Variable.woff2", "../../core/ui/src/Allo-LICENSE.txt"]
   },
   "app": {
     "withGlobalTauri": true,
