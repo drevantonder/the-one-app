@@ -1,6 +1,6 @@
 /* The window's own page: the frames its apps are drawn in, the Home Screen' under the rest, and a problem above
-   them. An app has the whole window but what the device keeps for itself. A frame is told of no safe area, so the
-   page keeps the app clear of it. */
+   them. An app has the whole window but what the device keeps for itself. Not every web view tells a frame of the safe
+   area (Android's doesn't), so the page keeps the app clear of it, and the app keeps none of its own. */
 html,
 body {
   height: 100%;

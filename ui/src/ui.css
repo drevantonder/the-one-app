@@ -11,7 +11,7 @@ html {
 }
 /* What's scrolled to (a field the keyboard reached, a part a link names) stops below a screen's bar, not under it. */
 html:has(.ui-screen) {
-  scroll-padding-top: calc(var(--control) + 1.25rem + env(safe-area-inset-top));
+  scroll-padding-top: calc(var(--control) + 1.25rem);
 }
 body {
   margin: 0;
@@ -978,7 +978,9 @@ button.ui-box {
   font-variant-numeric: tabular-nums;
 }
 
-/* A whole view of an app: a bar that stays as it scrolls, then what's in it. */
+/* A whole view of an app: a bar that stays as it scrolls, then what's in it. A screen is always in the app's frame,
+   which the app's page already keeps clear of the device's safe area (`clients/app/page/client.css`), so it keeps
+   none of its own: iOS tells a frame the window's safe area too, and keeping it twice left a gap above the bar. */
 .ui-screen {
   display: block;
   /* As tall as the window, or as what it's in says (a split's side). */
@@ -991,8 +993,8 @@ button.ui-box {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  min-height: calc(var(--control) + 0.75rem + env(safe-area-inset-top));
-  padding: env(safe-area-inset-top) max(var(--gutter), env(safe-area-inset-right)) 0 max(var(--gutter), env(safe-area-inset-left));
+  min-height: calc(var(--control) + 0.75rem);
+  padding: 0 var(--gutter);
   background: var(--background);
 }
 .ui-screen > header > h1 {
@@ -1030,7 +1032,7 @@ button.ui-box {
   display: grid;
   align-content: start;
   gap: var(--gap);
-  padding: 0.5rem max(var(--gutter), env(safe-area-inset-right)) calc(var(--gutter) + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+  padding: 0.5rem var(--gutter) var(--gutter);
   /* Each part sizes itself by the room it has here, not by the window. */
   container-type: inline-size;
 }
