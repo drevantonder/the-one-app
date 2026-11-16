@@ -774,10 +774,10 @@ defmodule OneCore.Sandbox do
     # What no VM has been started from for a month goes: its version, or this server's build, is long gone.
     month_ago = System.os_time(:second) - 30 * 24 * 3600
 
-    for kept <- Path.wildcard(Path.join(Path.dirname(cache), "*")),
-        {:ok, %{mtime: used}} <- [File.stat(kept, time: :posix)],
+    for folder <- Path.wildcard(Path.join(Path.dirname(cache), "*")),
+        {:ok, %{mtime: used}} <- [File.stat(folder, time: :posix)],
         used < month_ago,
-        do: File.rm_rf!(kept)
+        do: File.rm_rf!(folder)
   rescue
     error -> Logger.warning("What a plugin's VM compiled wasn't kept: #{Exception.message(error)}")
   end

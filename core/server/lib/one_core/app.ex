@@ -85,7 +85,7 @@ defmodule OneCore.App do
   end
 
   @doc "The code of the UI library an app was built against, from the files a server keeps of its plugin, or `nil` for one with no app."
-  def ui(kept), do: kept[@ui]
+  def ui(settings), do: settings[@ui]
 
   # The UI library's build, with what it builds with installed: its folder, made whole beside it and moved in, so a
   # folder that's there is ready. Those an earlier server build made go as this one's is made.

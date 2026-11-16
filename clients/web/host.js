@@ -9,8 +9,8 @@
 /// 9728, RFC 8414), kept in this browser's storage once it's looked, so going to sign in asks nothing more.
 const AUTHORIZATION_ENDPOINT = "authorization_endpoint"
 async function signIn() {
-  const kept = localStorage.getItem(AUTHORIZATION_ENDPOINT)
-  if (kept) return kept
+  const stored = localStorage.getItem(AUTHORIZATION_ENDPOINT)
+  if (stored) return stored
   const { authorization_servers } = await (await fetch("/.well-known/oauth-protected-resource")).json()
   const issuer = new URL(authorization_servers[0])
   const { authorization_endpoint } = await (await fetch(`${issuer.origin}/.well-known/oauth-authorization-server${issuer.pathname}`.replace(/\/$/, ""))).json()
@@ -87,10 +87,10 @@ const REPORTS = "reports"
 const reports = () => JSON.parse(localStorage.getItem(REPORTS) ?? "[]")
 /** @param {Record<string, any>} record */
 function report(record) {
-  const kept = reports()
+  const stored = reports()
   const browser = ["Edge", "Firefox", "Chrome", "Safari"].find((name) => navigator.userAgent.includes(name === "Edge" ? "Edg/" : `${name}/`))
   const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser }
-  if (kept.length < 300) localStorage.setItem(REPORTS, JSON.stringify([...kept, { ...record, attributes, time: Date.now() }]))
+  if (stored.length < 300) localStorage.setItem(REPORTS, JSON.stringify([...stored, { ...record, attributes, time: Date.now() }]))
   if (answering) sendReports()
 }
 /// Reports are told a few seconds after the first of them, as one batch.
@@ -98,12 +98,12 @@ function report(record) {
 let sending
 const sendReports = () => void (sending ??= setTimeout(() => ((sending = undefined), send()), 5000))
 async function send() {
-  const kept = reports()
-  if (!kept.length) return
+  const stored = reports()
+  if (!stored.length) return
   localStorage.removeItem(REPORTS)
-  const said = { jsonrpc: "2.0", method: "notifications/one/measured", params: { records: kept } }
+  const said = { jsonrpc: "2.0", method: "notifications/one/measured", params: { records: stored } }
   const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(said) }).catch(() => undefined)
-  if (!sent?.ok) localStorage.setItem(REPORTS, JSON.stringify([...kept, ...reports()].slice(0, 300)))
+  if (!sent?.ok) localStorage.setItem(REPORTS, JSON.stringify([...stored, ...reports()].slice(0, 300)))
 }
 /// Since when no server has answered, which once one does is reported, if it was long enough to show.
 let unanswered = 0
@@ -137,8 +137,8 @@ const answered = (view) => /** @type {NonNullable<ReturnType<typeof views.get>>}
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function read(view, method, params) {
   const asked = JSON.stringify([method, params])
-  const kept = answered(view).get(asked)
-  if (kept) return kept.answer
+  const cached = answered(view).get(asked)
+  if (cached) return cached.answer
   const answer = await mcp(method, params)
   answered(view).set(asked, { method, params, answer })
   return answer
@@ -158,11 +158,11 @@ async function reads(view, method, params) {
 async function refresh(view) {
   let changed = false
   await Promise.all(
-    [...(views.get(view)?.values() ?? [])].map(async (kept) => {
+    [...(views.get(view)?.values() ?? [])].map(async (cached) => {
       // With no server answering, what was answered stays what's shown.
-      const fresh = await mcp(kept.method, kept.params).catch(() => kept.answer)
-      if (JSON.stringify(fresh) === JSON.stringify(kept.answer)) return
-      kept.answer = fresh
+      const fresh = await mcp(cached.method, cached.params).catch(() => cached.answer)
+      if (JSON.stringify(fresh) === JSON.stringify(cached.answer)) return
+      cached.answer = fresh
       changed = true
     }),
   )

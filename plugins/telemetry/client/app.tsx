@@ -49,7 +49,7 @@ interface Overview {
   slowest: Slowest[]
   spending: Spent[]
   names: Record<string, string>
-  kept: { days: number; bytes: number; most_bytes: number }
+  retention: { days: number; bytes: number; most_bytes: number }
 }
 
 /** A span of a trace, as `telemetry_trace` answers it. */
@@ -311,7 +311,7 @@ function Telemetry(props: { all: Overview }) {
         </Show>
         <Spending days={all().spending} />
         <p class="hint">
-          Kept for {all().kept.days} days, up to {size(all().kept.most_bytes)}. {size(all().kept.bytes)} now.
+          Kept for {all().retention.days} days, up to {size(all().retention.most_bytes)}. {size(all().retention.bytes)} now.
         </p>
       </Screen>
     </Split>

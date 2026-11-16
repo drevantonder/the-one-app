@@ -352,7 +352,7 @@ defmodule Vault do
 
     quietly("Keeping #{item}", fn ->
       transaction(call, artifact, fn db ->
-        kept =
+        stored =
           if item(db, item) do
             allowed!(db, item, {:plugin, call.who})
           else
@@ -361,7 +361,7 @@ defmodule Vault do
             made
           end
 
-        for {field, value} <- fields, do: keep(db, kept, field, value, true)
+        for {field, value} <- fields, do: keep(db, stored, field, value, true)
         :ok
       end)
     end)
@@ -474,13 +474,13 @@ defmodule Vault do
                 "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
               )
 
-          kept = JSON.encode!(Map.take(service, [:name, :token, :hosts, :client]))
+          stored = JSON.encode!(Map.take(service, [:name, :token, :hosts, :client]))
           query(db, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
 
           query(db, "insert into sign_ins (state, verifier, service, plugin, item, at) values (?, ?, ?, ?, ?, ?)", [
             state,
             verifier,
-            kept,
+            stored,
             call.caller,
             inputs["item"] || service.name,
             now()
@@ -939,10 +939,10 @@ defmodule Vault do
   end
 
   defp keep(db, item, field, value, secret) do
-    kept =
+    sql =
       "insert into fields (item, name, value, secret) values (?, ?, ?, ?) on conflict (item, name) do update set value = excluded.value, secret = excluded.secret"
 
-    query(db, kept, [item["id"], field!(field), value, secret == true])
+    query(db, sql, [item["id"], field!(field), value, secret == true])
     touch(db, item)
   end
 

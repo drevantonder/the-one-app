@@ -16,9 +16,9 @@ pub fn home(own: &Path, group: Option<&Path>) -> Result<PathBuf> {
         return Ok(home.into());
     }
     fs::create_dir_all(home)?;
-    let mut kept: Vec<_> = fs::read_dir(own)?.map(|entry| Ok(entry?.file_name())).collect::<Result<_>>()?;
-    kept.sort_by_key(|name| name == "key");
-    for name in kept {
+    let mut names: Vec<_> = fs::read_dir(own)?.map(|entry| Ok(entry?.file_name())).collect::<Result<_>>()?;
+    names.sort_by_key(|name| name == "key");
+    for name in names {
         let to = home.join(&name);
         // What a move that was cut short left there goes first: it's moved again whole.
         match fs::metadata(&to) {

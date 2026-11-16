@@ -312,7 +312,7 @@ export function File(props: {
     set(props.multiple ? [...files().filter((file) => !picked.includes(file)), ...picked] : picked.slice(0, 1))
   }
   const remove = (file: Chosen) => {
-    set(files().filter((kept) => kept !== file))
+    set(files().filter((other) => other !== file))
     // Its button went with it: the keyboard carries on from the picker.
     control.focus()
   }

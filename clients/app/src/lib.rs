@@ -97,8 +97,8 @@ impl Views {
     async fn file(&self, address: &Uri) -> anyhow::Result<(String, Vec<u8>)> {
         let file = address.path().trim_start_matches('/');
         // A large file a tool answered with, which the client keeps, at the address the answer gave an app for it.
-        if let Some(kept) = file.strip_prefix(".file/") {
-            return self.client.file(kept).ok_or_else(|| anyhow::anyhow!("this client keeps no such file"));
+        if let Some(path) = file.strip_prefix(".file/") {
+            return self.client.file(path).ok_or_else(|| anyhow::anyhow!("this client keeps no such file"));
         }
         let none = || anyhow::anyhow!("no plugin here has {file}");
         let (plugin, path) = file.split_once('/').ok_or_else(none)?;
@@ -474,7 +474,7 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
 
 /// What of the window is kept for the next time the app opens.
 #[cfg(desktop)]
-const KEPT: tauri_plugin_window_state::StateFlags = tauri_plugin_window_state::StateFlags::SIZE
+const WINDOW_STATE: tauri_plugin_window_state::StateFlags = tauri_plugin_window_state::StateFlags::SIZE
     .union(tauri_plugin_window_state::StateFlags::POSITION)
     .union(tauri_plugin_window_state::StateFlags::MAXIMIZED)
     .union(tauri_plugin_window_state::StateFlags::FULLSCREEN);
@@ -487,7 +487,7 @@ fn opens_as_it_was(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     use tauri_plugin_window_state::{StateFlags, WindowExt};
     window.restore_state(StateFlags::SIZE | StateFlags::POSITION)?;
     window.center()?;
-    window.restore_state(KEPT)
+    window.restore_state(WINDOW_STATE)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -498,7 +498,7 @@ pub fn run() {
     // opens (`opens_as_it_was`).
     #[cfg(desktop)]
     let builder = builder
-        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(KEPT).skip_initial_state("main").build());
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).skip_initial_state("main").build());
     builder
         .setup(move |app| {
             app.manage(Start(tokio::sync::watch::Sender::new(None)));

@@ -25,7 +25,7 @@ defmodule GitRepos.Mirror do
   # least twice the size of all the newer ones together, so a merge rewrites mostly what's new.
   @packs 8
   # How long a pack merged away is kept, for a server that read `repo.json` before the merge and is fetching it.
-  @kept_for :timer.hours(1)
+  @retention :timer.hours(1)
   # How many times a change is decided again after another got there first.
   @tries 8
 
@@ -101,12 +101,12 @@ defmodule GitRepos.Mirror do
     git!(folder, ["repack", "-d", "-q", "--geometric=2", "--no-write-bitmap-index"])
     packs = local_packs(folder)
     now = System.system_time(:millisecond)
-    {old, kept} = Enum.split_with(state["retired"], &(now - &1["at"] > @kept_for))
+    {old, retained} = Enum.split_with(state["retired"], &(now - &1["at"] > @retention))
     merged = for pack <- state["packs"] -- packs, do: %{"pack" => pack, "at" => now}
 
     if merged != [] do
       Enum.each(packs -- state["packs"], &store(folder, repo, &1))
-      state = %{state | "packs" => packs, "retired" => kept ++ merged}
+      state = %{state | "packs" => packs, "retired" => retained ++ merged}
 
       if Artifact.replace(repo, "repo.json", JSON.encode!(state), tag) == :ok do
         for %{"pack" => pack} <- old, kind <- ["pack", "idx"], do: Artifact.remove(repo, "packs/#{pack}.#{kind}")

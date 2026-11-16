@@ -27,13 +27,13 @@ const home = createMemo(async () => {
 changed(() => refresh(home))
 
 /// An item of a page as the page is arranged with it.
-const kept = (item: Item) => (item.widget ? { widget: item.widget, size: item.size } : { app: item.app })
+const arrangement = (item: Item) => (item.widget ? { widget: item.widget, size: item.size } : { app: item.app })
 const same = (a: Pick<Item, "widget" | "app" | "size">, b: Pick<Item, "widget" | "app" | "size">) => (a.widget ?? a.app) === (b.widget ?? b.app) && a.size === b.size
 
 /// Arranges a page as `items`, and says why if it couldn't be.
 async function arrange(page: Page, items: Item[]) {
   try {
-    await call("home-screen_arrange", { items: items.map(kept) }, { for: page.for })
+    await call("home-screen_arrange", { items: items.map(arrangement) }, { for: page.for })
   } catch (error) {
     toast((error as Error).message)
   }

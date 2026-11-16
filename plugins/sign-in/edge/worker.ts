@@ -84,9 +84,9 @@ async function appsSession(auth: Auth, url: URL): Promise<Signed | null> {
   const { adapter, internalAdapter, secret } = await auth.$context;
   const signature = Uint8Array.from(hex.match(/../g) ?? [], (byte) => parseInt(byte, 16));
   const valid = await crypto.subtle.verify("HMAC", await signing(secret), signature, signs(session));
-  const kept = valid && (await adapter.findOne<{ userId: string; expiresAt: Date }>({ model: "session", where: [{ field: "id", value: session }] }));
-  if (!kept || kept.expiresAt < new Date()) return null;
-  const user = (await internalAdapter.findUserById(kept.userId))!;
+  const stored = valid && (await adapter.findOne<{ userId: string; expiresAt: Date }>({ model: "session", where: [{ field: "id", value: session }] }));
+  if (!stored || stored.expiresAt < new Date()) return null;
+  const user = (await internalAdapter.findUserById(stored.userId))!;
   return { device: await browserDevice(session), who: who(user) };
 }
 

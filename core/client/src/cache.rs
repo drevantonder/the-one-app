@@ -66,8 +66,8 @@ impl Client {
 
     /// A large file this client keeps, by what follows `/.file/` in where an answer said it is: what kind of file
     /// it is, and the file.
-    pub fn file(&self, kept: &str) -> Option<(String, Vec<u8>)> {
-        let (name, kind) = kept.split_once('/')?;
+    pub fn file(&self, path: &str) -> Option<(String, Vec<u8>)> {
+        let (name, kind) = path.split_once('/')?;
         let named = !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_hexdigit());
         Some((kind.to_owned(), fs::read(self.home.join("files").join(name).as_path()).ok().filter(|_| named)?))
     }
@@ -144,7 +144,7 @@ impl Subscription {
         if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get(&asked) {
             return Ok(answer.clone());
         }
-        let (answer, kept) = match self.client.cached(method, &params) {
+        let (answer, cached) = match self.client.cached(method, &params) {
             Some(answer) => (answer, true),
             None => (self.client.fresh(method, &params).await?, false),
         };
@@ -152,7 +152,7 @@ impl Subscription {
             .lock()
             .expect("no view panics")
             .insert(asked.clone(), (method.to_owned(), params, answer.clone()));
-        if kept {
+        if cached {
             let shown = self.clone();
             tokio::spawn(async move { shown.refresh_for(vec![asked]).await });
         }

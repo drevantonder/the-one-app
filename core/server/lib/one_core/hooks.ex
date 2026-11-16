@@ -189,7 +189,7 @@ defmodule OneCore.Hooks do
   end
 
   # How long a server keeps that something may be reached, in milliseconds, where nothing told it to forget.
-  @kept_for 10_000
+  @ttl 10_000
   @allowed __MODULE__.Allowed
 
   @doc "Makes where which plugins hook into what is kept, and what was decided. Whatever calls this owns both."
@@ -312,10 +312,10 @@ defmodule OneCore.Hooks do
   """
   def validate(hook, about, {by, who} = asked, apart \\ nil) do
     # Who validates is whoever's plugins they are, so what's kept is what they validated.
-    kept = if hook == "reach", do: {"reach", {about, Plugins.chain(who)}}
+    cache_key = if hook == "reach", do: {"reach", {about, Plugins.chain(who)}}
     forgotten = forgotten("reach")
 
-    if kept != nil and kept?(kept) do
+    if cache_key != nil and cached?(cache_key) do
       :ok
     else
       # Who may do what is decided only where a plugin validates who reaches what.
@@ -339,8 +339,8 @@ defmodule OneCore.Hooks do
         end
 
       # Kept only if nothing was forgotten meanwhile: it may have been decided from what has since changed.
-      if kept != nil and decided == :ok and forgotten == forgotten("reach"),
-        do: :ets.insert(@allowed, {kept, System.monotonic_time(:millisecond) + @kept_for})
+      if cache_key != nil and decided == :ok and forgotten == forgotten("reach"),
+        do: :ets.insert(@allowed, {cache_key, System.monotonic_time(:millisecond) + @ttl})
 
       decided
     end
@@ -370,9 +370,9 @@ defmodule OneCore.Hooks do
   end
 
   # Whether it's kept that this may be reached, and not for too long. The clock it's kept by starts anywhere.
-  defp kept?(kept) do
-    case :ets.lookup(@allowed, kept) do
-      [{^kept, until}] -> until > System.monotonic_time(:millisecond)
+  defp cached?(cache_key) do
+    case :ets.lookup(@allowed, cache_key) do
+      [{^cache_key, until}] -> until > System.monotonic_time(:millisecond)
       [] -> false
     end
   end
@@ -382,10 +382,10 @@ defmodule OneCore.Hooks do
   once it's somebody's, so a call asks nothing. `{:error, why}` where a plugin couldn't say, which isn't nobody's.
   """
   def whose(device) do
-    kept = {"device", device}
+    cache_key = {"device", device}
 
-    case :ets.lookup(@allowed, kept) do
-      [{^kept, who}] ->
+    case :ets.lookup(@allowed, cache_key) do
+      [{^cache_key, who}] ->
         who
 
       [] ->
@@ -393,7 +393,7 @@ defmodule OneCore.Hooks do
 
         with {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
              true <- is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
-          if forgotten == forgotten("device"), do: :ets.insert(@allowed, {kept, who})
+          if forgotten == forgotten("device"), do: :ets.insert(@allowed, {cache_key, who})
           who
         else
           {:refuse, why} -> {:error, why}

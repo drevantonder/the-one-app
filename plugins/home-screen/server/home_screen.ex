@@ -175,23 +175,23 @@ defmodule HomeScreen do
   # The apps and widgets of a renamed plugin stay where they were on the page of whoever it's renamed for.
   @impl true
   def hook("renamed", %{"from" => from, "to" => to}, call) do
-    kept = kept(call)
+    stored = stored(call)
 
     renamed =
-      for item <- kept do
+      for item <- stored do
         Map.new(item, fn
           {kind, ^from <> "/" <> part} when kind in ["app", "widget"] -> {kind, "#{to}/#{part}"}
           other -> other
         end)
       end
 
-    if renamed != kept, do: keep(call, JSON.encode!(renamed))
+    if renamed != stored, do: store(call, JSON.encode!(renamed))
   end
 
   @impl true
   def call("page", _inputs, call) do
-    kept = kept(call)
-    put = for %{"app" => app} <- kept, do: app
+    stored = stored(call)
+    put = for %{"app" => app} <- stored, do: app
 
     here =
       for plugin <- Call.plugins(call),
@@ -225,7 +225,7 @@ defmodule HomeScreen do
       end
 
     placed =
-      Enum.flat_map(kept, fn
+      Enum.flat_map(stored, fn
         %{"app" => app} -> Enum.filter(apps, &(&1.app == app))
         %{"widget" => widget} = item -> for w <- widgets, w.widget == widget, do: Map.put(w, :size, size(w, item))
         _ -> []
@@ -243,7 +243,7 @@ defmodule HomeScreen do
     items =
       for item <- items, is_binary(item["app"]) or is_binary(item["widget"]), do: Map.take(item, ~w(app widget size))
 
-    keep(call, JSON.encode!(items))
+    store(call, JSON.encode!(items))
     "The page is arranged."
   end
 
@@ -292,7 +292,7 @@ defmodule HomeScreen do
         if apps == [],
           do: raise("#{plugin} has no app to put on a page. Its accounts, if it has any, are in Accounts already.")
 
-        keep(call, JSON.encode!(Enum.uniq(kept(call) ++ apps)))
+        store(call, JSON.encode!(Enum.uniq(stored(call) ++ apps)))
         "Its app is on #{call.subject}'s page. Nothing was installed: it's the one in use for #{found.installed}."
     end
   end
@@ -305,7 +305,7 @@ defmodule HomeScreen do
         raise "#{plugin} is installed for #{at}: uninstall --name #{name} takes it off."
 
       %{name: name} ->
-        keep(call, JSON.encode!(Enum.reject(kept(call), &String.starts_with?(&1["app"] || "", name <> "/"))))
+        store(call, JSON.encode!(Enum.reject(stored(call), &String.starts_with?(&1["app"] || "", name <> "/"))))
         "It's off the page."
 
       nil ->
@@ -391,7 +391,7 @@ defmodule HomeScreen do
   defp size(widget, item), do: if(item["size"] in widget.sizes, do: item["size"], else: hd(widget.sizes))
 
   # How a page is arranged is its owner's: an artifact made for them, which holds the one blob.
-  defp kept(call) do
+  defp stored(call) do
     with {:ok, items, _tag} <- Artifact.read(Call.make(call, "page"), "items"),
          do: JSON.decode!(items),
          else: (:absent -> [])
@@ -468,7 +468,7 @@ defmodule HomeScreen do
     if wrote == :ok, do: answer, else: noted(call, change)
   end
 
-  defp keep(call, items) do
+  defp store(call, items) do
     page = Call.make(call, "page")
 
     wrote =

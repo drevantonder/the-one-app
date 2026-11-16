@@ -23,7 +23,7 @@ defmodule AndroidEmulator.Emulator do
   @scrcpy "5.0.1"
   @scrcpy_sha256 "764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536"
   @aiortc "1.16.0"
-  @kept 64 * 1024
+  @max_bytes 64 * 1024
 
   @impl OneCore.Service
   def called, do: "Android Emulator's emulators"
@@ -525,7 +525,7 @@ defmodule AndroidEmulator.Emulator do
   # Keeps the end of long output, where errors usually are.
   defp clip(text) do
     text = String.replace_invalid(text)
-    if byte_size(text) <= @kept, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @kept, @kept), "")
+    if byte_size(text) <= @max_bytes, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @max_bytes, @max_bytes), "")
   end
 
   defp read(file) do

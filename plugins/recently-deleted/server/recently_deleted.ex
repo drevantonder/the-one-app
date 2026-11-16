@@ -28,7 +28,7 @@ defmodule RecentlyDeleted do
   alias OneCore.{Artifact, Bucket, Hooks, User}
 
   # How long what's removed can be restored, after which it's erased.
-  @kept :timer.hours(24 * 30)
+  @retention :timer.hours(24 * 30)
   @made ~r{^(users/[^/]+|groups/[^/]+|network)/made/([^/]+)/[A-Za-z0-9_-]+$}
   @plugin ~r{^(users/[^/]+|groups/[^/]+|network)/plugins/[a-z][a-z0-9-]*$}
 
@@ -132,7 +132,7 @@ defmodule RecentlyDeleted do
 
   def call("purge", _inputs, call) do
     purged =
-      for {id, line} <- removed(call), now() - line["at"] > @kept do
+      for {id, line} <- removed(call), now() - line["at"] > @retention do
         for blob <- Bucket.list(aside(line["artifact"], id)), do: Bucket.remove(blob)
         Artifact.remove(call.own, "removed/" <> id)
         notify(call, line["artifact"], "purged")

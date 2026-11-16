@@ -132,10 +132,10 @@ defmodule OneCore.Plugins.Process do
     end
   end
 
-  def handle_continue(continue, process), do: kept(process.module.handle_continue(continue, process.state), process)
+  def handle_continue(continue, process), do: put_state(process.module.handle_continue(continue, process.state), process)
 
   @impl true
-  def handle_call(request, from, process), do: kept(process.module.handle_call(request, from, process.state), process)
+  def handle_call(request, from, process), do: put_state(process.module.handle_call(request, from, process.state), process)
 
   @impl true
   def handle_cast({__MODULE__, :started, asked, monitor}, process) do
@@ -176,10 +176,10 @@ defmodule OneCore.Plugins.Process do
     end
   end
 
-  def handle_cast(request, process), do: kept(process.module.handle_cast(request, process.state), process)
+  def handle_cast(request, process), do: put_state(process.module.handle_cast(request, process.state), process)
 
   @impl true
-  def handle_info(message, process), do: kept(process.module.handle_info(message, process.state), process)
+  def handle_info(message, process), do: put_state(process.module.handle_info(message, process.state), process)
 
   # A process that never started, or couldn't take what it held to newer code, holds nothing to end with. The
   # version is let go of here, so that it's unloaded by the time anyone sees that the process stopped.
@@ -206,7 +206,7 @@ defmodule OneCore.Plugins.Process do
   end
 
   # What a callback returned, with the plugin's state where this process keeps it.
-  defp kept(returned, process) do
+  defp put_state(returned, process) do
     at =
       case {elem(returned, 0), tuple_size(returned)} do
         {:reply, _} -> 2

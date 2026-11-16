@@ -410,7 +410,7 @@ defmodule OneCore.Tools do
 
     if plugin == nil and inputs["new"] != true, do: elsewhere!(asked, name)
 
-    case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :kept), sandbox) do
+    case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :stored), sandbox) do
       {:ok, number, warnings} ->
         mode = if sandbox, do: ", in sandbox mode", else: ""
         warned = if warnings == "", do: "", else: " The compiler warns:\n#{warnings}"

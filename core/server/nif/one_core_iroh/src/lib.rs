@@ -49,10 +49,10 @@ type Asks = Arc<RwLock<()>>;
 impl Reached {
     /// Keeps where the clients that are watching are, as `watchers` has them now.
     fn keep(&self, watchers: &HashMap<String, Watcher>) {
-        let kept: HashMap<&String, &EndpointAddr> =
+        let stored: HashMap<&String, &EndpointAddr> =
             watchers.iter().map(|(key, watcher)| (key, &watcher.address)).collect();
-        if let Ok(kept) = serde_json::to_vec(&kept) {
-            let _ = std::fs::write(&*self.watching, kept);
+        if let Ok(stored) = serde_json::to_vec(&stored) {
+            let _ = std::fs::write(&*self.watching, stored);
         }
     }
 }
@@ -127,11 +127,11 @@ fn start(
         let asks = Asks::default();
         tokio::spawn(accept(endpoint.clone(), asked, clients.clone(), asks.clone()));
         let watching = Path::new(&key_file).with_file_name("watching");
-        let kept = std::fs::read(&watching).ok();
-        let kept: HashMap<String, EndpointAddr> =
-            kept.and_then(|kept| serde_json::from_slice(&kept).ok()).unwrap_or_default();
+        let stored = std::fs::read(&watching).ok();
+        let stored: HashMap<String, EndpointAddr> =
+            stored.and_then(|stored| serde_json::from_slice(&stored).ok()).unwrap_or_default();
         let watchers =
-            kept.into_iter().map(|(key, address)| (key, Watcher { address, open: Arc::default() })).collect();
+            stored.into_iter().map(|(key, address)| (key, Watcher { address, open: Arc::default() })).collect();
         let reached = Reached {
             endpoint: AssertUnwindSafe(endpoint),
             clients: AssertUnwindSafe(clients),

@@ -258,7 +258,7 @@ defmodule OneCore.Servers do
 
   defp again(what) do
     with true <- :ets.whereis(__MODULE__) != :undefined,
-         [{^what, _kept, read}] <- :ets.lookup(__MODULE__, what),
+         [{^what, _value, read}] <- :ets.lookup(__MODULE__, what),
          do: :ets.insert(__MODULE__, {what, read.(), read})
   end
 
@@ -274,13 +274,13 @@ defmodule OneCore.Servers do
   @doc "What `read` gave for `what` when it was last asked, which is asked again where nothing keeps it."
   def cached(what, read) do
     case :ets.whereis(__MODULE__) != :undefined and :ets.lookup(__MODULE__, what) do
-      [{^what, kept, _read}] ->
-        kept
+      [{^what, value, _read}] ->
+        value
 
       [] ->
-        kept = read.()
-        :ets.insert(__MODULE__, {what, kept, read})
-        kept
+        value = read.()
+        :ets.insert(__MODULE__, {what, value, read})
+        value
 
       false ->
         read.()

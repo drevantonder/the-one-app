@@ -11,7 +11,7 @@ defmodule RemoteShell.Runner do
   @behaviour OneCore.Service
 
   # The most of each of what a command prints that's given back: the end of it, where errors usually are.
-  @kept 64 * 1024
+  @max_bytes 64 * 1024
 
   @impl OneCore.Service
   def called, do: "Remote Shell's runner"
@@ -80,11 +80,11 @@ defmodule RemoteShell.Runner do
   defp clip(text) do
     text = String.replace_invalid(text)
 
-    if byte_size(text) <= @kept do
+    if byte_size(text) <= @max_bytes do
       text
     else
-      kept = String.replace_invalid(binary_part(text, byte_size(text) - @kept, @kept), "")
-      "(#{byte_size(text) - byte_size(kept)} earlier bytes cut) …" <> kept
+      tail = String.replace_invalid(binary_part(text, byte_size(text) - @tail, @tail), "")
+      "(#{byte_size(text) - byte_size(tail)} earlier bytes cut) …" <> tail
     end
   end
 end

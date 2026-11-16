@@ -383,7 +383,7 @@ async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) 
 
 impl NetworkConfig {
     /// What's kept in `home`, if it's there whole.
-    fn kept(home: &Path) -> Option<Self> {
+    fn read(home: &Path) -> Option<Self> {
         serde_json::from_slice(&fs::read(home.join("network")).ok()?).ok()
     }
 
@@ -882,7 +882,7 @@ impl Client {
     fn network(&self) -> NetworkConfig {
         let Link { network, who, .. } = self.link();
         let network = network.expect("only a client of a network with an address has a token");
-        let authorization_server = NetworkConfig::kept(&self.home).and_then(|config| config.authorization_server);
+        let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
         NetworkConfig {
             address: network.address,
             authorization_server,
@@ -1092,7 +1092,7 @@ impl Client {
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let authorization_server = NetworkConfig::kept(&self.home).and_then(|config| config.authorization_server);
+        let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
         let mut config =
             NetworkConfig { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
         let asked = config.admit(&self.key, &self.home).await;
@@ -1250,9 +1250,9 @@ impl Client {
         if fs::rename(self.home.join(REPORTS), &sending).is_err() {
             return;
         }
-        let kept = fs::read_to_string(&sending).unwrap_or_default();
+        let stored = fs::read_to_string(&sending).unwrap_or_default();
         let _ = fs::remove_file(&sending);
-        let records: Vec<Value> = kept.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+        let records: Vec<Value> = stored.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
         let said = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"records": records}});
         if !records.is_empty() && self.ask(said.to_string().as_bytes()).await.is_err() {
             for record in &records {
@@ -1325,9 +1325,9 @@ impl Client {
             return servers.map(Some);
         };
         let of = self.of()?;
-        let kept = self.kept_servers(&of);
+        let cached = self.cached_servers(&of);
         if !now {
-            return Ok(kept);
+            return Ok(cached);
         }
         let servers = network
             .servers(&self.key, &of)
@@ -1336,7 +1336,7 @@ impl Client {
         // One that was reached straight before is tried there again, beside the relay.
         let servers: Vec<EndpointAddr> = servers
             .into_iter()
-            .map(|server| match kept.iter().flatten().find(|was| was.id == server.id) {
+            .map(|server| match cached.iter().flatten().find(|was| was.id == server.id) {
                 Some(was) => server.with_addrs(was.addrs.iter().filter(|addr| addr.is_ip()).cloned()),
                 None => server,
             })
@@ -1359,23 +1359,23 @@ impl Client {
     }
 
     /// The servers acting for `of` as this client last kept them, each with where it was last reached straight.
-    fn kept_servers(&self, of: &str) -> Option<Vec<EndpointAddr>> {
-        self.cached(SERVERS, &json!({"of": of})).and_then(|kept| serde_json::from_value(kept).ok())
+    fn cached_servers(&self, of: &str) -> Option<Vec<EndpointAddr>> {
+        self.cached(SERVERS, &json!({"of": of})).and_then(|cached| serde_json::from_value(cached).ok())
     }
 
     /// Keeps `addr` as where `server` is reached straight, as a connection to it found it, so the next run of this
     /// device's clients tries it from the start, beside the relay, rather than waiting for the relay to find it again.
     fn reached_straight(&self, server: EndpointId, addr: SocketAddr) {
         let (Some(_), Ok(of)) = (self.link().network, self.of()) else { return };
-        let Some(mut servers) = self.kept_servers(&of) else { return };
-        let Some(kept) = servers.iter_mut().find(|kept| kept.id == server) else { return };
-        let relay = kept.addrs.iter().filter(|addr| !addr.is_ip()).cloned();
+        let Some(mut servers) = self.cached_servers(&of) else { return };
+        let Some(cached) = servers.iter_mut().find(|cached| cached.id == server) else { return };
+        let relay = cached.addrs.iter().filter(|addr| !addr.is_ip()).cloned();
         let now: std::collections::BTreeSet<_> = relay.chain([TransportAddr::Ip(addr)]).collect();
-        if now != kept.addrs {
-            kept.addrs = now;
-            let kept = serde_json::to_value(&servers).map_err(anyhow::Error::from);
-            if let Err(error) = kept.and_then(|servers| self.keep(SERVERS, &json!({"of": of}), &servers)) {
-                self.report(json!({"name": "one.client.kept", "error": format!("{error:#}")}));
+        if now != cached.addrs {
+            cached.addrs = now;
+            let cached = serde_json::to_value(&servers).map_err(anyhow::Error::from);
+            if let Err(error) = cached.and_then(|servers| self.keep(SERVERS, &json!({"of": of}), &servers)) {
+                self.report(json!({"name": "one.client.cache", "error": format!("{error:#}")}));
             }
         }
     }
@@ -1434,12 +1434,12 @@ fn report(home: &Path, record: &Value) {
 
 fn keep(home: &Path, record: &Value) {
     let file = home.join(REPORTS);
-    if fs::metadata(&file).is_ok_and(|kept| kept.len() > REPORTS_MOST) {
+    if fs::metadata(&file).is_ok_and(|metadata| metadata.len() > REPORTS_MOST) {
         return;
     }
     let line = format!("{record}\n");
-    let kept = fs::OpenOptions::new().create(true).append(true).open(&file);
-    let _ = kept.and_then(|mut kept| kept.write_all(line.as_bytes()));
+    let log = fs::OpenOptions::new().create(true).append(true).open(&file);
+    let _ = log.and_then(|mut log| log.write_all(line.as_bytes()));
 }
 
 /// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.

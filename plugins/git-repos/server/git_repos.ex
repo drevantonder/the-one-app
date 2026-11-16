@@ -22,7 +22,7 @@ defmodule GitRepos do
   # Larger than this, what git sends or is answered goes through the bucket instead of in the call.
   @inline 4_194_304
   # How long an answer kept in the bucket for git to fetch is kept.
-  @answers_kept :timer.minutes(10)
+  @answers_ttl :timer.minutes(10)
   # The most of a file that's shown, and of a commit's changes.
   @shown 1_048_576
   @page 25
@@ -202,15 +202,15 @@ defmodule GitRepos do
     names
     |> Enum.zip(Artifact.read_all(index(), Enum.map(names, &("index/" <> &1))))
     |> Enum.flat_map(fn {name, {:ok, data, _tag}} ->
-      kept = JSON.decode!(data)
+      stored = JSON.decode!(data)
 
-      if kept["removed"],
+      if stored["removed"],
         do: [],
         else: [
           %{
             repo: name,
             whose: name |> String.split("/made/") |> hd(),
-            pushed: kept["pushed"],
+            pushed: stored["pushed"],
             pushes: Call.reaches?(call, name, "editor"),
             clone: address(name)
           }
@@ -650,9 +650,9 @@ defmodule GitRepos do
   defp answered(call, type, answer) do
     now = now()
 
-    for "answers/" <> kept = blob <- Artifact.list(call.own, "answers/"),
-        [at | _] = String.split(kept, "-"),
-        now - String.to_integer(at) > @answers_kept,
+    for "answers/" <> name = blob <- Artifact.list(call.own, "answers/"),
+        [at | _] = String.split(name, "-"),
+        now - String.to_integer(at) > @answers_ttl,
         do: Artifact.remove(call.own, blob)
 
     blob = "answers/#{now}-#{random()}"
@@ -679,11 +679,11 @@ defmodule GitRepos do
     key = "index/" <> name
 
     with {:ok, data, tag} <- Artifact.read(index(), key) do
-      kept = JSON.decode!(data)
+      stored = JSON.decode!(data)
 
       case what do
-        "removed" -> Artifact.replace(index(), key, JSON.encode!(Map.put(kept, "removed", now())), tag)
-        "restored" -> Artifact.replace(index(), key, JSON.encode!(Map.delete(kept, "removed")), tag)
+        "removed" -> Artifact.replace(index(), key, JSON.encode!(Map.put(stored, "removed", now())), tag)
+        "restored" -> Artifact.replace(index(), key, JSON.encode!(Map.delete(stored, "removed")), tag)
         "purged" -> Artifact.remove(index(), key)
       end
     end

@@ -38,7 +38,7 @@ defmodule Backups do
   # How often each schedule backs up, in seconds.
   @schedules %{"hour" => 3600, "day" => 86_400, "week" => 7 * 86_400, "never" => nil}
 
-  @kept "Every backup is kept for a day, then one a day for a week, one a week for a month and one a month for a year."
+  @retention "Every backup is kept for a day, then one a day for a week, one a week for a month and one a month for a year."
 
   @impl true
   def uses, do: ["database", "vault"]
@@ -158,7 +158,7 @@ defmodule Backups do
         try do
           Run.back_up(call, destination)
         rescue
-          _failed -> :kept_as_a_problem
+          _failed -> :failed
         end
       end
     end
@@ -194,7 +194,7 @@ defmodule Backups do
 
     %{
       every: every,
-      kept: @kept,
+      retention: @retention,
       machines: for(machine <- Service.servers(call, Disk), do: %{key: machine, name: Service.name(machine)}),
       destinations:
         for destination <- destinations do

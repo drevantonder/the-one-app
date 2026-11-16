@@ -19,7 +19,7 @@ defmodule IphoneSimulator.Simulator do
   # idb's CLI isn't on PyPI past 1.7.7: it's the wheel on the same release.
   @cli_sha256 "ed8557a4c54ffee53006c1fe63f070cda567949312ab24be56faf987c5a3d04b"
   @aiortc "1.16.0"
-  @kept 64 * 1024
+  @max_bytes 64 * 1024
 
   @impl OneCore.Service
   def called, do: "iPhone Simulator's simulators"
@@ -384,6 +384,6 @@ defmodule IphoneSimulator.Simulator do
 
   defp clip(text) do
     text = String.replace_invalid(text)
-    if byte_size(text) <= @kept, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @kept, @kept), "")
+    if byte_size(text) <= @max_bytes, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @max_bytes, @max_bytes), "")
   end
 end

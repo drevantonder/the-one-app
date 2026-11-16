@@ -23,26 +23,26 @@ defmodule OneCore.Plugins.Deploy do
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
   (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/6` takes it, and
-  `sandbox` whether it runs in sandbox mode (`OneCore.Sandbox`), each as the version before had it if `:kept`. Gives
+  `sandbox` whether it runs in sandbox mode (`OneCore.Sandbox`), each as the version before had it if `:stored`. Gives
   its version's number and the compiler's warnings.
   """
-  def deploy(owner, name, files, from \\ :kept, sandbox \\ :kept),
+  def deploy(owner, name, files, from \\ :stored, sandbox \\ :stored),
     do: deploy(owner, name, files, from, sandbox, fn _version -> true end)
 
   @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
   def deploy(owner, name, files, from, sandbox, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
-    sandbox = if sandbox == :kept, do: Store.about(artifact)["sandbox"] == true, else: sandbox == true
+    sandbox = if sandbox == :stored, do: Store.about(artifact)["sandbox"] == true, else: sandbox == true
 
     with :ok <- check(name, files),
-         {:ok, kept} <- built(owner, name, files, sandbox),
-         {:ok, version, warnings} <- loaded(artifact, kept, sandbox) do
+         {:ok, built} <- built(owner, name, files, sandbox),
+         {:ok, version, warnings} <- loaded(artifact, built, sandbox) do
       version = %{version | artifact: artifact}
       install = install?.(version)
 
       with :ok <- if(install, do: fits(owner, name, version), else: :ok),
-           {:ok, warnings} <- if(sandbox, do: Sandbox.check(owner, version, kept), else: {:ok, warnings}),
-           {:ok, number} <- Store.keep(artifact, name, kept, files, from, sandbox),
+           {:ok, warnings} <- if(sandbox, do: Sandbox.check(owner, version, built), else: {:ok, warnings}),
+           {:ok, number} <- Store.keep(artifact, name, built, files, from, sandbox),
            :ok <- Store.describe(version),
            :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
         listed(artifact, version)
@@ -58,10 +58,10 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   # A version's code, compiled and loaded here, or in sandbox mode only described, by its own VM.
-  defp loaded(artifact, kept, false), do: Version.load(Path.basename(artifact), kept)
+  defp loaded(artifact, built, false), do: Version.load(Path.basename(artifact), built)
 
-  defp loaded(artifact, kept, true) do
-    with {:ok, version} <- Sandbox.describe(artifact, kept), do: {:ok, version, ""}
+  defp loaded(artifact, built, true) do
+    with {:ok, version} <- Sandbox.describe(artifact, built), do: {:ok, version, ""}
   end
 
   @doc """
@@ -344,13 +344,13 @@ defmodule OneCore.Plugins.Deploy do
   defp built_before(artifact, files) do
     client = &Map.filter(&1, fn {path, _} -> Version.client?(path) end)
 
-    with %Version{ui: ui, code: kept} <- Plugins.version(artifact),
+    with %Version{ui: ui, code: hash} <- Plugins.version(artifact),
          true <- ui == App.library().code,
-         true <- client.(Store.source(artifact, kept)) == client.(files) do
+         true <- client.(Store.source(artifact, hash)) == client.(files) do
       {:ok,
        Map.merge(
          Map.reject(files, fn {path, _} -> Version.client?(path) end),
-         client.(Store.files(artifact, kept))
+         client.(Store.files(artifact, hash))
        )}
     else
       _ -> nil
@@ -371,10 +371,10 @@ defmodule OneCore.Plugins.Deploy do
         {whose, name} = {Store.whose(artifact), Path.basename(artifact)},
         Servers.runs?(whose) or (Store.about(artifact)["sandbox"] == true and Servers.here?(whose)),
         built_with(artifact) not in [nil, code],
-        {_number, kept, _tag} <- [Store.latest(artifact)],
+        {_number, hash, _tag} <- [Store.latest(artifact)],
         # It stays as installed, or not, as it was.
         install? = fn _version -> Plugins.plugin(whose, name) == artifact end,
-        {:error, why} <- [deploy(whose, name, Store.source(artifact, kept), :kept, :kept, install?)],
+        {:error, why} <- [deploy(whose, name, Store.source(artifact, hash), :stored, :stored, install?)],
         built_with(artifact) != code,
         do: Logger.error("#{artifact}'s app wasn't built again against this server's UI library: #{why}")
   end
@@ -382,8 +382,8 @@ defmodule OneCore.Plugins.Deploy do
   # The code of the UI library the latest version of a plugin's app was built against, as the bucket has it, or `nil`
   # for one with no app.
   defp built_with(artifact) do
-    with {_number, kept, _tag} <- Store.latest(artifact),
-         {:ok, code} <- Store.file(artifact, kept, "client/ui"),
+    with {_number, hash, _tag} <- Store.latest(artifact),
+         {:ok, code} <- Store.file(artifact, hash, "client/ui"),
          do: code,
          else: (_ -> nil)
   end

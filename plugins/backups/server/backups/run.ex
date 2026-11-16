@@ -149,7 +149,7 @@ defmodule Backups.Run do
     backups =
       transaction(call, &query(&1, "select name, at from backups where destination = ? order by at desc", [destination["id"]]))
 
-    gone = backups -- kept(backups, System.os_time(:millisecond))
+    gone = backups -- retained(backups, System.os_time(:millisecond))
 
     if gone == [] do
       0
@@ -187,13 +187,13 @@ defmodule Backups.Run do
   The backups kept, of `backups` newest first, at `now`: every one for a day, then the newest of each day for a
   week, of each week for a month, and of each month for a year. The newest is always kept.
   """
-  def kept([], _now), do: []
+  def retained([], _now), do: []
 
-  def kept([latest | _] = backups, now) do
+  def retained([latest | _] = backups, now) do
     day = 86_400_000
 
-    {kept, _seen} =
-      Enum.reduce(backups, {[], MapSet.new()}, fn %{"at" => at} = backup, {kept, seen} ->
+    {retained, _seen} =
+      Enum.reduce(backups, {[], MapSet.new()}, fn %{"at" => at} = backup, {retained, seen} ->
         date = DateTime.to_date(DateTime.from_unix!(at, :millisecond))
         {year, week} = :calendar.iso_week_number(Date.to_erl(date))
 
@@ -206,10 +206,10 @@ defmodule Backups.Run do
             true -> nil
           end
 
-        if group && group not in seen, do: {[backup | kept], MapSet.put(seen, group)}, else: {kept, seen}
+        if group && group not in seen, do: {[backup | retained], MapSet.put(seen, group)}, else: {retained, seen}
       end)
 
-    Enum.uniq([latest | Enum.reverse(kept)])
+    Enum.uniq([latest | Enum.reverse(retained)])
   end
 
   @doc """
@@ -323,7 +323,7 @@ defmodule Backups.Run do
   end
 
   # The blobs a backup holds, as they're kept here.
-  defp listed(kept), do: JSON.decode!(:zlib.uncompress(kept))["blobs"]
+  defp listed(compressed), do: JSON.decode!(:zlib.uncompress(compressed))["blobs"]
 
   defp digest(data), do: Base.encode16(:crypto.hash(:sha256, data), case: :lower)
 

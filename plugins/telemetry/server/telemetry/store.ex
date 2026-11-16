@@ -44,7 +44,7 @@ defmodule Telemetry.Store do
   end
 
   @doc "How much is kept: since when, in milliseconds since 1970, how many bytes, for how many days, and the most."
-  def kept(own) do
+  def retention(own) do
     names = Artifact.list(own, "batches/")
 
     %{
@@ -71,8 +71,8 @@ defmodule Telemetry.Store do
       end
 
     hours = Enum.group_by(Artifact.list(own, "batches/"), &Path.dirname/1)
-    {old, kept} = Enum.split_with(Enum.sort(hours), fn {hour, _names} -> hour < oldest end)
-    {over, _kept} = past_most(Enum.reverse(kept), 0)
+    {old, retained} = Enum.split_with(Enum.sort(hours), fn {hour, _names} -> hour < oldest end)
+    {over, _retained} = past_most(Enum.reverse(retained), 0)
     let_go = old ++ over
     for {_hour, names} <- let_go, name <- names, do: Artifact.remove(own, name)
 
@@ -102,8 +102,8 @@ defmodule Telemetry.Store do
     if bytes > @most_bytes do
       {[latest | older], []}
     else
-      {over, kept} = past_most(older, bytes)
-      {over, [latest | kept]}
+      {over, retained} = past_most(older, bytes)
+      {over, [latest | retained]}
     end
   end
 

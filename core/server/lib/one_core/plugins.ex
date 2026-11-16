@@ -385,14 +385,14 @@ defmodule OneCore.Plugins do
     any = changed != [] or state.installed[owner] != installed
     state = %{state | installed: Map.put(state.installed, owner, installed)}
     state = put_in(state.reloaded[owner], System.monotonic_time(:millisecond))
-    kept = for {_owner, installed} <- state.installed, {_name, artifact} <- installed, into: MapSet.new(), do: artifact
-    {running, dropped} = Map.split_with(state.running, fn {artifact, _version} -> artifact in kept end)
+    artifacts = for {_owner, installed} <- state.installed, {_name, artifact} <- installed, into: MapSet.new(), do: artifact
+    {running, dropped} = Map.split_with(state.running, fn {artifact, _version} -> artifact in artifacts end)
 
     state = %{
       state
       | running: running,
-        latest: Map.filter(state.latest, fn {artifact, _number} -> artifact in kept end),
-        described: Map.filter(state.described, fn {artifact, _number} -> artifact in kept end)
+        latest: Map.filter(state.latest, fn {artifact, _number} -> artifact in artifacts end),
+        described: Map.filter(state.described, fn {artifact, _number} -> artifact in artifacts end)
     }
 
     changed = Enum.uniq(changed ++ Map.keys(dropped))

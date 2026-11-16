@@ -92,10 +92,10 @@ defmodule OneCore.Plugins.Version do
       Map.split_with(Map.new(rest), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
 
     with {:ok, skills} <- Skills.found(name, skills),
-         {:ok, kept} <- nifs(nifs, rest),
+         {:ok, nif_warnings} <- nifs(nifs, rest),
          {:ok, modules, warnings} <- compile(under, sources),
          {:ok, version} <- describe(under, modules, rest) do
-      warnings = Enum.join(Enum.reject([warnings | kept], &(&1 == "")), "\n")
+      warnings = Enum.join(Enum.reject([warnings | nif_warnings], &(&1 == "")), "\n")
       hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
       own = Map.reject(rest, fn {path, _} -> client?(path) end)
@@ -144,7 +144,7 @@ defmodule OneCore.Plugins.Version do
   none of its code.
   """
   def description(%__MODULE__{under: under} = version) do
-    kept = :persistent_term.get({__MODULE__, under})
+    cached = :persistent_term.get({__MODULE__, under})
 
     said =
       Map.take(version, [
@@ -173,7 +173,7 @@ defmodule OneCore.Plugins.Version do
         |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
       end
 
-    :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: kept.files, skills: kept.skills}))
+    :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: cached.files, skills: cached.skills}))
   end
 
   @doc """
@@ -302,10 +302,10 @@ defmodule OneCore.Plugins.Version do
   # again is that one, and another is kept for the next start, which loads the latest version's, and is said in the
   # warnings. Gives `{:ok, warnings}`, or what's wrong.
   defp nifs(nifs, rest) do
-    Enum.reduce_while(nifs, {:ok, []}, fn nif, {:ok, kept} ->
+    Enum.reduce_while(nifs, {:ok, []}, fn nif, {:ok, warnings} ->
       case compile_nif(nif, rest) do
-        :ok -> {:cont, {:ok, kept}}
-        {:kept, warning} -> {:cont, {:ok, [warning | kept]}}
+        :ok -> {:cont, {:ok, warnings}}
+        {:warning, warning} -> {:cont, {:ok, [warning | warnings]}}
         {:error, _why} = error -> {:halt, error}
       end
     end)
@@ -341,7 +341,7 @@ defmodule OneCore.Plugins.Version do
     else
       {:built, false} -> {:error, "#{path} has no build for this kind of machine, #{library}"}
       {^build, _} -> :ok
-      {_other, _} -> {:kept, "#{path}: this server runs the NIF it loaded until it restarts, and this one after"}
+      {_other, _} -> {:warning, "#{path}: this server runs the NIF it loaded until it restarts, and this one after"}
       names when is_list(names) -> {:error, "#{path} defines one module, which its library was built for"}
       _ -> {:error, "#{path}'s module is one of the server's own"}
     end

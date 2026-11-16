@@ -299,7 +299,7 @@ defmodule Encryption do
   def call("revoke", %{"device" => device}, call) do
     key = key(call)
     if not (device =~ ~r/^[0-9a-f]{64}$/), do: raise("A device is named by its key.")
-    for kept <- ["devices/", "asking/"], do: Artifact.remove(key, kept <> device)
+    for prefix <- ["devices/", "asking/"], do: Artifact.remove(key, prefix <> device)
     "That device is no longer trusted."
   end
 
@@ -309,9 +309,9 @@ defmodule Encryption do
     Call.make(call, "key")
   end
 
-  defp devices(key, kept) do
-    for name <- Artifact.list(key, kept), {:ok, device, _tag} <- [Artifact.read(key, name)] do
-      {String.replace_prefix(name, kept, ""), JSON.decode!(device)}
+  defp devices(key, prefix) do
+    for name <- Artifact.list(key, prefix), {:ok, device, _tag} <- [Artifact.read(key, name)] do
+      {String.replace_prefix(name, prefix, ""), JSON.decode!(device)}
     end
   end
 end

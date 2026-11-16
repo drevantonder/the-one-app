@@ -33,8 +33,8 @@ defmodule Telemetry.Read do
     spans
     |> Enum.group_by(& &1["traceId"])
     |> Enum.sort_by(fn {_id, spans} -> {not Enum.any?(spans, &failed?/1), -Enum.sum_by(spans, &took/1)} end)
-    |> Enum.reduce_while([], fn {_id, trace}, kept ->
-      if length(kept) + length(trace) > @most_spans, do: {:halt, kept}, else: {:cont, trace ++ kept}
+    |> Enum.reduce_while([], fn {_id, trace}, acc ->
+      if length(acc) + length(trace) > @most_spans, do: {:halt, acc}, else: {:cont, trace ++ acc}
     end)
   end
 

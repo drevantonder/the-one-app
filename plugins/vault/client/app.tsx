@@ -50,8 +50,8 @@ const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs
 /// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
 const opened = createMemo(() => ask<{ servers: string[]; may: { key: string; name?: string }[] }>("vault_unlocked_on"))
 const key = createMemo(() => ask<{ owner: string; slot?: unknown; check?: unknown; device: string; devices: Device[]; asking: Device[] }>("encryption_key"))
-const kept = createMemo(() => (opened().servers.length ? ask<{ items: Item[]; requests: Request[]; plugins: string[] }>("vault_list") : { items: [], requests: [], plugins: [] }))
-const again = () => [opened, key, kept].forEach(refresh)
+const contents = createMemo(() => (opened().servers.length ? ask<{ items: Item[]; requests: Request[]; plugins: string[] }>("vault_list") : { items: [], requests: [], plugins: [] }))
+const again = () => [opened, key, contents].forEach(refresh)
 changed(again)
 
 /// Whose Vaults its person can open here: theirs, each group they own, and the network if they own it.
@@ -160,7 +160,7 @@ function FieldSheet() {
 function RequestSheet() {
   const asked = () => { const open = sheet(); return open?.kind === "request" ? open.request : undefined }
   const [picked, setPicked] = createSignal("")
-  const fits = () => kept().items.filter((item) => asked()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
+  const fits = () => contents().items.filter((item) => asked()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
   const who = () => asked()!.plugin ?? "Your agents"
   const allow = async (event: SubmitEvent) => {
     event.preventDefault()
@@ -233,7 +233,7 @@ function ItemScreen(props: { item: Item }) {
             text="Use it, never see it"
             end={<Switch aria-label="Your agents" checked={item().agents} onChange={(event) => does("vault_agents", { item: item().name, on: event.currentTarget.checked })} />}
           />
-          <For each={kept().plugins}>
+          <For each={contents().plugins}>
             {(plugin) => (
               <Row
                 heading={plugin}
@@ -349,10 +349,10 @@ function Whose() {
 }
 
 function Vault() {
-  const item = () => kept().items.find(({ name }) => name === open())
+  const item = () => contents().items.find(({ name }) => name === open())
   return (
     <>
-      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={kept().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <ItemScreen item={item()} />}</Show>}>
+      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={contents().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <ItemScreen item={item()} />}</Show>}>
         <Screen
         heading="Vault"
         back
@@ -368,10 +368,10 @@ function Vault() {
           <Show when={!opened().servers.length}>
             <Problem warn heading={`No server opens ${whom()} Vault`} text={holds() ? "Choose one below. Until then it keeps nothing." : "Choose one from a trusted device. Until then it keeps nothing."} />
           </Show>
-          <Show when={kept().requests.length}>
+          <Show when={contents().requests.length}>
             <Section heading="Asked for">
               <List>
-                <For each={kept().requests}>
+                <For each={contents().requests}>
                   {(request) => <Row heading={request.title} text={[`For ${request.plugin ?? "your agents"}`, request.why].filter(Boolean).join(" · ")} onClick={() => setSheet({ kind: "request", request })} />}
                 </For>
               </List>
@@ -379,9 +379,9 @@ function Vault() {
           </Show>
           <Show when={opened().servers.length}>
             <Section>
-              <Show when={kept().items.length} fallback={<Empty>Nothing's kept here yet.</Empty>}>
+              <Show when={contents().items.length} fallback={<Empty>Nothing's kept here yet.</Empty>}>
                 <List>
-                  <For each={kept().items}>
+                  <For each={contents().items}>
                     {(item) => (
                       <Row
                         heading={item.name}

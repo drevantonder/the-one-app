@@ -32,7 +32,7 @@ interface Destination {
 interface All {
   destinations: Destination[]
   every: string
-  kept: string
+  retention: string
   machines: { key: string; name?: string }[]
 }
 
@@ -282,7 +282,7 @@ function Backups(props: { all: All }) {
               <Row heading="Add Destination" onClick={() => setAdding(true)} />
             </List>
             <Section heading="Schedule">
-              <Field label="Back Up" hint={props.all.kept}>
+              <Field label="Back Up" hint={props.all.retention}>
                 <Select.Root collection={schedules} value={[props.all.every]} onValueChange={schedule} />
               </Field>
             </Section>

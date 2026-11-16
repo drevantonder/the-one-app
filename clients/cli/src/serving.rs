@@ -496,13 +496,13 @@ impl Here {
 
     /// Removes the builds that are neither `current` nor `previous`.
     fn prune(&self) -> Result<()> {
-        let kept: Vec<_> = ["current", "previous"]
+        let retained: Vec<_> = ["current", "previous"]
             .iter()
             .filter_map(|name| fs::read_link(self.folder.join(name)).ok()?.file_name().map(|build| build.to_owned()))
             .collect();
         for build in fs::read_dir(self.folder.join("builds"))? {
             let build = build?;
-            if !kept.contains(&build.file_name()) {
+            if !retained.contains(&build.file_name()) {
                 fs::remove_dir_all(build.path())?;
             }
         }
@@ -708,11 +708,11 @@ mod system {
         use std::os::unix::fs::MetadataExt;
 
         const LOG: u64 = 10 << 20;
-        let Ok(kept) = fs::metadata(log) else { return Ok(()) };
+        let Ok(metadata) = fs::metadata(log) else { return Ok(()) };
         let mut out: libc::stat = unsafe { std::mem::zeroed() };
         let writing = unsafe { libc::fstat(1, &mut out) } == 0
-            && (out.st_dev as u64, out.st_ino as u64) == (kept.dev(), kept.ino());
-        if kept.len() < LOG || !writing {
+            && (out.st_dev as u64, out.st_ino as u64) == (metadata.dev(), metadata.ino());
+        if metadata.len() < LOG || !writing {
             return Ok(());
         }
         fs::rename(log, log.with_extension("log.1"))?;
@@ -862,7 +862,7 @@ mod system {
     /// `server.log.1`, in place of the one before, and a new one is begun.
     pub fn bound(log: &Path) -> Result<()> {
         let mut writing = LOG.lock().unwrap();
-        let full = fs::metadata(log).is_ok_and(|kept| kept.len() >= 10 << 20);
+        let full = fs::metadata(log).is_ok_and(|metadata| metadata.len() >= 10 << 20);
         if writing.is_some() && !full {
             return Ok(());
         }

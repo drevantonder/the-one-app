@@ -259,9 +259,9 @@ refused on phone as alice fake digest --item GitHub --field token
 
 say "A plugin keeps a secret it made itself, which only it uses"
 may on phone as alice fake keep --item Session
-kept=$said
+digest=$said
 may on phone as alice fake digest --item Session --field key
-[[ $said == "$kept" ]] && echo "  which is the SHA-256 the plugin gave as it kept it"
+[[ $said == "$digest" ]] && echo "  which is the SHA-256 the plugin gave as it kept it"
 refused on phone as alice nosy digest --item Session --field key
 refused on phone as alice nosy keep --item Session
 may on phone as alice vault list

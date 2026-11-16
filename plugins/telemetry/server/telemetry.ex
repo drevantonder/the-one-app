@@ -162,7 +162,7 @@ defmodule Telemetry do
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
-      kept: Store.kept(call.own)
+      retention: Store.retention(call.own)
     }
   end
 

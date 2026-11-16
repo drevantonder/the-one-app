@@ -10,7 +10,7 @@ defmodule Containers.Podman do
   @behaviour OneCore.Service
 
   # The most of each of what a command prints that's given back: the end of it, where errors usually are.
-  @kept 64 * 1024
+  @max_bytes 64 * 1024
   # The most of a file, a screenshot or a response's body that's given back.
   @largest 16 * 1024 * 1024
   @sizes %{"small" => {"1", "1g"}, "medium" => {"2", "4g"}, "large" => {"4", "8g"}}
@@ -338,7 +338,7 @@ defmodule Containers.Podman do
 
     case output do
       :raw -> %{exit: exit, stdout: stdout, stderr: stderr}
-      :text -> %{exit: exit, stdout: clip(stdout, @kept), stderr: clip(stderr, @kept)}
+      :text -> %{exit: exit, stdout: clip(stdout, @max_bytes), stderr: clip(stderr, @max_bytes)}
     end
   end
 
@@ -355,13 +355,13 @@ defmodule Containers.Podman do
   end
 
   # Keeps the end of long output, and says how much was cut.
-  defp clip(text, kept) do
+  defp clip(text, max) do
     text = String.replace_invalid(text)
 
-    if byte_size(text) <= kept do
+    if byte_size(text) <= max do
       text
     else
-      end_of = String.replace_invalid(binary_part(text, byte_size(text) - kept, kept), "")
+      end_of = String.replace_invalid(binary_part(text, byte_size(text) - max, max), "")
       "(#{byte_size(text) - byte_size(end_of)} earlier bytes cut) …" <> end_of
     end
   end

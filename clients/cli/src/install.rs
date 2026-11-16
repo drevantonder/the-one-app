@@ -556,7 +556,7 @@ pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
         Some(file) => read_lock(file)?,
         None => BTreeMap::new(),
     };
-    let mut kept = false;
+    let mut skipped = false;
     for (name, it) in recorded(client, &names).await? {
         let (newer, changed) = state(client, &name, &it).await?;
         let Some(newer) = newer else {
@@ -569,7 +569,7 @@ pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
                  gives it as it is now; `one plugins update {name} --force` overwrites it with {}.",
                 &newer[..12]
             );
-            kept = true;
+            skipped = true;
             continue;
         }
         let source = Source { said: it.source.clone(), reference: it.reference.clone() };
@@ -580,7 +580,7 @@ pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
             write_lock(file, &all)?;
         }
     }
-    Ok(if kept { ExitCode::FAILURE } else { ExitCode::SUCCESS })
+    Ok(if skipped { ExitCode::FAILURE } else { ExitCode::SUCCESS })
 }
 
 /// `one uninstall --name <name>` in a network's repo: uninstalls it, and takes it out of `plugins.lock` if that

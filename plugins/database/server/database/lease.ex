@@ -160,7 +160,7 @@ defmodule Database.Lease do
   def code_change(_was, lease, _extra) do
     {monotonic, system} = clocks()
     long_ago = %{opened: monotonic - @writes_after, proved: {monotonic - @answers_for, system - @answers_for}}
-    {:ok, Map.merge(%{firing: %{}}, Map.merge(long_ago, lease, fn _key, long_ago, kept -> kept || long_ago end))}
+    {:ok, Map.merge(%{firing: %{}}, Map.merge(long_ago, lease, fn _key, long_ago, stored -> stored || long_ago end))}
   end
 
   # Runs `fun` with the database in a transaction, and writes what it changed as the log's next entry. Gives

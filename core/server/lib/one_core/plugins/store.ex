@@ -77,7 +77,7 @@ defmodule OneCore.Plugins.Store do
   @doc """
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
-  latest is there, and `from`, the git repo its files came from, is kept with it (`:kept` keeps what the version
+  latest is there, and `from`, the git repo its files came from, is kept with it (`:stored` keeps what the version
   before said, and `nil` says they came from none), and whether it runs in `sandbox` mode. Gives the version's number.
   """
   def keep(artifact, name, files, deployed, from, sandbox \\ false) do
@@ -93,7 +93,7 @@ defmodule OneCore.Plugins.Store do
 
     from =
       case from do
-        :kept -> about(artifact)["from"]
+        :stored -> about(artifact)["from"]
         nil -> nil
         from -> Map.put(from, "hash", source)
       end
@@ -119,10 +119,10 @@ defmodule OneCore.Plugins.Store do
 
   # How many of a plugin's versions keep their files: the latest, which every server runs, and the two before it, which
   # a server may still hold while it moves to the latest, and an app open on a device may still be reading.
-  @kept 3
+  @versions_kept 3
 
   @doc """
-  Removes the files of the plugin `artifact`'s versions before its last few (`@kept`): the set each ran, the files
+  Removes the files of the plugin `artifact`'s versions before its last few (`@versions_kept`): the set each ran, the files
   it was deployed from and what it said of itself, and its entry in `versions/`. Nothing runs them, and nothing
   goes back to one: a plugin goes back by being deployed again from its git repo. A set a kept version runs too
   stays. Gives how many blobs went.
@@ -131,11 +131,11 @@ defmodule OneCore.Plugins.Store do
     with {number, latest, _tag} <- latest(artifact) do
       history = Bucket.list("#{artifact}/versions/")
       codes = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, code, _tag} -> {blob, code} end)
-      {old, kept} = Enum.split_with(codes, fn {blob, _code} -> String.to_integer(Path.basename(blob)) <= number - @kept end)
-      kept = MapSet.new([latest | Enum.map(kept, &elem(&1, 1))])
+      {old, retained} = Enum.split_with(codes, fn {blob, _code} -> String.to_integer(Path.basename(blob)) <= number - @versions_kept end)
+      retained = MapSet.new([latest | Enum.map(retained, &elem(&1, 1))])
 
       files =
-        for code <- Enum.uniq(Enum.map(old, &elem(&1, 1))), code not in kept, prefix <- ~w(code source described) do
+        for code <- Enum.uniq(Enum.map(old, &elem(&1, 1))), code not in retained, prefix <- ~w(code source described) do
           Bucket.list("#{artifact}/#{prefix}/#{code}")
         end
 
@@ -224,13 +224,13 @@ defmodule OneCore.Plugins.Store do
   A set of files of a plugin, by their paths: the files the server keeps, or with `"source"` the ones they were
   built from. Read at once: a bucket at an address is asked for each over the internet.
   """
-  def files(artifact, code, kept \\ "code") do
-    paths = Bucket.list("#{artifact}/#{kept}/#{code}/")
+  def files(artifact, code, prefix \\ "code") do
+    paths = Bucket.list("#{artifact}/#{prefix}/#{code}/")
 
     paths
     |> Task.async_stream(&Bucket.read/1, max_concurrency: 16, timeout: :infinity)
     |> Enum.zip_with(paths, fn {:ok, {:ok, text, _tag}}, path ->
-      {String.replace_prefix(path, "#{artifact}/#{kept}/#{code}/", ""), text}
+      {String.replace_prefix(path, "#{artifact}/#{prefix}/#{code}/", ""), text}
     end)
     |> Map.new()
   end

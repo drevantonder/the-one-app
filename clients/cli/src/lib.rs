@@ -158,7 +158,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
                     None => {
                         // A large file is one the client fetched and kept, and any other is in the answer.
                         let file = match part["uri"].as_str().and_then(|uri| uri.strip_prefix("/.file/")) {
-                            Some(kept) => client.file(kept).context("the answer isn't a file")?.1,
+                            Some(path) => client.file(path).context("the answer isn't a file")?.1,
                             None => {
                                 let file = part["data"].as_str().or(part["resource"]["blob"].as_str());
                                 BASE64.decode(file.unwrap_or_default().as_bytes()).context("the answer isn't a file")?

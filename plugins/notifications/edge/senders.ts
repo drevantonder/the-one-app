@@ -59,12 +59,12 @@ export async function send(fetch: Fetch, env: Keys, devices: Device[]) {
 }
 
 // A sign-in each service gives, kept while it lasts, by whose it is.
-const kept = new Map<string, { token: string; until: number }>();
+const cache = new Map<string, { token: string; until: number }>();
 async function token(whose: string, make: () => Promise<{ token: string; lasts: number }>) {
-  const had = kept.get(whose);
+  const had = cache.get(whose);
   if (had && had.until > Date.now()) return had.token;
   const { token, lasts } = await make();
-  kept.set(whose, { token, until: Date.now() + lasts });
+  cache.set(whose, { token, until: Date.now() + lasts });
   return token;
 }
 
@@ -95,7 +95,7 @@ async function apns(fetch: Fetch, env: Keys, device: string, sealed: string): Pr
   if (answer.ok) return {};
   const { reason = "" } = await answer.json<{ reason?: string }>().catch(() => ({}) as { reason?: string });
   if (answer.status === 410 || ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"].includes(reason)) return { gone: true };
-  if (["ExpiredProviderToken", "InvalidProviderToken"].includes(reason)) kept.delete("apns");
+  if (["ExpiredProviderToken", "InvalidProviderToken"].includes(reason)) cache.delete("apns");
   return { failed: `APNs answered ${answer.status} ${reason}`.trim() };
 }
 
@@ -129,7 +129,7 @@ async function fcm(fetch: Fetch, env: Keys, device: string, sealed: string): Pro
   const { error = {} } = await answer.json<Answer>().catch(() => ({}) as Answer);
   const code = error.details?.find((detail) => detail.errorCode)?.errorCode ?? error.status ?? "";
   if (answer.status === 404 || code === "UNREGISTERED") return { gone: true };
-  if (answer.status === 401) kept.delete("fcm");
+  if (answer.status === 401) cache.delete("fcm");
   return { failed: `FCM answered ${answer.status} ${code}`.trim() };
 }
 

@@ -70,7 +70,7 @@ defmodule OneCore.Plugins.Rename do
 
       with :ok <- each(moved, fn {at, as, now} -> copy("#{at}/own/#{as}/", "#{at}/own/#{now}/") end),
            files = skill(Store.source(is, code), name, to),
-           {:ok, _number, _warnings} <- Deploy.deploy(owner, to, files, :kept, :kept, fn _ -> installed? end),
+           {:ok, _number, _warnings} <- Deploy.deploy(owner, to, files, :stored, :stored, fn _ -> installed? end),
            :ok <- each(moved, fn {at, _as, now} -> if(at == owner, do: :ok, else: Installed.install(at, now, is)) end),
            :ok <- answers(moved, is) do
         each(moved, fn {at, as, now} -> copy("#{at}/own/#{as}/", "#{at}/own/#{now}/") end)
@@ -86,14 +86,14 @@ defmodule OneCore.Plugins.Rename do
   # Only one's own plugin is renamed, by a name that's never had anything, and not one a server ships, which it
   # would bring back by its old name.
   defp renamable(owner, name, to, was, is, moved) do
-    kept = for {at, as, now} <- moved, as != now, Bucket.list("#{at}/own/#{now}/") != [], do: at
+    existing = for {at, as, now} <- moved, as != now, Bucket.list("#{at}/own/#{now}/") != [], do: at
 
     cond do
       Plugins.plugin(owner, name) not in [nil, was] or Store.latest(was) == nil ->
         {:error,
          "#{owner} has no plugin of their own named #{name}. One installed from someone else's is theirs to rename."}
 
-      Plugins.plugin(owner, to) != nil or Bucket.list("#{is}/") != [] or kept != [] ->
+      Plugins.plugin(owner, to) != nil or Bucket.list("#{is}/") != [] or existing != [] ->
         {:error, "#{to} is a plugin of #{owner}'s already, or was one and kept something. Choose another name."}
 
       is_map_key(Application.get_env(:one_core, :bundled, %{}), name) ->
