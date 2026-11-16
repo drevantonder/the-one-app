@@ -6,10 +6,14 @@ defmodule OneCore.Sandbox do
   thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it, no plugin
   runs in sandbox mode, and a call to one says why.
 
-  There's one child for each version of a sandboxed plugin on a server, with the versions of the plugins it uses,
-  which run inside it as it (`database` among them, its SQLite too). It's started by the first call, compiles the
-  code itself, behind the wall, and stops after five idle minutes. One that stops, or is stopped, fails the calls
-  it was running and nothing else; the next call starts another.
+  There's one child for each version of a sandboxed plugin on a server and each user, group or network it's
+  installed for, with the versions of the plugins it uses, which run inside it as it (`database` among them, its
+  SQLite too). So a child only ever runs one owner's calls, and what a stranger's plugin keeps from one person's call
+  isn't there in another's: its handles are its own, and a request for an artifact or a call that isn't its own is
+  refused. It's started by the first call, compiles the code itself, behind the wall, and stops after five idle
+  minutes. One that stops, or is stopped, fails the calls it was running and nothing else; the next call starts
+  another. What the first child of a version compiled is kept on this machine, and every owner's next child loads it
+  read-only instead.
 
   The protocol, over the child's standard input and output, each message a frame of a 4-byte length:
 
@@ -73,7 +77,7 @@ defmodule OneCore.Sandbox do
   """
   def check(owner, %Version{} = version, files) do
     with {:ok, used} <- used(owner, version),
-         {:ok, %{"problems" => problems, "warnings" => warnings}} <- loaded(version, used, files) do
+         {:ok, %{"problems" => problems, "warnings" => warnings}} <- loaded(owner, version, used, files) do
       case problems do
         [] ->
           {:ok, warnings}
@@ -139,7 +143,7 @@ defmodule OneCore.Sandbox do
     version = versions[name]
 
     {child, port, context} =
-      case child(version, Map.delete(versions, name)) do
+      case child(call.installed, version, Map.delete(versions, name)) do
         {:ok, child, port, context} -> {child, port, context}
         {:error, why} -> raise why
       end
@@ -316,9 +320,10 @@ defmodule OneCore.Sandbox do
   end
 
   # A scheduled job's call, which the plugin's schedule keeper in the child makes as the clock, for whoever it's
-  # installed for, as One Core would: only one of the plugin's own jobs.
+  # installed for, as One Core would: only one of the plugin's own jobs, for the owner whose child it is.
   defp fire(%{"installed" => at, "plugin" => name, "tool" => tool, "inputs" => inputs}, context) do
-    with %{^name => %Version{artifact: artifact}} <- Plugins.versions([at]),
+    with true <- at == context.owner,
+         %{^name => %Version{artifact: artifact}} <- Plugins.versions([at]),
          true <- artifact == context.artifact,
          %{} <- Enum.find(context.jobs, &(&1.tool == tool and &1.inputs == inputs)) do
       with {:error, why} <- Calls.call(name, tool, inputs, {nil, at}, true),
@@ -332,14 +337,14 @@ defmodule OneCore.Sandbox do
   end
 
   # An artifact the child holds a handle to, kept here for as long as the child runs. The same artifact has the
-  # same handle.
+  # same handle, and no two children's handles are the same, so one passed on from another owner's child is refused.
   defp handle(context, %Artifact{} = artifact) do
     case :ets.lookup(context.handles, artifact) do
       [{^artifact, handle}] ->
         handle
 
       [] ->
-        handle = :ets.update_counter(context.handles, :next, 1, {:next, 0})
+        handle = System.unique_integer([:positive])
         :ets.insert(context.handles, [{handle, artifact}, {artifact, handle}])
         handle
     end
@@ -359,19 +364,19 @@ defmodule OneCore.Sandbox do
     Port.command(port, [<<byte_size(frame)::32>>, frame])
   end
 
-  # The child of a version with the versions it uses, started if there's none: `{:ok, child, port, context}`, or
-  # `{:error, why}` with why it couldn't start or load.
-  defp child(version, used, files \\ nil) do
+  # The child of a version with the versions it uses, for whoever it's installed for, `owner`, started if there's
+  # none: `{:ok, child, port, context}`, or `{:error, why}` with why it couldn't start or load.
+  defp child(owner, version, used, files \\ nil) do
     key = {version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
 
     child =
-      case Registry.lookup(@registry, key) do
+      case Registry.lookup(@registry, {owner, key}) do
         [{child, _}] ->
           child
 
         [] ->
           sets = fn -> sets(version, used, files) end
-          spec = {__MODULE__, {key, Path.basename(version.artifact), sets, version}}
+          spec = {__MODULE__, {owner, key, Path.basename(version.artifact), sets, version}}
 
           case DynamicSupervisor.start_child(@supervisor, spec) do
             {:ok, child} -> child
@@ -386,7 +391,7 @@ defmodule OneCore.Sandbox do
 
   # A child that runs once, to say what a set of files is, and stops.
   defp once(key, name, sets) do
-    {:ok, child} = DynamicSupervisor.start_child(@supervisor, {__MODULE__, {key, name, fn -> sets end, nil}})
+    {:ok, child} = DynamicSupervisor.start_child(@supervisor, {__MODULE__, {nil, key, name, fn -> sets end, nil}})
 
     try do
       with {:ok, _child, _port, context} <- GenServer.call(child, :loaded, :infinity), do: {:ok, context.said}
@@ -397,8 +402,8 @@ defmodule OneCore.Sandbox do
     :exit, _ -> {:error, "#{name} stopped as it started"}
   end
 
-  defp loaded(version, used, files) do
-    case child(version, used, files) do
+  defp loaded(owner, version, used, files) do
+    case child(owner, version, used, files) do
       {:ok, _child, _port, context} -> {:ok, context.said}
       {:error, why} -> {:error, why}
     end
@@ -437,20 +442,21 @@ defmodule OneCore.Sandbox do
     end
   end
 
-  def start_link({key, _name, _sets, _version} = started),
-    do: GenServer.start_link(__MODULE__, started, name: {:via, Registry, {@registry, key}})
+  def start_link({owner, key, _name, _sets, _version} = started),
+    do: GenServer.start_link(__MODULE__, started, name: {:via, Registry, {@registry, {owner, key}}})
 
   @impl true
-  def init({key, name, sets, version}) do
+  def init({owner, key, name, sets, version}) do
     handles = :ets.new(__MODULE__, [:public, read_concurrency: true])
 
-    # What a version's VM compiled is kept on this machine for its next VM, which loads it instead: its own code
-    # and the child's side of One Core, as this server has it.
+    # What a version's VM compiled is kept on this machine for its next VM, whoever's it is, which loads it instead:
+    # its own code and the child's side of One Core, as this server has it.
     runtime = File.read!(Application.app_dir(:one_core, "priv/sandbox/child.ex"))
     cache = if version, do: Path.join([Server.home(), "sandbox", Version.code({key, runtime})])
 
     context = %{
       cache: cache,
+      owner: owner,
       name: name,
       handles: handles,
       artifact: version && version.artifact,
@@ -480,7 +486,9 @@ defmodule OneCore.Sandbox do
         cache = cached && %{"ebin" => state.context.cache, "modules" => cached}
         command(port, {:load, sets.(), Builds.target(), cache})
         Process.send_after(self(), :loading, @silent)
-        {:noreply, %{state | port: port}}
+        # Only a VM that compiled the code itself, before any call, has what it compiled kept.
+        context = if cached, do: %{state.context | cache: nil}, else: state.context
+        {:noreply, %{state | port: port, context: context}}
 
       {:error, why} ->
         {:stop, :normal, answer_loaded(state, {:error, why})}
@@ -621,6 +629,10 @@ defmodule OneCore.Sandbox do
 
   defp frames(state), do: {:noreply, state}
 
+  # It answers what it is once, before any call, so what it compiled holds nothing of anyone's.
+  defp received(%{"answer" => "load"}, %{loaded: loaded} = state) when loaded != nil,
+    do: {:stop, "it said what it is again", state}
+
   defp received(%{"answer" => "load"} = answer, state) do
     loaded =
       case answer do
@@ -687,10 +699,9 @@ defmodule OneCore.Sandbox do
   defp received(message, state), do: {:stop, "it sent what isn't the protocol: #{inspect(message, limit: 5)}", state}
 
   # Keeps what a VM compiled, each module by its name, for the next VM of the same version. It's written aside and
-  # moved into place, so a VM never loads half of it.
+  # moved into place, so a VM never loads half of it, and what another VM kept first stays.
   defp keep(cache, beams) do
-    writing = cache <> ".part"
-    File.rm_rf!(writing)
+    writing = "#{cache}.#{System.unique_integer([:positive])}"
     File.mkdir_p!(writing)
 
     modules =
@@ -705,8 +716,7 @@ defmodule OneCore.Sandbox do
       end
 
     File.write!(Path.join(writing, "modules"), JSON.encode!(Map.delete(modules, "runtime")))
-    File.rm_rf!(cache)
-    File.rename!(writing, cache)
+    with {:error, _} <- File.rename(writing, cache), do: File.rm_rf!(writing)
 
     # What no VM has been started from for a month goes: its version, or this server's build, is long gone.
     month_ago = System.os_time(:second) - 30 * 24 * 3600

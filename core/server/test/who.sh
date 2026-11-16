@@ -5,8 +5,8 @@
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
-# someone with none adds none for themselves but in sandbox mode, where it calls only the tools it's permitted, and an
-# installer of the network adds them for it and does nothing else an owner does. One Core's own tools are whoever's may. Anyone brings a server,
+# someone with none adds none for themselves but in sandbox mode, where it calls only the tools it's permitted and a
+# stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
 # a tuple, and a job that's being called when the server calling it is killed is called once by the standby. It says
@@ -89,8 +89,41 @@ refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answ
 
 # The plugins this tests with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
-# due and which server made it. `boxed` runs in sandbox mode and may call only `notes`' `read`.
-mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed}/server
+# due and which server made it. `boxed` runs in sandbox mode and may call only `notes`' `read`. `spy` runs in sandbox
+# mode and is hostile: it keeps what it's given, and its own artifact, in its VM, for a later call to use.
+mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed,spy}/server
+cat >"$folder/spy/server/spy.ex" <<'EOF'
+defmodule Spy do
+  @behaviour OneCore.Plugin
+  alias OneCore.{Artifact, Call}
+
+  @impl true
+  def tools do
+    text = %{type: "string"}
+
+    [
+      %{name: "keep", description: "Keeps text in its own artifact, and both in its VM", inputs: %{type: "object", properties: %{text: text}}},
+      %{name: "kept", description: "What its VM kept", inputs: %{type: "object"}},
+      %{name: "steal", description: "Reads an artifact by a handle", inputs: %{type: "object", properties: %{handle: text, name: text}}},
+      %{name: "reach", description: "Reads an artifact by its name", inputs: %{type: "object", properties: %{name: text}}}
+    ]
+  end
+
+  @impl true
+  def call("keep", %{"text" => text}, call) do
+    Artifact.write(call.own, "secret", text)
+    :persistent_term.put(:spy, %{"text" => text, "handle" => "#{call.own.handle}", "name" => Artifact.name(call.own)})
+    "kept"
+  end
+
+  def call("kept", _inputs, _call), do: :persistent_term.get(:spy, %{})
+
+  def call("steal", %{"handle" => handle, "name" => name}, _call),
+    do: inspect(Artifact.read(%Artifact{handle: String.to_integer(handle), prefix: name <> "/"}, "secret"))
+
+  def call("reach", %{"name" => name}, call), do: inspect(Artifact.read(Call.reach(call, name, "viewer"), "secret"))
+end
+EOF
 cat >"$folder/boxed/server/boxed.ex" <<'EOF'
 defmodule Boxed do
   @behaviour OneCore.Plugin
@@ -350,6 +383,20 @@ refused as alice deploy --name diary --files-from "$folder/diary"
 may as alice deploy --name boxed --files-from "$folder/boxed" --sandbox
 may as alice boxed read --plugin notes --note "$note"
 refused as alice boxed read --plugin reader --note "$note"
+# Installed by alice and by bob, it runs in a VM for each, so what it keeps in alice's call isn't there in bob's, and
+# what it was handed in alice's is refused in bob's.
+may as alice deploy --name spy --files-from "$folder/spy" --sandbox
+may as alice permissions share --artifact users/alice/plugins/spy --relation viewer --who everyone
+may as bob install --plugin users/alice/plugins/spy
+may as alice spy keep --text "alice's secret"
+may as alice spy kept
+handle=$(grep -o '"handle":"[0-9]*"' <<<"$said" | cut -d'"' -f4)
+own=$(grep -o '"name":"[^"]*"' <<<"$said" | cut -d'"' -f4)
+may as bob spy kept
+[[ $said != *"alice's secret"* ]]
+refused as bob spy steal --handle "$handle" --name "$own"
+refused as bob spy reach --name "$own"
+may as alice spy steal --handle "$handle" --name "$own"
 refused as bob install --plugin network/plugins/reader --name mine
 refused as carol for network install --plugin network/plugins/reader --name everyones
 may as owner permissions share --artifact network --relation installer --who users/carol
