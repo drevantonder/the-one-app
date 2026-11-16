@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261116.1",
+    "typescript": "7.0.2",
     "wrangler": "^4.160.0"
+  },
+  "scripts": {
+    "types": "wrangler types -c gateway/wrangler.jsonc gateway/worker-configuration.d.ts --include-runtime=false && wrangler types -c plugin-directory/wrangler.jsonc plugin-directory/worker-configuration.d.ts --include-runtime=false",
+    "typecheck": "tsc -p gateway && tsc -p plugin-directory"
   }
 }

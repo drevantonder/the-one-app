@@ -1,6 +1,6 @@
 {
   "name": "one-www-plugin-directory",
-  "main": "worker.js",
+  "main": "worker.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   // Its stylesheet, at /plugins/style.css.

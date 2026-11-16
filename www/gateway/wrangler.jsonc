@@ -1,6 +1,6 @@
 {
   "name": "one-www-gateway",
-  "main": "gateway.js",
+  "main": "gateway.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
   "routes": [{ "pattern": "one.drevan.me", "custom_domain": true }],

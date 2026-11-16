@@ -4,4 +4,4 @@ export default {
     const first = new URL(request.url).pathname.split("/")[1];
     return (first === "plugins" ? env.PLUGIN_DIRECTORY : env.MARKETING).fetch(request);
   },
-};
+} satisfies ExportedHandler<Env>;

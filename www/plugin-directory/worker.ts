@@ -9,43 +9,56 @@ const COMMIT = /^[0-9a-f]{7,40}$/;
 const DAY = 24 * 60 * 60 * 1000;
 
 /** A SKILL.md's front matter: its `name:` and `description:` lines. */
-export function frontMatter(text) {
+export function frontMatter(text: string): { name?: string; description?: string } {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
-  const field = (key) => block.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1].trim().replace(/^(["'])(.*)\1$/, "$2");
+  const field = (key: string) => block.match(new RegExp(`^${key}:\\s*(.+)$`, "m"))?.[1].trim().replace(/^(["'])(.*)\1$/, "$2");
   return { name: field("name"), description: field("description") };
 }
 
-const day = (ms) => new Date(ms).toISOString().slice(0, 10);
+const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+type Period = "all" | "week";
+
+/** A row of `plugins`, with its installs in the period asked for. */
+interface Row {
+  owner: string;
+  repo: string;
+  name: string;
+  description: string;
+  installs: number;
+}
+
+type Plugin = Row & { source: string };
 
 /** Plugins with their installs since a day, most first. */
-async function ranked(env, period) {
+async function ranked(env: Env, period: Period): Promise<Plugin[]> {
   const since = period === "week" ? day(Date.now() - 6 * DAY) : "";
   const { results } = await env.DB.prepare(
     `SELECT p.owner, p.repo, p.name, p.description, COALESCE(SUM(i.count), 0) AS installs
      FROM plugins p LEFT JOIN installs i ON i.owner = p.owner AND i.repo = p.repo AND i.name = p.name AND i.day >= ?1
      GROUP BY p.owner, p.repo, p.name ORDER BY installs DESC, p.name`,
-  ).bind(since).all();
+  ).bind(since).all<Row>();
   return results.map((p) => ({ ...p, source: `${p.owner}/${p.repo}` }));
 }
 
-const code = (p) => `https://github.com/${p.owner}/${p.repo}/tree/HEAD/plugins/${p.name}`;
-const command = (p) => `one install ${p.owner}/${p.repo} --plugin ${p.name}`;
+const code = (p: Row) => `https://github.com/${p.owner}/${p.repo}/tree/HEAD/plugins/${p.name}`;
+const command = (p: Row) => `one install ${p.owner}/${p.repo} --plugin ${p.name}`;
 
-async function install(request, env) {
+async function install(request: Request, env: Env): Promise<Response> {
   // Rate limited per address at the edge; the address is a key to Cloudflare's counter only, and never kept.
   const { success } = await env.INSTALLS.limit({ key: request.headers.get("cf-connecting-ip") ?? "" });
   if (!success) return Response.json({ error: "Too many installs from here. Try again in a minute." }, { status: 429 });
 
-  const body = await request.json().catch(() => null);
-  const [owner, repo, extra] = String(body?.source ?? "").split("/");
-  const name = body?.plugin;
-  const commit = body?.commit;
-  if (!OWNER.test(owner ?? "") || !REPO.test(repo ?? "") || extra !== undefined || !NAME.test(name ?? "") || (commit !== undefined && !COMMIT.test(commit))) {
+  const body: Partial<Record<"source" | "plugin" | "commit", unknown>> | null = await request.json<{}>().catch(() => null);
+  const [owner = "", repo = "", extra] = String(body?.source ?? "").split("/");
+  const name = String(body?.plugin ?? "");
+  const commit = body?.commit === undefined ? undefined : String(body.commit);
+  if (!OWNER.test(owner) || !REPO.test(repo) || extra !== undefined || !NAME.test(name) || (commit !== undefined && !COMMIT.test(commit))) {
     return Response.json({ error: 'Send {"source": "owner/repo", "plugin": "name", "commit": "sha" (optional)}.' }, { status: 400 });
   }
   const key = [owner.toLowerCase(), repo.toLowerCase(), name];
 
-  const known = await env.DB.prepare("SELECT checked FROM plugins WHERE owner = ?1 AND repo = ?2 AND name = ?3").bind(...key).first();
+  const known = await env.DB.prepare("SELECT checked FROM plugins WHERE owner = ?1 AND repo = ?2 AND name = ?3").bind(...key).first<{ checked: string }>();
   if (!known || Date.parse(known.checked) < Date.now() - DAY) {
     const response = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${commit ?? "HEAD"}/plugins/${name}/SKILL.md`);
     const { description } = response.ok ? frontMatter(await response.text()) : {};
@@ -67,9 +80,9 @@ async function install(request, env) {
   return new Response(null, { status: 204 });
 }
 
-const escape = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const number = (n) => n.toLocaleString("en");
-const installs = (n) => `${number(n)} ${n === 1 ? "install" : "installs"}`;
+const escape = (text: unknown) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const number = (n: number) => n.toLocaleString("en");
+const installs = (n: number) => `${number(n)} ${n === 1 ? "install" : "installs"}`;
 
 const TRUST = `<p class="trust">A plugin's server code runs on your own machine, with full access to it. Nothing here is reviewed by us: have your agent read a plugin before you install it. Plugins are listed and ranked by anonymous install counts; installing with <code>DO_NOT_TRACK=1</code> sends none.</p>`;
 
@@ -77,7 +90,7 @@ const ORIGIN = "https://one.drevan.me";
 const CARD = { url: `${ORIGIN}/social-card.png`, alt: "The One App: make using AI to its full potential easy." };
 
 /** The tags that make a link to a page a card in a chat or on social media, and its canonical address. */
-const tags = (title, description, path) => {
+const tags = (title: string, description: string, path: string) => {
   const url = `${ORIGIN}${path}`;
   const text = escape(description.length > 200 ? `${description.slice(0, 199).trimEnd()}…` : description);
   return `<meta name="description" content="${text}">
@@ -104,7 +117,7 @@ const tags = (title, description, path) => {
 };
 
 /** A page; `meta` is `[description, path]` for one that's linked to, and none for the not-found page. */
-const page = (title, body, meta) =>
+const page = (title: string, body: string, meta?: [description: string, path: string]) =>
   new Response(
     `<!doctype html>
 <html lang="en">
@@ -125,8 +138,8 @@ ${TRUST}
     { headers: { "content-type": "text/html; charset=utf-8" } },
   );
 
-function list(plugins, period) {
-  const tab = (value, label) => `<a href="/plugins${value === "all" ? "" : `?period=${value}`}"${period === value ? ' aria-current="page"' : ""}>${label}</a>`;
+function list(plugins: Plugin[], period: Period) {
+  const tab = (value: Period, label: string) => `<a href="/plugins${value === "all" ? "" : `?period=${value}`}"${period === value ? ' aria-current="page"' : ""}>${label}</a>`;
   const rows = plugins
     .map(
       (p, i) => `<li data-search="${escape(`${p.name} ${p.source} ${p.description}`.toLowerCase())}">
@@ -163,7 +176,7 @@ ${rows}
   );
 }
 
-function plugin(p) {
+function plugin(p: Plugin) {
   return page(
     `${p.name} · Plugins · The One App`,
     `<p class="back"><a href="/plugins">Plugins</a></p>
@@ -211,4 +224,4 @@ export default {
       headers: { "content-type": "text/html; charset=utf-8" },
     });
   },
-};
+} satisfies ExportedHandler<Env>;

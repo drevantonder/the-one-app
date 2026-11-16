@@ -3,7 +3,7 @@
 //     bun seed.js > seed.sql
 import { Glob } from "bun";
 import { dirname } from "node:path";
-import { frontMatter } from "./worker.js";
+import { frontMatter } from "./worker.ts";
 
 const plugins = new URL("../../plugins/", import.meta.url).pathname;
 const quote = (text) => `'${text.replaceAll("'", "''")}'`;

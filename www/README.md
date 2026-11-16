@@ -14,6 +14,9 @@ Run it all on this machine, from this folder:
     (cd plugin-directory && bun seed.js > seed.sql && bunx wrangler d1 execute one-www-plugin-directory --local --file seed.sql)
     bunx wrangler dev -c gateway/wrangler.jsonc -c plugin-directory/wrangler.jsonc -c marketing/wrangler.jsonc
 
+The Workers are TypeScript, which wrangler builds without checking. `bun run typecheck` checks them;
+`bun run types` makes each Worker's `worker-configuration.d.ts` again after its `wrangler.jsonc` changes.
+
 Deploy, with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set, each from its own folder, the gateway last:
 
     cd plugin-directory && bunx wrangler deploy
