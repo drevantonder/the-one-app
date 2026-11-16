@@ -21,11 +21,14 @@ changed(() => refresh(store))
 const on = (page: Page, app: App) => page.items.flatMap((item): Item[] => item.folder ?? [item]).find((item) => item.plugin === app.plugin)
 const [managing, setManaging] = createSignal<string>()
 
-/// Puts an app on a page or takes it off, which is adding or removing its plugin for whoever's page it is.
+/// Puts an app on a page or takes it off. One in use for the network goes on without installing anything, and any
+/// other is installed for whoever's page it is, which takes a server of their own.
 async function put(page: Page, app: App, there: boolean) {
+  const item = on(page, app)
   try {
-    if (there) await call("install", { plugin: app.plugin }, { for: page.for })
-    else await call("uninstall", { name: on(page, app)!.app!.split("/")[0] }, { for: page.for })
+    if (there) await call("home-screen_add", { plugin: app.plugin }, { for: page.for }).catch(() => call("install", { plugin: app.plugin }, { for: page.for }))
+    else if (item?.put) await call("home-screen_remove", { plugin: app.plugin }, { for: page.for })
+    else await call("uninstall", { name: item!.app!.split("/")[0] }, { for: page.for })
   } catch (error) {
     toast((error as Error).message)
   }

@@ -2,11 +2,14 @@ defmodule HomeScreen do
   @moduledoc """
   Home Screen: where apps and widgets sit. A user has one, and so does each group and the network.
 
-  A page is what's installed for whoever it belongs to: each plugin's apps, and the widgets its plugins have. So
-  adding an app to a page is adding its plugin for them (One Core's `install`), which is what puts it on the clients
-  of everyone who sees that page, and nothing here keeps which apps a page has. What this keeps is how a page is
-  arranged: the order of its apps, and the widgets put on it, each at a size. That's the page's owner's, an
-  artifact made for them.
+  A page is what's installed for whoever it belongs to, each plugin's apps and the widgets its plugins have, and the
+  apps put on it of the plugins they can already use: the network's (`add`), which installs nothing. What this keeps
+  is how a page is arranged: the order of its apps, those put on it, and the widgets put on it, each at a size.
+  That's the page's owner's, an artifact made for them.
+
+  Installing a plugin puts its code on a server, so for the network only its owners and installers do it. Anyone
+  asks them for one (`request`), and they approve or decline (`approve`, `decline`): the requests are the
+  network's, in this plugin's own artifact for it.
 
   A group has a page once it's made, so the groups someone is in, and who's in each, are a part of Settings
   here, over the tools of whatever keeps them (`permissions`).
@@ -21,6 +24,7 @@ defmodule HomeScreen do
   def essential, do: true
 
   alias OneCore.{Artifact, Call}
+  alias OneCore.Plugins.Store
 
   @impl true
   def apps do
@@ -34,6 +38,18 @@ defmodule HomeScreen do
   @impl true
   def tools do
     none = %{type: "object", properties: %{}}
+
+    plugin = %{
+      type: "object",
+      properties: %{plugin: %{type: "string", description: "The plugin, as `store` lists it"}},
+      required: ["plugin"]
+    }
+
+    request = %{
+      type: "object",
+      properties: %{id: %{type: "integer", description: "The request, as `requests` lists it"}},
+      required: ["id"]
+    }
 
     [
       %{
@@ -50,8 +66,8 @@ defmodule HomeScreen do
         name: "arrange",
         description: """
         Arranges your Home Screen page: its apps and widgets, in the order given. Asked for a group or for the network,
-        it arranges theirs, which their owners do. A widget not given is taken off the page, and an app not given
-        goes after the rest: `uninstall` is what takes an app off a page, and `install` puts one on.
+        it arranges theirs, which their owners do. A widget or an app put on it (`add`) not given is taken off the
+        page, and an app installed for them not given goes after the rest: `uninstall` takes one of those off.
         """,
         inputs: %{
           type: "object",
@@ -86,13 +102,73 @@ defmodule HomeScreen do
         read_only: true,
         description: "Lists every app anyone has deployed, which could be added to a page, each with its plugin",
         inputs: none
+      },
+      %{
+        name: "add",
+        description: """
+        Puts the app of a plugin you can already use, one in use for the network, on your Home Screen page. It
+        installs nothing. Asked for a group, on theirs. One not in use for the network is asked for with `request`.
+        """,
+        inputs: plugin
+      },
+      %{
+        name: "remove",
+        description:
+          "Takes an app put on your page with `add` off it. One installed for you is taken off with `uninstall`.",
+        inputs: plugin
+      },
+      %{
+        name: "request",
+        description: """
+        Asks whoever may install plugins for the network to install one for everyone: one in the network, as
+        `store` lists it, or one from a git repo, by the repo (owner/repo) and the plugin's name, as
+        `one install <owner>/<repo> --plugin <name>` takes them. They're notified, and you are when they answer.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            plugin: %{type: "string", description: "A plugin in the network, as `store` lists it"},
+            source: %{type: "string", description: "The git repo it's in: owner/repo, a URL or a path"},
+            name: %{type: "string", description: "The plugin's name in that repo"},
+            reason: %{type: "string", maxLength: 300, description: "Why, in a sentence"}
+          }
+        }
+      },
+      %{
+        name: "requests",
+        read_only: true,
+        description: """
+        Lists the requests for plugins to be installed for the network, newest first: every one, for whoever may
+        install them, and otherwise your own. Each is `asked`, `approved` or `declined`.
+        """,
+        inputs: none
+      },
+      %{
+        name: "approve",
+        description: """
+        Approves a request, which whoever may install plugins for the network does. One for a plugin in the network
+        is installed for everyone now. One from a git repo is installed by your agent, with the command this
+        answers, and approving it again once it's installed marks it approved. The asker is told.
+        """,
+        inputs: request
+      },
+      %{
+        name: "decline",
+        description: "Declines a request, which whoever may install plugins for the network does. The asker is told.",
+        inputs: request
       }
     ]
   end
 
   @impl true
   def call("page", _inputs, call) do
-    here = for plugin <- Call.plugins(call), plugin.installed == call.subject, do: plugin
+    kept = kept(call)
+    put = for %{"app" => app} <- kept, do: app
+
+    here =
+      for plugin <- Call.plugins(call),
+          plugin.installed == call.subject or Enum.any?(plugin.apps, &("#{plugin.name}/#{&1.page}" in put)),
+          do: plugin
 
     all =
       for plugin <- here, app <- plugin.apps, not app.settings do
@@ -101,7 +177,8 @@ defmodule HomeScreen do
           plugin: plugin.plugin,
           name: app.name,
           icon: app.icon,
-          account: app.account
+          account: app.account,
+          put: plugin.installed != call.subject
         }
       end
 
@@ -118,7 +195,7 @@ defmodule HomeScreen do
       end
 
     placed =
-      Enum.flat_map(kept(call), fn
+      Enum.flat_map(kept, fn
         %{"app" => app} -> Enum.filter(apps, &(&1.app == app))
         %{"widget" => widget} = item -> for w <- widgets, w.widget == widget, do: Map.put(w, :size, size(w, item))
         _ -> []
@@ -159,6 +236,112 @@ defmodule HomeScreen do
     Enum.sort_by(apps, &String.downcase(&1.name))
   end
 
+  def call("add", %{"plugin" => plugin}, call) do
+    if not Call.owns?(call), do: raise("#{call.subject}'s Home Screen page is arranged by their owners.")
+
+    case Enum.find(Call.plugins(call), &(&1.plugin == plugin)) do
+      nil ->
+        raise "#{plugin} isn't in use for the network, so its app can't go on a page yet. Whoever may install " <>
+                "plugins for everyone can, and home-screen_request asks them."
+
+      %{installed: at} when at == call.subject ->
+        "It's on the page already, installed for #{at}."
+
+      found ->
+        apps = for app <- found.apps, not app.settings, do: %{"app" => "#{found.name}/#{app.page}"}
+        if apps == [], do: raise("#{plugin} has no app to put on a page.")
+        keep(call, JSON.encode!(Enum.uniq(kept(call) ++ apps)))
+        "Its app is on #{call.subject}'s page. Nothing was installed: it's the one in use for #{found.installed}."
+    end
+  end
+
+  def call("remove", %{"plugin" => plugin}, call) do
+    if not Call.owns?(call), do: raise("#{call.subject}'s Home Screen page is arranged by their owners.")
+
+    case Enum.find(Call.plugins(call), &(&1.plugin == plugin)) do
+      %{installed: at, name: name} when at == call.subject ->
+        raise "#{plugin} is installed for #{at}: uninstall --name #{name} takes it off."
+
+      %{name: name} ->
+        keep(call, JSON.encode!(Enum.reject(kept(call), &String.starts_with?(&1["app"] || "", name <> "/"))))
+        "It's off the page."
+
+      nil ->
+        raise "#{plugin} isn't on the page."
+    end
+  end
+
+  # A request names a plugin in the network, or a repo and a plugin's name in it, as `one install` takes them.
+  def call("request", inputs, call) do
+    asked =
+      case inputs do
+        %{"plugin" => plugin} ->
+          %{"plugin" => plugin}
+
+        %{"source" => source, "name" => name} ->
+          %{"source" => source, "name" => name}
+
+        _ ->
+          raise "A request names a plugin in the network (plugin), or a repo and the plugin's name in it (source, name)."
+      end
+
+    if installed(call, asked), do: raise("#{called(asked)} is installed for everyone already.")
+    at = DateTime.to_iso8601(DateTime.utc_now(:second))
+
+    request =
+      noted(call, fn requests ->
+        id = 1 + Enum.max(Enum.map(requests, & &1["id"]), fn -> 0 end)
+
+        request =
+          Map.merge(asked, %{
+            "id" => id,
+            "by" => call.actor,
+            "reason" => inputs["reason"],
+            "at" => at,
+            "state" => "asked"
+          })
+
+        {[request | requests], request}
+      end)
+
+    installers = Call.tool(call, "permissions", "users", %{"artifact" => "network", "relation" => "installer"})
+
+    text = Enum.join(List.wrap(inputs["reason"]) ++ ["home-screen_approve or home-screen_decline answers it."], "\n")
+
+    for to <- installers,
+        do: notify(call, if(to == "everyone", do: "network", else: to), "#{call.actor} asks for #{called(asked)}", text)
+
+    "Asked whoever may install plugins for everyone (#{Enum.join(installers, ", ")}), as request #{request["id"]}."
+  end
+
+  def call("requests", _inputs, call) do
+    requests = requests(call)
+    if installs?(call), do: requests, else: Enum.filter(requests, &(&1["by"] == call.actor))
+  end
+
+  def call("approve", %{"id" => id}, call) do
+    request = answering!(call, id)
+
+    cond do
+      Map.has_key?(request, "plugin") ->
+        # As the approver would install it themselves, which One Core checks as it does theirs.
+        case OneCore.Tools.call("install", %{"plugin" => request["plugin"]}, {call.actor, "network"}) do
+          {:error, why} -> raise why
+          {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
+          _installed -> answered(call, request, "approved")
+        end
+
+      installed(call, request) ->
+        answered(call, request, "approved")
+
+      true ->
+        "Install it for everyone, then approve it again, which tells #{request["by"]}: " <>
+          "ONE_FOR=network one install #{request["source"]} --plugin #{request["name"]}"
+    end
+  end
+
+  def call("decline", %{"id" => id}, call), do: answered(call, answering!(call, id), "declined")
+
   # The size a widget is drawn at: the one it was put on the page at, if it still comes in it.
   defp size(widget, item), do: if(item["size"] in widget.sizes, do: item["size"], else: hd(widget.sizes))
 
@@ -167,6 +350,77 @@ defmodule HomeScreen do
     with {:ok, items, _tag} <- Artifact.read(Call.make(call, "page"), "items"),
          do: JSON.decode!(items),
          else: (:absent -> [])
+  end
+
+  # Whether whoever asks may install plugins for the network, as the plugin that keeps who may do what says.
+  defp installs?(call) do
+    about = %{"who" => call.actor, "relation" => "installer", "artifact" => "network"}
+    OneCore.Hooks.validate("reach", about, {call.actor, "network"}) == :ok
+  end
+
+  defp called(%{"plugin" => plugin}), do: plugin
+  defp called(%{"source" => source, "name" => name}), do: "#{name} from #{source}"
+
+  # Whether what's asked for is installed for the network: the plugin itself, or one installed from that repo by that name.
+  defp installed(call, asked) do
+    Enum.any?(Call.plugins(%{call | subject: "network"}), fn plugin ->
+      plugin.installed == "network" and
+        case asked do
+          %{"plugin" => artifact} ->
+            plugin.plugin == artifact
+
+          %{"source" => source, "name" => name} ->
+            plugin.name == name and Store.about(plugin.plugin)["from"]["source"] == source
+        end
+    end)
+  end
+
+  defp answering!(call, id) do
+    if not installs?(call),
+      do: raise("Only whoever may install plugins for the network answers a request. home-screen_requests lists yours.")
+
+    case Enum.find(requests(call), &(&1["id"] == id)) do
+      nil -> raise "There's no request #{id}. home-screen_requests lists them."
+      %{"state" => "asked"} = request -> request
+      %{"state" => state} -> raise "Request #{id} was #{state} already."
+    end
+  end
+
+  defp answered(call, request, state) do
+    noted(call, fn requests ->
+      {for(
+         r <- requests,
+         do: if(r["id"] == request["id"], do: Map.merge(r, %{"state" => state, "answered_by" => call.actor}), else: r)
+       ), nil}
+    end)
+
+    notify(call, request["by"], "Your request for #{called(request)} was #{state}", "#{call.actor} #{state} it.")
+    "Request #{request["id"]} is #{state}, and #{request["by"]} is told."
+  end
+
+  defp notify(call, to, title, text),
+    do: Call.tool(call, "notifications", "send", %{"to" => to, "title" => title, "text" => text, "app" => call.plugin})
+
+  defp requests(call) do
+    with {:ok, requests, _tag} <- Artifact.read(call.own, "requests"), do: JSON.decode!(requests), else: (:absent -> [])
+  end
+
+  # Changes the requests as `change` says of them, which gives them and what to answer. Two at once both land.
+  defp noted(call, change) do
+    {requests, tag} =
+      case Artifact.read(call.own, "requests") do
+        {:ok, requests, tag} -> {JSON.decode!(requests), tag}
+        :absent -> {[], nil}
+      end
+
+    {next, answer} = change.(requests)
+
+    wrote =
+      if tag,
+        do: Artifact.replace(call.own, "requests", JSON.encode!(next), tag),
+        else: Artifact.write(call.own, "requests", JSON.encode!(next))
+
+    if wrote == :ok, do: answer, else: noted(call, change)
   end
 
   defp keep(call, items) do

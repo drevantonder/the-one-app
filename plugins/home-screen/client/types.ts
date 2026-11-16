@@ -1,11 +1,12 @@
 // What the Home Screen's tools answer, which every screen here reads.
 
-/** An app on a page, or in its Accounts folder: its page's address, name and icon, and its plugin. */
+/** An app on a page, or in its Accounts folder: its page's address, name and icon, its plugin, and whether it was put on the page rather than installed for it. */
 export interface App {
   app: string
   name: string
   icon: string
   plugin?: string
+  put?: boolean
   folder?: App[]
   for?: string
 }
