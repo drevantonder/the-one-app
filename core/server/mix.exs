@@ -10,6 +10,8 @@ defmodule OneCore.MixProject do
       deps: [
         {:ex_json_schema, "~> 0.11"},
         {:mime, "~> 2.0"},
+        {:observer_cli, "~> 1.8"},
+        {:recon, "~> 2.5"},
         {:req, "~> 0.5"},
         {:tz, "~> 0.28"},
         {:yaml_elixir, "~> 2.12"}

@@ -30,6 +30,11 @@ Always set `ONE_HOME`: without it, `one` (yours or the installed one) is the own
 network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_FOR=groups/<name>` or
 `ONE_FOR=network` runs a call for a group or the network.
 
+## Looking inside the server
+
+Each server is an Erlang node: `iex --sname dbg-$$ --cookie $(cat <folder>/cookie) --remsh <node>` attaches, with the
+node's name as `tooling/network` prints it. `:recon`, `:recon_trace` and `:observer_cli.start()` are there.
+
 ## Logs and stopping
 
 Everything is in the folder: `server.log` (and `standby.log`, `edge.log`, `bucket.log` with those flags), the

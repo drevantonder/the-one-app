@@ -384,19 +384,20 @@ may as alice deploy --name boxed --files-from "$folder/boxed" --sandbox
 may as alice boxed read --plugin notes --note "$note"
 refused as alice boxed read --plugin reader --note "$note"
 # Installed by alice and by bob, it runs in a VM for each, so what it keeps in alice's call isn't there in bob's, and
-# what it was handed in alice's is refused in bob's.
+# what it was handed in alice's is refused in bob's. Each server has its VMs, so they're called through one.
 may as alice deploy --name spy --files-from "$folder/spy" --sandbox
 may as alice permissions share --artifact users/alice/plugins/spy --relation viewer --who everyone
 may as bob install --plugin users/alice/plugins/spy
-may as alice spy keep --text "alice's secret"
-may as alice spy kept
+may via server as alice spy keep --text "alice's secret"
+may via server as alice spy kept
 handle=$(grep -o '"handle":"[0-9]*"' <<<"$said" | cut -d'"' -f4)
 own=$(grep -o '"name":"[^"]*"' <<<"$said" | cut -d'"' -f4)
-may as bob spy kept
+[[ -n $handle ]]
+may via server as bob spy kept
 [[ $said != *"alice's secret"* ]]
-refused as bob spy steal --handle "$handle" --name "$own"
-refused as bob spy reach --name "$own"
-may as alice spy steal --handle "$handle" --name "$own"
+refused via server as bob spy steal --handle "$handle" --name "$own"
+refused via server as bob spy reach --name "$own"
+may via server as alice spy steal --handle "$handle" --name "$own"
 refused as bob install --plugin network/plugins/reader --name mine
 refused as carol for network install --plugin network/plugins/reader --name everyones
 may as owner permissions share --artifact network --relation installer --who users/carol

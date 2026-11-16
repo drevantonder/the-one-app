@@ -89,10 +89,16 @@ if [[ -n $edge ]]; then
   at_address=(--address "http://localhost:$gateway" --first "$first")
 fi
 
+# Each server is an Erlang node named after its folder and this network's, with a cookie only this network's folder
+# holds, so `iex --remsh` attaches to it. An installed server is no node at all (`core/server/rel/env.sh.eex`).
+[[ -s $folder/cookie ]] || (umask 077 && random 20 >"$folder/cookie")
+node_name() { echo "$1-$(printf %s "$folder" | cksum | cut -d' ' -f1)"; }
+
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/core/server" && exec mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/core/server" && exec elixir --sname "$(node_name "$1")" --cookie "$(cat "$folder/cookie")" -S \
+    mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
@@ -128,6 +134,9 @@ A network is running in $folder. Its client's home is $folder/client:
     ONE_AS=alice $one permissions group --name work    calls one as another user
     $one --help                                      lists every tool
     $one mcp                                         is the same tools as MCP over stdio
+
+    iex --sname dbg-\$\$ --cookie \$(cat $folder/cookie) --remsh $(node_name server)
+                                                     attaches to the server, with :recon and :observer_cli
 ${at_address:+
 Its address is ${at_address[1]}.
 }
