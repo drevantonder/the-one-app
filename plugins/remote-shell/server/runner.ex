@@ -83,7 +83,7 @@ defmodule RemoteShell.Runner do
     if byte_size(text) <= @max_bytes do
       text
     else
-      tail = String.replace_invalid(binary_part(text, byte_size(text) - @tail, @tail), "")
+      tail = String.replace_invalid(binary_part(text, byte_size(text) - @max_bytes, @max_bytes), "")
       "(#{byte_size(text) - byte_size(tail)} earlier bytes cut) …" <> tail
     end
   end

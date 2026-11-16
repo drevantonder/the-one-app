@@ -306,7 +306,7 @@ defmodule Database.Lease do
   end
 
   # A server that couldn't reach this one may have taken the lease by writing the log's next entry, and this one
-  # only finds out by looking. So it answers from its copy for `@answers_for` after it last saw that entry free, by
+  # only finds out by looking. So it answers from its copy for `@lease_ttl` after it last saw that entry free, by
   # both its clocks, the monotonic one, which never goes back, and the system's, which goes on while the machine
   # sleeps; and then looks again. A server that took the lease meanwhile writes nothing until that's passed.
   defp proved(%{proved: {monotonic, system}} = lease) do
