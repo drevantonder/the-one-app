@@ -73,15 +73,15 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
 
     let mut told = client.notifications();
     // The newest notification there was, once the inbox has answered: what's after it is new.
-    let mut newest = None;
+    let mut latest = None;
     loop {
-        match (newest, inbox(&client, newest.unwrap_or(0)).await) {
+        match (latest, inbox(&client, latest.unwrap_or(0)).await) {
             (_, Err(error)) => eprintln!("couldn't ask the inbox: {error:#}"),
-            (None, Ok(there)) => newest = Some(there.first().and_then(|one| one["id"].as_i64()).unwrap_or(0)),
+            (None, Ok(there)) => latest = Some(there.first().and_then(|one| one["id"].as_i64()).unwrap_or(0)),
             (Some(_), Ok(new)) => {
                 for notification in new.iter().rev() {
                     let id = notification["id"].as_i64().unwrap_or_default();
-                    newest = newest.max(Some(id));
+                    latest = latest.max(Some(id));
                     if notification["read"] == true {
                         continue;
                     }

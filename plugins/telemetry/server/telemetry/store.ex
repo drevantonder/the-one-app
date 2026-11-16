@@ -96,14 +96,14 @@ defmodule Telemetry.Store do
   # The newest hours that fit in `most_bytes/0`, and the rest.
   defp past_most([], _bytes), do: {[], []}
 
-  defp past_most([{_hour, names} = newest | older], bytes) do
+  defp past_most([{_hour, names} = latest | older], bytes) do
     bytes = bytes + Enum.sum_by(names, &bytes/1)
 
     if bytes > @most_bytes do
-      {[newest | older], []}
+      {[latest | older], []}
     else
       {over, kept} = past_most(older, bytes)
-      {over, [newest | kept]}
+      {over, [latest | kept]}
     end
   end
 

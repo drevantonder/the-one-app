@@ -189,7 +189,7 @@ defmodule Backups.Run do
   """
   def kept([], _now), do: []
 
-  def kept([newest | _] = backups, now) do
+  def kept([latest | _] = backups, now) do
     day = 86_400_000
 
     {kept, _seen} =
@@ -209,7 +209,7 @@ defmodule Backups.Run do
         if group && group not in seen, do: {[backup | kept], MapSet.put(seen, group)}, else: {kept, seen}
       end)
 
-    Enum.uniq([newest | Enum.reverse(kept)])
+    Enum.uniq([latest | Enum.reverse(kept)])
   end
 
   @doc """

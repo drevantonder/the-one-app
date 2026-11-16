@@ -86,19 +86,19 @@ defmodule Telemetry.Read do
     (spans ++ logs)
     |> Enum.group_by(&{&1.where, first_line(&1.message)})
     |> Enum.map(fn {{where, message}, all} ->
-      newest = Enum.max_by(all, & &1.at)
+      latest = Enum.max_by(all, & &1.at)
 
       %{
         where: where,
         message: message,
         count: length(all),
-        at: newest.at,
-        took: newest.took,
-        trace: newest.trace,
-        server: newest.server,
-        from: newest.from,
-        whose: newest.whose,
-        span: newest.span
+        at: latest.at,
+        took: latest.took,
+        trace: latest.trace,
+        server: latest.server,
+        from: latest.from,
+        whose: latest.whose,
+        span: latest.span
       }
     end)
     |> Enum.sort_by(& &1.at, :desc)
