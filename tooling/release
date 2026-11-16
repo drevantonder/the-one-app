@@ -9,7 +9,7 @@
 # `server` is a server for every kind of machine one of the network's servers runs on, and `client` is `one` for
 # every kind of desktop machine among the network's devices; neither says both. A name is one build, as
 # `one builds` names them: `server/linux-x86_64`, `one/macos-aarch64`, `one-cli/linux-x86_64`. A phone's app is
-# built by its store, not here. --dry-run says what it would build, and builds nothing.
+# built by the network's owner from its repo (`iphone` skill), not here. --dry-run says what it would build, and builds nothing.
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
 # the network's owner. Linux builds Linux's builds, and a Mac a Mac's, which needs its system's frameworks: from
@@ -50,7 +50,7 @@ here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/
 builds=$(one builds)
 
 # What's asked for, by name. A desktop or the CLI is built for each kind of machine a device of the network's is,
-# but a phone, whose app its store builds.
+# but a phone, whose app the network's owner builds.
 names=()
 for want in "${wanted[@]}"; do
   case $want in
