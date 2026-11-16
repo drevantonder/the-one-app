@@ -80,7 +80,7 @@ defmodule Sandbox do
       (allow process-fork)
       (allow process-exec #{paths.(read)})
       (allow file-read* #{paths.(read ++ ["/usr/lib", "/System", "/private/var/db/timezone"])})
-      (allow file-read* (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random"))
+      (allow file-read* (literal "/") (literal "/dev/null") (literal "/dev/urandom") (literal "/dev/random"))
       (allow file-read-metadata)
       (allow file-read* file-write* (subpath "#{folder}") #{paths.(write)})
       (allow file-write-data (literal "/dev/null"))
@@ -120,9 +120,11 @@ defmodule Sandbox do
   end
 
   # The folder a Mac's sandbox writes to goes once the program stops.
+  # A Mac's program starts in its own folder, which is the one folder it may read and write.
   defp opened(executable, arguments, env, folder) do
     env = for {name, value} <- env, do: {String.to_charlist(name), value && String.to_charlist(value)}
     options = [:binary, :stream, :exit_status, :use_stdio, :stderr_to_stdout, args: arguments, env: env]
+    options = if folder, do: [{:cd, folder} | options], else: options
     port = Port.open({:spawn_executable, executable}, options)
 
     if folder do
