@@ -18,6 +18,9 @@
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
 // - `RELAY` passes a call to a server and gives its answer, or tells every server something.
 //
+// A part whose `package.json` says `"who": true` is the one that signs people in: its Worker exports an entrypoint
+// `Who`, which the network's MCP endpoint asks who a request is from (`mcp/mcp.ts`). One part at most says so.
+//
 // A part whose `package.json` says `"tail": true` is a Tail Worker: every other Worker here that handles requests
 // for the network is given it as a tail consumer, so it hears what each did. The gateway only passes each on, and
 // the web client's are files; the presigner isn't either, since such a part is bound to it and so is deployed after.
@@ -38,12 +41,16 @@ const PIECES = {
   relay: "RELAY",
   ping: "RELAY",
   presigner: "PRESIGNER",
-  link: "PUBLIC_MCP",
+  // The network's front door.
+  mcp: "MCP",
+  "llms.txt": "MCP",
+  apps: "MCP",
+  link: "MCP",
 };
 const services = [
   { binding: "RELAY", service: "network-relay" },
   { binding: "PRESIGNER", service: "network-presigner" },
-  { binding: "PUBLIC_MCP", service: "network-public-mcp" },
+  { binding: "MCP", service: "network-mcp" },
   { binding: "WEB", service: "network-web" },
 ];
 
@@ -63,6 +70,7 @@ mkdirSync(built, { recursive: true });
 const paths = { ...PIECES };
 const parts = [];
 const workers = [];
+let who = null;
 for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins`)) {
   const plugin = config.split("/")[0];
   const part = `${built}/${plugin}`;
@@ -76,6 +84,10 @@ for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins
   for (const path of about.paths ?? []) {
     if (paths[path]) throw new Error(`${plugin} answers /${path}, which ${paths[path]} answers already`);
     paths[path] = binding;
+  }
+  if (about.who) {
+    if (who) throw new Error(`${plugin} says who a request is from, which ${who.plugin} says already`);
+    who = { plugin, binding: "WHO", service: worker.name, entrypoint: "Who" };
   }
   services.push({ binding, service: worker.name });
   worker.services = [
@@ -99,13 +111,15 @@ await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, stdio: ["inherit", "inherit", "inherit"] }).exited;
-// The relay and public MCP are told their tail parts in a copy of their config beside the gateway's.
+// The relay and the MCP endpoint are told their tail parts in a copy of their config beside the gateway's, and the MCP
+// endpoint the part that says who a request is from.
 const config = {
   web: "web/wrangler.jsonc",
   presigner: "presigner/wrangler.jsonc",
 };
-for (const piece of ["relay", "public-mcp"]) {
+for (const piece of ["relay", "mcp"]) {
   const worker = (await import(`${here}/${piece}/wrangler.jsonc`)).default;
+  if (piece === "mcp" && who) worker.services = [...worker.services, { binding: who.binding, service: who.service, entrypoint: who.entrypoint }];
   await Bun.write(`${built}/${piece}.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/${piece}/${worker.main}`) }), null, 2));
   config[piece] = relative(here, `${built}/${piece}.jsonc`);
 }
@@ -117,7 +131,7 @@ if (what === "dev") {
 // its `wrangler.jsonc`, which only it holds, such as the presigner's and a plugin's part's keys to an outside service.
 // The tail parts come first among the parts, before whatever names them.
 const [tailParts, otherParts] = [parts.slice(0, tails.length), parts.slice(tails.length)];
-for (const deployed of [config.web, config.presigner, ...tailParts, config.relay, ...otherParts, config["public-mcp"], gatewayConfig]) {
+for (const deployed of [config.web, config.presigner, ...tailParts, config.relay, ...otherParts, config.mcp, gatewayConfig]) {
   const file = `${dirname(deployed)}/secrets`;
   const secrets = existsSync(`${here}/${file}`) ? ["--secrets-file", file] : [];
   const failed = await wrangler("deploy", "-c", deployed, ...secrets);

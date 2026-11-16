@@ -31,7 +31,8 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   between calls. It and the rest of its plugin call each other's functions, which nothing else can call. The plugin
   decides which instance it calls.
 - **Edge**: what of a network is always on and faces the internet, at the network's address: the gateway,
-  the presigner, the relay, the web client's files, the public MCP endpoint for a sharing link's holder, and each plugin's edge function.
+  the presigner, the relay, the web client's files, the network's MCP endpoint (for its own devices, whoever signed
+  in and a sharing link's holder), and each plugin's edge function.
 - **Edge function**: a part of a plugin that runs at the network's address, for what comes in over the web: a
   page people sign in on, a call from an outside service. One runs for the whole network, with storage of its own
   there, and whoever sets up the edge puts it there with the edge's other pieces.

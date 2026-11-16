@@ -1,0 +1,200 @@
+// The network's front door: its MCP endpoint over the web (`/mcp`), what tells an assistant how to come in
+// (`/llms.txt`), the web client's apps' files (`/apps`), and the endpoint for whoever holds a sharing link
+// (`/link/<link>`). Each call is passed through the relay to a server acting for whoever it's from, which is told
+// which device that is and decides whose it is itself.
+//
+// One of the network's own devices signs what it asks with its key, which is checked here. Anyone else has signed in,
+// and who they are is the plugin's to say that signs people in: it's bound here as WHO, by `edge.js`, and asked
+// `who(request)` (`plugins/sign-in/edge/worker.ts`). With no such plugin, only devices signing with their key come in.
+import { verifiedKey } from "../ask.ts";
+
+/** Who a request is from, as the plugin that signs people in says. */
+interface Who {
+  /** The device it is to a server. */
+  device: string;
+  /** Whose that device is, as relation tuples name them: `users/<name>`. */
+  who: string;
+  /** An assistant's: the `WWW-Authenticate` to answer once a server says its device is nobody's. */
+  challenge?: string;
+  /** A browser's: its session, as Devices lists it, where its apps' files are, and its session's cookies, renewed. */
+  session?: string;
+  apps?: string;
+  cookies?: string[];
+}
+
+type Env = McpEnv & {
+  /** The plugin that signs people in: who a request is from, or the answer for one from nobody signed in. */
+  WHO?: { who(request: Request): Promise<Who | { refused: Response }> };
+};
+
+const refuse = (status: number, why: string) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
+
+/** A server on this list acts for the network, and so for everyone in it. */
+const NETWORK = "network/";
+/** A sharing link starts with whose it leads to, as their prefix: that's whose servers answer its holder. */
+const LEADS_TO = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
+/** The JSON-RPC error a server answers a device that's nobody's (`OneCore.Mcp`). */
+const NOBODY = -32003;
+/** What's said to whoever isn't one of the network's devices, with nothing here to sign them in. */
+const NO_SIGN_IN = "Nothing signs people in on this network, so only its own devices come in, signing what they ask with their key";
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/llms.txt") return new Response(llms(url.origin), { headers: { "content-type": "text/markdown; charset=utf-8" } });
+    if (url.pathname === "/apps") return apps(request, env);
+    if (url.pathname.startsWith("/apps/")) return file(request, env, url);
+    // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
+    if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+    if (url.pathname === "/mcp") return mcp(request, env);
+    if (url.pathname.startsWith("/link/")) return link(request, env, url);
+    return new Response(null, { status: 404 });
+  },
+} satisfies ExportedHandler<Env>;
+
+/** What an assistant reads to come into the network at `origin`, as llmstxt.org has it. */
+const llms = (origin: string) => `# ${new URL(origin).host}
+
+> A One App network: a family's or a workplace's apps, files and devices. An assistant comes in as the person who
+> lets it in, and does what they can.
+
+## Connecting
+
+- Add ${origin}/mcp as a remote MCP server (a connector), over streamable HTTP. In Claude Code:
+  \`claude mcp add --transport http one ${origin}/mcp\`
+- It signs in with OAuth. The person is asked for their passkey once, and that's their yes.
+- Then their tools are yours: \`tools/list\` lists them. Read a plugin's skill before using its tools:
+  \`resources/list\` lists them, under \`skill://\`, and \`skill://building-plugins/SKILL.md\` says how to make one.
+`;
+
+/** Who signed in, as the plugin that signs people in says from what `request` carries, its body left here. */
+async function signedIn(request: Request, env: Env) {
+  if (!env.WHO) return { refused: refuse(401, NO_SIGN_IN) };
+  return env.WHO.who(new Request(request.url, { method: request.method, headers: request.headers }));
+}
+
+async function mcp(request: Request, env: Env) {
+  const traceparent = request.headers.get("traceparent") ?? undefined;
+  // One of the network's own devices signs what it asks with its key. One that's nobody's is told so by the
+  // server, and asks for a code to be let in by.
+  if (request.headers.has("one-key")) {
+    const body = await request.text();
+    const device = await verifiedKey(request, body);
+    if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
+    return forward(env, body, { device }, [NETWORK], traceparent);
+  }
+  // A browser or an assistant someone let in. One that's since become nobody's signs in, or is let in, again.
+  const who = await signedIn(request, env);
+  if ("refused" in who) return who.refused;
+  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], traceparent);
+  if (!(await nobodys(answer))) return answer;
+  return who.challenge ? new Response(null, { status: 401, headers: { "www-authenticate": who.challenge } }) : refuse(401, "Sign in again");
+}
+
+/**
+ * Whoever holds a sharing link needs no signing in: the link is all they are. What they ask says it's from the
+ * link's holder and nothing else, whatever it said of itself, and a server refuses them everything the link's
+ * relation tuple doesn't give. Whose a request is, is a server's to say: one acting for whoever the link leads to,
+ * or for the network.
+ */
+async function link(request: Request, env: Env, url: URL) {
+  const link = decodeURIComponent(url.pathname.slice("/link/".length));
+  const of = LEADS_TO.exec(link)?.[0];
+  if (!of) return refuse(404, "That isn't a sharing link");
+  return forward(env, await request.text(), { link }, [of, NETWORK], request.headers.get("traceparent") ?? undefined);
+}
+
+/**
+ * Passes one JSON-RPC message to a server acting for one of `of`, as from `from`, a device or a sharing link's
+ * holder, and answers what the server did. What's asked says who it's from, who it's for (a device's) and the span
+ * it's under, and nothing else of itself.
+ */
+async function forward(env: Env, message: string, from: { device: string } | { link: string }, of: string[], header?: string) {
+  let call: { method?: unknown; params?: { _meta?: { for?: unknown; traceparent?: unknown } } };
+  try {
+    call = JSON.parse(message);
+    if (typeof call?.method !== "string") throw new Error("not a request");
+  } catch {
+    return refuse(400, "That isn't a JSON-RPC request");
+  }
+  const asks_for = "device" in from ? call.params?._meta?.for : undefined;
+  const traceparent = traced(call.params?._meta?.traceparent ?? header);
+  const said = { ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }) };
+  message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
+  const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
+  const reached = await env.RELAY.forward(servers, message);
+  if (!reached) return refuse(503, "None of this network's servers answered. Try again once one is on.");
+  // A notification has no answer.
+  if (reached.answer === "") return new Response(null, { status: 202 });
+  return new Response(reached.answer, { headers: { "content-type": "application/json" } });
+}
+
+/**
+ * The `traceparent` of this request's span, as W3C's Trace Context has it: under `parent`, the client's, which it
+ * sends in `_meta` as MCP has it or as a header, if any. It's said in a line Telemetry's Tail Worker reads
+ * (`plugins/telemetry/edge/worker.ts`), and carried to the server.
+ */
+function traced(parent: unknown) {
+  const random = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const under = typeof parent === "string" ? /^00-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec(parent) : null;
+  const traceparent = `00-${under?.[1] ?? random(16)}-${random(8)}-01`;
+  console.log(JSON.stringify({ telemetry: { traceparent, parent: under?.[0] } }));
+  return traceparent;
+}
+
+/** Whether a server answered that the device is nobody's. The answer is left to be sent on if it isn't. */
+async function nobodys(answer: Response) {
+  if (answer.status !== 200) return false;
+  const said = await answer.clone().json<{ error?: { code?: number } }>();
+  return said.error?.code === NOBODY;
+}
+
+/**
+ * Where a signed-in browser's apps' files are, `/apps/<its session, signed>`, and the device it is: its session, as
+ * Devices lists it. An app's page has an origin of its own in the web client, so its files are asked for with no
+ * cookie, and the signed session in their address says whose they are.
+ */
+async function apps(request: Request, env: Env) {
+  const who = await signedIn(request, env);
+  if ("refused" in who || !who.apps) return Response.json({ error: "Sign in" }, { status: 401 });
+  const answer = Response.json({ apps: who.apps, device: who.session });
+  for (const cookie of who.cookies ?? []) answer.headers.append("set-cookie", cookie);
+  return answer;
+}
+
+/**
+ * What an app's page loads in the web client: `/apps/<session, signed>/<app>/<plugin>/<path>` is `path` among the
+ * latest files of `plugin` that a server lists for that session's person, as the app's client has them at its own
+ * address for each app (`clients/app/src/lib.rs`). An app opened for a group or the network says so after its name,
+ * last part first (`notes.family.groups`).
+ */
+async function file(request: Request, env: Env, url: URL) {
+  const [, app, plugin, ...path] = url.pathname.slice("/apps/".length).split("/");
+  const who = await signedIn(request, env);
+  if ("refused" in who) return new Response("Sign in again", { status: 401 });
+  const [, ...whose] = app.split(".");
+  const meta = whose.length ? { _meta: { for: whose.reverse().join("/") } } : {};
+  const ask = async <Result,>(method: string, params: object): Promise<Result | null> => {
+    const answer = await forward(env, JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, ...meta } }), { device: who.device }, [`${who.who}/`, NETWORK]);
+    if (answer.status !== 200) return null;
+    return (await answer.json<{ result: Result }>()).result;
+  };
+  const listed = await ask<{ resources: { uri: string }[] }>("resources/list", {});
+  const version = listed?.resources.map(({ uri }) => uri.split("/")).find(([scheme, , of]) => scheme === "ui:" && of === plugin)?.[3];
+  const read = version ? await ask<{ contents: { blob?: string; text?: string; mimeType: string }[] }>("resources/read", { uri: `ui://${plugin}/${version}/${path.join("/")}` }) : null;
+  const found = read?.contents?.[0];
+  if (!found) return new Response(`There's nothing at ${url.pathname}`, { status: 404 });
+  const body = found.blob ? Uint8Array.from(atob(found.blob), (char) => char.charCodeAt(0)) : found.text;
+  return new Response(body, {
+    headers: {
+      "content-type": found.mimeType.replace(";profile=mcp-app", ""),
+      // What an app's page may load, which is what an MCP App may by default and what the app lets one
+      // (`APP_MAY_LOAD` in `clients/app/src/lib.rs`): its own plugin's files and the UI library, which are all
+      // here, and nothing from anywhere else.
+      "content-security-policy": `default-src 'none'; script-src ${url.origin} 'unsafe-inline'; style-src ${url.origin} 'unsafe-inline'; img-src ${url.origin} data:; media-src ${url.origin} data:; font-src ${url.origin} data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri ${url.origin}`,
+      // The page's origin is its own, so what it loads from here is from elsewhere to it.
+      "access-control-allow-origin": "*",
+      "cache-control": "no-store",
+    },
+  });
+}

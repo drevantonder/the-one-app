@@ -27,7 +27,6 @@ declare global {
         servers(of: string): Promise<string[]>;
       };
       RELAY: {
-        forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null>;
         notify(message: string): Promise<void>;
         seen(keys: string[]): Promise<Record<string, "on" | number | null>>;
       };
@@ -276,7 +275,7 @@ async function made(origin: string) {
     databaseHooks: {
       user: { update: { after: goesBy } },
       // A browser that's signed in is one of its person's devices for as long as it is: the web client asks as its
-      // session (`worker.js`).
+      // session (`worker.ts`).
       session: {
         create: { after: (session) => browserIn(session) },
         delete: { after: (session) => browserOut(session.id) },

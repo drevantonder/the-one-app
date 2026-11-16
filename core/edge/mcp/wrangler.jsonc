@@ -1,8 +1,9 @@
 {
-  "name": "network-public-mcp",
-  "main": "public-mcp.ts",
+  "name": "network-mcp",
+  "main": "mcp.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
+  // `edge.js` also binds WHO, the entrypoint of the plugin that says who a request is from, if one does.
   "services": [
     { "binding": "RELAY", "service": "network-relay" },
     { "binding": "NETWORK", "service": "network-presigner", "entrypoint": "Network" }

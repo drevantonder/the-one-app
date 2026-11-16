@@ -1,15 +1,13 @@
 {
   "name": "sign-in",
-  "description": "Signing in's edge function: the sign-in page, passkeys, the way in for a device, a browser or an assistant that someone let act as them, the web client's apps' files, and the llms.txt that tells an assistant how.",
+  "description": "Signing in's edge function: the sign-in page, passkeys, the devices and assistants someone let act as them, and who a request at the network's address is from.",
   "private": true,
   "type": "module",
   "paths": [
     "sign-in",
-    "mcp",
-    ".well-known",
-    "llms.txt",
-    "apps"
+    ".well-known"
   ],
+  "who": true,
   "scripts": {
     "build": "bun ../../../core/ui/app.js \"$PWD/page\" \"$PWD/files/sign-in\" && cp ../../../icons/Logo.png files/sign-in/mark.png",
     "typecheck": "tsc && tsc -p page"
