@@ -21,37 +21,37 @@ defmodule OneCore.User do
   def nobody, do: -32003
 
   @doc """
-  Who a request is by and who it's for: `{:ok, {by, for}, forwarded}`, or `{:error, why}`. `from` is the key of
-  whatever sent it, which its connection proved, or `nil` for what came in at the network's address over the
-  web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a plugin's hook: a
+  Who a request is by and who it's for, its actor and its subject: `{:ok, {actor, subject}, forwarded}`, or
+  `{:error, why}`. `from` is the key of whatever sent it, which its connection proved, or `nil` for what came in at
+  the network's address over the web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a plugin's hook: a
   moment on any of the network's servers is about whoever it's about, so each of them is believed about that,
   where only one acting for someone is believed about what they asked for.
 
-  - `who` and `for`, from a server acting for whoever asked, are who that server was asked by and for: it passes on
-    what it was asked, having decided it, and `forwarded` says so: `:to` from a server that couldn't run it, and
-    `true` from one that handed it to this one for what it holds (`OneCore.Call`). A scheduled job is asked by
-    nobody, so its `who` is `nil`.
+  - `actor` and `subject`, from a server acting for whoever asked, are who that server was asked by and for: it
+    passes on what it was asked, having decided it, and `forwarded` says so: `:to` from a server that couldn't run
+    it, and `true` from one that handed it to this one for what it holds (`OneCore.Call`). A scheduled job is asked
+    by nobody, so its `actor` is `nil`.
   - `link` is a sharing link, and whoever shows one is its holder.
   - `as` names a user to act as. It's for a network being built, to show who may do what with nobody signing
     in, and is refused unless the server's `:development` setting is on.
   - `device`, in what came in at the network's address, is the device the edge says it's from: it proved
     that there, as a connection proves a key here. Over a connection, it's the device a run of a client runs for,
     with `attestation` (`device/2`).
-  - `for` names who else the request is for: a group, or the network.
+  - `subject` names who else the request is for: a group, or the network.
 
   Otherwise it's from whoever's device `from` is.
   """
   def asking(from, meta, hook \\ false)
 
-  def asking(from, %{"who" => by} = meta, hook) when is_binary(by) or is_nil(by) do
-    whose = owner(by || meta["for"] || "") || "network"
+  def asking(from, %{"actor" => actor} = meta, hook) when is_binary(actor) or is_nil(actor) do
+    whose = owner(actor || meta["subject"] || "") || "network"
 
     cond do
       not (Servers.acts_for?(from, whose) or (hook and is_binary(from) and Servers.acts_for(from) != [])) ->
         {:error, "Only a server acting for #{whose} says it asks for them"}
 
-      is_binary(meta["for"]) ->
-        {:ok, {by, meta["for"]}, if(meta["forwarded"] == "to", do: :to, else: meta["forwarded"] == true)}
+      is_binary(meta["subject"]) ->
+        {:ok, {actor, meta["subject"]}, if(meta["forwarded"] == "to", do: :to, else: meta["forwarded"] == true)}
 
       true ->
         {:error, "A server says who it asks for too"}
@@ -59,11 +59,11 @@ defmodule OneCore.User do
   end
 
   def asking(from, meta, _hook) do
-    with {:ok, by} <- by(from, meta),
-         :ok <- here(by),
-         subject = Map.get(meta, "for", by),
-         :ok <- acts(by, subject),
-         do: {:ok, {by, subject}, false}
+    with {:ok, actor} <- by(from, meta),
+         :ok <- here(actor),
+         subject = Map.get(meta, "subject", actor),
+         :ok <- acts(actor, subject),
+         do: {:ok, {actor, subject}, false}
   end
 
   defp by(_from, %{"link" => link}) when is_binary(link), do: {:ok, link(link)}

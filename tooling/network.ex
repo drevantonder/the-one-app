@@ -15,7 +15,7 @@ defmodule Mix.Tasks.Network do
   starts another server of that network, whose home is the folder's `<server>`. It doesn't start until whoever
   it's for has let it in, and says how.
 
-      mix network <folder> <server> --for users/alice
+      mix network <folder> <server> --subject users/alice
 
   starts a server that is that user's, or that group's, and acts for them alone. Without it a server is the
   network's, and acts for everyone in it.
@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Network do
              address: :string,
              first: :string,
              development: :boolean,
-             for: :string,
+             subject: :string,
              without: :string,
              owner: :string,
              name: :string
@@ -88,7 +88,7 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :address, address)
     Application.put_env(:one_core, :first, options[:first])
     Application.put_env(:one_core, :development, options[:development] == true)
-    Application.put_env(:one_core, :for, options[:for] || "network")
+    Application.put_env(:one_core, :owner, options[:subject] || "network")
     Application.put_env(:one_core, :home, Path.join(folder, server))
     Application.put_env(:one_core, :name, options[:name])
     Application.put_env(:one_core, :bundled, bundled())
@@ -101,17 +101,20 @@ defmodule Mix.Tasks.Network do
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->
         Mix.raise("""
-        This server isn't one of #{options[:for] || "the network"}'s yet. Whoever owns them lets it in from a client,
-        asking for them (ONE_FOR=#{options[:for] || "network"}), and then it's started again:
+        This server isn't one of #{options[:subject] || "the network"}'s yet. Whoever owns them lets it in from a client,
+        asking for them (ONE_SUBJECT=#{options[:subject] || "network"}), and then it's started again:
 
             one add_server --key #{key}
         """)
     end
 
     if without = options[:without] do
-      case Installed.uninstall(options[:for] || "network", without) do
-        :ok -> Mix.shell().info("#{without} is removed from what's installed for #{options[:for] || "the network"}.")
-        {:error, why} -> Mix.shell().error("#{without} wasn't removed: #{why}")
+      case Installed.uninstall(options[:subject] || "network", without) do
+        :ok ->
+          Mix.shell().info("#{without} is removed from what's installed for #{options[:subject] || "the network"}.")
+
+        {:error, why} ->
+          Mix.shell().error("#{without} wasn't removed: #{why}")
       end
     end
 

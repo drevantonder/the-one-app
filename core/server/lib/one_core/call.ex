@@ -58,7 +58,7 @@ defmodule OneCore.Call do
 
       OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})
   """
-  def tool(%__MODULE__{actor: by, subject: who} = call, plugin, tool, inputs, options \\ []) do
+  def tool(%__MODULE__{actor: actor, subject: subject} = call, plugin, tool, inputs, options \\ []) do
     caller =
       case Keyword.fetch(options, :on_behalf_of) do
         :error -> call.who
@@ -66,7 +66,7 @@ defmodule OneCore.Call do
         {:ok, _} -> raise "#{call.plugin} acts on behalf only of the plugin that called it, and #{inspect(call.caller)} did"
       end
 
-    case Calls.call(plugin, tool, inputs, {by, who}, false, caller) do
+    case Calls.call(plugin, tool, inputs, {actor, subject}, false, caller) do
       {:ok, result} when is_binary(result) ->
         result
 
@@ -102,14 +102,14 @@ defmodule OneCore.Call do
 
       OneCore.Call.run_hook(call, "removed", %{"artifact" => name, "what" => "restored"})
   """
-  def run_hook(%__MODULE__{installed: at, plugin: plugin, actor: by, subject: who}, hook, about) do
+  def run_hook(%__MODULE__{installed: at, plugin: plugin, actor: actor, subject: subject}, hook, about) do
     name = "#{plugin}.#{hook}"
 
     case Hooks.offered(name, at) do
-      :observe -> Hooks.observe(name, about, {by, who})
-      :mutate -> Hooks.mutate(name, about, {by, who})
-      :validate -> Hooks.validate(name, about, {by, who})
-      :collect -> Hooks.collect(name, about, {by, who})
+      :observe -> Hooks.observe(name, about, {actor, subject})
+      :mutate -> Hooks.mutate(name, about, {actor, subject})
+      :validate -> Hooks.validate(name, about, {actor, subject})
+      :collect -> Hooks.collect(name, about, {actor, subject})
       nil -> raise "#{plugin} doesn't offer #{hook}. Its offers/0 names the hooks it offers."
     end
   end
@@ -132,10 +132,10 @@ defmodule OneCore.Call do
       OneCore.Artifact.name(note)
       #=> "users/alice/made/notes/7"
   """
-  def make(%__MODULE__{subject: who, actor: by, plugin: plugin} = call, id) do
-    if User.link?(who), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
+  def make(%__MODULE__{subject: subject, actor: actor, plugin: plugin} = call, id) do
+    if User.link?(subject), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
     if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
-    %Artifact{prefix: "#{who}/made/#{plugin}/#{id}/", reached: {call.who, {by, who}, "owner"}}
+    %Artifact{prefix: "#{subject}/made/#{plugin}/#{id}/", reached: {call.who, {actor, subject}, "owner"}}
   end
 
   @doc """
@@ -150,19 +150,19 @@ defmodule OneCore.Call do
       note = OneCore.Call.reach(call, "users/alice/made/notes/7")
       {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
   """
-  def reach(%__MODULE__{subject: who, actor: by} = call, name, relation \\ "viewer") do
+  def reach(%__MODULE__{subject: subject, actor: actor} = call, name, relation \\ "viewer") do
     if why = refused(call, name, relation), do: raise(why)
     # Its blobs are whoever's it is, whom this server may not act for. One that does runs the call.
     owner = User.owner(name) || "network"
     if not Servers.here?(owner), do: forward(call, owner)
-    %Artifact{prefix: name <> "/", reached: {call.who, {by, who}, relation}}
+    %Artifact{prefix: name <> "/", reached: {call.who, {actor, subject}, relation}}
   end
 
   @doc "Whether `reach/3` would give the artifact: whether this call may reach it as `relation`."
   def reaches?(%__MODULE__{} = call, name, relation \\ "viewer"), do: refused(call, name, relation) == nil
 
   @doc "Why this call may not reach the artifact `name` as `relation`, or `nil` if it may."
-  def refused(%__MODULE__{subject: who, actor: by, plugin: plugin} = call, name, relation)
+  def refused(%__MODULE__{subject: subject, actor: actor, plugin: plugin} = call, name, relation)
       when relation in ["viewer", "editor", "owner"] do
     parts = String.split(name, "/")
 
@@ -174,18 +174,18 @@ defmodule OneCore.Call do
 
     about =
       cond do
-        name == Artifact.name(call.own) -> [who]
+        name == Artifact.name(call.own) -> [subject]
         match?(["own" | _], kind) -> nil
-        kind == ["made", plugin] and String.starts_with?(name, who <> "/") -> []
-        kind == ["made", plugin] -> [who]
-        true -> [who, call.who]
+        kind == ["made", plugin] and String.starts_with?(name, subject <> "/") -> []
+        kind == ["made", plugin] -> [subject]
+        true -> [subject, call.who]
       end
 
     if about == nil do
       "#{name} is a plugin's own artifact, which only that plugin reaches"
     else
       Enum.find_value(about, fn about ->
-        case Hooks.validate("reach", %{"who" => about, "relation" => relation, "artifact" => name}, {by, who}) do
+        case Hooks.validate("reach", %{"who" => about, "relation" => relation, "artifact" => name}, {actor, subject}) do
           :ok -> nil
           {:refuse, why} -> why
         end
@@ -198,11 +198,11 @@ defmodule OneCore.Call do
   nobody asking, as for a scheduled job, it's whoever the call runs for. It's what a plugin asks before telling
   someone what only a group's members, or the network's, may know.
   """
-  def member?(%__MODULE__{subject: who, actor: by}, of) do
-    asking = by || who
+  def member?(%__MODULE__{subject: subject, actor: actor}, of) do
+    asking = actor || subject
 
     asking == of or
-      Hooks.validate("reach", %{"who" => asking, "relation" => "member", "artifact" => of}, {by, who}) == :ok
+      Hooks.validate("reach", %{"who" => asking, "relation" => "member", "artifact" => of}, {actor, subject}) == :ok
   end
 
   @doc """
@@ -210,19 +210,20 @@ defmodule OneCore.Call do
   as its `owner`. It's who changes what's installed for them, so a plugin asks it before changing what's a group's
   or the network's as a whole, where being a member isn't enough.
   """
-  def owns?(%__MODULE__{subject: who, actor: who}), do: true
+  def owns?(%__MODULE__{subject: subject, actor: subject}), do: true
   def owns?(%__MODULE__{actor: nil}), do: false
 
-  def owns?(%__MODULE__{subject: who, actor: by}),
-    do: Hooks.validate("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}) == :ok
+  def owns?(%__MODULE__{subject: subject, actor: actor}),
+    do:
+      Hooks.validate("reach", %{"who" => actor, "relation" => "owner", "artifact" => subject}, {actor, subject}) == :ok
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
   `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle` and `about`, its
   `apps`, its `widgets` and its `tools`' names and pages (`ui`). A Home Screen page is drawn from these.
   """
-  def plugins(%__MODULE__{subject: who}) do
-    for at <- Enum.reverse(Plugins.chain(who)), {name, version} <- Plugins.versions([at]), into: %{} do
+  def plugins(%__MODULE__{subject: subject}) do
+    for at <- Enum.reverse(Plugins.chain(subject)), {name, version} <- Plugins.versions([at]), into: %{} do
       tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui])
 
       {name,
@@ -349,21 +350,31 @@ defmodule OneCore.Call do
   """
   def forward_to(%__MODULE__{forwarded: true}, _server), do: throw({__MODULE__, :forwarding_loop})
 
-  def forward_to(%__MODULE__{request: ask, subject: who, actor: by}, server), do: asks(ask, {by, who}, server, true)
+  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server),
+    do: asks(ask, {actor, subject}, server, true)
 
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
-  defp asks({method, params}, {by, who}, server, forwarded) do
+  defp asks({method, params}, {actor, subject}, server, forwarded) do
     forwarding_loop = Server.forwarding_loop()
 
-    meta = %{forwarded: forwarded, who: by, for: who}
+    meta = %{forwarded: forwarded, actor: actor, subject: subject}
 
     case Server.request(server, method, Map.update(params, :_meta, meta, &Map.merge(&1, meta))) do
-      {:ok, result} -> throw({__MODULE__, {:forwarded, result}})
-      {:error, ^forwarding_loop, _why} -> :forwarding_loop
-      {:error, _code, why} -> raise why
-      :unreachable -> :no_response
-      :stopped -> if again?(method, params, who), do: :no_response, else: raise(Server.error_message(:stopped, server))
+      {:ok, result} ->
+        throw({__MODULE__, {:forwarded, result}})
+
+      {:error, ^forwarding_loop, _why} ->
+        :forwarding_loop
+
+      {:error, _code, why} ->
+        raise why
+
+      :unreachable ->
+        :no_response
+
+      :stopped ->
+        if again?(method, params, subject), do: :no_response, else: raise(Server.error_message(:stopped, server))
     end
   end
 

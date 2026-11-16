@@ -33,7 +33,7 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
 - `grant` chooses the servers that open the Vault, from a device that holds its person's key (the skill
   `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
 - Someone's Vault is theirs alone: nobody asks for another user's, and the network's owner reads none. A group's
-  or the network's is its members' to use (`ONE_FOR=groups/family`), and its owner's to choose servers for.
+  or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owner's to choose servers for.
 - Removing an item, switching a plugin on and choosing servers are a person's decisions. Do them when asked
   to, and say what you did.
 

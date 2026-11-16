@@ -45,7 +45,7 @@ interface Device {
 type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "request"; request: Request }
 
 const [whose, setWhose] = createSignal<string>()
-const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs, { for: whose() }).then(JSON.parse)
+const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs, { subject: whose() }).then(JSON.parse)
 
 /// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
 const opened = createMemo(() => ask<{ servers: string[]; may: { key: string; name?: string }[] }>("vault_unlocked_on"))
@@ -59,8 +59,8 @@ const owners = createMemo(async () => {
   const me: string | undefined = (await call("sign-in_people").then(JSON.parse, () => []))[0]?.who
   if (!me) return []
   const [groups, network] = await Promise.all([
-    call("permissions_groups", {}, { for: me }).then((text): { group: string; called: string; owners: string[] }[] => JSON.parse(text), () => []),
-    call("permissions_check", { artifact: "network", relation: "owner" }, { for: me }).then((result): boolean => JSON.parse(result).may, () => false),
+    call("permissions_groups", {}, { subject: me }).then((text): { group: string; called: string; owners: string[] }[] => JSON.parse(text), () => []),
+    call("permissions_check", { artifact: "network", relation: "owner" }, { subject: me }).then((result): boolean => JSON.parse(result).may, () => false),
   ])
   const theirs = groups.filter((group) => group.owners.includes(me)).map((group) => ({ value: group.group, label: group.called, whose: /s$/i.test(group.called) ? `${group.called}'` : `${group.called}'s` }))
   return [{ value: me, label: "Yours", whose: "your" }, ...theirs, ...(network ? [{ value: "network", label: "The network's", whose: "the network's" }] : [])]
@@ -72,7 +72,7 @@ const Whom = () => whom()[0].toUpperCase() + whom().slice(1)
 /// Does something that changes the Vault, and says what the server said if it wouldn't. → whether it did.
 async function does(tool: string, inputs: object) {
   try {
-    await call(tool, inputs, { for: whose() })
+    await call(tool, inputs, { subject: whose() })
     again()
     return true
   } catch (error) {
@@ -293,7 +293,7 @@ function YourKey() {
                 <Button variant="outline" onClick={() => does("encryption_ask", {}).then((requested) => void (requested && toast("Asked. Open Vault on a trusted device.")))}>
                   Ask Another Device
                 </Button>
-                <Button variant="outline" onClick={() => useRecoveryKey({ for: whose() }).then(again)}>
+                <Button variant="outline" onClick={() => useRecoveryKey({ subject: whose() }).then(again)}>
                   Use Recovery Key
                 </Button>
               </>
@@ -317,7 +317,7 @@ function YourKey() {
           </For>
           <Row heading="This device" text="Trusted device" />
           <For each={others()}>{(device) => <Row heading={device.name} text="Trusted device" />}</For>
-          <Row heading="Recovery Key" text="For when every device is gone" onClick={() => showRecoveryKey({ for: whose() })} />
+          <Row heading="Recovery Key" text="For when every device is gone" onClick={() => showRecoveryKey({ subject: whose() })} />
         </List>
       </Show>
     </Section>
@@ -328,7 +328,7 @@ function YourKey() {
 /// the network's, by one of its owners. It shows them its recovery key then, which is the one time they're asked
 /// to write something down.
 async function setUp() {
-  if (await does("encryption_approve", {})) await showRecoveryKey({ for: whose() })
+  if (await does("encryption_approve", {})) await showRecoveryKey({ subject: whose() })
 }
 
 /// Which Vault shows, where its person owns more than their own.

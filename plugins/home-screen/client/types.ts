@@ -7,7 +7,7 @@ export interface App {
   icon: string
   plugin?: string
   put?: boolean
-  for?: string
+  subject?: string
 }
 
 /** A plugin with accounts, in Accounts: its name there (what its tools start with), its title and icon, and the page its sign-in shows on, if it has one. */
@@ -17,7 +17,7 @@ export interface Signs {
   title: string
   icon: string
   sign_in?: string
-  for?: string
+  subject?: string
 }
 
 /** A widget on a page, or one a page's plugins have: its tool, the sizes it comes in, and what pressing it opens. */
@@ -42,7 +42,7 @@ export interface Page {
   widgets: Widget[]
   accounts: Signs[]
   arranges?: boolean
-  for?: string
+  subject?: string
   name: string
 }
 

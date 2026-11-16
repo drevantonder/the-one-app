@@ -8,7 +8,7 @@ metadata:
 
 Backups are copies of the whole network, every person's and group's data, to a folder on one of the network's
 machines (as on a disk plugged into it) or to S3-compatible storage. They're the network's: an owner of it uses these
-tools for the network (`ONE_FOR=network`, and `for: "network"` from an app).
+tools for the network (`ONE_SUBJECT=network`, and `subject: "network"` from an app).
 
 - A backup holds the network's blobs as they are, so it's trusted as the network's own storage is: what's encrypted
   there, like a Vault item, is encrypted in the backup too, and the rest isn't. Whoever can reach a destination

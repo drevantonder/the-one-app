@@ -5,7 +5,7 @@
 # `plugins/<name>/server/nif/<crate>/<kind>.so` and `plugins/<name>/server/bin/<crate>/<kind>`. A plugin is the same
 # files on every server of a network, so it's deployed with all of them:
 #
-#     tooling/nifs [kind...] && ONE_FOR=network one deploy --name <name> --files-from plugins/<name>
+#     tooling/nifs [kind...] && ONE_SUBJECT=network one deploy --name <name> --files-from plugins/<name>
 #
 # Each kind is built in one place, so every server build of a commit ships the same bytes, and a server finds the
 # plugins it ships unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM

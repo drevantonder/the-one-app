@@ -362,7 +362,7 @@ defmodule OneCore.Plugins.Deploy do
 
         {:error,
          "#{other} is this network's launcher, and a network has one. To replace it, deploy #{name} as #{other}'s " <>
-           "new version: ONE_FOR=network one deploy --name #{other} --files-from <#{name}'s folder>"}
+           "new version: ONE_SUBJECT=network one deploy --name #{other} --files-from <#{name}'s folder>"}
 
       true ->
         :ok

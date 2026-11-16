@@ -742,7 +742,7 @@ pub struct Client {
     notifications: broadcast::Sender<Value>,
     /// What every request says of who it's from and for, where the environment says: `ONE_LINK` is a sharing link,
     /// whose holder asks, `ONE_AS` names a user to act as, which only a server of a network being built allows, and
-    /// `ONE_FOR` names the group it's for (`groups/family`), or `network`.
+    /// `ONE_SUBJECT` names the group it's for (`groups/family`), or `network`.
     says: Vec<(&'static str, String)>,
     /// Whether this client is to hear what changes, so its servers are to tell it.
     watching: AtomicBool,
@@ -842,7 +842,7 @@ impl Client {
             None => (None, None),
         };
         let link = Link::run(&key, network, who).await?;
-        let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("for", "ONE_FOR")];
+        let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("subject", "ONE_SUBJECT")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
         let notifications = broadcast::channel(16).0;
         accept(link.endpoint.clone(), notifications.clone());

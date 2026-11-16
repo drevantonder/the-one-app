@@ -12,16 +12,16 @@ import type { Account, App, Item, Page, Signs, Size, Widget as WidgetItem } from
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
 const HOME = "home-screen/client/index.html"
 const ACCOUNTS = "home-screen/client/accounts.html"
-const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
+const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
 /// Every page this user sees, and the parts of Settings. A network with nothing that keeps groups has none.
 const home = createMemo(async () => {
   const groups = await json<{ group: string; called: string }[]>("permissions_groups").catch((): { group: string; called: string }[] => [])
   // Each page is named for whose it is: a group by what it's called.
-  const whos: { for?: string; name: string }[] = [{ name: "You" }, ...groups.map(({ group, called }) => ({ for: group, name: called })), { for: "network", name: "Everyone" }]
-  const [settings, pages] = await Promise.all([json<App[]>("home-screen_settings"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who.for).then((page): Page => ({ ...page, ...who }))))])
+  const whos: { subject?: string; name: string }[] = [{ name: "You" }, ...groups.map(({ group, called }) => ({ subject: group, name: called })), { subject: "network", name: "Everyone" }]
+  const [settings, pages] = await Promise.all([json<App[]>("home-screen_settings"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who.subject).then((page): Page => ({ ...page, ...who }))))])
   // Every page's plugins with accounts, each once, are in the one Accounts folder.
-  const accounts = [...new Map(pages.flatMap((page) => page.accounts.map((signs): [string, Signs] => [signs.plugin, { ...signs, for: page.for }]))).values()]
+  const accounts = [...new Map(pages.flatMap((page) => page.accounts.map((signs): [string, Signs] => [signs.plugin, { ...signs, subject: page.subject }]))).values()]
   return { pages, settings, accounts }
 })
 changed(() => refresh(home))
@@ -33,7 +33,7 @@ const same = (a: Pick<Item, "widget" | "app" | "size">, b: Pick<Item, "widget" |
 /// Arranges a page as `items`, and says why if it couldn't be.
 async function arrange(page: Page, items: Item[]) {
   try {
-    await call("home-screen_arrange", { items: items.map(arrangement) }, { for: page.for })
+    await call("home-screen_arrange", { items: items.map(arrangement) }, { subject: page.subject })
   } catch (error) {
     toast((error as Error).message)
   }
@@ -107,7 +107,7 @@ function held(page: () => Page, item?: () => Item) {
 /// A widget on a page: what its plugin's tool answers, drawn, and asked again each minute it's in view.
 function Card(props: { item: WidgetItem; page: Page }) {
   const tool = () => props.item.widget.replace("/", "_")
-  const layout = createMemo(() => json<NonNullable<Parameters<typeof Widget>[0]["layout"]>>(tool(), { size: props.item.size }, props.page.for))
+  const layout = createMemo(() => json<NonNullable<Parameters<typeof Widget>[0]["layout"]>>(tool(), { size: props.item.size }, props.page.subject))
   onSettled(() => {
     const stop = changed(() => refresh(layout))
     const every = setInterval(() => document.visibilityState === "visible" && refresh(layout), 60_000)
@@ -115,13 +115,13 @@ function Card(props: { item: WidgetItem; page: Page }) {
   })
   const act = async (name: string | undefined, inputs: Record<string, unknown>) => {
     try {
-      await call(`${props.item.widget.split("/")[0]}_${name}`, inputs, { for: props.page.for })
+      await call(`${props.item.widget.split("/")[0]}_${name}`, inputs, { subject: props.page.subject })
     } catch (error) {
       toast((error as Error).message)
     }
     refresh(layout)
   }
-  const opens = () => Date.now() > quiet && props.item.opens && open(props.item.opens, { for: props.page.for })
+  const opens = () => Date.now() > quiet && props.item.opens && open(props.item.opens, { subject: props.page.subject })
   return (
     <Errored fallback={(error) => <Widget name={props.item.name} size={props.item.size} problem={String((error() as Error).message ?? error())} />}>
       <Loading fallback={<Widget name={props.item.name} size={props.item.size} />}>
@@ -132,7 +132,7 @@ function Card(props: { item: WidgetItem; page: Page }) {
 }
 
 /// What the window shows, as it says (`notifications/one/showing`): an app and who it's for, or this.
-const [showing, setShowing] = createSignal<{ app: string; for?: string | null }>({ app: HOME })
+const [showing, setShowing] = createSignal<{ app: string; subject?: string | null }>({ app: HOME })
 addEventListener("message", ({ source, data }) => source === parent && data?.method === "notifications/one/showing" && setShowing(data.params))
 
 /// Whether the window is wide and tall enough for the sidebar. The client keeps an app beside it, as wide as this
@@ -173,7 +173,7 @@ interface Section {
 function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => number; go: (index: number) => void }) {
   let nav!: HTMLElement
   const home = () => showing().app === HOME
-  const current = (app: App) => !home() && (showing().app === ACCOUNTS ? app.app === ACCOUNTS : (showing().for ?? null) === (app.for ?? null) && showing().app.split("#")[0] === app.app)
+  const current = (app: App) => !home() && (showing().app === ACCOUNTS ? app.app === ACCOUNTS : (showing().subject ?? null) === (app.subject ?? null) && showing().app.split("#")[0] === app.app)
   // A section's name is selected while its page shows, or while it's collapsed over the app that's open.
   const selected = (section: Section, index: number) => (home() ? props.at() === index : collapsed().has(section.key) && section.apps.some(current))
   const pick = (index: number) => {
@@ -214,7 +214,7 @@ function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => numb
             <Show when={!collapsed().has(section().key)}>
               <List>
                 <For each={section().apps} keyed={(app) => app.app}>
-                  {(app) => <Row start={app().app === ACCOUNTS ? <Folder signs={props.accounts} /> : <img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { for: app().for })} />}
+                  {(app) => <Row start={app().app === ACCOUNTS ? <Folder signs={props.accounts} /> : <img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { subject: app().subject })} />}
                 </For>
               </List>
             </Show>
@@ -226,9 +226,9 @@ function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => numb
 }
 
 /// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts.
-function Tile(props: { app: App; for?: string; icon?: JSX.Element }) {
+function Tile(props: { app: App; subject?: string; icon?: JSX.Element }) {
   return (
-    <button type="button" class="tile" onPointerDown={() => open(props.app.app, { for: props.for, behind: true })} onClick={() => Date.now() > quiet && open(props.app.app, { for: props.for })}>
+    <button type="button" class="tile" onPointerDown={() => open(props.app.app, { subject: props.subject, behind: true })} onClick={() => Date.now() > quiet && open(props.app.app, { subject: props.subject })}>
       <span class="icon">{props.icon ?? <img src={props.app.icon} alt="" />}</span>
       <span>{props.app.name}</span>
     </button>
@@ -263,7 +263,7 @@ function AccountsTile(props: { signs: Signs[] }) {
 /// A dot while any account of the folder's plugins is not ok, as each plugin's `accounts` answers.
 function Attention(props: { signs: Signs[] }) {
   const needed = createMemo(async () => {
-    const lists = await Promise.all(props.signs.map((signs) => json<Account[]>(`${signs.name}_accounts`, {}, signs.for).catch((): Account[] => [])))
+    const lists = await Promise.all(props.signs.map((signs) => json<Account[]>(`${signs.name}_accounts`, {}, signs.subject).catch((): Account[] => [])))
     return lists.flat().some((account) => !account.ok)
   })
   onSettled(() => changed(() => refresh(needed)))
@@ -282,7 +282,7 @@ function PageGrid(props: { page: Page; accounts?: Signs[] }) {
           <For each={props.page.items} keyed={(item) => (item.widget ?? item.app) + (item.size ?? "")}>
             {(item) => (
               <div class="cell" data-item={(item().widget ?? item().app) + (item().size ?? "")} data-size={item().size} ref={held(() => props.page, item)}>
-                <Show when={item().widget} fallback={<Tile app={item() as App} for={props.page.for} />}>
+                <Show when={item().widget} fallback={<Tile app={item() as App} subject={props.page.subject} />}>
                   <Card item={item() as WidgetItem} page={props.page} />
                 </Show>
               </div>
@@ -309,7 +309,7 @@ function Offers() {
   const off = done(async () => {
     const plugin = item()!.app!.split("/")[0]
     if (!(await confirm({ heading: `Remove ${item()!.name} from ${page().name}?`, text: "What it kept stays, and comes back with it.", action: "Remove", destructive: true }))) return
-    await call("uninstall", { name: plugin }, { for: page().for }).catch((error) => toast(error.message))
+    await call("uninstall", { name: plugin }, { subject: page().subject }).catch((error) => toast(error.message))
     refresh(home)
   })
   return (
@@ -397,9 +397,9 @@ function Home(props: { home: { pages: Page[]; settings: App[]; accounts: Signs[]
   const press = (does: () => void) => () => Date.now() > quiet && does()
   const sections = (): Section[] => [
     ...props.home.pages.map((page, index) => ({
-      key: page.for ?? "you",
+      key: page.subject ?? "you",
       name: page.name,
-      apps: [...page.items.filter((item): item is Extract<Item, App> => !!item.app).map((item) => ({ ...item, for: page.for })), ...(index ? [] : [{ app: ACCOUNTS, name: "Accounts", icon: "" }])],
+      apps: [...page.items.filter((item): item is Extract<Item, App> => !!item.app).map((item) => ({ ...item, subject: page.subject })), ...(index ? [] : [{ app: ACCOUNTS, name: "Accounts", icon: "" }])],
     })),
     { key: "settings", name: "Settings", apps: props.home.settings },
   ]

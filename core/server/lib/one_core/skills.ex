@@ -63,7 +63,7 @@ defmodule OneCore.Skills do
 
   Then tell the person in plain words, before they decide: what it does, what it may reach ("It uses your Gmail and
   sends data to api.example.com"), whether it runs in sandbox mode, and anything that surprised you. Install it on
-  their yes: `one install <owner>/<repo>@<commit> --plugin <name>`, with `ONE_FOR=groups/<name>` or `network` for a
+  their yes: `one install <owner>/<repo>@<commit> --plugin <name>`, with `ONE_SUBJECT=groups/<name>` or `network` for a
   group or everyone. It's their own copy, theirs to change, and the network keeps where it came from. In a network's
   repo, `plugins.lock` records it at that commit, and `one install` there installs everything it records again.
 

@@ -13,7 +13,7 @@ harness tell you when it ends; put the folder in your scratch folder.
 ## The fastest loop
 
 - A plugin changed: deploy it into the running network, which takes under a second, its app built again too:
-  `ONE_FOR=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>`. A new build of its NIF
+  `ONE_SUBJECT=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>`. A new build of its NIF
   is deployed too, but a server runs the one it loaded until it's started again in the same folder.
 - Anything else changed (`core/`, `clients/`): stop it and start it again in the same folder. Only what changed is
   built again, so that's seconds.
@@ -24,11 +24,11 @@ harness tell you when it ends; put the folder in your scratch folder.
     export ONE_HOME=<folder>/client ONE_AS=owner
     target/release/one permissions group --name family
     ONE_AS=alice target/release/one permissions groups
-    ONE_FOR=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>
+    ONE_SUBJECT=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>
 
 Always set `ONE_HOME`: without it, `one` (yours or the installed one) is the owner's live client on the live
-network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_FOR=groups/<name>` or
-`ONE_FOR=network` runs a call for a group or the network.
+network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
+`ONE_SUBJECT=network` runs a call for a group or the network.
 
 ## Looking inside the server
 

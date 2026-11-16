@@ -278,8 +278,8 @@ defmodule OneCore.Hooks do
   def nothing(:collect), do: nil
 
   @doc "Tells each plugin that observes `hook` what it's about, for `asked`."
-  def observe(hook, about, {_by, who} = principal) do
-    for {at, name} <- hooking(hook, who), do: __MODULE__.Observer.notify(at, name, hook, about, principal)
+  def observe(hook, about, {_actor, subject} = principal) do
+    for {at, name} <- hooking(hook, subject), do: __MODULE__.Observer.notify(at, name, hook, about, principal)
     :ok
   end
 
@@ -288,8 +288,8 @@ defmodule OneCore.Hooks do
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
   say. `apart` is a plugin that isn't asked, as who it was installed for and its name there.
   """
-  def mutate(hook, about, {_by, who} = principal, apart \\ nil) do
-    Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed,
+  def mutate(hook, about, {_actor, subject} = principal, apart \\ nil) do
+    Enum.reduce_while(hooking(hook, subject) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed,
                                                                          {:ok, changes, by} ->
       with {:ok, changed} <- call_hook(installed, :mutate, hook, about, principal),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
@@ -310,26 +310,26 @@ defmodule OneCore.Hooks do
   refuse. `apart` is a plugin that isn't asked, as who it was installed for and its name there. Where no plugin
   validates `reach` for them, a call or a reach is the network's first owner's alone.
   """
-  def validate(hook, about, {by, who} = principal, apart \\ nil) do
+  def validate(hook, about, {actor, subject} = principal, apart \\ nil) do
     # Who validates is whoever's plugins they are, so what's kept is what they validated.
-    cache_key = if hook == "reach", do: {"reach", {about, Plugins.chain(who)}}
+    cache_key = if hook == "reach", do: {"reach", {about, Plugins.chain(subject)}}
     forgotten = forgotten("reach")
 
     if cache_key != nil and cached?(cache_key) do
       :ok
     else
       # Who may do what is decided only where a plugin validates who reaches what.
-      undecided = hook in ["call", "reach"] and hooking("reach", who) -- [apart] == []
+      undecided = hook in ["call", "reach"] and hooking("reach", subject) -- [apart] == []
 
       decided =
-        with :ok <- if(undecided, do: undecided(by), else: :ok) do
-          Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = installed ->
+        with :ok <- if(undecided, do: undecided(actor), else: :ok) do
+          Enum.find_value(hooking(hook, subject) -- [apart], :ok, fn {_at, plugin} = installed ->
             case call_hook(installed, :validate, hook, about, principal) do
               {:ok, "ok"} ->
                 nil
 
               {:ok, %{"refuse" => why}} ->
-                Logger.info("#{plugin} refused #{hook} for #{who}: #{why}")
+                Logger.info("#{plugin} refused #{hook} for #{subject}: #{why}")
                 {:refuse, why}
 
               {:error, why} ->
@@ -350,8 +350,8 @@ defmodule OneCore.Hooks do
   Asks each plugin that collects `hook` for its part, for `asked`. Gives `{:ok, parts, failed}`: each plugin's part
   by its name, leaving out those that answered `nil`, and why each plugin that couldn't answer couldn't, by its name.
   """
-  def collect(hook, about, {_by, who} = principal) do
-    Enum.reduce(hooking(hook, who), {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, parts, failed} ->
+  def collect(hook, about, {_actor, subject} = principal) do
+    Enum.reduce(hooking(hook, subject), {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, parts, failed} ->
       case call_hook(installed, :collect, hook, about, principal) do
         {:ok, nil} -> {:ok, parts, failed}
         {:ok, part} -> {:ok, Map.put(parts, plugin, part), failed}

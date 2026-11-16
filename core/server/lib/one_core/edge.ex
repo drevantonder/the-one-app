@@ -11,7 +11,7 @@ defmodule OneCore.Edge do
   end
 
   # The list this server is on: its owner's, whom it was started for.
-  defp list, do: Application.get_env(:one_core, :for, "network") <> "/"
+  defp list, do: Application.get_env(:one_core, :owner, "network") <> "/"
 
   @doc """
   Sends `request`, as `Req.request!/1` takes it, to the network's edge or to what it hands out a link to, and

@@ -23,14 +23,14 @@ pub trait InputResolver: Send + Sync {
 }
 
 /// One input to fill in, of a call of a tool of `plugin`: its `format`, what its schema `says`, what was given for
-/// it (`typed`), the call's other inputs, and whoever the call is for (`who`), if it says.
+/// it (`typed`), the call's other inputs, and whoever the call is for (`subject`), if it says.
 pub struct Input<'a> {
     pub plugin: &'a str,
     pub format: &'a str,
     pub says: &'a Value,
     pub typed: Option<&'a str>,
     pub inputs: &'a Map<String, Value>,
-    pub who: Option<&'a str>,
+    pub subject: Option<&'a str>,
 }
 
 /// What One Core fills in itself, first: an input that's for a device, as a key for one is, is filled in after it.
@@ -104,8 +104,8 @@ impl Client {
         let Some(fills) = listed.fills.get(&tool) else { return Ok(()) };
         let plugin = tool.split('_').next().unwrap_or_default();
         // What the device asks to fill these in is for whoever the call is.
-        let who = request["params"]["_meta"]["for"].as_str().map(str::to_owned);
-        let who = who.as_deref();
+        let subject = request["params"]["_meta"]["subject"].as_str().map(str::to_owned);
+        let subject = subject.as_deref();
         if !request["params"]["arguments"].is_object() {
             request["params"]["arguments"] = json!({});
         }
@@ -118,7 +118,7 @@ impl Client {
                 ("device-name", None) => Some(crate::name()),
                 _ => match self.resolvers.iter().find(|resolver| resolver.formats().contains(&format)) {
                     Some(resolver) => {
-                        let input = Input { plugin, format, says, typed, inputs, who };
+                        let input = Input { plugin, format, says, typed, inputs, subject };
                         resolver.resolve(self, input).await?
                     }
                     None => None,

@@ -68,7 +68,7 @@ check() {
 
 say "Two servers on one folder as the bucket"
 start a
-ONE_FOR=network ONE_HOME=$folder/client "$one" deploy --name tally --files-from test/plugins/tally >/dev/null
+ONE_SUBJECT=network ONE_HOME=$folder/client "$one" deploy --name tally --files-from test/plugins/tally >/dev/null
 write client
 start b
 echo "a ran the first write, so it holds the lease"

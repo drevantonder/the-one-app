@@ -36,7 +36,7 @@ interface All {
   machines: { key: string; name?: string }[]
 }
 
-const network = { for: "network" }
+const network = { subject: "network" }
 const backups = createMemo(() => call("backups_destinations", {}, network).then((text): All => JSON.parse(text)))
 changed(() => refresh(backups))
 

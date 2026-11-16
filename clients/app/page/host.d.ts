@@ -17,7 +17,7 @@ export declare const openLink: (url: string) => void
 export interface View {
   key: string
   app: string
-  for: string | undefined
+  subject: string | undefined
   host: string
   frame: HTMLIFrameElement
   tapped?: number
@@ -38,8 +38,8 @@ export interface Resource {
 export interface Commands {
   /** Where the window starts: here, on the page that signs its device in, or why the network couldn't be reached. */
   start(): { signIn?: string; unreached?: string; taps?: boolean }
-  /** The files a server lists for `who`, and the plugins whose open apps are out of date. */
-  apps(args: { who: string | undefined }): { resources: Resource[]; outdated: string[] }
+  /** The files a server lists for `subject`, and the plugins whose open apps are out of date. */
+  apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
@@ -48,8 +48,8 @@ export interface Commands {
   enter(): void
   serve(args: { on: boolean }): string
   update(): string
-  recovery_key(args: { who: string | undefined }): string
-  recover(args: { key: string; who: string | undefined }): void
+  recovery_key(args: { subject: string | undefined }): string
+  recover(args: { key: string; subject: string | undefined }): void
   visible(args: { onScreen: boolean }): void
   opened(args: { view: string; ms: number }): void
   /** Reports to Telemetry, as Telemetry's tool `record` takes a record, what went wrong here. */

@@ -96,7 +96,7 @@ defmodule OneCore.Server do
 
   @doc "Tells `servers`, by their keys, what `notify_servers/3` tells the servers acting for `owners`."
   def notify(servers, owners, what \\ "reload", hooks \\ []) do
-    params = %{for: owners, hooks: hooks}
+    params = %{owners: owners, hooks: hooks}
     notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
     Stream.run(Task.async_stream(servers -- [key()], &ask(&1, notification), timeout: :infinity))
   end
@@ -174,7 +174,7 @@ defmodule OneCore.Server do
     :persistent_term.put(__MODULE__, {key, endpoint})
     {:ok, machine} = :inet.gethostname()
     name = Application.get_env(:one_core, :name) || to_string(machine)
-    Servers.started(key, address, name, Application.get_env(:one_core, :for, "network"))
+    Servers.started(key, address, name, Application.get_env(:one_core, :owner, "network"))
     # The clients that were watching before it stopped may have missed something meanwhile, a new build of its
     # plugins among them, so they're told to ask again.
     changed()

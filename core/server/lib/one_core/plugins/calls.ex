@@ -35,8 +35,8 @@ defmodule OneCore.Plugins.Calls do
 
   # `{:ran, ended}` where the plugin and the tool are there, `{:error, why}` where they aren't, and what `call/5`
   # gives where another server runs it.
-  defp run(name, tool, inputs, {_by, who} = principal, forwarded, caller) do
-    Plugins.run(Plugins.chain(who), name, fn at, versions ->
+  defp run(name, tool, inputs, {_actor, subject} = principal, forwarded, caller) do
+    Plugins.run(Plugins.chain(subject), name, fn at, versions ->
       version = versions[name]
 
       case Enum.find(version.tools, &(&1.name == tool)) do
@@ -55,7 +55,7 @@ defmodule OneCore.Plugins.Calls do
           try do
             call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller}
             result = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
-            if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", cached)
+            if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(subject)]), "forget", cached)
             {:ran, result}
           after
             Hooks.forget(cached)
@@ -116,8 +116,8 @@ defmodule OneCore.Plugins.Calls do
 
   # Runs a call as a span of its trace, and tells the plugins that observe calls how it went: whether it answered,
   # and whether another server ran it. With none observing, it's only run.
-  defp observed(about, {_by, who} = principal, call) do
-    if Hooks.hooking("called", who) == [] do
+  defp observed(about, {_actor, subject} = principal, call) do
+    if Hooks.hooking("called", subject) == [] do
       call.()
     else
       began = System.monotonic_time(:microsecond)
@@ -376,7 +376,7 @@ defmodule OneCore.Plugins.Calls do
   end
 
   # The call as this server would run it.
-  defp new_call(at, name, versions, ask, {by, who}, forwarded) do
+  defp new_call(at, name, versions, ask, {actor, subject}, forwarded) do
     own = "#{at}/own/#{name}"
 
     %Call{
@@ -384,8 +384,8 @@ defmodule OneCore.Plugins.Calls do
       installed: at,
       folder: Path.join(Server.home(), own),
       server: Server.key(),
-      subject: who,
-      actor: by,
+      subject: subject,
+      actor: actor,
       plugin: name,
       who: versions[name].artifact,
       request: ask,

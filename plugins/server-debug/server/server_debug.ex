@@ -23,7 +23,7 @@ defmodule ServerDebug do
   def tools do
     common = %{
       plugin: %{type: "string", description: "The plugin, by the name you find it by: agent-memory"},
-      for: %{
+      subject: %{
         type: "string",
         description: "Whose calls: yours if left out, or a group's or the network's you own (groups/family, network)"
       },
@@ -41,7 +41,7 @@ defmodule ServerDebug do
       %{
         name: "processes",
         description:
-          "A plugin's processes on a server, as observer_cli lists them: the top by memory, reductions or message queue, with each one's current function, and the ETS tables they own. Only those running your calls, and the plugin's own where it's installed only for whoever `for` is",
+          "A plugin's processes on a server, as observer_cli lists them: the top by memory, reductions or message queue, with each one's current function, and the ETS tables they own. Only those running your calls, and the plugin's own where it's installed only for whoever `subject` is",
         inputs:
           takes.(
             %{
@@ -103,20 +103,23 @@ defmodule ServerDebug do
   def call(tool, inputs, %Call{} = call) do
     target = target!(call, inputs)
     on!(call, inputs, target)
-    request = inputs |> Map.drop(["plugin", "for", "server"]) |> Map.merge(%{"op" => tool, "follower" => call.actor})
+
+    request =
+      inputs |> Map.drop(["plugin", "subject", "server"]) |> Map.merge(%{"op" => tool, "follower" => call.actor})
+
     result = probed(target, request, tool == "logs")
     "#{target.name} on #{Servers.name(Server.key()) || Server.key()}, for #{target.whose}. " <> shown(tool, result)
   end
 
-  # The plugin `plugin` as whoever `for` is finds it, if whoever asked may look into it.
-  defp target!(%Call{actor: by} = call, %{"plugin" => name} = inputs) do
-    if by == nil or User.link?(by), do: raise("Only a person looks into a plugin")
-    whose = inputs["for"] || by
+  # The plugin `plugin` as whoever `subject` is finds it, if whoever asked may look into it.
+  defp target!(%Call{actor: actor} = call, %{"plugin" => name} = inputs) do
+    if actor == nil or User.link?(actor), do: raise("Only a person looks into a plugin")
+    whose = inputs["subject"] || actor
 
     # Another person's calls are never looked at, whoever owns the network: what they were given is theirs.
     group = whose == "network" or String.starts_with?(whose, "groups/")
 
-    if not (whose == by or (group and Call.owns?(%{call | subject: whose}))),
+    if not (whose == actor or (group and Call.owns?(%{call | subject: whose}))),
       do: raise("You look only at your own calls, or a group's or the network's you own, and #{whose} isn't one")
 
     {at, version} =
@@ -124,7 +127,7 @@ defmodule ServerDebug do
         with %Version{} = version <- Plugins.versions([at])[name], do: {at, version}
       end) || raise "#{whose} has no plugin named #{name}"
 
-    if not editor?(by, version.artifact),
+    if not editor?(actor, version.artifact),
       do: raise("You aren't an editor of #{name} (#{version.artifact}): only whoever may deploy it looks into it")
 
     %{name: name, at: at, version: version, whose: whose}
@@ -186,7 +189,7 @@ defmodule ServerDebug do
         raise("#{target.name} is sensitive: what it's given and keeps are secrets, so nothing looks into it as it runs")
 
     artifact = version.artifact
-    # The plugin's own processes are shown where everyone it's installed for here is whoever `for` is.
+    # The plugin's own processes are shown where everyone it's installed for here is whoever `subject` is.
     own? = Enum.all?(Plugins.installed_for(artifact), &(&1 == target.whose))
 
     label = fn pid ->

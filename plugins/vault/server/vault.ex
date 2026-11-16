@@ -773,11 +773,11 @@ defmodule Vault do
   # Whoever the service sent back is nobody the network knows: what says whose sign-in this finishes is its
   # `state`, which only the browser that began it was given, and which starts with whose it is.
   # A server that passed this on has checked that, and asks for whoever's it is, by nobody.
-  def call("oauth_callback", %{"state" => state} = inputs, %Call{actor: by} = call) do
+  def call("oauth_callback", %{"state" => state} = inputs, %Call{actor: actor} = call) do
     with [whose, _random] <- String.split(state, "."),
          {:ok, owner} <- Base.url_decode64(whose, padding: false),
          true <- User.owner?(owner),
-         true <- by == User.link("#{owner}/#{state}") or (by == nil and call.subject == owner) do
+         true <- actor == User.link("#{owner}/#{state}") or (actor == nil and call.subject == owner) do
       call = %{call | subject: owner, actor: nil}
       artifact = own(call)
 
@@ -1000,8 +1000,10 @@ defmodule Vault do
   end
 
   # Someone's Vault is theirs alone: no relation tuple has anyone else ask for a user, the network's owner included.
-  defp mine!(%Call{subject: who, actor: by} = call) do
-    if String.starts_with?(who, "users/") and by not in [who, nil], do: raise("#{who}'s Vault is theirs alone.")
+  defp mine!(%Call{subject: subject, actor: actor} = call) do
+    if String.starts_with?(subject, "users/") and actor not in [subject, nil],
+      do: raise("#{subject}'s Vault is theirs alone.")
+
     call
   end
 

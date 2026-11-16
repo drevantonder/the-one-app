@@ -29,7 +29,7 @@ start() {
   if ! grep -q -m1 "A server is running" <(tail -F --pid=$! -n +1 "$folder/$1.log"); then
     local approve
     approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log"; exit 1; }
-    ONE_FOR=network ONE_HOME=$folder/client "$one" $approve >/dev/null
+    ONE_SUBJECT=network ONE_HOME=$folder/client "$one" $approve >/dev/null
     start "$1"
     return
   fi

@@ -133,7 +133,7 @@ defmodule OneCore.Mcp do
       # Another server saying there's something new in the bucket for some owners, or with none, this server saying
       # it can reach its network's address again.
       {:ok, %{"method" => "notifications/one/reload"} = notification} ->
-        case notification["params"]["for"] do
+        case notification["params"]["owners"] do
           nil -> Server.reconnected()
           owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Server.reload(owner)
         end
@@ -199,13 +199,13 @@ defmodule OneCore.Mcp do
   end
 
   # `search` and `execute` are this server's own, and a sharing link's holder has only the tools it's given.
-  defp result("tools/call", %{"name" => name} = params, from, {by, _who} = principal, forwarded)
+  defp result("tools/call", %{"name" => name} = params, from, {actor, _subject} = principal, forwarded)
        when name in ["search", "execute"] do
     tool = if name == "search", do: Search.tool(), else: CodeMode.tool()
     inputs = Map.get(params, "arguments") || %{}
 
     cond do
-      holder?(by) ->
+      holder?(actor) ->
         {:error, -32602, "There's no tool #{name} for a sharing link's holder"}
 
       not ExJsonSchema.Validator.valid?(
@@ -220,9 +220,9 @@ defmodule OneCore.Mcp do
   end
 
   # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
-  # asks for (a request that says `who`). A client calls as nobody's plugin.
+  # asks for (a request that says its `actor`). A client calls as nobody's plugin.
   defp result("tools/call", %{"name" => name} = params, _from, principal, forwarded) do
-    caller = if Map.has_key?(meta(params), "who"), do: meta(params)["caller"]
+    caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
 
     case call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller) do
       {:ok, result} -> changed(name, %{content: content(name, result)}, principal)
@@ -234,7 +234,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("initialize", params, _from, {by, who}, _forwarded) do
+  defp result("initialize", params, _from, {actor, subject}, _forwarded) do
     requested = params["protocolVersion"]
 
     {:ok,
@@ -242,18 +242,18 @@ defmodule OneCore.Mcp do
        protocolVersion: if(requested in @initialized, do: requested, else: hd(@initialized)),
        capabilities: @capabilities,
        serverInfo: server_info(),
-       instructions: instructions(if(holder?(by), do: :holder, else: mode(params)), who)
+       instructions: instructions(if(holder?(actor), do: :holder, else: mode(params)), subject)
      }}
   end
 
   # What a client of a version since 2026-07-28 may ask first, or to tell whether a server speaks one at all.
-  defp result("server/discover", params, _from, {by, who}, _forwarded) do
+  defp result("server/discover", params, _from, {actor, subject}, _forwarded) do
     {:ok,
      %{
        supportedVersions: @versions,
        capabilities: @capabilities,
        _meta: %{"io.modelcontextprotocol/serverInfo" => server_info()},
-       instructions: instructions(if(holder?(by), do: :holder, else: mode(params)), who)
+       instructions: instructions(if(holder?(actor), do: :holder, else: mode(params)), subject)
      }}
   end
 
@@ -275,12 +275,12 @@ defmodule OneCore.Mcp do
   end
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
-  defp result("tools/list", params, _from, {by, who}, _forwarded) do
-    listed = listed(who, holder?(by))
+  defp result("tools/list", params, _from, {actor, subject}, _forwarded) do
+    listed = listed(subject, holder?(actor))
 
     tools =
       cond do
-        holder?(by) -> listed
+        holder?(actor) -> listed
         mode(params) == :code -> [Search.tool(), CodeMode.tool() | Enum.filter(listed, &(&1.name in @direct))]
         true -> [Search.tool() | listed]
       end
@@ -298,10 +298,10 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("resources/" <> _ = method, params, _from, {by, who}, _forwarded) do
-    if holder?(by),
+  defp result("resources/" <> _ = method, params, _from, {actor, subject}, _forwarded) do
+    if holder?(actor),
       do: {:error, -32002, "A sharing link's holder reads nothing of a network but what a tool gives them"},
-      else: resources(method, params, who)
+      else: resources(method, params, subject)
   end
 
   defp result(method, _params, _from, _principal, _forwarded),
@@ -396,17 +396,17 @@ defmodule OneCore.Mcp do
 
   defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
-  defp own("search", %{"query" => query} = inputs, params, _from, {_by, who}, _forwarded) do
-    text = Search.run(query, Map.get(inputs, "limit", 8), who, mode(params))
+  defp own("search", %{"query" => query} = inputs, params, _from, {_actor, subject}, _forwarded) do
+    text = Search.run(query, Map.get(inputs, "limit", 8), subject, mode(params))
     {:ok, %{content: [%{type: "text", text: text}]}}
   end
 
   # A script's calls are each answered here as that call of the tool would be, for whoever asked.
-  defp own("execute", %{"code" => code}, _params, from, {_by, who} = principal, forwarded) do
+  defp own("execute", %{"code" => code}, _params, from, {_actor, subject} = principal, forwarded) do
     call = fn name, inputs -> result("tools/call", %{"name" => name, "arguments" => inputs}, from, principal, forwarded) end
 
     tools =
-      for tool <- listed(who, false),
+      for tool <- listed(subject, false),
           do: %{name: tool.name, plugin: tool[:_meta][:plugin], description: tool.description, input: tool.inputSchema}
 
     {done, text} = CodeMode.run(code, tools, call)
@@ -480,8 +480,8 @@ defmodule OneCore.Mcp do
   defp content(_name, text), do: [%{type: "text", text: text}]
 
   # After a tool that doesn't only read, every client connected here is told that something changed.
-  defp changed(name, result, {_by, who}) do
-    if not reads?(name, who), do: Server.changed()
+  defp changed(name, result, {_actor, subject}) do
+    if not reads?(name, subject), do: Server.changed()
     {:ok, result}
   end
 
@@ -500,7 +500,7 @@ defmodule OneCore.Mcp do
   defp server_info, do: %{name: "one", version: Builds.build()}
 
   # A sharing link's holder sees no skill.
-  defp skills({by, who}), do: if(holder?(by), do: [], else: Skills.list(who))
+  defp skills({actor, subject}), do: if(holder?(actor), do: [], else: Skills.list(subject))
 
   # What an agent is told when it connects: the rules first, then how it finds tools as it calls them, then where
   # the skills are, which say the rest, and the plugins there are, as many as fit. Not every client lists skills yet,

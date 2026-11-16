@@ -7,13 +7,13 @@ import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Icon, leave, List, open, Problem, Row, Screen, Section, Skeleton, toast } from "ui"
 import type { Account, Page, Signs } from "./types.ts"
 
-const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
+const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
 /// Every page's plugins with accounts, each once, by its title.
 const signs = createMemo(async () => {
   const groups = await json<{ group: string }[]>("permissions_groups").catch((): { group: string }[] => [])
-  const pages = await Promise.all([undefined, ...groups.map(({ group }) => group), "network"].map((who) => json<Page>("home-screen_page", {}, who).then((page) => ({ ...page, for: who }))))
-  const all = new Map(pages.flatMap((page) => page.accounts.map((one): [string, Signs] => [one.plugin, { ...one, for: page.for }])))
+  const pages = await Promise.all([undefined, ...groups.map(({ group }) => group), "network"].map((who) => json<Page>("home-screen_page", {}, who).then((page) => ({ ...page, subject: who }))))
+  const all = new Map(pages.flatMap((page) => page.accounts.map((one): [string, Signs] => [one.plugin, { ...one, subject: page.subject }])))
   return [...all.values()].sort((a, b) => a.title.localeCompare(b.title))
 })
 changed(() => refresh(signs))
@@ -25,18 +25,18 @@ const does = (what: () => Promise<unknown>) => what().catch((error) => toast(err
 /// at the web address its `sign_in` answers, in the device's browser.
 const signIn = (plugin: Signs, account?: string) =>
   does(async () => {
-    if (plugin.sign_in) return open(account ? `${plugin.sign_in}#${encodeURIComponent(account)}` : plugin.sign_in, { for: plugin.for })
-    const { url } = await json<{ url: string }>(`${plugin.name}_sign_in`, account ? { account } : {}, plugin.for)
+    if (plugin.sign_in) return open(account ? `${plugin.sign_in}#${encodeURIComponent(account)}` : plugin.sign_in, { subject: plugin.subject })
+    const { url } = await json<{ url: string }>(`${plugin.name}_sign_in`, account ? { account } : {}, plugin.subject)
     return open(url)
   })
 
 /// A plugin's section: its accounts, once its `accounts` answers, or why it couldn't. With none, Add Account is all.
 function Accounts(props: { plugin: Signs }) {
-  const accounts = createMemo(() => json<Account[]>(`${props.plugin.name}_accounts`, {}, props.plugin.for))
+  const accounts = createMemo(() => json<Account[]>(`${props.plugin.name}_accounts`, {}, props.plugin.subject))
   changed(() => refresh(accounts))
   const signOut = async (account: string) => {
     const sure = await confirm({ heading: `Sign out of ${account}?`, text: `${props.plugin.title} can't use it until it's signed in again.`, action: "Sign Out", destructive: true })
-    if (sure) await does(() => call(`${props.plugin.name}_sign_out`, { account }, { for: props.plugin.for }))
+    if (sure) await does(() => call(`${props.plugin.name}_sign_out`, { account }, { subject: props.plugin.subject }))
     refresh(accounts)
   }
   return (

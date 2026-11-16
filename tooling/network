@@ -11,7 +11,7 @@
 # The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
-# command acts as that user, and ONE_FOR=groups/<name> or ONE_FOR=network has it run for a group or the network.
+# command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
 # Its first owner is the user `owner`.
 #
 # --standby starts a second server, which takes over when the first stops. Each server is called after its folder,
@@ -103,7 +103,7 @@ start() {
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
-    ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$one" $approve
+    ONE_AS=owner ONE_SUBJECT=network ONE_HOME=$folder/client "$one" $approve
     start "$1"
   fi
 }

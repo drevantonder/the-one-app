@@ -51,7 +51,7 @@ started+=($!)
 grep -q -m1 "A network is running" <("$tail" -F --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 client=$folder/network/client
 # Its owner, at a device of theirs that isn't the second machine.
-owner() { ONE_HOME=$client ONE_AS=owner ONE_FOR=network "$one" "$@"; }
+owner() { ONE_HOME=$client ONE_AS=owner ONE_SUBJECT=network "$one" "$@"; }
 first=$(grep -o "running in [^ ]*: [0-9a-f]*" "$folder/network/server.log" | grep -o "[0-9a-f]*$")
 echo "its server: $first"
 
@@ -65,7 +65,7 @@ release() {
     (cd "$clone" && eval "$2")
     git -C "$clone" -c user.name=test -c user.email=test@localhost commit -q --allow-empty -am "$1"
   fi
-  (cd "$clone" && PATH=$root/target/release:$PATH ONE_HOME=$client ONE_AS=owner ONE_FOR=network tooling/release "server/$kind" "$program/$kind") >"$folder/release-$1.log" 2>&1 ||
+  (cd "$clone" && PATH=$root/target/release:$PATH ONE_HOME=$client ONE_AS=owner ONE_SUBJECT=network tooling/release "server/$kind" "$program/$kind") >"$folder/release-$1.log" 2>&1 ||
     { tail -30 "$folder/release-$1.log" >&2; exit 1; }
   grep -E "^(server|one|one-cli)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
   "$clone/tooling/version"
@@ -176,7 +176,7 @@ if [[ -n $pc ]]; then
   gateway=${address##*:}
   ssh -N -o ExitOnForwardFailure=yes -R "$gateway:localhost:$gateway" -R "${bucket##*:}:$bucket" "$pc" &
   started+=($!)
-  on_machine() { timeout 300 ssh "$pc" "set ONE_HOME=$home&& set ONE_AS=owner&& set ONE_FOR=network&& \"$machine\\one.exe\" $*" | tr -d '\r'; }
+  on_machine() { timeout 300 ssh "$pc" "set ONE_HOME=$home&& set ONE_AS=owner&& set ONE_SUBJECT=network&& \"$machine\\one.exe\" $*" | tr -d '\r'; }
   for tool in erl elixir mix cargo rustc bun; do
     ! ssh "$pc" "where $tool" >/dev/null 2>&1 || { echo "$tool is on the PC's PATH" && exit 1; }
   done
@@ -190,7 +190,7 @@ else
   # Each command there is given five minutes.
   on_machine() {
     timeout 300 env -i HOME="$machine/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR-}" \
-      DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS-}" ONE_AS=owner ONE_FOR=network "$machine/bin/one" "$@"
+      DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS-}" ONE_AS=owner ONE_SUBJECT=network "$machine/bin/one" "$@"
   }
   for tool in erl elixir mix cargo rustc bun; do
     ! env -i PATH=/usr/bin:/bin sh -c "command -v $tool" >/dev/null || { echo "$tool is on the machine's PATH" && exit 1; }

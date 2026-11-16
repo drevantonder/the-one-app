@@ -43,13 +43,13 @@ const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// acting for the network deploys what it ships with that the network has never had before it's running.
 const START: Duration = Duration::from_secs(180);
 
-/// Makes this device a server of whoever it's for: its person, or the group or network `ONE_FOR` names. It's put
+/// Makes this device a server of whoever it's for: its person, or the group or network `ONE_SUBJECT` names. It's put
 /// on their list, its build is downloaded and checked, and the system starts it now and whenever it starts.
 pub async fn on(client: &Client) -> Result<String> {
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
     let here = Here::of(&client::home()?);
     let key = here.key()?;
-    let who = match env::var("ONE_FOR") {
+    let who = match env::var("ONE_SUBJECT") {
         Ok(who) => who,
         Err(_) => client.who().context("This device isn't signed in yet. Sign in on it first.")?,
     };
@@ -64,7 +64,7 @@ pub async fn on(client: &Client) -> Result<String> {
     }
     // The server runs with the client it updates by, and finds programs where its person's terminal does. Windows
     // starts a task with its person's environment as they log in, PATH and all.
-    let mut env = vec![("ONE_HOME", client::home()?.display().to_string()), ("ONE_FOR", who.clone())];
+    let mut env = vec![("ONE_HOME", client::home()?.display().to_string()), ("ONE_SUBJECT", who.clone())];
     #[cfg(unix)]
     env.push(("PATH", login_path().await?));
     // A network being built has a command say who it acts as, and so does what runs here for it.
@@ -152,7 +152,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     let here = Here::of(&client::home()?);
     let key = here.key()?;
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
-    let who = env::var("ONE_FOR").context("ONE_FOR says who the server is for")?;
+    let who = env::var("ONE_SUBJECT").context("ONE_SUBJECT says who the server is for")?;
     // What the server says goes on, in what the system keeps of this program's output.
     let log = here.folder.join("server.log");
     system::bound(&log)?;
@@ -171,7 +171,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             .args(["eval", "OneCore.Release.serve()"])
             .env("ONE_SERVER_HOME", here.folder.join("home"))
             .env("ONE_ADDRESS", &address)
-            .env("ONE_FOR", &who)
+            .env("ONE_SUBJECT", &who)
             .env("ONE_DEVICE", client.key())
             .env("ONE_NAME", client::name())
             .stdin(Stdio::piped())

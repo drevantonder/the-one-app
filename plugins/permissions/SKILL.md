@@ -42,7 +42,7 @@ Its words:
 - `groups` lists the groups whoever asks is in, each with what it's called, its members and owners.
 - `group` makes a group called what it's given (The Smiths is `groups/the-smiths`), with whoever asks as its
   owner and first member. A member has a call run for the group, with the group's artifacts:
-  `ONE_FOR=groups/family` before a command, and an app opened from the group's Home Screen page. Every user is a member
+  `ONE_SUBJECT=groups/family` before a command, and an app opened from the group's Home Screen page. Every user is a member
   of the network.
 - `link` makes a sharing link to an artifact, as a viewer or an editor. Whoever holds the link reaches the
   artifact without signing in, through the tools that take a link's holder, until its tuple is removed with

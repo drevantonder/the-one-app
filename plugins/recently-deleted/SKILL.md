@@ -10,7 +10,7 @@ Recently Deleted keeps what's removed for 30 days, as it was, and then erases it
 is named by where it is, like `users/alice/made/git-repos/notes`, and its owner removes and restores it.
 
 - `list` lists what you own that was removed in the last 30 days, the latest first, with who removed it and when.
-  For a group's things, ask for the group (`ONE_FOR=groups/<name>`).
+  For a group's things, ask for the group (`ONE_SUBJECT=groups/<name>`).
 - `restore --artifact <name>` brings one back as it was. If something new was made at the same name since, it says
   so: that has to be removed first.
 - `remove --artifact <name>` removes one. An app's own way of removing, such as `git-repos remove`, does the same and

@@ -35,7 +35,7 @@ interface At {
   commit?: string
 }
 
-const json = <T,>(tool: string, inputs?: object, options?: { for?: string }): Promise<T> => call(tool, inputs, options).then(JSON.parse)
+const json = <T,>(tool: string, inputs?: object, options?: { subject?: string }): Promise<T> => call(tool, inputs, options).then(JSON.parse)
 const repos = createMemo(() => json<{ repo: string; whose: string; pushed?: number }[]>("git-repos_list"))
 changed(() => refresh(repos))
 
@@ -80,7 +80,7 @@ const Branchy = () => (
 )
 
 /// Does something that changes a repo, and says why if it couldn't. → whether it did.
-async function does(tool: string, inputs: object, options?: { for?: string }) {
+async function does(tool: string, inputs: object, options?: { subject?: string }) {
   try {
     const result = await call(tool, inputs, options)
     refresh(repos)
@@ -101,7 +101,7 @@ function NewRepo() {
   const make = async (event: SubmitEvent) => {
     event.preventDefault()
     const { name } = Object.fromEntries(new FormData(event.target as HTMLFormElement)) as Record<string, string>
-    if (!(await does("git-repos_create", { name }, forWhom() ? { for: forWhom() } : undefined))) return
+    if (!(await does("git-repos_create", { name }, forWhom() ? { subject: forWhom() } : undefined))) return
     setAdding(false)
     setOpen(`${forWhom() || (await mine())}/made/git-repos/${name}`)
   }

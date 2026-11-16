@@ -173,7 +173,7 @@ defmodule Backups do
 
   defp owner!(call) do
     cond do
-      call.subject != "network" -> raise "Backups are the network's: ask for the network (ONE_FOR=network)."
+      call.subject != "network" -> raise "Backups are the network's: ask for the network (ONE_SUBJECT=network)."
       not Call.owns?(call) -> raise "Only the network's owners see and change its backups."
       true -> :ok
     end

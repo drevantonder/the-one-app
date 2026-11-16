@@ -18,13 +18,13 @@ interface App {
 }
 
 const named = (who?: string) => (!who ? "You" : who === "network" ? "Everyone" : who.replace("groups/", "").replace(/^./, (first) => first.toUpperCase()))
-const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
+const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
 /// Every app there is, and the pages this user sees, each with the plugins it has.
 const store = createMemo(async () => {
   const groups = await json<{ group: string }[]>("permissions_groups").catch((): { group: string }[] => [])
   const whos = [undefined, ...groups.map(({ group }) => group), "network"]
-  const [all, pages] = await Promise.all([json<App[]>("home-screen_store"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, for: who, name: named(who) }))))])
+  const [all, pages] = await Promise.all([json<App[]>("home-screen_store"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, subject: who, name: named(who) }))))])
   const apps = location.hash === "#accounts" ? all.filter((app) => app.accounts) : all
   return { apps, pages }
 })
@@ -45,9 +45,9 @@ const [managing, setManaging] = createSignal<string>()
 async function put(page: Page, app: App, there: boolean) {
   const item = on(page, app)
   try {
-    if (there) await call("home-screen_add", { plugin: app.plugin }, { for: page.for }).catch(() => call("install", { plugin: app.plugin }, { for: page.for }))
-    else if (item?.put) await call("home-screen_remove", { plugin: app.plugin }, { for: page.for })
-    else await call("uninstall", { name: item!.name }, { for: page.for })
+    if (there) await call("home-screen_add", { plugin: app.plugin }, { subject: page.subject }).catch(() => call("install", { plugin: app.plugin }, { subject: page.subject }))
+    else if (item?.put) await call("home-screen_remove", { plugin: app.plugin }, { subject: page.subject })
+    else await call("uninstall", { name: item!.name }, { subject: page.subject })
   } catch (error) {
     toast((error as Error).message)
   }

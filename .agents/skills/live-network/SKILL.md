@@ -9,7 +9,7 @@ anything you build, use a network of your own (`local-network`).
 
 ## You may
 
-- Read: `one builds`, `one --help`, `ONE_FOR=network one code --name <plugin>`, a plugin's read-only tools.
+- Read: `one builds`, `one --help`, `ONE_SUBJECT=network one code --name <plugin>`, a plugin's read-only tools.
 - Release your own change, once it's on `main`, by the smallest path (`release`).
 
 ## You may not, without the owner saying so

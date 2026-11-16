@@ -39,11 +39,11 @@ interface Thing {
   seen?: "on" | number | null
   build?: string
   behind?: boolean
-  for?: string
+  subject?: string
   services?: (Service & { on: boolean })[]
 }
 
-const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
+const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
 /// What's known of the devices and servers, each as a row says it. Whoever owns the network sees its servers too.
 const mine = createMemo(async () => {
@@ -75,7 +75,7 @@ const mine = createMemo(async () => {
       const runs = (theirs?.services ?? []).map((service) => ({ ...service, on: service.servers.includes(server.server) }))
       // Only a server that was installed takes the latest build when it's asked.
       const updates = server.installed ? behind("server", server) : undefined
-      servers.set(server.server, { ...server, id: server.server, for: who, here: server.server === here.server, behind: updates, services: runs })
+      servers.set(server.server, { ...server, id: server.server, subject: who, here: server.server === here.server, behind: updates, services: runs })
     }
   }
   return { devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here }
@@ -108,7 +108,7 @@ async function doing(does: () => Promise<unknown>) {
 }
 
 /// Has a server take the latest builds, or this device: `one update`.
-const update = (thing: Thing) => (thing.kind ? client({ update: true }).then(({ message }) => toast(message)) : call("update", { server: thing.id }, { for: thing.for }))
+const update = (thing: Thing) => (thing.kind ? client({ update: true }).then(({ message }) => toast(message)) : call("update", { server: thing.id }, { subject: thing.subject }))
 
 /// Takes a device out once its person has said so. Taking this one out is signing out, and the client starts again
 /// where a device that isn't in does. A device that's taken out forgets what it kept of theirs when it's next on.
@@ -123,7 +123,7 @@ async function remove(device: Thing) {
 /// Takes a server off the list of whoever it acts for. It no longer runs their apps.
 async function removeServer(server: Thing) {
   if (!(await confirm({ heading: `Remove ${server.name ?? "this server"}?`, text: "It stops running your apps. Another server takes its work.", action: "Remove", destructive: true }))) return
-  doing(() => call("remove_server", { key: server.id }, { for: server.for }))
+  doing(() => call("remove_server", { key: server.id }, { subject: server.subject }))
 }
 
 const [open, setOpen] = createSignal<string>()
@@ -173,7 +173,7 @@ function Detail(props: { thing: Thing; all: All }) {
                     <Switch
                       aria-label={service().called}
                       checked={service().on}
-                      onChange={(event) => doing(() => call(event.currentTarget.checked ? "install_service" : "uninstall_service", { plugin: service().plugin, service: service().service, server: server()!.id }, { for: server()!.for }))}
+                      onChange={(event) => doing(() => call(event.currentTarget.checked ? "install_service" : "uninstall_service", { plugin: service().plugin, service: service().service, server: server()!.id }, { subject: server()!.subject }))}
                     />
                   }
                 />

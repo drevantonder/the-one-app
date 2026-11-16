@@ -194,10 +194,10 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   const modern = headers && (VERSION in meta || (headers.get("mcp-protocol-version") ?? "") >= "2026-07-28");
   const mismatch = modern && mismatched(headers, call);
   if (mismatch) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32020, message: `Header mismatch: ${mismatch}` } }, { status: 400 });
-  const asks_for = "device" in from ? meta.for : undefined;
+  const subject = "device" in from ? meta.subject : undefined;
   const traceparent = traced(meta.traceparent ?? headers?.get("traceparent") ?? undefined);
   const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP) || key === "progressToken"));
-  const forwardedMeta = { ...mcp, ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
+  const forwardedMeta = { ...mcp, ...from, traceparent, ...(typeof subject === "string" && { subject }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: forwardedMeta } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const forwarded = env.RELAY.forward(servers, message);
@@ -303,7 +303,7 @@ async function file(request: Request, env: Env, url: URL) {
   const who = await signedIn(request, env);
   if ("refused" in who) return new Response("Sign in again", { status: 401 });
   const [, ...whose] = app.split(".");
-  const meta = whose.length ? { _meta: { for: whose.reverse().join("/") } } : {};
+  const meta = whose.length ? { _meta: { subject: whose.reverse().join("/") } } : {};
   const ask = async <Result,>(method: string, params: object): Promise<Result | null> => {
     const answer = await forward(env, JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, ...meta } }), { device: who.device }, [`${who.who}/`, NETWORK]);
     if (answer.status !== 200) return null;

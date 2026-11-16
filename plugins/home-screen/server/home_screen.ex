@@ -381,7 +381,7 @@ defmodule HomeScreen do
 
       true ->
         "Install it for everyone, then approve it again, which tells #{request["by"]}: " <>
-          "ONE_FOR=network one install #{request["source"]} --plugin #{request["name"]}"
+          "ONE_SUBJECT=network one install #{request["source"]} --plugin #{request["name"]}"
     end
   end
 

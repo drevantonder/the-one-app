@@ -13,7 +13,7 @@ if home = System.get_env("ONE_SERVER_HOME") do
     home: home,
     address: address,
     bucket: {OneCore.Bucket.S3, address},
-    for: System.get_env("ONE_FOR", "network"),
+    owner: System.get_env("ONE_SUBJECT", "network"),
     device: System.get_env("ONE_DEVICE"),
     # What its machine is called, as its owner named it, which the server is listed by.
     name: System.get_env("ONE_NAME"),

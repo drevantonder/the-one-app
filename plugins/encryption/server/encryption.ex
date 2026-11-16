@@ -129,7 +129,7 @@ defmodule Encryption do
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
   defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
     {at, plugin} = OneCore.Plugins.installed(call.subject, encryption)
-    meta = %{who: nil, for: User.owner(name), forwarded: true}
+    meta = %{actor: nil, subject: User.owner(name), forwarded: true}
     ask = %{installed: at, plugin: plugin, function: "looked", arguments: [name], _meta: meta}
     for server <- servers -- [call.server], do: Server.request(server, "plugins/call", ask)
   end
@@ -181,20 +181,24 @@ defmodule Encryption do
 
   # What's encrypted for someone is theirs alone to hand keys for: a user's by that user, and a group's or the
   # network's by an owner of it. No relation tuple lets anyone else, the network's owner included.
-  defp owner!(%Call{subject: who, actor: by} = call, artifact) do
+  defp owner!(%Call{subject: subject, actor: actor} = call, artifact) do
     cond do
-      User.owner(artifact) != who ->
-        raise "#{artifact} isn't #{who}'s"
+      User.owner(artifact) != subject ->
+        raise "#{artifact} isn't #{subject}'s"
 
-      String.starts_with?(who, "users/") and by != who ->
-        raise "What's encrypted for #{who} is theirs alone to hand the keys of."
+      String.starts_with?(subject, "users/") and actor != subject ->
+        raise "What's encrypted for #{subject} is theirs alone to hand the keys of."
 
-      String.starts_with?(who, "users/") ->
+      String.starts_with?(subject, "users/") ->
         :ok
 
       true ->
         with {:refuse, why} <-
-               Hooks.validate("reach", %{"who" => by, "relation" => "owner", "artifact" => who}, {by, who}),
+               Hooks.validate(
+                 "reach",
+                 %{"who" => actor, "relation" => "owner", "artifact" => subject},
+                 {actor, subject}
+               ),
              do: raise(why)
     end
 
@@ -304,8 +308,8 @@ defmodule Encryption do
   end
 
   # Where an owner's key is kept, encrypted to each of their devices. It's theirs alone: nobody asks for a user.
-  defp key(%Call{subject: who, actor: by} = call) do
-    if String.starts_with?(who, "users/") and by != who, do: raise("#{who}'s key is theirs alone.")
+  defp key(%Call{subject: subject, actor: actor} = call) do
+    if String.starts_with?(subject, "users/") and actor != subject, do: raise("#{subject}'s key is theirs alone.")
     Call.make(call, "key")
   end
 

@@ -34,13 +34,13 @@ let launcher = ""
 /// The room the launcher keeps along the start of its frame beside the app that's showing, which that app's frame
 /// leaves clear: a CSS length, as the launcher says (`notifications/one/beside`), or none.
 let room = ""
-/// The apps that are open, by who each is for and what it is: `{ key, app, for, host, frame, tapped, drawn, over }`.
+/// The apps that are open, by who each is for and what it is: `{ key, app, subject, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
 /** @type {Map<string, View>} */
 const open = new Map()
-/** @param {string} app @param {string} [who] */
-const key = (app, who) => `${who ?? ""}|${app}`
+/** @param {string} app @param {string} [subject] */
+const key = (app, subject) => `${subject ?? ""}|${app}`
 /// Each plugin's first app, by the plugin's name, among this user's, and one that isn't a part of Settings if it
 /// has one: what a notification from it opens.
 /** @type {Map<string, string>} */
@@ -50,9 +50,9 @@ let first = new Map()
 /** @type {Set<string | undefined>} */
 const listed = new Set()
 
-/// What an app's address is named by: its plugin's name, then who it's for if that isn't its user, last part first.
-/** @param {string} app @param {string} [who] */
-const host = (app, who) => [app.split("/")[0], ...(who ? who.split("/").reverse() : [])].join(".")
+/// What an app's address is named by: its plugin's name, then who it's for (its subject) if that isn't its user, last part first.
+/** @param {string} app @param {string} [subject] */
+const host = (app, subject) => [app.split("/")[0], ...(subject ? subject.split("/").reverse() : [])].join(".")
 
 /// Whether a server answered the last thing this client asked, and since when none has, and why its files couldn't
 /// be listed, if they couldn't.
@@ -128,15 +128,15 @@ addEventListener("online", () => {
   if (!answering) invoke("refresh", { view: key(launcher) })
 })
 
-/// Lists the files a server has for `who`, which the client keeps, so an app opens with no server up. An open app
+/// Lists the files a server has for `subject`, which the client keeps, so an app opens with no server up. An open app
 /// whose plugins have a new version loads again.
-/** @param {string} [who] */
-async function list(who) {
-  listed.add(who)
+/** @param {string} [subject] */
+async function list(subject) {
+  listed.add(subject)
   try {
-    const { resources, outdated } = await invoke("apps", { who })
+    const { resources, outdated } = await invoke("apps", { subject })
     for (const view of open.values()) if (outdated.includes(view.host)) view.stale = true
-    if (!who) {
+    if (!subject) {
       unlisted = undefined
       // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
       const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
@@ -152,7 +152,7 @@ async function list(who) {
       if (tooOld) launcher = ""
     }
   } catch (error) {
-    if (!who) unlisted = `${error}`.replace(/[^.]$/, "$&.")
+    if (!subject) unlisted = `${error}`.replace(/[^.]$/, "$&.")
   }
   problem()
   reload()
@@ -178,13 +178,13 @@ async function reload(now = false) {
 byId("reload").addEventListener("click", () => reload(true))
 
 /// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown.
-/** @param {string} app @param {string} [who] @returns {View} */
-function load(app, who) {
-  const at = key(app, who)
+/** @param {string} app @param {string} [subject] @returns {View} */
+function load(app, subject) {
+  const at = key(app, subject)
   const opened = open.get(at)
   if (opened) return opened
-  if (!listed.has(who)) list(who)
-  const place = { key: at, app, for: who, host: host(app, who) }
+  if (!listed.has(subject)) list(subject)
+  const place = { key: at, app, subject, host: host(app, subject) }
   const view = { ...place, frame: Object.assign(document.createElement("iframe"), { src: address(place), inert: true }) }
   view.frame.setAttribute("sandbox", sandbox)
   if (app === launcher) view.frame.className = "launcher"
@@ -236,7 +236,7 @@ function layer(at) {
   const view = showing(at)
   const home = open.get(key(launcher))
   for (const other of open.values()) other.frame.inert = other !== view && !(other === home && room)
-  if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, for: view.for } })
+  if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, subject: view.subject } })
   return view
 }
 /// The app that's open as `at`, or with none there, the launcher.
@@ -263,15 +263,15 @@ function opened(view) {
 }
 
 /// Shows this device's person their recovery key, or with `typed`, asks them for it and lets the device in with
-/// it: theirs, or that of `who`, a group or the network the app asking is for. → `{ done }`: whether they saw it,
+/// it: theirs, or that of `subject`, a group or the network the app asking is for. → `{ done }`: whether they saw it,
 /// or the device is in now. It's over whatever app asked, and the app is told only that.
-/** @param {boolean} typed @param {string} [who] @returns {Promise<{ done: boolean }>} */
-function recoveryKey(typed, who) {
+/** @param {boolean} typed @param {string} [subject] @returns {Promise<{ done: boolean }>} */
+function recoveryKey(typed, subject) {
   const dialog = /** @type {HTMLDialogElement} */ (byId("recovery"))
   const [key, entry, problem, form] = /** @type {[HTMLElement, HTMLInputElement, HTMLElement, HTMLFormElement]} */ ([".key", ".entry", ".wrong", "form"].map((part) => dialog.querySelector(part)))
   dialog.dataset.typed = String(typed)
   entry.value = key.textContent = problem.textContent = dialog.returnValue = ""
-  if (!typed) invoke("recovery_key", { who }).then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
+  if (!typed) invoke("recovery_key", { subject }).then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
   dialog.showModal()
   return new Promise((resolve) => {
     form.onsubmit = async (event) => {
@@ -279,7 +279,7 @@ function recoveryKey(typed, who) {
       const pressed = /** @type {HTMLButtonElement | null} */ (event.submitter)
       if (typed && pressed?.value !== "cancel") {
         try {
-          await invoke("recover", { key: entry.value, who })
+          await invoke("recover", { key: entry.value, subject })
         } catch (error) {
           return void (problem.textContent = `${error}`)
         }
@@ -322,12 +322,12 @@ async function respond(view, method, params) {
   // A file too large to go in a call: the client sends it where the network keeps it, for a tool of the app's plugin.
   if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { plugin: view.app.split("/")[0] } })
   // A person's recovery key is shown and typed on this page, which is the client's own: no app's page is handed one.
-  if (method === "one/recovery-key") return recoveryKey(params.typed === true, params.for ?? view.for)
+  if (method === "one/recovery-key") return recoveryKey(params.typed === true, params.subject ?? view.subject)
   // Another app, shown over this one, as tapping its icon or a notification from it does: by its plugin's name,
   // and its page if it isn't the plugin's first app, for whoever this one is for unless it says. `behind` starts
   // it as a finger lands on its icon, and it shows as the finger lifts.
   if (method === "ui/open-link" && params.url?.startsWith("one:")) {
-    if (!go(params.url.slice("one:".length), params.for ?? view.for, params.behind)) throw new Error("That app isn't on this device")
+    if (!go(params.url.slice("one:".length), params.subject ?? view.subject, params.behind)) throw new Error("That app isn't on this device")
     return {}
   }
   // A web address opens in the device's own browser, outside the app.
@@ -350,9 +350,9 @@ async function respond(view, method, params) {
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   // An app opened from a group's page is answered for the group.
-  const who = params._meta?.for ?? view.for
-  if (who && !listed.has(who)) list(who)
-  return invoke("request", { view: view.key, method, params: who ? { ...params, _meta: { ...params._meta, for: who } } : params })
+  const subject = params._meta?.subject ?? view.subject
+  if (subject && !listed.has(subject)) list(subject)
+  return invoke("request", { view: view.key, method, params: subject ? { ...params, _meta: { ...params._meta, subject } } : params })
 }
 
 addEventListener("message", async ({ source, data }) => {
@@ -390,13 +390,13 @@ addEventListener("message", async ({ source, data }) => {
 })
 
 /// Shows an app over whatever's showing: by its plugin's name, and its page if it isn't the plugin's first app,
-/// for `who`. With `behind` it only starts. → whether there is one here.
-/** @param {string} app @param {string} [who] @param {boolean} [behind] */
-function go(app, who, behind) {
+/// for `subject`. With `behind` it only starts. → whether there is one here.
+/** @param {string} app @param {string} [subject] @param {boolean} [behind] */
+function go(app, subject, behind) {
   const page = app.includes("/") ? app : first.get(app)
   if (!page) return false
   const tapped = performance.now()
-  const next = load(page, who)
+  const next = load(page, subject)
   if (behind) return true
   const showing = history.state === next.key
   move(() => show(next.key, tapped))
@@ -416,7 +416,7 @@ async function hearTaps() {
 }
 
 listen("changed", ({ payload: view }) => {
-  if (view === "client") for (const who of listed) list(who)
+  if (view === "client") for (const subject of listed) list(subject)
   else if (open.has(view)) post(/** @type {View} */ (open.get(view)), { method: "notifications/one/changed" })
 })
 
@@ -461,7 +461,7 @@ function returned() {
   invoke("visible", { onScreen: !document.hidden })
   if (document.hidden) return void reload()
   if (unlisted) start()
-  else for (const who of listed) list(who)
+  else for (const subject of listed) list(subject)
   invoke("refresh", { view: key(launcher) })
   if (open.has(history.state)) invoke("refresh", { view: history.state })
 }

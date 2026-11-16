@@ -66,10 +66,10 @@ impl Views {
         }
     }
 
-    /// The files of every plugin a server lists for `who`, a group or the network, or for this client's user, as MCP
+    /// The files of every plugin a server lists for `subject`, a group or the network, or for this client's user, as MCP
     /// lists resources.
-    async fn listed(&self, who: Option<&str>) -> anyhow::Result<Value> {
-        let request = who.map_or(json!({}), |who| json!({"_meta": {"for": who}}));
+    async fn listed(&self, subject: Option<&str>) -> anyhow::Result<Value> {
+        let request = subject.map_or(json!({}), |subject| json!({"_meta": {"subject": subject}}));
         self.subscription("client").request("resources/list", request).await
     }
 
@@ -105,9 +105,9 @@ impl Views {
         let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
         // Android's and Windows' web views name the app after the scheme, in a host's name.
         let app = app.strip_prefix("oneapp.").unwrap_or(app);
-        let who: Vec<&str> = app.split('.').skip(1).collect();
-        let who = (!who.is_empty()).then(|| who.into_iter().rev().collect::<Vec<_>>().join("/"));
-        let listed = self.listed(who.as_deref()).await?;
+        let subject: Vec<&str> = app.split('.').skip(1).collect();
+        let subject = (!subject.is_empty()).then(|| subject.into_iter().rev().collect::<Vec<_>>().join("/"));
+        let listed = self.listed(subject.as_deref()).await?;
         let mut versions = resources(&listed).filter_map(parts).filter(|(of, ..)| *of == plugin);
         let (_, code, _) = versions.next().ok_or_else(none)?;
         let resource = format!("ui://{plugin}/{code}/{path}");
@@ -117,11 +117,11 @@ impl Views {
         self.read(&resource).await
     }
 
-    /// The open apps for `who` that loaded a file a server no longer lists: one of their plugins has a new version.
+    /// The open apps for `subject` that loaded a file a server no longer lists: one of their plugins has a new version.
     /// They have loaded nothing once this has named them.
-    fn outdated(&self, who: Option<&str>, listed: &Value) -> Vec<String> {
+    fn outdated(&self, subject: Option<&str>, listed: &Value) -> Vec<String> {
         let listed: HashSet<&str> = resources(listed).collect();
-        let whose = who.map(|who| who.split('/').rev().collect::<Vec<_>>().join("."));
+        let whose = subject.map(|subject| subject.split('/').rev().collect::<Vec<_>>().join("."));
         let mut loaded = self.loaded.lock().expect("no view panics");
         let outdated: Vec<String> = loaded
             .iter()
@@ -145,14 +145,14 @@ fn parts(resource: &str) -> Option<(&str, &str, &str)> {
     Some((parts.next()?, parts.next()?, parts.next()?))
 }
 
-/// The files a server lists for `who`, a group or the network, or for this client's user, and with them the open
+/// The files a server lists for `subject`, a group or the network, or for this client's user, and with them the open
 /// apps that are `outdated` and load again, each as its address names it. Every file listed is kept behind this, so
 /// with no server up an app opens whole, even one that was never opened, or whose plugins have changed since.
 #[tauri::command]
-async fn apps(app: AppHandle, views: State<'_, Views>, who: Option<String>) -> Result<Value, String> {
+async fn apps(app: AppHandle, views: State<'_, Views>, subject: Option<String>) -> Result<Value, String> {
     // A person is told what went wrong, and not what was behind it.
-    let mut listed = views.listed(who.as_deref()).await.map_err(|error| error.to_string())?;
-    listed["outdated"] = views.outdated(who.as_deref(), &listed).into();
+    let mut listed = views.listed(subject.as_deref()).await.map_err(|error| error.to_string())?;
+    listed["outdated"] = views.outdated(subject.as_deref(), &listed).into();
     let keep = listed.clone();
     tauri::async_runtime::spawn(async move {
         for resource in resources(&keep) {
@@ -233,18 +233,18 @@ async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, 
     sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
 }
 
-/// The recovery key of this device's person, or of a group or the network an app was opened for (`who`), for the
+/// The recovery key of this device's person, or of a group or the network an app was opened for (`subject`), for the
 /// client's own page to show them. It's that page that shows it, so no app's page is handed one.
 #[tauri::command]
-async fn recovery_key(views: State<'_, Views>, who: Option<String>) -> Result<String, String> {
-    encryption_client::recovery_key(&views.client, who.as_deref()).await.map_err(|error| error.to_string())
+async fn recovery_key(views: State<'_, Views>, subject: Option<String>) -> Result<String, String> {
+    encryption_client::recovery_key(&views.client, subject.as_deref()).await.map_err(|error| error.to_string())
 }
 
-/// Lets this device hold its person's key, or `who`'s, with the recovery key they typed on the client's own page,
+/// Lets this device hold its person's key, or `subject`'s, with the recovery key they typed on the client's own page,
 /// and has every view ask again.
 #[tauri::command]
-async fn recover(views: State<'_, Views>, key: String, who: Option<String>) -> Result<(), String> {
-    encryption_client::recover(&views.client, &key, who.as_deref()).await.map_err(|error| error.to_string())?;
+async fn recover(views: State<'_, Views>, key: String, subject: Option<String>) -> Result<(), String> {
+    encryption_client::recover(&views.client, &key, subject.as_deref()).await.map_err(|error| error.to_string())?;
     views.refresh().await;
     Ok(())
 }

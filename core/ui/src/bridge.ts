@@ -15,9 +15,9 @@ interface HostContext {
   theme?: "light" | "dark" | null
 }
 
-/** Who a call or an app is for: a group (`groups/family`), or `network`. Whoever the app is for, unless said. */
-export interface For {
-  for?: string
+/** Who a call or an app is for, its subject: a group (`groups/family`), or `network`. Whoever the app is for, unless said. */
+export interface Subject {
+  subject?: string
 }
 
 const waiting = new Map<number, (response: JsonRpcResponse) => void>()
@@ -103,10 +103,10 @@ interface Content {
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
 /// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
 /// An app opened from a group's Home Screen page is answered for the group, with nothing said. A page that shows more
-/// than one of them says who each call is for: `call("home-screen_page", {}, { for: "groups/family" })`, or `network`.
-export async function call(tool: string, inputs: object = {}, who: For = {}): Promise<string> {
+/// than one of them says who each call is for: `call("home-screen_page", {}, { subject: "groups/family" })`, or `network`.
+export async function call(tool: string, inputs: object = {}, { subject }: Subject = {}): Promise<string> {
   await greet()
-  const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(who.for ? { _meta: { for: who.for } } : {}) })
+  const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
   const text = content.map(({ type, text, uri, data, mimeType, resource }) => text ?? (type === "resource_link" ? uri : `data:${mimeType ?? resource?.mimeType};base64,${data ?? resource?.blob}`)).join("\n")
   if (isError) throw new Error(text)
   return text
@@ -119,12 +119,12 @@ export const upload = (file: File | Blob): Promise<string> => greet().then(() =>
 
 /// `await showRecoveryKey()`: has the client show its person their recovery key, over the app. The app is told
 /// only that they've seen it: no app's page is handed one. → whether it was shown, which only a device that
-/// holds their key can. It's the key of whoever the app is for, or as a call says it, `{ for: "network" }`'s.
-export const showRecoveryKey = (who: For = {}): Promise<boolean> => greet().then(() => ask<{ done: boolean }>("one/recovery-key", { for: who.for })).then(({ done }) => done)
+/// holds their key can. It's the key of whoever the app is for, or as a call says it, `{ subject: "network" }`'s.
+export const showRecoveryKey = ({ subject }: Subject = {}): Promise<boolean> => greet().then(() => ask<{ done: boolean }>("one/recovery-key", { subject })).then(({ done }) => done)
 
 /// `await useRecoveryKey()`: has the client ask its person for their recovery key, and let this device in with
 /// it. → whether the device holds their key now. Whose, as `showRecoveryKey` says.
-export const useRecoveryKey = (who: For = {}): Promise<boolean> => greet().then(() => ask<{ done: boolean }>("one/recovery-key", { typed: true, for: who.for })).then(({ done }) => done)
+export const useRecoveryKey = ({ subject }: Subject = {}): Promise<boolean> => greet().then(() => ask<{ done: boolean }>("one/recovery-key", { typed: true, subject })).then(({ done }) => done)
 
 /// `changed(() => refresh(notes))`: runs what it's given whenever what this page was answered has changed, to ask
 /// again and draw it. → the function that stops it.
@@ -139,13 +139,13 @@ export function changed(listener: () => void): () => void {
 export const leave = () => greet().then(() => notify("ui/notifications/request-teardown"))
 
 /// `open("claims")`: shows another app over this one, by its plugin's name, as tapping its icon or a notification
-/// from it does. `open("notes/client/index.html", { for: "groups/family" })` names a page of the plugin's that isn't
+/// from it does. `open("notes/client/index.html", { subject: "groups/family" })` names a page of the plugin's that isn't
 /// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a Home Screen page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
 /// without. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an
 /// outside service's sign-in page is opened.
-export const open = (app: string, who: For & { behind?: boolean } = {}): Promise<unknown> =>
-  greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, for: who.for, behind: who.behind }))
+export const open = (app: string, { subject, behind }: Subject & { behind?: boolean } = {}): Promise<unknown> =>
+  greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind }))
 
 /// `const { device, network, build, server } = await client()`: this device's key, as Devices lists it, the
 /// network's address, if it has one, the build it's on, and its server's key if it's a server. `await client({

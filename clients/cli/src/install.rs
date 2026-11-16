@@ -182,11 +182,11 @@ fn write_lock(file: &Path, locked: &BTreeMap<String, Locked>) -> Result<()> {
     Ok(fs::write(file, text + "\n")?)
 }
 
-/// Calls a tool for `of` (a user, a group or the network), as `ONE_FOR` would have it, and gives its text.
+/// Calls a tool for `of` (a user, a group or the network), as `ONE_SUBJECT` would have it, and gives its text.
 async fn call(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -> Result<String> {
     let mut params = json!({"name": tool, "arguments": arguments});
     if let Some(of) = of {
-        params["_meta"]["for"] = json!(of);
+        params["_meta"]["subject"] = json!(of);
     }
     let result = client.request("tools/call", params).await?;
     let text: Vec<&str> =
@@ -377,7 +377,7 @@ async fn report(from: &Source, name: &str, commit: &str) {
     let _ = tokio::time::timeout(Duration::from_secs(3), post).await;
 }
 
-/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--sandbox] [--new]`, for whoever `ONE_FOR` says, or
+/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--sandbox] [--new]`, for whoever `ONE_SUBJECT` says, or
 /// this device's user. `--sandbox` runs them in sandbox mode, which needs no server of the user's; `--new` makes a
 /// second copy where one by that name is installed for the network or a group they're in, which is refused without.
 pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {

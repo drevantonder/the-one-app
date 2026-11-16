@@ -70,7 +70,7 @@ on() {
   shift 2
   [[ $1 == for ]] && subject=$2 && shift 2
   if [[ -n $only ]]; then printf '[%s]' "$(reached "$only")" >"$home/servers"; else printf '[%s,%s]' "$(reached server)" "$(reached standby)" >"$home/servers"; fi
-  ${subject:+env ONE_FOR=$subject} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/said"
+  ${subject:+env ONE_SUBJECT=$subject} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/said"
 }
 shown() {
   echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" | named)"
@@ -341,7 +341,7 @@ may on den as alice for groups/family vault list
 refused on bobs as bob for groups/family vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 refused on bobs as bob for groups/family encryption approve
 may on den as owner for network encryption approve
-ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/devices/den "$root/target/release/examples/recovery_key" "$folder/secrets/network-recovery"
+ONE_AS=owner ONE_SUBJECT=network ONE_HOME=$folder/devices/den "$root/target/release/examples/recovery_key" "$folder/secrets/network-recovery"
 echo "  the den's window shows the network's recovery key once, which its owner writes down"
 may on den as owner for network vault grant --servers "$(servers "${key[server]}")"
 may on den as owner for network vault set --item Storage --field secret_key --value-from "$folder/secrets/storage"

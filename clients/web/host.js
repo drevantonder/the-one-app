@@ -169,19 +169,19 @@ async function refresh(view) {
   if (changed) emit("changed", view)
 }
 
-/// The version of each plugin a server last listed, by who it's listed for.
+/// The version of each plugin a server last listed, by the subject it's listed for.
 /** @type {Map<string | undefined, Map<string, string>>} */
 const versions = new Map()
-/// The open apps for `who` whose plugins have a new version since the last list, each as its address names it
-/// (`<plugin>[.<who, last part first>]`).
-/** @param {string | undefined} who @param {{ uri: string }[]} resources */
-function outdated(who, resources) {
+/// The open apps for `subject` whose plugins have a new version since the last list, each as its address names it
+/// (`<plugin>[.<subject, last part first>]`).
+/** @param {string | undefined} subject @param {{ uri: string }[]} resources */
+function outdated(subject, resources) {
   const now = new Map(resources.map(({ uri }) => /** @type {[string, string]} */ (uri.slice("ui://".length).split("/", 2))))
-  const was = versions.get(who)
-  versions.set(who, now)
+  const was = versions.get(subject)
+  versions.set(subject, now)
   if (!was) return []
   const changed = [...now].filter(([plugin, version]) => was.has(plugin) && was.get(plugin) !== version).map(([plugin]) => plugin)
-  const whose = who ? `.${who.split("/").reverse().join(".")}` : ""
+  const whose = subject ? `.${subject.split("/").reverse().join(".")}` : ""
   return changed.map((plugin) => plugin + whose)
 }
 
@@ -207,10 +207,10 @@ const commands = {
     sendReports()
     return {}
   },
-  /// The files a server lists for `who`, and the open apps that are out of date.
-  async apps({ who }) {
-    const listed = await mcp("resources/list", who ? { _meta: { for: who } } : {})
-    return { ...listed, outdated: outdated(who, listed.resources) }
+  /// The files a server lists for `subject`, and the open apps that are out of date.
+  async apps({ subject }) {
+    const listed = await mcp("resources/list", subject ? { _meta: { subject } } : {})
+    return { ...listed, outdated: outdated(subject, listed.resources) }
   },
   async request({ view, method, params }) {
     if (await reads(view, method, params)) return read(view, method, params)
@@ -251,7 +251,7 @@ export const invoke = (command, ...args) => {
 }
 
 /// Where an app's page is: the edge's, under where this browser's apps' files are, by what names its address
-/// (`<plugin>[.<who, last part first>]`), as the app has its own address for each.
+/// (`<plugin>[.<subject, last part first>]`), as the app has its own address for each.
 /** @type {typeof import("../app/page/host.js").address} */
 export const address = (view) => `${apps}/${view.host}/${view.app}`
 

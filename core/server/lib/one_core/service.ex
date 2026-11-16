@@ -33,7 +33,7 @@ defmodule OneCore.Service do
       raise "No server runs #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
-    meta = %{who: call.actor, for: call.subject, forwarded: true}
+    meta = %{actor: call.actor, subject: call.subject, forwarded: true}
     ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: meta}
 
     case ask(servers, call.server, ask) do
@@ -43,8 +43,8 @@ defmodule OneCore.Service do
   end
 
   @doc "The keys of the servers that run a service of this call's plugin, for a plugin that chooses which to call."
-  def servers(%Call{subject: who} = call, service),
-    do: Services.servers(whose(call, service), Version.own_name(service), who)
+  def servers(%Call{subject: subject} = call, service),
+    do: Services.servers(whose(call, service), Version.own_name(service), subject)
 
   @doc "What the machine a server runs on is called, by the server's key: its name, which the server says as it starts."
   def name(server), do: Servers.name(server)

@@ -82,7 +82,7 @@ defmodule OneCore.Plugins.Installed do
          true <- Deploy.launcher?(version) do
       {:error,
        "#{name} is this network's launcher, which every client opens first, and a network with none has no way in. " <>
-         "To replace it, deploy another as its new version: ONE_FOR=network one deploy --name #{name} --files-from <folder>"}
+         "To replace it, deploy another as its new version: ONE_SUBJECT=network one deploy --name #{name} --files-from <folder>"}
     else
       _ -> :ok
     end

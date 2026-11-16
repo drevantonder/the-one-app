@@ -21,9 +21,9 @@ warning and error. Reach for these when that isn't enough.
   plugin while it runs, from another shell or agent. Recon's limit counts everyone's calls, so a trace of a function
   that's called a lot stops early, and the server carries on. One trace runs on a server at a time.
 
-Who may: an `editor` of the plugin, as for deploying it. You see only calls running for you, or for `for`, a group or
+Who may: an `editor` of the plugin, as for deploying it. You see only calls running for you, or for `subject`, a group or
 the network you own, since what a call was given is its person's. Its processes kept between calls are shown where
-everyone it's installed for is `for`. A plugin that says it's `sensitive` (Vault, Encryption, Sign-in) is never looked
+everyone it's installed for is `subject`. A plugin that says it's `sensitive` (Vault, Encryption, Sign-in) is never looked
 into. In sandbox mode the same tools look inside the plugin's own VM on that server, which a call starts.
 
 Each server runs its own calls: `server` names which to look on, by its machine's name; left out, it's one that

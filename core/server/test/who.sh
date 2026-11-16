@@ -48,7 +48,7 @@ as() {
     ONE_LINK=$who ONE_HOME=$folder/client "$one" "$@"
   else
     [[ $1 == for ]] && subject=$2 && shift 2
-    ${subject:+env ONE_FOR=$subject} env ONE_AS=$who ONE_HOME=${home:-$folder/client} "$one" "$@"
+    ${subject:+env ONE_SUBJECT=$subject} env ONE_AS=$who ONE_HOME=${home:-$folder/client} "$one" "$@"
   fi
 }
 # The same through one server and no other: `via alices as alice diary write ...`.
@@ -60,7 +60,7 @@ named() { local names=() server; for server in "${!key[@]}"; do names+=(-e "s/${
 key_of server && key_of standby
 # Starts a server that is someone's own, and returns once it's running or has said it isn't theirs yet.
 start_for() {
-  (cd "$root/core/server" && exec mix network "$folder" "$1" --for "$2" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+  (cd "$root/core/server" && exec mix network "$folder" "$1" --subject "$2" --development "${at_address[@]}") >"$folder/$1.log" 2>&1 &
   started+=($!)
   grep -q -m1 -E "A server is running|isn't one of" <(tail -F --pid=$! -n +1 "$folder/$1.log")
   key_of "$1"
@@ -523,7 +523,7 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
   (cd "$root/core/server" && mix run --no-start -e '
     [folder, address | blobs] = System.argv()
     Application.put_env(:one_core, :home, Path.join(folder, "alices"))
-    Application.put_env(:one_core, :for, "users/alice")
+    Application.put_env(:one_core, :owner, "users/alice")
     Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, address})
     Application.ensure_all_started(:req)
     for blob <- blobs do
@@ -603,9 +603,9 @@ done
 say "Whoever may deploy a plugin looks into it as it runs, at only their own calls, and never into one that's sensitive"
 as owner for network install --plugin network/plugins/server-debug >/dev/null
 may as owner server-debug processes --plugin notes
-may as owner server-debug processes --plugin notes --for network
+may as owner server-debug processes --plugin notes --subject network
 refused as alice server-debug processes --plugin notes
-refused as owner server-debug logs --plugin notes --for users/alice
+refused as owner server-debug logs --plugin notes --subject users/alice
 refused as owner server-debug trace --plugin vault --module Vault
 
 say "A plugin that decides and breaks has refused, for whoever it was installed for, and has no say in its own removal"
