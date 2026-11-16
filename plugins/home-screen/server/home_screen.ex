@@ -318,7 +318,7 @@ defmodule HomeScreen do
 
   # A request names a plugin in the network, or a repo and a plugin's name in it, as `one install` takes them.
   def call("request", inputs, call) do
-    asked =
+    request =
       case inputs do
         %{"plugin" => plugin} ->
           %{"plugin" => plugin}
@@ -330,7 +330,7 @@ defmodule HomeScreen do
           raise "A request names a plugin in the network (plugin), or a repo and the plugin's name in it (source, name)."
       end
 
-    if installed(call, asked), do: raise("#{called(asked)} is installed for everyone already.")
+    if installed(call, request), do: raise("#{called(request)} is installed for everyone already.")
     at = DateTime.to_iso8601(DateTime.utc_now(:second))
 
     request =
@@ -338,7 +338,7 @@ defmodule HomeScreen do
         id = 1 + Enum.max(Enum.map(requests, & &1["id"]), fn -> 0 end)
 
         request =
-          Map.merge(asked, %{
+          Map.merge(request, %{
             "id" => id,
             "by" => call.actor,
             "reason" => inputs["reason"],
@@ -354,7 +354,7 @@ defmodule HomeScreen do
     text = Enum.join(List.wrap(inputs["reason"]) ++ ["home-screen_approve or home-screen_decline answers it."], "\n")
 
     for to <- installers,
-        do: notify(call, if(to == "everyone", do: "network", else: to), "#{call.actor} asks for #{called(asked)}", text)
+        do: notify(call, if(to == "everyone", do: "network", else: to), "#{call.actor} asks for #{called(request)}", text)
 
     "Asked whoever may install plugins for everyone (#{Enum.join(installers, ", ")}), as request #{request["id"]}."
   end
@@ -407,10 +407,10 @@ defmodule HomeScreen do
   defp called(%{"source" => source, "name" => name}), do: "#{name} from #{source}"
 
   # Whether what's asked for is installed for the network: the plugin itself, or one installed from that repo by that name.
-  defp installed(call, asked) do
+  defp installed(call, request) do
     Enum.any?(Call.plugins(%{call | subject: "network"}), fn plugin ->
       plugin.installed == "network" and
-        case asked do
+        case request do
           %{"plugin" => artifact} ->
             plugin.plugin == artifact
 

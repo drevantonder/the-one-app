@@ -138,18 +138,18 @@ defmodule OneCore.Plugins.Process do
   def handle_call(request, from, process), do: put_state(process.module.handle_call(request, from, process.state), process)
 
   @impl true
-  def handle_cast({__MODULE__, :started, asked, monitor}, process) do
-    send(asked, {monitor, :done})
+  def handle_cast({__MODULE__, :started, from, monitor}, process) do
+    send(from, {monitor, :done})
     {:noreply, process}
   end
 
-  def handle_cast({__MODULE__, :stop, _asked, _monitor}, process), do: {:stop, :normal, process}
+  def handle_cast({__MODULE__, :stop, _from, _monitor}, process), do: {:stop, :normal, process}
 
-  def handle_cast({__MODULE__, :follow, asked, monitor}, %{held: was_held, module: was} = process) do
+  def handle_cast({__MODULE__, :follow, from, monitor}, %{held: was_held, module: was} = process) do
     case held(process.plugin, process.name, process.key) do
       {:ok, held, ^was} ->
         Plugins.release(held)
-        send(asked, {monitor, :done})
+        send(from, {monitor, :done})
         {:noreply, process}
 
       {:ok, held, module} ->
@@ -162,7 +162,7 @@ defmodule OneCore.Plugins.Process do
           {:ok, state} ->
             process = %{process | held: held, module: module, state: state}
             Plugins.release(was_held)
-            send(asked, {monitor, :done})
+            send(from, {monitor, :done})
             {:noreply, process}
 
           {:error, why} ->

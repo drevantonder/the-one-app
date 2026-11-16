@@ -200,14 +200,14 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   const said = { ...mcp, ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
-  const asked = env.RELAY.forward(servers, message);
+  const forwarded = env.RELAY.forward(servers, message);
   // A request with a progress token from a client that takes a stream is told every second that it's still running,
   // as MCP's streamable HTTP has it: once it's run that long, it's answered with a stream of its progress and then
   // its answer, however long it runs. One answered sooner is answered as any other.
   const token = meta.progressToken;
   const streams = "id" in call && (typeof token === "string" || typeof token === "number") && headers?.get("accept")?.includes("text/event-stream");
-  if (streams && (await Promise.race([asked.then(() => false), scheduler.wait(PROGRESS).then(() => true)]))) return streamed(asked, call.id, token);
-  const reached = await asked;
+  if (streams && (await Promise.race([forwarded.then(() => false), scheduler.wait(PROGRESS).then(() => true)]))) return streamed(forwarded, call.id, token);
+  const reached = await forwarded;
   if (!reached) return refuse(503, "None of this network's servers answered. Try again once one is on.");
   // A notification has no answer.
   if (reached.answer === "") return new Response(null, { status: 202 });
@@ -222,7 +222,7 @@ async function forward(env: Env, message: string, from: { device: string } | { l
  * notification every second while it runs, how far it is being the seconds it's run, as a server says it, and then
  * the answer. Whoever asked closing it stops only the telling: the server runs the call to its end.
  */
-function streamed(asked: Promise<{ answer: string } | null>, id: unknown, token: string | number) {
+function streamed(forwarded: Promise<{ answer: string } | null>, id: unknown, token: string | number) {
   let ran = 1;
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const stream = writable.getWriter();
@@ -231,7 +231,7 @@ function streamed(asked: Promise<{ answer: string } | null>, id: unknown, token:
   const telling = setInterval(() => progress().catch(() => clearInterval(telling)), PROGRESS);
   (async () => {
     await progress();
-    const reached = await asked;
+    const reached = await forwarded;
     clearInterval(telling);
     const none = { jsonrpc: "2.0", id, error: { code: -32000, message: "None of this network's servers answered. Try again once one is on." } };
     await send(reached?.answer ?? JSON.stringify(none));

@@ -73,8 +73,8 @@ defmodule OneCore.CodeMode do
 
       {^port, {:data, {:eol, more}}} ->
         case JSON.decode(part <> more) do
-          {:ok, %{"call" => id, "name" => name} = asked} ->
-            task = Task.async(fn -> called(call, name, asked["input"]) end)
+          {:ok, %{"call" => id, "name" => name} = request} ->
+            task = Task.async(fn -> called(call, name, request["input"]) end)
             listen(port, call, Map.put(running, task.ref, id), "", said, until)
 
           {:ok, %{"done" => %{"ok" => ok, "text" => text}}} ->

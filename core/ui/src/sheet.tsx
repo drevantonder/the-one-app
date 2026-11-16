@@ -184,11 +184,11 @@ let ask: ((question: Question) => Promise<boolean>) | undefined
 /// press outside are no.
 export function confirm(question: Question): Promise<boolean> {
   if (!ask) {
-    const [asked, setAsked] = createSignal<Question | null>(null)
+    const [question, setQuestion] = createSignal<Question | null>(null)
     let answered: (yes: boolean) => void
     const host = document.body.appendChild(document.createElement("div"))
-    render(() => <Alert question={asked()} onAnswer={(yes) => (setAsked(null), answered(yes))} />, host)
-    ask = (question) => new Promise<boolean>((done) => ((answered = done), setAsked(question)))
+    render(() => <Alert question={question()} onAnswer={(yes) => (setQuestion(null), answered(yes))} />, host)
+    ask = (question) => new Promise<boolean>((done) => ((answered = done), setQuestion(question)))
   }
   return ask(question)
 }

@@ -21,7 +21,7 @@ import sys
 import time
 
 with open(sys.argv[1]) as file:
-    asked = json.load(file)
+    config = json.load(file)
 os.remove(sys.argv[1])
 
 # The answer comes back up a pipe, and the stream carries on in a process of its own once it has.
@@ -37,7 +37,7 @@ if os.fork():
 
 os.close(reading)
 os.setsid()
-log = os.open(asked["log"], os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+log = os.open(config["log"], os.O_WRONLY | os.O_CREAT | os.O_APPEND)
 os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
 os.dup2(log, 1)
 os.dup2(log, 2)
@@ -52,7 +52,7 @@ from aiortc.mediastreams import MediaStreamTrack  # noqa: E402
 from idb.common.types import HIDButtonType, VideoFormat  # noqa: E402
 from idb.grpc.management import ClientManager  # noqa: E402
 
-points = asked["points"]
+points = config["points"]
 
 # The USB HID usage of each key X names, which is how idb presses one.
 KEYS = {"Return": 40, "Escape": 41, "BackSpace": 42, "Tab": 43, "space": 44, "Delete": 76, "Right": 79, "Left": 80, "Down": 81, "Up": 82, "Home": 74, "End": 77, "Prior": 75, "Next": 78}
@@ -149,7 +149,7 @@ async def main(client):
     # IPv4 always answers.
     tcp = [
         (re.sub(r"^turn:([^:?]+)", lambda host: "turn:" + socket.gethostbyname(host[1]), url), s)
-        for s in asked["iceServers"]
+        for s in config["iceServers"]
         for url in ([s["urls"]] if isinstance(s["urls"], str) else s["urls"])
         if url.startswith("turn:") and url.endswith("transport=tcp")
     ]
@@ -175,7 +175,7 @@ async def main(client):
     # H.264 only, as idb sends it: aiortc chooses the codecs as the offer is taken, from the transceiver's.
     transceiver = pc.addTransceiver(screen, direction="sendonly")
     transceiver.setCodecPreferences([c for c in RTCRtpSender.getCapabilities("video").codecs if c.mimeType in ("video/H264", "video/rtx")])
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=asked["offer"], type="offer"))
+    await pc.setRemoteDescription(RTCSessionDescription(sdp=config["offer"], type="offer"))
     await pc.setLocalDescription(await pc.createAnswer())
     sdp = "".join(line + "\r\n" for line in pc.localDescription.sdp.splitlines() if not line.startswith("a=candidate:") or " typ relay" in line)
     if " typ relay" not in sdp:
@@ -197,8 +197,8 @@ async def main(client):
 
 
 async def streaming():
-    manager = ClientManager(companion_path=asked["companion"], logger=logging.getLogger("idb"))
-    async with manager.from_udid(asked["udid"]) as client:
+    manager = ClientManager(companion_path=config["companion"], logger=logging.getLogger("idb"))
+    async with manager.from_udid(config["udid"]) as client:
         await main(client)
 
 

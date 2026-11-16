@@ -20,7 +20,7 @@ import struct
 import sys
 
 with open(sys.argv[1]) as file:
-    asked = json.load(file)
+    config = json.load(file)
 os.remove(sys.argv[1])
 
 # The answer comes back up a pipe, and the stream carries on in a process of its own once it has.
@@ -36,7 +36,7 @@ if os.fork():
 
 os.close(reading)
 os.setsid()
-log = os.open(asked["log"], os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+log = os.open(config["log"], os.O_WRONLY | os.O_CREAT | os.O_APPEND)
 os.dup2(os.open(os.devnull, os.O_RDONLY), 0)
 os.dup2(log, 1)
 os.dup2(log, 2)
@@ -48,7 +48,7 @@ import av  # noqa: E402
 from aiortc import RTCConfiguration, RTCIceServer, RTCIceTransportPolicy, RTCPeerConnection, RTCRtpSender, RTCSessionDescription  # noqa: E402
 from aiortc.mediastreams import MediaStreamTrack  # noqa: E402
 
-adb = [asked["adb"], "-s", asked["serial"]]
+adb = [config["adb"], "-s", config["serial"]]
 
 # Android's key codes for the keys X names, and its meta state for X's modifiers.
 KEYS = {"Return": 66, "BackSpace": 67, "Tab": 61, "Escape": 4, "Delete": 112, "Left": 21, "Right": 22, "Up": 19, "Down": 20, "Home": 122, "End": 123, "Prior": 92, "Next": 93, "space": 62}
@@ -91,7 +91,7 @@ async def main():
     # encoder is told to make a frame only when the screen changes.
     server = await asyncio.create_subprocess_exec(
         *adb, "shell", "CLASSPATH=/data/local/tmp/scrcpy-server.jar", "app_process", "/", "com.genymobile.scrcpy.Server",
-        asked["version"], f"scid={scid}", "log_level=warn", "tunnel_forward=false", "audio=false", "control=true",
+        config["version"], f"scid={scid}", "log_level=warn", "tunnel_forward=false", "audio=false", "control=true",
         "video_codec=h264", "max_size=1600", "max_fps=60", "video_bit_rate=6000000", "video_codec_options=profile=1",
         "send_device_meta=false", "send_dummy_byte=false", "stay_awake=true", "cleanup=true",
     )
@@ -175,7 +175,7 @@ async def main():
     # IPv4 always answers.
     tcp = [
         (re.sub(r"^turn:([^:?]+)", lambda host: "turn:" + socket.gethostbyname(host[1]), url), s)
-        for s in asked["iceServers"]
+        for s in config["iceServers"]
         for url in ([s["urls"]] if isinstance(s["urls"], str) else s["urls"])
         if url.startswith("turn:") and url.endswith("transport=tcp")
     ]
@@ -203,7 +203,7 @@ async def main():
     transceiver.setCodecPreferences([c for c in RTCRtpSender.getCapabilities("video").codecs if c.mimeType in ("video/H264", "video/rtx")])
     # A viewer that lost a frame asks for a whole one: scrcpy's server starts its encoder again, which begins with one.
     transceiver.sender._send_keyframe = lambda: send(bytes([17]))
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=asked["offer"], type="offer"))
+    await pc.setRemoteDescription(RTCSessionDescription(sdp=config["offer"], type="offer"))
     await pc.setLocalDescription(await pc.createAnswer())
     sdp = "".join(line + "\r\n" for line in pc.localDescription.sdp.splitlines() if not line.startswith("a=candidate:") or " typ relay" in line)
     if " typ relay" not in sdp:

@@ -18,7 +18,7 @@ defmodule OneCore.Plugins.Rename do
   Renames the plugin `name` of `owner`'s, which is theirs, to `to`, for `asked`. Gives `:ok`, or `{:error, why}`
   with everything as it was.
   """
-  def rename(owner, name, to, asked) do
+  def rename(owner, name, to, principal) do
     was = "#{owner}/plugins/#{name}"
     is = "#{owner}/plugins/#{to}"
     installs = installs(owner, was)
@@ -31,7 +31,7 @@ defmodule OneCore.Plugins.Rename do
         :ok ->
           for {at, as, now} <- moved do
             about = %{"was" => was, "is" => is, "for" => at, "from" => as, "to" => now}
-            Hooks.observe("renamed", about, {elem(asked, 0), at})
+            Hooks.observe("renamed", about, {elem(principal, 0), at})
           end
 
           for {at, as, now} <- moved, as != now, blob <- Bucket.list("#{at}/own/#{as}/"), do: Bucket.remove(blob)

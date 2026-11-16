@@ -22,16 +22,16 @@ defmodule OneCore.Jobs do
   def init(nil), do: {:ok, %{at: 0, timer: nil}, {:continue, :reload}}
 
   @impl true
-  def handle_continue(:reload, clock), do: {:noreply, asked(%{clock | at: 0})}
+  def handle_continue(:reload, clock), do: {:noreply, schedule_next(%{clock | at: 0})}
 
   @impl true
-  def handle_cast(:reload, clock), do: {:noreply, asked(%{clock | at: 0})}
+  def handle_cast(:reload, clock), do: {:noreply, schedule_next(%{clock | at: 0})}
 
   @impl true
-  def handle_info(:due, clock), do: {:noreply, asked(clock)}
+  def handle_info(:due, clock), do: {:noreply, schedule_next(clock)}
 
   # Asks for each plugin that has a job due since `at`, apart from the others, and waits for the next time one is.
-  defp asked(%{at: at, timer: timer}) do
+  defp schedule_next(%{at: at, timer: timer}) do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
 

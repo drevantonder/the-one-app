@@ -339,7 +339,7 @@ defmodule OneCore.Tools do
   Calls one of One Core's own tools for `asked`, who asked and who for. Gives what `OneCore.Plugins.Calls.call/5` does,
   or `:none` if `name` isn't one.
   """
-  def call(name, inputs, asked, forwarded \\ false) do
+  def call(name, inputs, principal, forwarded \\ false) do
     case Enum.find(@taking, &(&1.name == name)) do
       nil ->
         :none
@@ -349,15 +349,15 @@ defmodule OneCore.Tools do
         ask = {"tools/call", %{name: name, arguments: inputs}}
         # To a server acting for someone, or with `{:running, owner}` to one that runs their plugins.
         forward = fn
-          {:running, owner} -> Call.run_elsewhere(ask, asked, forwarded, owner, "A plugin for #{owner}")
-          owner -> Call.forward(ask, asked, forwarded, owner)
+          {:running, owner} -> Call.run_elsewhere(ask, principal, forwarded, owner, "A plugin for #{owner}")
+          owner -> Call.forward(ask, principal, forwarded, owner)
         end
 
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
-        apart = if name in ["deploy", "uninstall", "rename"], do: {User.owner(elem(asked, 1)), inputs["name"]}
+        apart = if name in ["deploy", "uninstall", "rename"], do: {User.owner(elem(principal, 1)), inputs["name"]}
 
-        Calls.tool(tool, about, asked, nil, &run(name, &1, asked, forward), apart)
+        Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward), apart)
     end
   end
 
@@ -398,17 +398,17 @@ defmodule OneCore.Tools do
   # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
   # deployed for. Either way it's loaded where it will run.
   # A plugin in sandbox mode runs on any server acting for whoever it's for, the network's among them.
-  defp run("deploy", %{"name" => name, "files" => files} = inputs, {_by, who} = asked, forward) do
+  defp run("deploy", %{"name" => name, "files" => files} = inputs, {_by, who} = principal, forward) do
     plugin = Plugins.plugin(who, name)
     sandbox = Map.get(inputs, "sandbox", plugin != nil and Store.about(plugin)["sandbox"] == true)
     if sandbox, do: at(who, forward), else: runs(who, forward)
 
     case plugin do
-      nil -> reaches!(asked, who, "installer")
-      plugin -> reaches!(asked, plugin, "editor")
+      nil -> reaches!(principal, who, "installer")
+      plugin -> reaches!(principal, plugin, "editor")
     end
 
-    if plugin == nil and inputs["new"] != true, do: elsewhere!(asked, name)
+    if plugin == nil and inputs["new"] != true, do: elsewhere!(principal, name)
 
     case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :stored), sandbox) do
       {:ok, number, warnings} ->
@@ -421,10 +421,10 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("code", %{"name" => name}, {_by, who} = asked, _pass) do
+  defp run("code", %{"name" => name}, {_by, who} = principal, _pass) do
     case Plugins.running(who) do
       %{^name => version} ->
-        opens!(asked, version.artifact)
+        opens!(principal, version.artifact)
         JSON.encode!(Store.sent(Store.source(version.artifact, version.code)))
 
       _ ->
@@ -457,27 +457,27 @@ defmodule OneCore.Tools do
     JSON.encode!(%{for: User.owner(who), plugins: plugins})
   end
 
-  defp run("install", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
+  defp run("install", %{"plugin" => plugin} = inputs, {_by, who} = principal, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
     if Store.about(plugin)["sandbox"] == true, do: at(who, forward), else: runs(who, forward)
-    opens!(asked, plugin)
-    reaches!(asked, who, "installer")
+    opens!(principal, plugin)
+    reaches!(principal, who, "installer")
     with {:error, why} <- Installed.install(who, name, plugin), do: raise(why)
     "#{plugin} is installed for #{who}, as #{name}. #{permitted(Plugins.running(who)[name])}"
   end
 
   # It's renamed where it runs, which is where it's deployed again.
-  defp run("rename", %{"name" => name, "to" => to}, {_by, who} = asked, forward) do
+  defp run("rename", %{"name" => name, "to" => to}, {_by, who} = principal, forward) do
     plugin = "#{who}/plugins/#{name}"
     if Store.about(plugin)["sandbox"] == true, do: at(who, forward), else: runs(who, forward)
-    reaches!(asked, plugin, "owner")
-    with {:error, why} <- Rename.rename(who, name, to, asked), do: raise(why)
+    reaches!(principal, plugin, "owner")
+    with {:error, why} <- Rename.rename(who, name, to, principal), do: raise(why)
     "#{name} is #{to} now, for everyone who has it."
   end
 
-  defp run("uninstall", %{"name" => name}, {_by, who} = asked, forward) do
+  defp run("uninstall", %{"name" => name}, {_by, who} = principal, forward) do
     at(who, forward)
-    reaches!(asked, who, "owner")
+    reaches!(principal, who, "owner")
     with {:error, why} <- Installed.uninstall(who, name), do: raise(why)
     "#{name} is removed from what's installed for #{who}."
   end
@@ -498,9 +498,9 @@ defmodule OneCore.Tools do
 
   # Whoever a server acts for put it on their list, and its owner chose them. A server with no members yet is a
   # new one, which whoever adds it first is bringing.
-  defp run("add_server", %{"key" => key}, {_by, who} = asked, forward) do
+  defp run("add_server", %{"key" => key}, {_by, who} = principal, forward) do
     at(who, forward)
-    reaches!(asked, who, "owner")
+    reaches!(principal, who, "owner")
 
     Servers.forget()
     members = Servers.members(key)
@@ -509,27 +509,27 @@ defmodule OneCore.Tools do
       do: raise("That server is #{hd(members)}'s, who hasn't chosen #{who}. Its owner does, with add_member.")
 
     with {:error, why} <- Servers.add(key, who), do: raise(why)
-    Hooks.observe("joined", %{"server" => key, "for" => who, "by" => Server.key()}, asked)
+    Hooks.observe("joined", %{"server" => key, "for" => who, "by" => Server.key()}, principal)
     Server.notify_servers([who])
     "That server acts for #{who} now, once it's started for them or its owner has chosen them."
   end
 
   # The server taken off is told too, so that it stops acting for them at once.
-  defp run("remove_server", %{"key" => key}, {_by, who} = asked, forward) do
+  defp run("remove_server", %{"key" => key}, {_by, who} = principal, forward) do
     at(who, forward)
-    reaches!(asked, who, "owner")
+    reaches!(principal, who, "owner")
     acting = Servers.acting(who)
     with {:error, why} <- Servers.remove(key, who), do: raise(why)
     Server.notify(acting, [who])
     "That server no longer acts for #{who}."
   end
 
-  defp run("add_member", %{"who" => member} = inputs, asked, _pass) do
-    on(inputs["server"], "add_member", inputs, asked, fn ->
+  defp run("add_member", %{"who" => member} = inputs, principal, _pass) do
+    on(inputs["server"], "add_member", inputs, principal, fn ->
       if not User.owner?(member),
         do: raise("A server acts for a user, a group or the network: users/<name>, groups/<name> or network")
 
-      reaches!(asked, owner(), "owner")
+      reaches!(principal, owner(), "owner")
       Servers.choose(member)
       Server.notify_servers([member, owner()])
       "The server #{Server.key()} acts for #{member} too, once they add it with add_server."
@@ -539,35 +539,35 @@ defmodule OneCore.Tools do
   defp run("services", _inputs, {_by, who}, _pass) do
     servers = Servers.acting(User.owner(who) || "network")
     names = Map.new(servers, &{&1, Servers.name(&1)})
-    JSON.encode!(%{asked: Server.key(), servers: servers, names: names, services: Services.list(who)})
+    JSON.encode!(%{server: Server.key(), servers: servers, names: names, services: Services.list(who)})
   end
 
-  defp run("install_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _pass) do
-    on(inputs["server"], "install_service", inputs, asked, fn ->
-      reaches!(asked, owner(), "owner")
+  defp run("install_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = principal, _pass) do
+    on(inputs["server"], "install_service", inputs, principal, fn ->
+      reaches!(principal, owner(), "owner")
       with {:error, why} <- Services.install(plugin(who, name), service), do: raise(why)
       "#{service} is running on #{here()}."
     end)
   end
 
-  defp run("uninstall_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = asked, _pass) do
-    on(inputs["server"], "uninstall_service", inputs, asked, fn ->
-      reaches!(asked, owner(), "owner")
+  defp run("uninstall_service", %{"plugin" => name, "service" => service} = inputs, {_by, who} = principal, _pass) do
+    on(inputs["server"], "uninstall_service", inputs, principal, fn ->
+      reaches!(principal, owner(), "owner")
       with {:error, why} <- Services.remove(plugin(who, name), service), do: raise(why)
       "#{service} no longer runs on #{here()}."
     end)
   end
 
-  defp run("builds", inputs, {by, who} = asked, _pass) do
-    on(inputs["server"], "builds", inputs, asked, fn -> JSON.encode!(Builds.list(by, User.owner(who) || "network")) end)
+  defp run("builds", inputs, {by, who} = principal, _pass) do
+    on(inputs["server"], "builds", inputs, principal, fn -> JSON.encode!(Builds.list(by, User.owner(who) || "network")) end)
   end
 
-  defp run("download", %{"target" => target}, _asked, _pass), do: JSON.encode!(Builds.download(target))
+  defp run("download", %{"target" => target}, _principal, _pass), do: JSON.encode!(Builds.download(target))
 
   # What the network's servers run is the network's.
-  defp run("publish", %{"builds" => builds}, asked, forward) do
+  defp run("publish", %{"builds" => builds}, principal, forward) do
     at("network", forward)
-    reaches!(asked, "network", "owner")
+    reaches!(principal, "network", "owner")
 
     case Builds.publish(builds) do
       {:send, links} -> JSON.encode!(%{send: links})
@@ -576,9 +576,9 @@ defmodule OneCore.Tools do
   end
 
   # What takes the latest builds is the program that keeps an installed server running, which hears this said.
-  defp run("update", inputs, asked, _pass) do
-    on(inputs["server"], "update", inputs, asked, fn ->
-      reaches!(asked, owner(), "owner")
+  defp run("update", inputs, principal, _pass) do
+    on(inputs["server"], "update", inputs, principal, fn ->
+      reaches!(principal, owner(), "owner")
 
       if not Application.get_env(:one_core, :installed, false),
         do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
@@ -615,14 +615,14 @@ defmodule OneCore.Tools do
 
   # Raises unless whoever asked may reach the artifact as `relation`, which the plugins that validate `reach` say.
   # Nothing is asked about what's their own: themselves, and what their name starts.
-  defp reaches!(asked, artifact, relation) do
-    with {:refuse, why} <- reaches(asked, artifact, relation), do: raise(why)
+  defp reaches!(principal, artifact, relation) do
+    with {:refuse, why} <- reaches(principal, artifact, relation), do: raise(why)
   end
 
-  defp reaches({by, _who} = asked, artifact, relation) do
+  defp reaches({by, _who} = principal, artifact, relation) do
     if artifact == by or String.starts_with?(artifact, by <> "/"),
       do: :ok,
-      else: Hooks.validate("reach", %{"who" => by, "relation" => relation, "artifact" => artifact}, asked)
+      else: Hooks.validate("reach", %{"who" => by, "relation" => relation, "artifact" => artifact}, principal)
   end
 
   # Raises unless whoever asked may read a plugin's code and add it: a `viewer` of it, or a member of a group or
@@ -630,8 +630,8 @@ defmodule OneCore.Tools do
   # made is open to everyone inside once it's in use": what only its author has is theirs and whoever they share
   # it with, and taking it away from a group takes it away from them. Only its code is opened: what it keeps for
   # anyone is never the plugin's artifact, and is reached as ever.
-  defp opens!({by, _who} = asked, plugin) do
-    with {:refuse, why} <- reaches(asked, plugin, "viewer") do
+  defp opens!({by, _who} = principal, plugin) do
+    with {:refuse, why} <- reaches(principal, plugin, "viewer") do
       in_use =
         for of <- [User.owner(plugin) | Installed.installed_for(plugin)],
             of == "network" or match?("groups/" <> _, of),

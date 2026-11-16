@@ -22,7 +22,7 @@ export interface For {
 
 const waiting = new Map<number, (response: JsonRpcResponse) => void>()
 const listeners = new Set<() => void>()
-let asked = 0
+let requests = 0
 
 addEventListener("message", ({ source, data }) => {
   if (source !== parent) return
@@ -50,7 +50,7 @@ configureClientErrors({
 })
 
 const ask = <Result>(method: string, params: object = {}) => new Promise<Result>((answered, refused) => {
-  const id = ++asked
+  const id = ++requests
   waiting.set(id, ({ result, error }) => {
     waiting.delete(id)
     if (error) refused(new Error(error.message))

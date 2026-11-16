@@ -152,7 +152,7 @@ defmodule OneCore.Builds do
           do: Map.put(JSON.decode!(said), "device", Path.basename(blob))
 
     %{
-      asked: Server.key(),
+      server: Server.key(),
       build: build(),
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,

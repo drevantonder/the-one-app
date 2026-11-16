@@ -36,10 +36,10 @@ shown() { sed -e "s|$folder|<folder>|g" | cut -c1-400 | sed 's/^/    /'; }
 # A command as a user, and for a group or the network if it says, on the network's client: `as alice shelf all`,
 # `as owner for network backups now`.
 as() {
-  local who=$1 asked=
+  local who=$1 subject=
   shift
-  [[ $1 == for ]] && asked=$2 && shift 2
-  ${asked:+env ONE_FOR=$asked} env ONE_AS="$who" ONE_HOME="$folder/client" "$one" "$@"
+  [[ $1 == for ]] && subject=$2 && shift 2
+  ${subject:+env ONE_FOR=$subject} env ONE_AS="$who" ONE_HOME="$folder/client" "$one" "$@"
 }
 backups() { as owner for network backups "$@"; }
 # What each of them keeps, as one line to compare.

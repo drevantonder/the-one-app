@@ -239,9 +239,9 @@ defmodule SignIn do
 
     body = JSON.encode!(what)
 
-    asked = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
+    request = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
 
-    case Edge.send!(asked ++ [retry: false]) do
+    case Edge.send!(request ++ [retry: false]) do
       %{status: 200, body: %{"error" => why}} -> raise why
       %{status: 200, body: answer} -> answer
       %{status: status} -> raise "The network's edge answered #{status}"

@@ -10,7 +10,7 @@ defmodule OneCore.Bucket.Folder do
   @behaviour OneCore.Bucket
   require Record
 
-  Record.defrecordp(:asked, :mod, Record.extract(:mod, from_lib: "inets/include/httpd.hrl"))
+  Record.defrecordp(:mod, :mod, Record.extract(:mod, from_lib: "inets/include/httpd.hrl"))
 
   # How long a link works for, in seconds, as the presigner's does.
   @linked_for 60
@@ -129,16 +129,16 @@ defmodule OneCore.Bucket.Folder do
     {_port, secret} = :persistent_term.get(__MODULE__)
 
     {status, body} =
-      with [to, signed] <- String.split(String.trim_leading(List.to_string(asked(request, :request_uri)), "/"), "."),
+      with [to, signed] <- String.split(String.trim_leading(List.to_string(mod(request, :request_uri)), "/"), "."),
            true <- signed == signature(secret, to),
            {folder, key, mode, until} <- :erlang.binary_to_term(Base.url_decode64!(to)),
            true <- until > System.system_time(:second) do
-        case {mode, asked(request, :method)} do
+        case {mode, mod(request, :method)} do
           {:read, ~c"GET"} ->
             with {:ok, data, _tag} <- read(folder, key), do: {200, data}, else: (:absent -> {404, ""})
 
           {:write, ~c"PUT"} ->
-            with :ok <- write(folder, key, :erlang.list_to_binary(asked(request, :entity_body))),
+            with :ok <- write(folder, key, :erlang.list_to_binary(mod(request, :entity_body))),
                  do: {200, ""},
                  else: (:exists -> {412, ""})
 

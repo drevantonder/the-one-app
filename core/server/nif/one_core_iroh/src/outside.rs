@@ -21,15 +21,15 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 const EVERY: Duration = Duration::from_secs(30);
 
 /// Keeps the connection open for as long as the server runs, handing each call to `asked` as a client's is.
-pub async fn listen(network: Network, key: SecretKey, asked: LocalPid) {
+pub async fn listen(network: Network, key: SecretKey, handler: LocalPid) {
     loop {
         // Why it ended doesn't matter: the next one is the same either way.
-        let _ = connect(&network, &key, &asked).await;
+        let _ = connect(&network, &key, &handler).await;
         sleep(EVERY).await;
     }
 }
 
-async fn connect(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result<()> {
+async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Result<()> {
     let address = network.address.trim_end_matches('/');
     let socket = format!("ws{}/relay/outside", address.strip_prefix("http").context("an address is http or https")?);
     let mut request = socket.into_client_request()?;
@@ -41,7 +41,7 @@ async fn connect(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result
     // What the network's servers and the pieces of the edge told this one while it wasn't there, it didn't hear.
     // So it looks again, as a server that comes back does (`OneCore.Server.reconnected/0`), meanwhile answering
     // what it's asked here: looking again reads the bucket and starts plugins, which can take minutes.
-    let reload = *asked;
+    let reload = *handler;
     tokio::spawn(async move { crate::ask(&reload, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#).await });
     let (mut up, mut down) = socket.split();
     let (answers, mut answered) = mpsc::unbounded_channel();
@@ -53,11 +53,11 @@ async fn connect(network: &Network, key: &SecretKey, asked: &LocalPid) -> Result
         tokio::select! {
             message = down.next() => match message {
                 Some(Ok(Message::Text(call))) => {
-                    let (asked, answers) = (*asked, answers.clone());
+                    let (handler, answers) = (*handler, answers.clone());
                     tokio::spawn(async move {
                         let Ok(call) = serde_json::from_str::<Value>(call.as_str()) else { return };
                         let Some(message) = call["message"].as_str() else { return };
-                        if let Ok(answer) = crate::ask(&asked, None, message.as_bytes()).await {
+                        if let Ok(answer) = crate::ask(&handler, None, message.as_bytes()).await {
                             let answer = json!({"call": call["call"], "answer": String::from_utf8_lossy(&answer)});
                             let _ = answers.send(answer.to_string());
                         }

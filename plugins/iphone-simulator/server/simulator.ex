@@ -253,8 +253,8 @@ defmodule IphoneSimulator.Simulator do
     [_, "--companion-path", companion] = idb(service)
     %{"points" => points} = describe(service, udid) || raise "It isn't running: `start` starts it"
     file = Path.join(OneCore.Service.folder(service), "stream-#{System.unique_integer([:positive])}.json")
-    asked = Map.merge(JSON.decode!(request), %{"companion" => companion, "udid" => udid, "points" => points, "log" => Path.join(OneCore.Service.folder(service), "stream.log")})
-    File.write!(file, JSON.encode!(asked))
+    config = Map.merge(JSON.decode!(request), %{"companion" => companion, "udid" => udid, "points" => points, "log" => Path.join(OneCore.Service.folder(service), "stream.log")})
+    File.write!(file, JSON.encode!(config))
 
     case cmd([python(service), Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do
       %{exit: 0, stdout: answer} -> answer

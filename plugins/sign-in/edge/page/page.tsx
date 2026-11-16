@@ -14,17 +14,17 @@ import Bowser from "bowser"
 
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
 const opened = new URLSearchParams(location.hash.slice(1))
-const asked = new URLSearchParams(location.search)
+const params = new URLSearchParams(location.search)
 /// What Better Auth carries an assistant's request in while a person answers it. It's signed, so it goes back as it came.
-const request = asked.has("client_id") ? location.search.slice(1) : null
+const request = params.has("client_id") ? location.search.slice(1) : null
 const invite = opened.get("invite")
 /// What lets someone who has joined make another passkey, as the app's Passkeys opens this page with.
 const another = opened.get("passkey")
 /// The code a new device shows, which its link carries.
-const code = asked.get("user_code")
-const app = asked.has("app")
+const code = params.get("user_code")
+const app = params.has("app")
 /// Why the app shows a new code, in the words the device says it in (`NotApproved` in `core/client/src/lib.rs`).
-const why = app && { denied: "It was denied where you signed in.", expired: "Its code expired before it was approved. Try again." }[asked.get("why") ?? ""]
+const why = app && { denied: "It was denied where you signed in.", expired: "Its code expired before it was approved. Try again." }[params.get("why") ?? ""]
 /// A code as it's shown, in two halves: WDJB-MJHT.
 const shown = code && code.replace(/(.{4})(?=.)/g, "$1-")
 
@@ -44,7 +44,7 @@ const [problem, setProblem] = createSignal<string>()
 const [done, setDone] = createSignal<string>()
 /// The name someone joining goes by, as they type it.
 const [called, setCalled] = createSignal("")
-if (request) ask<{ client_name: string }>("/oauth2/public-client-prelogin", { client_id: asked.get("client_id"), oauth_query: request }).then((client) => setActs(client.client_name))
+if (request) ask<{ client_name: string }>("/oauth2/public-client-prelogin", { client_id: params.get("client_id"), oauth_query: request }).then((client) => setActs(client.client_name))
 
 /// Claims the device's code for whoever is signed in here, which only they can then answer, and learns what it is.
 async function claim() {

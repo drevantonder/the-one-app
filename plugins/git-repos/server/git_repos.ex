@@ -610,10 +610,10 @@ defmodule GitRepos do
 
   # Whoever only reads a repo still opens pull requests on it and closes their own, which this plugin keeps in the
   # repo: so it writes there as an editor, once it has decided what they may do.
-  defp writable(call, %Artifact{reached: {plugin, asked, "viewer"}} = repo) do
+  defp writable(call, %Artifact{reached: {plugin, principal, "viewer"}} = repo) do
     if Call.reaches?(call, Artifact.name(repo), "editor"),
       do: Call.reach(call, Artifact.name(repo), "editor"),
-      else: %{repo | reached: {plugin, asked, "editor"}}
+      else: %{repo | reached: {plugin, principal, "editor"}}
   end
 
   defp writable(_call, repo), do: repo

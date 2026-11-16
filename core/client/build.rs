@@ -5,8 +5,8 @@ fn main() {
     // app are named by too. It's named again whenever the commit does: git's HEAD, or the branch it's on. Not when
     // git's index does, which git writes whenever it looks at the files (`git status`), and every program would be
     // built again for nothing: its `-dirty` is what was uncommitted when the commit last changed.
-    let git = |asked: &[&str]| {
-        let said = std::process::Command::new("git").args(asked).output().expect("git is there");
+    let git = |args: &[&str]| {
+        let said = std::process::Command::new("git").args(args).output().expect("git is there");
         String::from_utf8(said.stdout).expect("git says text").trim().to_owned()
     };
     let branch = git(&["symbolic-ref", "-q", "HEAD"]);

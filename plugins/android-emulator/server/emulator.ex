@@ -241,7 +241,7 @@ defmodule AndroidEmulator.Emulator do
     folder = OneCore.Service.folder(service)
     file = Path.join(folder, "stream-#{System.unique_integer([:positive])}.json")
 
-    asked =
+    config =
       Map.merge(JSON.decode!(request), %{
         "adb" => adb_path(service),
         "serial" => serial(id),
@@ -249,7 +249,7 @@ defmodule AndroidEmulator.Emulator do
         "log" => Path.join(folder, "stream.log")
       })
 
-    File.write!(file, JSON.encode!(asked))
+    File.write!(file, JSON.encode!(config))
 
     case run(service, [python, Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do
       %{exit: 0, stdout: answer} -> answer

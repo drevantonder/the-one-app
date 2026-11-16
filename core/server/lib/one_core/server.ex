@@ -135,19 +135,19 @@ defmodule OneCore.Server do
   # one that's there answers at once (`Iroh.connect/4`); one that started again is somewhere new.
   defp ask(server, message) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
-    asked = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
+    request = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
 
-    case asked.() do
-      :closed -> connect(endpoint, server, asked)
-      {:gone, _address} -> connect(endpoint, server, asked)
+    case request.() do
+      :closed -> connect(endpoint, server, request)
+      {:gone, _address} -> connect(endpoint, server, request)
       answered -> answered
     end
   end
 
-  defp connect(endpoint, server, asked) do
+  defp connect(endpoint, server, request) do
     with {:ok, address} <- Servers.address(server),
          :ok <- await(&Iroh.connect(endpoint, address, self(), &1)) do
-      case asked.() do
+      case request.() do
         :closed -> :unreachable
         {:gone, _address} -> :unreachable
         answered -> answered

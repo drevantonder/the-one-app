@@ -34,15 +34,15 @@ Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/authorize") {
-      const asked = url.searchParams;
-      if (asked.get("client_id") !== client.id || asked.get("code_challenge_method") !== "S256") return json({ error: "invalid_request" }, 400);
+      const params = url.searchParams;
+      if (params.get("client_id") !== client.id || params.get("code_challenge_method") !== "S256") return json({ error: "invalid_request" }, 400);
       // A code is no secret: it passes through the browser and the network's edge, and redeems nothing alone.
       const code = `code-${crypto.randomUUID()}`;
-      codes.set(code, { challenge: asked.get("code_challenge"), back: asked.get("redirect_uri") });
+      codes.set(code, { challenge: params.get("code_challenge"), back: params.get("redirect_uri") });
       seen.signed_in++;
-      const back = new URL(asked.get("redirect_uri"));
+      const back = new URL(params.get("redirect_uri"));
       back.searchParams.set("code", code);
-      back.searchParams.set("state", asked.get("state"));
+      back.searchParams.set("state", params.get("state"));
       return Response.redirect(back, 302);
     }
     if (url.pathname === "/token" && request.method === "POST") {

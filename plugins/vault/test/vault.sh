@@ -63,14 +63,14 @@ device() { mkdir -p "$folder/devices/$1" && printf '[%s,%s]' "$(reached server)"
 # A command on a device, as a user, and for a group or the network if it says: `on phone as alice vault list`,
 # `on desk via standby as owner for network deploy ...`. Everything any of them is answered is kept, to search.
 on() {
-  local home=$folder/devices/$1 only= asked=
+  local home=$folder/devices/$1 only= subject=
   shift
   [[ $1 == via ]] && only=$2 && shift 2
   local who=$2
   shift 2
-  [[ $1 == for ]] && asked=$2 && shift 2
+  [[ $1 == for ]] && subject=$2 && shift 2
   if [[ -n $only ]]; then printf '[%s]' "$(reached "$only")" >"$home/servers"; else printf '[%s,%s]' "$(reached server)" "$(reached standby)" >"$home/servers"; fi
-  ${asked:+env ONE_FOR=$asked} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/said"
+  ${subject:+env ONE_FOR=$subject} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/said"
 }
 shown() {
   echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" | named)"
@@ -230,9 +230,9 @@ started+=($!)
 curl -s --retry 30 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$service/seen" >/dev/null
 echo "  an outside service runs on this machine, at 127.0.0.1:$service"
 may on laptop as alice vault set --item Pasted --field password --value-from "$folder/secrets/pasted"
-asked=$(on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --hosts "[\"127.0.0.1:$service\"]" --why "To read your invoices")
-said=$asked shown "may    " on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --why "To read your invoices"
-request=$(grep -o '"id":"[^"]*"' <<<"$asked" | cut -d'"' -f4)
+response=$(on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --hosts "[\"127.0.0.1:$service\"]" --why "To read your invoices")
+said=$response shown "may    " on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --why "To read your invoices"
+request=$(grep -o '"id":"[^"]*"' <<<"$response" | cut -d'"' -f4)
 echo "  she opens the link in a browser:"
 browser "$address/vault/request?id=$request"
 may on laptop as alice vault status --id "$request"

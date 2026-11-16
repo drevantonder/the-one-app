@@ -18,7 +18,7 @@ defmodule OneCore.Iroh do
   returns once it's connected there, so a server that says it's running is one the others know is on. Gives the
   endpoint, open while it's held, and its address as the JSON a client is told it in.
   """
-  def start(_key_file, _network, _asked), do: :erlang.nif_error(:nif_not_loaded)
+  def start(_key_file, _network, _handler), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes:

@@ -111,7 +111,7 @@ fn sign(key_file: String, message: Binary) -> Result<String, String> {
 fn start(
     key_file: String,
     network: Option<(String, String)>,
-    asked: LocalPid,
+    handler: LocalPid,
 ) -> Result<(ResourceArc<Reached>, String), String> {
     RUNTIME.block_on(async {
         let network = network.map(|(address, token)| Network { address, token });
@@ -120,12 +120,12 @@ fn start(
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
             endpoint.online().await;
-            tokio::spawn(outside::listen(network, endpoint.secret_key().clone(), asked));
+            tokio::spawn(outside::listen(network, endpoint.secret_key().clone(), handler));
         }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
         let clients = Clients::default();
         let asks = Asks::default();
-        tokio::spawn(accept(endpoint.clone(), asked, clients.clone(), asks.clone()));
+        tokio::spawn(accept(endpoint.clone(), handler, clients.clone(), asks.clone()));
         let watching = Path::new(&key_file).with_file_name("watching");
         let stored = std::fs::read(&watching).ok();
         let stored: HashMap<String, EndpointAddr> =
@@ -147,10 +147,10 @@ fn start(
 /// Hands `message` to the server's Elixir, with the key of whoever asked it if they have one, and waits for its
 /// answer. There's none if the Elixir is gone: `REFUSED` if it was before it took the message, and `STOPPED` if it
 /// went after, so it may have done what was asked.
-async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Result<Vec<u8>, VarInt> {
+async fn ask(handler: &LocalPid, from: Option<&str>, message: &[u8]) -> Result<Vec<u8>, VarInt> {
     let (answer, answered) = oneshot::channel();
     let ask = ResourceArc::new(Ask(Mutex::new(Some(answer))));
-    let sent = OwnedEnv::new().send_and_clear(asked, |env| {
+    let sent = OwnedEnv::new().send_and_clear(handler, |env| {
         let mut binary = NewBinary::new(env, message.len());
         binary.as_mut_slice().copy_from_slice(message);
         (atoms::ask(), ask, from, Binary::from(binary))
@@ -159,7 +159,7 @@ async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Result<Vec
     answered.await.map_err(|_| client::STOPPED)
 }
 
-async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients, asks: Asks) {
+async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: Asks) {
     while let Some(incoming) = endpoint.accept().await {
         // A server that's stopping takes no new connection, so whoever connects reaches another.
         if asks.try_read().is_err() {
@@ -184,7 +184,7 @@ async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients, asks: Ask
                     // A stream ended unanswered is reset, so whoever asked knows it wasn't answered, and whether it
                     // was taken.
                     let Ok(_answering) = asks.try_read_owned() else { return drop(send.reset(client::REFUSED)) };
-                    let answer = ask(&asked, Some(&from), &message);
+                    let answer = ask(&handler, Some(&from), &message);
                     tokio::pin!(answer);
                     // While it runs, whoever asked with a progress token is told so every `THERE`, which is how
                     // they know it's still running, however long it takes (`client::Reached::ask`). How far it

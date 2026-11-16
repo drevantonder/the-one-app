@@ -141,14 +141,14 @@ export function LiveScreen(props: { label: string; screen: (inputs: ScreenInputs
   // ends as it's resized, and is connected to again at its new size.
   let resizing: ReturnType<typeof setTimeout>
   let fixed = false
-  let asked = ""
+  let requested = ""
   const resize = () => {
     // A view smaller than the least a screen takes keeps its shape, and is drawn a little smaller.
     const up = Math.max(1, SIZES.width[0] / view.clientWidth, SIZES.height[0] / view.clientHeight)
     const width = Math.min(Math.round(view.clientWidth * up), SIZES.width[1])
     const height = Math.min(Math.round(view.clientHeight * up), SIZES.height[1])
-    if (fixed || asked === `${width}x${height}`) return
-    asked = `${width}x${height}`
+    if (fixed || requested === `${width}x${height}`) return
+    requested = `${width}x${height}`
     // A screen whose display can't be resized (a desktop container made before it could) is drawn scaled instead.
     return screen({ action: "resize", width, height }).then(
       () => true,

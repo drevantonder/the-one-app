@@ -61,9 +61,9 @@ defmodule OneCore.User do
   def asking(from, said, _hook) do
     with {:ok, by} <- by(from, said),
          :ok <- here(by),
-         asked = Map.get(said, "for", by),
-         :ok <- acts(by, asked),
-         do: {:ok, {by, asked}, false}
+         subject = Map.get(said, "for", by),
+         :ok <- acts(by, subject),
+         do: {:ok, {by, subject}, false}
   end
 
   defp by(_from, %{"link" => link}) when is_binary(link), do: {:ok, link(link)}
@@ -133,9 +133,9 @@ defmodule OneCore.User do
   # member of.
   defp acts(by, by), do: :ok
 
-  defp acts(by, asked) do
+  defp acts(by, subject) do
     cond do
-      not owner?(asked) ->
+      not owner?(subject) ->
         {:error, "A request is for a user, a group or the network: users/<name>, groups/<name> or network"}
 
       link?(by) ->
@@ -143,7 +143,7 @@ defmodule OneCore.User do
 
       true ->
         with {:refuse, why} <-
-               Hooks.validate("reach", %{"who" => by, "relation" => "member", "artifact" => asked}, {by, asked}),
+               Hooks.validate("reach", %{"who" => by, "relation" => "member", "artifact" => subject}, {by, subject}),
              do: {:error, why}
     end
   end

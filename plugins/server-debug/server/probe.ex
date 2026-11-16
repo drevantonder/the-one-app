@@ -20,9 +20,9 @@ defmodule ServerDebug.Probe do
            end)
   def source, do: @source
 
-  def run(%{"op" => "processes"} = asked, scope), do: processes(asked, scope)
-  def run(%{"op" => "trace"} = asked, scope), do: trace(asked, scope)
-  def run(%{"op" => "logs"} = asked, scope), do: logs(asked, scope)
+  def run(%{"op" => "processes"} = request, scope), do: processes(request, scope)
+  def run(%{"op" => "trace"} = request, scope), do: trace(request, scope)
+  def run(%{"op" => "logs"} = request, scope), do: logs(request, scope)
 
   ## Whose a process is
 
@@ -65,8 +65,8 @@ defmodule ServerDebug.Probe do
 
   # The plugin's processes as observer_cli and `:recon.proc_count/2` show them, the top by `sort`, and the ETS
   # tables they own.
-  defp processes(asked, scope) do
-    sort = String.to_existing_atom(asked["sort"] || "memory")
+  defp processes(request, scope) do
+    sort = String.to_existing_atom(request["sort"] || "memory")
     pids = for pid <- Process.list(), pid != self(), mine?(pid, scope), do: pid
 
     rows =
@@ -101,7 +101,7 @@ defmodule ServerDebug.Probe do
 
     %{
       "count" => length(rows),
-      "processes" => rows |> Enum.sort_by(& &1[Atom.to_string(sort)], :desc) |> Enum.take(asked["top"] || 20),
+      "processes" => rows |> Enum.sort_by(& &1[Atom.to_string(sort)], :desc) |> Enum.take(request["top"] || 20),
       "tables" => Enum.sort_by(tables, & &1["memory"], :desc)
     }
   end
@@ -130,11 +130,11 @@ defmodule ServerDebug.Probe do
   # messages say which processes are in one, in order with the rest. A process that was in one already as the trace
   # began, a task a call started and the plugin's own are told by looking. Recon's limit counts everyone's calls, so a
   # function others call often stops at it sooner. Only one trace runs in a VM at once, as recon has it.
-  defp trace(asked, scope) do
-    module = scope.module.(asked["module"])
-    function = if asked["function"], do: function!(module, asked["function"], asked["arity"]), else: :_
-    calls = asked["calls"] || 10
-    seconds = asked["seconds"] || 20
+  defp trace(request, scope) do
+    module = scope.module.(request["module"])
+    function = if request["function"], do: function!(module, request["function"], request["arity"]), else: :_
+    calls = request["calls"] || 10
+    seconds = request["seconds"] || 20
     # Recon's own limit, of trace messages: a call and its return are two.
     most = min(calls * 20, 1000)
 
@@ -145,7 +145,7 @@ defmodule ServerDebug.Probe do
     if not :global.set_lock(lock, [node()], 0),
       do: raise("Another trace is running on this server; each lasts a minute at most")
 
-    head = if is_integer(asked["arity"]), do: List.duplicate(:_, asked["arity"]), else: :_
+    head = if is_integer(request["arity"]), do: List.duplicate(:_, request["arity"]), else: :_
     {in_module, in_function, in_head} = scope.calls
     me = self()
 
@@ -260,21 +260,21 @@ defmodule ServerDebug.Probe do
 
   # A follow: what the plugin says to Logger, every level, as it runs for `subject`, kept for whoever follows it until
   # they read it, for `minutes` or until it has heard `lines`. Reading it again goes on from there.
-  defp logs(asked, scope) do
-    name = {:global, {__MODULE__.Follow, asked["follower"], scope.who, scope.subject}}
+  defp logs(request, scope) do
+    name = {:global, {__MODULE__.Follow, request["follower"], scope.who, scope.subject}}
 
-    if asked["stop"] do
+    if request["stop"] do
       with pid when is_pid(pid) <- GenServer.whereis(name), do: GenServer.stop(pid)
       %{"lines" => [], "ended" => "It stopped following.", "until" => nil}
     else
       follow =
-        case GenServer.start(__MODULE__.Follow, {scope, asked["minutes"] || 10, asked["lines"] || 1000}, name: name) do
+        case GenServer.start(__MODULE__.Follow, {scope, request["minutes"] || 10, request["lines"] || 1000}, name: name) do
           {:ok, pid} -> pid
           {:error, {:already_started, pid}} -> pid
           {:error, why} -> raise why
         end
 
-      GenServer.call(follow, {:read, (asked["wait"] || 10) * 1000}, :infinity)
+      GenServer.call(follow, {:read, (request["wait"] || 10) * 1000}, :infinity)
     end
   end
 

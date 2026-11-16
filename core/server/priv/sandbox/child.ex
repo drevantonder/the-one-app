@@ -18,14 +18,14 @@ defmodule OneCore.Call do
   end
 
   def tool(%__MODULE__{id: id}, plugin, tool, inputs, options \\ []) do
-    asked = %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}
+    request = %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}
 
-    asked =
+    request =
       if Keyword.has_key?(options, :on_behalf_of),
-        do: Map.put(asked, "on_behalf_of", options[:on_behalf_of]),
-        else: asked
+        do: Map.put(request, "on_behalf_of", options[:on_behalf_of]),
+        else: request
 
-    case Child.request("tool", asked, id) do
+    case Child.request("tool", request, id) do
       {:blob, kind, data} -> {:blob, kind, data}
       answer -> answer
     end

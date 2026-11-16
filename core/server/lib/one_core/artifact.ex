@@ -92,13 +92,13 @@ defmodule OneCore.Artifact do
     end
   end
 
-  defp writes(%__MODULE__{reached: {_plugin, _asked, "viewer"}} = artifact),
+  defp writes(%__MODULE__{reached: {_plugin, _principal, "viewer"}} = artifact),
     do: raise("#{name(artifact)} was reached as a viewer, which only reads it")
 
   defp writes(%__MODULE__{prefix: prefix}), do: prefix
 
-  defp changed(%__MODULE__{reached: {plugin, asked, _as}} = artifact, blob, :ok) do
-    Hooks.observe("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, asked)
+  defp changed(%__MODULE__{reached: {plugin, principal, _as}} = artifact, blob, :ok) do
+    Hooks.observe("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, principal)
   end
 
   defp changed(_artifact, _blob, outcome), do: outcome

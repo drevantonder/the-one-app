@@ -158,25 +158,25 @@ function FieldSheet() {
 /// A request for an item: who asks, what they'd get and where it goes, then one of this person's items that has
 /// what it needs, or new values to type. Allow is the only way to say yes.
 function RequestSheet() {
-  const asked = () => { const open = sheet(); return open?.kind === "request" ? open.request : undefined }
+  const request = () => { const open = sheet(); return open?.kind === "request" ? open.request : undefined }
   const [picked, setPicked] = createSignal("")
-  const fits = () => contents().items.filter((item) => asked()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
-  const who = () => asked()!.plugin ?? "Your agents"
+  const fits = () => contents().items.filter((item) => request()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
+  const who = () => request()!.plugin ?? "Your agents"
   const allow = async (event: SubmitEvent) => {
     event.preventDefault()
     const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement))
-    const answer = picked() ? { item: picked() } : { values: JSON.stringify(Object.fromEntries(asked()!.fields.map(({ name }) => [name, typed[name]]))) }
-    if (await does("vault_answer", { id: asked()!.id, ...answer })) shut()
+    const answer = picked() ? { item: picked() } : { values: JSON.stringify(Object.fromEntries(request()!.fields.map(({ name }) => [name, typed[name]]))) }
+    if (await does("vault_answer", { id: request()!.id, ...answer })) shut()
   }
-  const decline = async () => (await does("vault_answer", { id: asked()!.id, decline: true })) && shut()
+  const decline = async () => (await does("vault_answer", { id: request()!.id, decline: true })) && shut()
   return (
-    <Sheet heading={asked() ? `${who()} ${asked()!.plugin ? "needs" : "need"} ${asked()!.title}` : ""} open={!!asked()} onClose={shut}>
-      <Show when={asked()}>
+    <Sheet heading={request() ? `${who()} ${request()!.plugin ? "needs" : "need"} ${request()!.title}` : ""} open={!!request()} onClose={shut}>
+      <Show when={request()}>
         <form onSubmit={allow}>
           <p class="about">
-            {asked()!.why ? `${asked()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
-            {who()} can use {picked() || asked()!.title}
-            {!picked() && asked()!.hosts.length ? `, sent only to ${listed(asked()!.hosts)}` : ""}. Nobody is shown what you type.
+            {request()!.why ? `${request()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
+            {who()} can use {picked() || request()!.title}
+            {!picked() && request()!.hosts.length ? `, sent only to ${listed(request()!.hosts)}` : ""}. Nobody is shown what you type.
           </p>
           <Show when={fits().length}>
             <Field label="Use">
@@ -184,7 +184,7 @@ function RequestSheet() {
             </Field>
           </Show>
           <Show when={!picked()}>
-            <For each={asked()!.fields}>
+            <For each={request()!.fields}>
               {(field, at) => (
                 <Field label={label(field.name)}>
                   <Input name={field.name} type={field.secret ? "password" : "text"} autocomplete={field.secret ? "new-password" : "off"} spellcheck={false} required autofocus={at() === 0} />
@@ -290,7 +290,7 @@ function YourKey() {
             text={`It adds and uses items. Choosing the servers that open ${whom()} Vault takes a trusted device.`}
             action={
               <>
-                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((asked) => void (asked && toast("Asked. Open Vault on a trusted device.")))}>
+                <Button variant="outline" onClick={() => does("encryption_ask", {}).then((requested) => void (requested && toast("Asked. Open Vault on a trusted device.")))}>
                   Ask Another Device
                 </Button>
                 <Button variant="outline" onClick={() => useRecoveryKey({ for: whose() }).then(again)}>

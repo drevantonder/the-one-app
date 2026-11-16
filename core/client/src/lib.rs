@@ -215,7 +215,7 @@ impl std::error::Error for DeviceAuthorization {}
 impl DeviceAuthorization {
     /// Asks the network's authorization server for a code to let the device with `key` in by, under this
     /// machine's name.
-    async fn asked(server: &AuthorizationServer, key: &SecretKey) -> Result<Self> {
+    async fn request(server: &AuthorizationServer, key: &SecretKey) -> Result<Self> {
         let ask = serde_urlencoded::to_string([("client_id", key.public().to_string()), ("name", name())])?;
         let (given, said) = ask_edge(&server.device_authorization_endpoint, key, FORM, ask).await?;
         let (true, Some(link), Some(code), Some(device_code)) = (
@@ -373,11 +373,11 @@ const FORM: &str = "application/x-www-form-urlencoded";
 async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) -> Result<(bool, Value)> {
     let parsed: reqwest::Url = url.parse().with_context(|| format!("{url} isn't an address"))?;
     let network = Network { address: parsed.origin().ascii_serialization(), token: String::new() };
-    let mut asked = web()?.post(url).timeout(CONNECT * 3).header("content-type", content_type);
+    let mut request = web()?.post(url).timeout(CONNECT * 3).header("content-type", content_type);
     for (name, value) in network.signed(key, parsed.path(), &body)? {
-        asked = asked.header(name, value);
+        request = request.header(name, value);
     }
-    let answer = asked.body(body).send().await?;
+    let answer = request.body(body).send().await?;
     Ok((answer.status().is_success(), answer.json().await?))
 }
 
@@ -416,11 +416,11 @@ impl NetworkConfig {
                 Some(server) => server,
                 None => AuthorizationServer::discovered(&self.address).await?,
             };
-            let asked = DeviceAuthorization::asked(&server, key).await;
+            let requested = DeviceAuthorization::request(&server, key).await;
             // What it found is kept for the next time, and what didn't answer is looked for again then.
-            self.authorization_server = asked.is_ok().then_some(server);
+            self.authorization_server = requested.is_ok().then_some(server);
             write(&home.join("network"), &serde_json::to_vec(self)?)?;
-            bail!(asked?)
+            bail!(requested?)
         }
         if answer["result"].is_null() {
             bail!("{}", answer["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
@@ -675,8 +675,8 @@ impl Reached {
     /// Whether the server is there: an empty message, which a server answers at once with nothing. One that doesn't
     /// in time is gone, and so is this connection to it.
     async fn there(&self) -> bool {
-        let asked = async { self.send(b"").await?.read_to_end(LIMIT).await.ok() };
-        let there = timeout(THERE, asked).await.is_ok_and(|answer| answer.is_some());
+        let probe = async { self.send(b"").await?.read_to_end(LIMIT).await.ok() };
+        let there = timeout(THERE, probe).await.is_ok_and(|answer| answer.is_some());
         if there {
             *self.received.lock().expect("no ask panics") = Instant::now();
         } else {
@@ -1027,7 +1027,7 @@ impl Client {
         let reached = std::sync::Mutex::new("none");
         // A server that went away after it was asked is asked again elsewhere only for what only reads: anything
         // else it may have done.
-        let asked = async {
+        let request = async {
             let mut stopped = false;
             for _ in 0..2 {
                 let open = self.reached().await?;
@@ -1047,7 +1047,7 @@ impl Client {
                 false => bail!(UNANSWERED),
             }
         };
-        let answer = asked.await;
+        let answer = request.await;
         self.answered(answer.is_ok());
         if let Some(mut span) = span {
             let refused = match &answer {
@@ -1095,8 +1095,8 @@ impl Client {
         let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
         let mut config =
             NetworkConfig { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
-        let asked = config.admit(&self.key, &self.home).await;
-        match asked.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
+        let admitted = config.admit(&self.key, &self.home).await;
+        match admitted.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
             _ => return answer,
         }
@@ -1280,14 +1280,14 @@ impl Client {
     /// user answers first. Which they are is what the client kept from when it last asked, and what it's told when
     /// it asks now if none of those answers.
     async fn reached(&self) -> Result<Arc<Reached>> {
-        let asked = Instant::now();
+        let started = Instant::now();
         let mut reach = self.reach.lock().await;
         if let Some(open) = reach.open.as_ref().filter(|open| open.open()) {
             return Ok(open.clone());
         }
         reach.open = None;
         // Many asks at once share one try: no server answered while this one waited its turn.
-        if reach.failed.is_some_and(|failed| failed > asked) {
+        if reach.failed.is_some_and(|failed| failed > started) {
             bail!(UNANSWERED)
         }
         let mut tried = None;

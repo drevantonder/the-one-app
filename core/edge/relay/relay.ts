@@ -76,7 +76,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const url = new URL(request.url);
     // iroh times this to learn how far away the relay is. An endpoint with no answer has no relay.
     if (url.pathname === "/ping") return new Response(null, { status: 200 });
-    if (url.pathname === "/relay/seen") return this.asked(request, url);
+    if (url.pathname === "/relay/seen") return this.handleSeen(request, url);
     if (request.headers.get("upgrade") !== "websocket") return refuse(url.pathname.startsWith("/relay") ? 426 : 404, "The relay is a WebSocket at /relay");
     if (url.pathname === "/relay") return this.endpoint(request, url);
     if (url.pathname === "/relay/outside") return this.relay().fetch(request);
@@ -198,7 +198,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   }
 
   /** A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. */
-  async asked(request: Request, url: URL) {
+  async handleSeen(request: Request, url: URL) {
     const key = await verifiedKey(request, "");
     if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));

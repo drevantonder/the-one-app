@@ -40,15 +40,15 @@ median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.3f ms", all[int(
 # A command as a user of the network, or `link <link>` as a sharing link's holder, and for a group or the network if
 # it says: `as alice notes read --note ...`, `as alice for groups/family notes write ...`.
 as() {
-  local who=$1 asked=
+  local who=$1 subject=
   shift
   if [[ $who == link ]]; then
     who=$1
     shift
     ONE_LINK=$who ONE_HOME=$folder/client "$one" "$@"
   else
-    [[ $1 == for ]] && asked=$2 && shift 2
-    ${asked:+env ONE_FOR=$asked} env ONE_AS=$who ONE_HOME=${home:-$folder/client} "$one" "$@"
+    [[ $1 == for ]] && subject=$2 && shift 2
+    ${subject:+env ONE_FOR=$subject} env ONE_AS=$who ONE_HOME=${home:-$folder/client} "$one" "$@"
   fi
 }
 # The same through one server and no other: `via alices as alice diary write ...`.
@@ -68,10 +68,10 @@ start_for() {
 # One tool call over the web at the network's address, as whoever holds a sharing link, with what it's answered.
 # What it says of itself is someone else, which the edge doesn't pass on.
 web() {
-  local asked answer
-  asked="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"owner\",\"for\":\"network\",\"who\":\"users/owner\"}}"
+  local arguments answer
+  arguments="{\"name\":\"$3\",\"arguments\":$4,\"_meta\":{\"as\":\"owner\",\"for\":\"network\",\"who\":\"users/owner\"}}"
   answer=$(curl -s -m 20 -X POST "${at_address[1]}/link/$2" -H 'content-type: application/json' \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":$asked}")
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":$arguments}")
   sed -E 's/.*"(text|message)":"(([^"\\]|\\.)*)".*/\2/' <<<"$answer"
   [[ $answer == *'"content"'* && $answer != *'"isError":true'* ]]
 }

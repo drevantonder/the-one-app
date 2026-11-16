@@ -96,8 +96,8 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
             if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
         }
         ["search", query @ ..] if !query.is_empty() && !query[0].starts_with("--") => {
-            let asked = json!({"name": "search", "arguments": {"query": query.join(" ")}, "_meta": {"mode": "cli"}});
-            let result = client.request("tools/call", asked).await?;
+            let request = json!({"name": "search", "arguments": {"query": query.join(" ")}, "_meta": {"mode": "cli"}});
+            let result = client.request("tools/call", request).await?;
             let text: Vec<&str> =
                 result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
             printed(text.join("\n"))

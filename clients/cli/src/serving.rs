@@ -90,13 +90,13 @@ async fn login_path() -> Result<String> {
         std::ffi::CStr::from_ptr((*user).pw_shell).to_string_lossy().into_owned()
     };
     const MARK: &str = "one-path-6f0c";
-    let asked = Command::new(&shell)
+    let command = Command::new(&shell)
         .args(["-i", "-l", "-c", &format!("printf '%s%s%s' {MARK} \"$PATH\" {MARK}")])
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .output();
-    let said = timeout(Duration::from_secs(10), asked)
+    let said = timeout(Duration::from_secs(10), command)
         .await
         .with_context(|| format!("Your login shell, {shell}, didn't say its PATH within 10 seconds"))??;
     let said = String::from_utf8_lossy(&said.stdout);
@@ -420,11 +420,11 @@ async fn download(client: &Client) -> Result<Map<String, Value>> {
 async fn fetch(build: &Value, file: &Path) -> Result<()> {
     let link = &build["link"];
     let method = reqwest::Method::from_bytes(link["method"].as_str().unwrap_or("GET").as_bytes())?;
-    let mut asked = client::web()?.request(method, link["url"].as_str().context("a build has a link")?);
+    let mut request = client::web()?.request(method, link["url"].as_str().context("a build has a link")?);
     for (name, value) in link["headers"].as_object().into_iter().flatten() {
-        asked = asked.header(name, value.as_str().unwrap_or_default());
+        request = request.header(name, value.as_str().unwrap_or_default());
     }
-    let mut answer = asked.send().await?.error_for_status()?;
+    let mut answer = request.send().await?.error_for_status()?;
     let mut out = tokio::fs::File::create(file).await?;
     let (mut hash, mut size) = (Sha256::new(), 0);
     while let Some(part) = answer.chunk().await? {
@@ -620,8 +620,8 @@ mod system {
         std::process::Command::new(program).args(["serve", "run"]).exec().into()
     }
 
-    fn systemctl(asked: &[&str]) -> Result<()> {
-        let done = std::process::Command::new("systemctl").arg("--user").args(asked).output()?;
+    fn systemctl(args: &[&str]) -> Result<()> {
+        let done = std::process::Command::new("systemctl").arg("--user").args(args).output()?;
         ensure!(done.status.success(), "systemd didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
         Ok(())
     }
@@ -743,8 +743,8 @@ mod system {
         std::process::Command::new(program).args(["serve", "run"]).exec().into()
     }
 
-    fn launchctl(asked: &[&str]) -> Result<()> {
-        let done = std::process::Command::new("launchctl").args(asked).output()?;
+    fn launchctl(args: &[&str]) -> Result<()> {
+        let done = std::process::Command::new("launchctl").args(args).output()?;
         ensure!(done.status.success(), "launchd didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
         Ok(())
     }
@@ -907,8 +907,8 @@ mod system {
         }
     }
 
-    fn schtasks(asked: &[&str]) -> Result<()> {
-        let done = command("schtasks").args(asked).output()?;
+    fn schtasks(args: &[&str]) -> Result<()> {
+        let done = command("schtasks").args(args).output()?;
         ensure!(done.status.success(), "Task Scheduler didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
         Ok(())
     }

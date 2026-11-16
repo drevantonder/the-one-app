@@ -144,8 +144,8 @@ defmodule ComputerUse do
   def call(action, inputs, call) when action in @actions do
     s = screen(call, inputs["screen"])
     if action != "screenshot" or inputs["doing"], do: note(call, s, inputs["doing"])
-    asked = Map.drop(inputs, ~w(screen doing)) |> Map.merge(s["inputs"]) |> Map.put("action", action)
-    Call.tool(call, s["plugin"], s["tool"], asked)
+    inputs = Map.drop(inputs, ~w(screen doing)) |> Map.merge(s["inputs"]) |> Map.put("action", action)
+    Call.tool(call, s["plugin"], s["tool"], inputs)
   end
 
   # Every screen the caller may use, each with the plugin it's from, and why each plugin that couldn't say its own

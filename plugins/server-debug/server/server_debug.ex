@@ -103,8 +103,8 @@ defmodule ServerDebug do
   def call(tool, inputs, %Call{} = call) do
     target = target!(call, inputs)
     on!(call, inputs, target)
-    asked = inputs |> Map.drop(["plugin", "for", "server"]) |> Map.merge(%{"op" => tool, "follower" => call.actor})
-    answer = probed(target, asked, tool == "logs")
+    request = inputs |> Map.drop(["plugin", "for", "server"]) |> Map.merge(%{"op" => tool, "follower" => call.actor})
+    answer = probed(target, request, tool == "logs")
     "#{target.name} on #{Servers.name(Server.key()) || Server.key()}, for #{target.whose}. " <> shown(tool, answer)
   end
 
@@ -147,15 +147,15 @@ defmodule ServerDebug do
           raise "None of the servers that run #{name} answered"
         end
 
-      asked ->
+      wanted ->
         server =
-          Enum.find(servers, &(&1 == asked or Servers.name(&1) == asked)) ||
-            raise "#{asked} isn't a server that runs #{name}. These are: " <>
+          Enum.find(servers, &(&1 == wanted or Servers.name(&1) == wanted)) ||
+            raise "#{wanted} isn't a server that runs #{name}. These are: " <>
                     Enum.map_join(servers, ", ", &(Servers.name(&1) || &1))
 
         if server != Server.key() do
           Call.forward_to(call, server)
-          raise "#{asked} didn't answer"
+          raise "#{wanted} didn't answer"
         end
     end
   end
@@ -165,10 +165,10 @@ defmodule ServerDebug do
 
   # What the plugin's VM answered: the server's own, or its own in sandbox mode, where only a running one is asked,
   # but by a follow, which keeps it running.
-  defp probed(%{version: %Version{sandbox: true}} = target, asked, start) do
+  defp probed(%{version: %Version{sandbox: true}} = target, request, start) do
     request = %{
       "source" => Probe.source(),
-      "request" => asked,
+      "request" => request,
       "scope" => %{"subject" => target.whose, "own" => target.at == target.whose}
     }
 
@@ -178,7 +178,7 @@ defmodule ServerDebug do
     end
   end
 
-  defp probed(%{version: version} = target, asked, _start) do
+  defp probed(%{version: version} = target, request, _start) do
     plugin = version.plugin
 
     if function_exported?(plugin, :sensitive, 0) and plugin.sensitive(),
@@ -196,7 +196,7 @@ defmodule ServerDebug do
       end
     end
 
-    Probe.run(asked, %{
+    Probe.run(request, %{
       subject: target.whose,
       who: artifact,
       own: if(own?, do: &(label.(&1) != nil)),

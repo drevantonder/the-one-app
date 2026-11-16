@@ -12,7 +12,7 @@ defmodule Vault.OAuth do
   def link(service, client_id, back, state, verifier) do
     challenge = Base.url_encode64(:crypto.hash(:sha256, verifier), padding: false)
 
-    asked =
+    query =
       Map.merge(Map.get(service, :params, %{}), %{
         "response_type" => "code",
         "client_id" => client_id,
@@ -23,7 +23,7 @@ defmodule Vault.OAuth do
         "code_challenge_method" => "S256"
       })
 
-    service.authorize <> "?" <> URI.encode_query(asked)
+    service.authorize <> "?" <> URI.encode_query(query)
   end
 
   @doc "The tokens a service gives for the code its person came back with."
@@ -36,11 +36,11 @@ defmodule Vault.OAuth do
     tokens(service, client, grant_type: "refresh_token", refresh_token: refresh_token)
   end
 
-  defp tokens(service, client, asked) do
+  defp tokens(service, client, params) do
     url = service["token"]
     site!(URI.parse(url))
     secret = if secret = client["client_secret"], do: [client_secret: secret], else: []
-    form = asked ++ [client_id: client["client_id"]] ++ secret
+    form = params ++ [client_id: client["client_id"]] ++ secret
 
     case Req.post(url, form: form, retry: false, redirect: false) do
       {:ok, %{status: 200, body: %{"access_token" => token} = tokens}} when is_binary(token) ->

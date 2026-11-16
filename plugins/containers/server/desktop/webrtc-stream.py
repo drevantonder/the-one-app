@@ -20,7 +20,7 @@ import sys
 from urllib.parse import quote, urlsplit
 
 with open(sys.argv[1]) as file:
-    asked = json.load(file)
+    config = json.load(file)
 os.remove(sys.argv[1])
 
 # The answer comes back up a pipe, and the stream carries on in a process of its own once it has, so the command
@@ -83,7 +83,7 @@ def h264(sdp):
 
 screen = display.Display()
 root = screen.screen().root
-sdp = asked["offer"]
+sdp = config["offer"]
 pt = h264(sdp)
 # H.264 takes only an even width and height, so a display of an odd one leaves out its last column or row.
 size = root.get_geometry()
@@ -96,7 +96,7 @@ pipeline = Gst.parse_launch(
 )
 rtc = pipeline.get_by_name("rtc")
 rtc.set_property("ice-transport-policy", GstWebRTC.WebRTCICETransportPolicy.RELAY)
-for server in asked["iceServers"]:
+for server in config["iceServers"]:
     for url in [server["urls"]] if isinstance(server["urls"], str) else server["urls"]:
         # TURN over UDP and TCP, not TLS: libnice gets no allocation from Cloudflare's over TLS, and one that fails
         # can stop the others being gathered. Both, since some flows over UDP to Cloudflare's address are dropped

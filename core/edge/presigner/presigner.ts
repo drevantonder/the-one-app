@@ -158,7 +158,7 @@ interface Ask {
  * (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. It names one operation, so that what's checked
  * is what's signed.
  */
-function asked(body: string): Ask | null {
+function parse(body: string): Ask | null {
   let ask;
   try {
     ask = JSON.parse(body);
@@ -177,7 +177,7 @@ function asked(body: string): Ask | null {
  * its method, URL and headers.
  */
 async function sign(env: PresignerEnv, by: string, token: string | null, body: string) {
-  const ask = asked(body);
+  const ask = parse(body);
   if (!ask) return refuse(400, "An ask is JSON that names one blob's key, to read, write, replace, list or remove");
   if (!(await allowed(env, by, token, ask))) return refuse(403, "You aren't on its list of servers");
   const { method, url, headers } = request(env, ask);
@@ -193,7 +193,7 @@ async function sign(env: PresignerEnv, by: string, token: string | null, body: s
  * dropped unread: a refusal comes as soon as the lists say so, however large or absent the blob.
  */
 async function read(env: PresignerEnv, by: string, token: string | null, body: string) {
-  const ask = asked(body);
+  const ask = parse(body);
   if (!ask || (ask.operation !== "read" && ask.operation !== "list")) {
     return refuse(400, "An ask to read is JSON that names one blob's key to read, or the start of the keys to list");
   }

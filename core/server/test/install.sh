@@ -272,7 +272,7 @@ b=$(release newer true)
 mark
 owner update --server "$server"
 began=$(now)
-echo "while it updates, the network's other server answers: $(owner builds | grep -o '"asked":"[^"]*"' | sed "s/$first/the network's first server/")"
+echo "while it updates, the network's other server answers: $(owner builds | jq -r .server | sed "s/$first/the network's first server/")"
 logged "The server is on the build"
 said | grep -E "^The server is on the build" | sed 's/^/  /'
 echo "in $(since "$began"); it answers as $(build_of "$server"), and the machine's one is $(on_machine --version)"

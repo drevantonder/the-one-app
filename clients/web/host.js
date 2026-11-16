@@ -136,11 +136,11 @@ const answered = (view) => /** @type {NonNullable<ReturnType<typeof views.get>>}
 
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function read(view, method, params) {
-  const asked = JSON.stringify([method, params])
-  const cached = answered(view).get(asked)
+  const request = JSON.stringify([method, params])
+  const cached = answered(view).get(request)
   if (cached) return cached.answer
   const answer = await mcp(method, params)
-  answered(view).set(asked, { method, params, answer })
+  answered(view).set(request, { method, params, answer })
   return answer
 }
 

@@ -322,10 +322,10 @@ defmodule OneCore.Call do
     do: run_elsewhere(call.request, {call.actor, call.subject}, call.forwarded, owner, call.plugin)
 
   @doc "Has a server that runs the plugins installed for `owner` run what was asked of this one, `what`, as `run_elsewhere/2` does."
-  def run_elsewhere(ask, asked, forwarded, owner, what) do
+  def run_elsewhere(ask, principal, forwarded, owner, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
     servers = Servers.running(owner)
-    for server <- servers -- [Server.key()], do: asks(ask, asked, server, "to")
+    for server <- servers -- [Server.key()], do: asks(ask, principal, server, "to")
     raise Servers.off(what, owner, servers)
   end
 
@@ -333,9 +333,9 @@ defmodule OneCore.Call do
   Has a server acting for `owner` run what was asked of this one instead, as `forward/2` does for a call: `ask` is
   its method and what it was asked with, for `asked`.
   """
-  def forward(ask, asked, forwarded, owner) do
+  def forward(ask, principal, forwarded, owner) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    for server <- Servers.acting(owner) -- [Server.key()], do: asks(ask, asked, server, "to")
+    for server <- Servers.acting(owner) -- [Server.key()], do: asks(ask, principal, server, "to")
     raise "No server acting for #{owner} answered"
   end
 

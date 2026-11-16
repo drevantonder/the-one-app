@@ -17,16 +17,16 @@ defmodule OneCore.Plugins.Calls do
   and `:forwarding_loop` that this one would pass it on in turn. `caller` is the plugin that called it, if one did
   (`OneCore.Call.tool/5`).
   """
-  def call(name, tool, inputs, asked, forwarded \\ false, caller \\ nil) do
-    asked = asked(asked)
+  def call(name, tool, inputs, principal, forwarded \\ false, caller \\ nil) do
+    principal = principal(principal)
 
-    case run(name, tool, inputs, asked, forwarded, caller) do
+    case run(name, tool, inputs, principal, forwarded, caller) do
       {:ran, ended} ->
         ended
 
       # A tool that isn't there is observed as a call that failed, as one refused is.
       {:error, why} ->
-        observed(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, asked, fn -> {:error, why} end)
+        observed(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, principal, fn -> {:error, why} end)
 
       forwarded ->
         forwarded
@@ -35,7 +35,7 @@ defmodule OneCore.Plugins.Calls do
 
   # `{:ran, ended}` where the plugin and the tool are there, `{:error, why}` where they aren't, and what `call/5`
   # gives where another server runs it.
-  defp run(name, tool, inputs, {_by, who} = asked, forwarded, caller) do
+  defp run(name, tool, inputs, {_by, who} = principal, forwarded, caller) do
     Plugins.run(Plugins.chain(who), name, fn at, versions ->
       version = versions[name]
 
@@ -53,8 +53,8 @@ defmodule OneCore.Plugins.Calls do
           cached = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           try do
-            call = %{called(at, name, versions, ask, asked, forwarded) | caller: caller}
-            answered = tool(found, about, asked, version, &invoked(versions, name, {:tool, tool, &1}, call))
+            call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller}
+            answered = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
             if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(who)]), "forget", cached)
             {:ran, answered}
           after
@@ -72,14 +72,14 @@ defmodule OneCore.Plugins.Calls do
   told, or what `call/5` does where another server ran it. `apart` is the plugin the call removes or deploys over, as who it was installed for and its name there, which
   isn't asked.
   """
-  def tool(tool, about, asked, version \\ nil, fun, apart \\ nil) do
-    with :ok <- open_to(tool, about, asked),
+  def tool(tool, about, principal, version \\ nil, fun, apart \\ nil) do
+    with :ok <- open_to(tool, about, principal),
          :ok <- given(tool.takes, about["inputs"]),
-         {:ok, about} <- hooked(about, tool.takes, asked, apart) do
-      observed(about, asked, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
+         {:ok, about} <- hooked(about, tool.takes, principal, apart) do
+      observed(about, principal, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
     else
       # A call refused is observed as one that failed, with why.
-      {:error, why} -> observed(about, asked, fn -> {:error, why} end)
+      {:error, why} -> observed(about, principal, fn -> {:error, why} end)
     end
   end
 
@@ -94,11 +94,11 @@ defmodule OneCore.Plugins.Calls do
   end
 
   # What a call is about once the plugins that mutate its inputs have, if the ones that validate it agree to it.
-  defp hooked(about, takes, asked, apart) do
-    with {:ok, changes, by} <- Hooks.mutate("inputs", about, asked, apart),
+  defp hooked(about, takes, principal, apart) do
+    with {:ok, changes, by} <- Hooks.mutate("inputs", about, principal, apart),
          about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
          :ok <- if(changes == %{}, do: :ok, else: changed(takes, about)),
-         :ok <- Hooks.validate("call", about, asked, apart) do
+         :ok <- Hooks.validate("call", about, principal, apart) do
       {:ok, about}
     else
       {:refuse, why} -> {:error, why}
@@ -116,7 +116,7 @@ defmodule OneCore.Plugins.Calls do
 
   # Runs a call as a span of its trace, and tells the plugins that observe calls how it went: whether it answered,
   # and whether another server ran it. With none observing, it's only run.
-  defp observed(about, {_by, who} = asked, call) do
+  defp observed(about, {_by, who} = principal, call) do
     if Hooks.hooking("called", who) == [] do
       call.()
     else
@@ -130,13 +130,13 @@ defmodule OneCore.Plugins.Calls do
 
         case ended do
           {:ok, _answer} ->
-            Hooks.observe("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), asked)
+            Hooks.observe("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), principal)
 
           {:error, why} ->
-            Hooks.observe("called", Map.merge(about, %{"error" => why, "forwarded" => false}), asked)
+            Hooks.observe("called", Map.merge(about, %{"error" => why, "forwarded" => false}), principal)
 
           {:forwarded, result} ->
-            Hooks.observe("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), asked)
+            Hooks.observe("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), principal)
 
           # It would have been passed on again, so the server that passed it here observes it.
           :forwarding_loop ->
@@ -213,12 +213,12 @@ defmodule OneCore.Plugins.Calls do
   Calls a function of the plugin that `name` is for `at`, for a service of its own, with a call for `asked` and
   then `arguments`. Gives what `call/5` does.
   """
-  def function(at, name, function, arguments, asked, forwarded \\ false) do
-    asked = asked(asked)
+  def function(at, name, function, arguments, principal, forwarded \\ false) do
+    principal = principal(principal)
 
     Plugins.run([at], name, fn at, versions ->
       ask = {"plugins/call", %{installed: at, plugin: name, function: function, arguments: arguments}}
-      call = called(at, name, versions, ask, asked, forwarded)
+      call = called(at, name, versions, ask, principal, forwarded)
       plugin = versions[name].plugin
 
       case plugin && exported(plugin, function, length(arguments) + 1) do
@@ -234,13 +234,13 @@ defmodule OneCore.Plugins.Calls do
   that no longer hooks into it has nothing to say. A hook gives no access of its own: a plugin that observes an
   artifact changing is told only if it could already reach it, and isn't told what it changed itself.
   """
-  def hook(at, name, kind, hook, about, asked, forwarded \\ false) do
-    asked = asked(asked)
+  def hook(at, name, kind, hook, about, principal, forwarded \\ false) do
+    principal = principal(principal)
 
     Plugins.run([at], name, fn at, versions ->
       version = versions[name]
       ask = {"hooks/call", %{installed: at, plugin: name, kind: kind, hook: hook, about: about}}
-      call = called(at, name, versions, ask, asked, forwarded)
+      call = called(at, name, versions, ask, principal, forwarded)
 
       # A plugin in sandbox mode only observes: it mutates, validates and collects nothing.
       if hook in version.hooks and observes?(call, about) and (kind == :observe or not version.sandbox),
@@ -267,13 +267,13 @@ defmodule OneCore.Plugins.Calls do
       version = versions[name]
 
       Hooks.within(name, "what it observed", fn ->
-        for {hook, about, asked} <- observed, hook in version.hooks do
+        for {hook, about, principal} <- observed, hook in version.hooks do
           ask = {"hooks/call", %{installed: at, plugin: name, kind: :observe, hook: hook, about: about}}
 
           call =
             if Version.described?(version),
-              do: called(at, name, versions, ask, asked, false),
-              else: new_call(at, name, versions, ask, asked, false)
+              do: called(at, name, versions, ask, principal, false),
+              else: new_call(at, name, versions, ask, principal, false)
 
           try do
             if observes?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
@@ -303,7 +303,7 @@ defmodule OneCore.Plugins.Calls do
     clock = {nil, at}
 
     Plugins.run([at], name, fn at, versions ->
-      asked = called(at, name, versions, {"plugins/schedule", %{installed: at, plugin: name}}, clock, forwarded)
+      scheduled = called(at, name, versions, {"plugins/schedule", %{installed: at, plugin: name}}, clock, forwarded)
 
       fire = fn job ->
         with {:error, why} <- call(name, job.tool, job.inputs, clock, true),
@@ -314,8 +314,8 @@ defmodule OneCore.Plugins.Calls do
 
       # A plugin in sandbox mode has its jobs kept in its own VM, by the plugin it uses there.
       if versions[name].sandbox,
-        do: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, asked),
-        else: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(asked, versions[name].jobs, fire))
+        do: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, scheduled),
+        else: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, versions[name].jobs, fire))
 
       {:ok, :ok}
     end)
@@ -367,8 +367,8 @@ defmodule OneCore.Plugins.Calls do
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. It's run
   # by a server that runs the plugins of whoever it was installed for, or by any server acting for them where the
   # plugin is in sandbox mode: this one, or one that it's passed on to.
-  defp called(at, name, versions, ask, asked, forwarded) do
-    call = new_call(at, name, versions, ask, asked, forwarded)
+  defp called(at, name, versions, ask, principal, forwarded) do
+    call = new_call(at, name, versions, ask, principal, forwarded)
 
     if Servers.runs?(at) or (versions[name].sandbox and Servers.here?(at)),
       do: call,
@@ -395,6 +395,6 @@ defmodule OneCore.Plugins.Calls do
   end
 
   # Who asked and who for: one who is both.
-  defp asked({_by, _for} = asked), do: asked
-  defp asked(who) when is_binary(who), do: {who, who}
+  defp principal({_by, _for} = principal), do: principal
+  defp principal(who) when is_binary(who), do: {who, who}
 end

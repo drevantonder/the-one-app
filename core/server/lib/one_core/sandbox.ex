@@ -511,7 +511,7 @@ defmodule OneCore.Sandbox do
       said: nil
     }
 
-    state = %{context: context, port: nil, buffer: "", loaded: nil, waiting: [], calls: %{}, asked: 0, logged: {0, 0}}
+    state = %{context: context, port: nil, buffer: "", loaded: nil, waiting: [], calls: %{}, requests: 0, logged: {0, 0}}
     {:ok, state, {:continue, {:start, sets}}}
   end
 
@@ -634,7 +634,7 @@ defmodule OneCore.Sandbox do
     do: {:stop, :normal, stopped(state, "it didn't load within #{div(@silent, 1000)} seconds")}
 
   def handle_info(:loading, state), do: {:noreply, state}
-  def handle_info(:answered, state), do: {:noreply, %{state | asked: state.asked - 1}}
+  def handle_info(:answered, state), do: {:noreply, %{state | requests: state.requests - 1}}
 
   @impl true
   def terminate(_why, %{port: port}) when is_port(port) do
@@ -713,26 +713,26 @@ defmodule OneCore.Sandbox do
   end
 
   # A request within a call is run by the process running the call, and any other alongside, a few at once.
-  defp received(%{"request" => request, "call" => call, "op" => op} = asked, state)
+  defp received(%{"request" => request, "call" => call, "op" => op} = message, state)
        when is_integer(request) and is_binary(op) do
     cond do
       is_map_key(state.calls, call) ->
         {caller, _monitor} = state.calls[call]
-        send(caller, {__MODULE__, :request, call, asked})
+        send(caller, {__MODULE__, :request, call, message})
         {:ok, state}
 
-      state.asked >= @at_once ->
+      state.requests >= @at_once ->
         {:stop, "it asked for more than #{@at_once} things at once outside a call", state}
 
       true ->
         {port, context, child} = {state.port, state.context, self()}
 
         Task.start(fn ->
-          command(port, {:reply, request, handled(asked, nil, context)})
+          command(port, {:reply, request, handled(message, nil, context)})
           send(child, :answered)
         end)
 
-        {:ok, %{state | asked: state.asked + 1}}
+        {:ok, %{state | requests: state.requests + 1}}
     end
   end
 

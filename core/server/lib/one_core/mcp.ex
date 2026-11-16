@@ -82,8 +82,8 @@ defmodule OneCore.Mcp do
           Trace.follow(said(params)["traceparent"])
 
           with :ok <- speaks(version),
-               {:ok, asked, forwarded} <- User.asking(from, said(params), method == "hooks/call"),
-               {:ok, result} <- result(method, params, from, asked, forwarded) do
+               {:ok, principal, forwarded} <- User.asking(from, said(params), method == "hooks/call"),
+               {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
           else
             {:error, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
@@ -176,12 +176,12 @@ defmodule OneCore.Mcp do
       else: Map.put(result, key, value)
   end
 
-  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _asked, forwarded) do
+  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _principal, forwarded) do
     between(forwarded, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"installed" => at, "plugin" => plugin} = params, _from, asked, forwarded) do
-    function = fn -> Calls.function(at, plugin, params["function"], params["arguments"], asked, true) end
+  defp result("plugins/call", %{"installed" => at, "plugin" => plugin} = params, _from, principal, forwarded) do
+    function = fn -> Calls.function(at, plugin, params["function"], params["arguments"], principal, true) end
 
     with {:ok, result} <- between(forwarded, function) do
       Server.changed()
@@ -189,17 +189,17 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("plugins/schedule", %{"installed" => at, "plugin" => plugin}, _from, _asked, forwarded) do
+  defp result("plugins/schedule", %{"installed" => at, "plugin" => plugin}, _from, _principal, forwarded) do
     between(forwarded, fn -> Calls.schedule(at, plugin, true) end)
   end
 
-  defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "kind" => kind, "hook" => hook} = params, _from, asked, forwarded)
+  defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "kind" => kind, "hook" => hook} = params, _from, principal, forwarded)
        when kind in ["observe", "mutate", "validate", "collect"] do
-    between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], asked, true) end)
+    between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], principal, true) end)
   end
 
   # `search` and `execute` are this server's own, and a sharing link's holder has only the tools it's given.
-  defp result("tools/call", %{"name" => name} = params, from, {by, _who} = asked, forwarded)
+  defp result("tools/call", %{"name" => name} = params, from, {by, _who} = principal, forwarded)
        when name in ["search", "execute"] do
     tool = if name == "search", do: Search.tool(), else: CodeMode.tool()
     inputs = Map.get(params, "arguments") || %{}
@@ -215,31 +215,31 @@ defmodule OneCore.Mcp do
         {:ok, %{content: [%{type: "text", text: "#{name} takes #{JSON.encode!(tool.inputSchema)}"}], isError: true}}
 
       true ->
-        own(name, inputs, params, from, asked, forwarded)
+        own(name, inputs, params, from, principal, forwarded)
     end
   end
 
   # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
   # asks for (a request that says `who`). A client calls as nobody's plugin.
-  defp result("tools/call", %{"name" => name} = params, _from, asked, forwarded) do
+  defp result("tools/call", %{"name" => name} = params, _from, principal, forwarded) do
     caller = if Map.has_key?(said(params), "who"), do: said(params)["caller"]
 
-    case call(name, Map.get(params, "arguments", %{}), asked, forwarded, caller) do
-      {:ok, answer} -> changed(name, %{content: content(name, answer)}, asked)
+    case call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller) do
+      {:ok, answer} -> changed(name, %{content: content(name, answer)}, principal)
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
       {:forwarded, %{"isError" => true} = result} -> {:ok, result}
-      {:forwarded, result} -> changed(name, result, asked)
+      {:forwarded, result} -> changed(name, result, principal)
       :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass #{name} on in turn"}
     end
   end
 
   defp result("initialize", params, _from, {by, who}, _forwarded) do
-    asked = params["protocolVersion"]
+    requested = params["protocolVersion"]
 
     {:ok,
      %{
-       protocolVersion: if(asked in @initialized, do: asked, else: hd(@initialized)),
+       protocolVersion: if(requested in @initialized, do: requested, else: hd(@initialized)),
        capabilities: @capabilities,
        serverInfo: server_info(),
        instructions: instructions(if(holder?(by), do: :holder, else: mode(params)), who)
@@ -257,7 +257,7 @@ defmodule OneCore.Mcp do
      }}
   end
 
-  defp result("ping", _params, _from, _asked, _forwarded), do: {:ok, %{}}
+  defp result("ping", _params, _from, _principal, _forwarded), do: {:ok, %{}}
 
   # A user's device asks for its token to the relay at the network's address, and for the next before that one
   # ends, and is told whose it is: the device a run of it proved here, or the edge did there. It says which
@@ -288,11 +288,11 @@ defmodule OneCore.Mcp do
     {:ok, %{tools: tools}}
   end
 
-  defp result("skills/list", _params, _from, asked, _forwarded),
-    do: {:ok, %{resultType: "complete", skills: skills(asked)}}
+  defp result("skills/list", _params, _from, principal, _forwarded),
+    do: {:ok, %{resultType: "complete", skills: skills(principal)}}
 
-  defp result("skills/get", params, _from, asked, _forwarded) do
-    case Enum.find(skills(asked), &(&1.uri == params["uri"])) do
+  defp result("skills/get", params, _from, principal, _forwarded) do
+    case Enum.find(skills(principal), &(&1.uri == params["uri"])) do
       nil -> {:error, -32602, "There's no skill at #{params["uri"]}. skills/list says what there is."}
       skill -> {:ok, %{resultType: "complete", skill: skill}}
     end
@@ -304,7 +304,7 @@ defmodule OneCore.Mcp do
       else: resources(method, params, who)
   end
 
-  defp result(method, _params, _from, _asked, _forwarded),
+  defp result(method, _params, _from, _principal, _forwarded),
     do: {:error, -32601, "This server has no method #{method}"}
 
   # A skill is listed here too, for an agent whose client lists resources and not yet skills.
@@ -402,8 +402,8 @@ defmodule OneCore.Mcp do
   end
 
   # A script's calls are each answered here as that call of the tool would be, for whoever asked.
-  defp own("execute", %{"code" => code}, _params, from, {_by, who} = asked, forwarded) do
-    call = fn name, inputs -> result("tools/call", %{"name" => name, "arguments" => inputs}, from, asked, forwarded) end
+  defp own("execute", %{"code" => code}, _params, from, {_by, who} = principal, forwarded) do
+    call = fn name, inputs -> result("tools/call", %{"name" => name, "arguments" => inputs}, from, principal, forwarded) end
 
     tools =
       for tool <- listed(who, false),
@@ -448,10 +448,10 @@ defmodule OneCore.Mcp do
   end
 
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
-  defp call(name, inputs, asked, forwarded, caller) do
-    with :none <- Tools.call(name, inputs, asked, forwarded),
+  defp call(name, inputs, principal, forwarded, caller) do
+    with :none <- Tools.call(name, inputs, principal, forwarded),
          [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, answer} <- Calls.call(plugin, tool, inputs, asked, forwarded, caller) do
+         {:ok, answer} <- Calls.call(plugin, tool, inputs, principal, forwarded, caller) do
       case answer do
         text when is_binary(text) -> {:ok, text}
         {:blob, _kind, _data} -> {:ok, answer}

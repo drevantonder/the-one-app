@@ -69,18 +69,18 @@ impl Views {
     /// The files of every plugin a server lists for `who`, a group or the network, or for this client's user, as MCP
     /// lists resources.
     async fn listed(&self, who: Option<&str>) -> anyhow::Result<Value> {
-        let asked = who.map_or(json!({}), |who| json!({"_meta": {"for": who}}));
-        self.subscription("client").request("resources/list", asked).await
+        let request = who.map_or(json!({}), |who| json!({"_meta": {"for": who}}));
+        self.subscription("client").request("resources/list", request).await
     }
 
     /// One file a server listed: what kind it is, and what's in it, which is its text or, for a picture or a font,
     /// base64 as MCP's `blob`. A set of a plugin's files never changes, so a file that's kept is never asked for
     /// again.
     async fn read(&self, resource: &str) -> anyhow::Result<(String, Vec<u8>)> {
-        let asked = json!({"uri": resource});
-        let read = match self.client.cached("resources/read", &asked) {
+        let request = json!({"uri": resource});
+        let read = match self.client.cached("resources/read", &request) {
             Some(read) => read,
-            None => self.client.fresh("resources/read", &asked).await?,
+            None => self.client.fresh("resources/read", &request).await?,
         };
         let file = &read["contents"][0];
         let kind = file["mimeType"].as_str().unwrap_or_default().to_owned();

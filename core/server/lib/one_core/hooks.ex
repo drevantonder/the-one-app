@@ -278,8 +278,8 @@ defmodule OneCore.Hooks do
   def nothing(:collect), do: nil
 
   @doc "Tells each plugin that observes `hook` what it's about, for `asked`."
-  def observe(hook, about, {_by, who} = asked) do
-    for {at, name} <- hooking(hook, who), do: __MODULE__.Observer.notify(at, name, hook, about, asked)
+  def observe(hook, about, {_by, who} = principal) do
+    for {at, name} <- hooking(hook, who), do: __MODULE__.Observer.notify(at, name, hook, about, principal)
     :ok
   end
 
@@ -288,10 +288,10 @@ defmodule OneCore.Hooks do
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
   say. `apart` is a plugin that isn't asked, as who it was installed for and its name there.
   """
-  def mutate(hook, about, {_by, who} = asked, apart \\ nil) do
+  def mutate(hook, about, {_by, who} = principal, apart \\ nil) do
     Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed,
                                                                          {:ok, changes, by} ->
-      with {:ok, changed} <- answered(installed, :mutate, hook, about, asked),
+      with {:ok, changed} <- answered(installed, :mutate, hook, about, principal),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
         {:cont, {:ok, Map.merge(changes, changed), by}}
@@ -310,7 +310,7 @@ defmodule OneCore.Hooks do
   refuse. `apart` is a plugin that isn't asked, as who it was installed for and its name there. Where no plugin
   validates `reach` for them, a call or a reach is the network's first owner's alone.
   """
-  def validate(hook, about, {by, who} = asked, apart \\ nil) do
+  def validate(hook, about, {by, who} = principal, apart \\ nil) do
     # Who validates is whoever's plugins they are, so what's kept is what they validated.
     cache_key = if hook == "reach", do: {"reach", {about, Plugins.chain(who)}}
     forgotten = forgotten("reach")
@@ -324,7 +324,7 @@ defmodule OneCore.Hooks do
       decided =
         with :ok <- if(undecided, do: undecided(by), else: :ok) do
           Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = installed ->
-            case answered(installed, :validate, hook, about, asked) do
+            case answered(installed, :validate, hook, about, principal) do
               {:ok, "ok"} ->
                 nil
 
@@ -350,9 +350,9 @@ defmodule OneCore.Hooks do
   Asks each plugin that collects `hook` for its part, for `asked`. Gives `{:ok, parts, failed}`: each plugin's part
   by its name, leaving out those that answered `nil`, and why each plugin that couldn't answer couldn't, by its name.
   """
-  def collect(hook, about, {_by, who} = asked) do
+  def collect(hook, about, {_by, who} = principal) do
     Enum.reduce(hooking(hook, who), {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, parts, failed} ->
-      case answered(installed, :collect, hook, about, asked) do
+      case answered(installed, :collect, hook, about, principal) do
         {:ok, nil} -> {:ok, parts, failed}
         {:ok, part} -> {:ok, Map.put(parts, plugin, part), failed}
         {:error, why} -> {:ok, parts, Map.put(failed, plugin, why)}
@@ -403,8 +403,8 @@ defmodule OneCore.Hooks do
   end
 
   # A hook whose plugin keeps what it needs where another server writes it is answered there.
-  defp answered({at, plugin}, kind, hook, about, asked) do
-    case Calls.hook(at, plugin, kind, hook, about, asked) do
+  defp answered({at, plugin}, kind, hook, about, principal) do
+    case Calls.hook(at, plugin, kind, hook, about, principal) do
       {:ok, answer} -> {:ok, answer}
       {:forwarded, %{"answer" => answer}} -> {:ok, answer}
       {:error, why} -> {:error, why}

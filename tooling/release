@@ -243,9 +243,9 @@ if ((${#mine[@]})); then
       return { file, name: `${what}/${kind}`, build: BUILD, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
     }));
     const publish = () => {
-      const asked = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
-      if (asked.exitCode !== 0) process.exit(1);
-      return JSON.parse(asked.stdout.toString());
+      const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
+      if (published.exitCode !== 0) process.exit(1);
+      return JSON.parse(published.stdout.toString());
     };
     let said = publish();
     if (said.send) {

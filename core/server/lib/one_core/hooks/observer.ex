@@ -12,7 +12,7 @@ defmodule OneCore.Hooks.Observer do
   def children, do: [{Registry, keys: :unique, name: __MODULE__}, {DynamicSupervisor, name: OneCore.Hooks}]
 
   @doc "Tells the plugin `name`, installed for `at`, about `hook`, for `asked`. It's told once it was told what came before."
-  def notify(at, name, hook, about, asked), do: send(of(at, name), {:observed, {hook, about, asked}})
+  def notify(at, name, hook, about, principal), do: send(of(at, name), {:observed, {hook, about, principal}})
 
   defp of(at, name) do
     with :undefined <- Registry.whereis_name({__MODULE__, {at, name}}) do

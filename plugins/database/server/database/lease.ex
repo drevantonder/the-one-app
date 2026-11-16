@@ -82,13 +82,13 @@ defmodule Database.Lease do
   def handle_call({codec, _ask}, _from, %{artifact: %{codec: was}} = lease) when codec != was,
     do: {:stop, :normal, :codec_changed, lease}
 
-  def handle_call({_wrapped, ask}, from, lease), do: asked(ask, from, lease)
+  def handle_call({_wrapped, ask}, from, lease), do: handle_request(ask, from, lease)
 
-  defp asked({:transaction, _schema, _fun}, _from, %{db: nil} = lease) do
+  defp handle_request({:transaction, _schema, _fun}, _from, %{db: nil} = lease) do
     {:reply, {:held_by, lease.held_by}, lease}
   end
 
-  defp asked({:transaction, schema, fun} = transaction, {caller, _} = from, lease) do
+  defp handle_request({:transaction, schema, fun} = transaction, {caller, _} = from, lease) do
     firing = lease.firing[caller]
 
     ran =
@@ -103,18 +103,18 @@ defmodule Database.Lease do
       {:ok, result, lease} when firing != nil -> {:reply, {:ok, result}, put_in(lease.firing[caller].marked, true)}
       {:ok, result, lease} -> {:reply, {:ok, result}, lease}
       # Here again if this server holds the lease after all, and otherwise answered with who does.
-      {:lost, lease} -> asked(transaction, from, lease)
+      {:lost, lease} -> handle_request(transaction, from, lease)
       {raised, lease} -> {:reply, raised, lease}
     end
   end
 
-  defp asked({:schedule, _jobs, _fire, _now}, _from, %{db: nil} = lease) do
+  defp handle_request({:schedule, _jobs, _fire, _now}, _from, %{db: nil} = lease) do
     {:reply, {:held_by, lease.held_by}, lease}
   end
 
   # Each job that's due at `now`, and isn't being called already, is called in a process of its own. A call that has
   # marked its job as run is done with it, even while its process is still ending.
-  defp asked({:schedule, jobs, fire, now} = schedule, from, lease) do
+  defp handle_request({:schedule, jobs, fire, now} = schedule, from, lease) do
     case transact(lease, &due(&1, jobs, now)) do
       {:ok, due, lease} ->
         calling = for {_caller, %{job: job, marked: false}} <- lease.firing, do: job
@@ -128,7 +128,7 @@ defmodule Database.Lease do
         {:reply, :ok, %{lease | firing: firing}}
 
       {:lost, lease} ->
-        asked(schedule, from, lease)
+        handle_request(schedule, from, lease)
     end
   end
 

@@ -153,9 +153,9 @@ impl Carried {
         } else if !body.is_empty() {
             inputs["body"] = json!(BASE64.encode(&body));
         }
-        let asked = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                            "params": {"name": "git-repos_git", "arguments": inputs}});
-        let answer = self.client.ask(asked.to_string().as_bytes()).await.map_err(gone)?;
+        let answer = self.client.ask(request.to_string().as_bytes()).await.map_err(gone)?;
         let answer: Value = serde_json::from_slice(&answer).map_err(|error| gone(error.into()))?;
         let result = &answer["result"];
         let part = &result["content"][0];

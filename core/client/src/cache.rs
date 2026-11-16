@@ -38,8 +38,8 @@ impl Client {
     }
 
     fn cache_file(&self, method: &str, params: &Value) -> PathBuf {
-        let asked = json!([self.link().who, self.says, method, params]);
-        self.home.join("cache").join(crate::hex(&Sha256::digest(asked.to_string())))
+        let key = json!([self.link().who, self.says, method, params]);
+        self.home.join("cache").join(crate::hex(&Sha256::digest(key.to_string())))
     }
 
     /// Fetches each large file a tool answered with, by its link, and keeps it, unless it's kept already: a blob
@@ -135,13 +135,13 @@ impl Subscription {
 
     /// Asks the server again for everything the view was answered, and tells the view if any of it changed.
     pub async fn refresh(&self) {
-        let asked: Vec<String> = self.answered.lock().expect("no view panics").keys().cloned().collect();
-        self.refresh_for(asked).await
+        let requests: Vec<String> = self.answered.lock().expect("no view panics").keys().cloned().collect();
+        self.refresh_for(requests).await
     }
 
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
-        let asked = json!([method, params]).to_string();
-        if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get(&asked) {
+        let request = json!([method, params]).to_string();
+        if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get(&request) {
             return Ok(answer.clone());
         }
         let (answer, cached) = match self.client.cached(method, &params) {
@@ -151,24 +151,24 @@ impl Subscription {
         self.answered
             .lock()
             .expect("no view panics")
-            .insert(asked.clone(), (method.to_owned(), params, answer.clone()));
+            .insert(request.clone(), (method.to_owned(), params, answer.clone()));
         if cached {
             let shown = self.clone();
-            tokio::spawn(async move { shown.refresh_for(vec![asked]).await });
+            tokio::spawn(async move { shown.refresh_for(vec![request]).await });
         }
         Ok(answer)
     }
 
-    async fn refresh_for(&self, asked: Vec<String>) {
-        let asks = asked.into_iter().filter_map(|asked| {
-            let (method, params, _) = self.answered.lock().expect("no view panics").get(&asked)?.clone();
-            Some(async move { (asked, self.client.fresh(&method, &params).await) })
+    async fn refresh_for(&self, requests: Vec<String>) {
+        let asks = requests.into_iter().filter_map(|request| {
+            let (method, params, _) = self.answered.lock().expect("no view panics").get(&request)?.clone();
+            Some(async move { (request, self.client.fresh(&method, &params).await) })
         });
         let mut changed = false;
-        for (asked, fresh) in join_all(asks).await {
+        for (request, fresh) in join_all(asks).await {
             // With no server answering, what was kept stays what's shown.
             let Ok(fresh) = fresh else { continue };
-            if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get_mut(&asked)
+            if let Some((_, _, answer)) = self.answered.lock().expect("no view panics").get_mut(&request)
                 && *answer != fresh
             {
                 *answer = fresh;
