@@ -2,8 +2,9 @@ defmodule OneCore.Service do
   @moduledoc """
   The interface a plugin's service is written against. `OneCore.Plugin` says how to write one.
 
-  A service is a module of its plugin that says `use GenServer` and `@behaviour OneCore.Service`. Its process runs
-  on each server whose owner installed it, and its public functions are what the rest of its plugin calls there.
+  A service is a module of its plugin that says `@behaviour OneCore.Service`, and `use GenServer` or, when it has
+  stages, `@behaviour :gen_statem`. Its process runs on each server whose owner installed it, and its public
+  functions are what the rest of its plugin calls there.
   """
   alias OneCore.{Call, Plugins, Server, Servers, Services}
   alias OneCore.Plugins.{Calls, Store, Version}

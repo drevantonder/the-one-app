@@ -58,11 +58,19 @@ defmodule OneCore.Call do
     Child.request("fetch", %{"web" => request}, id)
   end
 
-  @doc "A process of this VM's that keeps running between calls: one for each `module` and `key`."
+  @doc """
+  A process of this VM's that keeps running between calls: one for each `module` and `key`, a GenServer or a
+  `:gen_statem`.
+  """
   def process(%__MODULE__{}, module, key, argument) do
     name = {:via, Registry, {Child.Processes, {module, key}}}
 
-    case GenServer.start(module, argument, name: name) do
+    started =
+      if :gen_statem in Child.behaviours(module),
+        do: :gen_statem.start(name, module, argument, []),
+        else: GenServer.start(module, argument, name: name)
+
+    case started do
       {:ok, pid} -> pid
       {:error, {:already_started, pid}} -> pid
       {:error, why} -> raise "#{inspect(module)} didn't start: #{inspect(why)}"
@@ -452,7 +460,8 @@ defmodule OneCore.Sandbox.Child do
     end
   end
 
-  defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
+  @doc "The behaviours a module says it follows, one `behaviour` attribute each."
+  def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what sandbox mode doesn't offer it.
   defp described(plugin, main, modules, uses) do

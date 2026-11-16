@@ -461,15 +461,17 @@ defmodule OneCore.Plugins.Version do
 
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
-        if Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) do
+        process? = &(GenServer in behaviours(&1) or :gen_statem in behaviours(&1))
+
+        if Enum.all?(services, &(process?.(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) do
           services =
             for module <- services, do: %{name: own_name(module), called: module.called(), needs: module.needs()}
 
           checked(under, plugin, description, services, rest)
         else
           {:error,
-           "A service says `use GenServer`, its needs/0 gives what it needs of a machine, and its called/0 what " <>
-             "it's called, each as text"}
+           "A service says `use GenServer` or `@behaviour :gen_statem`, its needs/0 gives what it needs of a " <>
+             "machine, and its called/0 what it's called, each as text"}
         end
 
       found ->
@@ -592,8 +594,8 @@ defmodule OneCore.Plugins.Version do
          "jobs/0 gives a list of %{tool: ..., every: ...}: one of this plugin's tools, how many seconds apart, and the inputs it takes, if any"}
   end
 
-  # A module has one `behaviour` attribute for each behaviour it says it follows.
-  defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
+  @doc "The behaviours a module says it follows, one `behaviour` attribute each."
+  def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # An icon goes to clients as a `data:` address, so a home screen asks for nothing more. The plugin's is the file it
   # names, and an app's its own or else the plugin's; a plugin that names none is drawn as its first app is.

@@ -1,14 +1,16 @@
 defmodule OneCore.Plugins.Process do
   @moduledoc """
   One process of a plugin's that keeps running on this server between calls, in its plugin's latest version: a
-  service installed here, or a process a plugin's own code keeps (`OneCore.Call.process/4`). It's a GenServer the
-  plugin wrote.
+  service installed here, or a process a plugin's own code keeps (`OneCore.Call.process/4`). It's a GenServer or a
+  `:gen_statem` the plugin wrote.
 
-  A GenServer runs one module for life, and each version of a plugin has module names of its own. So this process
-  is the GenServer, and hands every callback to the plugin's module in the version it's at. It holds that version
-  as a running call does. When the plugin has a newer one it holds that instead, gives what it holds to the new
-  module's `code_change/3`, and lets go of the old one, which is unloaded once no call holds it either. The process
-  is the same one throughout, so what it has open stays open.
+  A GenServer or a `:gen_statem` runs one module for life, and each version of a plugin has module names of its own.
+  So this process is the GenServer, or `OneCore.Plugins.Process.Statem` the `:gen_statem`, and hands every callback
+  to the plugin's module in the version it's at. It holds that version as a running call does. When the plugin has
+  a newer one it holds that instead, gives what it holds to the new module's `code_change`, and lets go of the old
+  one, which is unloaded once no call holds it either. The process is the same one throughout, so what it has open
+  stays open. One whose module is the other behaviour in the newer version stops, and whatever asks for it next
+  starts it afresh.
 
   It's registered by its plugin, its module's name as the plugin wrote it, and a key that tells it from the
   module's other processes, with the version it's at, so all are known without asking it.
@@ -27,9 +29,7 @@ defmodule OneCore.Plugins.Process do
   @doc "What runs every plugin's processes: where they're registered, and what starts them."
   def children, do: [{Registry, keys: :unique, name: @registry}, {DynamicSupervisor, name: @supervisor}]
 
-  def start_link({plugin, name, key, _argument} = process) do
-    GenServer.start_link(__MODULE__, process, name: {:via, Registry, {@registry, {plugin, name, key}}})
-  end
+  def start_link(process), do: :proc_lib.start_link(__MODULE__, :init, [process])
 
   @doc "The process of a plugin's module running here under `key`, or `nil` if there's none."
   def whereis(plugin, name, key \\ nil) do
@@ -105,37 +105,44 @@ defmodule OneCore.Plugins.Process do
     end
   end
 
-  # The plugin's own `init/1` runs once this process has started, so that starting one never waits on a plugin's
-  # code.
+  # A process knows which behaviour it is only once it holds its plugin's version. So it starts as OTP has one with
+  # more to do first, and as a Ranch protocol does: it says it has started, so that starting one never waits on a
+  # plugin's code, runs the plugin's `init/1`, and enters the loop of a GenServer or of a `:gen_statem`.
   @impl true
   def init({plugin, name, key, argument}) do
-    # What it logs is its plugin's, as a call's is (`OneCore.Plugins.Calls.running/2`), for no call in particular.
-    Logger.metadata(who: plugin)
+    registered = {@registry, {plugin, name, key}}
 
-    case held(plugin, name, key) do
-      {:ok, held, module} ->
-        {:ok, %{plugin: plugin, name: name, key: key, held: held, module: module}, {:continue, {__MODULE__, argument}}}
+    with :yes <- Registry.register_name(registered, self()),
+         {:ok, held, module} <- held(plugin, name, key) do
+      :proc_lib.init_ack({:ok, self()})
+      # What it logs is its plugin's, as a call's is (`OneCore.Plugins.Calls.running/2`), for no call in particular.
+      Logger.metadata(who: plugin)
+      process = %{plugin: plugin, name: name, key: key, held: held, module: module}
+      registered = {:via, Registry, registered}
 
-      :absent ->
-        :ignore
+      if statem?(module) do
+        __MODULE__.Statem.init({process, argument, registered})
+      else
+        case returned(fn -> module.init(argument) end) do
+          {:ok, state} -> enter(process, state, :infinity, registered)
+          {:ok, state, more} -> enter(process, state, more, registered)
+          refused -> ended(process, refused)
+        end
+      end
+    else
+      :no -> :proc_lib.init_fail({:error, {:already_started, whereis(plugin, name, key)}}, {:exit, :normal})
+      :absent -> :proc_lib.init_fail(:ignore, {:exit, :normal})
     end
   end
 
-  @impl true
-  def handle_continue({__MODULE__, argument}, process) do
-    case process.module.init(argument) do
-      {:ok, state} -> {:noreply, Map.put(process, :state, state)}
-      {:ok, state, more} -> {:noreply, Map.put(process, :state, state), more}
-      :ignore -> {:stop, :normal, process}
-      {:stop, why} -> {:stop, why, process}
-      {:error, why} -> {:stop, why, process}
-    end
-  end
-
-  def handle_continue(continue, process), do: put_state(process.module.handle_continue(continue, process.state), process)
+  defp enter(process, state, more, registered),
+    do: :gen_server.enter_loop(__MODULE__, [], Map.put(process, :state, state), registered, more)
 
   @impl true
-  def handle_call(request, from, process), do: put_state(process.module.handle_call(request, from, process.state), process)
+  def handle_continue(continue, process), do: forward(process, :handle_continue, [continue])
+
+  @impl true
+  def handle_call(request, from, process), do: forward(process, :handle_call, [request, from])
 
   @impl true
   def handle_cast({__MODULE__, :started, from, monitor}, process) do
@@ -153,22 +160,25 @@ defmodule OneCore.Plugins.Process do
         {:noreply, process}
 
       {:ok, held, module} ->
-        # OTP names the code a process is leaving by its `@vsn`, and so does this.
-        [vsn] = Keyword.fetch!(was.module_info(:attributes), :vsn)
+        if statem?(module) do
+          # It ends as it ran, in the old code.
+          Plugins.release(held)
+          {:stop, :normal, process}
+        else
+          # The old version is let go of last, with nothing of it left here: unloading it ends any process that
+          # still holds one of its functions.
+          case returned(fn -> module.code_change(vsn(was), process.state, nil) end) do
+            {:ok, state} ->
+              process = %{process | held: held, module: module, state: state}
+              Plugins.release(was_held)
+              send(from, {monitor, :done})
+              {:noreply, process}
 
-        # The old version is let go of last, with nothing of it left here: unloading it ends any process that
-        # still holds one of its functions.
-        case module.code_change(vsn, process.state, nil) do
-          {:ok, state} ->
-            process = %{process | held: held, module: module, state: state}
-            Plugins.release(was_held)
-            send(from, {monitor, :done})
-            {:noreply, process}
-
-          {:error, why} ->
-            process = Map.delete(%{process | held: held, module: module}, :state)
-            Plugins.release(was_held)
-            {:stop, {:code_change, why}, process}
+            {:error, why} ->
+              process = Map.delete(%{process | held: held, module: module}, :state)
+              Plugins.release(was_held)
+              {:stop, {:code_change, why}, process}
+          end
         end
 
       :absent ->
@@ -176,22 +186,23 @@ defmodule OneCore.Plugins.Process do
     end
   end
 
-  def handle_cast(request, process), do: put_state(process.module.handle_cast(request, process.state), process)
+  def handle_cast(request, process), do: forward(process, :handle_cast, [request])
 
   @impl true
-  def handle_info(message, process), do: put_state(process.module.handle_info(message, process.state), process)
+  def handle_info(message, process), do: forward(process, :handle_info, [message])
 
-  # A process that never started, or couldn't take what it held to newer code, holds nothing to end with. The
-  # version is let go of here, so that it's unloaded by the time anyone sees that the process stopped.
+  # A process that couldn't take what it held to newer code holds nothing to end with. The version is let go of
+  # here, so that it's unloaded by the time anyone sees that the process stopped.
   @impl true
   def terminate(why, process) do
     with %{state: state} <- process, do: process.module.terminate(why, state)
     Plugins.release(process.held)
   end
 
+  @doc false
   # Holds the plugin's latest version, says so where this process is registered, and gives its module in it.
   # `:absent` if the plugin isn't running here, or no longer has the module.
-  defp held(plugin, name, key) do
+  def held(plugin, name, key) do
     with {:ok, held, version} <- Plugins.hold(plugin) do
       case Version.module(version, name) do
         nil ->
@@ -205,8 +216,38 @@ defmodule OneCore.Plugins.Process do
     end
   end
 
-  # What a callback returned, with the plugin's state where this process keeps it.
-  defp put_state(returned, process) do
+  @doc false
+  def statem?(module), do: :gen_statem in Version.behaviours(module)
+
+  @doc false
+  # OTP names the code a process is leaving by its `@vsn`, and so does this.
+  def vsn(module), do: hd(Keyword.fetch!(module.module_info(:attributes), :vsn))
+
+  @doc false
+  # What a plugin's callback returned, thrown too, as OTP takes it.
+  def returned(callback) do
+    callback.()
+  catch
+    :throw, returned -> returned
+  end
+
+  @doc false
+  # A process whose plugin's `init/1` didn't start it lets go of its version and ends, as OTP has one end.
+  def ended(process, returned) do
+    Plugins.release(process.held)
+
+    case returned do
+      :ignore -> exit(:normal)
+      {stop_or_error, why} when stop_or_error in [:stop, :error] -> exit(why)
+      returned -> exit({:bad_return_value, returned})
+    end
+  end
+
+  # Hands a callback to the plugin's module, with its state, and keeps the state it returns where this process keeps
+  # it.
+  defp forward(process, callback, arguments) do
+    returned = returned(fn -> apply(process.module, callback, arguments ++ [process.state]) end)
+
     at =
       case {elem(returned, 0), tuple_size(returned)} do
         {:reply, _} -> 2

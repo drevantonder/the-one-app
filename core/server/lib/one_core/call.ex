@@ -286,10 +286,10 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  A process that keeps running on this server between calls: the GenServer `module`, which is one of this call's
-  plugin's or of a plugin it uses. There's one for each `key`, started when first asked for, with `argument` given
-  to its `init/1`, and found again by every call after. It carries on through its plugin's updates as a service
-  does, and one that stopped is started by the next call that asks for it.
+  A process that keeps running on this server between calls: the GenServer or `:gen_statem` `module`, which is one
+  of this call's plugin's or of a plugin it uses. There's one for each `key`, started when first asked for, with
+  `argument` given to its `init/1`, and found again by every call after. It carries on through its plugin's
+  updates as a service does, and one that stopped is started by the next call that asks for it.
 
       counter = OneCore.Call.process(call, Hello.Counter, call.subject, 0)
   """

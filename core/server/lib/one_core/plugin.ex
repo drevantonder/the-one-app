@@ -184,9 +184,16 @@ defmodule OneCore.Plugin do
   - `OneCore.Call.fetch(call, %{url: "https://api.example.com/x", method: "POST", headers: %{...}, body: "..."})`
     makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
-    the server running this one: a GenServer of the plugin's, one for each `key`, started with `argument` when
-    first asked for. It's for what is slow to open and belongs to no machine in particular, as a database is. What
-    must run on particular machines is a service.
+    the server running this one: a GenServer or a `:gen_statem` of the plugin's, one for each `key`, started with
+    `argument` when first asked for. It's for what is slow to open and belongs to no machine in particular, as a
+    database is. What must run on particular machines is a service. Either carries on through the plugin's
+    updates as a service does (below).
+  - A process that goes through stages, such as starting, connecting, waiting for a person or holding something
+    for a while, is a `:gen_statem`, written as OTP says, with each stage a named state and the moves between
+    them in its `handle_event/4`. What a stage can't handle yet is `:postpone`d until the next, how long a stage
+    may last is its `:state_timeout`, and nothing waits with `Process.sleep`, so the process still hears what
+    comes meanwhile. A tool says the state by name, and the app shows each one, never an error while it's still
+    starting. A GenServer is for a process that handles each message the same way whatever came before.
   - Every module is a `defmodule` at the top of a file in `server/`, and a plugin can have as many files and modules
     as it likes. The code is free to use the machine it runs on.
   - A plugin's files can be anything: a template, a picture, a font. Its code reads one of its own by its path,
@@ -370,7 +377,8 @@ defmodule OneCore.Plugin do
 
   A service is a part of the plugin that runs only on the machines that have what it needs, and keeps running
   between calls: to watch for something, hold a connection open or keep a program going. It's a module of the
-  plugin that is a GenServer, and says what it's called where a person reads it, and what it needs of a machine:
+  plugin that is a GenServer, or a `:gen_statem` when it has stages, and says what it's called where a person
+  reads it, and what it needs of a machine:
 
       defmodule Hello.Door do
         use GenServer
@@ -424,9 +432,13 @@ defmodule OneCore.Plugin do
     which stays through its plugin's updates and goes when it's removed from that server. It runs as whoever
     runs its server there, with their files and their programs.
   - When the plugin is updated, the service's process carries on in the new code with what it holds, and
-    whatever it has open stays open. `code_change/3` is given the state, if the new code keeps it in another
-    shape. A service that can't carry on starts afresh in the new code: one whose `code_change/3` refuses, one
-    that takes over 5 seconds to get to it, and one whose state holds a function, so keep only data there.
+    whatever it has open stays open. `code_change/3` is given the state, or a `:gen_statem`'s `code_change/4`
+    its state and data, if the new code keeps them in another shape. Keep them in a struct with a default for
+    each field, the safe one: `struct(__MODULE__, Map.from_struct(data))` in `code_change` gives the new code's
+    struct, with a field the old code didn't have at its default, which a running process otherwise lacks and
+    crashes on. A service that can't carry on starts afresh in the new code: one whose `code_change` refuses,
+    one that takes over 5 seconds to get to it, one that has become a `:gen_statem` or stopped being one, and
+    one whose state holds a function, so keep only data there.
   - A service can bring a program in another language, as source in a folder of the plugin's files.
     `OneCore.Service.folder(self(), "server/meter")` gives a folder on the machine holding the files under
     `server/meter/`, which is the service's to build the program in, with what the machine has, and to start it
