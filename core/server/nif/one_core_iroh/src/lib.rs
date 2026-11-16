@@ -5,6 +5,7 @@
 //! client does.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -116,7 +117,20 @@ fn start(
     RUNTIME.block_on(async {
         let network = network.map(|(address, token)| Network { address, token });
         let key = client::key(Path::new(&key_file)).map_err(|error| format!("{error:#}"))?;
-        let endpoint = client::endpoint(key, network.as_ref()).await.map_err(|error| format!("{error:#}"))?;
+        // It listens on the port it did before it started again, so a connection another server still holds from
+        // its last run reaches it: iroh sends what it has for a machine only where a connection it still has with it
+        // last was, and one a server left behind when it stopped lasts until it times out. Another program may have
+        // taken the port meanwhile, and then it's any that's free.
+        let port_file = Path::new(&key_file).with_file_name("port");
+        let port = std::fs::read_to_string(&port_file).ok().and_then(|port| port.trim().parse().ok()).unwrap_or(0);
+        let endpoint = match client::endpoint(key.clone(), network.as_ref(), port).await {
+            Err(_) if port != 0 => client::endpoint(key, network.as_ref(), 0).await,
+            bound => bound,
+        }
+        .map_err(|error| format!("{error:#}"))?;
+        if let Some(socket) = endpoint.bound_sockets().into_iter().find(SocketAddr::is_ipv4) {
+            std::fs::write(&port_file, socket.port().to_string()).map_err(|error| error.to_string())?;
+        }
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
             endpoint.online().await;

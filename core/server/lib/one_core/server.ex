@@ -132,7 +132,7 @@ defmodule OneCore.Server do
 
   # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
   # answered may only have lost what it was sent, as a network now and then does, so it's connected to again, which
-  # one that's there answers at once (`Iroh.connect/4`); one that started again is somewhere new.
+  # one that's there answers at once (`Iroh.connect/4`), one that started again too.
   defp ask(server, message) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
     request = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1)) end

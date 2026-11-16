@@ -77,8 +77,9 @@ const IDLE: Duration = Duration::from_secs(2);
 /// the other's QUIC acknowledges at once, and one that's running a call says so every `THERE` too. So a few of
 /// those missed in a row is a machine that's gone, and whatever was asked of it is asked elsewhere this soon after
 /// it went. QUIC takes the shorter of the two sides' `SILENT`. Whoever opens a connection closes it once it's
-/// `IDLE`, so one a server that stopped left behind ends then, and that server is found where it starts again: iroh
-/// sends what it has for a machine only where a connection it still has with it last was.
+/// `IDLE`, and one opened by a server that stopped lasts this long on the other side. Meanwhile iroh sends what it
+/// has for that server only where that connection was, so a server that starts again listens on the port it did
+/// (`one_core_iroh`'s `start`).
 const SILENT: Duration = Duration::from_secs(4);
 
 /// A network's address, and the token this machine shows there: what says it's one of the network's own.
@@ -465,8 +466,9 @@ fn hex(bytes: &[u8]) -> String {
 /// An endpoint holding `key`. It reaches others, and is reached, by key: straight to the addresses it's told and the
 /// ones it finds, and otherwise through the relay at its network's address, which is also the only thing it times.
 /// With no other relay and no address lookup, nothing about a network goes to anyone outside it. A network on one
-/// machine has no address, and so no relay. A server's NIF binds this same endpoint.
-pub async fn endpoint(key: SecretKey, network: Option<&Network>) -> Result<Endpoint> {
+/// machine has no address, and so no relay. It listens on `port`, or on any that's free with `0`. A server's NIF
+/// binds this same endpoint.
+pub async fn endpoint(key: SecretKey, network: Option<&Network>, port: u16) -> Result<Endpoint> {
     let mut probes = NetReportConfig::minimal();
     let relay = match network {
         Some(Network { address, token }) => {
@@ -485,6 +487,7 @@ pub async fn endpoint(key: SecretKey, network: Option<&Network>) -> Result<Endpo
         )
         .relay_mode(relay)
         .net_report_config(probes)
+        .bind_addr(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)))?
         .bind()
         .await
         .context("couldn't open a socket")
@@ -791,7 +794,7 @@ impl Link {
         let key = SecretKey::generate();
         let attestation = hex(&device.sign(format!("one/run/1\n{}", key.public()).as_bytes()).to_bytes());
         let shown = network.as_ref().map(|network| network.shown(device, &attestation));
-        let endpoint = endpoint(key, shown.as_ref()).await?;
+        let endpoint = endpoint(key, shown.as_ref(), 0).await?;
         Ok(Self { endpoint, network, who, attestation })
     }
 }
