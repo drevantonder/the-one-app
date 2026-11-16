@@ -3,36 +3,37 @@
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Sheet, Skeleton, Switch, toast } from "ui"
+import type { App, Item, Page } from "./types.ts"
 
-const named = (who) => (!who ? "You" : who === "network" ? "Everyone" : who.replace("groups/", "").replace(/^./, (first) => first.toUpperCase()))
-const json = (tool, inputs, who) => call(tool, inputs, { for: who }).then(JSON.parse)
+const named = (who?: string) => (!who ? "You" : who === "network" ? "Everyone" : who.replace("groups/", "").replace(/^./, (first) => first.toUpperCase()))
+const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
 
 /// Every app there is, and the pages this user sees, each with the plugins it has.
 const store = createMemo(async () => {
-  const groups = await json("permissions_groups").catch(() => [])
+  const groups = await json<{ group: string }[]>("permissions_groups").catch((): { group: string }[] => [])
   const whos = [undefined, ...groups.map(({ group }) => group), "network"]
-  const [apps, ...pages] = await Promise.all([json("home-screen_store"), ...whos.map((who) => json("home-screen_page", {}, who).then((page) => ({ ...page, for: who, name: named(who) })))])
+  const [apps, pages] = await Promise.all([json<App[]>("home-screen_store"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, for: who, name: named(who) }))))])
   return { apps, pages }
 })
 changed(() => refresh(store))
 
 /// The page's app that is this plugin's, if the plugin is on the page, or in its Accounts folder.
-const on = (page, app) => page.items.flatMap((item) => item.folder ?? [item]).find((item) => item.plugin === app.plugin)
-const [managing, setManaging] = createSignal()
+const on = (page: Page, app: App) => page.items.flatMap((item): Item[] => item.folder ?? [item]).find((item) => item.plugin === app.plugin)
+const [managing, setManaging] = createSignal<string>()
 
 /// Puts an app on a page or takes it off, which is adding or removing its plugin for whoever's page it is.
-async function put(page, app, there) {
+async function put(page: Page, app: App, there: boolean) {
   try {
     if (there) await call("install", { plugin: app.plugin }, { for: page.for })
-    else await call("uninstall", { name: on(page, app).app.split("/")[0] }, { for: page.for })
+    else await call("uninstall", { name: on(page, app)!.app!.split("/")[0] }, { for: page.for })
   } catch (error) {
-    toast(error.message)
+    toast((error as Error).message)
   }
   refresh(store)
 }
 
-function Apps(props) {
-  const pages = (app) => props.store.pages.filter((page) => on(page, app))
+function Apps(props: { store: { apps: App[]; pages: Page[] } }) {
+  const pages = (app: App) => props.store.pages.filter((page) => on(page, app))
   const app = () => props.store.apps.find((app) => app.plugin === managing())
   return (
     <>
@@ -54,7 +55,7 @@ function Apps(props) {
         <Show when={app()}>
           <form>
             <For each={props.store.pages} keyed={(page) => page.who}>
-              {(page) => <Switch label={page().name} checked={!!on(page(), app())} disabled={!page().arranges} onChange={(event) => put(page(), app(), event.currentTarget.checked)} />}
+              {(page) => <Switch label={page().name} checked={!!on(page(), app()!)} disabled={!page().arranges} onChange={(event) => put(page(), app()!, event.currentTarget.checked)} />}
             </For>
           </form>
         </Show>
@@ -67,7 +68,7 @@ render(
   () => (
     <Screen heading="Apps" back onBack={leave}>
       <style>{".icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; }"}</style>
-      <Errored fallback={(error) => <Problem heading="Can't show the apps" text={String(error().message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show the apps" text={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <Apps store={store()} />
         </Loading>

@@ -3,27 +3,31 @@
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { call, changed, Empty, Icon, leave, List, open, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
+import type { Account, App, Page } from "./types.ts"
 
-const json = (tool, inputs) => call(tool, inputs).then(JSON.parse)
+const json = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs).then(JSON.parse)
+
+/** An app of the folder, with its accounts, or why they couldn't be listed. */
+type Listed = App & { accounts: Account[]; problem?: string }
 
 /// The folder's apps, each with its accounts. An app whose accounts couldn't be listed says why.
 const folder = createMemo(async () => {
-  const page = await json("home-screen_page")
+  const page = await json<Page>("home-screen_page")
   const apps = page.items.find((item) => item.folder)?.folder ?? []
   return Promise.all(
     apps.map((app) =>
-      json(`${app.app.split("/")[0]}_accounts`)
-        .then((accounts) => ({ ...app, accounts }))
-        .catch((error) => ({ ...app, accounts: [], problem: error.message })),
+      json<Account[]>(`${app.app.split("/")[0]}_accounts`)
+        .then((accounts): Listed => ({ ...app, accounts }))
+        .catch((error): Listed => ({ ...app, accounts: [], problem: error.message })),
     ),
   )
 })
 changed(() => refresh(folder))
 
 const [adding, setAdding] = createSignal(false)
-const logo = (app) => <img class="logo" src={app.icon} alt="" />
+const logo = (app: App) => <img class="logo" src={app.icon} alt="" />
 
-function Accounts(props) {
+function Accounts(props: { apps: Listed[] }) {
   const some = () => props.apps.some((app) => app.accounts.length || app.problem)
   return (
     <>
@@ -61,7 +65,7 @@ function Accounts(props) {
 }
 
 /// The apps an account can be added to, each opening its page, which signs one in.
-function Adding(props) {
+function Adding(props: { apps: Listed[] }) {
   return (
     <Screen heading="Add Account" back onBack={() => setAdding(false)}>
       <List>
@@ -75,7 +79,7 @@ function Adding(props) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Accounts" back onBack={leave}><Problem heading="Can't show your accounts" text={String(error().message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Accounts" back onBack={leave}><Problem heading="Can't show your accounts" text={String((error() as Error).message ?? error())} /></Screen>}>
       <style>{`
         .logo { display: block; width: 2rem; height: 2rem; border-radius: 22.5%; }
         .add { display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 22.5%; background: var(--secondary); }

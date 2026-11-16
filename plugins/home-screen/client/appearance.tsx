@@ -3,9 +3,9 @@ import { createSignal, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { client, Field, leave, RadioGroup, Screen } from "ui"
 
-const [theme, setTheme] = createSignal()
+const [theme, setTheme] = createSignal<string>()
 client().then(({ theme }) => setTheme(theme ?? "device"))
-const choose = (theme) => client({ theme: theme === "device" ? null : theme }).then(() => setTheme(theme))
+const choose = (theme: string) => client({ theme: theme === "device" ? null : (theme as "light" | "dark") }).then(() => setTheme(theme))
 
 render(
   () => (
