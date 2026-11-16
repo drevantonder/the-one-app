@@ -42,6 +42,12 @@ export const who = (user) => `users/${user.name}`;
  */
 export const assistant = (client, user) => sha256(`${client}\n${user}`);
 
+/**
+ * The device a browser that's signed in here is, to a server: one for each of its sessions, the size of a key and
+ * nobody's key, as an assistant's is.
+ */
+export const browserDevice = (session) => sha256(`browser\n${session}`);
+
 /** What signs this Worker's cookies and tokens, made on first use and kept beside what it protects. */
 async function secret() {
   await env.DB.exec("create table if not exists secret (secret text not null)");
@@ -69,6 +75,18 @@ async function goesBy(user) {
   const said = { called: user.called ?? null, email: user.emailVerified ? user.email : null };
   await env.OWN.remove(`people/${user.name}`);
   await env.OWN.write(`people/${user.name}`, JSON.stringify(said));
+}
+
+/** Makes a browser's session one of its person's devices, as a server reads whose a device is. */
+async function browserIn(session) {
+  const user = await env.DB.prepare("select name from user where id = ?").bind(session.userId).first();
+  await env.OWN.write(`devices/${await browserDevice(session.id)}`, who(user));
+}
+
+/** Makes a browser's session nobody's, on every server. */
+async function browserOut(session) {
+  await env.OWN.remove(`devices/${await browserDevice(session)}`);
+  await forget();
 }
 
 /** Makes a device nobody's, on every server. */
@@ -200,7 +218,15 @@ async function made(origin) {
     // The name a person chose as they joined, which they can change: the one they're `users/<name>` by is chosen
     // for them, as they're invited, and never changes.
     user: { additionalFields: { called: { type: "string", required: false, input: true } } },
-    databaseHooks: { user: { update: { after: goesBy } } },
+    databaseHooks: {
+      user: { update: { after: goesBy } },
+      // A browser that's signed in is one of its person's devices for as long as it is: the web client asks as its
+      // session (`worker.js`).
+      session: {
+        create: { after: (session) => browserIn(session) },
+        delete: { after: (session) => browserOut(session.id) },
+      },
+    },
     // Better Auth limits how often an address asks only where NODE_ENV says production, which a Worker's doesn't,
     // and counts in memory, which each copy of a Worker has its own of.
     rateLimit: { enabled: true, storage: "database" },
@@ -401,6 +427,7 @@ export async function asked(auth, origin, { ask, who: name, ...about }) {
   // Someone taken out of the network: nothing acts as them from then on, they sign in nowhere, and their name is free.
   if (ask === "remove_person") {
     for (const device of await adapter.findMany({ model: "device", where: mine })) await remove(adapter, device);
+    for (const { id } of await adapter.findMany({ model: "session", where: mine })) await browserOut(id);
     for (const model of ["oauthRefreshToken", "oauthAccessToken", "oauthConsent", "session", "passkey", "invite", "account"])
       await adapter.deleteMany({ model, where: mine });
     await adapter.delete({ model: "user", where: [{ field: "id", value: user.id }] });

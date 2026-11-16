@@ -18,7 +18,7 @@
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
 // - `RELAY` passes a call to a server and gives its answer, or tells every server something.
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import { $, Glob } from "bun";
 
 const here = import.meta.dir;
@@ -43,10 +43,13 @@ const services = [
   { binding: "WEB", service: "network-web" },
 ];
 
-// The web client is its files with the UI library among them, as every client has it: a page here is built against it, as
-// an app is (`ui/app.js`), and finds it at `/ui/client/`. The piece `web` serves what's built, `clients/web/dist`.
+// The web client is the app's own page, the files its window is given (`clients/app/tauri.conf.json`), with the
+// web's files over them (`clients/web`), which answer what the page asks in a browser in place of the app's Rust half,
+// and the UI library, which an app's page finds at `/ui/client/`. The piece `web` serves what's built, `clients/web/dist`.
 const web = `${root}/clients/web`;
 rmSync(`${web}/dist`, { recursive: true, force: true });
+const app = `${root}/clients/app`;
+for (const file of (await Bun.file(`${app}/tauri.conf.json`).json()).build.frontendDist) cpSync(`${app}/${file}`, `${web}/dist/${basename(file)}`);
 for (const file of readdirSync(web).filter((file) => file !== "dist")) cpSync(`${web}/${file}`, `${web}/dist/${file}`, { recursive: true });
 cpSync(`${root}/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true });
 

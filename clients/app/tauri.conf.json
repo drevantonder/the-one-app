@@ -3,7 +3,7 @@
   "productName": "The One App",
   "identifier": "app.theone.client",
   "build": {
-    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "../../icons/Logo.png", "../../ui/src/tokens.css", "../../ui/src/ui.css"]
+    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "page/host.js", "../../icons/Logo.png", "../../ui/src/tokens.css", "../../ui/src/ui.css"]
   },
   "app": {
     "withGlobalTauri": true,

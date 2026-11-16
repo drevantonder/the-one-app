@@ -2,12 +2,12 @@
 //
 // An app is a page of its plugin's, in a frame at an address of its own, so it reaches no other app and nothing
 // here. It speaks to this page as an MCP App speaks to its host: JSON-RPC messages, posted. What it asks goes to
-// the client's Rust half (`ask`), which answers what only reads from what it kept and says when that has changed.
+// where the page runs (`host.js`): the app's Rust half, or in a browser, the network's edge (`clients/web/host.js`),
+// which answers what only reads from what it kept and says when that has changed.
 //
 // The Home Screen are an app too: the plugin `home`'s, which reaches this client from a server as every plugin
 // does. It's the one this page shows first, under every other, and it opens the rest (`one/open`).
-const { invoke } = window.__TAURI__.core
-const { listen } = window.__TAURI__.event
+import { address, invoke, listen, openLink, sandbox } from "./host.js"
 
 const HOME = "home/client/index.html"
 /// Whether the window is wide enough for the Home Screen's sidebar, which the home plugin draws along the start of
@@ -26,10 +26,8 @@ let first = new Map()
 /// for.
 const listed = new Set()
 
-/// Where an app's page is: under its plugin's name, then who it's for if that isn't its user, last part first.
-/// Android's and Windows' web views load only http, so there the app's own scheme is the start of a host's name.
+/// What an app's address is named by: its plugin's name, then who it's for if that isn't its user, last part first.
 const host = (app, who) => [app.split("/")[0], ...(who ? who.split("/").reverse() : [])].join(".")
-const address = (view) => `${location.protocol === "tauri:" ? "oneapp://" : "http://oneapp."}${view.host}.localhost/${view.app}`
 
 /// Whether a server answered the last thing this client asked, and why its files couldn't be listed, if they
 /// couldn't.
@@ -104,7 +102,7 @@ function load(app, who) {
   if (!listed.has(who)) list(who)
   const view = { key: at, app, for: who, host: host(app, who) }
   view.frame = Object.assign(document.createElement("iframe"), { src: address(view), inert: true })
-  view.frame.sandbox = "allow-scripts allow-same-origin allow-forms"
+  view.frame.sandbox = sandbox
   if (app === HOME) view.frame.className = "home"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`).
   view.frame.allow = "clipboard-write; web-share"
@@ -233,9 +231,9 @@ async function answer(view, method, params) {
     if (!go(params.url.slice("one:".length), params.for ?? view.for, params.behind)) throw new Error("That app isn't on this device")
     return {}
   }
-  // A web address opens in the device's own browser: the window is sent there, and leaves it to the browser.
+  // A web address opens in the device's own browser, outside the app.
   if (method === "ui/open-link" && /^https?:/.test(new URL(params.url).protocol)) {
-    location.assign(params.url)
+    openLink(params.url)
     return {}
   }
   // What an app is told of its client, and the few things one changes of it.

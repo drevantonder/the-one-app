@@ -2,7 +2,7 @@
 // invitation, someone joins; from an assistant's request to be let in, the assistant is. Opened with a new device's
 // code, as that device's link has it, its person signs in if they aren't yet, and is shown the code to compare
 // with the device's before they let it in or stop it. Opened from the app's Passkeys, someone makes another passkey. Whichever it was, this browser is signed in after, and is one
-// of that person's devices. In the app's own window, which has no passkeys, the page shows the device's code and its
+// of that person's devices, whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, which has no passkeys, the page shows the device's code and its
 // button opens the page in the device's browser instead.
 import { createSignal } from "solid-js"
 import { render } from "@solidjs/web"
@@ -83,7 +83,8 @@ async function signIn() {
     const { url } = await ask("/oauth2/consent", { accept: true, oauth_query: request })
     return location.replace(url)
   }
-  if (!code) return setDone(invite ? "You've joined. Now open the app on your phone or computer, and sign in there." : "You're signed in. Now open the app on your phone or computer.")
+  // Signed in, someone is shown their Home Screen: this browser has the app too, the web client.
+  if (!code) return location.replace("/")
   setSignedIn(true)
   await claim()
 }
