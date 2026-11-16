@@ -4,7 +4,7 @@ defmodule Telemetry.Recorded do
   whoever Telemetry was installed for as one batch a minute, or as often as `OTEL_BSP_SCHEDULE_DELAY` says in
   milliseconds, which keeps it (`Telemetry.keep/2`): so a call costs a few microseconds, writes nothing and asks no
   other server, and an idle server sends nothing at all. There's one of these on each server where something
-  Telemetry hears happened, for whoever Telemetry was installed for, and its batches carry that server's name.
+  Telemetry observes happened, for whoever Telemetry was installed for, and its batches carry that server's name.
 
   - A span for each tool call, from the hook `called`: its plugin, its tool, whose it was as an owner's prefix
     (`users/alice`), how long it took and how it ended. A call passed on is a span on both servers, the one that

@@ -520,7 +520,7 @@ defmodule OneCore.Sandbox.Check do
   @programs [{System, :cmd}, {System, :shell}, {Port, :open}, {:os, :cmd}, {:erlang, :open_port}]
   @network [:gen_tcp, :gen_udp, :gen_sctp, :ssl, :httpc, :socket, Req, Finch, Mint.HTTP, HTTPoison, Tesla]
 
-  # Core's hooks that change or decide what happens, which only a plugin on a server of its owner's may.
+  # Core's hooks that mutate or validate what happens, which only a plugin on a server of its owner's may.
   @deciding ~w(inputs call reach device owner)
 
   # The plugins it uses run in its VM as it, so they're checked too: one that can't run there, as most of the
@@ -541,7 +541,7 @@ defmodule OneCore.Sandbox.Check do
           hook in @deciding,
           do:
             "#{where(plugin)}: hooks/0 names `#{hook}`, which changes or decides what happens. In sandbox mode a " <>
-              "plugin only hears: hook `called` or `changed` instead, or run it on a server of its owner's."
+              "plugin only observes: hook `called` or `changed` instead, or run it on a server of its owner's."
 
     offering =
       if offers == [],

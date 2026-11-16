@@ -27,11 +27,11 @@ defmodule OneCore.Plugins do
   # How long after looking at someone a request for them has this server look again, behind it, in milliseconds.
   @looks_after :timer.minutes(5)
 
-  # This, and after it what runs plugins' processes, what tells the plugins that hear a hook, and the VMs of plugins in
+  # This, and after it what runs plugins' processes, what tells the plugins that observe a hook, and the VMs of plugins in
   # sandbox mode, which hold versions here.
   def child_spec(_) do
     children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
-    children = children ++ __MODULE__.Process.children() ++ Hooks.Hearer.children() ++ OneCore.Sandbox.children()
+    children = children ++ __MODULE__.Process.children() ++ Hooks.Observer.children() ++ OneCore.Sandbox.children()
     start = {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}
     %{id: __MODULE__, type: :supervisor, start: start}
   end

@@ -6,12 +6,12 @@ defmodule OneCore.User do
   link leads to, and is nobody else.
 
   Signing in is a plugin, which tells One Core whose device a request came from: `asking/3` is the one place
-  that's decided, and it asks the plugins that change `device` (`OneCore.Hooks.whose/1`). A device no plugin
+  that's decided, and it asks the plugins that mutate `device` (`OneCore.Hooks.whose/1`). A device no plugin
   places is nobody's, and nobody is refused everything: so with no plugin signing anyone in, a network answers
   nobody.
 
   A request is for whoever it's from, unless it says who else: a group, or the network. It then runs for them,
-  with their artifacts, once the plugins that decide `reach` say whoever asked is their `member`.
+  with their artifacts, once the plugins that validate `reach` say whoever asked is their `member`.
   """
   alias OneCore.{Bucket, Hooks, Server, Servers}
 
@@ -129,7 +129,7 @@ defmodule OneCore.User do
       else: {:error, "This server doesn't act for #{owner}. The ones that do are the ones to ask."}
   end
 
-  # Whether a request by `by` runs for `asked`: themselves, or whoever the plugins that decide say they're a
+  # Whether a request by `by` runs for `asked`: themselves, or whoever the plugins that validate `reach` say they're a
   # member of.
   defp acts(by, by), do: :ok
 
@@ -160,7 +160,7 @@ defmodule OneCore.User do
 
   @doc """
   Makes the user `who` the network's first owner, which a network gets once: `:ok`, or `{:error, why}`. The
-  plugins that decide `owner` are asked, and the one that keeps who may do what writes it down then. Doing it
+  plugins that validate `owner` are asked, and the one that keeps who may do what writes it down then. Doing it
   again for the same user finishes what an earlier try left undone.
   """
   def make_first_owner(who) do

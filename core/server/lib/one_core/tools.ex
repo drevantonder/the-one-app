@@ -3,15 +3,15 @@ defmodule OneCore.Tools do
   One Core's own tools: what installs, updates and removes plugins, servers and services.
 
   They're called as a plugin's tools are, through the same hooks (`OneCore.Plugins.Calls.tool/6`): the plugins that
-  change a call's inputs change theirs, the ones that decide a call decide theirs, and the ones that hear are
-  told. What each changes it reaches as a plugin reaches an artifact, so the plugins that decide `reach` say
+  mutate a call's inputs mutate theirs, the ones that validate a call validate theirs, and the ones that observe
+  are told. What each changes it reaches as a plugin reaches an artifact, so the plugins that validate `reach` say
   whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` reads its code and installs it, and
   so does a `member` of the group or the network it's whoever's or installed for, since what's in use is open to
   everyone it's in use for. An `installer` of a user, a group or the network adds plugins for them, which an `owner`
   is, and only an `owner` removes them and says which servers act for them. A plugin is added only where a server
   would run it (`OneCore.Servers.runs?/1`): for a user or a group, one of their own. A server is its owner's: who it was started for, and only their `owner` says
   who else it acts for and what it runs. Nothing is asked about what's whoever's asked, which is what their name
-  starts. With no plugin deciding, they're the network's first owner's alone.
+  starts. With no plugin validating `reach`, they're the network's first owner's alone.
 
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
@@ -559,7 +559,7 @@ defmodule OneCore.Tools do
   # Whose this server is: who it was started for.
   defp owner, do: hd(Servers.members(Server.key()))
 
-  # Raises unless whoever asked may reach the artifact as `relation`, which the plugins that decide `reach` say.
+  # Raises unless whoever asked may reach the artifact as `relation`, which the plugins that validate `reach` say.
   # Nothing is asked about what's their own: themselves, and what their name starts.
   defp reaches!(asked, artifact, relation) do
     with {:refuse, why} <- reaches(asked, artifact, relation), do: raise(why)
@@ -572,7 +572,7 @@ defmodule OneCore.Tools do
   end
 
   # Raises unless whoever asked may read a plugin's code and add it: a `viewer` of it, or a member of a group or
-  # the network that it's whoever's or installed for, as the plugins that decide `reach` say. That's VISION's "what's
+  # the network that it's whoever's or installed for, as the plugins that validate `reach` say. That's VISION's "what's
   # made is open to everyone inside once it's in use": what only its author has is theirs and whoever they share
   # it with, and taking it away from a group takes it away from them. Only its code is opened: what it keeps for
   # anyone is never the plugin's artifact, and is reached as ever.

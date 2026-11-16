@@ -184,7 +184,7 @@ defmodule SignIn do
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
 
-  # Whoever may see who's in the network sees who each of them is: a member of it, as the plugins that decide
+  # Whoever may see who's in the network sees who each of them is: a member of it, as the plugins that validate
   # `reach` say. Everyone sees who they are themselves.
   def call("people", inputs, call) do
     users = Map.get(inputs, "users", [person(call)])

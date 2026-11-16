@@ -2,7 +2,7 @@ defmodule OneCore.Trace do
   @moduledoc """
   Which trace a tool call is in, as W3C's Trace Context names it: a call is a span of a trace, a call it makes is
   a span under it, and a call passed to another server carries its span there (`traceparent`), so one trace spans
-  both. The plugins that hear `called` are told it; with none hearing, no call is given a span.
+  both. The plugins that observe `called` are told it; with none observing, no call is given a span.
   """
 
   @doc """

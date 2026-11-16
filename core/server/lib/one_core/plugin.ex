@@ -23,8 +23,8 @@ defmodule OneCore.Plugin do
   to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `uses/0`, `jobs/0` and
   `permissions/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
-  `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks that hear. The plugins it uses
-  run in its VM too, as it, `database` among them. It has no services, no hooks that change or decide, no other
+  `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
+  run in its VM too, as it, `database` among them. It has no services, no hooks it mutates or validates, no other
   plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
   which goes when the VM stops, a minute after its last call. Deploying one that uses what sandbox mode doesn't offer
   says each, with its file and line, and what to do instead.
@@ -146,7 +146,7 @@ defmodule OneCore.Plugin do
     `OneCore.Call.tool(call, "sign-in", "people", %{"users" => ["users/alice"]})` gives each one's `called`, the
     name they chose, and their `email` where how the network signs in has one, either `nil` where there's none.
     Left out, `users` is whoever asked. It answers about others only to a member of the network, as the plugins
-    that decide `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
+    that validate `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
   - `permissions/0`, if the plugin has one, says what it may do beyond its own, as an Android app's manifest does:
     the other plugins' tools it calls, by the plugin's name for all its tools or a tool's (`gmail`,
     `notifications_send`), and the hosts it sends data to (`https://api.example.com`, `https://*.googleapis.com`).
@@ -202,8 +202,8 @@ defmodule OneCore.Plugin do
   of their own calls. `sensitive/0`, if a plugin gives `true`, says what it's given and keeps are secrets, as
   Vault's are, and nothing looks into it.
 
-  A plugin hooks into a moment that isn't one of its own tools being called, to hear of it, to change it or to
-  decide it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:
+  A plugin hooks into a moment that isn't one of its own tools being called, to observe it, to mutate it or to
+  validate it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:
 
       @impl true
       def hooks, do: ["call"]
@@ -217,8 +217,8 @@ defmodule OneCore.Plugin do
   - `hook/3` is called with the hook's name, what the moment is about, a map with string keys, and an
     `OneCore.Call`: it runs as this plugin, for whoever the moment is about, with the plugin's own artifact. A
     hook gives a plugin nothing it couldn't already reach.
-  - A plugin hooks into the moments of whoever it was installed for: one installed for a user decides only what runs for
-    that user, and one installed for the network decides for everyone.
+  - A plugin hooks into the moments of whoever it was installed for: one installed for a user mutates and validates only
+    what runs for that user, and one installed for the network does for everyone.
   #{OneCore.Hooks.listed()}
 
   A plugin that knows which plugin it needs calls it (`OneCore.Call.tool/4`, `OneCore.Call.plugin/2`). One that can't

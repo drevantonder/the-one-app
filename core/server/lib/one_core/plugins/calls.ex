@@ -24,9 +24,9 @@ defmodule OneCore.Plugins.Calls do
       {:ran, ended} ->
         ended
 
-      # A tool that isn't there is heard as a call that failed, as one refused is.
+      # A tool that isn't there is observed as a call that failed, as one refused is.
       {:error, why} ->
-        heard(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, asked, fn -> {:error, why} end)
+        observed(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, asked, fn -> {:error, why} end)
 
       forwarded ->
         forwarded
@@ -67,8 +67,8 @@ defmodule OneCore.Plugins.Calls do
   @doc """
   Calls a tool as every tool is called, a plugin's and One Core's own alike. `tool` is what it says of itself,
   `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
-  inputs are what the tool takes, the plugins that change a call's inputs are asked and the ones that decide it,
-  and the ones that hear are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
+  inputs are what the tool takes, the plugins that mutate a call's inputs are asked and the ones that validate it,
+  and the ones that observe are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
   told, or what `call/5` does where another server ran it. `apart` is the plugin the call removes or deploys over, as who it was installed for and its name there, which
   isn't asked.
   """
@@ -76,10 +76,10 @@ defmodule OneCore.Plugins.Calls do
     with :ok <- open_to(tool, about, asked),
          :ok <- given(tool.takes, about["inputs"]),
          {:ok, about} <- hooked(about, tool.takes, asked, apart) do
-      heard(about, asked, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
+      observed(about, asked, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
     else
-      # A call refused is heard as one that failed, with why.
-      {:error, why} -> heard(about, asked, fn -> {:error, why} end)
+      # A call refused is observed as one that failed, with why.
+      {:error, why} -> observed(about, asked, fn -> {:error, why} end)
     end
   end
 
@@ -93,7 +93,7 @@ defmodule OneCore.Plugins.Calls do
       else: :ok
   end
 
-  # What a call is about once the plugins that change its inputs have, if the ones that decide it agree to it.
+  # What a call is about once the plugins that mutate its inputs have, if the ones that validate it agree to it.
   defp hooked(about, takes, asked, apart) do
     with {:ok, changes, by} <- Hooks.mutate("inputs", about, asked, apart),
          about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
@@ -114,9 +114,9 @@ defmodule OneCore.Plugins.Calls do
     end
   end
 
-  # Runs a call as a span of its trace, and tells the plugins that hear calls how it went: whether it answered, and
-  # whether another server ran it. With none hearing, it's only run.
-  defp heard(about, {_by, who} = asked, call) do
+  # Runs a call as a span of its trace, and tells the plugins that observe calls how it went: whether it answered,
+  # and whether another server ran it. With none observing, it's only run.
+  defp observed(about, {_by, who} = asked, call) do
     if Hooks.hooking("called", who) == [] do
       call.()
     else
@@ -138,7 +138,7 @@ defmodule OneCore.Plugins.Calls do
           {:forwarded, result} ->
             Hooks.observe("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), asked)
 
-          # It would have been passed on again, so the server that passed it here hears it.
+          # It would have been passed on again, so the server that passed it here observes it.
           :forwarding_loop ->
             :ok
         end
@@ -231,7 +231,7 @@ defmodule OneCore.Plugins.Calls do
   @doc """
   Calls the `hook/3` of the plugin that `name` is for `at`, at `hook`, a hook of `kind`, for `asked`. Gives
   `{:ok, answer}` with its answer as `OneCore.Hooks.answer/3` gives it, and otherwise what `call/5` does. A plugin
-  that no longer hooks into it has nothing to say. A hook gives no access of its own: a plugin that hears of an
+  that no longer hooks into it has nothing to say. A hook gives no access of its own: a plugin that observes an
   artifact changing is told only if it could already reach it, and isn't told what it changed itself.
   """
   def hook(at, name, kind, hook, about, asked, forwarded \\ false) do
@@ -242,8 +242,8 @@ defmodule OneCore.Plugins.Calls do
       ask = {"hooks/call", %{installed: at, plugin: name, kind: kind, hook: hook, about: about}}
       call = called(at, name, versions, ask, asked, forwarded)
 
-      # A plugin in sandbox mode only hears: it changes and decides nothing.
-      if hook in version.hooks and hears?(call, about) and (kind == :observe or not version.sandbox),
+      # A plugin in sandbox mode only observes: it mutates and validates nothing.
+      if hook in version.hooks and observes?(call, about) and (kind == :observe or not version.sandbox),
         do:
           {:ok,
            Hooks.answer(
@@ -256,18 +256,18 @@ defmodule OneCore.Plugins.Calls do
   end
 
   @doc """
-  Tells the plugin that `name` is for `at` what it heard, each a hook, what it's about and who asked, in turn and
+  Tells the plugin that `name` is for `at` what it observed, each a hook, what it's about and who asked, in turn and
   under one hold of its version, as `hook/6` would. It's told here, where it happened: a plugin that needs a server
   acting for whoever it was installed for passes it there itself (`OneCore.Call.forward/2`), and one that keeps what
-  it heard on this server for a while needn't. One that only runs elsewhere is told there. It has ten seconds for all
+  it observed on this server for a while needn't. One that only runs elsewhere is told there. It has ten seconds for all
   of it; what it answers or raises is ignored.
   """
-  def hear(at, name, heard) do
+  def observe(at, name, observed) do
     Plugins.run([at], name, fn at, versions ->
       version = versions[name]
 
-      Hooks.within(name, "what it heard", fn ->
-        for {hook, about, asked} <- heard, hook in version.hooks do
+      Hooks.within(name, "what it observed", fn ->
+        for {hook, about, asked} <- observed, hook in version.hooks do
           ask = {"hooks/call", %{installed: at, plugin: name, kind: :observe, hook: hook, about: about}}
 
           call =
@@ -276,7 +276,7 @@ defmodule OneCore.Plugins.Calls do
               else: new_call(at, name, versions, ask, asked, false)
 
           try do
-            if hears?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
+            if observes?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
           catch
             :throw, {Call, _forwarded} -> :ok
             kind, reason -> Logger.error(Exception.format(kind, reason, __STACKTRACE__))
@@ -288,10 +288,10 @@ defmodule OneCore.Plugins.Calls do
     end)
   end
 
-  defp hears?(call, %{"artifact" => artifact, "by" => by}),
+  defp observes?(call, %{"artifact" => artifact, "by" => by}),
     do: call.who != by and Call.refused(call, artifact, "viewer") == nil
 
-  defp hears?(_call, _about), do: true
+  defp observes?(_call, _about), do: true
 
   @doc """
   Has the scheduled jobs that are due called, of the plugin that `name` is for `at`: the plugin it uses that

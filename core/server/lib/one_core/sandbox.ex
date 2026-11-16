@@ -30,7 +30,7 @@ defmodule OneCore.Sandbox do
   deployed, process (its own VM's) and forward_to; `OneCore.Plugin.file/2` and `nif/2`; Logger; and `fetch`, a
   web request this server makes for it. An artifact it's given is a handle this server looks up, never a prefix
   it could rewrite, and a call is one this server is running, never a subject, actor or caller it could name. It hooks
-  only into what it hears: a mutate or validate hook asks it nothing. It has no services, no other plugins'
+  only into what it observes: a mutate or validate hook asks it nothing. It has no services, no other plugins'
   functions, no network, no programs, and no files but a folder of its own that goes when it stops.
 
   What it may call of other plugins, and where it may send data, are its permissions (`OneCore.Plugin`): a tool

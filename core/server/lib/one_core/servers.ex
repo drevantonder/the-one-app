@@ -49,7 +49,7 @@ defmodule OneCore.Servers do
   @doc """
   Whether this server runs the plugins installed for `owner`: it acts for them as one of their own servers, not
   only as one of the network's, or it's the network's and they are, or own, the network. Who owns the network is
-  what the plugins that decide `reach` say.
+  what the plugins that validate `reach` say.
   """
   def runs?(owner) do
     cond do

@@ -141,7 +141,7 @@ defmodule OneCore.Call do
   it too, and an `owner` says who else may. Raises with the reason if it may not.
 
   A plugin reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
-  plugins that decide `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what
+  plugins that validate `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what
   the plugin made for whoever it runs for, and nothing about the plugin where it made the artifact for someone
   else, or the artifact is its own. Another plugin's own artifact is never reached: it's always that one plugin's.
 
@@ -192,7 +192,7 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  Whether whoever asked is a member of `of`, a group or the network, as the plugins that decide `reach` say. With
+  Whether whoever asked is a member of `of`, a group or the network, as the plugins that validate `reach` say. With
   nobody asking, as for a scheduled job, it's whoever the call runs for. It's what a plugin asks before telling
   someone what only a group's members, or the network's, may know.
   """

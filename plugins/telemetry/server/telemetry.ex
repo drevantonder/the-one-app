@@ -3,7 +3,7 @@ defmodule Telemetry do
   Telemetry: what the network's servers, clients and plugins did, how long it took and how it ended, kept in the
   network and read back by agents and on a screen of Settings.
 
-  It hears each tool call (the hook `called`) and what a client measured (`measured`), and what plugins record with
+  It observes each tool call (the hook `called`) and what a client measured (`measured`), and what plugins record with
   its tool `record`, gathers it on each server in OpenTelemetry's shapes (`Telemetry.Recorded`), and keeps a
   server's minute as one blob of its own artifact: so a call writes nothing to the bucket, and an idle server
   writes nothing at all. It isn't kept in a database,

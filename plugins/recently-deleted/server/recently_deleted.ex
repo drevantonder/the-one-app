@@ -15,7 +15,7 @@ defmodule RecentlyDeleted do
 
   `restore` puts the blobs back at the artifact's name, only if nothing has been made there since, and `purge`,
   which the clock calls each day, erases what was removed more than 30 days ago. Who removes and restores an
-  artifact is whoever owns it, as the plugins that decide `reach` say. Each of the three is told to every plugin
+  artifact is whoever owns it, as the plugins that validate `reach` say. Each of the three is told to every plugin
   that hooks into the hook this plugin offers, `recently-deleted.removed`, so one that keeps a list of what it made
   keeps it true.
   """
@@ -43,8 +43,8 @@ defmodule RecentlyDeleted do
         kind: :observe,
         description:
           "What a plugin made for someone was removed, restored or purged. It's about the `artifact`'s name, and " <>
-            "`what` happened: `removed`, `restored` or `purged`. A plugin that keeps a list of what it made hears " <>
-            "it to keep its list true."
+            "`what` happened: `removed`, `restored` or `purged`. A plugin that keeps a list of what it made observes it " <>
+            "to keep its list true."
       }
     ]
   end
@@ -197,7 +197,7 @@ defmodule RecentlyDeleted do
 
   defp owns?(call, name), do: owner(call, name) == :ok
 
-  # Whether whoever the call runs for owns the artifact, as the plugins that decide `reach` say.
+  # Whether whoever the call runs for owns the artifact, as the plugins that validate `reach` say.
   defp owner(call, name),
     do:
       Hooks.validate(

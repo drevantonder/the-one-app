@@ -8,35 +8,37 @@ defmodule OneCore.Hooks do
   `recently-deleted.removed`. A plugin's hook is run here as One Core's are, and only that plugin runs it
   (`OneCore.Call.run_hook/3`).
 
-  A hook is one of three kinds, and how a kind is run is what keeps plugins from getting in each other's way:
+  A hook is one of three kinds, as with Kubernetes' admission webhooks, which are mutating or validating, and its
+  observers: a plugin observes it, mutates it or validates it. How a kind is run is what keeps plugins from getting
+  in each other's way:
 
   - No hook is handed what happens next to run or to leave out. It answers, and One Core carries on: nothing is
     blocked by a plugin that forgot to pass it on.
-  - Nothing depends on the order plugins are asked in. Plugins that hear are each told apart from the others,
-    every plugin that changes is handed the same thing, and every plugin that decides has to agree.
-  - What a plugin changed is said, with its name, to the plugins that decide and hear the same moment.
+  - Nothing depends on the order plugins are asked in. Plugins that observe are each told apart from the others,
+    every plugin that mutates is handed the same thing, and every plugin that validates has to agree.
+  - What a plugin mutated is said, with its name, to the plugins that validate and observe the same moment.
 
   A plugin hooks into the moments of whoever it was installed for. So a moment that runs for someone is hooked into
   by the plugins installed for them and by the ones installed for the network, and by nobody else's: what one user installs
-  decides nothing for another.
+  has no say in another's.
 
   A plugin that can't answer, because it raised, its server couldn't be reached or it took longer than ten seconds
-  (`within/3`), has refused: nothing is let through for want of an answer. So a plugin that breaks blocks what it changes or decides, for whoever it was
-  installed for and nobody else, until it's removed or deployed again, and it has no say in either: a call that
-  removes a plugin or deploys over it isn't that plugin's to change or decide.
+  (`within/3`), has refused: nothing is let through for want of an answer. So a plugin that breaks blocks what it
+  mutates or validates, for whoever it was installed for and nobody else, until it's removed or deployed again, and
+  it has no say in either: a call that removes a plugin or deploys over it isn't that plugin's to mutate or validate.
 
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
-  another server is decided on both.
+  another server is validated on both.
 
   That something may be reached is kept by the server that asked, so that it asks once: until a tool that doesn't
-  only read is called of a plugin that decides it, which that server and the ones it tells forget at once, and
+  only read is called of a plugin that validates it, which that server and the ones it tells forget at once, and
   for a few seconds anywhere else. Whose a device is is kept the same way, until a server is told to forget it:
   by a tool of a plugin that says whose, or by that plugin's edge function. A refusal is never
   kept, nor that a device is nobody's. So taking access away reaches every server, and giving it is seen at once.
 
-  Who may do what is a plugin's to decide. Where no plugin decides `reach` for a moment, nothing is reached and
+  Who may do what is a plugin's to decide. Where no plugin validates `reach` for a moment, nothing is reached and
   no tool is called but by the network's first owner (`OneCore.User.first_owner/0`), who is how a network whose
-  deciding plugin was removed is put right. A network being built, the server's `:development` setting, lets
+  validating plugin was removed is put right. A network being built, the server's `:development` setting, lets
   everything through instead.
 
   A history of who changed what, relation tuples included, is a plugin's to keep, through plugin hooks.
@@ -46,18 +48,18 @@ defmodule OneCore.Hooks do
   alias OneCore.Plugins.Calls
 
   @kinds [
-    hears: """
+    observe: """
     is told after it happened, on the server where it happened, apart from what happened and from every other
-    plugin that hears it, in the order it happened. What it answers is ignored, and so is its raising. One that
+    plugin that observes it, in the order it happened. What it answers is ignored, and so is its raising. One that
     needs a server acting for whoever it was installed for passes it there (`OneCore.Call.forward/2`).
     """,
-    changes: """
-    is handed it as it was asked, as every other plugin that changes it is, and answers only what it changes, by
+    mutate: """
+    is handed it as it was asked, as every other plugin that mutates it is, and answers only what it changes, by
     name: `%{}` changes nothing. Two plugins that change the same thing to something different refuse it, and say
-    so. Which plugin changed what is said to the plugins that decide and hear it.
+    so. Which plugin changed what is said to the plugins that validate and observe it.
     """,
-    decides: """
-    answers `:ok` or `{:refuse, why}`. Every plugin that decides it has to answer `:ok`: one refusal refuses it,
+    validate: """
+    answers `:ok` or `{:refuse, why}`. Every plugin that validates it has to answer `:ok`: one refusal refuses it,
     and whoever asked is told why. A plugin that raises, or answers anything else, refuses it too.
     """
   ]
@@ -81,7 +83,7 @@ defmodule OneCore.Hooks do
      they need to it (`viewer`, `editor` or `owner`) and the `artifact`'s name. It's asked about whoever the
      plugin runs for, and about the plugin, by its artifact's name, where the plugin didn't make the artifact.
      An `:ok` is kept for a few seconds, and until a tool of the plugin is called that doesn't only read: so
-     what it decides from is what its own tools change.
+     what it validates from is what its own tools change.
      It's also asked whether whoever asks is a `member` of the group or the network they ask for: then `who` is
      them, the `relation` is `member` and the `artifact` is the group, or `network`.
      """},
@@ -103,7 +105,7 @@ defmodule OneCore.Hooks do
      A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
      which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `forwarded`
      to another server to run, and its `trace`: its `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A
-     call passed on is heard on both servers.
+     call passed on is observed on both servers.
      """},
     {"changed", :observe,
      """
@@ -113,7 +115,7 @@ defmodule OneCore.Hooks do
      """},
     {"measured", :observe,
      """
-     A client said what it measured of itself. It's heard by the plugins installed for the network, and it's about the
+     A client said what it measured of itself. It's observed by the plugins installed for the network, and it's about the
      `device`'s key and `who` it's of, as its request proved, and its `records`, each as Telemetry's tool `record`
      takes one, with the `time` it was made, in milliseconds since 1970, and the client's own say of which it is in
      its `attributes`: what went wrong or was slow there, kept on the device until a server could be told.
@@ -132,11 +134,12 @@ defmodule OneCore.Hooks do
   Whether `hook` is a name a plugin can hook into: one of One Core's hooks, or a plugin's, `<plugin>.<hook>`, which
   may not be installed yet: then it's never run.
   """
-  def hook?(hook), do: is_map_key(kinds(), hook) or (is_binary(hook) and hook =~ ~r/^[a-z0-9][a-z0-9-]*\.[a-z][a-z0-9_]*$/)
+  def hook?(hook),
+    do: is_map_key(kinds(), hook) or (is_binary(hook) and hook =~ ~r/^[a-z0-9][a-z0-9-]*\.[a-z][a-z0-9_]*$/)
 
   @doc "What a plugin's author reads about hooks: each kind, and each of One Core's hooks with its kind and what it's about."
   def listed do
-    kinds = for {kind, how} <- @kinds, do: "- A hook that #{kind} #{flat(how)}"
+    kinds = for {kind, how} <- @kinds, do: "- A plugin that hooks into a hook of kind `#{inspect(kind)}` #{flat(how)}"
     Enum.join(kinds ++ ["", "The hooks:", "", listed(@hooks)], "\n")
   end
 
@@ -205,7 +208,10 @@ defmodule OneCore.Hooks do
   there. Which hook into what is kept by `OneCore.Plugins`, by who they were installed for, as it looks at them.
   """
   def hooking(hook, who) do
-    for at <- Plugins.chain(who), {hooking, _offered} = installed(at), name <- Map.get(hooking, hook, []), do: {at, name}
+    for at <- Plugins.chain(who),
+        {hooking, _offered} = installed(at),
+        name <- Map.get(hooking, hook, []),
+        do: {at, name}
   end
 
   @doc "The kind of the hook `hook` that a plugin installed for `owner` offers, by its full name, or `nil` for none."
@@ -254,19 +260,20 @@ defmodule OneCore.Hooks do
   def nothing(:mutate), do: %{}
   def nothing(:validate), do: :ok
 
-  @doc "Tells each plugin that hears `hook` what it's about, for `asked`."
+  @doc "Tells each plugin that observes `hook` what it's about, for `asked`."
   def observe(hook, about, {_by, who} = asked) do
-    for {at, name} <- hooking(hook, who), do: __MODULE__.Hearer.tell(at, name, hook, about, asked)
+    for {at, name} <- hooking(hook, who), do: __MODULE__.Observer.tell(at, name, hook, about, asked)
     :ok
   end
 
   @doc """
-  Asks each plugin that changes `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
+  Asks each plugin that mutates `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
   what's changed by name, and the plugin that changed each. `{:refuse, why}` if two don't agree, or one couldn't
   say. `apart` is a plugin that isn't asked, as who it was installed for and its name there.
   """
   def mutate(hook, about, {_by, who} = asked, apart \\ nil) do
-    Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, changes, by} ->
+    Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed,
+                                                                         {:ok, changes, by} ->
       with {:ok, changed} <- answered(installed, :mutate, hook, about, asked),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
@@ -282,19 +289,19 @@ defmodule OneCore.Hooks do
   end
 
   @doc """
-  Asks each plugin that decides `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to
+  Asks each plugin that validates `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to
   refuse. `apart` is a plugin that isn't asked, as who it was installed for and its name there. Where no plugin
-  decides `reach` for them, a call or a reach is the network's first owner's alone.
+  validates `reach` for them, a call or a reach is the network's first owner's alone.
   """
   def validate(hook, about, {by, who} = asked, apart \\ nil) do
-    # Who decides is whoever's plugins they are, so what's kept is what they decided.
+    # Who validates is whoever's plugins they are, so what's kept is what they validated.
     kept = if hook == "reach", do: {"reach", {about, Plugins.chain(who)}}
     forgotten = forgotten("reach")
 
     if kept != nil and kept?(kept) do
       :ok
     else
-      # Who may do what is decided only where something decides who reaches what.
+      # Who may do what is decided only where a plugin validates who reaches what.
       undecided = hook in ["call", "reach"] and hooking("reach", who) -- [apart] == []
 
       decided =
@@ -309,7 +316,7 @@ defmodule OneCore.Hooks do
                 {:refuse, why}
 
               {:error, why} ->
-                {:refuse, "#{plugin} couldn't decide it: #{why}"}
+                {:refuse, "#{plugin} couldn't validate it: #{why}"}
             end
           end)
         end
@@ -322,7 +329,7 @@ defmodule OneCore.Hooks do
     end
   end
 
-  # What's decided where no plugin decides who may reach what.
+  # What's decided where no plugin validates who may reach what.
   defp undecided(by) do
     cond do
       Application.get_env(:one_core, :development, false) -> :ok
@@ -340,7 +347,7 @@ defmodule OneCore.Hooks do
   end
 
   @doc """
-  Whose the device `device` is, as the plugins that change `device` say: a user, or `nil` for nobody's. Kept
+  Whose the device `device` is, as the plugins that mutate `device` say: a user, or `nil` for nobody's. Kept
   once it's somebody's, so a call asks nothing. `{:error, why}` where a plugin couldn't say, which isn't nobody's.
   """
   def whose(device) do

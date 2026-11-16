@@ -20,7 +20,7 @@ defmodule OneCore.Artifact do
   its first parts say whose it is. A plugin has its own artifact (a call's `own`), makes others for whoever it
   runs for (`OneCore.Call.make/2`) and reaches the ones they may (`OneCore.Call.reach/3`). One that was made or
   reached knows as what: reached as a `viewer`, it's only read, and a change to it is told to the plugins that
-  hear `changed`.
+  observe `changed`.
 
   A plugin gives an artifact a codec by saying what they pass through on their way in and out: `%{artifact |
   codec: {module, with}}`, where `module.encode(with, name, data)` and `module.decode(with, name, blob)` each give
