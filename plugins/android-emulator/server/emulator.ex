@@ -1,0 +1,554 @@
+defmodule AndroidEmulator.Emulator do
+  @moduledoc """
+  Runs Android emulators on its machine: the Android SDK's `emulator`, with no window, each an Android Virtual Device
+  (AVD) of this service's own, in its folder's `avd/` (`ANDROID_AVD_HOME`), never one of the machine's own. adb
+  reaches each at its console's port (`emulator-<port>`). What each is, its name, whose it is and what it's for, is a
+  file beside its AVD, `<id>.json`, and when it was last used is a file's time, `used/<id>`.
+
+  The emulator's own network gives a phone's apps this machine's 127.0.0.1 at 10.0.2.2, with no way not to. So on
+  Linux each runs in a network of its own (pasta), reaching the internet as this machine does but nothing on its
+  127.0.0.1, which takes in only the phone's console and adb ports. A Mac has nothing like pasta: there a phone's
+  apps reach the Mac's 127.0.0.1.
+  """
+  use GenServer
+  @behaviour OneCore.Service
+
+  # Android 16, with Google Play, as Google's emulator images name it, for this machine's processor.
+  @android "android-36"
+  @tag "google_apis_playstore"
+  @memory_mb 2048
+  # The command-line tools Google publishes, to install the rest with, where the machine has no SDK.
+  @cmdline_tools "13114758"
+  # scrcpy's server, which a stream runs in the phone for its H.264 and its input, and the file's SHA-256.
+  @scrcpy "5.0.1"
+  @scrcpy_sha256 "764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536"
+  @aiortc "1.16.0"
+  @kept 64 * 1024
+
+  @impl OneCore.Service
+  def called, do: "Android Emulator's emulators"
+
+  @impl OneCore.Service
+  def needs do
+    "A Linux x86 machine with KVM (/dev/kvm) and pasta (the passt package), or a Mac, with uv and Java. It runs " <>
+      "Android emulators as the user this server runs as, about 2 GB of memory and a CPU or two each while they " <>
+      "run. It uses the Android SDK where ANDROID_HOME or ~/Android/Sdk has one, and otherwise installs Google's " <>
+      "command-line tools, emulator and an Android 16 system image in its own folder, accepting Google's SDK " <>
+      "licences, the first time it's used (a few GB). On Linux each phone has a network of its own, reaching the " <>
+      "internet but nothing on this machine; on a Mac its apps reach the Mac's 127.0.0.1."
+  end
+
+  @impl GenServer
+  def init(_) do
+    case :os.type() do
+      {:unix, :darwin} ->
+        :ok
+
+      {:unix, :linux} ->
+        File.exists?("/dev/kvm") || raise "Android's emulator needs KVM here (/dev/kvm)"
+        System.find_executable("pasta") || raise "Android's emulator needs pasta here (the passt package), for a network of its own"
+
+      _ ->
+        raise "Android's emulator runs on Linux and Macs"
+    end
+
+    System.find_executable("uv") || raise "This machine has no uv, which a stream's sender is installed with"
+    {:ok, nil}
+  end
+
+  @doc "Every emulator here: its id, name, whose it is, what it's for, its state and when it was created and last used."
+  def list(service) do
+    avd = avd_home(service)
+    used = used(service)
+    running = processes()
+
+    for file <- if(File.dir?(avd), do: File.ls!(avd), else: []), String.ends_with?(file, ".json") do
+      device = JSON.decode!(File.read!(Path.join(avd, file)))
+      id = device["id"]
+
+      Map.merge(device, %{
+        "state" => state(service, id, running[id]),
+        "last_used" => Map.get(used, id, device["created"])
+      })
+    end
+  end
+
+  @doc """
+  Makes an AVD from `spec` (its `id`, `name`, `description`, `artifact` and `by`) with Google's `avdmanager`, from
+  Android 16's system image with Google Play, installing what the SDK lacks first, and starts it.
+  """
+  def create(service, spec) do
+    sdk = sdk!(service)
+    id = spec["id"]
+
+    avdmanager =
+      ["sh", "-c", ~s(echo no | "$0" "$@"), Path.join(sdk, "cmdline-tools/latest/bin/avdmanager")] ++
+        ["create", "avd", "--name", id, "--package", image(), "--device", "pixel_8", "--path", Path.join(avd_home(service), id <> ".avd")]
+
+    run!(service, avdmanager, 120)
+    device = Map.merge(spec, %{"created" => System.system_time(:millisecond)})
+    File.write!(Path.join(avd_home(service), id <> ".json"), JSON.encode!(device))
+    start(service, id)
+  end
+
+  @doc """
+  Starts an emulator and waits for Android to have started. It carries on from where it was when it last stopped,
+  if that stop saved it (the emulator's Quick Boot snapshot), and otherwise boots: a snapshot taken before a stop
+  that didn't save would take its disk back to then.
+  """
+  def start(service, id) do
+    if processes()[id], do: raise("It's running, or still stopping: try again once `list` says it's stopped")
+    sdk = sdk!(service)
+    port = port()
+    log = log(service, id)
+    saved = String.contains?(read(log), "Saving snapshot 'default_boot' took")
+    File.rm(Path.join(avd_home(service), id <> ".stopping"))
+    touch(service, id)
+
+    emulator =
+      [Path.join(sdk, "emulator/emulator"), "-avd", id, "-port", "#{port}", "-no-window", "-no-audio", "-no-boot-anim"] ++
+        ["-gpu", "swiftshader_indirect", "-accel", "on", "-memory", "#{@memory_mb}"] ++
+        if(saved, do: [], else: ["-no-snapshot-load"])
+
+    # On Linux: in a network of its own, and in a scope of the user's systemd, so it outlives this server's
+    # restarts, which stop everything in the server's own, and what it starts in its network (its own adb server,
+    # netsimd) is stopped with it. Its runtime folder is its own, for its own netsimd (its
+    # radios): one an emulator in another network started is unreachable from this one, and a phone that waits for
+    # it never starts. It asks this machine's resolvers, not a stub on its 127.0.0.53.
+    command =
+      case :os.type() do
+        {:unix, :linux} ->
+          runtime = Path.join([OneCore.Service.folder(service), "run", id])
+          File.mkdir_p!(runtime)
+
+          ["systemd-run", "--user", "--scope", "--unit", scope(id), "--quiet", "--collect", "--", "env", "XDG_RUNTIME_DIR=#{runtime}"] ++
+            ["pasta", "--config-net", "--no-map-gw", "-T", "none", "-U", "none", "-u", "none", "-t", "127.0.0.1/#{port}-#{port + 1}", "--quiet", "--"] ++
+            emulator ++ dns()
+
+        _ ->
+          emulator
+      end
+
+    # Started in the background with what it says in its log; it's in a session of its own already, as everything
+    # Erlang starts is.
+    %{exit: 0} = run(service, ["sh", "-c", ~s("$@" >"$0" 2>&1 </dev/null &), log | command], 10)
+    booted(service, id, port, System.monotonic_time(:millisecond), false)
+
+    for args <- [~w(svc power stayon true), ~w(input keyevent KEYCODE_WAKEUP), ~w(wm dismiss-keyguard)],
+        do: adb(service, id, ["shell" | args], 10)
+
+    :ok
+  end
+
+  @doc """
+  Stops an emulator, as its own SIGTERM does: it saves what it was doing (its Quick Boot snapshot) and ends, a few
+  seconds' work it carries on with alone.
+  """
+  def stop(service, id) do
+    File.touch!(Path.join(avd_home(service), id <> ".stopping"))
+    with %{emulator: pid} when is_integer(pid) <- processes()[id], do: System.cmd("kill", ["-TERM", "#{pid}"])
+    :ok
+  end
+
+  @doc "Removes an emulator and its AVD, for good, stopping it at once if it's running."
+  def remove(service, id) do
+    kill(id)
+    avd = avd_home(service)
+    File.rm_rf!(Path.join(avd, id <> ".avd"))
+    for file <- [id <> ".ini", id <> ".json", id <> ".stopping", id <> ".log"], do: File.rm(Path.join(avd, file))
+    File.rm_rf!(Path.join([OneCore.Service.folder(service), "run", id]))
+    File.rm(Path.join([OneCore.Service.folder(service), "used", id]))
+    :ok
+  end
+
+  @doc "Stops every running emulator that's gone unused for `idle` ms, and gives their names."
+  def stop_idle(service, idle) do
+    now = System.system_time(:millisecond)
+
+    for d <- list(service), d["state"] == "running", now - d["last_used"] > idle do
+      stop(service, d["id"])
+      d["name"]
+    end
+  end
+
+  @doc "A PNG of the phone's screen, as base64, by Android's `screencap`."
+  def screenshot(service, id) do
+    touch(service, id)
+
+    case adb(service, id, ~w(exec-out screencap -p), 15, :raw) do
+      %{exit: 0, stdout: png} -> Base.encode64(png)
+      %{stderr: why} -> raise "No screenshot: #{String.trim(why)}"
+    end
+  end
+
+  @doc "Runs Android's `input` with `args`, in the phone's shell: a tap, a swipe, text, a key."
+  def input(service, id, args) do
+    touch(service, id)
+    %{exit: 0} = adb!(service, id, ["shell", Enum.join(["input" | Enum.map(args, &word/1)], " ")], 30)
+    :ok
+  end
+
+  @doc "Opens `url` in the phone, as its own app for it or its browser does."
+  def open_url(service, id, url) do
+    touch(service, id)
+    adb!(service, id, ["shell", "am start -a android.intent.action.VIEW -d #{word(url)}"], 30)
+    :ok
+  end
+
+  @doc "Installs an APK, given as base64 or by its URL, granting what it asks for."
+  def install(service, id, apk) do
+    touch(service, id)
+    file = Path.join(OneCore.Service.folder(service), "install-#{System.unique_integer([:positive])}.apk")
+
+    try do
+      case apk do
+        %{"url" => url} -> Req.get!(url, into: File.stream!(file), retry: false, receive_timeout: 300_000)
+        %{"data" => data} -> File.write!(file, Base.decode64!(data))
+      end
+
+      %{stdout: said} = adb!(service, id, ["install", "-r", "-g", file], 600)
+      String.trim(said)
+    after
+      File.rm(file)
+    end
+  end
+
+  @doc "Runs `command` in the phone's shell, as adb's shell user, for at most `timeout` seconds."
+  def shell(service, id, command, timeout) do
+    touch(service, id)
+    adb(service, id, ["shell", command], timeout)
+  end
+
+  @doc """
+  The running emulators here, each as `list/1` gives it, with its screen's `width` and `height` in pixels as
+  Android says them now.
+  """
+  def screens(service) do
+    for d <- list(service), d["state"] == "running",
+        %{exit: 0, stdout: said} <- [adb(service, d["id"], ~w(shell wm size), 10)],
+        [_, width, height] <- [Regex.run(~r/(\d+)x(\d+)\s*$/, String.trim(said))],
+        do: Map.merge(d, %{"width" => String.to_integer(width), "height" => String.to_integer(height)})
+  end
+
+  @doc """
+  Streams the phone's screen as WebRTC video to the app whose SDP offer `request` has, as JSON, with the ICE servers
+  to use: `server/stream/stream.py` answers it and carries on by itself until the app goes. Gives the SDP answer.
+  """
+  def stream(service, id, request) do
+    touch(service, id)
+    python = sender(service)
+    adb!(service, id, ["push", scrcpy(service), "/data/local/tmp/scrcpy-server.jar"], 30)
+    folder = OneCore.Service.folder(service)
+    file = Path.join(folder, "stream-#{System.unique_integer([:positive])}.json")
+
+    asked =
+      Map.merge(JSON.decode!(request), %{
+        "adb" => adb_path(service),
+        "serial" => serial(id),
+        "version" => @scrcpy,
+        "log" => Path.join(folder, "stream.log")
+      })
+
+    File.write!(file, JSON.encode!(asked))
+
+    case run(service, [python, Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do
+      %{exit: 0, stdout: answer} -> answer
+      %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
+    end
+  end
+
+  # The SDK: the machine's own, where it has one with the emulator, or this service's, installed here the first
+  # time. Either way with what an emulator needs: the emulator, adb and the system image.
+  defp sdk(service) do
+    Enum.find(
+      [System.get_env("ANDROID_HOME"), System.get_env("ANDROID_SDK_ROOT"), Path.expand("~/Android/Sdk"), Path.expand("~/Library/Android/sdk")],
+      &(&1 && File.exists?(Path.join(&1, "emulator/emulator")))
+    ) || Path.join(OneCore.Service.folder(service), "sdk")
+  end
+
+  defp sdk!(service) do
+    sdk = sdk(service)
+
+    image = Path.join([sdk, "system-images", @android, @tag, abi(), "system.img"])
+    sdkmanager = Path.join(sdk, "cmdline-tools/latest/bin/sdkmanager")
+
+    if not (File.exists?(image) and File.exists?(Path.join(sdk, "platform-tools/adb")) and File.exists?(sdkmanager)) do
+      if not File.exists?(sdkmanager), do: cmdline_tools(service, sdk)
+      run!(service, ["sh", "-c", ~s(yes | "$0" --sdk_root="$1" --licenses >/dev/null), sdkmanager, sdk], 120)
+      run!(service, [sdkmanager, "--sdk_root=#{sdk}", "platform-tools", "emulator", image()], 3600)
+    end
+
+    sdk
+  end
+
+  # Google's command-line tools, unpacked as the SDK keeps them, in cmdline-tools/latest.
+  defp cmdline_tools(service, sdk) do
+    os = if match?({:unix, :darwin}, :os.type()), do: "mac", else: "linux"
+    zip = Path.join(OneCore.Service.folder(service), "cmdline-tools.zip")
+    url = "https://dl.google.com/android/repository/commandlinetools-#{os}-#{@cmdline_tools}_latest.zip"
+    Req.get!(url, into: File.stream!(zip), receive_timeout: 600_000)
+    unpacked = Path.join(sdk, "cmdline-tools.unpacking")
+    File.rm_rf!(unpacked)
+    {:ok, _} = :zip.unzip(String.to_charlist(zip), cwd: String.to_charlist(unpacked))
+    for bin <- File.ls!(Path.join(unpacked, "cmdline-tools/bin")), do: File.chmod!(Path.join([unpacked, "cmdline-tools/bin", bin]), 0o755)
+    File.mkdir_p!(Path.join(sdk, "cmdline-tools"))
+    File.rename!(Path.join(unpacked, "cmdline-tools"), Path.join(sdk, "cmdline-tools/latest"))
+    File.rm_rf!(unpacked)
+    File.rm!(zip)
+  end
+
+  defp image, do: "system-images;#{@android};#{@tag};#{abi()}"
+
+  defp abi do
+    if String.starts_with?(to_string(:erlang.system_info(:system_architecture)), "aarch64"), do: "arm64-v8a", else: "x86_64"
+  end
+
+  # The Python a stream's sender runs with, aiortc in it, made with uv the first time.
+  defp sender(service) do
+    venv = Path.join(OneCore.Service.folder(service), "venv")
+    python = Path.join(venv, "bin/python")
+    made = Path.join(venv, "aiortc-#{@aiortc}")
+
+    if not File.exists?(made) do
+      File.rm_rf!(venv)
+      run!(service, ["uv", "venv", "--quiet", "--python", "3.12", venv], 300)
+      run!(service, ["uv", "pip", "install", "--quiet", "--python", python, "aiortc==#{@aiortc}"], 300)
+      File.touch!(made)
+    end
+
+    python
+  end
+
+  # scrcpy's server, downloaded from its releases the first time, and checked.
+  defp scrcpy(service) do
+    file = Path.join(OneCore.Service.folder(service), "scrcpy-server-v#{@scrcpy}")
+
+    if not File.exists?(file) do
+      url = "https://github.com/Genymobile/scrcpy/releases/download/v#{@scrcpy}/scrcpy-server-v#{@scrcpy}"
+      %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false)
+
+      if Base.encode16(:crypto.hash(:sha256, body), case: :lower) != @scrcpy_sha256,
+        do: raise("scrcpy's server from GitHub isn't the one expected")
+
+      File.write!(file, body)
+    end
+
+    file
+  end
+
+  # Each running emulator here, by its AVD: its processes (the emulator's, and on Linux its pasta and scope), which
+  # of them is the emulator itself (QEMU, which the SDK's `emulator` becomes), and its console port.
+  defp processes do
+    {ps, 0} = System.cmd("ps", ["-axo", "pid=,args="])
+
+    for line <- String.split(ps, "\n", trim: true),
+        [_, pid, program, id] <- [Regex.run(~r/^\s*(\d+)\s+(\S+).*\s-avd\s(\S+)\s/, line <> " ")],
+        reduce: %{} do
+      running ->
+        pid = String.to_integer(pid)
+        port = with [_, port] <- Regex.run(~r/\s-port\s(\d+)/, line), do: String.to_integer(port)
+        emulator = if Path.basename(program) =~ ~r/^(qemu-system|emulator)/, do: pid
+        was = Map.get(running, id, %{pids: [], port: nil, emulator: nil})
+        Map.put(running, id, %{pids: [pid | was.pids], port: was.port || port, emulator: was.emulator || emulator})
+    end
+  end
+
+  defp state(_service, _id, nil), do: "stopped"
+
+  defp state(service, id, _pids) do
+    cond do
+      File.exists?(Path.join(avd_home(service), id <> ".stopping")) -> "stopping"
+      match?(%{exit: 0, stdout: "device" <> _}, adb(service, id, ["get-state"], 5)) -> "running"
+      true -> "starting"
+    end
+  end
+
+  # Ends an emulator at once, keeping nothing: on Linux its scope, with everything it started; on a Mac its
+  # processes, by their PIDs.
+  defp kill(id) do
+    case :os.type() do
+      {:unix, :linux} -> System.cmd("systemctl", ["--user", "kill", "--signal=KILL", scope(id) <> ".scope"], stderr_to_stdout: true)
+      _ -> with %{pids: pids} <- processes()[id], do: System.cmd("kill", ["-KILL" | Enum.map(pids, &to_string/1)])
+    end
+  end
+
+  defp scope(id), do: "android-emulator-#{id}"
+
+  # A phone takes a while to start, and nothing says when it has: Android is asked every second, for at most five
+  # minutes. The emulator tells adb's server it's there, unless it's in a network of its own, where it can't reach
+  # it: then it's told here, as the emulator would have. Its process shows a moment after it's started, and one
+  # that's gone after that has stopped.
+  defp booted(service, id, port, since, seen) do
+    announce(service, port + 1)
+    running = processes()[id] != nil
+    waited = System.monotonic_time(:millisecond) - since
+
+    cond do
+      running and match?(%{exit: 0, stdout: "1" <> _}, adb(service, id, ~w(shell getprop sys.boot_completed), 5)) ->
+        :ok
+
+      not running and (seen or waited > 10_000) ->
+        raise "Its emulator stopped as it started: #{String.slice(read(log(service, id)), -2000..-1//1)}"
+
+      waited > 300_000 ->
+        kill(id)
+        raise "It didn't start in 5 minutes, so it was stopped: #{String.slice(read(log(service, id)), -2000..-1//1)}"
+
+      true ->
+        Process.sleep(1000)
+        booted(service, id, port, since, seen or running)
+    end
+  end
+
+  # Tells adb's server of the emulator whose adb is at `port`, in adb's own words: `host:emulator:<port>`.
+  defp announce(service, port) do
+    case :gen_tcp.connect(~c"127.0.0.1", 5037, [:binary, active: false], 1000) do
+      {:ok, socket} ->
+        message = "host:emulator:#{port}"
+        :gen_tcp.send(socket, String.pad_leading(Integer.to_string(byte_size(message), 16), 4, "0") <> message)
+        :gen_tcp.close(socket)
+
+      _ ->
+        run(service, [adb_path(service), "start-server"], 10)
+    end
+  end
+
+  # A console port that no emulator here uses, nor anything else on the machine: from 5560, leaving the SDK's own
+  # first, 5554, to whoever runs one by hand. Its adb port is the one after it.
+  defp port do
+    taken =
+      for line <- String.split(elem(System.cmd("ps", ["-axo", "args="]), 0), "\n"),
+          [_, port] <- [Regex.run(~r/\s-port\s(\d+)/, line)],
+          do: String.to_integer(port)
+
+    Enum.find(5560..5680//2, fn port ->
+      port not in taken and Enum.all?([port, port + 1], &free?/1)
+    end) || raise "Every emulator port here is taken"
+  end
+
+  defp free?(port) do
+    case :gen_tcp.connect(~c"127.0.0.1", port, [], 200) do
+      {:ok, socket} -> :gen_tcp.close(socket) && false
+      _ -> true
+    end
+  end
+
+  # The resolvers this machine asks, not a stub on its 127.0.0.53, which a phone in its own network can't reach.
+  defp dns do
+    found =
+      for file <- ["/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"],
+          line <- String.split(read(file), "\n"),
+          [_, ip] <- [Regex.run(~r/^nameserver\s+(\d+\.\d+\.\d+\.\d+)\s*$/, line)],
+          not String.starts_with?(ip, "127."),
+          uniq: true,
+          do: ip
+
+    if found == [], do: [], else: ["-dns-server", Enum.join(found, ",")]
+  end
+
+  defp avd_home(service) do
+    folder = Path.join(OneCore.Service.folder(service), "avd")
+    File.mkdir_p!(folder)
+    folder
+  end
+
+  defp env(service, sdk), do: [{"ANDROID_HOME", sdk}, {"ANDROID_SDK_ROOT", sdk}, {"ANDROID_AVD_HOME", avd_home(service)}]
+
+  defp log(service, id), do: Path.join(avd_home(service), id <> ".log")
+
+  defp adb_path(service), do: Path.join(sdk(service), "platform-tools/adb")
+
+  # adb's name for a running emulator: `emulator-` and its console port.
+  defp serial(id) do
+    case processes()[id] do
+      %{port: port} when is_integer(port) -> "emulator-#{port}"
+      _ -> raise "It isn't running: `start` starts it"
+    end
+  end
+
+  # Runs adb for the emulator `id`, for at most `timeout` seconds: a phone whose Android has hung leaves adb waiting
+  # for as long as it's let.
+  defp adb(service, id, args, timeout, output \\ :text), do: run(service, [adb_path(service), "-s", serial(id) | args], timeout, output)
+
+  defp adb!(service, id, args, timeout) do
+    case adb(service, id, args, timeout) do
+      %{exit: 0} = done -> done
+      %{exit: -1} -> raise "It stopped answering: adb had no answer in #{timeout} s. `stop` and `start` it if it stays so"
+      %{stdout: stdout, stderr: stderr} -> raise String.trim(stderr <> "\n" <> stdout)
+    end
+  end
+
+  defp run!(service, args, timeout) do
+    case run(service, args, timeout) do
+      %{exit: 0} = done -> done
+      %{stdout: stdout, stderr: stderr} -> raise "#{Path.basename(hd(args))} failed: #{String.trim(stderr <> "\n" <> stdout)}"
+    end
+  end
+
+  # Runs `args` for at most `timeout` seconds, as Containers' Podman runs podman: its own process group, stopped whole
+  # once it takes too long, with what it writes as errors in a file beside while it runs.
+  defp run(service, [program | args], timeout, output \\ :text) do
+    errors = Path.join(OneCore.Service.folder(service), "errors-#{System.unique_integer([:positive])}")
+    env = for {key, value} <- env(service, sdk(service)), do: {String.to_charlist(key), String.to_charlist(value)}
+
+    port =
+      Port.open({:spawn_executable, System.find_executable("sh")}, [
+        :binary,
+        :exit_status,
+        env: env,
+        args: ["-c", ~s(exec </dev/null 2>"$0"; exec "$@"), errors, program | args]
+      ])
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+    {exit, stdout} = read(port, pid, System.monotonic_time(:millisecond) + timeout * 1000, [])
+    stderr = read(errors)
+    File.rm(errors)
+
+    case output do
+      :raw -> %{exit: exit, stdout: stdout, stderr: stderr}
+      :text -> %{exit: exit, stdout: clip(stdout), stderr: clip(stderr)}
+    end
+  end
+
+  defp read(port, pid, until, printed) do
+    receive do
+      {^port, {:data, data}} -> read(port, pid, until, [printed | data])
+      {^port, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
+    after
+      max(0, until - System.monotonic_time(:millisecond)) ->
+        System.cmd("kill", ["-KILL", "--", "-#{pid}"])
+        Port.close(port)
+        {-1, IO.iodata_to_binary(printed)}
+    end
+  end
+
+  # Keeps the end of long output, where errors usually are.
+  defp clip(text) do
+    text = String.replace_invalid(text)
+    if byte_size(text) <= @kept, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @kept, @kept), "")
+  end
+
+  defp read(file) do
+    case File.read(file) do
+      {:ok, text} -> text
+      _ -> ""
+    end
+  end
+
+  defp touch(service, id) do
+    folder = Path.join(OneCore.Service.folder(service), "used")
+    File.mkdir_p!(folder)
+    File.touch!(Path.join(folder, id))
+  end
+
+  defp used(service) do
+    folder = Path.join(OneCore.Service.folder(service), "used")
+
+    for file <- if(File.dir?(folder), do: File.ls!(folder), else: []), into: %{} do
+      {file, File.stat!(Path.join(folder, file), time: :posix).mtime * 1000}
+    end
+  end
+
+  # A word for the phone's shell, which reads what adb sends it as a command line.
+  defp word(text), do: "'" <> String.replace(text, "'", ~S('\'')) <> "'"
+end
