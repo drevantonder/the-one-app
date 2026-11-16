@@ -17,12 +17,12 @@ const access = new Map();
 const refresh = new Set();
 /** What happened, for the test to read: never a secret. */
 const seen = { signed_in: 0, exchanged: 0, renewed: 0, asked: 0, refused: 0, without_verifier: 0 };
-let made = 0;
+let issued = 0;
 
 const json = (body, status = 200) => Response.json(body, { status });
 const tokens = () => {
-  const token = `${MARKER}-access-${++made}`;
-  const again = `${MARKER}-refresh-${made}`;
+  const token = `${MARKER}-access-${++issued}`;
+  const again = `${MARKER}-refresh-${issued}`;
   access.set(token, Date.now() + Number(LASTS) * 1000);
   refresh.add(again);
   return { access_token: token, refresh_token: again, token_type: "Bearer", expires_in: 3600 };

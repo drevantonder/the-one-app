@@ -78,8 +78,8 @@ if [[ -n $edge ]]; then
   (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
     import { AwsClient } from "aws4fetch";
     const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
-    const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
-    if (!made.ok && made.status !== 409) throw new Error(`the bucket answered ${made.status}`);')
+    const response = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
+    if (!response.ok && response.status !== 409) throw new Error(`the bucket answered ${response.status}`);')
   # `wrangler dev` gives the presigner its secrets from the environment.
   (cd "$root/core/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
     WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \

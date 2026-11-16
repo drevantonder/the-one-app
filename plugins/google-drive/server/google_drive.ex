@@ -12,7 +12,7 @@ defmodule GoogleDrive do
   # What each tool gives when fields is left out: what an agent uses, without Drive's kind on everything.
   @one_file "id,name,mimeType,parents,modifiedTime,size,webViewLink,trashed"
   @list "nextPageToken,files(id,name,mimeType,parents,modifiedTime,webViewLink)"
-  @made "id,name,mimeType,parents,webViewLink"
+  @file_fields "id,name,mimeType,parents,webViewLink"
   @fields_hint "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink"
   @no_folder "No folder among its parents: folder ids come from google-drive_files_list (root is My Drive)."
 
@@ -110,12 +110,12 @@ defmodule GoogleDrive do
       %{
         name: "files_create",
         description:
-          "Makes a file with no content, like a folder (files.create): body is its metadata. Gives #{@made} if fields is left out. files_upload uploads a file's bytes.",
+          "Makes a file with no content, like a folder (files.create): body is its metadata. Gives #{@file_fields} if fields is left out. files_upload uploads a file's bytes.",
         inputs:
           with_account.(
             %{
               body: metadata.(~s|The new file's metadata, like {"name": "Receipts", "mimeType": "application/vnd.google-apps.folder", "parents": ["root"]}|),
-              fields: fields.(@made)
+              fields: fields.(@file_fields)
             },
             ["body"]
           )
@@ -123,7 +123,7 @@ defmodule GoogleDrive do
       %{
         name: "files_upload",
         description:
-          "Uploads a file (files.create with its bytes): metadata names it and says where it goes. Gives #{@made} if fields is left out.",
+          "Uploads a file (files.create with its bytes): metadata names it and says where it goes. Gives #{@file_fields} if fields is left out.",
         inputs:
           with_account.(
             %{
@@ -131,7 +131,7 @@ defmodule GoogleDrive do
               upload: %{type: "string", format: "upload", description: "The file to upload"},
               data: %{type: "string", contentEncoding: "base64", description: "Or its bytes, in base64, for a small one"},
               type: string.("Its MIME type, like application/pdf. metadata's mimeType if left out"),
-              fields: fields.(@made)
+              fields: fields.(@file_fields)
             },
             ["metadata"]
           )
@@ -139,7 +139,7 @@ defmodule GoogleDrive do
       %{
         name: "files_update",
         description:
-          "Renames, moves or trashes a file or folder (files.update). Its id and links stay. Gives #{@made} if fields is left out. Moving: addParents the new folder, removeParents the old one (its parents, from files_get).",
+          "Renames, moves or trashes a file or folder (files.update). Its id and links stay. Gives #{@file_fields} if fields is left out. Moving: addParents the new folder, removeParents the old one (its parents, from files_get).",
         inputs:
           with_account.(
             %{
@@ -151,7 +151,7 @@ defmodule GoogleDrive do
               },
               addParents: string.("Folder ids to put it in, comma-separated, from google-drive_files_list (root is My Drive)"),
               removeParents: string.("Folder ids to take it out of, comma-separated, as files_get gives its parents"),
-              fields: fields.(@made)
+              fields: fields.(@file_fields)
             },
             ["fileId"]
           )
@@ -194,7 +194,7 @@ defmodule GoogleDrive do
   defp run("files_create", %{"body" => body} = inputs, at) do
     api(at, "POST", "files",
       json: body,
-      query: [fields: inputs["fields"] || @made, supportsAllDrives: true],
+      query: [fields: inputs["fields"] || @file_fields, supportsAllDrives: true],
       missing: @no_folder,
       hint: @fields_hint
     )
@@ -226,7 +226,7 @@ defmodule GoogleDrive do
     started =
       request(at, "POST", @upload,
         json: Map.put_new(metadata, "mimeType", type),
-        query: [uploadType: "resumable", fields: inputs["fields"] || @made, supportsAllDrives: true],
+        query: [uploadType: "resumable", fields: inputs["fields"] || @file_fields, supportsAllDrives: true],
         headers: %{"x-upload-content-type" => type},
         missing: @no_folder,
         hint: @fields_hint
@@ -246,7 +246,7 @@ defmodule GoogleDrive do
       query: [
         addParents: inputs["addParents"],
         removeParents: inputs["removeParents"],
-        fields: inputs["fields"] || @made,
+        fields: inputs["fields"] || @file_fields,
         supportsAllDrives: true
       ],
       missing: no_file(id),

@@ -307,13 +307,13 @@ defmodule AndroidEmulator.Emulator do
   defp sender(service) do
     venv = Path.join(OneCore.Service.folder(service), "venv")
     python = Path.join(venv, "bin/python")
-    made = Path.join(venv, "aiortc-#{@aiortc}")
+    marker = Path.join(venv, "aiortc-#{@aiortc}")
 
-    if not File.exists?(made) do
+    if not File.exists?(marker) do
       File.rm_rf!(venv)
       run!(service, ["uv", "venv", "--quiet", "--python", "3.12", venv], 300)
       run!(service, ["uv", "pip", "install", "--quiet", "--python", python, "aiortc==#{@aiortc}"], 300)
-      File.touch!(made)
+      File.touch!(marker)
     end
 
     python

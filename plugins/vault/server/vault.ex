@@ -356,9 +356,9 @@ defmodule Vault do
           if item(db, item) do
             allowed!(db, item, {:plugin, call.who})
           else
-            made = new(db, item, hosts)
-            query(db, "insert into uses (item, plugin) values (?, ?)", [made["id"], call.who])
-            made
+            created = new(db, item, hosts)
+            query(db, "insert into uses (item, plugin) values (?, ?)", [created["id"], call.who])
+            created
           end
 
         for {field, value} <- fields, do: keep(db, stored, field, value, true)
@@ -415,7 +415,7 @@ defmodule Vault do
   # renamed for, if they have one.
   @impl true
   def hook("renamed", %{"was" => was, "is" => is}, %Call{subject: "users/" <> _} = call) do
-    if Artifact.list(made(call), "") != [] do
+    if Artifact.list(items_artifact(call), "") != [] do
       transaction(call, own(call), fn db ->
         query(db, "update or ignore uses set plugin = ? where plugin = ?", [is, was])
         query(db, "delete from uses where plugin = ?", [was])
@@ -493,14 +493,14 @@ defmodule Vault do
     end)
   end
 
-  def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, made(call))
+  def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, items_artifact(call))
 
   def call("grant", %{"servers" => _servers} = inputs, call) do
     keys =
       inputs["keys"] ||
         raise "Which servers open your Vault is chosen from a trusted device: in the Vault's app there, or with `one vault grant` on it."
 
-    chosen = encryption(call).choose(call, made(call), keys)
+    chosen = encryption(call).choose(call, items_artifact(call), keys)
 
     if chosen == [],
       do: "No server opens your Vault now.",
@@ -607,7 +607,7 @@ defmodule Vault do
       end)
 
     {what, unused} = removed
-    for plugin <- unused, do: share(call, "unshare", Artifact.name(made(call)), plugin)
+    for plugin <- unused, do: share(call, "unshare", Artifact.name(items_artifact(call)), plugin)
     "#{what} is deleted."
   end
 
@@ -1006,10 +1006,10 @@ defmodule Vault do
   end
 
   # The artifact that the items of whoever a call of the Vault's own tools is for are in.
-  defp made(call), do: Call.make(mine!(call), "items")
+  defp items_artifact(call), do: Call.make(mine!(call), "items")
 
   # Their Vault, opened: on a server they chose, which this call ends up on.
-  defp own(call), do: encryption(call).encrypted(call, made(call))
+  defp own(call), do: encryption(call).encrypted(call, items_artifact(call))
 
   # The same artifact by its name, for a plugin that uses the Vault, which finds it added as `vault`.
   defp theirs(call), do: "#{mine!(call).subject}/made/vault/items"

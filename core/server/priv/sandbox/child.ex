@@ -31,7 +31,7 @@ defmodule OneCore.Call do
     end
   end
 
-  def make(%__MODULE__{id: id}, made), do: Child.artifact(Child.request("make", %{"id" => made}, id))
+  def make(%__MODULE__{id: call}, id), do: Child.artifact(Child.request("make", %{"id" => id}, call))
 
   def reach(%__MODULE__{id: id}, name, relation \\ "viewer"),
     do: Child.artifact(Child.request("reach", %{"name" => name, "relation" => relation}, id))

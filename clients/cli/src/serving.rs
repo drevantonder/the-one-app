@@ -253,15 +253,15 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             if line == UPDATE_ASKED {
                 // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops
                 // where it was told the device is nobody's, and its timer doesn't count while the machine sleeps.
-                let took = match Client::open(client::home()?, Vec::new()).await {
+                let updated = match Client::open(client::home()?, Vec::new()).await {
                     Ok(now) => {
-                        let took = take(&now, &here, &program).await;
+                        let updated = take(&now, &here, &program).await;
                         now.close().await;
-                        took
+                        updated
                     }
                     Err(error) => Err(error),
                 };
-                match took {
+                match updated {
                     Ok(true) => {
                         stop(&mut server).await?;
                         return Err(system::again_here(&program));
@@ -338,21 +338,21 @@ fn went_back(here: &Here, why: &str, lines: &[String]) -> Result<()> {
 /// took any.
 async fn take(client: &Client, here: &Here, program: &Path) -> Result<bool> {
     let builds = download(client).await?;
-    let mut took = false;
+    let mut updated = false;
     if let Some(server) = builds.get("server")
         && server["build"] != here.current()?
     {
         let build = here.take(server).await?;
         fs::write(here.folder.join("next"), build)?;
-        took = true;
+        updated = true;
     }
     if let Some(one) = builds.get(PROGRAM)
         && one["build"] != BUILD
     {
         take_program(one, program).await?;
-        took = true;
+        updated = true;
     }
-    Ok(took)
+    Ok(updated)
 }
 
 /// Replaces this program with the build `one`, once it has said it's that build. What runs now runs on, and the

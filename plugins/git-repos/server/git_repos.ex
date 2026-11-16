@@ -366,7 +366,7 @@ defmodule GitRepos do
         into = "refs/heads/" <> about["into"]
         base = state["refs"][into]
 
-        {merged, made} =
+        {merged, merged_packs} =
           if base == nil or ancestor?(folder, base, tip),
             do: {tip, []},
             else: merge(folder, base, tip, "Take #{pull_request}: #{about["title"]}", person, by)
@@ -376,7 +376,7 @@ defmodule GitRepos do
         merged =
           Map.merge(about, %{"state" => "merged", "commit" => tip, "from" => base, "by_then" => by, "then" => now()})
 
-        {%{state | "refs" => refs, "pull_requests" => Map.put(state["pull_requests"], pull_request, merged)}, made,
+        {%{state | "refs" => refs, "pull_requests" => Map.put(state["pull_requests"], pull_request, merged)}, merged_packs,
          "Merged #{pull_request} into #{about["into"]}, which is at #{String.slice(merged, 0, 7)} now."}
       end)
 

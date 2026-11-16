@@ -121,11 +121,11 @@ defmodule GitRepos.Mirror do
 
   defp attempt(folder, repo, state, tag, indexed, stored, decide, tries) do
     case decide.(state, folder) do
-      {nil, _made, result} ->
+      {nil, _packs, result} ->
         {result, state}
 
-      {changed, made, result} ->
-        packs = Enum.reject([indexed | made], &is_nil/1)
+      {changed, packs, result} ->
+        packs = Enum.reject([indexed | packs], &is_nil/1)
         for pack <- packs, pack not in stored, do: store(folder, repo, pack)
         changed = %{changed | "packs" => Enum.uniq(changed["packs"] ++ packs)}
 

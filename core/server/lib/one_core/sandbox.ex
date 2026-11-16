@@ -289,7 +289,7 @@ defmodule OneCore.Sandbox do
     Call.tool(call, plugin, tool, inputs, options)
   end
 
-  defp op("make", %{"id" => made}, call, context), do: named(context, Call.make(call, made))
+  defp op("make", %{"id" => id}, call, context), do: named(context, Call.make(call, id))
 
   defp op("reach", %{"name" => name, "relation" => relation}, call, context),
     do: named(context, Call.reach(call, artifact_name!(name), relation!(relation)))

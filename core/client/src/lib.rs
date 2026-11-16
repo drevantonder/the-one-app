@@ -425,12 +425,12 @@ impl NetworkConfig {
         if response["result"].is_null() {
             bail!("{}", response["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
         }
-        self.took(&response["result"], home)
+        self.store_token(&response["result"], home)
     }
 
     /// Keeps a token this device was given, `{token, who}`, in `home`. Once the device is someone else's, what it kept
     /// of whoever's it was goes.
-    fn took(&mut self, given: &Value, home: &Path) -> Result<()> {
+    fn store_token(&mut self, given: &Value, home: &Path) -> Result<()> {
         let (Some(token), Some(who)) = (given["token"].as_str(), given["who"].as_str()) else {
             bail!("this device was given no token")
         };
@@ -523,12 +523,12 @@ pub fn key(file: &Path) -> Result<SecretKey> {
     let folder = file.parent().context("a key is kept in a folder")?;
     fs::create_dir_all(folder)?;
     let key = SecretKey::generate();
-    let made = || -> std::io::Result<()> {
+    let write_key = || -> std::io::Result<()> {
         let mut making = tempfile::NamedTempFile::new_in(folder)?;
         making.write_all(&key.to_bytes())?;
         making.persist_noclobber(file).map(drop).map_err(|error| error.error)
     };
-    match made() {
+    match write_key() {
         Ok(()) => Ok(key),
         Err(error) if error.kind() == ErrorKind::AlreadyExists => read(),
         Err(error) => Err(error).with_context(|| format!("couldn't make {}", file.display())),
@@ -907,7 +907,7 @@ impl Client {
             false => None,
         };
         match given {
-            Some(given) => config.took(&given, &self.home)?,
+            Some(given) => config.store_token(&given, &self.home)?,
             None => config.admit(&self.key, &self.home).await?,
         }
         let token = config.token.clone().context("this device was given no token")?;

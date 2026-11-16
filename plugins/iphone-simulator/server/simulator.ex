@@ -317,14 +317,14 @@ defmodule IphoneSimulator.Simulator do
   # The Python idb's CLI and a stream's sender run with, made with uv the first time.
   defp python(service) do
     venv = Path.join(OneCore.Service.folder(service), "venv")
-    made = Path.join(venv, "idb-#{@idb}-aiortc-#{@aiortc}")
+    marker = Path.join(venv, "idb-#{@idb}-aiortc-#{@aiortc}")
     cli = "https://github.com/facebook/idb/releases/download/v#{@idb}/fb_idb-#{@idb}-py3-none-any.whl#sha256=#{@cli_sha256}"
 
-    if not File.exists?(made) do
+    if not File.exists?(marker) do
       File.rm_rf!(venv)
       %{exit: 0} = cmd(["uv", "venv", "--quiet", "--python", "3.12", venv], 300)
       %{exit: 0} = cmd(["uv", "pip", "install", "--quiet", "--python", Path.join(venv, "bin/python"), "fb-idb @ #{cli}", "aiortc==#{@aiortc}"], 300)
-      File.touch!(made)
+      File.touch!(marker)
     end
 
     Path.join(venv, "bin/python")

@@ -106,8 +106,8 @@ export const browserDevice = (session: string) => sha256(`browser\n${session}`);
 /** What signs this Worker's cookies and tokens, made on first use and kept beside what it protects. */
 async function secret() {
   await env.DB.exec("create table if not exists secret (secret text not null)");
-  const made = hex(crypto.getRandomValues(new Uint8Array(32)));
-  await env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(made).run();
+  const generated = hex(crypto.getRandomValues(new Uint8Array(32)));
+  await env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(generated).run();
   return (await env.DB.prepare("select secret from secret").first<{ secret: string }>())!.secret;
 }
 
@@ -278,7 +278,7 @@ const devices = () => ({
 }) satisfies BetterAuthPlugin;
 
 /** Better Auth for the network at `origin`, with its tables made. */
-async function made(origin: string) {
+async function createAuth(origin: string) {
   const auth = betterAuth({
     baseURL: origin,
     basePath: "/sign-in/auth",
@@ -350,12 +350,12 @@ async function made(origin: string) {
 }
 
 /** Better Auth, as this Worker sets it up. */
-export type Auth = Awaited<ReturnType<typeof made>>;
+export type Auth = Awaited<ReturnType<typeof createAuth>>;
 
 const auths = new Map<string, Promise<Auth>>();
 /** Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. */
 export function at(origin: string): Promise<Auth> {
-  if (!auths.has(origin)) auths.set(origin, made(origin).catch((error) => (auths.delete(origin), Promise.reject(error))));
+  if (!auths.has(origin)) auths.set(origin, createAuth(origin).catch((error) => (auths.delete(origin), Promise.reject(error))));
   return auths.get(origin)!;
 }
 

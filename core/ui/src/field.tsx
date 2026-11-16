@@ -255,7 +255,7 @@ export async function fitted(file: File, side: number): Promise<File> {
       if (small) return file
     }
     const canvas = await drawn(file, side)
-    const photo = await new Promise<Blob>((made, failed) => canvas.toBlob((blob) => (blob ? made(blob) : failed()), "image/jpeg", 0.8))
+    const photo = await new Promise<Blob>((resolve, failed) => canvas.toBlob((blob) => (blob ? resolve(blob) : failed()), "image/jpeg", 0.8))
     return new globalThis.File([photo], file.name.replace(/\.[^.]*$/, "") + ".jpg", { type: photo.type, lastModified: file.lastModified })
   } catch {
     return file

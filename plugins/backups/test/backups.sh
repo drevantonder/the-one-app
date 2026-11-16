@@ -99,8 +99,8 @@ curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$s3/" >/dev/null
 (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$s3/backups bun -e '
   import { AwsClient } from "aws4fetch";
   const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
-  const made = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
-  if (!made.ok) throw new Error(`the store answered ${made.status}`);')
+  const response = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
+  if (!response.ok) throw new Error(`the store answered ${response.status}`);')
 printf 'ACCESS_KEY_ID=%s\nSECRET_ACCESS_KEY=%s\n' "$access" "$secret" >"$folder/secrets/s3"
 printf '%s' "$secret" >"$folder/secrets/s3-secret"
 as owner for network vault grant --servers "[\"$(ls "$folder/bucket/servers")\"]" | shown

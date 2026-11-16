@@ -116,9 +116,9 @@ export function machine<Parts extends string, Given = Props>(
     )
   }
 
-  const made = { Root } as Record<"Root" | Parts, Component<any>>
+  const parts = { Root } as Record<"Root" | Parts, Component<any>>
   for (const [name, [element, get, takes = []]] of Object.entries(list) as [Parts, (typeof list)[Parts]][]) {
-    made[name] = (props: Props) => {
+    parts[name] = (props: Props) => {
       const { api, merged, zag } = useContext(Api)!
       // What opens over the page opens only once the machine is here to open it.
       if (!zag && name === "Positioner") return null
@@ -127,7 +127,7 @@ export function machine<Parts extends string, Given = Props>(
     }
   }
   return {
-    Ark: made,
+    Ark: parts,
     use,
     live: () => !!useContext(Api)!.zag,
     draw: (element: Element, attributes: () => object, props: object) => draw(element, attributes, props as Props, useContext(Api)!.merged),

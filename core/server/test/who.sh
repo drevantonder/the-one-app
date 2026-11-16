@@ -348,9 +348,9 @@ may as carol notes change --note "$note" --text "Buy oat milk"
 may as alice notes read --note "$note"
 
 say "A sharing link's holder can, until its tuple is removed"
-made=$(as alice permissions link --artifact "$note")
-link=$(grep -o '"link":"[^"]*"' <<<"$made" | cut -d'"' -f4)
-holder=$(grep -o '"who":"[^"]*"' <<<"$made" | cut -d'"' -f4)
+output=$(as alice permissions link --artifact "$note")
+link=$(grep -o '"link":"[^"]*"' <<<"$output" | cut -d'"' -f4)
+holder=$(grep -o '"who":"[^"]*"' <<<"$output" | cut -d'"' -f4)
 echo "  alice made a link, whose holder the tuple names $holder"
 may as link "$link" notes read --note "$note"
 refused as link "${link}x" notes read --note "$note"
