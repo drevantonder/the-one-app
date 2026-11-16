@@ -19,7 +19,8 @@ body {
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
   user-select: none;
-  overscroll-behavior: none;
+  /* Sideways is the device's: a trackpad's two-finger swipe goes back. */
+  overscroll-behavior-y: none;
 }
 /* What the window shows of itself fills its middle, over the frames, with the background behind it: the UI library
    draws each state (`.ui-state.middle`). */

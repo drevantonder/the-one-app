@@ -361,7 +361,18 @@ function layer(at) {
   const home = open.get(key(launcher))
   for (const other of open.values()) other.frame.inert = other !== view && !(other === home && room)
   if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, subject: view.subject } })
+  gestures()
   return view
+}
+
+/// Whether the device's own back and forward gestures are on: an iPhone's swipe in from the edge, a trackpad's swipe.
+/// They go through this window's history, so they're off while something is open over the app that's showing, as a
+/// phone's are under a sheet, and its Back or Escape shuts that first.
+let swiping = true
+function gestures() {
+  const on = !showing(history.state)?.over
+  if (on !== swiping) invoke("navigation_gestures", { on })
+  swiping = on
 }
 /// The app that's open as `at`, or with none there, the launcher.
 /** @param {string | null} at */
@@ -489,7 +500,10 @@ addEventListener("message", async ({ source, data }) => {
     // The app's user went back out of it. The app stays open behind the launcher.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && history.state) history.back()
     // Something is open over its page, or nothing is any more.
-    if (method === "notifications/one/over") view.over = params.over === true
+    if (method === "notifications/one/over") {
+      view.over = params.over === true
+      gestures()
+    }
     // The launcher, loaded again, is told which app is showing beside it.
     if (method === "ui/notifications/initialized" && view.app === launcher) layer(history.state)
     // The launcher says how much room it keeps beside other apps, as the window's size changes.

@@ -6,8 +6,9 @@
 html {
   -webkit-text-size-adjust: 100%;
   scrollbar-gutter: stable;
-  /* An app isn't a document: pulling past its top neither refreshes it nor drags the window. */
-  overscroll-behavior: none;
+  /* An app isn't a document: pulling past its top neither refreshes it nor drags the window. Sideways is the
+     device's: a trackpad's two-finger swipe goes back, as it does in a browser. */
+  overscroll-behavior-y: none;
 }
 /* What's scrolled to (a field the keyboard reached, a part a link names) stops below a screen's bar, not under it. */
 html:has(.ui-screen) {
@@ -110,10 +111,12 @@ html:has(.ui-dialog[open]) {
   font: inherit;
   color: inherit;
 }
-/* What's the app's own, not what it shows: read and pressed, not selected. */
-:is(.ui-button, .ui-field label, .ui-choice, [role="tab"], [role="menuitem"], [role="option"]) {
+/* What's the app's own, not what it shows: read and pressed, not selected, and a long press on it opens no link's
+   preview. */
+:is(.ui-button, .ui-field label, .ui-choice, [role="tab"], [role="menuitem"], [role="option"], .ui-screen > header, .ui-section > h2, .ui-row > :is(a, button).row) {
   -webkit-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
 }
 .ui-icon {
   flex: none;

@@ -98,6 +98,8 @@ export interface Commands {
   opened(args: { view: string; ms: number }): void
   /** Reports to Telemetry, as Telemetry's tool `record` takes a record, what went wrong here. */
   report(args: { record: Record<string, unknown> }): void
+  /** Turns the device's own back and forward gestures on or off. */
+  navigation_gestures(args: { on: boolean }): void
   listen(): void
   tapped(args: { tapped: unknown }): void
   "plugin:notifications|set_click_listener_active"(args: { active: boolean }): void

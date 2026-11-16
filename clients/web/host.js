@@ -244,6 +244,8 @@ const commands = {
   // What the app does as it's seen, which a browser doesn't: it hears notifications.
   visible() {},
   listen() {},
+  // A browser's back and forward gestures are its own.
+  navigation_gestures() {},
 }
 
 /** @type {typeof import("../app/page/host.js").invoke} */

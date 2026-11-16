@@ -340,6 +340,40 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
     views.client.report(json!({"name": "one.client.open.duration", "value": ms, "attributes": {"one.view": view}}));
 }
 
+/// Turns the device's own back and forward gestures on, or off: an iPhone's swipe in from the edge, which follows the
+/// finger as a pop does, a Mac's two-finger swipe, and a Linux touchpad's. They go back and forward through the window's
+/// history, as its Back buttons do, and its page has them off while something is open over the app that's showing,
+/// which they'd go back behind. A web view has them off unless it's asked; Android's has none, and its back is
+/// `MainActivity`'s.
+#[tauri::command]
+fn navigation_gestures(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
+    window
+        .with_webview(move |webview| {
+            // It's the window's WKWebView, which Tauri hands over on the main thread, where it's used.
+            #[cfg(target_vendor = "apple")]
+            unsafe {
+                let view = &*webview.inner().cast::<objc2::runtime::AnyObject>();
+                let () = objc2::msg_send![view, setAllowsBackForwardNavigationGestures: on];
+            }
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::{SettingsExt, WebViewExt};
+                if let Some(settings) = webview.inner().settings() {
+                    settings.set_enable_back_forward_navigation_gestures(on)
+                }
+            }
+            #[cfg(any(windows, target_os = "android"))]
+            let _ = (webview, on);
+        })
+        .map_err(|error| error.to_string())
+}
+
+/// What a computer's app does in every page of its window, which Mac's and Linux's web views leave to it: a browser
+/// window's keys and mouse buttons for back and forward, and no menu of the web view's own on a right-click but for
+/// text.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const INITIALIZATION_SCRIPT: &str = include_str!("initialization-script.js");
+
 /// Reports what the window's page saw go wrong (`Client::report`): what it showed its person, a page's error, an
 /// app that never drew.
 #[tauri::command]
@@ -527,12 +561,15 @@ pub fn run() {
             let page = HOME.parse().expect("the home screen has an address");
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page))
                 .on_navigation(move |to| stays(&goes, to));
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            let window = window.initialization_script_for_all_frames(INITIALIZATION_SCRIPT);
             #[cfg(desktop)]
-            let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center();
+            let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center().build()?;
             #[cfg(desktop)]
-            opens_as_it_was(&window.build()?)?;
+            opens_as_it_was(&window)?;
             #[cfg(mobile)]
-            window.build()?;
+            let window = window.build()?;
+            navigation_gestures(window, true)?;
             eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
             Ok(())
         })
@@ -571,6 +608,7 @@ pub fn run() {
             listen,
             tapped,
             opened,
+            navigation_gestures,
             report
         ])
         .run(tauri::generate_context!())

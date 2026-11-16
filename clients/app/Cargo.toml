@@ -30,6 +30,8 @@ window = [
   "dep:tauri-plugin-window-state",
   "dep:encryption_client",
   "dep:notifications_client",
+  "dep:objc2",
+  "dep:webkit2gtk",
   "cli/window",
 ]
 
@@ -61,6 +63,13 @@ notifications_client = { path = "../../plugins/notifications/client/native", opt
 tauri-plugin-notification = { version = "2.8", optional = true }
 # The window opens where and as large as it was last, as a computer's apps do.
 tauri-plugin-window-state = { version = "2.5", optional = true }
+
+# The web view's own back and forward gestures, which Tauri doesn't switch on (`navigation_gestures`).
+[target.'cfg(target_vendor = "apple")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"], optional = true }

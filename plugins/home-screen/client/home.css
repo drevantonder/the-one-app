@@ -68,7 +68,8 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The caret that collapses a section shows on a hover, and while it's collapsed. */
+/* The caret that collapses a section shows on a hover, and while it's collapsed. A touch screen hovers over
+   nothing, so there it always shows, as an iPad's sidebar does. */
 .sidebar .caret {
   display: grid;
   place-items: center;
@@ -88,6 +89,11 @@ body {
 .sidebar .label:hover .caret,
 .sidebar .caret[aria-expanded="false"] {
   opacity: 1;
+}
+@media (hover: none) {
+  .sidebar .caret {
+    opacity: 1;
+  }
 }
 .sidebar :is(.name, .caret):focus-visible,
 .sidebar .ui-row > .row:focus-visible {

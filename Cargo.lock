@@ -104,6 +104,7 @@ dependencies = [
  "encryption_client",
  "libc",
  "notifications_client",
+ "objc2",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -112,6 +113,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-window-state",
  "tokio",
+ "webkit2gtk",
 ]
 
 [[package]]
