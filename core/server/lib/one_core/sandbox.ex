@@ -67,7 +67,7 @@ defmodule OneCore.Sandbox do
     name = Path.basename(artifact)
     sets = [{name, Map.reject(files, fn {path, _} -> Version.client?(path) end)}]
 
-    with {:ok, said} <- once({:describe, Version.code(files)}, name, sets),
+    with {:ok, said} <- once({:describe, name, Version.code(files)}, name, sets),
          do: Version.sandboxed(artifact, files, said)
   end
 
@@ -420,8 +420,10 @@ defmodule OneCore.Sandbox do
     :exit, _ -> {:error, "#{Path.basename(version.artifact)} stopped as it started"}
   end
 
-  # What tells a version's child from another's: its code, and the code of the versions it uses.
-  defp key(version, used), do: {version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
+  # What tells a version's child from another's: its name and code, and those of the versions it uses. Two plugins
+  # of the same files are two plugins, each with its VM and what it compiled.
+  defp key(version, used),
+    do: {Path.basename(version.artifact), version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
 
   # A child that runs once, to say what a set of files is, and stops.
   defp once(key, name, sets) do

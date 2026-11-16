@@ -399,6 +399,11 @@ may via server as bob spy kept
 refused via server as bob spy steal --handle "$handle" --name "$own"
 refused via server as bob spy reach --name "$own"
 may via server as alice spy steal --handle "$handle" --name "$own"
+# Another plugin of the same files is another plugin, in a VM of its own, which has nothing of the first's.
+may as alice deploy --name spy2 --files-from "$folder/spy" --sandbox
+may via server as alice spy2 kept
+[[ $said != *"alice's secret"* ]]
+refused via server as alice spy2 steal --handle "$handle" --name "$own"
 refused as bob install --plugin network/plugins/reader --name mine
 refused as carol for network install --plugin network/plugins/reader --name everyones
 may as owner permissions share --artifact network --relation installer --who users/carol
