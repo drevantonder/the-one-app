@@ -1600,6 +1600,13 @@ button.ui-box {
   display: grid;
   gap: 0.5rem;
 }
+.ui-sign-in .status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--muted-foreground);
+}
 .ui-sign-in .ui-button {
   min-width: 12rem;
   text-decoration: none;
