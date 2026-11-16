@@ -16,6 +16,8 @@ defmodule IphoneSimulator.Simulator do
 
   @idb "1.7.8"
   @companion_sha256 "44369a2df0b62e3a1764de61bd09280999c7e9b27ea8f20bff1ea3a9db0302a2"
+  # idb's CLI isn't on PyPI past 1.7.7: it's the wheel on the same release.
+  @cli_sha256 "ed8557a4c54ffee53006c1fe63f070cda567949312ab24be56faf987c5a3d04b"
   @aiortc "1.16.0"
   @kept 64 * 1024
 
@@ -59,16 +61,21 @@ defmodule IphoneSimulator.Simulator do
   has, on its newest iOS, and boots it.
   """
   def create(service, spec) do
-    %{"runtimes" => runtimes, "devicetypes" => types} = JSON.decode!(simctl!(service, ~w(list --json runtimes devicetypes)))
-    runtime = runtimes |> Enum.filter(&(&1["platform"] == "iOS" and &1["isAvailable"])) |> List.last()
-    type = types |> Enum.filter(&(&1["name"] =~ ~r/^iPhone \d+ Pro$/)) |> List.last()
-    if runtime == nil or type == nil, do: raise("Xcode here has no iOS runtime or iPhone to make one with: Xcode › Settings › Components adds one")
+    %{"runtimes" => runtimes} = JSON.decode!(simctl!(service, ~w(list --json runtimes)))
+    runtimes = Enum.filter(runtimes, &(&1["platform"] == "iOS" and &1["isAvailable"]))
+    if runtimes == [], do: raise("Xcode here has no iOS runtime to make one with: Xcode › Settings › Components adds one")
+    runtime = Enum.max_by(runtimes, &numbers(&1["version"]))
+    pros = for t <- runtime["supportedDeviceTypes"], [_, n] <- [Regex.run(~r/^iPhone (\d+) Pro$/, t["name"])], do: {String.to_integer(n), t}
+    if pros == [], do: raise("iOS #{runtime["version"]} here runs no iPhone Pro")
+    {_, type} = Enum.max_by(pros, &elem(&1, 0))
 
     udid = String.trim(simctl!(service, ["create", "One: #{spec["name"]}", type["identifier"], runtime["identifier"]]))
     s = Map.merge(spec, %{"udid" => udid, "model" => type["name"], "ios" => runtime["version"], "created" => System.system_time(:millisecond)})
     File.write!(Path.join(folder(service, "simulators"), udid <> ".json"), JSON.encode!(s))
     start(service, udid)
   end
+
+  defp numbers(version), do: version |> String.split(".") |> Enum.map(&String.to_integer/1)
 
   @doc "Boots a simulator and waits until it has."
   def start(service, udid) do
@@ -147,7 +154,7 @@ defmodule IphoneSimulator.Simulator do
     for args <- plays do
       case cmd(idb(service) ++ ["ui" | args] ++ ["--udid", udid], 60) do
         %{exit: 0} -> :ok
-        %{stdout: out, stderr: why} -> raise "idb: #{String.trim(why <> "\n" <> out)}"
+        %{stdout: out, stderr: why} -> raise "idb: #{String.trim(clip(why <> "\n" <> out))}"
       end
     end
 
@@ -274,10 +281,13 @@ defmodule IphoneSimulator.Simulator do
   defp state(_), do: "stopped"
 
   # idb's command, with its companion, installed here the first time: the companion from idb's release on GitHub,
-  # checked, and idb's CLI in this service's Python.
+  # checked, and idb's CLI in this service's Python. idb starts a companion for a simulator the first time it's asked
+  # about it, and runs it with no options of ours, so it's started through a script that adds one: it ends once its
+  # simulator is shut down, rather than staying for good.
   defp idb(service) do
     python(service)
     companion = Path.join([OneCore.Service.folder(service), "idb-companion-#{@idb}", "idb_companion"])
+    started = Path.join(Path.dirname(companion), "companion")
 
     if not File.exists?(companion) do
       url = "https://github.com/facebook/idb/releases/download/v#{@idb}/idb-companion.macos-arm64.tar.gz"
@@ -292,21 +302,24 @@ defmodule IphoneSimulator.Simulator do
       File.write!(Path.join(unpacking, "companion.tar.gz"), tarball)
       %{exit: 0} = cmd(["tar", "-xzf", Path.join(unpacking, "companion.tar.gz"), "-C", unpacking], 120)
       File.rm!(Path.join(unpacking, "companion.tar.gz"))
+      File.write!(Path.join(unpacking, "companion"), ~s(#!/bin/sh\nexec "#{companion}" "$@" --terminate-offline true\n))
+      File.chmod!(Path.join(unpacking, "companion"), 0o755)
       File.rename!(unpacking, Path.dirname(companion))
     end
 
-    [Path.join([OneCore.Service.folder(service), "venv", "bin", "idb"]), "--companion-path", companion]
+    [Path.join([OneCore.Service.folder(service), "venv", "bin", "idb"]), "--companion-path", started]
   end
 
   # The Python idb's CLI and a stream's sender run with, made with uv the first time.
   defp python(service) do
     venv = Path.join(OneCore.Service.folder(service), "venv")
     made = Path.join(venv, "idb-#{@idb}-aiortc-#{@aiortc}")
+    cli = "https://github.com/facebook/idb/releases/download/v#{@idb}/fb_idb-#{@idb}-py3-none-any.whl#sha256=#{@cli_sha256}"
 
     if not File.exists?(made) do
       File.rm_rf!(venv)
       %{exit: 0} = cmd(["uv", "venv", "--quiet", "--python", "3.12", venv], 300)
-      %{exit: 0} = cmd(["uv", "pip", "install", "--quiet", "--python", Path.join(venv, "bin/python"), "fb-idb==#{@idb}", "aiortc==#{@aiortc}"], 300)
+      %{exit: 0} = cmd(["uv", "pip", "install", "--quiet", "--python", Path.join(venv, "bin/python"), "fb-idb @ #{cli}", "aiortc==#{@aiortc}"], 300)
       File.touch!(made)
     end
 
@@ -316,7 +329,7 @@ defmodule IphoneSimulator.Simulator do
   defp simctl!(_service, args, timeout \\ 60) do
     case cmd(["xcrun", "simctl" | args], timeout) do
       %{exit: 0, stdout: out} -> out
-      %{stderr: why, stdout: out} -> raise "simctl #{hd(args)}: #{String.trim(why <> "\n" <> out)}"
+      %{stderr: why, stdout: out} -> raise "simctl #{hd(args)}: #{String.trim(clip(why <> "\n" <> out))}"
     end
   end
 
@@ -334,7 +347,8 @@ defmodule IphoneSimulator.Simulator do
   end
 
   # Runs `args` for at most `timeout` seconds, as Containers' Podman runs podman: its own process group, stopped
-  # whole once it takes too long, with what it writes as errors in a file beside while it runs.
+  # whole once it takes too long, with what it writes as errors in a file beside while it runs. What it prints is
+  # kept whole, as simctl's JSON is read; only what goes into an error is cut short.
   defp cmd([program | args], timeout) do
     errors = Path.join(System.tmp_dir!(), "iphone-simulator-#{System.unique_integer([:positive])}")
 
@@ -349,7 +363,7 @@ defmodule IphoneSimulator.Simulator do
     {exit, stdout} = read(port, pid, System.monotonic_time(:millisecond) + timeout * 1000, [])
     stderr = with {:ok, text} <- File.read(errors), do: text, else: (_ -> "")
     File.rm(errors)
-    %{exit: exit, stdout: clip(stdout), stderr: clip(stderr)}
+    %{exit: exit, stdout: stdout, stderr: clip(stderr)}
   end
 
   defp read(port, pid, until, printed) do
