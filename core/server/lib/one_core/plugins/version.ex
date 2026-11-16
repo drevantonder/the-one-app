@@ -324,7 +324,7 @@ defmodule OneCore.Plugins.Version do
       File.mkdir_p!(Path.dirname(file))
       # Renamed into place, as another VM on this home may have the same library loaded from it.
       File.write!(file <> ".part", rest[library])
-      File.rename!(file <> ".part", file <> ".so")
+      File.rename!(file <> ".part", file <> library_extension())
       :persistent_term.put({__MODULE__, module}, {build, file})
       # What doesn't compile says why in its diagnostics.
       compile = fn -> Code.compile_string(source, path) end
@@ -346,6 +346,9 @@ defmodule OneCore.Plugins.Version do
       _ -> {:error, "#{path}'s module is one of the server's own"}
     end
   end
+
+  # What the VM loads a library by, which it finds by the name without it: a DLL on Windows.
+  defp library_extension, do: if(match?({:win32, _}, :os.type()), do: ".dll", else: ".so")
 
   @doc false
   def nif(module, load) do

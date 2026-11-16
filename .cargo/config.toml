@@ -6,3 +6,8 @@ rustflags = ["-C", "link-arg=-Wl,-install_name,@rpath/nif.so"]
 
 [env]
 CFLAGS_aarch64_apple_darwin = "-g0"
+
+# Windows builds carry the C runtime in them, so `one` and a NIF need nothing a PC may not have installed: Windows
+# has the Universal CRT, and not the Visual C++ runtime unless something installed it.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/ignore:4099"]

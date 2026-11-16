@@ -149,17 +149,19 @@ defmodule OneCore.App do
 
   defp fetched(url, sha256) do
     folder = Path.join([Server.home(), "bun", sha256])
-    bun = Path.join(folder, "bun")
+    # Windows finds a program by its extension.
+    name = if match?({:win32, _}, :os.type()), do: "bun.exe", else: "bun"
+    bun = Path.join(folder, name)
 
     with false <- File.exists?(bun),
          {:ok, %{status: 200, body: zip}} <- Req.get(url, raw: true),
          ^sha256 <- Base.encode16(:crypto.hash(:sha256, zip), case: :lower),
          {:ok, files} <- :zip.extract(zip, [:memory]),
-         {_name, program} <- Enum.find(files, fn {name, _} -> Path.basename(to_string(name)) == "bun" end) do
+         {_name, program} <- Enum.find(files, fn {file, _} -> Path.basename(to_string(file)) == name end) do
       writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
       File.mkdir_p!(writing)
-      File.write!(Path.join(writing, "bun"), program)
-      File.chmod!(Path.join(writing, "bun"), 0o755)
+      File.write!(Path.join(writing, name), program)
+      File.chmod!(Path.join(writing, name), 0o755)
       # Another build may have fetched it meanwhile, which is as good.
       with {:error, _} <- File.rename(writing, folder), do: File.rm_rf!(writing)
       {:ok, bun}

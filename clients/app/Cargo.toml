@@ -35,6 +35,8 @@ window = [
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
+# The manifest of `one` without its window on Windows (`build.rs`).
+embed-manifest = "1"
 
 [dependencies]
 anyhow = { workspace = true, optional = true }

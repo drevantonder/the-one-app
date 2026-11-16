@@ -13,11 +13,21 @@ defmodule OneCore.Release do
   @doc "What it says when it's asked to take the latest build."
   def update_asked, do: "Update asked"
 
-  @doc "Starts the server, says so, and runs until it's stopped."
+  @doc """
+  Starts the server, says so, and runs until it's stopped, as a system stops a program, with SIGTERM, or on Windows,
+  which has none, by its input's closing, as the program that started it stops it there. Either way it takes nothing
+  new and answers what it took already (`OneCore.Application`).
+  """
   def serve do
     case Application.ensure_all_started(:one_core) do
       {:ok, _started} ->
         IO.puts(running() <> Server.key())
+
+        if match?({:win32, _}, :os.type()) do
+          IO.read(:eof)
+          System.stop()
+        end
+
         Process.sleep(:infinity)
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->

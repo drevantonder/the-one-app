@@ -5,7 +5,8 @@
 #
 #     tooling/nifs && ONE_FOR=network one deploy --name <name> --files-from plugins/<name>
 #
-# With zig, from one machine, and for Linux for the same glibc as a server's VM (`tooling/release`).
+# With zig, from one machine, and for Linux for the same glibc as a server's VM (`tooling/release`); for Windows with
+# cargo-xwin, as a DLL, which the plugin keeps under the same kind of name, `windows-x86_64.so`.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,12 +16,16 @@ cd "$root"
 
 crates=($(dirname plugins/*/server/nif/*/Cargo.toml))
 # Each kind of machine needs Rust's standard library for it, which a Mac or a new machine may not have yet.
-rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin >/dev/null
+rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc >/dev/null
 target=${CARGO_TARGET_DIR:-$root/target}
-for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin; do
-  if [[ $triple == *linux* ]]; then os=linux glibc=.2.35 library=so; else os=macos glibc= library=dylib; fi
-  cargo zigbuild --release --target "$triple$glibc" $(printf -- '-p %s ' $(basename -a "${crates[@]}"))
+for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc; do
+  case $triple in
+    *linux*) os=linux build="zigbuild --target $triple.2.35" library=lib%s.so ;;
+    *apple*) os=macos build="zigbuild --target $triple" library=lib%s.dylib ;;
+    *windows*) os=windows build="xwin build --target $triple" library=%s.dll ;;
+  esac
+  cargo $build --release $(printf -- '-p %s ' $(basename -a "${crates[@]}"))
   for crate in "${crates[@]}"; do
-    cp "$target/$triple/release/lib$(basename "$crate").$library" "$crate/$os-${triple%%-*}.so"
+    cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$crate/$os-${triple%%-*}.so"
   done
 done

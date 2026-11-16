@@ -174,7 +174,8 @@ defmodule OneCore.Plugin do
 
   - A plugin brings native code as a NIF, which its Elixir calls: its source in a folder of `server/nif/`, say
     `server/nif/sqlite/`, which is never deployed, and beside it the library built from it for each kind of machine
-    a server runs on, `linux-x86_64.so`, `linux-aarch64.so` and `macos-aarch64.so`, which are. The module the
+    a server runs on, `linux-x86_64.so`, `linux-aarch64.so`, `macos-aarch64.so` and `windows-x86_64.so` (a DLL),
+    which are. The module the
     library was built for is `server/nif/sqlite.ex`, which keeps its name rather than taking its version's, and
     loads it with `@on_load :load` and `def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))`.
     A deploy whose NIF doesn't load on the server fails, saying why. A name holds the first build loaded until the

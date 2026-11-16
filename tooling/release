@@ -9,18 +9,21 @@
 # `server` is a server for every kind of machine one of the network's servers runs on, and `client` is `one` for
 # every kind of desktop machine among the network's devices; neither says both. A name is one build, as
 # `one builds` names them: `server/linux-x86_64`, `one/macos-aarch64`, `one-cli/linux-x86_64`. A phone's app is
-# built by the network's owner from its repo (`iphone` skill), not here. --dry-run says what it would build, and builds nothing.
+# built by the network's owner from its repo (`iphone` skill), not here, and Windows has `one-cli` only, until the app
+# has a Windows build. --dry-run says what it would build, and builds nothing.
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
-# the network's owner. Linux builds Linux's builds, and a Mac a Mac's, which needs its system's frameworks: from
-# Linux, what's for a Mac is built on the Mac `ssh mac` reaches, in its checkout ~/scratch/one-release, at the same
-# commit. One release runs on a machine at a time; another waits for it. A commit older than one the network has
+# the network's owner. Linux builds Linux's builds and Windows', with the MSVC toolchain cargo-xwin downloads, and a
+# Mac a Mac's, which needs its system's frameworks: from Linux, what's for a Mac is built on the Mac `ssh mac`
+# reaches, in its checkout ~/scratch/one-release, at the same commit. One release runs on a machine at a time;
+# another waits for it. A commit older than one the network has
 # published is refused, so a release that finishes late doesn't undo a newer one. A build already published is
 # left as it is.
 #
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
-# and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), One
-# Core's Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships
+# and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
+# Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
+# with them, One Core's Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships
 # with, with their NIFs built for every kind of machine (`tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
 # target/builds/<build>.
@@ -56,7 +59,8 @@ for want in "${wanted[@]}"; do
   case $want in
     server) names+=($(jq -r '.servers[].target | "server/" + .' <<<"$builds")) ;;
     client) names+=($(jq -r '.devices[].target | select(startswith("linux-")) | "one/" + ., "one-cli/" + .' <<<"$builds")
-      $(jq -r '.devices[].target | select(startswith("macos-")) | "one/" + .' <<<"$builds")) ;;
+      $(jq -r '.devices[].target | select(startswith("macos-")) | "one/" + .' <<<"$builds")
+      $(jq -r '.devices[].target | select(startswith("windows-")) | "one-cli/" + .' <<<"$builds")) ;;
     *) names+=("$want") ;;
   esac
 done
@@ -76,7 +80,7 @@ for name in "${names[@]}"; do
   kind=${name#*/}
   if [[ $(jq -r --arg n "$name" '.latest[$n].build // ""' <<<"$builds") == "$build" ]]; then
     echo "$name  $build is published already"
-  elif [[ ($name == server/* && ${kind%%-*} == ${here%%-*}) || $kind == "$here" ]]; then
+  elif [[ ($name == server/* && ${kind%%-*} == ${here%%-*}) || $kind == "$here" || ($here == linux-* && $kind == windows-*) ]]; then
     mine+=("$name")
   elif [[ $here == linux-* && $kind == macos-* ]]; then
     mac+=("$name")
@@ -137,13 +141,19 @@ for kind in "${servers[@]}"; do
     linux-x86_64) triple=x86_64-unknown-linux-gnu hex=amd64 bunzip=bun-linux-x64-baseline.zip ;;
     linux-aarch64) triple=aarch64-unknown-linux-gnu hex=arm64 bunzip=bun-linux-aarch64.zip ;;
     macos-aarch64) triple=aarch64-apple-darwin bunzip=bun-darwin-aarch64.zip ;;
+    windows-x86_64) triple=x86_64-pc-windows-msvc bunzip=bun-windows-x64-baseline.zip ;;
     *) echo "There's no server for $kind" >&2 && exit 1 ;;
   esac
 
-  # The VM and OTP for that machine, from Hex's builds for Linux and the Erlang Ecosystem Foundation's for a Mac.
+  # The VM and OTP for that machine, from Hex's builds for Linux, Erlang/OTP's own for Windows and the Erlang
+  # Ecosystem Foundation's for a Mac.
   if [[ $kind == linux-* ]]; then
     sum=$(curl -fsSL "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/builds.txt" | awk -v v="OTP-$otp" '$1 == v { print $4 }')
     archive=$(fetched "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/OTP-$otp.tar.gz" "otp-$otp-$kind.tar.gz" "$sum")
+  elif [[ $kind == windows-* ]]; then
+    zip=otp_win64_$otp.zip
+    sum=$(curl -fsSL "https://api.github.com/repos/erlang/otp/releases/tags/OTP-$otp" | jq -r --arg z "$zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
+    archive=$(fetched "https://github.com/erlang/otp/releases/download/OTP-$otp/$zip" "otp-$otp-$kind.zip" "$sum")
   else
     url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-$triple.tar.gz"
     [[ -e $cache/otp-$otp-$kind.tar.gz ]] || curl -fsSL -o "$cache/otp-$otp-$kind.tar.gz" "$url"
@@ -151,7 +161,18 @@ for kind in "${servers[@]}"; do
   fi
   vm=$cache/otp-$otp-$kind
   if [[ ! -d $vm ]]; then
-    rm -rf "$vm.part" && mkdir -p "$vm.part" && tar -xzf "$archive" -C "$vm.part" --strip-components=1
+    rm -rf "$vm.part" && mkdir -p "$vm.part"
+    if [[ $kind == windows-* ]]; then
+      unzip -q "$archive" -d "$vm.part" -x 'doc/*' '*.pdb' '*/doc/*' '*/src/*' '*/examples/*' '*/beam.debug.smp.dll'
+      # The VM needs the Visual C++ runtime, which a PC may not have: its DLLs go beside it, as Microsoft lets an
+      # app carry them, from the installer of it that comes with Erlang/OTP.
+      (cd "$vm.part" && 7z x -t# -y -ovc_redist vc_redist.exe >/dev/null && 7z x -y -ovc_redist/cabs vc_redist/4.cab >/dev/null &&
+        cab=$(grep -l vcruntime140.dll_amd64 vc_redist/cabs/*) &&
+        for dll in vcruntime140 vcruntime140_1 msvcp140; do 7z e -y -so "$cab" "$dll.dll_amd64" >"$(echo erts-*)/bin/$dll.dll"; done &&
+        rm -r vc_redist vc_redist.exe)
+    else
+      tar -xzf "$archive" -C "$vm.part" --strip-components=1
+    fi
     mv "$vm.part" "$vm"
   fi
   # Hex's builds are made whole where they're put by their own script.
@@ -161,6 +182,9 @@ for kind in "${servers[@]}"; do
   crates=($(basename -a core/server/nif/*/))
   if [[ $kind == linux-* ]]; then
     cargo zigbuild --release --target "$triple.2.35" "${crates[@]/#/-p}"
+    native=$target/$triple/release
+  elif [[ $kind == windows-* ]]; then
+    cargo xwin build --release --target "$triple" "${crates[@]/#/-p}"
     native=$target/$triple/release
   else
     cargo build --release "${crates[@]/#/-p}"
@@ -180,10 +204,12 @@ for kind in "${servers[@]}"; do
   priv=$(echo "$release"/lib/one_core-*)/priv/native
   rm -rf "$priv" && mkdir -p "$priv"
   for crate in "${crates[@]}"; do
-    cp "$native/lib$crate".so "$priv/$crate.so" 2>/dev/null || cp "$native/lib$crate.dylib" "$priv/$crate.so"
+    # The VM loads a NIF by its name without its extension, which on Windows is a DLL's.
+    cp "$native/lib$crate".so "$priv/$crate.so" 2>/dev/null || cp "$native/lib$crate.dylib" "$priv/$crate.so" 2>/dev/null ||
+      cp "$native/$crate.dll" "$priv/$crate.dll"
   done
-  beam=$(echo "$release"/erts-*/bin/beam.smp)
-  "$objcopy" --strip-all "$beam"
+  # Windows' VM keeps its debugging symbols apart already.
+  [[ $kind == windows-* ]] || "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"
 
   # What it ships with: the plugins, which it deploys as a folder is (`client::files`), with their NIFs built beside
   # their source, the UI library's build, which it builds apps against and serves, and the Bun it builds apps with.
@@ -201,6 +227,8 @@ done
 # that machine's system libraries, so each kind builds its own.
 for name in "${mine[@]}"; do
   case $name in
+    one-cli/windows-*) echo "Building $name" && cargo xwin build --release --target x86_64-pc-windows-msvc -p app --no-default-features &&
+      gzip -9 -c "$target/x86_64-pc-windows-msvc/release/one.exe" >"$out/$(tr / - <<<"$name").gz" ;;
     one-cli/*) echo "Building $name" && cargo build --release -p app --no-default-features && gzip -9 -c "$target/release/one" >"$out/one-cli-$here.gz" ;;
   esac
 done

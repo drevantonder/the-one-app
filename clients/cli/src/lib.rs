@@ -7,7 +7,6 @@
 mod codemode;
 mod install;
 mod mcp;
-#[cfg(unix)]
 pub mod serving;
 
 use std::io::Write;
@@ -28,6 +27,15 @@ pub fn resolvers() -> Vec<Arc<dyn InputResolver>> {
 }
 
 pub fn main() -> ExitCode {
+    // A server's environment, where the system gives a program none of its own, as Task Scheduler gives a task's,
+    // is given to `one serve run` as its arguments, each NAME=value (`serving`). It's set before anything runs.
+    if let [serve, run, said @ ..] = &env::args().skip(1).collect::<Vec<_>>()[..]
+        && (serve.as_str(), run.as_str()) == ("serve", "run")
+    {
+        for (name, value) in said.iter().filter_map(|said| said.split_once('=')) {
+            unsafe { env::set_var(name, value) };
+        }
+    }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio starts");
     let args: Vec<String> = env::args().skip(1).collect();
     // Run by git as its remote helper, it's that, under the name git found it by, with `.exe` after it on Windows.
@@ -94,16 +102,12 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
                 result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
             printed(text.join("\n"))
         }
-        #[cfg(unix)]
         ["serve", "on"] => printed(serving::on(&client).await?),
-        #[cfg(unix)]
         ["serve", "off"] => printed(serving::off(&client).await?),
-        #[cfg(unix)]
-        ["serve", "run"] => {
+        ["serve", "run", ..] => {
             serving::run(client.clone()).await?;
             ExitCode::SUCCESS
         }
-        #[cfg(unix)]
         ["update"] => printed(serving::update(&client).await?),
         // A plugin from a git repo, as `npx skills add` adds a skill; with no repo, the plugin is the network's own.
         ["install", repo, ..] if !repo.starts_with("--") => install::install(&client, &args[1..]).await?,

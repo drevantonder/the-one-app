@@ -29,7 +29,8 @@ defmodule OneCore.Builds do
     case :os.type() do
       {:unix, :darwin} -> "macos-" <> arch
       {:unix, os} -> "#{os}-#{arch}"
-      {:win32, _} -> "windows-" <> arch
+      # Windows' VM says only `win32`, and Erlang/OTP's one Windows build is x64's, which an ARM PC runs emulated.
+      {:win32, _} -> "windows-x86_64"
     end
   end
 

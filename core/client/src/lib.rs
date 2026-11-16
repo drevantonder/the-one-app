@@ -530,12 +530,13 @@ pub fn key(file: &Path) -> Result<SecretKey> {
 }
 
 /// The folder a client on a computer is kept in: `ONE_HOME` if that's set, as a network made to build or test with
-/// sets it, and otherwise where the system keeps an app's data, under a name of this client's own. A phone gives
-/// its app a folder instead.
+/// sets it, and otherwise where the system keeps an app's data on this machine, under a name of this client's own:
+/// on Windows `%LOCALAPPDATA%`, as a device's key and a server's builds are this PC's and never roam with its person.
+/// A phone gives its app a folder instead.
 pub fn home() -> Result<PathBuf> {
     match env::var_os("ONE_HOME") {
         Some(home) => Ok(home.into()),
-        None => Ok(dirs::data_dir().context("this system has no folder for an app's data: set ONE_HOME")?.join(NAME)),
+        None => Ok(dirs::data_local_dir().context("this system has no folder for an app's data: set ONE_HOME")?.join(NAME)),
     }
 }
 

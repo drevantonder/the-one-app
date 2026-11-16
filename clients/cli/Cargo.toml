@@ -10,6 +10,7 @@ anyhow.workspace = true
 client = { path = "../../core/client" }
 data-encoding = "2"
 dirs = "6"
+flate2 = "1"
 iroh.workspace = true
 reqwest = { version = "0.13", default-features = false }
 serde_json.workspace = true
@@ -24,6 +25,13 @@ git_repos_client = { path = "../../plugins/git-repos/client/native" }
 # Who's running this, and their login shell (`serving`).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# How Windows keeps a server running (`serving`): a junction to its build, the job object it's held in, its log, and
+# the pipe it says it's running on.
+[target.'cfg(windows)'.dependencies]
+junction = "2"
+tokio = { workspace = true, features = ["net"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_JobObjects"] }
 
 # Built into the app, with its window: which build of `one` an update takes (`serving`).
 [features]
