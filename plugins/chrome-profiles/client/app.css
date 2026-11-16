@@ -1,29 +1,3 @@
-.page {
-  position: relative;
-  width: 100%;
-  max-width: 64rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  overflow: hidden;
-  cursor: default;
-  touch-action: pan-y;
-}
-.page img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  user-select: none;
-}
-/* Where what's typed on the page goes: unseen, but focused, so a phone shows its keyboard. */
-.page .keys {
-  position: absolute;
-  inset-block-end: 0;
-  inset-inline-start: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
 .hint {
   color: var(--muted-foreground);
 }

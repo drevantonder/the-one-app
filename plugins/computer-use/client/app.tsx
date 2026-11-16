@@ -1,8 +1,7 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
-import { createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
+import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
-import "./app.css"
+import { Button, call, changed, Empty, leave, List, LiveScreen, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
 interface AgentScreen {
@@ -28,42 +27,13 @@ const usage = (used: AgentScreen["used"]) => (used ? `${used.doing ?? "Used"} ·
 
 const [open, setOpen] = createSignal<string>()
 
-/// The screen as it is now: a screenshot, taken again a second and a half after the last came, while it's in view.
-function Live(props: { screen: AgentScreen }) {
-  const [picture, setPicture] = createSignal<{ of: string; data: string }>()
-  const [problem, setProblem] = createSignal<string>()
-  onSettled(() => {
-    let timer: ReturnType<typeof setTimeout>
-    let stopped = false
-    const take = async () => {
-      if (document.visibilityState === "visible") {
-        const screen = props.screen
-        await call("computer-use_screenshot", { screen: address(screen) })
-          .then((data) => (setPicture({ of: address(screen), data }), setProblem()))
-          .catch((error) => setProblem(error.message))
-      }
-      if (!stopped) timer = setTimeout(take, 1500)
-    }
-    take()
-    return () => ((stopped = true), clearTimeout(timer))
-  })
-  const shown = () => (picture()?.of === address(props.screen) ? picture()!.data : undefined)
-  return (
-    <Show when={!problem()} fallback={<Problem heading="Couldn't see this screen" text={problem()} />}>
-      <div class="live" style={{ "aspect-ratio": `${props.screen.width} / ${props.screen.height}` }}>
-        <Show when={shown()}>
-          <img src={shown()} alt={`${props.screen.name} as it is now`} />
-        </Show>
-      </div>
-    </Show>
-  )
-}
-
 function Detail(props: { screen: AgentScreen }) {
   const s = () => props.screen
   return (
     <Screen heading={s().name} back onBack={() => setOpen()}>
-      <Live screen={s()} />
+      <Show when={address(s())} keyed>
+        {(screen) => <LiveScreen label={`${s().name} as it is now`} watch screen={(inputs) => call("computer-use_screenshot", { screen, ...inputs })} />}
+      </Show>
       <Section heading="Last Used">
         <List>
           <Row heading={s().used?.doing ?? "Not used yet"} text={s().used ? `${name(s().used!.by)}'s agent · ${since(s().used!.at)}` : undefined} />
