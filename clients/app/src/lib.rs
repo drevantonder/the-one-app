@@ -178,7 +178,8 @@ async fn refresh(views: State<'_, Views>, view: String) -> Result<(), ()> {
 }
 
 /// This device's key, as its network knows it, the network's address, if it has one, the build it's on and its kind
-/// of machine, as builds are named, and its server's key, if it's a server.
+/// of machine, as builds are named, its server's key, if it's a server, and whether a phone is woken by its
+/// notifications (`notifications::Push`).
 #[tauri::command]
 fn client(views: State<'_, Views>) -> Value {
     json!({
@@ -187,6 +188,7 @@ fn client(views: State<'_, Views>) -> Value {
         "build": ::client::BUILD,
         "target": ::client::target(),
         "server": cli::serving::server(),
+        "push": notifications::push(),
     })
 }
 
@@ -303,6 +305,13 @@ fn told(seq: u64, session: &Session) -> Value {
         _ => None,
     };
     json!({"seq": seq, "session": session, "link": link})
+}
+
+/// Has a phone whose push failed try again now (`notifications::Push`), as its person does in Notifications, and
+/// says where it is once that try has ended.
+#[tauri::command]
+async fn push() -> Result<Value, ()> {
+    Ok(json!({"message": format!("{:?}", notifications::retry().await)}))
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
@@ -558,6 +567,7 @@ pub fn run() {
             retry,
             sign_out,
             start,
+            push,
             listen,
             tapped,
             opened,

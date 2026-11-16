@@ -1,8 +1,9 @@
 // Notifications, a part of Settings: what you've been told, newest first, and the apps that have told you
-// something, each of which you hear from or not. Tapping one marks it read and opens the app it's from.
+// something, each of which you hear from or not. Tapping one marks it read and opens the app it's from. A phone that
+// isn't woken by them says so first, and why.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, confirm, Empty, leave, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Switch, toast } from "ui"
+import { Button, call, changed, client, confirm, Empty, leave, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Spinner, Switch, toast } from "ui"
 import "./app.css"
 
 /** A notification, as `notifications_inbox` answers it. */
@@ -23,9 +24,16 @@ interface App {
   allowed: boolean
 }
 
+/** Where this phone is with being woken by its notifications, as `client()` says: nothing on a computer or in a browser. */
+type Push = { state: "notAsked" | "denied" | "registering" | "registered" } | { state: "failed"; why: string }
+
 const inbox = createMemo(async () => {
-  const [{ notifications }, apps]: [{ notifications: Received[] }, App[]] = await Promise.all([call("notifications_inbox").then(JSON.parse), call("notifications_apps").then((text) => JSON.parse(text).apps)])
-  return { notifications, apps }
+  const [{ notifications }, apps, { push }]: [{ notifications: Received[] }, App[], { push?: Push }] = await Promise.all([
+    call("notifications_inbox").then(JSON.parse),
+    call("notifications_apps").then((text) => JSON.parse(text).apps),
+    client(),
+  ])
+  return { notifications, apps, push }
 })
 changed(() => refresh(inbox))
 
@@ -46,6 +54,37 @@ async function change(tool: string, input = {}) {
     toast((error as Error).message)
   }
   refresh(inbox)
+}
+
+/// Has this phone try again to be woken by its notifications, and shows where that left it.
+async function tryPush() {
+  try {
+    await client({ push: true })
+  } catch (error) {
+    toast((error as Error).message)
+  }
+  refresh(inbox)
+}
+
+/// Where this phone is with being woken by its notifications, said only where it isn't: fine is silent, and so is a
+/// computer, which shows them while the app runs, and a browser.
+function PushState(props: { push: Push }) {
+  return (
+    <>
+      <Show when={props.push.state === "registering"}>
+        <p class="push" role="status">
+          <Spinner />
+          <span>Turning on notifications…</span>
+        </p>
+      </Show>
+      <Show when={props.push.state === "denied"}>
+        <Problem warn heading="Notifications are off for this phone" text="Turn them on for this app in its Settings." />
+      </Show>
+      <Show when={props.push.state === "failed"}>
+        <Problem warn heading="This phone isn't woken by notifications" text={"why" in props.push ? props.push.why : undefined} action={<Button variant="outline" onClick={tryPush}>Try Again</Button>} />
+      </Show>
+    </>
+  )
 }
 
 function tapped(notification: Received) {
@@ -76,6 +115,7 @@ render(
     <Screen heading="Notifications" back onBack={leave} action={<Show when={inbox()?.notifications.length}><More /></Show>}>
       <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Skeleton rows={4} />}>
+          <Show when={inbox().push}>{(push) => <PushState push={push()} />}</Show>
           <Section>
             <Show when={inbox().notifications.length} fallback={<Empty>No notifications.</Empty>}>
               <List class="inbox">

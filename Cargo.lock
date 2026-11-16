@@ -3615,6 +3615,7 @@ dependencies = [
  "data-encoding",
  "encryption_client",
  "jni 0.21.1",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-plugin-notification",

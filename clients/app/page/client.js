@@ -461,6 +461,8 @@ async function respond(view, method, params) {
   // What an app is told of its client, and the few things one changes of it.
   if (method === "one/client") {
     if (params.leave) return invoke("sign_out")
+    // A phone whose push failed tries again.
+    if (params.push) return invoke("push")
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
     if ("serve" in params) return { message: await invoke("serve", { on: params.serve === true }) }
     if (params.update) return { message: await invoke("update") }

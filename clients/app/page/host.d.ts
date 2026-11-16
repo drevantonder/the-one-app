@@ -82,12 +82,14 @@ export interface Commands {
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
-  client(): { device: string; network?: string; build?: string; target?: string; server?: string }
+  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown }
   upload(file: ArrayBuffer, options: { headers: { plugin: string } }): { upload: string }
   /** Asks the network's address again now, which didn't answer. */
   retry(): void
   /** Signs this device out, once it's removed from its person's devices. */
   sign_out(): void
+  /** Has a phone whose push failed try again, saying where it is once that try has ended. */
+  push(): { message: string }
   serve(args: { on: boolean }): string
   update(): string
   recovery_key(args: { subject: string | undefined }): string
