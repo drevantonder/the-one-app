@@ -14,6 +14,8 @@ command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
 crates=($(dirname plugins/*/server/nif/*/Cargo.toml))
+# Each kind of machine needs Rust's standard library for it, which a Mac or a new machine may not have yet.
+rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin >/dev/null
 target=${CARGO_TARGET_DIR:-$root/target}
 for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin; do
   if [[ $triple == *linux* ]]; then os=linux glibc=.2.35 library=so; else os=macos glibc= library=dylib; fi
