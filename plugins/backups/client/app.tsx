@@ -7,55 +7,85 @@ import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, toast } from "ui"
 import "./app.css"
 
+/** A backup made to a destination. */
+interface Backup {
+  name: string
+  at: number
+  bytes: number
+  sent_bytes: number
+  took: number
+}
+
+/** Where backups go, as `backups_destinations` answers it. */
+interface Destination {
+  name: string
+  kind: "folder" | "s3"
+  where: string
+  machine?: string
+  item?: string
+  size: number
+  last?: { at: number }
+  problem?: { kind: string; text: string }
+  backups: Backup[]
+}
+
+/** What `backups_destinations` answers: the destinations, how often backups are made, which are kept, and the machines that can hold them. */
+interface All {
+  destinations: Destination[]
+  every: string
+  kept: string
+  machines: { key: string; name?: string }[]
+}
+
 const network = { for: "network" }
-const backups = createMemo(() => call("backups_destinations", {}, network).then(JSON.parse))
+const backups = createMemo(() => call("backups_destinations", {}, network).then((text): All => JSON.parse(text)))
 changed(() => refresh(backups))
 
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 /// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
-function since(at) {
+function since(at: number) {
   const minutes = Math.round((at - Date.now()) / 60_000)
   if (minutes > -1) return "just now"
   if (minutes > -60) return ago.format(minutes, "minute")
   if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
   return ago.format(Math.round(minutes / (24 * 60)), "day")
 }
-const when = (at) => new Date(at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+const when = (at: number) => new Date(at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
 const units = ["bytes", "KB", "MB", "GB", "TB"]
-function size(bytes) {
+function size(bytes: number) {
   let n = bytes, unit = 0
   while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
   return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
 }
 /// How long something took: "40 ms", "14 s", "3 min".
-const took = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
+const took = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 /// A name as relation tuples say it, short: "users/andre" is "andre".
-const short = (who) => String(who ?? "").replace(/^(users|groups)\//, "")
+const short = (who?: string) => String(who ?? "").replace(/^(users|groups)\//, "")
 
 /// A destination's grey line: what's wrong, or when it was last backed up and how big it is, or that it hasn't been yet.
-const about = (destination) =>
+const about = (destination: Destination) =>
   destination.problem ? (destination.problem.kind === "check" ? "Changed since it was sent" : "Couldn't back up") : destination.last ? `Backed up ${since(destination.last.at)} · ${size(destination.size)}` : "Not backed up yet"
 
 /// Does something, says why if it couldn't, and shows everything as it is after. → whether it was done.
-async function doing(does) {
+async function doing<T>(does: () => Promise<T>): Promise<T | true | false> {
   try {
     const said = await does()
     return said ?? true
   } catch (error) {
-    toast(error.message)
+    toast((error as Error).message)
     return false
   } finally {
     refresh(backups)
   }
 }
 
-const [open, setOpen] = createSignal()
+const [open, setOpen] = createSignal<string>()
 const [adding, setAdding] = createSignal(false)
-const [restoring, setRestoring] = createSignal()
-const [working, setWorking] = createSignal()
+const [restoring, setRestoring] = createSignal<Destination>()
+const [working, setWorking] = createSignal<string>()
 
 /// `does` under way on the button `which`, which shows it's working until it's done.
-const press = (which, does) => async () => {
+const press = (which: string, does: () => Promise<unknown>) => async () => {
   setWorking(which)
   await doing(does)
   setWorking()
@@ -71,7 +101,7 @@ const schedules = createListCollection({
 })
 
 /// A destination, opened: what's wrong with it, where it is, its backups, Check and Stop Backing Up Here.
-function Destination(props) {
+function Opened(props: { destination: Destination }) {
   const destination = () => props.destination
   const stop = async () => {
     const question = { heading: `Stop backing up to ${destination().name}?`, text: "What's there now stays there.", action: "Stop Backing Up", destructive: true }
@@ -82,7 +112,7 @@ function Destination(props) {
   return (
     <Screen heading={destination().name} back>
       <Show when={destination().problem}>
-        <Problem heading={destination().problem.kind === "check" ? `What's at ${destination().name} was changed` : `Couldn't back up to ${destination().name}`} text={destination().problem.kind === "check" ? "Part of the newest backup isn't there as it was sent. Back up now to send it again." : destination().problem.text} action={<Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>} />
+        <Problem heading={destination().problem!.kind === "check" ? `What's at ${destination().name} was changed` : `Couldn't back up to ${destination().name}`} text={destination().problem!.kind === "check" ? "Part of the newest backup isn't there as it was sent. Back up now to send it again." : destination().problem!.text} action={<Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>} />
       </Show>
       <List>
         <Row heading={destination().kind === "folder" ? "Folder" : "Bucket"} text={destination().where} />
@@ -117,12 +147,12 @@ function Destination(props) {
 
 /// Adds a destination: a folder on one of the network's machines, as on a disk plugged into it, or S3-compatible storage
 /// whose keys are an item in Everyone's Vault. It's tried before it's added, so a typo shows here.
-function AddSheet(props) {
+function AddSheet(props: { machines: All["machines"] }) {
   const [kind, setKind] = createSignal("folder")
   const machines = () => createListCollection({ items: props.machines.map((machine) => ({ value: machine.key, label: machine.name ?? machine.key.slice(0, 8) })) })
-  const add = async (event) => {
+  const add = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
     event.preventDefault()
-    const typed = Object.fromEntries([...new FormData(event.target)].filter(([name, value]) => value !== "" && name !== "kind"))
+    const typed = Object.fromEntries([...new FormData(event.target as HTMLFormElement)].filter(([name, value]) => value !== "" && name !== "kind"))
     setWorking("add")
     if (await doing(() => call("backups_add", { ...typed }, network))) setAdding(false)
     setWorking()
@@ -171,30 +201,35 @@ function RestoreSheet() {
   const destination = () => restoring()
   const [what, setWhat] = createSignal("whose")
   const choices = createMemo(async () => {
-    if (!destination()) return { whose: [], apps: [] }
-    const [people, groups, store] = await Promise.all(["sign-in_everyone", "permissions_groups", "home-screen_store"].map((tool) => call(tool).then(JSON.parse, () => [])))
+    if (!destination()) return { whose: createListCollection<{ value: string; label: string }>({ items: [] }), apps: createListCollection<{ value: string; label: string }>({ items: [] }) }
+    const listed = <T,>(tool: string) => call(tool).then((text): T[] => JSON.parse(text), (): T[] => [])
+    const [people, groups, store] = await Promise.all([
+      listed<{ who: string; called?: string; joined?: boolean }>("sign-in_everyone"),
+      listed<{ group: string; called: string }>("permissions_groups"),
+      listed<{ plugin: string; name: string }>("home-screen_store"),
+    ])
     const whose = [
       ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
       ...groups.map((group) => ({ value: group.group, label: group.called })),
       { value: "network", label: "Everyone" },
     ]
-    const apps = [...new Map(store.map((app) => [app.plugin.split("/").pop(), app.name])).entries()].map(([value, label]) => ({ value, label }))
+    const apps = [...new Map(store.map((app) => [app.plugin.split("/").pop()!, app.name])).entries()].map(([value, label]) => ({ value, label }))
     return { whose: createListCollection({ items: whose }), apps: createListCollection({ items: apps }) }
   })
-  const backupsOf = () => createListCollection({ items: destination().backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
-  const restore = async (event) => {
+  const backupsOf = () => createListCollection({ items: destination()!.backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
+  const restore = async (event: SubmitEvent) => {
     event.preventDefault()
-    const typed = Object.fromEntries(new FormData(event.target))
+    const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement)) as Record<string, string>
     const blobs = what() === "file" ? [typed.file.trim()] : what() === "app" ? [`${typed.whose}/own/${typed.app}/`, `${typed.whose}/made/${typed.app}/`] : [`${typed.whose}/`]
     setWorking("restore")
     const said = await doing(async () => {
-      const each = []
-      for (const one of blobs) each.push(await call("backups_restore", { destination: destination().name, backup: typed.backup, blobs: one }, network))
+      const each: string[] = []
+      for (const one of blobs) each.push(await call("backups_restore", { destination: destination()!.name, backup: typed.backup, blobs: one }, network))
       return each.join("\n")
     })
     setWorking()
     if (said) {
-      toast(said)
+      toast(String(said))
       setRestoring()
     }
   }
@@ -203,7 +238,7 @@ function RestoreSheet() {
       <Show when={destination()}>
         <form onSubmit={restore}>
           <Field label="From">
-            <Select.Root name="backup" collection={backupsOf()} defaultValue={[destination().backups[0]?.name]} />
+            <Select.Root name="backup" collection={backupsOf()} defaultValue={[destination()!.backups[0]?.name]} />
           </Field>
           <Field label="What">
             <RadioGroup value={what()} onChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
@@ -233,14 +268,14 @@ function RestoreSheet() {
   )
 }
 
-function Backups(props) {
+function Backups(props: { all: All }) {
   const destinations = () => props.all.destinations
   const opened = () => destinations().find((destination) => destination.name === open())
   const now = press("now", () => call("backups_now", {}, network))
-  const schedule = ({ value: [every] }) => every && every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
+  const schedule = ({ value: [every] }: { value: string[] }) => every && every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
   return (
     <>
-      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Destination destination={opened()} /></Show>}>
+      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
         <Screen heading="Backups" back onBack={leave} action={<Show when={destinations().length}><Button loading={working() === "now"} onClick={now}>Back Up Now</Button></Show>}>
           <Show when={destinations().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
@@ -265,7 +300,7 @@ function Backups(props) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Backups" back onBack={leave}><Problem heading="Can't show backups" text={String(error().message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Backups" back onBack={leave}><Problem heading="Can't show backups" text={String((error() as Error).message ?? error())} /></Screen>}>
       <Loading fallback={<Screen heading="Backups" back onBack={leave}><Skeleton rows={3} /></Screen>}>
         <Backups all={backups()} />
       </Loading>
