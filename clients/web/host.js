@@ -66,7 +66,7 @@ async function mcp(method, params = {}) {
     const headers = { "content-type": "application/json", traceparent: `00-${span.traceId}-${span.spanId}-01` }
     answer = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
   } catch {
-    said(false)
+    setAnswering(false)
     ended("Can't reach your network")
     throw new Error("Can't reach your network. Check this device is online.")
   }
@@ -74,7 +74,7 @@ async function mcp(method, params = {}) {
     location.replace(await signIn())
     throw new Error("Sign in again.")
   }
-  said(answer.status !== 503)
+  setAnswering(answer.status !== 503)
   const { result, error } = await answer.json()
   ended(error?.message ?? (result?.isError ? (result.content?.[0]?.text ?? "The tool failed") : undefined))
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
@@ -101,8 +101,8 @@ async function send() {
   const stored = reports()
   if (!stored.length) return
   localStorage.removeItem(REPORTS)
-  const said = { jsonrpc: "2.0", method: "notifications/one/measured", params: { records: stored } }
-  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(said) }).catch(() => undefined)
+  const notification = { jsonrpc: "2.0", method: "notifications/one/measured", params: { records: stored } }
+  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(notification) }).catch(() => undefined)
   if (!sent?.ok) localStorage.setItem(REPORTS, JSON.stringify([...stored, ...reports()].slice(0, 300)))
 }
 /// Since when no server has answered, which once one does is reported, if it was long enough to show.
@@ -112,7 +112,7 @@ let unanswered = 0
 /// outside a device comes and goes, and no person should have to ask for what was going to come back anyway. Once
 /// one answers, every open app asks again, for what it missed.
 /** @param {boolean} now */
-function said(now) {
+function setAnswering(now) {
   const was = answering
   if (now && !was) for (const view of views.keys()) refresh(view)
   if (now !== was) emit("answering", (answering = now))

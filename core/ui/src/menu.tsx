@@ -1,6 +1,6 @@
 import { children, omit } from "solid-js"
 import { Icon } from "./button.tsx"
-import { said } from "./shared.ts"
+import { messages } from "./shared.ts"
 import { popover } from "./popover.ts"
 import { machine, type Part, type Root } from "./zag.tsx"
 import type { ButtonProps } from "./button.tsx"
@@ -46,7 +46,7 @@ export const Menu: {
         class={["ui-button press ring", props.class]}
         data-variant={props.variant ?? (words() ? "outline" : "ghost")}
         data-size={words() ? undefined : "icon"}
-        aria-label={props["aria-label"] ?? (words() ? undefined : said.more)}
+        aria-label={props["aria-label"] ?? (words() ? undefined : messages.more)}
       >
         {inside.toArray().length ? inside() : <Icon name="dots-three" />}
       </Ark.Trigger>

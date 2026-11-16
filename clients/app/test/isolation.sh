@@ -97,8 +97,8 @@ say "What Prober found"
 (cd "$here/../../../core/edge" && bun -e '
   const found = JSON.parse(await Bun.file(process.argv[1]).text());
   let reached = 0;
-  for (const [tried, { reached: did, said }] of Object.entries(found)) {
-    console.log(`${did ? "REACHED" : "refused"}  ${tried}: ${said}`);
+  for (const [tried, { reached: did, result }] of Object.entries(found)) {
+    console.log(`${did ? "REACHED" : "refused"}  ${tried}: ${result}`);
     reached += did;
   }
   if (!Object.keys(found).length) throw new Error("Prober found nothing, so nothing was tested");

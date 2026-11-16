@@ -98,27 +98,27 @@ defmodule OneCore.Plugins.Deploy do
     blobs = Bucket.list(@deployed)
     named = for blob <- blobs, do: Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob, capture: :all_but_first)
     latest = for [owner, name] <- named, do: "#{owner}/plugins/#{name}/latest"
-    {said, latest} = Enum.split(Bucket.read_all(blobs ++ latest), length(blobs))
+    {descriptions, latest} = Enum.split(Bucket.read_all(blobs ++ latest), length(blobs))
 
     deployed =
-      for {[owner, name], {:ok, said, _tag}, {:ok, _latest, _}} <- Enum.zip([named, said, latest]) do
-        said = JSON.decode!(said)
+      for {[owner, name], {:ok, description, _tag}, {:ok, _latest, _}} <- Enum.zip([named, descriptions, latest]) do
+        description = JSON.decode!(description)
 
         apps =
-          for app <- said["apps"],
+          for app <- description["apps"],
               do: %{name: app["name"], page: app["page"], icon: app["icon"], category: app["category"]}
 
         %{
           plugin: "#{owner}/plugins/#{name}",
-          title: said["title"] || name,
-          description: said["description"] || "",
-          subtitle: said["subtitle"],
-          about: said["about"],
-          icon: said["icon"],
+          title: description["title"] || name,
+          description: description["description"] || "",
+          subtitle: description["subtitle"],
+          about: description["about"],
+          icon: description["icon"],
           apps: apps,
-          tools: said["tools"] || [],
-          permissions: said["permissions"] || [],
-          sandbox: said["sandbox"] == true
+          tools: description["tools"] || [],
+          permissions: description["permissions"] || [],
+          sandbox: description["sandbox"] == true
         }
       end
 
@@ -131,7 +131,7 @@ defmodule OneCore.Plugins.Deploy do
   defp listed(artifact, version) do
     blob = "#{@deployed}#{Store.whose(artifact)}/#{Path.basename(artifact)}"
 
-    said =
+    listing =
       %{
         apps: version.apps,
         title: version.title,
@@ -145,9 +145,9 @@ defmodule OneCore.Plugins.Deploy do
       |> JSON.encode!()
 
     case Bucket.read(blob) do
-      {:ok, ^said, _tag} -> :ok
-      {:ok, _was, tag} -> Bucket.replace(blob, said, tag)
-      :absent -> Bucket.write(blob, said)
+      {:ok, ^listing, _tag} -> :ok
+      {:ok, _was, tag} -> Bucket.replace(blob, listing, tag)
+      :absent -> Bucket.write(blob, listing)
     end
 
     forget()
@@ -202,7 +202,7 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   defp deploying(name, nil), do: Agent.update(__MODULE__, &Map.delete(&1, name))
-  defp deploying(name, said), do: Agent.update(__MODULE__, &Map.put(&1, name, said))
+  defp deploying(name, status), do: Agent.update(__MODULE__, &Map.put(&1, name, status))
 
   # Deploys one plugin this server ships for the network, and notes its files among what servers have shipped. It's
   # installed for the network if it's essential or the network has it already.
@@ -231,8 +231,8 @@ defmodule OneCore.Plugins.Deploy do
 
   defp note_bundled(blob, source) do
     case Bucket.read(blob) do
-      {:ok, said, tag} ->
-        sources = bundled_sources(said)
+      {:ok, json, tag} ->
+        sources = bundled_sources(json)
 
         cond do
           source in sources -> :ok
@@ -260,14 +260,14 @@ defmodule OneCore.Plugins.Deploy do
 
       latest ->
         case Bucket.read(artifact <> "/bundled") do
-          {:ok, said, _tag} -> latest in bundled_sources(said)
+          {:ok, json, _tag} -> latest in bundled_sources(json)
           :absent -> false
         end
     end
   end
 
-  defp bundled_sources(said),
-    do: with(sources when is_list(sources) <- JSON.decode!(said), do: sources, else: (_ -> []))
+  defp bundled_sources(json),
+    do: with(sources when is_list(sources) <- JSON.decode!(json), do: sources, else: (_ -> []))
 
   @doc """
   Whether a plugin fits whoever it's installed for: the plugins it uses are there for them, and one with scheduled jobs

@@ -248,11 +248,11 @@ defmodule Backups.Run do
     listed_ok = digest(Destination.get(opened, "backups/" <> name) || "") == listed_digest
     bytes = Enum.sum_by(read, fn {_object, data} -> byte_size(data || "") end)
     took = seconds(System.os_time(:millisecond) - began)
-    said = "#{destination["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{took}."
+    message = "#{destination["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{took}."
 
     case {listed_ok, for(%{"key" => key, "object" => object} <- blobs, object in wrong, do: key)} do
       {true, []} ->
-        said <> " Every one is as it was sent."
+        message <> " Every one is as it was sent."
 
       {listed_ok, keys} ->
         not_as_sent =
@@ -277,7 +277,7 @@ defmodule Backups.Run do
           ])
         end)
 
-        raise said <> not_as_sent
+        raise message <> not_as_sent
     end
   end
 

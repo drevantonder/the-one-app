@@ -306,7 +306,7 @@ defmodule Backups do
   # Does `fun` to each destination, and says what each said. One that failed doesn't keep the rest from being done, and
   # what failed is raised after.
   defp each(destinations, fun) do
-    said =
+    results =
       for destination <- destinations do
         try do
           {:ok, fun.(destination)}
@@ -315,8 +315,8 @@ defmodule Backups do
         end
       end
 
-    text = Enum.map_join(said, "\n", &elem(&1, 1))
-    if Enum.any?(said, &match?({:failed, _}, &1)), do: raise(text), else: text
+    text = Enum.map_join(results, "\n", &elem(&1, 1))
+    if Enum.any?(results, &match?({:failed, _}, &1)), do: raise(text), else: text
   end
 
   defp every(call) do

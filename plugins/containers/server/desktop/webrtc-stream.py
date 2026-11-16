@@ -28,12 +28,12 @@ os.remove(sys.argv[1])
 reading, writing = os.pipe()
 if os.fork():
     os.close(writing)
-    said = b""
+    response = b""
     while chunk := os.read(reading, 65536):
-        said += chunk
-    said = json.loads(said or b'{"error": "it stopped before it answered: /tmp/webrtc-stream.log says why"}')
-    print(said.get("answer") or said["error"], end="", file=sys.stdout if "answer" in said else sys.stderr)
-    sys.exit(0 if "answer" in said else 1)
+        response += chunk
+    response = json.loads(response or b'{"error": "it stopped before it answered: /tmp/webrtc-stream.log says why"}')
+    print(response.get("answer") or response["error"], end="", file=sys.stdout if "answer" in response else sys.stderr)
+    sys.exit(0 if "answer" in response else 1)
 
 os.close(reading)
 os.setsid()
@@ -55,10 +55,10 @@ Gst.init(None)
 loop = GLib.MainLoop()
 
 
-def answer(said):
+def answer(response):
     global writing
     if writing is not None:
-        os.write(writing, json.dumps(said).encode())
+        os.write(writing, json.dumps(response).encode())
         os.close(writing)
         writing = None
 

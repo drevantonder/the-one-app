@@ -7,19 +7,19 @@ import { SignIn } from "ui"
 
 const callback = location.pathname === "/vault/callback"
 /// What the server said of the sign-in: `{ done }` or `{ problem }`.
-const [said, setSaid] = createSignal<{ done?: string; problem?: string }>()
+const [result, setResult] = createSignal<{ done?: string; problem?: string }>()
 if (callback)
   fetch(location.href, { method: "POST" })
     .then((answer) => answer.json())
-    .then(setSaid, () => setSaid({ problem: "Couldn't reach the network. Start the sign-in again." }))
+    .then(setResult, () => setResult({ problem: "Couldn't reach the network. Start the sign-in again." }))
 
 render(
   () => (
     <SignIn
       mark={<img src="./mark.png" alt="" />}
-      heading={!callback ? "Open Vault" : said()?.done ? "Signed in" : said()?.problem ? "Not signed in" : "Signing in"}
-      done={callback ? said()?.done : "Requests for your keys and sign-ins are answered in Vault, on a device of yours."}
-      problem={said()?.problem}
+      heading={!callback ? "Open Vault" : result()?.done ? "Signed in" : result()?.problem ? "Not signed in" : "Signing in"}
+      done={callback ? result()?.done : "Requests for your keys and sign-ins are answered in Vault, on a device of yours."}
+      problem={result()?.problem}
     />
   ),
   document.body,

@@ -225,11 +225,11 @@ mod tests {
     #[test]
     fn a_device_opens_a_notification_sent_to_it_and_nothing_else_does() {
         let (device, other) = (SecretKey::generate(), SecretKey::generate());
-        let said = br#"{"title":"Lunch is here","text":"At the door","app":"meals"}"#;
+        let plaintext = br#"{"title":"Lunch is here","text":"At the door","app":"meals"}"#;
         let to = notifications(&device).public();
-        let sealed = seal(&to, &for_notification(&to.to_string()), said).unwrap();
+        let sealed = seal(&to, &for_notification(&to.to_string()), plaintext).unwrap();
         assert!(!sealed.windows(5).any(|part| part == b"Lunch"));
-        assert_eq!(open_notification(&device, &sealed).unwrap().as_slice(), said);
+        assert_eq!(open_notification(&device, &sealed).unwrap().as_slice(), plaintext);
         assert!(open_notification(&other, &sealed).is_err());
         // Not with the device's own key: only the key derived for its notifications.
         assert!(open(&device, &for_notification(&notifications(&device).public().to_string()), &sealed).is_err());

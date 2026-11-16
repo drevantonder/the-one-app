@@ -47,7 +47,7 @@ pub fn target() -> String {
 
 /// What a device says of itself as it asks for its token, which the network keeps so a list of its devices says
 /// which build each is: its build, its kind of machine and its name.
-fn said() -> Value {
+fn device_info() -> Value {
     json!({"build": BUILD, "target": target(), "name": name()})
 }
 
@@ -120,12 +120,12 @@ impl Network {
             ask = ask.header(name, value);
         }
         let answer = ask.send().await?;
-        let (status, said): (_, Value) = (answer.status(), answer.json().await?);
+        let (status, response): (_, Value) = (answer.status(), answer.json().await?);
         if !status.is_success() {
-            bail!("{}", said["error"].as_str().unwrap_or("the presigner refused"))
+            bail!("{}", response["error"].as_str().unwrap_or("the presigner refused"))
         }
         let relay: RelayUrl = self.address.parse().with_context(|| format!("{} isn't an address", self.address))?;
-        let keys = said["servers"].as_array().context("the presigner listed no servers")?;
+        let keys = response["servers"].as_array().context("the presigner listed no servers")?;
         keys.iter()
             .map(|key| {
                 let key: EndpointId = key.as_str().unwrap_or_default().parse().context("that isn't a server's key")?;
@@ -217,14 +217,14 @@ impl DeviceAuthorization {
     /// machine's name.
     async fn request(server: &AuthorizationServer, key: &SecretKey) -> Result<Self> {
         let ask = serde_urlencoded::to_string([("client_id", key.public().to_string()), ("name", name())])?;
-        let (given, said) = ask_edge(&server.device_authorization_endpoint, key, FORM, ask).await?;
+        let (given, response) = ask_edge(&server.device_authorization_endpoint, key, FORM, ask).await?;
         let (true, Some(link), Some(code), Some(device_code)) = (
             given,
-            said["verification_uri_complete"].as_str(),
-            said["user_code"].as_str(),
-            said["device_code"].as_str(),
+            response["verification_uri_complete"].as_str(),
+            response["user_code"].as_str(),
+            response["device_code"].as_str(),
         ) else {
-            bail!("{}", said["error_description"].as_str().unwrap_or("the network's edge gave this device no code"))
+            bail!("{}", response["error_description"].as_str().unwrap_or("the network's edge gave this device no code"))
         };
         let halves: Vec<String> = code.as_bytes().chunks(4).map(|half| String::from_utf8_lossy(half).into()).collect();
         Ok(Self {
@@ -233,7 +233,7 @@ impl DeviceAuthorization {
             token_endpoint: server.token_endpoint.clone(),
             key: key.clone(),
             device_code: device_code.to_owned(),
-            interval: Duration::from_secs(said["interval"].as_u64().unwrap_or(5)),
+            interval: Duration::from_secs(response["interval"].as_u64().unwrap_or(5)),
         })
     }
 
@@ -247,14 +247,14 @@ impl DeviceAuthorization {
                 ("device_code", &self.device_code),
                 ("client_id", &self.key.public().to_string()),
             ])?;
-            let (given, said) = ask_edge(&self.token_endpoint, &self.key, FORM, ask).await?;
-            match said["error"].as_str() {
+            let (given, response) = ask_edge(&self.token_endpoint, &self.key, FORM, ask).await?;
+            match response["error"].as_str() {
                 _ if given => return Ok(()),
                 Some("authorization_pending") => {}
                 Some("slow_down") => self.interval += Duration::from_secs(5),
                 Some("access_denied") => bail!(NotApproved::Denied),
                 Some("expired_token") => bail!(NotApproved::Expired),
-                _ => bail!("{}", said["error_description"].as_str().unwrap_or("the network's edge didn't answer")),
+                _ => bail!("{}", response["error_description"].as_str().unwrap_or("the network's edge didn't answer")),
             }
         }
     }
@@ -305,18 +305,18 @@ pub fn name() -> String {
         let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }?;
         let mut env = vm.attach_current_thread()?;
         let activity = unsafe { JObject::from_raw(android.context().cast()) };
-        let text = |env: &mut jni::JNIEnv, said: JObject| -> jni::errors::Result<String> {
-            if said.is_null() {
+        let text = |env: &mut jni::JNIEnv, string: JObject| -> jni::errors::Result<String> {
+            if string.is_null() {
                 return Err(jni::errors::Error::NullPtr("nothing was said"));
             }
-            Ok(env.get_string(&JString::from(said))?.into())
+            Ok(env.get_string(&JString::from(string))?.into())
         };
         let set = (|| {
             let resolver =
                 env.call_method(&activity, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?.l()?;
             let setting = env.new_string("device_name")?;
             let get = "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;";
-            let said = env
+            let string = env
                 .call_static_method(
                     "android/provider/Settings$Global",
                     "getString",
@@ -324,7 +324,7 @@ pub fn name() -> String {
                     &[(&resolver).into(), (&setting).into()],
                 )?
                 .l()?;
-            text(&mut env, said)
+            text(&mut env, string)
         })();
         if set.is_err() {
             env.exception_clear()?;
@@ -394,9 +394,9 @@ impl NetworkConfig {
 
     /// When the token this client has ends, as it says: at once if it has none.
     fn ends(&self) -> SystemTime {
-        let said = self.token.as_ref().and_then(|token| BASE64URL_NOPAD.decode(token.as_bytes()).ok());
+        let claims = self.token.as_ref().and_then(|token| BASE64URL_NOPAD.decode(token.as_bytes()).ok());
         let until =
-            said.and_then(|said| serde_json::from_slice::<Value>(&said).ok()).and_then(|said| said["until"].as_u64());
+            claims.and_then(|claims| serde_json::from_slice::<Value>(&claims).ok()).and_then(|claims| claims["until"].as_u64());
         UNIX_EPOCH + Duration::from_millis(until.unwrap_or_default())
     }
 
@@ -404,7 +404,7 @@ impl NetworkConfig {
     /// device it is (`took`). A device that's nobody's there asks for a code to be let in by, and keeps nothing of
     /// whoever's it was: the next person on it sees none of it.
     async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
-        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/token", "params": {"build": said()}});
+        let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/token", "params": {"build": device_info()}});
         let mcp = format!("{}/mcp", self.address.trim_end_matches('/'));
         let (_, answer) = ask_edge(&mcp, key, "application/json", ask.to_string()).await?;
         if answer["error"]["code"] == NOBODY {
@@ -818,7 +818,7 @@ impl Client {
         // be let in by.
         let key = key(&home.join("key"))?;
         // A device that's a new build since it last got its token gets its next one now, which says so.
-        let said = config.as_ref().is_some_and(|config| config.build.as_deref() == Some(BUILD));
+        let built_same = config.as_ref().is_some_and(|config| config.build.as_deref() == Some(BUILD));
         // What a program of this device was on before is kept with its token: one that's now on another was updated.
         let updated = config.as_ref().and_then(|config| config.build.clone()).filter(|was| was != BUILD);
         let (network, who) = match config {
@@ -866,7 +866,7 @@ impl Client {
         // renewed yet, and the next while this runs.
         if renews {
             let left = match client.network().left() {
-                left if !left.is_zero() && said => left,
+                left if !left.is_zero() && built_same => left,
                 _ => match client.renew().await {
                     Err(error) if error.is::<DeviceAuthorization>() => return Err(error),
                     renewed => renewed.unwrap_or(AGAIN),
@@ -903,7 +903,7 @@ impl Client {
         let mut config = self.network();
         // No server takes a token that has ended, so that's asked at the address straight away.
         let given = match config.ends() > SystemTime::now() {
-            true => self.request("one/token", json!({"build": said()})).await.ok(),
+            true => self.request("one/token", json!({"build": device_info()})).await.ok(),
             false => None,
         };
         match given {
@@ -1086,10 +1086,10 @@ impl Client {
     /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
     /// it got its token. Then the answer says where its person lets it in again, as the network's edge says it.
     async fn taken_out(&self, answer: Vec<u8>) -> Vec<u8> {
-        let (Some(network), Ok(mut said)) = (self.link().network, serde_json::from_slice::<Value>(&answer)) else {
+        let (Some(network), Ok(mut response)) = (self.link().network, serde_json::from_slice::<Value>(&answer)) else {
             return answer;
         };
-        if said["error"]["code"] != NOBODY {
+        if response["error"]["code"] != NOBODY {
             return answer;
         }
         let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
@@ -1097,10 +1097,10 @@ impl Client {
             NetworkConfig { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
         let admitted = config.admit(&self.key, &self.home).await;
         match admitted.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
-            Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
+            Err(Some(not_in)) => response["error"]["message"] = json!(not_in.to_string()),
             _ => return answer,
         }
-        said.to_string().into_bytes()
+        response.to_string().into_bytes()
     }
 
     /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its attestation for the run's key,
@@ -1213,8 +1213,8 @@ impl Client {
         HOOKED.call_once(move || {
             let before = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic| {
-                let said = panic.payload_as_str().unwrap_or("panicked");
-                let mut record = json!({"name": "exception", "error": said.lines().next().unwrap_or(said),
+                let message = panic.payload_as_str().unwrap_or("panicked");
+                let mut record = json!({"name": "exception", "error": message.lines().next().unwrap_or(message),
                     "attributes": {"exception.type": "panic"}});
                 if let Some(at) = panic.location() {
                     record["attributes"]["code.file.path"] = json!(at.file());
@@ -1253,8 +1253,8 @@ impl Client {
         let stored = fs::read_to_string(&sending).unwrap_or_default();
         let _ = fs::remove_file(&sending);
         let records: Vec<Value> = stored.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
-        let said = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"records": records}});
-        if !records.is_empty() && self.ask(said.to_string().as_bytes()).await.is_err() {
+        let notification = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"records": records}});
+        if !records.is_empty() && self.ask(notification.to_string().as_bytes()).await.is_err() {
             for record in &records {
                 keep(&self.home, record);
             }
@@ -1348,8 +1348,8 @@ impl Client {
     /// Whose servers this client asks: whoever its device signed in as, or in a network being built, who it says it
     /// acts as. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
     fn of(&self) -> Result<String> {
-        let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
-        Ok(match (said("link").map(|link| link.split('/').collect::<Vec<_>>()), said("as"), &self.link().who) {
+        let header = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, header)| header.as_str());
+        Ok(match (header("link").map(|link| link.split('/').collect::<Vec<_>>()), header("as"), &self.link().who) {
             (Some(leads), ..) if leads[0] == "network" => "network/".to_owned(),
             (Some(leads), ..) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
             (_, Some(acts_as), _) => format!("users/{acts_as}/"),

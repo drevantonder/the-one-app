@@ -196,8 +196,8 @@ defmodule OneCore.Plugins.Store do
   code: `{:ok, version}`, or `:error` while no server that loads it has said.
   """
   def described(artifact, code) do
-    with {:ok, said, _tag} <- Bucket.read("#{artifact}/described/#{code}"),
-         do: Version.described(artifact, said),
+    with {:ok, description, _tag} <- Bucket.read("#{artifact}/described/#{code}"),
+         do: Version.described(artifact, description),
          else: (:absent -> :error)
   end
 
@@ -209,12 +209,12 @@ defmodule OneCore.Plugins.Store do
   def describe(%Version{artifact: artifact, code: code} = version) do
     if OneCore.Servers.here?(OneCore.User.owner(artifact)) do
       blob = "#{artifact}/described/#{code}"
-      said = Version.description(version)
+      description = Version.description(version)
 
       # One said otherwise, as a server from before descriptions named only what any server knows said it, is said again.
-      with :exists <- Bucket.write(blob, said),
-           {:ok, was, tag} when was != said <- Bucket.read(blob),
-           do: Bucket.replace(blob, said, tag)
+      with :exists <- Bucket.write(blob, description),
+           {:ok, was, tag} when was != description <- Bucket.read(blob),
+           do: Bucket.replace(blob, description, tag)
     end
 
     :ok

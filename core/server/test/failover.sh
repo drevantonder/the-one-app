@@ -13,7 +13,7 @@ touch "$answered"
 median() { sort -n "$1" | awk '{ all[NR] = $1 } END { printf "%.1f ms", all[int((NR + 1) / 2)] / 1000 }'; }
 
 # What each server named has logged about the lease since this was last asked, with servers by their names here.
-said() {
+logs() {
   local names=() server
   for server in "${!key[@]}"; do names+=(-e "s/${key[$server]}/$server/g"); done
   for server; do
@@ -89,13 +89,13 @@ wait $! || true
 until write client; do :; done
 echo "the next answered write came $(since "$killed") after the kill"
 for _ in $(seq 10); do write client; done
-said b
+logs b
 check client
 
 say "The first server comes back"
 start a
 for _ in $(seq 5); do write only-a; done
-said a
+logs a
 check only-a
 
 say "A server that still thinks it holds the lease: b is frozen, a takes over, b wakes and is read from, then written to"
@@ -106,18 +106,18 @@ until ONE_HOME=$folder/only-a "$one" tally list >/dev/null 2>&1; do :; done
 until write only-a; do :; done
 echo "a answered a write $(since "$frozen") after b froze"
 kill -CONT -- "-${group[b]}"
-said a b
+logs a b
 # Nothing has written to b since it froze, so only the lease can tell it that what it has is old.
 check only-b
 for _ in $(seq 5); do write only-b; done
-said a b
+logs a b
 check only-b
 
 say "Two standbys take over at once"
 start c
 write only-b
 write only-c
-said a b c >/dev/null
+logs a b c >/dev/null
 stop a
 killed=$(now)
 both=
@@ -132,16 +132,16 @@ until [ -n "$both" ]; do
   wait $second || both=
 done
 echo "both were answered $(since "$killed") after the kill"
-said b c
+logs b c
 check only-c
 
 say "A fresh server starts from a snapshot and the log after it"
 for _ in $(seq 40); do write only-b; done
 start d
-said b c >/dev/null
+logs b c >/dev/null
 stop b
 stop c
 until write only-d; do :; done
 echo "snapshots: $(ls "$bucket"/network/own/tally/snapshot | sed 's/^0*//' | tr '\n' ' ')"
-said d
+logs d
 check only-d

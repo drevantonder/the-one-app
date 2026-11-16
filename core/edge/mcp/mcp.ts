@@ -124,9 +124,9 @@ async function skill(request: Request, env: Env, url: URL) {
     answer = await forward(env, read, { device: who.device }, [`${who.who}/`, NETWORK]);
   }
   if (answer.status !== 200) return answer;
-  const said = await answer.json<{ result?: { contents: { text: string }[] }; error?: { code?: number; message: string } }>();
-  const text = said.result?.contents?.[0]?.text;
-  if (text === undefined) return new Response(said.error?.message ?? "There's no such skill", { status: said.error?.code === NOBODY ? 401 : 404 });
+  const response = await answer.json<{ result?: { contents: { text: string }[] }; error?: { code?: number; message: string } }>();
+  const text = response.result?.contents?.[0]?.text;
+  if (text === undefined) return new Response(response.error?.message ?? "There's no such skill", { status: response.error?.code === NOBODY ? 401 : 404 });
   return new Response(text, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
 }
 
@@ -197,8 +197,8 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   const asks_for = "device" in from ? meta.for : undefined;
   const traceparent = traced(meta.traceparent ?? headers?.get("traceparent") ?? undefined);
   const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP) || key === "progressToken"));
-  const said = { ...mcp, ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
-  message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
+  const forwardedMeta = { ...mcp, ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
+  message = JSON.stringify({ ...call, params: { ...call.params, _meta: forwardedMeta } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const forwarded = env.RELAY.forward(servers, message);
   // A request with a progress token from a client that takes a stream is told every second that it's still running,
@@ -275,8 +275,8 @@ function traced(parent: unknown) {
 async function nobodys(answer: Response) {
   // A stream ran past what a server says of a device at once.
   if (answer.status !== 200 || answer.headers.get("content-type") !== "application/json") return false;
-  const said = await answer.clone().json<{ error?: { code?: number } }>();
-  return said.error?.code === NOBODY;
+  const response = await answer.clone().json<{ error?: { code?: number } }>();
+  return response.error?.code === NOBODY;
 }
 
 /**

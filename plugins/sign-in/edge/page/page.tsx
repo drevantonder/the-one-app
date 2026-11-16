@@ -31,9 +31,9 @@ const shown = code && code.replace(/(.{4})(?=.)/g, "$1-")
 /// What this page asks Better Auth besides the passkey.
 async function ask<T = unknown>(path: string, body: object): Promise<T> {
   const answer = await fetch(`/sign-in/auth${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-  const said = await answer.json()
-  if (!answer.ok) throw new Error(said.message ?? "That didn't work. Try again.")
-  return said
+  const response = await answer.json()
+  if (!answer.ok) throw new Error(response.message ?? "That didn't work. Try again.")
+  return response
 }
 
 /// The assistant that asked to be let in, or the device whose code this is once this person is shown it.

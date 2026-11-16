@@ -224,7 +224,7 @@ defmodule GoogleAccount do
   end
 
   # What went wrong with a call, said for whoever's reading.
-  defp trouble(call, title, email, answer, said \\ %{}) do
+  defp trouble(call, title, email, answer, hints \\ %{}) do
     status = answer["status"]
     message = message(answer["body"]) || "#{status}"
     again = "#{email} needs signing in again, to let #{title} in: #{app(call)}_sign_in with account #{email}."
@@ -237,14 +237,14 @@ defmodule GoogleAccount do
         again
 
       # Gmail answers an id that was made up with 400 "Invalid id value", and Calendar a deleted event with 410.
-      said["missing"] && (status in [404, 410] or message =~ ~r/invalid id value/i) ->
-        said["missing"]
+      hints["missing"] && (status in [404, 410] or message =~ ~r/invalid id value/i) ->
+        hints["missing"]
 
-      said["missing"] && status == 403 ->
+      hints["missing"] && status == 403 ->
         "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (#{app(call)}_accounts lists them), or ask its owner to share it."
 
-      said["hint"] && status == 400 ->
-        "#{title}: #{String.trim_trailing(message, ".")}: #{said["hint"]}"
+      hints["hint"] && status == 400 ->
+        "#{title}: #{String.trim_trailing(message, ".")}: #{hints["hint"]}"
 
       true ->
         "#{title}: #{message}"

@@ -68,8 +68,8 @@ const about = (destination: Destination) =>
 /// Does something, says why if it couldn't, and shows everything as it is after. → whether it was done.
 async function doing<T>(does: () => Promise<T>): Promise<T | true | false> {
   try {
-    const said = await does()
-    return said ?? true
+    const result = await does()
+    return result ?? true
   } catch (error) {
     toast((error as Error).message)
     return false
@@ -219,14 +219,14 @@ function RestoreSheet() {
     const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement)) as Record<string, string>
     const blobs = what() === "file" ? [typed.file.trim()] : what() === "app" ? [`${typed.whose}/own/${typed.app}/`, `${typed.whose}/made/${typed.app}/`] : [`${typed.whose}/`]
     setWorking("restore")
-    const said = await doing(async () => {
+    const result = await doing(async () => {
       const each: string[] = []
       for (const one of blobs) each.push(await call("backups_restore", { destination: destination()!.name, backup: typed.backup, blobs: one }, network))
       return each.join("\n")
     })
     setWorking()
-    if (said) {
-      toast(String(said))
+    if (result) {
+      toast(String(result))
       setRestoring()
     }
   }

@@ -176,7 +176,7 @@ defmodule Telemetry.Recorded do
         case meta do
           %{crash_reason: {reason, stacktrace}} when is_list(stacktrace) -> crashed(:error, reason, stacktrace)
           %{crash_reason: reason} -> crashed(:exit, reason, [])
-          _ -> said(msg)
+          _ -> message(msg)
         end
 
       severity = if level == :warning, do: "WARN", else: "ERROR"
@@ -188,10 +188,10 @@ defmodule Telemetry.Recorded do
   defp crashed(kind, reason, stacktrace),
     do: String.replace_prefix(Exception.format_banner(kind, reason, stacktrace), "** ", "")
 
-  defp said({:string, text}), do: IO.chardata_to_string(text)
-  defp said({format, arguments}) when is_list(arguments), do: IO.chardata_to_string(:io_lib.format(format, arguments))
+  defp message({:string, text}), do: IO.chardata_to_string(text)
+  defp message({format, arguments}) when is_list(arguments), do: IO.chardata_to_string(:io_lib.format(format, arguments))
   # A report is a term, which may hold anything: only a crash's reason is kept of one, above.
-  defp said({:report, _report}), do: nil
+  defp message({:report, _report}), do: nil
 
   # A server's own warnings and errors are the network's, so the Telemetry installed for the network hears them. The
   # handler is this module as it is now, so it's added again each time the plugin moves to newer code.

@@ -76,11 +76,11 @@ impl Client {
     /// server gives a short-lived link to send it by. Gives the name that tool takes for it.
     pub async fn upload(&self, plugin: &str, file: Vec<u8>) -> Result<String> {
         let answer = self.request("tools/call", json!({"name": "upload", "arguments": {"plugin": plugin}})).await?;
-        let said = answer["content"][0]["text"].as_str().unwrap_or_default();
+        let text = answer["content"][0]["text"].as_str().unwrap_or_default();
         if answer["isError"] == true {
-            bail!("{said}")
+            bail!("{text}")
         }
-        let to: Value = serde_json::from_str(said).context("the server didn't say where to send the file")?;
+        let to: Value = serde_json::from_str(text).context("the server didn't say where to send the file")?;
         let (Some(method), Some(url), Some(name)) = (to["method"].as_str(), to["url"].as_str(), to["upload"].as_str())
         else {
             bail!("the server didn't say where to send the file")

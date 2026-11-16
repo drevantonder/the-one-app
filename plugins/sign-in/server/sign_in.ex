@@ -194,7 +194,7 @@ defmodule SignIn do
 
     for "users/" <> name = user <- users do
       case Artifact.read(call.own, "people/" <> name) do
-        {:ok, said, _tag} -> Map.put(JSON.decode!(said), "who", user)
+        {:ok, stored, _tag} -> Map.put(JSON.decode!(stored), "who", user)
         :absent -> %{"who" => user, "called" => nil, "email" => nil}
       end
     end

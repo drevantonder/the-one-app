@@ -78,15 +78,15 @@ web() {
 # What a command says is shown with it. `may` is one that has to be answered, and `refused` one that mustn't be.
 shown() {
   echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" -e 's/\(link [a-z/]*[A-Za-z0-9_-]\{6\}\)[A-Za-z0-9_-]*/\1…/' | named)"
-  echo "           -> $(named <<<"$said")"
+  echo "           -> $(named <<<"$output")"
 }
-may() { said=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
+may() { output=$("$@" 2>&1) && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $output" && exit 1; }; }
 # The skills someone is listed, by name, as MCP lists them: `skills as alice`.
 skills() {
   echo '{"jsonrpc":"2.0","id":1,"method":"skills/list","params":{}}' | "$@" mcp |
     { grep -o '"uri":"skill://[^"]*"' || true; } | cut -d/ -f3 | sort -u | paste -sd' '
 }
-refused() { ! said=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
+refused() { ! output=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $output" && exit 1; }; }
 
 # The plugins this tests with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
@@ -391,18 +391,18 @@ may as alice permissions share --artifact users/alice/plugins/spy --relation vie
 may as bob install --plugin users/alice/plugins/spy
 may via server as alice spy keep --text "alice's secret"
 may via server as alice spy kept
-handle=$(grep -o '"handle":"[0-9]*"' <<<"$said" | cut -d'"' -f4)
-own=$(grep -o '"name":"[^"]*"' <<<"$said" | cut -d'"' -f4)
+handle=$(grep -o '"handle":"[0-9]*"' <<<"$output" | cut -d'"' -f4)
+own=$(grep -o '"name":"[^"]*"' <<<"$output" | cut -d'"' -f4)
 [[ -n $handle ]]
 may via server as bob spy kept
-[[ $said != *"alice's secret"* ]]
+[[ $output != *"alice's secret"* ]]
 refused via server as bob spy steal --handle "$handle" --name "$own"
 refused via server as bob spy reach --name "$own"
 may via server as alice spy steal --handle "$handle" --name "$own"
 # Another plugin of the same files is another plugin, in a VM of its own, which has nothing of the first's.
 may as alice deploy --name spy2 --files-from "$folder/spy" --sandbox
 may via server as alice spy2 kept
-[[ $said != *"alice's secret"* ]]
+[[ $output != *"alice's secret"* ]]
 refused via server as alice spy2 steal --handle "$handle" --name "$own"
 refused as bob install --plugin network/plugins/reader --name mine
 refused as carol for network install --plugin network/plugins/reader --name everyones
@@ -442,8 +442,8 @@ echo "  the holder of alice's link is listed: ${listed:-none}"
 may as alice diary
 refused as bob diary
 refused as link "$link" diary
-said=$(as bob building-plugins)
-said="${said%%$'\n'*} ..." shown "may    " as bob building-plugins
+output=$(as bob building-plugins)
+output="${output%%$'\n'*} ..." shown "may    " as bob building-plugins
 refused as link "$link" building-plugins
 
 say "A plugin is whoever's deployed it, and has an artifact of its own for each one it's installed for"
@@ -527,7 +527,7 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
     Application.put_env(:one_core, :bucket, {OneCore.Bucket.S3, address})
     Application.ensure_all_started(:req)
     for blob <- blobs do
-      said = try do
+      response = try do
         case OneCore.Bucket.read(blob) do
           {:ok, data, _tag} -> "read, #{byte_size(data)} bytes"
           :absent -> "allowed, and there is none"
@@ -535,13 +535,13 @@ if [[ ${#at_address[@]} -gt 0 ]]; then
       rescue
         refused in OneCore.Bucket.Refused -> String.replace(refused.message, ~r/^.*refused: /, "refused by the presigner: ")
       end
-      IO.puts("    #{blob}: #{said}")
+      IO.puts("    #{blob}: #{response}")
     end
     # What it may read it may not replace by asking for both at once.
     ask = JSON.encode!(%{read: "network/servers", replace: "network/servers", tag: "*"})
-    said = Req.post!(address <> "/presigner/sign", body: ask, headers: OneCore.Edge.signed("/presigner/sign", ask))
-    said.status == 400 || raise "this was signed, and should not be: #{ask}"
-    IO.puts("    network/servers, read and replaced in one ask: refused by the presigner: #{said.body["error"]}")' \
+    response = Req.post!(address <> "/presigner/sign", body: ask, headers: OneCore.Edge.signed("/presigner/sign", ask))
+    response.status == 400 || raise "this was signed, and should not be: #{ask}"
+    IO.puts("    network/servers, read and replaced in one ask: refused by the presigner: #{response.body["error"]}")' \
     "$folder" "${at_address[1]}" users/alice/own/diary/1 users/alice/installed users/bob/own/diary/1 \
     users/bob/made/notes/list/text network/own/permissions/log/0000000000000001 groups/family/own/diary/1 \
     users/bob/installed network/plugins/notes/latest 2>&1 | grep -v "^$")

@@ -1,7 +1,7 @@
 import { Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Icon } from "./button.tsx"
-import { said } from "./shared.ts"
+import { messages } from "./shared.ts"
 
 /// `<Empty>No notes yet.</Empty>`: an empty screen or list: one grey line, and a button (`action`) only when
 /// there's an obvious first step.
@@ -18,7 +18,7 @@ export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
 /// so a quick load shows nothing in between. It's what `<Loading fallback>` shows.
 export function Skeleton(props: { rows?: number }) {
   return (
-    <div class="ui-state" role="status" aria-busy="true" aria-label={said.loading}>
+    <div class="ui-state" role="status" aria-busy="true" aria-label={messages.loading}>
       <div class="skeleton">
         {Array.from({ length: props.rows ?? 3 }, () => (
           <div>

@@ -84,7 +84,7 @@ scheme.addEventListener("change", dress)
 /// Says over the launcher what keeps it from showing anything: the network's address didn't answer, its pages
 /// couldn't be listed, or this app is too old for the network. Fine is silent.
 /** @type {string | undefined} */
-let said
+let lastProblem
 function problem() {
   // A problem is said in place of the mark.
   const nothing = unreached !== null || Boolean(unlisted) || tooOld
@@ -100,8 +100,8 @@ function problem() {
   action.hidden = tooOld && phone
   // What's shown is reported once, as it's shown.
   const shown = nothing ? `${byId("what").textContent}: ${byId("why").textContent}` : undefined
-  if (shown && shown !== said) report("one.client.problem", shown)
-  said = shown
+  if (shown && shown !== lastProblem) report("one.client.problem", shown)
+  lastProblem = shown
   status()
 }
 
@@ -339,8 +339,8 @@ async function answer(view, method, params) {
   if (method === "one/client") {
     if (params.leave) return invoke("enter")
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
-    if ("serve" in params) return { said: await invoke("serve", { on: params.serve === true }) }
-    if (params.update) return { said: await invoke("update") }
+    if ("serve" in params) return { message: await invoke("serve", { on: params.serve === true }) }
+    if (params.update) return { message: await invoke("update") }
     if ("theme" in params) {
       if (params.theme) localStorage.setItem("theme", params.theme)
       else localStorage.removeItem("theme")

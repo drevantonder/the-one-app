@@ -434,18 +434,18 @@ defmodule OneCore.Sandbox.Child do
   defp compiled(sources, name, out, files, folder) do
     case Kernel.ParallelCompiler.compile_to_path(sources, out, return_diagnostics: true) do
       {:ok, modules, warnings} ->
-        Process.put({__MODULE__, :warnings, name}, said(warnings.compile_warnings ++ warnings.runtime_warnings, folder))
+        Process.put({__MODULE__, :warnings, name}, messages(warnings.compile_warnings ++ warnings.runtime_warnings, folder))
 
         for module <- modules, do: :persistent_term.put({__MODULE__, :files, module}, {name, out, files})
         Enum.each(modules, &Code.ensure_loaded!/1)
         modules
 
       {:error, errors, _warnings} ->
-        raise said(errors, folder) |> Enum.join("\n")
+        raise messages(errors, folder) |> Enum.join("\n")
     end
   end
 
-  defp said(diagnostics, folder) do
+  defp messages(diagnostics, folder) do
     for %{file: file, position: position, message: message} <- diagnostics do
       line = if is_tuple(position), do: elem(position, 0), else: position
       "#{Path.relative_to(to_string(file), folder)}:#{line}: #{String.trim(message)}"
@@ -456,25 +456,25 @@ defmodule OneCore.Sandbox.Child do
 
   # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what sandbox mode doesn't offer it.
   defp described(plugin, main, modules, uses) do
-    said = fn function, none ->
+    value = fn function, none ->
       if function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none
     end
 
-    hooks = said.(:hooks, [])
-    offers = said.(:offers, [])
+    hooks = value.(:hooks, [])
+    offers = value.(:offers, [])
     services = for module <- modules, OneCore.Service in behaviours(module), do: inspect(module)
 
     %{
-      "tools" => said.(:tools, []),
-      "apps" => said.(:apps, []),
-      "title" => said.(:title, nil),
-      "icon" => said.(:icon, nil),
+      "tools" => value.(:tools, []),
+      "apps" => value.(:apps, []),
+      "title" => value.(:title, nil),
+      "icon" => value.(:icon, nil),
       "offers" => offers,
-      "widgets" => said.(:widgets, []),
-      "uses" => said.(:uses, []),
+      "widgets" => value.(:widgets, []),
+      "uses" => value.(:uses, []),
       "hooks" => hooks,
-      "jobs" => said.(:jobs, []),
-      "permissions" => said.(:permissions, []),
+      "jobs" => value.(:jobs, []),
+      "permissions" => value.(:permissions, []),
       "warnings" => Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
       "problems" => OneCore.Sandbox.Check.problems(plugin, modules, uses, hooks, offers, services)
     }
@@ -530,9 +530,9 @@ defmodule OneCore.Sandbox.Check do
     calls = calls(modules, loaded)
 
     using =
-      for name <- uses, said = calls(modules_of(name), loaded), said != [] do
+      for name <- uses, calls = calls(modules_of(name), loaded), calls != [] do
         "#{where(plugin)}: it uses #{name}, whose code would run in its VM in sandbox mode, and can't there " <>
-          "(#{hd(said)}#{if length(said) > 1, do: " And #{length(said) - 1} more."}) Call its tools instead, which " <>
+          "(#{hd(calls)}#{if length(calls) > 1, do: " And #{length(calls) - 1} more."}) Call its tools instead, which " <>
           "permissions/0 names, and leave what can't run out of uses/0."
       end
 

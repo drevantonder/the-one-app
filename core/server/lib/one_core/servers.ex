@@ -89,7 +89,7 @@ defmodule OneCore.Servers do
   def off(what, owner, servers),
     do:
       "#{what} runs on #{owner}'s own servers, and none is on: " <>
-        Enum.map_join(servers, "; ", &Server.said(:unreachable, &1)) <> "."
+        Enum.map_join(servers, "; ", &Server.error_message(:unreachable, &1)) <> "."
 
   @doc "The services the server whose key is `key` has installed: each one's plugin and its name."
   def installed(key) do

@@ -206,8 +206,8 @@ defmodule AndroidEmulator.Emulator do
         %{"data" => data} -> File.write!(file, Base.decode64!(data))
       end
 
-      %{stdout: said} = adb!(service, id, ["install", "-r", "-g", file], 600)
-      String.trim(said)
+      %{stdout: output} = adb!(service, id, ["install", "-r", "-g", file], 600)
+      String.trim(output)
     after
       File.rm(file)
     end
@@ -225,8 +225,8 @@ defmodule AndroidEmulator.Emulator do
   """
   def screens(service) do
     for d <- list(service), d["state"] == "running",
-        %{exit: 0, stdout: said} <- [adb(service, d["id"], ~w(shell wm size), 10)],
-        [_, width, height] <- [Regex.run(~r/(\d+)x(\d+)\s*$/, String.trim(said))],
+        %{exit: 0, stdout: output} <- [adb(service, d["id"], ~w(shell wm size), 10)],
+        [_, width, height] <- [Regex.run(~r/(\d+)x(\d+)\s*$/, String.trim(output))],
         do: Map.merge(d, %{"width" => String.to_integer(width), "height" => String.to_integer(height)})
   end
 

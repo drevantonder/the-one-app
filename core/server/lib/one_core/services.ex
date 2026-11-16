@@ -65,7 +65,7 @@ defmodule OneCore.Services do
           :ok
 
         stopped ->
-          why = with {:stopped, why} <- stopped, do: ". It stopped because: " <> said(plugin, why)
+          why = with {:stopped, why} <- stopped, do: ". It stopped because: " <> explained(plugin, why)
           {:error, "#{service} is installed on this server, but it stopped as it started#{why}"}
       end
     end
@@ -135,7 +135,7 @@ defmodule OneCore.Services do
   end
 
   # Why a service stopped, as its plugin's author would read it.
-  defp said(plugin, why) do
+  defp explained(plugin, why) do
     why =
       case why do
         {%{__exception__: true} = error, _stacktrace} -> Exception.message(error)
@@ -197,7 +197,7 @@ defmodule OneCore.Services do
     why =
       cond do
         service not in here() -> "#{plugin}'s #{name} isn't installed on this server"
-        why = state.stopped[service] -> "#{plugin}'s #{name} stopped, and is being started again: #{said(plugin, why)}"
+        why = state.stopped[service] -> "#{plugin}'s #{name} stopped, and is being started again: #{explained(plugin, why)}"
         true -> "#{plugin}'s #{name} is still starting"
       end
 
@@ -218,7 +218,7 @@ defmodule OneCore.Services do
     state = %{state | monitors: monitors, stopped: Map.put(state.stopped, service, why)}
 
     if service in here() do
-      Logger.warning("#{plugin}'s #{name} stopped, and is started again: #{said(plugin, OneCore.Redact.redact(why))}")
+      Logger.warning("#{plugin}'s #{name} stopped, and is started again: #{explained(plugin, OneCore.Redact.redact(why))}")
       wait = max(0, state.started[service] + @apart - System.monotonic_time(:millisecond))
       Process.send_after(self(), {:start, service}, wait)
     else

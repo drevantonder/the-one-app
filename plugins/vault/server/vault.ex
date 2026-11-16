@@ -684,7 +684,7 @@ defmodule Vault do
     %{
       id: id,
       link: link,
-      said: "#{where} shows the request, to answer on their own device. You never see what they type."
+      message: "#{where} shows the request, to answer on their own device. You never see what they type."
     }
   end
 
@@ -741,9 +741,9 @@ defmodule Vault do
           end
         end)
 
-      {said, plugin} = answered
+      {message, plugin} = answered
       if plugin, do: share(call, "share", Artifact.name(artifact), plugin)
-      said
+      message
     end)
   end
 

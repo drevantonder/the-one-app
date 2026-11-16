@@ -223,8 +223,8 @@ defmodule AgentSkills.Writer do
   defp kebab(text), do: text |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
 
   # Says each problem once, not every minute.
-  defp log_once(state, said) do
-    if not MapSet.member?(state.logged, said), do: Logger.warning("Agent Skills: " <> said)
-    %{state | logged: MapSet.put(state.logged, said)}
+  defp log_once(state, message) do
+    if not MapSet.member?(state.logged, message), do: Logger.warning("Agent Skills: " <> message)
+    %{state | logged: MapSet.put(state.logged, message)}
   end
 end

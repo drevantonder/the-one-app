@@ -146,7 +146,7 @@ defmodule OneCore.Plugins.Version do
   def description(%__MODULE__{under: under} = version) do
     cached = :persistent_term.get({__MODULE__, under})
 
-    said =
+    description =
       Map.take(version, [
         :tools,
         :apps,
@@ -167,13 +167,13 @@ defmodule OneCore.Plugins.Version do
     # It holds only names any server knows: a tool's inputs as JSON has them, not the atoms its plugin wrote them
     # with, which a server that never loaded the plugin doesn't have, and won't take from the bucket.
     tools =
-      for tool <- said.tools do
+      for tool <- description.tools do
         tool
         |> Map.take([:name, :description, :inputs, :read_only, :by_link, :ui])
         |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
       end
 
-    :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: cached.files, skills: cached.skills}))
+    :erlang.term_to_binary(%{description | tools: tools} |> Map.merge(%{files: cached.files, skills: cached.skills}))
   end
 
   @doc """
@@ -184,17 +184,17 @@ defmodule OneCore.Plugins.Version do
   def described(artifact, description) do
     # Its skills are as `OneCore.Skills` says them, whose names a server that has just started may not know yet.
     Code.ensure_loaded!(Skills)
-    said = :erlang.binary_to_term(description, [:safe])
-    under = {:described, artifact, said.code}
+    description = :erlang.binary_to_term(description, [:safe])
+    under = {:described, artifact, description.code}
 
     tools =
-      for tool <- said.tools,
+      for tool <- description.tools,
           do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
-    :persistent_term.put({__MODULE__, under}, %{files: said.files, hashes: %{}, skills: said.skills, own: %{}})
+    :persistent_term.put({__MODULE__, under}, %{files: description.files, hashes: %{}, skills: description.skills, own: %{}})
 
     fields =
-      Map.take(said, [
+      Map.take(description, [
         :apps,
         :widgets,
         :uses,
@@ -220,7 +220,7 @@ defmodule OneCore.Plugins.Version do
   itself in its own VM (`OneCore.Sandbox`): `{:ok, version}`, or `{:error, why}`. Its code never loads
   here, so it's described as a version a server doesn't run is, and is checked as one that loads is.
   """
-  def sandboxed(artifact, files, said) do
+  def sandboxed(artifact, files, description) do
     name = Path.basename(artifact)
     code = code(files)
     under = {:described, artifact, code}
@@ -236,24 +236,24 @@ defmodule OneCore.Plugins.Version do
     end
 
     offers =
-      for offer <- taken.(said["offers"], ~w(name kind description)), do: Map.update(offer, :kind, nil, &hook_kind/1)
+      for offer <- taken.(description["offers"], ~w(name kind description)), do: Map.update(offer, :kind, nil, &hook_kind/1)
 
-    said = %{
-      tools: taken.(said["tools"], ~w(name description inputs read_only by_link ui)),
-      apps: taken.(said["apps"], ~w(name page icon category)),
-      title: said["title"],
-      icon: said["icon"],
-      widgets: taken.(said["widgets"], ~w(name tool sizes)),
-      uses: said["uses"],
-      hooks: said["hooks"],
+    description = %{
+      tools: taken.(description["tools"], ~w(name description inputs read_only by_link ui)),
+      apps: taken.(description["apps"], ~w(name page icon category)),
+      title: description["title"],
+      icon: description["icon"],
+      widgets: taken.(description["widgets"], ~w(name tool sizes)),
+      uses: description["uses"],
+      hooks: description["hooks"],
       offers: offers,
-      jobs: taken.(said["jobs"], ~w(tool every inputs)),
+      jobs: taken.(description["jobs"], ~w(tool every inputs)),
       essential: false,
-      permissions: said["permissions"]
+      permissions: description["permissions"]
     }
 
     with {:ok, skills} <- Skills.found(name, skills),
-         {:ok, version} <- checked(under, nil, said, [], rest) do
+         {:ok, version} <- checked(under, nil, description, [], rest) do
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
       :persistent_term.put({__MODULE__, under}, %{files: served, hashes: %{}, skills: skills, own: %{}})
 
@@ -329,12 +329,12 @@ defmodule OneCore.Plugins.Version do
       # What doesn't compile says why in its diagnostics.
       compile = fn -> Code.compile_string(source, path) end
       {_, diagnostics} = Code.with_diagnostics(fn -> try(do: compile.(), rescue: (_ in CompileError -> nil)) end)
-      {_, said} = :persistent_term.get({__MODULE__, module})
+      {_, message} = :persistent_term.get({__MODULE__, module})
 
       if :code.is_loaded(module) == false do
         :persistent_term.erase({__MODULE__, module})
-        said = if said == file, do: Enum.map_join(diagnostics, "\n", & &1.message), else: said
-        {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{said}"}
+        message = if message == file, do: Enum.map_join(diagnostics, "\n", & &1.message), else: message
+        {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{message}"}
       else
         :ok
       end
@@ -378,7 +378,7 @@ defmodule OneCore.Plugins.Version do
         {:ok, modules, warnings} ->
           case Enum.reject(modules, &under?(&1, under)) do
             [] ->
-              {:ok, modules, said(warnings.compile_warnings ++ warnings.runtime_warnings, under, folder)}
+              {:ok, modules, messages(warnings.compile_warnings ++ warnings.runtime_warnings, under, folder)}
 
             outside ->
               Enum.each(outside, &(:code.delete(&1) && :code.purge(&1)))
@@ -386,7 +386,7 @@ defmodule OneCore.Plugins.Version do
           end
 
         {:error, errors, _warnings} ->
-          {:error, said(errors, under, folder)}
+          {:error, messages(errors, under, folder)}
       end
     after
       File.rm_rf!(folder)
@@ -408,7 +408,7 @@ defmodule OneCore.Plugins.Version do
 
   defp defined_by(_), do: []
 
-  defp said(diagnostics, under, folder) do
+  defp messages(diagnostics, under, folder) do
     Enum.map_join(diagnostics, "\n", fn %{file: file, position: position, message: message} ->
       line = if is_tuple(position), do: elem(position, 0), else: position
       own_names("#{file}:#{line}: #{String.trim(message)}", under) |> String.replace(folder <> "/", "")
@@ -434,7 +434,7 @@ defmodule OneCore.Plugins.Version do
   def own_names(text, under), do: String.replace(text, inspect(under) <> ".", "")
 
   # What a plugin says of itself, by the functions that say it, with what each gives where it has none.
-  @said [
+  @callbacks [
     tools: [],
     apps: [],
     title: nil,
@@ -455,8 +455,8 @@ defmodule OneCore.Plugins.Version do
         {:ok, version(under, nil, [], [], [], [], rest, nil)}
 
       [plugin] ->
-        said =
-          for {function, none} <- @said,
+        description =
+          for {function, none} <- @callbacks,
               into: %{},
               do: {function, if(function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none)}
 
@@ -466,7 +466,7 @@ defmodule OneCore.Plugins.Version do
           services =
             for module <- services, do: %{name: own_name(module), called: module.called(), needs: module.needs()}
 
-          checked(under, plugin, said, services, rest)
+          checked(under, plugin, description, services, rest)
         else
           {:error,
            "A service says `use GenServer`, its needs/0 gives what it needs of a machine, and its called/0 what " <>
@@ -486,9 +486,9 @@ defmodule OneCore.Plugins.Version do
 
   # A version from what its plugin said of itself, if that's what a plugin says: `plugin` is its module, or nil for
   # one in sandbox mode, whose module is in its own VM.
-  defp checked(under, plugin, said, services, rest) do
-    %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, uses: uses, hooks: hooks} = said
-    %{offers: offers, jobs: jobs, permissions: permissions} = said
+  defp checked(under, plugin, description, services, rest) do
+    %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, uses: uses, hooks: hooks} = description
+    %{offers: offers, jobs: jobs, permissions: permissions} = description
 
     cond do
       not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
@@ -547,7 +547,7 @@ defmodule OneCore.Plugins.Version do
                     hooks: Enum.uniq(hooks),
                     offers: offers,
                     jobs: jobs,
-                    essential: said.essential == true,
+                    essential: description.essential == true,
                     permissions: Enum.uniq(permissions)
                 }}
     end

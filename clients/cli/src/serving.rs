@@ -64,14 +64,14 @@ pub async fn on(client: &Client) -> Result<String> {
     }
     // The server runs with the client it updates by, and finds programs where its person's terminal does. Windows
     // starts a task with its person's environment as they log in, PATH and all.
-    let mut said = vec![("ONE_HOME", client::home()?.display().to_string()), ("ONE_FOR", who.clone())];
+    let mut env = vec![("ONE_HOME", client::home()?.display().to_string()), ("ONE_FOR", who.clone())];
     #[cfg(unix)]
-    said.push(("PATH", login_path().await?));
+    env.push(("PATH", login_path().await?));
     // A network being built has a command say who it acts as, and so does what runs here for it.
     if let Ok(name) = env::var("ONE_AS") {
-        said.push(("ONE_AS", name));
+        env.push(("ONE_AS", name));
     }
-    system::start(&here, &key, &env::current_exe()?, &said).await?;
+    system::start(&here, &key, &env::current_exe()?, &env).await?;
     tool(client, "builds", json!({"server": key})).await.context("The server started, and didn't answer")?;
     Ok(format!("This device is a server for {who} now, and starts whenever it does. Its key: {key}\n{address}"))
 }
@@ -96,11 +96,11 @@ async fn login_path() -> Result<String> {
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .output();
-    let said = timeout(Duration::from_secs(10), command)
+    let output = timeout(Duration::from_secs(10), command)
         .await
         .with_context(|| format!("Your login shell, {shell}, didn't say its PATH within 10 seconds"))??;
-    let said = String::from_utf8_lossy(&said.stdout);
-    let path = said.split(MARK).nth(1).filter(|path| !path.is_empty());
+    let output = String::from_utf8_lossy(&output.stdout);
+    let path = output.split(MARK).nth(1).filter(|path| !path.is_empty());
     Ok(path.with_context(|| format!("Your login shell, {shell}, didn't say its PATH"))?.to_owned())
 }
 
@@ -204,9 +204,9 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                 keep_error(&line);
             }
         });
-        let mut said = BufReader::new(server.stdout.take().context("the server's output")?).lines();
+        let mut lines = BufReader::new(server.stdout.take().context("the server's output")?).lines();
         let running = async {
-            while let Some(line) = said.next_line().await? {
+            while let Some(line) = lines.next_line().await? {
                 say(&line)?;
                 keep(&line);
                 if line.starts_with(RUNNING) {
@@ -248,7 +248,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             bail!("The server stopped before it was running: {}", server.wait().await?)
         }
         system::ready(&key)?;
-        while let Some(line) = said.next_line().await? {
+        while let Some(line) = lines.next_line().await? {
             say(&line)?;
             if line == UPDATE_ASKED {
                 // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops
@@ -326,12 +326,12 @@ const LAST: usize = 5;
 
 /// Keeps why an update didn't take, with the last lines the build said, in `went-back`, for the server to say.
 fn went_back(here: &Here, why: &str, lines: &[String]) -> Result<()> {
-    let said = match lines {
+    let message = match lines {
         [] => why.to_owned(),
         lines => format!("{why} Its last lines: {}", lines.join(" | ")),
     };
-    println!("{said}");
-    Ok(fs::write(here.folder.join("went-back"), said)?)
+    println!("{message}");
+    Ok(fs::write(here.folder.join("went-back"), message)?)
 }
 
 /// Takes the latest builds this device isn't on: the server's, to try next, and the program's. Gives whether it
@@ -372,8 +372,8 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&new, fs::Permissions::from_mode(0o755))?;
     }
-    let said = command(&new).arg("--version").output();
-    if !said.as_ref().is_ok_and(|said| String::from_utf8_lossy(&said.stdout).split_whitespace().nth(1) == Some(build)) {
+    let output = command(&new).arg("--version").output();
+    if !output.as_ref().is_ok_and(|output| String::from_utf8_lossy(&output.stdout).split_whitespace().nth(1) == Some(build)) {
         fs::remove_file(&new)?;
         bail!("The build {build} of one doesn't start here.")
     }
@@ -394,10 +394,10 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
 async fn answers(client: &Client, key: &str, build: &str) -> bool {
     let asking = async {
         loop {
-            let said = tool(client, "builds", json!({"server": key})).await.ok();
-            if said
-                .and_then(|said| serde_json::from_str::<Value>(&said).ok())
-                .is_some_and(|said| said["build"] == build)
+            let response = tool(client, "builds", json!({"server": key})).await.ok();
+            if response
+                .and_then(|response| serde_json::from_str::<Value>(&response).ok())
+                .is_some_and(|response| response["build"] == build)
             {
                 return;
             }
@@ -409,8 +409,8 @@ async fn answers(client: &Client, key: &str, build: &str) -> bool {
 
 /// The latest builds for this kind of machine, by what they are (`server`, `one`), each with a link to it.
 async fn download(client: &Client) -> Result<Map<String, Value>> {
-    let said = tool(client, "download", json!({"target": target()})).await?;
-    match serde_json::from_str(&said)? {
+    let response = tool(client, "download", json!({"target": target()})).await?;
+    match serde_json::from_str(&response)? {
         Value::Object(builds) => Ok(builds),
         _ => bail!("the network didn't list its builds"),
     }
@@ -444,13 +444,13 @@ async fn fetch(build: &Value, file: &Path) -> Result<()> {
 /// Calls one of the network's tools and gives what it said, or the error it said.
 async fn tool(client: &Client, name: &str, arguments: Value) -> Result<String> {
     let result = client.request("tools/call", json!({"name": name, "arguments": arguments})).await?;
-    let said: Vec<&str> =
+    let lines: Vec<&str> =
         result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
-    let said = said.join("\n");
+    let message = lines.join("\n");
     if result["isError"] == true {
-        bail!("{said}")
+        bail!("{message}")
     }
-    Ok(said)
+    Ok(message)
 }
 
 /// This device's server, in the client's home.
@@ -527,8 +527,8 @@ impl Here {
         let unpacked = command("tar").arg("-xzf").arg(&archive).arg("-C").arg(&unpacking).status()?;
         fs::remove_file(&archive)?;
         ensure!(unpacked.success(), "The build {name} didn't unpack.");
-        let said = command(release(&unpacking)).args(["eval", "OneCore.Release.check()"]).output()?;
-        let (out, errors) = (String::from_utf8_lossy(&said.stdout), String::from_utf8_lossy(&said.stderr));
+        let output = command(release(&unpacking)).args(["eval", "OneCore.Release.check()"]).output()?;
+        let (out, errors) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         let out = out.trim();
         if out != name {
             fs::remove_dir_all(&unpacking)?;
@@ -557,14 +557,14 @@ mod system {
     /// Writes the unit in the server's folder and has systemd start it now, or again with what it's run with now
     /// where it's running, and with the user's processes. That returns once the server is running (`ready`), or
     /// failed to start.
-    pub async fn start(here: &Here, key: &str, program: &Path, said: &[(&str, String)]) -> Result<()> {
+    pub async fn start(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
         let unit = here.folder.join(name(key));
-        let said: String = said.iter().map(|(name, value)| format!("Environment=\"{name}={value}\"\n")).collect();
+        let env: String = env.iter().map(|(name, value)| format!("Environment=\"{name}={value}\"\n")).collect();
         fs::write(
             &unit,
             format!(
                 "[Unit]\nDescription=The One App's server\nStartLimitIntervalSec=0\n\n\
-                 [Service]\nType=notify\nExecStart=\"{}\" serve run\n{said}Restart=always\nRestartSec=2\n\
+                 [Service]\nType=notify\nExecStart=\"{}\" serve run\n{env}Restart=always\nRestartSec=2\n\
                  TimeoutStartSec={}\n\n[Install]\nWantedBy=default.target\n",
                 program.display(),
                 START.as_secs()
@@ -648,10 +648,10 @@ mod system {
     /// Writes the LaunchAgent and has launchd start it now, or again with what it's run with now where it's
     /// running, and at each login, keeping it running. Its output is `server.log` in the server's folder. That
     /// returns once the server is running: it says so (`ready`) on a socket in its folder, as systemd hears it.
-    pub async fn start(here: &Here, key: &str, program: &Path, said: &[(&str, String)]) -> Result<()> {
+    pub async fn start(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
         let ready = here.folder.join("ready");
         let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;");
-        let said: String = said
+        let env: String = env
             .iter()
             .map(|(name, value)| (*name, value.clone()))
             .chain([("NOTIFY_SOCKET", ready.display().to_string())])
@@ -666,7 +666,7 @@ mod system {
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
                  <key>Label</key><string>{}</string>\
                  <key>ProgramArguments</key><array><string>{}</string><string>serve</string><string>run</string></array>\
-                 <key>EnvironmentVariables</key><dict>{said}</dict>\
+                 <key>EnvironmentVariables</key><dict>{env}</dict>\
                  <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\
                  <key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>\
                  </dict></plist>\n",
@@ -784,10 +784,10 @@ mod system {
     /// Registers the task and has Task Scheduler start it now, or again with what it's run with now where it's
     /// running. That returns once the server is running (`ready`). A task has no environment of its own, so the
     /// server's is in its arguments, which `one serve run` takes.
-    pub async fn start(here: &Here, key: &str, program: &Path, said: &[(&str, String)]) -> Result<()> {
+    pub async fn start(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
         let user = format!("{}\\{}", env::var("USERDOMAIN")?, env::var("USERNAME")?);
         let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-        let arguments: String = said.iter().map(|(name, value)| format!(" \"{name}={value}\"")).collect();
+        let arguments: String = env.iter().map(|(name, value)| format!(" \"{name}={value}\"")).collect();
         let task = format!(
             r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -921,7 +921,7 @@ mod system {
 
     const NONE: &str = "A server runs on Linux, macOS and Windows, and this device is none of them.";
 
-    pub async fn start(_here: &Here, _key: &str, _program: &Path, _said: &[(&str, String)]) -> Result<()> {
+    pub async fn start(_here: &Here, _key: &str, _program: &Path, _env: &[(&str, String)]) -> Result<()> {
         bail!(NONE)
     }
 

@@ -264,8 +264,8 @@ defmodule IphoneSimulator.Simulator do
 
   # Its screen as idb describes it: its size in pixels, and its points for each pixel.
   defp describe(service, udid) do
-    with %{exit: 0, stdout: said} <- cmd(idb(service) ++ ["describe", "--json", "--udid", udid], 30),
-         %{"screen_dimensions" => %{"width" => width, "height" => height, "width_points" => across}} <- JSON.decode!(said) do
+    with %{exit: 0, stdout: output} <- cmd(idb(service) ++ ["describe", "--json", "--udid", udid], 30),
+         %{"screen_dimensions" => %{"width" => width, "height" => height, "width_points" => across}} <- JSON.decode!(output) do
       %{"width" => width, "height" => height, "points" => across / width}
     else
       _ -> nil
@@ -274,8 +274,8 @@ defmodule IphoneSimulator.Simulator do
 
   # The simulators in the Mac's device set, by udid.
   defp simulators do
-    %{exit: 0, stdout: said} = cmd(~w(xcrun simctl list --json devices), 30)
-    for {_runtime, devices} <- JSON.decode!(said)["devices"], d <- devices, into: %{}, do: {d["udid"], d}
+    %{exit: 0, stdout: output} = cmd(~w(xcrun simctl list --json devices), 30)
+    for {_runtime, devices} <- JSON.decode!(output)["devices"], d <- devices, into: %{}, do: {d["udid"], d}
   end
 
   defp state("Booted"), do: "running"

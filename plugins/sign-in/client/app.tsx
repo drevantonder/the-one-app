@@ -57,15 +57,15 @@ const mine = createMemo(async () => {
   ])
   const latest = { ...network?.latest, ...builds.latest }
   /// Whether something is behind the latest build for its kind of machine, or `undefined` where there's none.
-  const behind = (kind: string, said?: Built) => {
-    const out = said?.build && latest[`${kind}/${said.target}`]
-    return out ? out.build !== said.build : undefined
+  const behind = (kind: string, built?: Built) => {
+    const out = built?.build && latest[`${kind}/${built.target}`]
+    return out ? out.build !== built.build : undefined
   }
-  const built = new Map(builds.devices.map((said) => [said.device, said]))
+  const built = new Map(builds.devices.map((built) => [built.device, built]))
   const rows = devices
     .map((device): Thing => {
-      const said = device.id === here.device ? { build: here.build, target: built.get(device.id)?.target } : built.get(device.id)
-      return { ...device, here: device.id === here.device, build: said?.build, behind: behind("one", said) }
+      const its = device.id === here.device ? { build: here.build, target: built.get(device.id)?.target } : built.get(device.id)
+      return { ...device, here: device.id === here.device, build: its?.build, behind: behind("one", its) }
     })
     .toSorted((a, b) => Number(b.here) - Number(a.here))
   const servers = new Map<string, Thing>()
@@ -108,7 +108,7 @@ async function doing(does: () => Promise<unknown>) {
 }
 
 /// Has a server take the latest builds, or this device: `one update`.
-const update = (thing: Thing) => (thing.kind ? client({ update: true }).then(({ said }) => toast(said)) : call("update", { server: thing.id }, { for: thing.for }))
+const update = (thing: Thing) => (thing.kind ? client({ update: true }).then(({ message }) => toast(message)) : call("update", { server: thing.id }, { for: thing.for }))
 
 /// Takes a device out once its person has said so. Taking this one out is signing out, and the client starts again
 /// where a device that isn't in does. A device that's taken out forgets what it kept of theirs when it's next on.
@@ -143,7 +143,7 @@ type All = Awaited<ReturnType<typeof mine>>
 function Detail(props: { thing: Thing; all: All }) {
   const thing = () => props.thing
   const server = () => (thing().kind ? props.all.servers.find((server) => server.here && thing().here) : thing())
-  const serve = (now: boolean) => doing(() => client({ serve: now }).then(({ said }) => toast(said)))
+  const serve = (now: boolean) => doing(() => client({ serve: now }).then(({ message }) => toast(message)))
   return (
     <Screen heading={thing().name ?? "Server"} back>
       <List>

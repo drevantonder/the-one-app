@@ -145,7 +145,7 @@ defmodule Telemetry do
   # A call to `record` is what it records, not more to record.
   def hook("called", %{"plugin" => plugin, "tool" => "record"}, %Call{plugin: plugin}), do: :ok
   def hook("called", about, call), do: Recorded.called(call, about)
-  def hook("measured", said, call), do: Recorded.measured(call, said)
+  def hook("measured", record, call), do: Recorded.measured(call, record)
 
   @doc "Keeps a batch that a server recorded (`Telemetry.Recorded`), on a server acting for whoever Telemetry is installed for."
   def keep(call, batch), do: Store.keep(call.own, batch)

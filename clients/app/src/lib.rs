@@ -200,11 +200,11 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
 /// it has updated. Gives what it says, which a device that's also a server says before its program has taken them.
 #[tauri::command]
 async fn update(app: AppHandle, views: State<'_, Views>) -> Result<String, String> {
-    let said = cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))?;
+    let message = cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))?;
     if cli::serving::server().is_none() {
         app.restart()
     }
-    Ok(said)
+    Ok(message)
 }
 
 /// Says whether the window is on screen. While it is, its views ask again when something changed, and as it's back,

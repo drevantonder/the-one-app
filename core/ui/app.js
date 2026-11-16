@@ -39,14 +39,14 @@ try {
     },
   })
 } catch (error) {
-  for (const problem of error.errors ?? [error]) console.error(said(problem))
+  for (const problem of error.errors ?? [error]) console.error(describe(problem))
   process.exit(1)
 }
 
 /// A problem as the compiler says it, with where: the file as the app's source names it, its line and column, and
 /// the lines around it. Solid's compiler says only what's wrong, so a file it couldn't read is read again by Vite's
 /// own parser, which says where.
-function said(problem) {
+function describe(problem) {
   let { message, loc: at = {}, frame } = problem
   const file = at.file ?? problem.id
   if (file && !at.line) {

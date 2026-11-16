@@ -179,7 +179,7 @@ pub extern "system" fn Java_app_theone_client_Notifications_open<'local>(
     };
     let opened = opened();
     match opened {
-        Ok(said) => env.new_string(said).map(|said| said.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Ok(string) => env.new_string(string).map(|string| string.into_raw()).unwrap_or(std::ptr::null_mut()),
         Err(error) => {
             eprintln!("a notification didn't open: {error:#}");
             std::ptr::null_mut()

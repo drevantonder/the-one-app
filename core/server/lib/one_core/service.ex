@@ -33,8 +33,8 @@ defmodule OneCore.Service do
       raise "No server runs #{service}. `services` says what it needs, and `install_service` runs it on one."
     end
 
-    said = %{who: call.actor, for: call.subject, forwarded: true}
-    ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: said}
+    meta = %{who: call.actor, for: call.subject, forwarded: true}
+    ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: meta}
 
     case ask(servers, call.server, ask) do
       {:ok, answer} -> answer
@@ -165,7 +165,7 @@ defmodule OneCore.Service do
 
   defp ask([], _here, %{plugin: plugin, service: service}, down) do
     {:error,
-     "No server that runs #{plugin}'s #{service} is up: " <> Enum.map_join(down, ", ", &Server.said(:unreachable, &1))}
+     "No server that runs #{plugin}'s #{service} is up: " <> Enum.map_join(down, ", ", &Server.error_message(:unreachable, &1))}
   end
 
   defp ask([here | _], here, %{plugin: plugin, service: service, function: function, arguments: arguments}, _down) do
@@ -177,7 +177,7 @@ defmodule OneCore.Service do
       {:ok, %{"answer" => answer}} -> {:ok, answer}
       {:error, _code, why} -> {:error, why}
       :unreachable -> ask(servers, here, ask, down ++ [server])
-      :stopped -> {:error, Server.said(:stopped, server)}
+      :stopped -> {:error, Server.error_message(:stopped, server)}
     end
   end
 end

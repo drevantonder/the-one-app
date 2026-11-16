@@ -2,7 +2,7 @@ import { children, createContext, For, omit, Show, useContext } from "solid-js"
 import { parseDate } from "./day.ts"
 import { Icon } from "./button.tsx"
 import { useField } from "./field.tsx"
-import { said, touch } from "./shared.ts"
+import { messages, touch } from "./shared.ts"
 import { popover } from "./popover.ts"
 import { machine, type Api, type Part, type Root } from "./zag.tsx"
 import type { JSX } from "@solidjs/web"
@@ -175,7 +175,7 @@ function Whole(props: { placeholder?: string; name?: string; required?: boolean 
           <DatePicker.Content class="ui-popup ui-calendar">
             <Calendar />
             <Show when={day() && !props.required}>
-              <DatePicker.ClearTrigger class="clear press ring">{said.clear}</DatePicker.ClearTrigger>
+              <DatePicker.ClearTrigger class="clear press ring">{messages.clear}</DatePicker.ClearTrigger>
             </Show>
           </DatePicker.Content>
         </DatePicker.Positioner>

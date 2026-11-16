@@ -86,21 +86,21 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
     to.lock().await.write_all(format!("{}\n", json!({"code": code, "tools": tools})).as_bytes()).await?;
     let listening = async {
         while let Some(line) = from.next_line().await? {
-            let Ok(said) = serde_json::from_str::<Value>(&line) else { continue };
-            if let Some(done) = said.get("done") {
+            let Ok(response) = serde_json::from_str::<Value>(&line) else { continue };
+            if let Some(done) = response.get("done") {
                 return Ok(Some((done["ok"] == true, done["text"].as_str().unwrap_or_default().to_owned())));
             }
             let (client, to) = (client.clone(), to.clone());
             // Each call runs beside the others, as the script makes them.
             tokio::spawn(async move {
                 let called =
-                    client.request("tools/call", json!({"name": said["name"], "arguments": said["input"]})).await;
+                    client.request("tools/call", json!({"name": response["name"], "arguments": response["input"]})).await;
                 let reply = match called {
                     Ok(result) if result["isError"] == true => {
-                        json!({"reply": said["call"], "error": texts(&result["content"])})
+                        json!({"reply": response["call"], "error": texts(&result["content"])})
                     }
-                    Ok(result) => json!({"reply": said["call"], "ok": value(&result["content"])}),
-                    Err(error) => json!({"reply": said["call"], "error": format!("{error:#}")}),
+                    Ok(result) => json!({"reply": response["call"], "ok": value(&result["content"])}),
+                    Err(error) => json!({"reply": response["call"], "error": format!("{error:#}")}),
                 };
                 // A script that has stopped listening has finished, or been stopped.
                 let _ = to.lock().await.write_all(format!("{reply}\n").as_bytes()).await;

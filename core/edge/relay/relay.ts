@@ -254,8 +254,8 @@ export class Relay extends DurableObject<RelayEnv> {
    * sends it goes back over it. One that connects again has left its old connection behind. It's on for its
    * `device`, and a `server` that comes is told to the others.
    */
-  endpoint(said: URLSearchParams) {
-    const [key, device, server] = [said.get("key"), said.get("device"), said.has("server")];
+  endpoint(params: URLSearchParams) {
+    const [key, device, server] = [params.get("key"), params.get("device"), params.has("server")];
     for (const before of this.ctx.getWebSockets(`endpoint ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`endpoint ${key}`, `on ${device}`]);
@@ -305,25 +305,25 @@ export class Relay extends DurableObject<RelayEnv> {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
-    const said: Attachment = ws.deserializeAttachment() ?? {};
-    if (said.call) {
-      const [server] = this.ctx.getWebSockets(`outside ${said.to}`);
+    const attachment: Attachment = ws.deserializeAttachment() ?? {};
+    if (attachment.call) {
+      const [server] = this.ctx.getWebSockets(`outside ${attachment.to}`);
       if (!server) return ws.close(1011, "That server left");
-      return server.send(JSON.stringify({ call: said.call, message }));
+      return server.send(JSON.stringify({ call: attachment.call, message }));
     }
-    if (said.outside) {
+    if (attachment.outside) {
       const { call, answer } = JSON.parse(message as string);
       for (const waiting of this.ctx.getWebSockets(`call ${call}`)) waiting.send(answer);
       return;
     }
-    if (!said.key) return;
+    if (!attachment.key) return;
     // The key it's for becomes the key it's from, and the rest is passed on untouched. With nobody there it's
     // dropped, as a network drops a packet, and QUIC sends again.
     const frame = new Uint8Array(message as ArrayBuffer);
     const [to] = this.ctx.getWebSockets(`endpoint ${hex.encode(frame.subarray(1, 33))}`);
     if (!to) return;
     frame[0] += 2;
-    frame.set(hex.decode(said.key), 1);
+    frame.set(hex.decode(attachment.key), 1);
     to.send(frame);
   }
 

@@ -205,20 +205,20 @@ defmodule ServerDebug.Probe do
 
       {__MODULE__, {:trace, pid, :call, {m, f, arguments}}} ->
         if state.calls < calls and (Map.has_key?(state.in, pid) or mine?(pid, scope)) do
-          said = "#{inspect(pid)} #{called(m, f, arguments)}"
+          line = "#{inspect(pid)} #{called(m, f, arguments)}"
           state = %{state | calls: state.calls + 1, open: Map.update(state.open, pid, 1, &(&1 + 1))}
-          traced(line(state, said, scope), calls, most, within, scope)
+          traced(line(state, line, scope), calls, most, within, scope)
         else
           traced(state, calls, most, within, scope)
         end
 
       {__MODULE__, {:trace, pid, :return_from, {m, f, a}, value}} ->
-        said = "#{function({m, f, a})} returned #{shown(value)}"
-        traced(returned(state, pid, said, scope), calls, most, within, scope)
+        line = "#{function({m, f, a})} returned #{shown(value)}"
+        traced(returned(state, pid, line, scope), calls, most, within, scope)
 
       {__MODULE__, {:trace, pid, :exception_from, {m, f, a}, {kind, reason}}} ->
-        said = "#{function({m, f, a})} raised #{shown(Exception.normalize(kind, reason))}"
-        traced(returned(state, pid, said, scope), calls, most, within, scope)
+        line = "#{function({m, f, a})} raised #{shown(Exception.normalize(kind, reason))}"
+        traced(returned(state, pid, line, scope), calls, most, within, scope)
 
       {__MODULE__, _other} ->
         traced(state, calls, most, within, scope)
@@ -238,10 +238,10 @@ defmodule ServerDebug.Probe do
     end
   end
 
-  defp returned(state, pid, said, scope) do
+  defp returned(state, pid, line, scope) do
     case state.open do
-      %{^pid => 1} -> line(%{state | open: Map.delete(state.open, pid)}, "#{inspect(pid)} #{said}", scope)
-      %{^pid => n} -> line(%{state | open: %{state.open | pid => n - 1}}, "#{inspect(pid)} #{said}", scope)
+      %{^pid => 1} -> line(%{state | open: Map.delete(state.open, pid)}, "#{inspect(pid)} #{line}", scope)
+      %{^pid => n} -> line(%{state | open: %{state.open | pid => n - 1}}, "#{inspect(pid)} #{line}", scope)
       _ -> state
     end
   end
@@ -251,9 +251,9 @@ defmodule ServerDebug.Probe do
 
   defp shown(term), do: inspect(term, limit: 20, printable_limit: 400)
 
-  defp line(state, said, scope) do
+  defp line(state, line, scope) do
     at = Time.utc_now() |> Time.truncate(:millisecond) |> Time.to_string()
-    %{state | lines: ["#{at} #{String.slice(scope.name.(said), 0, 2000)}" | state.lines]}
+    %{state | lines: ["#{at} #{String.slice(scope.name.(line), 0, 2000)}" | state.lines]}
   end
 
   ## logs
@@ -285,7 +285,7 @@ defmodule ServerDebug.Probe do
     if heard?(meta, scope) and :atomics.sub_get(left, 1, 1) >= 0 do
       at = meta |> Map.get(:time, :os.system_time(:microsecond)) |> div(1000)
       at = at |> DateTime.from_unix!(:millisecond) |> DateTime.to_time() |> Time.to_string()
-      send(to, {:received, "#{at} [#{level}] #{String.slice(scope.name.(said(msg)), 0, 4000)}"})
+      send(to, {:received, "#{at} [#{level}] #{String.slice(scope.name.(message(msg)), 0, 4000)}"})
     end
   end
 
@@ -294,10 +294,10 @@ defmodule ServerDebug.Probe do
     mine?(meta[:pid] || self(), Map.take(meta, [:subject, :who]), callers, scope)
   end
 
-  defp said({:string, text}), do: IO.chardata_to_string(text)
-  defp said({:report, report}), do: shown(report)
+  defp message({:string, text}), do: IO.chardata_to_string(text)
+  defp message({:report, report}), do: shown(report)
 
-  defp said({format, arguments}) do
+  defp message({format, arguments}) do
     IO.chardata_to_string(:io_lib.format(format, arguments))
   rescue
     _ -> shown({format, arguments})

@@ -1,6 +1,6 @@
 import { createContext, createMemo, createSignal, createUniqueId, For, omit, Show, useContext } from "solid-js"
 import { Icon } from "./button.tsx"
-import { said, touch } from "./shared.ts"
+import { messages, touch } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
 
 /** What the controls inside a `Field` read of it. */
@@ -131,7 +131,7 @@ export function Search(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
         }}
       />
       <Show when={text() && !props.disabled}>
-        <button class="press ring" type="button" aria-label={said.clear} onClick={clear}>
+        <button class="press ring" type="button" aria-label={messages.clear} onClick={clear}>
           <Icon name="x" />
         </button>
       </Show>
@@ -331,7 +331,7 @@ export function File(props: {
                   <span>{file.name}</span>
                   <small>{size(file.size)}</small>
                 </span>
-                <button class="press ring" type="button" aria-label={`${said.remove} ${file.name}`} disabled={props.disabled} onClick={() => remove(file)}>
+                <button class="press ring" type="button" aria-label={`${messages.remove} ${file.name}`} disabled={props.disabled} onClick={() => remove(file)}>
                   <Icon name="x" />
                 </button>
               </li>
@@ -342,7 +342,7 @@ export function File(props: {
       <div class="ui-picker" hidden={!props.multiple && files().length > 0}>
         <div class="ui-box" aria-hidden="true" data-disabled={props.disabled ? "" : undefined} data-invalid={field?.invalid() ? "" : undefined}>
           <Icon name="paperclip" />
-          <span>{props.placeholder ?? said.file}</span>
+          <span>{props.placeholder ?? messages.file}</span>
         </div>
         <input
           ref={(element) => (control = element)}

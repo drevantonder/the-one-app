@@ -42,7 +42,7 @@ defmodule OneCore.Builds do
   and, if the last update didn't take, why, as that program said it.
   """
   def started(key) do
-    said = %{
+    info = %{
       build: build(),
       target: target(),
       device: Application.get_env(:one_core, :device),
@@ -50,7 +50,7 @@ defmodule OneCore.Builds do
       went_back: Application.get_env(:one_core, :went_back)
     }
 
-    Servers.say("servers/#{key}/build", JSON.encode!(said))
+    Servers.say("servers/#{key}/build", JSON.encode!(info))
   end
 
   @doc "The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\"}}`."
@@ -114,13 +114,13 @@ defmodule OneCore.Builds do
   end
 
   @doc "Keeps which build the device whose key is `device`, `by`'s, says it is, when that's changed."
-  def seen(by, device, %{} = said) do
-    said = Map.take(said, ~w(build target name))
+  def seen(by, device, %{} = info) do
+    info = Map.take(info, ~w(build target name))
     blob = "#{by}/devices/#{device}"
 
     case Bucket.read(blob) do
-      {:ok, was, tag} -> if JSON.decode!(was) != said, do: Bucket.replace(blob, JSON.encode!(said), tag)
-      :absent -> Bucket.write(blob, JSON.encode!(said))
+      {:ok, was, tag} -> if JSON.decode!(was) != info, do: Bucket.replace(blob, JSON.encode!(info), tag)
+      :absent -> Bucket.write(blob, JSON.encode!(info))
     end
 
     :ok
@@ -139,17 +139,17 @@ defmodule OneCore.Builds do
     devices = Bucket.list("#{by}/devices/")
     # Each blob is a trip across the internet where the bucket is far away, so they're all read at once.
     [latest | read] = Bucket.read_all([@latest | Enum.map(keys, &"servers/#{&1}/build")] ++ devices)
-    {said, devices_said} = Enum.split(read, length(keys))
+    {server_reads, device_reads} = Enum.split(read, length(keys))
 
     servers =
-      for {key, read} <- Enum.zip(keys, said) do
-        said = with {:ok, said, _tag} <- read, do: JSON.decode!(said), else: (:absent -> %{})
-        Map.merge(said, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
+      for {key, read} <- Enum.zip(keys, server_reads) do
+        info = with {:ok, info, _tag} <- read, do: JSON.decode!(info), else: (:absent -> %{})
+        Map.merge(info, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
       end
 
     devices =
-      for {blob, {:ok, said, _tag}} <- Enum.zip(devices, devices_said),
-          do: Map.put(JSON.decode!(said), "device", Path.basename(blob))
+      for {blob, {:ok, info, _tag}} <- Enum.zip(devices, device_reads),
+          do: Map.put(JSON.decode!(info), "device", Path.basename(blob))
 
     %{
       server: Server.key(),

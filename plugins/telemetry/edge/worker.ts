@@ -35,7 +35,7 @@ interface Span {
 }
 
 /** What a Worker says of a request, in a line `{"telemetry": …}` of its log. */
-interface Said {
+interface LogLine {
   traceparent?: string;
   parent?: string;
   attributes?: Record<string, string | number | boolean>;
@@ -64,16 +64,16 @@ function span(item: TraceItem): Span | null {
   const request = event && "request" in event ? event.request : null;
   const path = request ? route(new URL(request.url).pathname) : null;
   const status = event && "response" in event ? event.response?.status : undefined;
-  const said: Said = {};
+  const record: LogLine = {};
   // `wrangler dev` says which Worker it was before what was logged.
   for (const text of item.logs.flatMap(({ message }) => message).filter((text) => typeof text === "string" && text.startsWith('{"telemetry"'))) {
-    const line: Said = JSON.parse(text).telemetry;
-    Object.assign(said, line, { attributes: { ...said.attributes, ...line.attributes } });
+    const line: LogLine = JSON.parse(text).telemetry;
+    Object.assign(record, line, { attributes: { ...record.attributes, ...line.attributes } });
   }
   const thrown = item.exceptions[0];
   const upgraded = request?.headers.upgrade?.toLowerCase() === "websocket";
   const error =
-    said.error ||
+    record.error ||
     (thrown && `${thrown.name}: ${thrown.message}`) ||
     // A WebSocket ends when either end leaves, which is no failure.
     (!upgraded && item.outcome === "canceled" && "The client went away before it was answered") ||
@@ -85,13 +85,13 @@ function span(item: TraceItem): Span | null {
   const routine = item.executionModel === "durableObject" || (path ? ROUTINE.test(path) : event?.rpcMethod !== "forward");
   if (!name || (!error && routine)) return null;
 
-  const [, trace = hex(16), id = hex(8)] = PARENT.exec(said.traceparent ?? "") ?? [];
+  const [, trace = hex(16), id = hex(8)] = PARENT.exec(record.traceparent ?? "") ?? [];
   const start = Math.round((item.eventTimestamp ?? Date.now()) * 1e6);
   const took = (item as { wallTime?: number }).wallTime ?? 0;
   return {
     traceId: trace,
     spanId: id,
-    parentSpanId: PARENT.exec(said.parent ?? "")?.[1] === trace ? PARENT.exec(said.parent!)![2] : null,
+    parentSpanId: PARENT.exec(record.parent ?? "")?.[1] === trace ? PARENT.exec(record.parent!)![2] : null,
     name,
     kind: "server",
     start,
@@ -100,7 +100,7 @@ function span(item: TraceItem): Span | null {
       ...(worker && { "one.worker": worker }),
       ...(request && { "http.request.method": request.method, "http.route": path! }),
       ...(status !== undefined && { "http.response.status_code": status }),
-      ...said.attributes,
+      ...record.attributes,
     },
     status: { code: error ? "error" : "ok", message: (error ?? "").slice(0, 1000) },
     events: [],

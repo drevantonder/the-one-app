@@ -95,7 +95,7 @@ defmodule Vault.OAuth do
 
     for field <- used, not is_map_key(fields, field), do: raise("It has no field named #{field}.")
 
-    if not to?(request.url, hosts), do: raise("It's used only with #{said(hosts)}, and that's #{site}.")
+    if not to?(request.url, hosts), do: raise("It's used only with #{listed(hosts)}, and that's #{site}.")
 
     fill = &Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, &1, fn _all, field -> fields[field] end)
     headers = for {name, value} <- request[:headers] || %{}, do: {fill.(name), fill.(value)}
@@ -131,8 +131,8 @@ defmodule Vault.OAuth do
   # The fields a text names.
   defp named(text), do: for([_all, field] <- Regex.scan(~r/\{\{([A-Za-z0-9_]+)\}\}/, text), do: field)
 
-  defp said([]), do: "no site: it names none"
-  defp said(hosts), do: Enum.join(hosts, ", ")
+  defp listed([]), do: "no site: it names none"
+  defp listed(hosts), do: Enum.join(hosts, ", ")
 
   defp method!(method) when method in ~w(get post put patch delete head), do: String.to_existing_atom(method)
   defp method!(_method), do: raise("A request's method is GET, POST, PUT, PATCH, DELETE or HEAD.")

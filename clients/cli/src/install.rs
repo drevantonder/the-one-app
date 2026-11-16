@@ -24,7 +24,7 @@ const LOCK: &str = "plugins.lock";
 /// folder's absolute path), and the ref asked for, if one was.
 #[derive(Clone)]
 struct Source {
-    said: String,
+    spec: String,
     reference: Option<String>,
 }
 
@@ -37,7 +37,7 @@ impl Source {
             }
             _ => (written, None),
         };
-        let said = if Path::new(repo).exists() || repo.starts_with(['.', '/', '~']) {
+        let spec = if Path::new(repo).exists() || repo.starts_with(['.', '/', '~']) {
             fs::canonicalize(repo).with_context(|| format!("There's no folder {repo}"))?.to_string_lossy().into_owned()
         } else if repo.contains("://") || repo.starts_with("git@") {
             repo.to_owned()
@@ -46,37 +46,37 @@ impl Source {
         } else {
             bail!("{written} isn't a repo: write owner/repo (on GitHub), a git URL or a folder, with @<ref> or not")
         };
-        Ok(Self { said, reference })
+        Ok(Self { spec, reference })
     }
 
     /// What git fetches it from.
     fn url(&self) -> String {
-        if self.github().is_some() && !self.said.contains("://") {
-            format!("https://github.com/{}.git", self.said)
+        if self.github().is_some() && !self.spec.contains("://") {
+            format!("https://github.com/{}.git", self.spec)
         } else {
-            self.said.clone()
+            self.spec.clone()
         }
     }
 
     fn local(&self) -> bool {
-        self.said.starts_with('/')
+        self.spec.starts_with('/')
     }
 
     /// `owner/repo`, for a repo on GitHub.
     fn github(&self) -> Option<String> {
-        let path = self.said.strip_prefix("https://github.com/").or(self.said.strip_prefix("git@github.com:"));
-        let path = path.unwrap_or(&self.said).trim_end_matches('/').trim_end_matches(".git");
+        let path = self.spec.strip_prefix("https://github.com/").or(self.spec.strip_prefix("git@github.com:"));
+        let path = path.unwrap_or(&self.spec).trim_end_matches('/').trim_end_matches(".git");
         (!self.local() && !path.contains(':') && path.split('/').count() == 2).then(|| path.to_owned())
     }
 
     /// Where this device keeps its copy of the repo, which an agent reads a plugin's code in before installing it.
     fn folder(&self) -> Result<PathBuf> {
-        let named = self.said.split_once("://").map_or(self.said.as_str(), |(_, rest)| rest);
+        let named = self.spec.split_once("://").map_or(self.spec.as_str(), |(_, rest)| rest);
         let named = named.replace(':', "/");
         let mut folder = client::home()?.join("git");
         if self.local() {
             folder.push("local");
-        } else if !self.said.contains("://") && !self.said.starts_with("git@") {
+        } else if !self.spec.contains("://") && !self.spec.starts_with("git@") {
             folder.push("github.com");
         }
         for part in named.trim_start_matches("git@").trim_end_matches(".git").split('/') {
@@ -103,7 +103,7 @@ impl Source {
             let url = self.url();
             let path = folder.to_string_lossy();
             git(Path::new("."), &[clone.as_slice(), &[url.as_str(), &path]].concat())
-                .with_context(|| format!("Couldn't fetch {}", self.said))?;
+                .with_context(|| format!("Couldn't fetch {}", self.spec))?;
         }
         let tried: Vec<String> = match at.or(self.reference.as_deref()) {
             None => vec!["origin/HEAD".to_owned()],
@@ -112,7 +112,7 @@ impl Source {
         let commit = tried
             .iter()
             .find_map(|at| git(&folder, &["rev-parse", "--verify", "--quiet", &format!("{at}^{{commit}}")]).ok())
-            .with_context(|| format!("{} has no {}", self.said, tried.last().expect("one is tried")))?;
+            .with_context(|| format!("{} has no {}", self.spec, tried.last().expect("one is tried")))?;
         git(&folder, &["checkout", "--quiet", "--force", "--detach", &commit])?;
         Ok((folder, commit))
     }
@@ -149,13 +149,13 @@ impl Locked {
         json!({"source": self.source, "ref": self.reference, "commit": self.commit, "hash": self.hash, "for": self.of})
     }
 
-    fn read(said: &Value) -> Option<Self> {
+    fn read(locked: &Value) -> Option<Self> {
         Some(Self {
-            source: said["source"].as_str()?.to_owned(),
-            reference: said["ref"].as_str().map(str::to_owned),
-            commit: said["commit"].as_str()?.to_owned(),
-            hash: said["hash"].as_str()?.to_owned(),
-            of: said["for"].as_str()?.to_owned(),
+            source: locked["source"].as_str()?.to_owned(),
+            reference: locked["ref"].as_str().map(str::to_owned),
+            commit: locked["commit"].as_str()?.to_owned(),
+            hash: locked["hash"].as_str()?.to_owned(),
+            of: locked["for"].as_str()?.to_owned(),
         })
     }
 }
@@ -167,11 +167,11 @@ fn lock_file() -> Option<PathBuf> {
 
 fn read_lock(file: &Path) -> Result<BTreeMap<String, Locked>> {
     let Ok(text) = fs::read_to_string(file) else { return Ok(BTreeMap::new()) };
-    let said: Value = serde_json::from_str(&text).with_context(|| format!("{} isn't JSON", file.display()))?;
-    let plugins = said["plugins"].as_object().into_iter().flatten();
+    let lock: Value = serde_json::from_str(&text).with_context(|| format!("{} isn't JSON", file.display()))?;
+    let plugins = lock["plugins"].as_object().into_iter().flatten();
     plugins
-        .map(|(name, said)| {
-            Locked::read(said).map(|locked| (name.clone(), locked)).with_context(|| format!("{LOCK} says {name} wrong"))
+        .map(|(name, lock)| {
+            Locked::read(lock).map(|locked| (name.clone(), locked)).with_context(|| format!("{LOCK} says {name} wrong"))
         })
         .collect()
 }
@@ -199,9 +199,9 @@ async fn call(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -
 
 /// What's installed for `of` and the network, as the tool `plugins` lists it, and who `of` is.
 async fn installed(client: &Client, of: Option<&str>) -> Result<(String, Vec<Value>)> {
-    let said: Value = serde_json::from_str(&call(client, of, "plugins", json!({})).await?)?;
-    let of = said["for"].as_str().context("`plugins` says who it lists for")?.to_owned();
-    Ok((of, said["plugins"].as_array().cloned().unwrap_or_default()))
+    let response: Value = serde_json::from_str(&call(client, of, "plugins", json!({})).await?)?;
+    let of = response["for"].as_str().context("`plugins` says who it lists for")?.to_owned();
+    Ok((of, response["plugins"].as_array().cloned().unwrap_or_default()))
 }
 
 /// A repo's plugins: each folder of its `plugins/` with a `SKILL.md`, with what that says it's called and is for.
@@ -323,13 +323,13 @@ async fn deploy(
     println!(
         "{name}'s code, from {} at {}, is in {}. Read it before installing (the skill installing-plugins): its \
          server code runs with full access on {of}'s servers, or in sandbox mode with only what it's given.",
-        from.said,
+        from.spec,
         &commit[..12],
         plugin.display()
     );
     let files = crate::read(&plugin, false)?;
     let mut deployed =
-        json!({"name": name, "files": files, "from": {"source": from.said, "ref": from.reference, "commit": commit}});
+        json!({"name": name, "files": files, "from": {"source": from.spec, "ref": from.reference, "commit": commit}});
     if sandbox {
         deployed["sandbox"] = json!(true);
     }
@@ -342,7 +342,7 @@ async fn deploy(
         .with_context(|| format!("{name} was deployed, but `plugins` doesn't list it for {of}"))?;
     report(from, name, commit).await;
     Ok(Locked {
-        source: from.said.clone(),
+        source: from.spec.clone(),
         reference: from.reference.clone(),
         commit: commit.to_owned(),
         hash: hash.to_owned(),
@@ -358,10 +358,10 @@ async fn report(from: &Source, name: &str, commit: &str) {
     let Some(repo) = from.github().filter(|_| !set("DO_NOT_TRACK") && !set("DISABLE_TELEMETRY")) else { return };
     let Ok(web) = client::web() else { return };
     let public = async {
-        let said =
+        let response =
             web.get(format!("https://api.github.com/repos/{repo}")).header("user-agent", "one").send().await.ok()?;
-        let said: Value = serde_json::from_str(&said.text().await.ok()?).ok()?;
-        Some(said["private"] == false)
+        let response: Value = serde_json::from_str(&response.text().await.ok()?).ok()?;
+        Some(response["private"] == false)
     };
     let post = async {
         if public.await == Some(true) {
@@ -393,7 +393,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         for (name, about) in &offered {
             println!("{name:width$}  {about}");
         }
-        println!("\n{} at {}, in {}/plugins.", source.said, &commit[..12], folder.display());
+        println!("\n{} at {}, in {}/plugins.", source.spec, &commit[..12], folder.display());
         if !list {
             println!("`one install {} --plugin <name>` installs one.", args[0]);
         }
@@ -410,7 +410,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         }
         let plugin = folder.join("plugins").join(&name);
         if !plugin.join("SKILL.md").exists() {
-            bail!("{} has no plugin {name}: `one install {} --list` lists the ones it has", source.said, args[0]);
+            bail!("{} has no plugin {name}: `one install {} --list` lists the ones it has", source.spec, args[0]);
         }
         if placed {
             order.push(name);
@@ -422,7 +422,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
             if !there && folder.join("plugins").join(&used).join("SKILL.md").exists() && !order.contains(&used) {
                 println!(
                     "{name} uses {used}, which isn't installed for {of} or the network, so it's installed from {} too.",
-                    source.said
+                    source.spec
                 );
                 next.push((used, false));
             }
@@ -459,7 +459,7 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
     while !waiting.is_empty() {
         let mut deployed = Vec::new();
         for (name, it) in &waiting {
-            let source = Source { said: it.source.clone(), reference: it.reference.clone() };
+            let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
             let (folder, commit) = source.fetch(Some(&it.commit))?;
             if uses(&folder.join("plugins").join(name)).iter().any(|used| used != name && waiting.contains_key(used)) {
                 continue;
@@ -494,9 +494,9 @@ async fn recorded(client: &Client, names: &[String]) -> Result<BTreeMap<String, 
             let mut by_name = BTreeMap::new();
             for plugin in plugins.iter().rev() {
                 let from = &plugin["from"];
-                let mut said = from.clone();
-                said["for"] = plugin["for"].clone();
-                if let (Some(name), Some(locked)) = (plugin["name"].as_str(), Locked::read(&said)) {
+                let mut locked = from.clone();
+                locked["for"] = plugin["for"].clone();
+                if let (Some(name), Some(locked)) = (plugin["name"].as_str(), Locked::read(&locked)) {
                     by_name.insert(name.to_owned(), locked);
                 }
             }
@@ -513,7 +513,7 @@ async fn recorded(client: &Client, names: &[String]) -> Result<BTreeMap<String, 
 
 /// What's become of each: `(newer commit upstream, changed since it was installed)`.
 async fn state(client: &Client, name: &str, it: &Locked) -> Result<(Option<String>, bool)> {
-    let source = Source { said: it.source.clone(), reference: it.reference.clone() };
+    let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
     let newer = source.newer(name, &it.commit)?;
     let (_, plugins) = installed(client, Some(&it.of)).await?;
     let now = plugins.iter().find(|plugin| plugin["name"] == name && plugin["for"] == it.of.as_str());
@@ -529,7 +529,7 @@ pub async fn check(client: &Client, names: &[String]) -> Result<ExitCode> {
     for (name, it) in &recorded {
         let (newer, changed) = state(client, name, it).await?;
         let at = format!("{}@{}", it.source, &it.commit[..12]);
-        let said = match (&newer, changed) {
+        let status = match (&newer, changed) {
             (None, false) => "up to date".to_owned(),
             (Some(newer), false) => format!("update available: {}", &newer[..12]),
             (None, true) => "changed locally since it was installed".to_owned(),
@@ -538,7 +538,7 @@ pub async fn check(client: &Client, names: &[String]) -> Result<ExitCode> {
             }
         };
         behind |= newer.is_some() || changed;
-        println!("{name} ({}, {at}): {said}", it.of);
+        println!("{name} ({}, {at}): {status}", it.of);
     }
     if recorded.is_empty() {
         println!("Nothing here was installed from a git repo.");
@@ -572,7 +572,7 @@ pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
             skipped = true;
             continue;
         }
-        let source = Source { said: it.source.clone(), reference: it.reference.clone() };
+        let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
         let (folder, commit) = source.fetch(Some(&newer))?;
         let updated = deploy(client, &it.of, &name, &folder, &source, &commit, false).await?;
         if let Some(file) = &lock {

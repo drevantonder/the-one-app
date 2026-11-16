@@ -62,7 +62,7 @@ interface Token {
 }
 
 /** What a token says, or nothing if it isn't one. */
-function said(token: string): Token {
+function claims(token: string): Token {
   try {
     return JSON.parse(atob(token.replace(/-/g, "+").replace(/_/g, "/"))) ?? {};
   } catch {
@@ -222,7 +222,7 @@ async function allowed(env: PresignerEnv, by: string, token: string | null, { op
   // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
   // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
   // list. The secret opens nothing after that, since the bucket lets only the first write land.
-  const first = operation === "write" && key === NETWORK + "servers" && same(said(token ?? "").first, env.FIRST_SERVER);
+  const first = operation === "write" && key === NETWORK + "servers" && same(claims(token ?? "").first, env.FIRST_SERVER);
   // Every list that could let it is read at once, each once: one trip to the bucket.
   const lists = reader(env);
   const [network, owners, open, installed] = await Promise.all([
@@ -260,7 +260,7 @@ type Admitted = { until?: number }
  */
 async function admits(lists: Lists, key: string, shown: string | null): Promise<Admitted | null> {
   const [token, device = key, attestation] = (shown ?? "").split(".");
-  const { list, by, until, signature } = said(token);
+  const { list, by, until, signature } = claims(token);
   if (!isKey(key) || owner(list) !== list) return null;
   if (by === undefined) return (await servers(lists, list)).includes(key) ? {} : null;
   if (!(until !== undefined && until > Date.now())) return null;

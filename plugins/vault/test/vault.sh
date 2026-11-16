@@ -74,10 +74,10 @@ on() {
 }
 shown() {
   echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" | named)"
-  echo "           -> $(named <<<"$said" | cut -c1-400)"
+  echo "           -> $(named <<<"$output" | cut -c1-400)"
 }
-may() { said=$("$@") && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $said" && exit 1; }; }
-refused() { ! said=$("$@") && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $said" && exit 1; }; }
+may() { output=$("$@") && shown "may    " "$@" || { echo "this was refused, and shouldn't be: $* -> $output" && exit 1; }; }
+refused() { ! output=$("$@") && shown "refused" "$@" || { echo "this was answered, and shouldn't be: $* -> $output" && exit 1; }; }
 
 # What a page at the network's address says once it has drawn, in a browser: its heading and what's under it.
 browser() {
@@ -162,7 +162,7 @@ echo "  files in the bucket that hold the note nothing encrypted, found the same
 [[ $(holding "$folder/bucket") == 0 && $({ grep -r -a -l -F -e "$control" "$folder/bucket" || true; } | wc -l) -ge 1 ]]
 may on phone as alice locker read
 note=$(sha256sum <"$folder/secrets/note" | cut -d' ' -f1)
-[[ $said == *"\"blob\":\"$note\""* && $said == *"\"rows\":[\"$note\"]"* ]] && echo "  which is the SHA-256 of the note she typed, both times: the server she chose opened the blob and the row"
+[[ $output == *"\"blob\":\"$note\""* && $output == *"\"rows\":[\"$note\"]"* ]] && echo "  which is the SHA-256 of the note she typed, both times: the server she chose opened the blob and the row"
 
 say "A server that wasn't chosen can't open them, and doesn't take the database's lease"
 may on phone via standby as alice vault list
@@ -195,7 +195,7 @@ may on phone as alice locker grant --servers "$(servers "${key[server]}" "${key[
 down server
 may on phone as alice vault list
 may on phone as alice locker read
-[[ $said == *"\"blob\":\"$note\""* && $said == *"${key[standby]}"* ]]
+[[ $output == *"\"blob\":\"$note\""* && $output == *"${key[standby]}"* ]]
 echo "  the standby took the lease of her Vault's database: $(grep -o "$vault/: taking its lease at [0-9]*: ok" "$folder/standby.log" | tail -1)"
 up server
 may on phone as alice vault grant --servers "$(servers "${key[server]}")"
@@ -231,7 +231,7 @@ curl -s --retry 30 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$service
 echo "  an outside service runs on this machine, at 127.0.0.1:$service"
 may on laptop as alice vault set --item Pasted --field password --value-from "$folder/secrets/pasted"
 response=$(on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --hosts "[\"127.0.0.1:$service\"]" --why "To read your invoices")
-said=$response shown "may    " on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --why "To read your invoices"
+output=$response shown "may    " on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --why "To read your invoices"
 request=$(grep -o '"id":"[^"]*"' <<<"$response" | cut -d'"' -f4)
 echo "  she opens the link in a browser:"
 browser "$address/vault/request?id=$request"
@@ -251,7 +251,7 @@ sed "s/PORT/$service/g" "$root/plugins/vault/test/plugins/fake/server/fake.ex" >
 for plugin in fake nosy; do on desk as owner for network deploy --name $plugin --files-from "$folder/fake" >/dev/null; done
 may on phone as alice vault use --item GitHub --plugin fake
 may on phone as alice fake digest --item GitHub --field token
-[[ $said == "$(sha256sum <"$folder/secrets/github" | cut -d' ' -f1)" ]] && echo "  which is the SHA-256 of the token she typed: the plugin's program was handed the secret itself"
+[[ $output == "$(sha256sum <"$folder/secrets/github" | cut -d' ' -f1)" ]] && echo "  which is the SHA-256 of the token she typed: the plugin's program was handed the secret itself"
 refused on phone as alice nosy digest --item GitHub --field token
 refused on phone as alice fake digest --item Pasted --field password
 may on phone as alice vault use --item GitHub --plugin fake --on false
@@ -259,9 +259,9 @@ refused on phone as alice fake digest --item GitHub --field token
 
 say "A plugin keeps a secret it made itself, which only it uses"
 may on phone as alice fake keep --item Session
-digest=$said
+digest=$output
 may on phone as alice fake digest --item Session --field key
-[[ $said == "$digest" ]] && echo "  which is the SHA-256 the plugin gave as it kept it"
+[[ $output == "$digest" ]] && echo "  which is the SHA-256 the plugin gave as it kept it"
 refused on phone as alice nosy digest --item Session --field key
 refused on phone as alice nosy keep --item Session
 may on phone as alice vault list
@@ -288,7 +288,7 @@ echo "  once its token had ended, which the service refused once: $(curl -s "htt
 refused on laptop as alice vault fetch --item Fake --url "http://127.0.0.1:$service/me" --headers '{"authorization":"Bearer {{access_token}}"}'
 may on phone as alice vault agents --item Fake
 may on laptop as alice vault fetch --item Fake --url "http://127.0.0.1:$service/me" --headers '{"authorization":"Bearer {{access_token}}"}'
-[[ $said == *'[secret]'* ]] && echo "  the service said her token back, and the answer has it blotted out"
+[[ $output == *'[secret]'* ]] && echo "  the service said her token back, and the answer has it blotted out"
 
 say "A new device is let in by one that holds her key, and with every device gone, by her recovery key"
 refused on laptop as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
@@ -301,7 +301,7 @@ may on laptop as alice vault grant --servers "$(servers "${key[server]}")"
 rm -rf "$folder/devices/phone" "$folder/devices/laptop"
 echo "  her phone and her laptop are gone, with their keys. On a tablet she signs in on:"
 may on tablet as alice vault list
-[[ $said == *GitHub* && $said == *Fake* ]]
+[[ $output == *GitHub* && $output == *Fake* ]]
 may on tablet as alice fake me
 refused on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 printf '%s' "AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-IIII-JJJJ-KKKK-LLLL-MMMQ" >"$folder/secrets/guess"
@@ -310,7 +310,7 @@ may on tablet as alice encryption approve --key-from "$folder/secrets/recovery"
 may on tablet as alice vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 down server
 may on tablet as alice vault list
-[[ $said == *GitHub* && $said == *Fake* && $said == *Stripe* ]]
+[[ $output == *GitHub* && $output == *Fake* && $output == *Stripe* ]]
 up server
 echo "  someone with the whole bucket, and a key of their own making:"
 (cd "$root/core/server" && mix run --no-start -e '
@@ -337,7 +337,7 @@ may on den as alice for groups/family encryption approve
 may on den as alice for groups/family vault grant --servers "$(servers "${key[server]}")"
 may on den as alice for groups/family vault set --item Wifi --field password --value-from "$folder/secrets/wifi"
 may on den as alice for groups/family vault list
-[[ $said == *Wifi* ]]
+[[ $output == *Wifi* ]]
 refused on bobs as bob for groups/family vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 refused on bobs as bob for groups/family encryption approve
 may on den as owner for network encryption approve
@@ -351,13 +351,13 @@ refused on attic as owner for network vault grant --servers "$(servers "${key[se
 may on attic as owner for network encryption approve --key-from "$folder/secrets/network-recovery"
 may on attic as owner for network vault grant --servers "$(servers "${key[server]}" "${key[standby]}")"
 may on attic as owner for network vault list
-[[ $said == *Storage* && $said != *Wifi* && $said != *GitHub* ]]
+[[ $output == *Storage* && $output != *Wifi* && $output != *GitHub* ]]
 
 say "No secret was answered, logged or stored anywhere but encrypted"
 # The chosen servers each keep a working copy of a database they write, on their own disk, which is the one place
 # outside the bucket a secret is: everything else of the network is searched. The secrets' own files are the test's.
 everything=$(find "$folder" -type f -not -path "$folder/secrets/*" -not -path "*/database/copy.sqlite*")
-echo "  what every tool answered every device, here: $(wc -l <"$folder/said") lines, of which $({ grep -c -F -e "$marker" "$folder/said" || true; }) hold the marker"
+echo "  what every tool answered every device, here: $(wc -l <"$folder/output") lines, of which $({ grep -c -F -e "$marker" "$folder/output" || true; }) hold the marker"
 echo "  the servers' logs, the edge's and the service's: $(cat "$folder"/*.log | wc -l) lines, of which $({ cat "$folder"/*.log | grep -c -a -F -e "$marker" || true; }) hold the marker"
 echo "  every file of the network (its bucket, its edge's storage, its servers' and its clients' homes): $(wc -l <<<"$everything"), of which $(xargs -d '\n' grep -a -l -F -e "$marker" <<<"$everything" 2>/dev/null | wc -l) hold the marker"
 [[ $(xargs -d '\n' grep -a -l -F -e "$marker" <<<"$everything" 2>/dev/null | wc -l) == 0 ]]

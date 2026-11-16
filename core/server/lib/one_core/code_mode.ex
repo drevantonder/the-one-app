@@ -66,31 +66,31 @@ defmodule OneCore.CodeMode do
   end
 
   # Each line from the runner is a call to run, which runs beside the others, or what the script came to.
-  defp listen(port, call, running, part, said, until) do
+  defp listen(port, call, running, part, output, until) do
     receive do
       {^port, {:data, {:noeol, more}}} ->
-        listen(port, call, running, part <> more, said, until)
+        listen(port, call, running, part <> more, output, until)
 
       {^port, {:data, {:eol, more}}} ->
         case JSON.decode(part <> more) do
           {:ok, %{"call" => id, "name" => name} = request} ->
             task = Task.async(fn -> called(call, name, request["input"]) end)
-            listen(port, call, Map.put(running, task.ref, id), "", said, until)
+            listen(port, call, Map.put(running, task.ref, id), "", output, until)
 
           {:ok, %{"done" => %{"ok" => ok, "text" => text}}} ->
             {if(ok, do: :ok, else: :error), text}
 
           _ ->
-            listen(port, call, running, "", [part <> more | said], until)
+            listen(port, call, running, "", [part <> more | output], until)
         end
 
       {ref, answer} when is_map_key(running, ref) ->
         Process.demonitor(ref, [:flush])
         Port.command(port, JSON.encode!(Map.put(answer, :reply, running[ref])) <> "\n")
-        listen(port, call, Map.delete(running, ref), part, said, until)
+        listen(port, call, Map.delete(running, ref), part, output, until)
 
       {^port, {:exit_status, _}} ->
-        {:error, "The script stopped without an answer: " <> (said |> Enum.reverse() |> Enum.join("\n"))}
+        {:error, "The script stopped without an answer: " <> (output |> Enum.reverse() |> Enum.join("\n"))}
     after
       max(until - System.monotonic_time(:millisecond), 0) ->
         {:error, "The script ran past its time and was stopped."}
@@ -163,8 +163,8 @@ defmodule OneCore.CodeMode do
             with {:error, _} <- File.rename(writing, folder), do: :ok
             {:ok, folder}
 
-          {said, _} ->
-            {:error, "Code mode's packages didn't install:\n#{String.trim(said)}"}
+          {output, _} ->
+            {:error, "Code mode's packages didn't install:\n#{String.trim(output)}"}
         end
       after
         File.rm_rf!(writing)

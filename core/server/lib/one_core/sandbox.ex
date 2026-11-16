@@ -67,8 +67,8 @@ defmodule OneCore.Sandbox do
     name = Path.basename(artifact)
     sets = [{name, Map.reject(files, fn {path, _} -> Version.client?(path) end)}]
 
-    with {:ok, said} <- once({:describe, name, Version.code(files)}, name, sets),
-         do: Version.sandboxed(artifact, files, said)
+    with {:ok, description} <- once({:describe, name, Version.code(files)}, name, sets),
+         do: Version.sandboxed(artifact, files, description)
   end
 
   @doc """
@@ -440,7 +440,7 @@ defmodule OneCore.Sandbox do
     {:ok, child} = DynamicSupervisor.start_child(@supervisor, {__MODULE__, {nil, key, name, fn -> sets end, nil}})
 
     try do
-      with {:ok, _child, _port, context} <- GenServer.call(child, :loaded, :infinity), do: {:ok, context.said}
+      with {:ok, _child, _port, context} <- GenServer.call(child, :loaded, :infinity), do: {:ok, context.description}
     after
       DynamicSupervisor.terminate_child(@supervisor, child)
     end
@@ -450,7 +450,7 @@ defmodule OneCore.Sandbox do
 
   defp loaded(owner, version, used, files) do
     case child(owner, version, used, files) do
-      {:ok, _child, _port, context} -> {:ok, context.said}
+      {:ok, _child, _port, context} -> {:ok, context.description}
       {:error, why} -> {:error, why}
     end
   end
@@ -508,7 +508,7 @@ defmodule OneCore.Sandbox do
       artifact: version && version.artifact,
       permissions: (version && version.permissions) || [],
       jobs: (version && version.jobs) || [],
-      said: nil
+      description: nil
     }
 
     state = %{context: context, port: nil, buffer: "", loaded: nil, waiting: [], calls: %{}, requests: 0, logged: {0, 0}}
@@ -520,9 +520,9 @@ defmodule OneCore.Sandbox do
     # A VM started from what's kept marks it as in use.
     cached =
       with path when is_binary(path) <- state.context.cache,
-           {:ok, said} <- File.read(Path.join(path, "modules")) do
+           {:ok, description} <- File.read(Path.join(path, "modules")) do
         File.touch(path)
-        JSON.decode!(said)
+        JSON.decode!(description)
       else
         _ -> nil
       end
@@ -689,10 +689,10 @@ defmodule OneCore.Sandbox do
   defp received(%{"answer" => "load"} = answer, state) do
     loaded =
       case answer do
-        %{"ok" => said} when is_map(said) ->
-          {beams, said} = Map.pop(said, "beams")
+        %{"ok" => description} when is_map(description) ->
+          {beams, description} = Map.pop(description, "beams")
           if beams && state.context.cache, do: keep(state.context.cache, beams)
-          context = %{state.context | said: said}
+          context = %{state.context | description: description}
           {:ok, self(), state.port, context}
 
         %{"raised" => why} when is_binary(why) ->

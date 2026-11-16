@@ -154,7 +154,7 @@ export const open = (app: string, who: For & { behind?: boolean } = {}): Promise
 /// a server of its person's and `false` stops it being one, and `client({ update: true })` has it take the latest
 /// builds: each answers `{ said }`, what it did, or throws why it couldn't.
 export function client(): Promise<Client>
-export function client(change: ClientChange): Promise<{ said: string }>
+export function client(change: ClientChange): Promise<{ message: string }>
 export function client(change: ClientChange = {}) {
   return greet().then(() => ask("one/client", change))
 }

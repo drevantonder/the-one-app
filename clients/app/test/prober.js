@@ -5,9 +5,9 @@ const found = {}
 async function attempt(tried, reach) {
   try {
     const got = await reach()
-    found[tried] = got === undefined ? { reached: false, said: "nothing there" } : { reached: true, said: String(got).slice(0, 80) }
+    found[tried] = got === undefined ? { reached: false, result: "nothing there" } : { reached: true, result: String(got).slice(0, 80) }
   } catch (error) {
-    found[tried] = { reached: false, said: `${error.name}: ${error.message}`.slice(0, 120) }
+    found[tried] = { reached: false, result: `${error.name}: ${error.message}`.slice(0, 120) }
   }
 }
 // A request that an answer came back to reached what it asked.
@@ -35,7 +35,7 @@ await attempt("the internet", () => fetched("https://example.com/"))
 
 // The other app. Its files are the network's to read, as every plugin's are. What it holds while it runs is its own.
 const others = Array.from({ length: parent.frames.length }, (_, at) => parent.frames[at]).filter((frame) => frame !== window)
-if (!others.length) found["this test"] = { reached: true, said: "no other app was open beside this one, so reaching one wasn't tried" }
+if (!others.length) found["this test"] = { reached: true, result: "no other app was open beside this one, so reaching one wasn't tried" }
 await attempt("another app's page", () => others.map((frame) => frame.document.body.textContent).join())
 await attempt("another app's storage", () => others.map((frame) => frame.localStorage.getItem("secret")).join())
 await attempt("another app's storage, from here", () => localStorage.getItem("secret") ?? undefined)
@@ -44,5 +44,5 @@ await attempt("another app's address, as a script here", () => loaded(`${locatio
 
 // Its own tool, through the bridge, which is what it does reach, once the app has had time to be sent elsewhere.
 await new Promise((later) => setTimeout(later, 500))
-found["sending the app's window elsewhere"] = { reached: false, said: "the app's page is still here to pass this on" }
+found["sending the app's window elsewhere"] = { reached: false, result: "the app's page is still here to pass this on" }
 parent.postMessage({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "a-prober_found", arguments: found } }, "*")

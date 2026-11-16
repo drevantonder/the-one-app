@@ -41,27 +41,27 @@ defmodule OneCore.User do
 
   Otherwise it's from whoever's device `from` is.
   """
-  def asking(from, said, hook \\ false)
+  def asking(from, meta, hook \\ false)
 
-  def asking(from, %{"who" => by} = said, hook) when is_binary(by) or is_nil(by) do
-    whose = owner(by || said["for"] || "") || "network"
+  def asking(from, %{"who" => by} = meta, hook) when is_binary(by) or is_nil(by) do
+    whose = owner(by || meta["for"] || "") || "network"
 
     cond do
       not (Servers.acts_for?(from, whose) or (hook and is_binary(from) and Servers.acts_for(from) != [])) ->
         {:error, "Only a server acting for #{whose} says it asks for them"}
 
-      is_binary(said["for"]) ->
-        {:ok, {by, said["for"]}, if(said["forwarded"] == "to", do: :to, else: said["forwarded"] == true)}
+      is_binary(meta["for"]) ->
+        {:ok, {by, meta["for"]}, if(meta["forwarded"] == "to", do: :to, else: meta["forwarded"] == true)}
 
       true ->
         {:error, "A server says who it asks for too"}
     end
   end
 
-  def asking(from, said, _hook) do
-    with {:ok, by} <- by(from, said),
+  def asking(from, meta, _hook) do
+    with {:ok, by} <- by(from, meta),
          :ok <- here(by),
-         subject = Map.get(said, "for", by),
+         subject = Map.get(meta, "for", by),
          :ok <- acts(by, subject),
          do: {:ok, {by, subject}, false}
   end
@@ -81,8 +81,8 @@ defmodule OneCore.User do
     end
   end
 
-  defp by(from, said) do
-    case device(from, said) do
+  defp by(from, meta) do
+    case device(from, meta) do
       nil -> {:error, nobody(), @nobody}
       device -> whose(device)
     end
@@ -109,8 +109,8 @@ defmodule OneCore.User do
     end
   end
 
-  def device(from, _said) when is_binary(from), do: from
-  def device(_from, _said), do: nil
+  def device(from, _meta) when is_binary(from), do: from
+  def device(_from, _meta), do: nil
 
   defp whose(device) do
     case Hooks.whose(device) do

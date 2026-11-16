@@ -112,14 +112,14 @@ defmodule OneCore.Search do
           room
         )
 
-      said =
+      lines =
         for {{_, _, _, _, _, _, tool}, call, about} <- Enum.zip([matches, calls, described]) do
           reads = if tool[:read_only] == true, do: " It only reads.", else: ""
           "#{call}\n  #{about}#{reads}"
         end
 
       shown = matches |> Enum.map(&{elem(&1, 4), elem(&1, 5)}) |> Enum.reject(&(elem(&1, 0) == nil)) |> Enum.uniq()
-      Enum.join(said ++ skills(shown) ++ could, "\n\n")
+      Enum.join(lines ++ skills(shown) ++ could, "\n\n")
     end
   end
 
@@ -284,11 +284,11 @@ defmodule OneCore.Search do
   defp object(schema) do
     {needed, optional} = inputs(schema)
 
-    said =
+    fields =
       for({name, input} <- needed, do: "#{name}: #{ts(input)}") ++
         for({name, input} <- optional, do: "#{name}?: #{ts(input)}")
 
-    if said == [], do: "{}", else: "{ #{Enum.join(said, ", ")} }"
+    if fields == [], do: "{}", else: "{ #{Enum.join(fields, ", ")} }"
   end
 
   @doc """

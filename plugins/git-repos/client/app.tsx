@@ -82,9 +82,9 @@ const Branchy = () => (
 /// Does something that changes a repo, and says why if it couldn't. → whether it did.
 async function does(tool: string, inputs: object, options?: { for?: string }) {
   try {
-    const said = await call(tool, inputs, options)
+    const result = await call(tool, inputs, options)
     refresh(repos)
-    return said || true
+    return result || true
   } catch (error) {
     toast((error as Error).message)
     return false

@@ -1,6 +1,6 @@
 import { createSignal, onSettled, Show } from "solid-js"
 import { Button, Icon } from "./button.tsx"
-import { said, touch } from "./shared.ts"
+import { messages, touch } from "./shared.ts"
 import { Problem } from "./states.tsx"
 
 // Keys as the browser names them, as X does, which is how a screen is told them.
@@ -308,7 +308,7 @@ export function LiveScreen(props: { label: string; screen: (inputs: ScreenInputs
         </Show>
         {/* Full screen in the window, or under a finger, has no Escape: it has its own way out. */}
         <Show when={full() === "window" || (full() && touch())}>
-          <Button class="leave" variant="secondary" size="icon" aria-label={said.exitFullScreen} onClick={(event) => (event.stopPropagation(), toggle())}>
+          <Button class="leave" variant="secondary" size="icon" aria-label={messages.exitFullScreen} onClick={(event) => (event.stopPropagation(), toggle())}>
             <Icon name="corners-in" />
           </Button>
         </Show>
@@ -319,7 +319,7 @@ export function LiveScreen(props: { label: string; screen: (inputs: ScreenInputs
             Live video couldn't connect, so this shows a picture each second.
           </p>
         </Show>
-        <Button variant="ghost" size="icon" aria-label={said.fullScreen} title={`${said.fullScreen} (${mac ? "⌃⌘F" : "F11"})`} onClick={toggle}>
+        <Button variant="ghost" size="icon" aria-label={messages.fullScreen} title={`${messages.fullScreen} (${mac ? "⌃⌘F" : "F11"})`} onClick={toggle}>
           <Icon name="corners-out" />
         </Button>
       </div>

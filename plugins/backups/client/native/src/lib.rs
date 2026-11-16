@@ -48,16 +48,16 @@ enum Destination {
 }
 
 impl Destination {
-    fn at(said: &str, keys: Option<&String>) -> Result<Self> {
-        if !(said.starts_with("https://") || said.starts_with("http://")) {
-            return Ok(Self::Folder(PathBuf::from(said)));
+    fn at(address: &str, keys: Option<&String>) -> Result<Self> {
+        if !(address.starts_with("https://") || address.starts_with("http://")) {
+            return Ok(Self::Folder(PathBuf::from(address)));
         }
-        let url: url::Url = said.parse().with_context(|| format!("{said} isn't an address"))?;
+        let url: url::Url = address.parse().with_context(|| format!("{address} isn't an address"))?;
         let mut parts = url.path().trim_matches('/').splitn(2, '/');
         let name =
             parts.next().filter(|name| !name.is_empty()).context("an address names its bucket after the host")?;
         let folder = parts.next().map(|folder| format!("{}/", folder.trim_end_matches('/'))).unwrap_or_default();
-        let keys = keys.with_context(|| format!("{said} needs its keys: --from-keys or --to-keys"))?;
+        let keys = keys.with_context(|| format!("{address} needs its keys: --from-keys or --to-keys"))?;
         let text = fs::read_to_string(keys).with_context(|| format!("couldn't read {keys}"))?;
         let value = |name: &str| {
             text.lines()
@@ -184,25 +184,25 @@ fn size(bytes: u64) -> String {
 
 /// `one restore`, with the words after it.
 pub async fn restore(args: &[String]) -> Result<String> {
-    let mut said = std::collections::HashMap::new();
+    let mut flags = std::collections::HashMap::new();
     let mut words = args.iter();
     while let Some(word) = words.next() {
         match word.as_str() {
-            "--list" => said.insert("list", String::new()),
+            "--list" => flags.insert("list", String::new()),
             flag @ ("--from" | "--to" | "--backup" | "--from-keys" | "--to-keys") => {
-                said.insert(&flag[2..], words.next().context(USAGE)?.clone())
+                flags.insert(&flag[2..], words.next().context(USAGE)?.clone())
             }
             _ => bail!("{USAGE}"),
         };
     }
-    let from = Destination::at(said.get("from").context(USAGE)?, said.get("from-keys"))?;
+    let from = Destination::at(flags.get("from").context(USAGE)?, flags.get("from-keys"))?;
     let backups = from.list("backups/").await?;
-    if said.contains_key("list") {
+    if flags.contains_key("list") {
         return Ok(backups.iter().map(|name| name.trim_start_matches("backups/")).collect::<Vec<_>>().join("\n"));
     }
-    let to = Destination::at(said.get("to").context(USAGE)?, said.get("to-keys"))?;
+    let to = Destination::at(flags.get("to").context(USAGE)?, flags.get("to-keys"))?;
 
-    let name = match said.get("backup") {
+    let name = match flags.get("backup") {
         Some(name) => format!("backups/{name}"),
         None => backups.last().cloned().context("There's no backup there.")?,
     };
@@ -210,7 +210,7 @@ pub async fn restore(args: &[String]) -> Result<String> {
     let listed = from.get(&name).await?.with_context(|| format!("There's no backup {backup} there."))?;
     let listed: Listed = serde_json::from_slice(&listed).context("that backup's list of blobs isn't one")?;
     if !to.list("").await?.is_empty() {
-        bail!("{} isn't empty. A network is restored into an empty bucket.", said["to"])
+        bail!("{} isn't empty. A network is restored into an empty bucket.", flags["to"])
     }
 
     // The network's list of servers isn't restored: the first server started on the bucket is its server then, as

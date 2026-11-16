@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { Icon } from "./button.tsx"
-import { reduced, said } from "./shared.ts"
+import { reduced, messages } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
 
 /// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
@@ -43,7 +43,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
     <div class={["ui-screen", props.class]}>
       <header>
         <Show when={props.back}>
-          <button class="back press ring" aria-label={said.back} onClick={() => (props.onBack ? props.onBack() : history.back())}>
+          <button class="back press ring" aria-label={messages.back} onClick={() => (props.onBack ? props.onBack() : history.back())}>
             <Icon name="caret-left" along />
           </button>
         </Show>

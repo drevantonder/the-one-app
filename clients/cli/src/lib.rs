@@ -29,10 +29,10 @@ pub fn resolvers() -> Vec<Arc<dyn InputResolver>> {
 pub fn main() -> ExitCode {
     // A server's environment, where the system gives a program none of its own, as Task Scheduler gives a task's,
     // is given to `one serve run` as its arguments, each NAME=value (`serving`). It's set before anything runs.
-    if let [serve, run, said @ ..] = &env::args().skip(1).collect::<Vec<_>>()[..]
+    if let [serve, run, args @ ..] = &env::args().skip(1).collect::<Vec<_>>()[..]
         && (serve.as_str(), run.as_str()) == ("serve", "run")
     {
-        for (name, value) in said.iter().filter_map(|said| said.split_once('=')) {
+        for (name, value) in args.iter().filter_map(|args| args.split_once('=')) {
             unsafe { env::set_var(name, value) };
         }
     }
@@ -187,7 +187,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
             // are, the plugin's is shown with its tools.
             let skills = says("skills/list", json!({})).await.unwrap_or_default();
             let skills = skills["skills"].as_array().map(Vec::as_slice).unwrap_or_default();
-            let uri = skills.iter().filter_map(|skill| skill["uri"].as_str()).rfind(|uri| said(uri) == words);
+            let uri = skills.iter().filter_map(|skill| skill["uri"].as_str()).rfind(|uri| uri_words(uri) == words);
             let skill = match uri {
                 Some(uri) => says("resources/read", json!({"uri": uri})).await,
                 None => None,
@@ -218,7 +218,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
                 println!("\n{COMMANDS}");
                 println!("\nA skill says when and how to use a plugin's tools, and `one <skill>` shows one:\n");
                 for skill in skills {
-                    let words = said(skill["uri"].as_str().unwrap_or_default()).join(" ");
+                    let words = uri_words(skill["uri"].as_str().unwrap_or_default()).join(" ");
                     let about = skill["frontmatter"]["description"].as_str().unwrap_or_default();
                     println!("one {words:width$}  {about}");
                 }
@@ -231,7 +231,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
 /// The words that show a skill, from its address (`OneCore.Skills`): a plugin's own, `skill://<plugin>/<its own
 /// name>/SKILL.md`, by the plugin's name; one of its `skills/` by the plugin's name and the skill's; and One Core's
 /// own, `skill://<name>/SKILL.md`, by its name.
-fn said(uri: &str) -> Vec<&str> {
+fn uri_words(uri: &str) -> Vec<&str> {
     let path = uri.strip_prefix("skill://").and_then(|uri| uri.strip_suffix("/SKILL.md")).unwrap_or_default();
     match path.split('/').collect::<Vec<_>>().as_slice() {
         [plugin, _own] => vec![plugin],

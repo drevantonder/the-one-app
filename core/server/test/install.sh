@@ -105,7 +105,7 @@ if [[ -n $pc ]]; then
   listening() { ps1 <<<"Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object OwningProcess -in @($1) | Out-String"; }
   its_path() { echo "(its person's own, as they log on)"; }
   mark() { cursor=$(($(ps1 <<<"@(Get-Content -LiteralPath '$log').Count") + 1)); }
-  said() {
+  logs() {
     local wait=; [[ ${1-} != -f ]] || wait=-Wait
     ps1 <<<"Get-Content -LiteralPath '$log' $wait | Select-Object -Skip $((cursor - 1))"
   }
@@ -123,7 +123,7 @@ elif [[ $kind == linux-* ]]; then
   its_path() { systemctl --user show -p Environment --value "$service" | tr ' ' '\n' | sed -n 's/^PATH=//p'; }
   # What it has said, from where it was when `mark` was last asked.
   mark() { cursor=$(journalctl --user -u "$service" -n 0 --show-cursor | grep -o 's=.*'); }
-  said() { journalctl --user -u "$service" -o cat --after-cursor="$cursor" "$@"; }
+  logs() { journalctl --user -u "$service" -o cat --after-cursor="$cursor" "$@"; }
   remove() { systemctl --user cat "$service" >/dev/null 2>&1 && systemctl --user disable --now "$service"; }
   gone() { ! systemctl --user cat "$service" >/dev/null 2>&1 && [[ -z $(find "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" -name "$service") ]]; }
 else
@@ -142,7 +142,7 @@ else
   its_path() { plutil -extract EnvironmentVariables.PATH raw -o - "$machine/home/Library/LaunchAgents/$service.plist"; }
   log=$machine/home/$data/app.theone.client/server/server.log
   mark() { cursor=$(($(wc -l <"$log") + 1)); }
-  said() { if [[ ${1-} == -f ]]; then "$tail" -n "+$cursor" -f --pid=$$ "$log" 2>/dev/null; else tail -n "+$cursor" "$log"; fi; }
+  logs() { if [[ ${1-} == -f ]]; then "$tail" -n "+$cursor" -f --pid=$$ "$log" 2>/dev/null; else tail -n "+$cursor" "$log"; fi; }
   remove() { launchctl bootout "$domain/$service" 2>/dev/null || true; }
   gone() { ! launchctl print "$domain/$service" >/dev/null 2>&1 && [[ ! -e $machine/home/Library/LaunchAgents/$service.plist ]]; }
 fi
@@ -200,7 +200,7 @@ echo "its device: $key"
 echo "one --version: $(on_machine --version)"
 
 # Waits for the server to say something, from where it was when `mark` was last asked.
-logged() { timeout 600 grep -q -m1 -E "$1" <(said -f) || { said | tail -20; exit 1; }; }
+logged() { timeout 600 grep -q -m1 -E "$1" <(logs -f) || { logs | tail -20; exit 1; }; }
 build_of() { on_machine builds --server "$1" | grep -o '"build":"[^"]*"' | head -1 | cut -d'"' -f4; }
 
 say "one serve on"
@@ -274,7 +274,7 @@ owner update --server "$server"
 began=$(now)
 echo "while it updates, the network's other server answers: $(owner builds | jq -r .server | sed "s/$first/the network's first server/")"
 logged "The server is on the build"
-said | grep -E "^The server is on the build" | sed 's/^/  /'
+logs | grep -E "^The server is on the build" | sed 's/^/  /'
 echo "in $(since "$began"); it answers as $(build_of "$server"), and the machine's one is $(on_machine --version)"
 echo "kept: $(there_ls "$home/server/builds")"
 
@@ -283,7 +283,7 @@ c=$(release broken "perl -pi -e 's/  def serve do/  def serve do\n    raise \"th
 mark
 owner update --server "$server"
 logged "Went back to"
-said | grep -E "can't start|Went back to" | sed 's/^/  /'
+logs | grep -E "can't start|Went back to" | sed 's/^/  /'
 logged "A server is running"
 echo "it answers as $(build_of "$server"), not $c"
 
@@ -294,7 +294,7 @@ echo "  what an update downloads: $(size "$CARGO_TARGET_DIR/builds/$b/server-$ki
 say "one serve off"
 began=$(now)
 mark
-on_machine serve off || { said | tail -20; exit 1; }
+on_machine serve off || { logs | tail -20; exit 1; }
 echo "in $(since "$began")"
 gone || { echo "the system still has $service" && exit 1; }
 ! there_exists "$home/server" || { echo "left behind: $home/server" && exit 1; }

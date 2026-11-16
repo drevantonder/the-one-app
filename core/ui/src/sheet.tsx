@@ -2,7 +2,7 @@ import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { covers } from "./bridge.ts"
 import { Button, Icon } from "./button.tsx"
-import { said } from "./shared.ts"
+import { messages } from "./shared.ts"
 import { hold } from "./toast.tsx"
 import type { JSX } from "@solidjs/web"
 
@@ -136,7 +136,7 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
       <div class="panel">
         <header>
           <h2 id={id}>{props.heading}</h2>
-          <button class="press ring" aria-label={said.close} onClick={() => dialog.close()}>
+          <button class="press ring" aria-label={messages.close} onClick={() => dialog.close()}>
             <Icon name="x" />
           </button>
         </header>
@@ -158,10 +158,10 @@ function Alert(props: { question: Question | null; onAnswer: (yes: boolean, rese
         </Show>
         <footer>
           <Button variant="outline" autofocus onClick={(event) => ((answer = false), event.currentTarget.closest("dialog")!.close())}>
-            {said.cancel}
+            {messages.cancel}
           </Button>
           <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((answer = true), event.currentTarget.closest("dialog")!.close())}>
-            {props.question?.action || said.ok}
+            {props.question?.action || messages.ok}
           </Button>
         </footer>
       </div>

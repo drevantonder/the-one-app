@@ -247,16 +247,16 @@ if ((${#mine[@]})); then
       if (published.exitCode !== 0) process.exit(1);
       return JSON.parse(published.stdout.toString());
     };
-    let said = publish();
-    if (said.send) {
-      for (const { file, name } of builds.filter(({ name }) => said.send[name])) {
-        const { method, url, headers } = said.send[name];
+    let published = publish();
+    if (published.send) {
+      for (const { file, name } of builds.filter(({ name }) => published.send[name])) {
+        const { method, url, headers } = published.send[name];
         const sent = await fetch(url, { method, headers, body: Bun.file(`${OUT}/${file}`) });
         if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
       }
-      said = publish();
+      published = publish();
     }
-    if (said.send) throw new Error("The network didn'"'"'t take them");
+    if (published.send) throw new Error("The network didn'"'"'t take them");
     for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
   '
 fi

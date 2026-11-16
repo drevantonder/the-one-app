@@ -363,7 +363,7 @@ defmodule OneCore.Call do
       {:error, ^forwarding_loop, _why} -> :forwarding_loop
       {:error, _code, why} -> raise why
       :unreachable -> :no_answer
-      :stopped -> if again?(method, params, who), do: :no_answer, else: raise(Server.said(:stopped, server))
+      :stopped -> if again?(method, params, who), do: :no_answer, else: raise(Server.error_message(:stopped, server))
     end
   end
 

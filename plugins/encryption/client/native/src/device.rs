@@ -41,11 +41,11 @@ async fn tool_for(client: &Client, name: &str, inputs: Value, who: Option<&str>)
         params["_meta"]["for"] = who.into();
     }
     let answer = Box::pin(client.request("tools/call", params)).await?;
-    let said = answer["content"][0]["text"].as_str().unwrap_or_default();
+    let text = answer["content"][0]["text"].as_str().unwrap_or_default();
     if answer["isError"] == true {
-        bail!("{said}")
+        bail!("{text}")
     }
-    Ok(serde_json::from_str(said).unwrap_or_else(|_| said.into()))
+    Ok(serde_json::from_str(text).unwrap_or_else(|_| text.into()))
 }
 
 /// What the plugin's tool that an input names says of the artifact it's kept in: its name, its epoch, and the

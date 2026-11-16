@@ -371,7 +371,7 @@ defmodule OneCore.Tools do
 
     case uses ++ sends do
       [] -> "It does nothing beyond its own."
-      said -> "It " <> Enum.join(said, " · ") <> "."
+      phrases -> "It " <> Enum.join(phrases, " · ") <> "."
     end
   end
 
@@ -659,7 +659,7 @@ defmodule OneCore.Tools do
       case Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{who: by, for: who}}) do
         {:ok, result} -> throw({Call, {:forwarded, result}})
         {:error, _code, why} -> raise why
-        down -> raise Server.said(down, server)
+        down -> raise Server.error_message(down, server)
       end
     end
   end

@@ -6,8 +6,8 @@ fn main() {
     // git's index does, which git writes whenever it looks at the files (`git status`), and every program would be
     // built again for nothing: its `-dirty` is what was uncommitted when the commit last changed.
     let git = |args: &[&str]| {
-        let said = std::process::Command::new("git").args(args).output().expect("git is there");
-        String::from_utf8(said.stdout).expect("git says text").trim().to_owned()
+        let output = std::process::Command::new("git").args(args).output().expect("git is there");
+        String::from_utf8(output.stdout).expect("git says text").trim().to_owned()
     };
     let branch = git(&["symbolic-ref", "-q", "HEAD"]);
     for watched in ["HEAD", "packed-refs", branch.as_str()].into_iter().filter(|path| !path.is_empty()) {

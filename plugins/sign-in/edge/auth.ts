@@ -127,9 +127,9 @@ async function place(adapter: Adapter, device: string, kind: Device["kind"], nam
  * proved. Better Auth keeps an email for everyone, made up for whoever signs in only with a passkey, which isn't one.
  */
 async function goesBy(user: User) {
-  const said = { called: user.called ?? null, email: user.emailVerified ? user.email : null };
+  const person = { called: user.called ?? null, email: user.emailVerified ? user.email : null };
   await env.OWN.remove(`people/${user.name}`);
-  await env.OWN.write(`people/${user.name}`, JSON.stringify(said));
+  await env.OWN.write(`people/${user.name}`, JSON.stringify(person));
 }
 
 /** Makes a browser's session one of its person's devices, as a server reads whose a device is. */
@@ -203,17 +203,17 @@ const devices = () => ({
     if (url.pathname !== DEVICE_CODE && url.pathname !== TOKEN) return;
     // A device asks with a form, as RFC 8628 has it.
     const body = await request.clone().text();
-    const said = Object.fromEntries(new URLSearchParams(body));
-    if (url.pathname === TOKEN && said.grant_type !== DEVICE_CODE_GRANT_TYPE) return;
+    const form = Object.fromEntries(new URLSearchParams(body));
+    if (url.pathname === TOKEN && form.grant_type !== DEVICE_CODE_GRANT_TYPE) return;
     // Whatever names a key as `client_id` is signed with it (`core/edge/ask.ts`).
     const key = await env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
-    if (!key || key !== said.client_id) {
+    if (!key || key !== form.client_id) {
       const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within a minute of the right time" };
       return { response: Response.json(refused, { status: 401 }) };
     }
     // A device is no OAuth client, so it's answered as Better Auth answers a device of its own, which takes JSON.
     if (url.pathname === TOKEN)
-      return { request: new Request(new URL(DEVICE_TOKEN, url.origin), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(said) }) };
+      return { request: new Request(new URL(DEVICE_TOKEN, url.origin), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(form) }) };
   },
   hooks: {
     before: [

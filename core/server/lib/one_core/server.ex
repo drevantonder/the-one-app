@@ -47,9 +47,9 @@ defmodule OneCore.Server do
   def request(server, method, params) do
     # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
     # this one knows the other is still running it, however long it takes (`client::Reached::ask`).
-    said = %{progressToken: System.unique_integer([:positive])}
-    said = if parent = Trace.traceparent(), do: Map.put(said, :traceparent, parent), else: said
-    params = Map.update(params, :_meta, said, &Map.merge(&1, said))
+    meta = %{progressToken: System.unique_integer([:positive])}
+    meta = if parent = Trace.traceparent(), do: Map.put(meta, :traceparent, parent), else: meta
+    params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
 
     with true <- Servers.seen(server) in [:on, nil] or Servers.seen_again(server) in [:on, nil] or :unreachable,
          {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
@@ -74,14 +74,14 @@ defmodule OneCore.Server do
   end
 
   @doc "What whoever asked is told of the server `server` that didn't answer `request/3`, by its machine's name."
-  def said(:unreachable, server) do
+  def error_message(:unreachable, server) do
     case Servers.seen(server) do
       at when is_integer(at) -> "#{named(server)} was last seen #{Servers.ago(at)}"
       _ -> "#{named(server)} isn't answering"
     end
   end
 
-  def said(:stopped, server),
+  def error_message(:stopped, server),
     do: "#{named(server)} went away before it answered, as a server does while it restarts, so this may or may not have been done. Look before trying again"
 
   defp named(server), do: Servers.name(server) || "That server"

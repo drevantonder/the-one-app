@@ -37,10 +37,10 @@ async function callback(params: URLSearchParams) {
   const state = params.get("state") ?? "";
   const owner = whose(state);
   if (!owner) return { problem: "This sign-in isn't one this network began." };
-  const said = { state, ...(params.has("code") && { code: params.get("code") }), ...(params.has("error") && { error: params.get("error") }) };
+  const inputs = { state, ...(params.has("code") && { code: params.get("code") }), ...(params.has("error") && { error: params.get("error") }) };
   // Whoever comes back is nobody the network knows: what they hold is the state, as a sharing link's holder holds
   // a link, and the Vault's tool checks it's the one it gave.
-  const call = { name: "vault_oauth_callback", arguments: said, _meta: { link: `${owner}/${state}` } };
+  const call = { name: "vault_oauth_callback", arguments: inputs, _meta: { link: `${owner}/${state}` } };
   const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call });
   const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers(NETWORK))]);
   const reached = await env.RELAY.forward([...servers], message);

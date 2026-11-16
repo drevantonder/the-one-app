@@ -129,8 +129,8 @@ defmodule Encryption do
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
   defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
     {at, plugin} = OneCore.Plugins.installed(call.subject, encryption)
-    said = %{who: nil, for: User.owner(name), forwarded: true}
-    ask = %{installed: at, plugin: plugin, function: "looked", arguments: [name], _meta: said}
+    meta = %{who: nil, for: User.owner(name), forwarded: true}
+    ask = %{installed: at, plugin: plugin, function: "looked", arguments: [name], _meta: meta}
     for server <- servers -- [call.server], do: Server.request(server, "plugins/call", ask)
   end
 

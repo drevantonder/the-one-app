@@ -1,6 +1,6 @@
 import { omit, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { said } from "./shared.ts"
+import { messages } from "./shared.ts"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
@@ -58,7 +58,7 @@ export function Icon(props: { name: IconName; along?: boolean }) {
 /// `<Spinner />`: something's under way. The size of the text around it.
 export function Spinner() {
   return (
-    <span class="ui-spinner" role="status" aria-label={said.loading}>
+    <span class="ui-spinner" role="status" aria-label={messages.loading}>
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="9" />
       </svg>

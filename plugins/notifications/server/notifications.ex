@@ -360,8 +360,8 @@ defmodule Notifications do
 
   defp push(call, devices, notification) do
     with address when is_binary(address) <- Application.get_env(:one_core, :address),
-         said = JSON.encode!(notification),
-         sent = Enum.map(devices, &%{token: &1["token"], via: &1["via"], sealed: sealed(&1["key"], said)}),
+         json = JSON.encode!(notification),
+         sent = Enum.map(devices, &%{token: &1["token"], via: &1["via"], sealed: sealed(&1["key"], json)}),
          {:ok, %{"gone" => gone, "failed" => failed}} <- ask(address, %{devices: sent}) do
       if gone != [] do
         forget = "delete from devices where token in (select value from json_each(?))"
@@ -381,8 +381,8 @@ defmodule Notifications do
     end
   end
 
-  defp sealed(key, said) do
-    {:ok, sealed} = Cipher.seal(key, "one/notifications/1/notification\n" <> key, said)
+  defp sealed(key, json) do
+    {:ok, sealed} = Cipher.seal(key, "one/notifications/1/notification\n" <> key, json)
     Base.encode64(sealed)
   end
 

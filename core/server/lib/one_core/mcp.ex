@@ -76,13 +76,13 @@ defmodule OneCore.Mcp do
       {:ok, %{"method" => method, "id" => id} = request} ->
         params = Map.get(request, "params", %{})
 
-        version = said(params)["io.modelcontextprotocol/protocolVersion"]
+        version = meta(params)["io.modelcontextprotocol/protocolVersion"]
 
         try do
-          Trace.follow(said(params)["traceparent"])
+          Trace.follow(meta(params)["traceparent"])
 
           with :ok <- speaks(version),
-               {:ok, principal, forwarded} <- User.asking(from, said(params), method == "hooks/call"),
+               {:ok, principal, forwarded} <- User.asking(from, meta(params), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
           else
@@ -105,15 +105,15 @@ defmodule OneCore.Mcp do
         end
 
       # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.
-      {:ok, %{"method" => "notifications/one/watch"} = said} when from != nil ->
-        Server.watch(from, said["params"]["address"])
+      {:ok, %{"method" => "notifications/one/watch"} = notification} when from != nil ->
+        Server.watch(from, notification["params"]["address"])
         ""
 
       # A client saying what it measured of itself, as from the device and person its request proves it is, which
       # is all that's believed of who said it.
       {:ok, %{"method" => "notifications/one/measured", "params" => %{} = params}} ->
-        with {:ok, {by, _for}, false} <- User.asking(from, said(params)) do
-          about = %{"records" => List.wrap(params["records"]), "device" => User.device(from, said(params)), "who" => by}
+        with {:ok, {by, _for}, false} <- User.asking(from, meta(params)) do
+          about = %{"records" => List.wrap(params["records"]), "device" => User.device(from, meta(params)), "who" => by}
           Hooks.observe("measured", about, {nil, "network"})
         end
 
@@ -126,14 +126,14 @@ defmodule OneCore.Mcp do
 
       # Another server, or a plugin's edge function, saying that what this one kept of some hooks
       # was decided from what has since changed.
-      {:ok, %{"method" => "notifications/one/forget"} = said} ->
-        Hooks.forget(for hook <- List.wrap(said["params"]["hooks"]), is_binary(hook), do: hook)
+      {:ok, %{"method" => "notifications/one/forget"} = notification} ->
+        Hooks.forget(for hook <- List.wrap(notification["params"]["hooks"]), is_binary(hook), do: hook)
         ""
 
       # Another server saying there's something new in the bucket for some owners, or with none, this server saying
       # it can reach its network's address again.
-      {:ok, %{"method" => "notifications/one/reload"} = said} ->
-        case said["params"]["for"] do
+      {:ok, %{"method" => "notifications/one/reload"} = notification} ->
+        case notification["params"]["for"] do
           nil -> Server.reconnected()
           owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Server.reload(owner)
         end
@@ -149,8 +149,8 @@ defmodule OneCore.Mcp do
   end
 
   # What a request says of itself.
-  defp said(%{"_meta" => %{} = said}), do: said
-  defp said(_params), do: %{}
+  defp meta(%{"_meta" => %{} = meta}), do: meta
+  defp meta(_params), do: %{}
 
   # A request with no version is of a client that said its version in `initialize`, or of a server.
   defp speaks(nil), do: :ok
@@ -222,7 +222,7 @@ defmodule OneCore.Mcp do
   # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
   # asks for (a request that says `who`). A client calls as nobody's plugin.
   defp result("tools/call", %{"name" => name} = params, _from, principal, forwarded) do
-    caller = if Map.has_key?(said(params), "who"), do: said(params)["caller"]
+    caller = if Map.has_key?(meta(params), "who"), do: meta(params)["caller"]
 
     case call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller) do
       {:ok, answer} -> changed(name, %{content: content(name, answer)}, principal)
@@ -264,7 +264,7 @@ defmodule OneCore.Mcp do
   # build it is as it asks, which is kept in the bucket after it's answered: a device waits a few seconds for its
   # token, and a slow bucket would otherwise keep it from joining at all.
   defp result("one/token", params, from, {"users/" <> _ = by, _for}, _forwarded) do
-    device = User.device(from, said(params))
+    device = User.device(from, meta(params))
 
     if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Builds.seen(by, device, params["build"]) end)
@@ -415,7 +415,7 @@ defmodule OneCore.Mcp do
 
   # How whoever asks calls tools: as MCP's tools, in a code mode script, or as commands.
   defp mode(params) do
-    case said(params)["mode"] do
+    case meta(params)["mode"] do
       "code" -> :code
       "cli" -> :cli
       _ -> :mcp
@@ -552,16 +552,16 @@ defmodule OneCore.Mcp do
 
   defp fitted(text, plugins) do
     more = ", and more: search finds them."
-    said = text <> "\n\nThe plugins here, whose tools start with their names: "
+    instructions = text <> "\n\nThe plugins here, whose tools start with their names: "
 
-    Enum.reduce_while(plugins, {said, ""}, fn plugin, {said, sep} ->
-      if length16(said <> sep <> plugin <> more) > @instructions_limit,
-        do: {:halt, {said <> more, :full}},
-        else: {:cont, {said <> sep <> plugin, ", "}}
+    Enum.reduce_while(plugins, {instructions, ""}, fn plugin, {instructions, sep} ->
+      if length16(instructions <> sep <> plugin <> more) > @instructions_limit,
+        do: {:halt, {instructions <> more, :full}},
+        else: {:cont, {instructions <> sep <> plugin, ", "}}
     end)
     |> case do
-      {said, :full} -> said
-      {said, _sep} -> said <> "."
+      {instructions, :full} -> instructions
+      {instructions, _sep} -> instructions <> "."
     end
   end
 
