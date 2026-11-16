@@ -13,9 +13,20 @@ defmodule Tally do
       %{
         name: "add",
         description: "Adds a note",
-        inputs: %{type: "object", properties: %{note: %{type: "string"}}, required: ["note"]}
+        inputs: %{type: "object", properties: %{note: %{type: "string"}}, required: ["note"]},
+        outputs: %{type: "object"}
       },
-      %{name: "list", read_only: true, description: "Lists the notes", inputs: %{type: "object"}}
+      %{
+        name: "list",
+        read_only: true,
+        description: "Lists the notes",
+        inputs: %{type: "object"},
+        outputs: %{
+          type: "object",
+          properties: %{notes: %{type: "array", items: %{type: "string"}}},
+          required: ["notes"]
+        }
+      }
     ]
   end
 
@@ -25,12 +36,14 @@ defmodule Tally do
 
     database.transaction(call, @schema, fn db ->
       database.query(db, "insert into notes (note) values (?)", [note])
-      "Installed."
     end)
+
+    %{}
   end
 
   def call("list", _inputs, call) do
     database = OneCore.Call.plugin(call, "database")
-    database.transaction(call, @schema, &database.query(&1, "select note from notes order by id"))
+    notes = database.transaction(call, @schema, &database.query(&1, "select note from notes order by id"))
+    %{notes: Enum.map(notes, & &1["note"])}
   end
 end
