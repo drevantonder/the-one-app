@@ -141,12 +141,13 @@ defmodule OneCore.Mcp do
 
   # A user's device asks for its token to the relay at the network's address, and for the next before that one
   # ends, and is told whose it is: the device a run of it proved here, or the edge did there. It says which
-  # build it is as it asks.
+  # build it is as it asks, which is kept in the bucket after it's answered: a device waits a few seconds for its
+  # token, and a slow bucket would otherwise keep it from joining at all.
   defp result("one/token", params, from, {"users/" <> _ = by, _for}, _forwarded) do
     device = User.device(from, said(params))
 
     if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
-      Builds.seen(by, device, params["build"])
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Builds.seen(by, device, params["build"]) end)
       {:ok, %{token: Edge.token(device), who: by}}
     else
       {:error, "A token is for a user's device, by its key"}
