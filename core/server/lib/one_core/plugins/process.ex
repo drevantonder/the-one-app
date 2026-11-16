@@ -65,20 +65,20 @@ defmodule OneCore.Plugins.Process do
   end
 
   @doc "Waits for a process to have started. Gives `:ok`, or `{:stopped, why}` if it stopped instead."
-  def started(process), do: told(process, :started, :infinity)
+  def started(process), do: request(process, :started, :infinity)
 
   @doc """
   Tells a process that its plugin has a newer version, and waits for it to have moved to it. Gives `:ok`, or
   `{:stopped, why}` if it stopped instead: its plugin no longer has it, or it starts afresh in the new code.
   """
-  def follow(process), do: told(process, :follow, @within)
+  def follow(process), do: request(process, :follow, @within)
 
   @doc "Stops a process that is no longer to run here, and waits until it has."
-  def stop(process), do: told(process, :stop, @within)
+  def stop(process), do: request(process, :stop, @within)
 
   # Tells a process something, and waits for it to say it's done or to stop. One that does neither in time is
   # stopped.
-  defp told(process, what, within) do
+  defp request(process, what, within) do
     monitor = Process.monitor(process)
     GenServer.cast(process, {__MODULE__, what, self(), monitor})
 

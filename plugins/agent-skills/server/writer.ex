@@ -33,7 +33,7 @@ defmodule AgentSkills.Writer do
   @impl GenServer
   def init(_) do
     send(self(), :write)
-    {:ok, %{listed: nil, skills: %{}, told: MapSet.new()}}
+    {:ok, %{listed: nil, skills: %{}, logged: MapSet.new()}}
   end
 
   @impl GenServer
@@ -49,10 +49,10 @@ defmodule AgentSkills.Writer do
       Enum.reduce(roots(System.user_home!()), state, &write(&1, network, &2))
     else
       [] -> state
-      {:error, why} -> tell(state, why)
+      {:error, why} -> log_once(state, why)
     end
   rescue
-    problem -> tell(state, "couldn't write them: " <> Exception.message(problem))
+    problem -> log_once(state, "couldn't write them: " <> Exception.message(problem))
   end
 
   defp network do
@@ -178,7 +178,7 @@ defmodule AgentSkills.Writer do
 
     cond do
       File.exists?(folder) and not ours and not before?(root, name) ->
-        tell(state, "left #{folder} alone: it isn't a skill Agent Skills wrote")
+        log_once(state, "left #{folder} alone: it isn't a skill Agent Skills wrote")
 
       ours and same?(folder, files) ->
         state
@@ -223,8 +223,8 @@ defmodule AgentSkills.Writer do
   defp kebab(text), do: text |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
 
   # Says each problem once, not every minute.
-  defp tell(state, said) do
-    if not MapSet.member?(state.told, said), do: Logger.warning("Agent Skills: " <> said)
-    %{state | told: MapSet.put(state.told, said)}
+  defp log_once(state, said) do
+    if not MapSet.member?(state.logged, said), do: Logger.warning("Agent Skills: " <> said)
+    %{state | logged: MapSet.put(state.logged, said)}
   end
 end

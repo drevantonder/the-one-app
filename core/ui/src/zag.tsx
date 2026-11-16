@@ -50,7 +50,7 @@ type Merged = (attributes: () => object, props: object) => object
 const drawn = new Promise((done) => requestAnimationFrame(() => setTimeout(done)))
 
 /// What of `props` is told to a machine: the props `names` Zag lists for it, as they are now.
-const told = (props: Record<string, unknown>, names: string[]) => Object.fromEntries(names.filter((name) => name in props).map((name) => [name, props[name]]))
+const pick = (props: Record<string, unknown>, names: string[]) => Object.fromEntries(names.filter((name) => name in props).map((name) => [name, props[name]]))
 
 /// What of a still root's props goes on its element: what can't be for its machine, which isn't here to say.
 const own = (props: Record<string, unknown>) => Object.fromEntries(Object.keys(props).filter((name) => name === "class" || name === "style" || /^(aria|data)-/.test(name)).map((name) => [name, props[name]]))
@@ -94,7 +94,7 @@ export function machine<Parts extends string, Given = Props>(
     const { zag, props } = given
     const id = createUniqueId()
     const unless = defaults()
-    const service = zag.useMachine(zag.machine, () => ({ id, dir: dir(), ...unless(), ...told(props, zag.props) }))
+    const service = zag.useMachine(zag.machine, () => ({ id, dir: dir(), ...unless(), ...pick(props, zag.props) }))
     const api = createMemo(() => zag.connect(service, zag.normalizeProps))
     const merged: Merged = (attributes, props) => zag.mergeProps(attributes, props)
     return (
@@ -123,7 +123,7 @@ export function machine<Parts extends string, Given = Props>(
       // What opens over the page opens only once the machine is here to open it.
       if (!zag && name === "Positioner") return null
       const taking = zag ? ((typeof takes === "function" ? takes(zag) : takes) as string[]) : []
-      return draw(element, () => api()[get](zag ? told(props, taking) : props), omit(props, ...taking), merged)
+      return draw(element, () => api()[get](zag ? pick(props, taking) : props), omit(props, ...taking), merged)
     }
   }
   return {

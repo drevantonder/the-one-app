@@ -15,7 +15,7 @@ defmodule OneCore.Server do
 
   @doc "Tells every client that's watching that something changed, so that it asks again. With no server started, nobody is told."
   def changed do
-    GenServer.cast(__MODULE__, {:tell, JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed"})})
+    GenServer.cast(__MODULE__, {:notify, JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed"})})
   end
 
   @doc """
@@ -97,8 +97,8 @@ defmodule OneCore.Server do
   @doc "Tells `servers`, by their keys, what `notify_servers/3` tells the servers acting for `owners`."
   def notify(servers, owners, what \\ "reload", hooks \\ []) do
     params = %{for: owners, hooks: hooks}
-    told = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
-    Stream.run(Task.async_stream(servers -- [key()], &ask(&1, told), timeout: :infinity))
+    notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
+    Stream.run(Task.async_stream(servers -- [key()], &ask(&1, notification), timeout: :infinity))
   end
 
   @doc """
@@ -135,7 +135,7 @@ defmodule OneCore.Server do
   # one that's there answers at once (`Iroh.connect/4`); one that started again is somewhere new.
   defp ask(server, message) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
-    asked = fn -> told(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
+    asked = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
 
     case asked.() do
       :closed -> connect(endpoint, server, asked)
@@ -146,7 +146,7 @@ defmodule OneCore.Server do
 
   defp connect(endpoint, server, asked) do
     with {:ok, address} <- Servers.address(server),
-         :ok <- told(&Iroh.connect(endpoint, address, self(), &1)) do
+         :ok <- await(&Iroh.connect(endpoint, address, self(), &1)) do
       case asked.() do
         :closed -> :unreachable
         {:gone, _address} -> :unreachable
@@ -157,7 +157,7 @@ defmodule OneCore.Server do
     end
   end
 
-  defp told(ask) do
+  defp await(ask) do
     reference = make_ref()
     ask.(reference)
 
@@ -182,8 +182,8 @@ defmodule OneCore.Server do
   end
 
   @impl true
-  def handle_cast({:tell, notification}, server) do
-    Iroh.tell(server.endpoint, notification)
+  def handle_cast({:notify, notification}, server) do
+    Iroh.notify(server.endpoint, notification)
     {:noreply, server}
   end
 

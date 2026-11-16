@@ -140,7 +140,7 @@ impl Network {
 /// someone's, its token to the relay there, whose it is and the build it was when it got that, which it said as it
 /// asked.
 #[derive(Clone, Serialize, Deserialize)]
-struct Told {
+struct NetworkConfig {
     address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     authorization_server: Option<AuthorizationServer>,
@@ -381,7 +381,7 @@ async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) 
     Ok((answer.status().is_success(), answer.json().await?))
 }
 
-impl Told {
+impl NetworkConfig {
     /// What's kept in `home`, if it's there whole.
     fn kept(home: &Path) -> Option<Self> {
         serde_json::from_slice(&fs::read(home.join("network")).ok()?).ok()
@@ -800,12 +800,12 @@ impl Client {
     /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do.
     pub async fn open(home: impl Into<PathBuf>, resolvers: Vec<Arc<dyn InputResolver>>) -> Result<Arc<Self>> {
         let home = home.into();
-        let told = match fs::read(home.join("network")) {
+        let config = match fs::read(home.join("network")) {
             Ok(network) => {
-                Some(serde_json::from_slice::<Told>(&network).context("`network` isn't a network's address")?)
+                Some(serde_json::from_slice::<NetworkConfig>(&network).context("`network` isn't a network's address")?)
             }
             // An app built for one network knows its address.
-            Err(error) if error.kind() == ErrorKind::NotFound => BUILT_FOR.map(|address| Told {
+            Err(error) if error.kind() == ErrorKind::NotFound => BUILT_FOR.map(|address| NetworkConfig {
                 address: address.to_owned(),
                 authorization_server: None,
                 token: None,
@@ -818,15 +818,15 @@ impl Client {
         // be let in by.
         let key = key(&home.join("key"))?;
         // A device that's a new build since it last got its token gets its next one now, which says so.
-        let said = told.as_ref().is_some_and(|told| told.build.as_deref() == Some(BUILD));
+        let said = config.as_ref().is_some_and(|config| config.build.as_deref() == Some(BUILD));
         // What a program of this device was on before is kept with its token: one that's now on another was updated.
-        let updated = told.as_ref().and_then(|told| told.build.clone()).filter(|was| was != BUILD);
-        let (network, who) = match told {
-            Some(mut told) => {
-                if told.token.is_none() {
-                    match told.admit(&key, &home).await {
+        let updated = config.as_ref().and_then(|config| config.build.clone()).filter(|was| was != BUILD);
+        let (network, who) = match config {
+            Some(mut config) => {
+                if config.token.is_none() {
+                    match config.admit(&key, &home).await {
                         Err(error) if !error.is::<DeviceAuthorization>() => {
-                            let error = error.context(format!("Couldn't join the network at {}", told.address));
+                            let error = error.context(format!("Couldn't join the network at {}", config.address));
                             let mut record = json!({"name": "one.client.join", "error": format!("{error:#}")});
                             record["attributes"] = Value::Object(resource());
                             record["attributes"]["host.name"] = json!(name());
@@ -836,8 +836,8 @@ impl Client {
                         admitted => admitted?,
                     }
                 }
-                let token = told.token.context("this device has no token")?;
-                (Some(Network { address: told.address, token }), told.who)
+                let token = config.token.context("this device has no token")?;
+                (Some(Network { address: config.address, token }), config.who)
             }
             None => (None, None),
         };
@@ -879,11 +879,11 @@ impl Client {
     }
 
     /// What this client keeps of its network, as it is now.
-    fn network(&self) -> Told {
+    fn network(&self) -> NetworkConfig {
         let Link { network, who, .. } = self.link();
         let network = network.expect("only a client of a network with an address has a token");
-        let authorization_server = Told::kept(&self.home).and_then(|told| told.authorization_server);
-        Told {
+        let authorization_server = NetworkConfig::kept(&self.home).and_then(|config| config.authorization_server);
+        NetworkConfig {
             address: network.address,
             authorization_server,
             token: Some(network.token),
@@ -900,19 +900,19 @@ impl Client {
     /// asked from the new one, whose run the device now attests to. Gives how long the new token lasts before it's
     /// renewed.
     async fn renew(&self) -> Result<Duration> {
-        let mut told = self.network();
+        let mut config = self.network();
         // No server takes a token that has ended, so that's asked at the address straight away.
-        let given = match told.ends() > SystemTime::now() {
+        let given = match config.ends() > SystemTime::now() {
             true => self.request("one/token", json!({"build": said()})).await.ok(),
             false => None,
         };
         match given {
-            Some(given) => told.took(&given, &self.home)?,
-            None => told.admit(&self.key, &self.home).await?,
+            Some(given) => config.took(&given, &self.home)?,
+            None => config.admit(&self.key, &self.home).await?,
         }
-        let token = told.token.clone().context("this device was given no token")?;
-        let network = Network { address: told.address.clone(), token };
-        let new = Link::run(&self.key, Some(network), told.who.clone()).await?;
+        let token = config.token.clone().context("this device was given no token")?;
+        let network = Network { address: config.address.clone(), token };
+        let new = Link::run(&self.key, Some(network), config.who.clone()).await?;
         accept(new.endpoint.clone(), self.notifications.clone());
         let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
         self.reach.lock().await.open = None;
@@ -924,7 +924,7 @@ impl Client {
         if self.watching.load(Ordering::Relaxed) {
             self.watch(true).await;
         }
-        Ok(told.left())
+        Ok(config.left())
     }
 
     /// Whose device this is, once it's someone's: the user it signed in as.
@@ -966,14 +966,14 @@ impl Client {
     pub async fn watch(&self, watching: bool) {
         self.watching.store(watching, Ordering::Relaxed);
         let Ok(Some(servers)) = self.servers(false).await else { return };
-        let told = servers.into_iter().map(|server| async move {
+        let watches = servers.into_iter().map(|server| async move {
             if let Some(open) = self.connect(server).await
                 && !watching
             {
                 let _ = open.ask(json!({"jsonrpc": "2.0", "method": WATCH, "params": {}}).to_string().as_bytes(), |_| {}).await;
             }
         });
-        join_all(told).await;
+        join_all(watches).await;
     }
 
     /// Connects to `server`, hears what it tells this client over the connection, and if this client is watching,
@@ -1092,10 +1092,10 @@ impl Client {
         if said["error"]["code"] != NOBODY {
             return answer;
         }
-        let authorization_server = Told::kept(&self.home).and_then(|told| told.authorization_server);
-        let mut told =
-            Told { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
-        let asked = told.admit(&self.key, &self.home).await;
+        let authorization_server = NetworkConfig::kept(&self.home).and_then(|config| config.authorization_server);
+        let mut config =
+            NetworkConfig { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
+        let asked = config.admit(&self.key, &self.home).await;
         match asked.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
             Err(Some(not_in)) => said["error"]["message"] = json!(not_in.to_string()),
             _ => return answer,
@@ -1470,13 +1470,13 @@ const SERVERS: &str = "presigner/servers";
 
 /// A server with something to say connects to this client to say it, at `endpoint`, until it closes. Only one of the
 /// network's own reaches a client, and all it can make one do is ask again.
-fn accept(endpoint: Endpoint, tell: broadcast::Sender<Value>) {
+fn accept(endpoint: Endpoint, notifications: broadcast::Sender<Value>) {
     tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
-            let tell = tell.clone();
+            let notifications = notifications.clone();
             tokio::spawn(async move {
                 if let Ok(connection) = incoming.await {
-                    receive_notifications(connection, tell).await
+                    receive_notifications(connection, notifications).await
                 }
             });
         }
@@ -1524,24 +1524,24 @@ async fn reconnecting(client: std::sync::Weak<Client>) {
 
 /// Tells whoever `connection` is to one message, on a stream of its own, which isn't answered. Gives whether it
 /// was sent.
-pub async fn tell(connection: &Connection, message: &[u8]) -> bool {
-    let told = async {
+pub async fn notify(connection: &Connection, message: &[u8]) -> bool {
+    let sent = async {
         let mut send = connection.open_uni().await.ok()?;
         send.write_all(message).await.ok()?;
         send.finish().ok()
     };
-    told.await.is_some()
+    sent.await.is_some()
 }
 
 /// Passes on what a server tells this client over `connection`, until the connection ends.
-async fn receive_notifications(connection: Connection, told: broadcast::Sender<Value>) {
+async fn receive_notifications(connection: Connection, notifications: broadcast::Sender<Value>) {
     while let Ok(mut receive) = connection.accept_uni().await {
-        let told = told.clone();
+        let notifications = notifications.clone();
         tokio::spawn(async move {
             let Ok(message) = receive.read_to_end(LIMIT).await else { return };
             if let Ok(message) = serde_json::from_slice(&message) {
                 // With nobody listening, as in the CLI, it's dropped.
-                let _ = told.send(message);
+                let _ = notifications.send(message);
             }
         });
     }

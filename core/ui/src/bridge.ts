@@ -33,13 +33,13 @@ addEventListener("message", ({ source, data }) => {
   else waiting.get(data?.id)?.(data)
 })
 
-const tell = (method: string, params: object = {}) => parent.postMessage({ jsonrpc: "2.0", method, params }, "*")
+const notify = (method: string, params: object = {}) => parent.postMessage({ jsonrpc: "2.0", method, params }, "*")
 
 /// A page's errors are logged to its client, as an MCP App logs to its host (MCP's `notifications/message`), which
 /// tells Telemetry: the message, and the file and line. Those an `<Errored>` boundary caught and shows are too, once
 /// each, as Solid tells of them (`configureClientErrors`), with where they were thrown from their stack.
 const logged = (message: unknown, file?: string, line?: number) =>
-  tell("notifications/message", { level: "error", data: { message: String(message), file, line } })
+  notify("notifications/message", { level: "error", data: { message: String(message), file, line } })
 addEventListener("error", ({ message, filename, lineno }) => logged(message, filename, lineno))
 addEventListener("unhandledrejection", ({ reason }) => logged(reason?.message ?? reason))
 configureClientErrors({
@@ -68,13 +68,13 @@ const greet = () => greeted ??= ask<{ hostContext?: HostContext }>("ui/initializ
   protocolVersion: "2026-01-26",
   appInfo: { name: document.title, version: "1" },
   appCapabilities: {},
-}).then(({ hostContext }) => (dress(hostContext), tell("ui/notifications/initialized")))
+}).then(({ hostContext }) => (dress(hostContext), notify("ui/notifications/initialized")))
 
 /// What's open over the page, the last opened last, each as the function that shuts it: a sheet, an alert, a
 /// menu, a select's list, a calendar. A device's own back shuts the last of them before it goes anywhere, so the
 /// client is told whether there are any.
 const over: (() => void)[] = []
-const overNow = () => greet().then(() => tell("notifications/one/over", { over: over.length > 0 }))
+const overNow = () => greet().then(() => notify("notifications/one/over", { over: over.length > 0 }))
 
 /// Says something has opened over the page, which `shut` shuts. → the function that says it has shut.
 export function covers(shut: () => void): () => void {
@@ -136,7 +136,7 @@ export function changed(listener: () => void): () => void {
 
 /// `<Screen heading="Notes" back onBack={leave}>`: tells the client the user went back out of the app, from its
 /// first screen.
-export const leave = () => greet().then(() => tell("ui/notifications/request-teardown"))
+export const leave = () => greet().then(() => notify("ui/notifications/request-teardown"))
 
 /// `open("claims")`: shows another app over this one, by its plugin's name, as tapping its icon or a notification
 /// from it does. `open("notes/client/index.html", { for: "groups/family" })` names a page of the plugin's that isn't

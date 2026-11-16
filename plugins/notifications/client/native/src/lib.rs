@@ -71,7 +71,7 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
         eprintln!("a tap on a notification opens nothing here: {error}");
     }
 
-    let mut told = client.notifications();
+    let mut notifications = client.notifications();
     // The newest notification there was, once the inbox has answered: what's after it is new.
     let mut latest = None;
     loop {
@@ -106,7 +106,7 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
         }
         // Until a server says something changed.
         loop {
-            match told.recv().await {
+            match notifications.recv().await {
                 Ok(message) if message["method"] == "notifications/one/changed" => break,
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => return,

@@ -99,7 +99,7 @@ defmodule RecentlyDeleted do
     moved(blobs, &(aside <> String.replace_prefix(&1, name <> "/", "")))
     line = %{"artifact" => name, "at" => now(), "by" => call.actor || call.subject}
     :ok = Artifact.write(call.own, "removed/" <> id, JSON.encode!(line))
-    told(call, name, "removed")
+    notify(call, name, "removed")
     "Removed #{name}. `restore` brings it back as it was, for 30 days."
   end
 
@@ -126,7 +126,7 @@ defmodule RecentlyDeleted do
     aside = aside(name, id)
     moved(Bucket.list(aside), &(name <> "/" <> String.replace_prefix(&1, aside, "")))
     Artifact.remove(call.own, "removed/" <> id)
-    told(call, name, "restored")
+    notify(call, name, "restored")
     "Restored #{name}. It's as it was."
   end
 
@@ -135,7 +135,7 @@ defmodule RecentlyDeleted do
       for {id, line} <- removed(call), now() - line["at"] > @kept do
         for blob <- Bucket.list(aside(line["artifact"], id)), do: Bucket.remove(blob)
         Artifact.remove(call.own, "removed/" <> id)
-        told(call, line["artifact"], "purged")
+        notify(call, line["artifact"], "purged")
         line["artifact"]
       end
 
@@ -206,7 +206,7 @@ defmodule RecentlyDeleted do
         {call.actor, call.subject}
       )
 
-  defp told(call, name, what), do: OneCore.Call.run_hook(call, "removed", %{"artifact" => name, "what" => what})
+  defp notify(call, name, what), do: OneCore.Call.run_hook(call, "removed", %{"artifact" => name, "what" => what})
 
   defp now, do: System.system_time(:millisecond)
 end

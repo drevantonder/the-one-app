@@ -247,7 +247,7 @@ fn watch(reached: ResourceArc<Reached>, client: String, address: Option<String>)
 /// Sends `message` to every client that's watching: over the connection it has open to this server, or else over
 /// one made to it for this. A client that can't be reached where it said has gone, and is told nothing more.
 #[rustler::nif]
-fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
+fn notify(reached: ResourceArc<Reached>, message: Binary) -> Atom {
     let message: Arc<[u8]> = message.as_slice().into();
     let watchers = reached.watchers.lock().expect("no connection panics").clone();
     for (key, watcher) in watchers {
@@ -255,19 +255,19 @@ fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
         RUNTIME.spawn(async move {
             let asking = reached.clients.lock().expect("no connection panics").get(&key).cloned();
             if let Some(asking) = asking
-                && client::tell(&asking, &message).await
+                && client::notify(&asking, &message).await
             {
                 return;
             }
             let mut open = watcher.open.lock().await;
             if let Some(open) = open.as_ref().filter(|open| open.open())
-                && client::tell(open.connection(), &message).await
+                && client::notify(open.connection(), &message).await
             {
                 return;
             }
             *open = client::Reached::connect(&reached.endpoint, watcher.address.clone(), client::CONNECT).await;
             match open.as_ref() {
-                Some(open) => drop(client::tell(open.connection(), &message).await),
+                Some(open) => drop(client::notify(open.connection(), &message).await),
                 None => {
                     let mut watchers = reached.watchers.lock().expect("no connection panics");
                     // It may have said where it is again since.

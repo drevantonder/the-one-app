@@ -31,7 +31,7 @@ defmodule OneCore.Iroh do
   Sends `message` to every client that's watching, each on a stream of its own: over the connection it has open
   to `endpoint`, or else over one made to it for this.
   """
-  def tell(_endpoint, _message), do: :erlang.nif_error(:nif_not_loaded)
+  def notify(_endpoint, _message), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Stops taking what's asked: whoever asks or connects from now on is refused, so they ask another server. Once

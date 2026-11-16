@@ -340,7 +340,7 @@ async fn deploy(
         .find(|plugin| plugin["name"] == name && plugin["for"] == of)
         .and_then(|plugin| plugin["from"]["hash"].as_str())
         .with_context(|| format!("{name} was deployed, but `plugins` doesn't list it for {of}"))?;
-    told(from, name, commit).await;
+    report(from, name, commit).await;
     Ok(Locked {
         source: from.said.clone(),
         reference: from.reference.clone(),
@@ -353,7 +353,7 @@ async fn deploy(
 /// Tells the directory of plugins that a plugin was installed, with nothing about who installed it. Not for a
 /// folder, nor a repo GitHub doesn't say is public, nor where `DO_NOT_TRACK` or `DISABLE_TELEMETRY` (skills.sh's own)
 /// is set. It's never waited on long, and its failing fails nothing.
-async fn told(from: &Source, name: &str, commit: &str) {
+async fn report(from: &Source, name: &str, commit: &str) {
     let set = |variable| env::var(variable).is_ok_and(|value| !value.is_empty() && value != "0");
     let Some(repo) = from.github().filter(|_| !set("DO_NOT_TRACK") && !set("DISABLE_TELEMETRY")) else { return };
     let Ok(web) = client::web() else { return };
@@ -363,13 +363,13 @@ async fn told(from: &Source, name: &str, commit: &str) {
         let said: Value = serde_json::from_str(&said.text().await.ok()?).ok()?;
         Some(said["private"] == false)
     };
-    let tell = async {
+    let post = async {
         if public.await == Some(true) {
             let body = json!({"source": repo, "plugin": name, "commit": commit}).to_string();
             let _ = web.post(DIRECTORY).header("content-type", "application/json").body(body).send().await;
         }
     };
-    let _ = tokio::time::timeout(Duration::from_secs(3), tell).await;
+    let _ = tokio::time::timeout(Duration::from_secs(3), post).await;
 }
 
 /// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--sandbox]`, for whoever `ONE_FOR` says, or this

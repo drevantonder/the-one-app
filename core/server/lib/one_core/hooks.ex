@@ -279,7 +279,7 @@ defmodule OneCore.Hooks do
 
   @doc "Tells each plugin that observes `hook` what it's about, for `asked`."
   def observe(hook, about, {_by, who} = asked) do
-    for {at, name} <- hooking(hook, who), do: __MODULE__.Observer.tell(at, name, hook, about, asked)
+    for {at, name} <- hooking(hook, who), do: __MODULE__.Observer.notify(at, name, hook, about, asked)
     :ok
   end
 

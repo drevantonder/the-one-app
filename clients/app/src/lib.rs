@@ -386,9 +386,9 @@ async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Op
     // A server said something changed, so every view on screen asks again. Servers tell this client for as long as
     // it runs, so a notification reaches it with its window hidden.
     let handle = app.clone();
-    let mut told = client.notifications();
+    let mut notifications = client.notifications();
     tauri::async_runtime::spawn(async move {
-        while let Ok(message) = told.recv().await {
+        while let Ok(message) = notifications.recv().await {
             let views = handle.state::<Views>();
             if message["method"] != "notifications/one/changed" {
                 continue;
