@@ -20,10 +20,44 @@ defmodule OneCore.Mcp do
   Skills are served as MCP's Skills Extension says (SEP-2640), in the shapes it gives for the protocol versions a
   server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each of a skill's files is
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
+
+  An agent's client chooses how it calls tools, by what its requests say (`_meta.mode`), which the CLI says for
+  `one mcp --code` and the network's address for `/mcp?code`: with none, every tool is listed, and `search` finds
+  them (`OneCore.Search`); in code mode, `search`, `execute`, which runs a script that calls them (`OneCore.CodeMode`),
+  and the few every agent needs from the start (`@direct`). `one search` says `cli`, for calls written as commands.
   """
   require Logger
-  alias OneCore.{App, Artifact, Builds, Edge, Hooks, Plugins, Server, Servers, Services, Skills, Tools, Trace, User}
+
+  alias OneCore.{
+    App,
+    Artifact,
+    Builds,
+    CodeMode,
+    Edge,
+    Hooks,
+    Plugins,
+    Search,
+    Server,
+    Servers,
+    Services,
+    Skills,
+    Tools,
+    Trace,
+    User
+  }
+
   alias OneCore.Plugins.{Calls, Store, Version}
+
+  # The tools code mode lists besides `search` and `execute`: deploying a plugin, and asking the person for a secret
+  # rather than for it in the chat.
+  @direct ~w(deploy vault_request vault_status)
+
+  # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
+  @external_resource Path.expand("../../priv/rules.md", __DIR__)
+  @rules File.read!(Path.expand("../../priv/rules.md", __DIR__))
+
+  # Claude Code keeps only the first 4,096 characters of a server's instructions, so they stay under that.
+  @instructions_limit 4000
 
   # What a server speaks of MCP is the same in each of these.
   @versions ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
@@ -126,6 +160,27 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], asked, true) end)
   end
 
+  # `search` and `execute` are this server's own, and a sharing link's holder has only the tools it's given.
+  defp result("tools/call", %{"name" => name} = params, from, {by, _who} = asked, forwarded)
+       when name in ["search", "execute"] do
+    tool = if name == "search", do: Search.tool(), else: CodeMode.tool()
+    inputs = Map.get(params, "arguments") || %{}
+
+    cond do
+      holder?(by) ->
+        {:error, -32602, "There's no tool #{name} for a sharing link's holder"}
+
+      not ExJsonSchema.Validator.valid?(
+        ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputSchema))),
+        inputs
+      ) ->
+        {:ok, %{content: [%{type: "text", text: "#{name} takes #{JSON.encode!(tool.inputSchema)}"}], isError: true}}
+
+      true ->
+        own(name, inputs, params, from, asked, forwarded)
+    end
+  end
+
   # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
   # asks for (a request that says `who`). A client calls as nobody's plugin.
   defp result("tools/call", %{"name" => name} = params, _from, asked, forwarded) do
@@ -141,7 +196,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("initialize", params, _from, {by, _who}, _forwarded) do
+  defp result("initialize", params, _from, {by, who}, _forwarded) do
     asked = params["protocolVersion"]
 
     {:ok,
@@ -149,7 +204,7 @@ defmodule OneCore.Mcp do
        protocolVersion: if(asked in @versions, do: asked, else: hd(@versions)),
        capabilities: %{tools: %{}, resources: %{}, extensions: %{"io.modelcontextprotocol/skills" => %{}}},
        serverInfo: %{name: "one", version: Builds.build()},
-       instructions: instructions(holder?(by))
+       instructions: instructions(if(holder?(by), do: :holder, else: mode(params)), who)
      }}
   end
 
@@ -171,31 +226,17 @@ defmodule OneCore.Mcp do
   end
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
-  defp result("tools/list", _params, _from, {by, who}, _forwarded) do
-    open = fn tools -> if holder?(by), do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
+  defp result("tools/list", params, _from, {by, who}, _forwarded) do
+    listed = listed(who, holder?(by))
 
-    listed = fn name, tool ->
-      %{
-        name: name,
-        description: tool.description,
-        inputSchema: tool.inputs,
-        annotations: %{readOnlyHint: tool[:read_only] == true}
-      }
-    end
-
-    own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
-
-    # A tool with a page of its own names it as an MCP App's tool names its UI.
-    plugins =
-      for {plugin, version} <- Enum.sort(Plugins.running(who)), tool <- open.(version.tools) do
-        listed = listed.("#{plugin}_#{tool.name}", tool)
-
-        if tool[:ui],
-          do: Map.put(listed, :_meta, %{ui: %{resourceUri: "ui://#{plugin}/#{version.code}/#{tool.ui}"}}),
-          else: listed
+    tools =
+      cond do
+        holder?(by) -> listed
+        mode(params) == :code -> [Search.tool(), CodeMode.tool() | Enum.filter(listed, &(&1.name in @direct))]
+        true -> [Search.tool() | listed]
       end
 
-    {:ok, %{tools: own ++ plugins}}
+    {:ok, %{tools: tools}}
   end
 
   defp result("skills/list", _params, _from, asked, _forwarded),
@@ -306,6 +347,57 @@ defmodule OneCore.Mcp do
 
   defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
+  defp own("search", %{"query" => query} = inputs, params, _from, {_by, who}, _forwarded) do
+    text = Search.answer(query, Map.get(inputs, "limit", 8), who, mode(params))
+    {:ok, %{content: [%{type: "text", text: text}]}}
+  end
+
+  # A script's calls are each answered here as that call of the tool would be, for whoever asked.
+  defp own("execute", %{"code" => code}, _params, from, {_by, who} = asked, forwarded) do
+    call = fn name, inputs -> result("tools/call", %{"name" => name, "arguments" => inputs}, from, asked, forwarded) end
+
+    tools =
+      for tool <- listed(who, false),
+          do: %{name: tool.name, plugin: tool[:_meta][:plugin], description: tool.description, input: tool.inputSchema}
+
+    {done, text} = CodeMode.run(code, tools, call)
+    {:ok, %{content: [%{type: "text", text: text}], isError: done == :error}}
+  end
+
+  # How whoever asks calls tools: as MCP's tools, in a code mode script, or as commands.
+  defp mode(params) do
+    case said(params)["mode"] do
+      "code" -> :code
+      "cli" -> :cli
+      _ -> :mcp
+    end
+  end
+
+  # Every tool there is for `who`, One Core's own first, or only those a sharing link's holder may call. A plugin's
+  # says whose it is, and one with a page of its own names it as an MCP App's tool names its UI.
+  defp listed(who, holder) do
+    open = fn tools -> if holder, do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
+
+    listed = fn name, tool ->
+      %{
+        name: name,
+        description: tool.description,
+        inputSchema: tool.inputs,
+        annotations: %{readOnlyHint: tool[:read_only] == true}
+      }
+    end
+
+    own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
+
+    plugins =
+      for {plugin, version} <- Enum.sort(Plugins.running(who)), tool <- open.(version.tools) do
+        ui = if tool[:ui], do: %{ui: %{resourceUri: "ui://#{plugin}/#{version.code}/#{tool.ui}"}}, else: %{}
+        Map.put(listed.("#{plugin}_#{tool.name}", tool), :_meta, Map.put(ui, :plugin, plugin))
+      end
+
+    own ++ plugins
+  end
+
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
   defp call(name, inputs, asked, forwarded, caller) do
     with :none <- Tools.call(name, inputs, asked, forwarded),
@@ -359,21 +451,69 @@ defmodule OneCore.Mcp do
   # A sharing link's holder sees no skill.
   defp skills({by, who}), do: if(holder?(by), do: [], else: Skills.list(who))
 
-  # What an agent is told when it connects. Skills say the rest, so it's pointed at them: not every client lists
-  # skills yet, and any reads one that it has the address of.
-  defp instructions(holder) do
+  # What an agent is told when it connects: the rules first, then how it finds tools as it calls them, then where
+  # the skills are, which say the rest, and the plugins there are, as many as fit. Not every client lists skills yet,
+  # and any reads one that it has the address of.
+  defp instructions(mode, who) do
     network = """
     This is a One App network: what one user, family or workplace keeps and makes, which you use as whoever you act \
     for. Its tools are its plugins', each named <plugin>_<tool>, and One Core's own, which add and remove plugins, \
-    servers and services.\
+    servers and services.
+
+    Rules, before anything else:
+    #{String.trim(@rules)}\
     """
+
+    finding =
+      case mode do
+        :code ->
+          """
+          `search` finds the tools for a task across every plugin, with each one's exact call in a script and its \
+          plugin's skill. `execute` runs a short script with them, `const r = await tools.<plugin>.<tool>({ ... }); \
+          return r`, calling several in one go: what it returns comes back to you. Skills name tools \
+          <plugin>_<tool>, which in a script is tools.<plugin>.<tool>, and One Core's own are tools.<tool>.\
+          """
+
+        _ ->
+          """
+          `search` finds the tools for a task across every plugin, each with its exact call and its plugin's skill: \
+          call it before you guess, to learn a plugin, and before saying you can't, since it offers plugins you \
+          could install. Where `one` runs, every tool is also a command: gmail_search is `one gmail search`.\
+          """
+      end
 
     skills = """
-    A plugin's skill says when and how to use its tools, and the skill building-plugins how to make a plugin. \
-    skills/list and resources/list list them, and resources/read reads one: a plugin's are under \
-    skill://<plugin>/, and building-plugins is skill://building-plugins/SKILL.md.\
+    A plugin's skill says when and how to use its tools, and the skill building-plugins how to make a plugin: when \
+    the person asks for an app, tracker or tool, make it here, where it's on all their devices. skills/list and \
+    resources/list list the skills, and resources/read reads one: a plugin's are under skill://<plugin>/, and \
+    building-plugins is skill://building-plugins/SKILL.md. Where your client reads no resources, `search` gives a \
+    skill's text by its name.\
     """
 
-    if holder, do: network, else: network <> "\n" <> skills
+    case mode do
+      :holder -> network
+      _ -> fitted(Enum.join([network, finding, skills], "\n\n"), Enum.sort(Map.keys(Plugins.running(who))))
+    end
   end
+
+  # The instructions, with the plugins there are, as many as fit under the limit.
+  defp fitted(text, []), do: text
+
+  defp fitted(text, plugins) do
+    more = ", and more: search finds them."
+    said = text <> "\n\nThe plugins here, whose tools start with their names: "
+
+    Enum.reduce_while(plugins, {said, ""}, fn plugin, {said, sep} ->
+      if length16(said <> sep <> plugin <> more) > @instructions_limit,
+        do: {:halt, {said <> more, :full}},
+        else: {:cont, {said <> sep <> plugin, ", "}}
+    end)
+    |> case do
+      {said, :full} -> said
+      {said, _sep} -> said <> "."
+    end
+  end
+
+  # What Claude Code counts a length in: UTF-16's units.
+  defp length16(text), do: div(byte_size(:unicode.characters_to_binary(text, :utf8, :utf16)), 2)
 end

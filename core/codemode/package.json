@@ -1,0 +1,8 @@
+{
+  "description": "Code mode: the interpreter a script runs in (run.js), for MCP's execute and `one run`, which reaches the world only through the person's tools.",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@opencode/codemode": "2.3.0"
+  }
+}

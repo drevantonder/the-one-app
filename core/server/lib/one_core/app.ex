@@ -124,10 +124,12 @@ defmodule OneCore.App do
     end
   end
 
-  # The Bun an app is built with: an installed server's is the one its release names, `{url, sha256}`, which it
-  # downloads the first time and keeps in its home, so an update downloads no Bun of its own. One started with
-  # `mix network` uses the Bun on its PATH, as the rest of the repo does.
-  defp bun do
+  @doc """
+  The Bun an app is built with, and a code mode script runs under (`OneCore.CodeMode`): an installed server's is
+  the one its release names, `{url, sha256}`, which it downloads the first time and keeps in its home, so an update
+  downloads no Bun of its own. One started with `mix network` uses the Bun on its PATH, as the rest of the repo does.
+  """
+  def bun do
     case Application.get_env(:one_core, :bun) do
       {url, sha256} -> fetched(url, sha256)
       nil -> path()

@@ -64,8 +64,9 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., icon: ...,
-  apps: [...], tools: [names], permissions: [...], sandbox: ...}]`, its permissions as `permissions/0` gives them
+  Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., description:
+  its skill's, icon: ..., apps: [...], tools: [names], permissions: [...], sandbox: ...}]`, its permissions as
+  `permissions/0` gives them
   and whether it runs in sandbox mode. It's what lists every app there is, whether or not it's on anyone's page
   now. One that was removed (Recently Deleted's `remove`) has no latest version, and isn't listed.
   """
@@ -85,6 +86,7 @@ defmodule OneCore.Plugins.Deploy do
       %{
         plugin: "#{owner}/plugins/#{name}",
         title: said["title"] || name,
+        description: said["description"] || "",
         icon: said["icon"],
         apps: apps,
         tools: said["tools"] || [],
@@ -102,6 +104,7 @@ defmodule OneCore.Plugins.Deploy do
       JSON.encode!(%{
         apps: version.apps,
         title: version.title,
+        description: OneCore.Search.described(version),
         icon: version.icon,
         tools: Enum.map(version.tools, & &1.name),
         permissions: version.permissions,
