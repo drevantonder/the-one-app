@@ -92,6 +92,7 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         ["uninstall", "--name", name] if std::path::Path::new("plugins.lock").exists() => {
             install::uninstall(&client, name).await?
         }
+        ["deploy", ..] if words.contains(&"--files-from") => install::deploy_folder(&client, &args).await?,
         ["plugins", "check", ..] => install::check(&client, &args[2..]).await?,
         ["plugins", "update", ..] => install::update(&client, &args[2..]).await?,
         _ => command(&client, &args).await?,
@@ -106,7 +107,7 @@ fn printed(text: String) -> ExitCode {
 }
 
 /// Calls the tool `args` name, or shows what they could have named.
-async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
+pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
     let (words, flags) = args.split_at(args.iter().take_while(|arg| !arg.starts_with("--")).count());
     let name = words.join("_");
     let (listed, answered) = match client.fresh("tools/list", &json!({})).await {

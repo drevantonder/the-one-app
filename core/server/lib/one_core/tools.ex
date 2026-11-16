@@ -34,6 +34,8 @@ defmodule OneCore.Tools do
       no server of yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0
       names. It answers with them. `recently-deleted remove --artifact <it>` removes one nobody has installed.
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
+      `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
+      refused where the live version came from a commit that yours doesn't contain, unless `--force`.
       """,
       inputs: %{
         type: "object",
@@ -58,11 +60,12 @@ defmodule OneCore.Tools do
           from: %{
             type: ["object", "null"],
             description:
-              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, and the `commit`. Left out, the version before's stays; null says they came from none",
+              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, the `commit`, and whether they had changes not committed (`dirty`). Left out, the version before's stays; null says they came from none",
             properties: %{
               source: %{type: "string"},
               ref: %{type: ["string", "null"]},
-              commit: %{type: "string", pattern: "^[0-9a-f]{40}$"}
+              commit: %{type: "string", pattern: "^[0-9a-f]{40}$"},
+              dirty: %{type: "boolean"}
             },
             required: ["source", "commit"],
             additionalProperties: false
@@ -98,8 +101,8 @@ defmodule OneCore.Tools do
       and the network. Each with the name it's installed by, who it's installed `for`, its artifact (`plugin`), its
       latest version, whether it runs in sandbox mode (`sandbox`), what it may do beyond its own (`permissions`), the hash
       of the files that version was deployed from (`source`), and, if it was installed from
-      a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, and the `hash` of the files
-      as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
+      a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, whether it had changes not
+      committed (`dirty`), and the `hash` of the files as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
       have moved on upstream or changed since, and `one plugins update` installs the newer.
       """,
       inputs: %{type: "object", properties: %{}}
