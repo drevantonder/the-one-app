@@ -8,8 +8,8 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
 - **Group**: an artifact whose members share other artifacts. Being in one is a relation tuple: the group, `member`, and
   a user or another group.
 - **Server**: a machine that runs a network's plugins and answers its clients. A computer at home, a colleague's, or a
-  cloud machine started when needed. A network has one or more. It is an artifact, holding its key and how to reach it,
-  and is a subject.
+  cloud machine started when needed. A network has one or more, and each acts for the network, or for one user or group
+  alone. It is an artifact, holding its key and how to reach it, and is a subject.
 - **Client**: what a user or their agent uses, on a phone, a computer or in a browser, or as the CLI or MCP. It asks a
   server, keeps what servers answered, and keeps secrets safe on its device.
 - **Presigner**: the only holder of the bucket's credentials. It hands a server short-lived access to the blobs of those it
@@ -19,8 +19,12 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services, an
   edge function and kinds of artifact. It uses other artifacts, and is a subject. A git repo can be where its code comes from, but needn't be.
   Avoid: module.
-- **App**: something with UI that goes on a home screen. A plugin provides it. It can have server-side code where it needs
-  it, which is its plugin's tools.
+- **App**: something with UI that the launcher shows, on a Home Screen page or in Settings. A plugin provides it. It can
+  have server-side code where it needs it, which is its plugin's tools.
+- **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
+  `launcher`, and Home Screen is it.
+- **Sandbox mode**: a plugin run in a VM of its own, for each user, group or network it's installed for, behind its
+  machine's sandbox, by any of the network's servers. So installing a stranger's plugin needs no server of one's own.
 - **Widget**: what a plugin shows on a Home Screen page at a glance. The plugin returns a layout from a fixed list of parts, in
   a phone's own sizes, and each client draws it. So one widget shows in the client, on a phone's own home screen, and to
   an agent as text. A control in one calls a tool.
@@ -31,8 +35,9 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   between calls. It and the rest of its plugin call each other's functions, which nothing else can call. The plugin
   decides which instance it calls.
 - **Edge**: what of a network is always on and faces the internet, at the network's address: the gateway,
-  the presigner, the relay, the web client's files, the network's MCP endpoint (for its own devices, whoever signed
-  in and a sharing link's holder), and each plugin's edge function.
+  the presigner, the relay, the web client's files, the network's front door (its MCP endpoint, for its own
+  devices, whoever signed in and a sharing link's holder, and the `/llms.txt` that says how to come in), and each
+  plugin's edge function.
 - **Edge function**: a part of a plugin that runs at the network's address, for what comes in over the web: a
   page people sign in on, a call from an outside service. One runs for the whole network, with storage of its own
   there, and whoever sets up the edge puts it there with the edge's other pieces.
@@ -49,4 +54,5 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   can't read it.
 - **Scheduled job**: a tool call made by the clock.
 - **Skill**: text for agents on when and how to use a plugin's tools, which an agent reads when it needs it. A plugin
-  provides one as a file, and One Core has one of its own, on building plugins.
+  provides one as a file, and One Core has some of its own: building plugins,
+  installing them and the UI library.
