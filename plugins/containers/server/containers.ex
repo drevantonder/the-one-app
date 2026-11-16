@@ -8,7 +8,8 @@ defmodule Containers do
   the setting `idle_hours`, whoever's they are: what it saves is the machine's.
 
   A machine may run another network's server too, sharing its Podman: each server's service gives only what that
-  server made, so a network sees and uses only its own.
+  server made, so a network sees and uses only its own. Each name is kept in the plugin's own artifact, as
+  `names/<whose>/<name>`, with the machine its container is on, so it's taken while that machine is off too.
   """
   @behaviour OneCore.Plugin
   alias Containers.Podman
@@ -407,6 +408,7 @@ defmodule Containers do
 
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
     artifact = Artifact.name(Call.make(call, id))
+    take_name!(call, name, server)
 
     spec = %{
       "id" => "#{name}-#{id}",
@@ -429,9 +431,16 @@ defmodule Containers do
     Enum.find(listed(call), &(&1.name == name))
   end
 
-  def call(tool, %{"container" => name} = inputs, call) when tool in ~w(start stop remove) do
+  def call(tool, %{"container" => name} = inputs, call) when tool in ~w(start stop) do
     on(call, inputs, String.to_existing_atom(tool))
     %{container: name}
+  end
+
+  def call("remove", inputs, call) do
+    c = container!(call, inputs)
+    Service.call(call, Podman, :remove, [c.id], c.server)
+    Artifact.remove(call.own, name_record(String.replace(c.artifact, ~r{/made/.*}, ""), c.name))
+    %{container: c.name}
   end
 
   def call("logs", inputs, call), do: on(call, inputs, :logs, [Map.get(inputs, "tail", 200)])
@@ -596,6 +605,21 @@ defmodule Containers do
       :absent -> %{"idle_hours" => @idle_hours}
     end
   end
+
+  # Takes the name for a container of whoever the call is for, on `server`: refused while one of theirs on a machine
+  # that's off has it. A name whose machine is on, where `create` found no container of theirs called that, was left
+  # by one that went some other way (removed by hand, or never made), and is taken again.
+  defp take_name!(call, name, server) do
+    record = name_record(call.subject, name)
+
+    with :exists <- Artifact.write(call.own, record, server),
+         {:ok, at, tag} <- Artifact.read(call.own, record) do
+      if is_integer(Service.seen(at)), do: raise("You have a container called #{name} on #{Service.name(at)}, which is off")
+      if Artifact.replace(call.own, record, server, tag) != :ok, do: raise("You have a container called #{name} already")
+    end
+  end
+
+  defp name_record(whose, name), do: "names/#{whose}/#{name}"
 
   # The image to create from, and the machine it's on: one of the caller's own made with `commit`, by its name or
   # Podman's, or any other, which Podman pulls, but never another's made with `commit`, nor another network's.
