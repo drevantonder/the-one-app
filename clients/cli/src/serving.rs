@@ -10,6 +10,8 @@
 //! - `next`: a build to try. `one serve run` starts it instead, and once it's running and answers by its key, it's
 //!   `current`. One that doesn't, within `START`, is stopped and `current` is started again.
 //! - `home`: the server's own folder, its key among it, whichever build runs.
+//! - `went-back`: why the last update didn't take, with the last lines the new build said, which the server says
+//!   in `builds` (`OneCore.Builds.started/1`) until an update takes.
 //!
 //! The server says on its output when it's running and when it's asked to update (`OneCore.Release`): asked, this
 //! takes the latest builds, the program's too, then stops the server and starts itself again in its place. While
@@ -162,7 +164,8 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             Some(build) => build.clone(),
             None => here.current()?,
         };
-        let mut server = Command::new(here.folder.join("builds").join(&build).join("bin/one_core"))
+        let mut server = Command::new(here.folder.join("builds").join(&build).join("bin/one_core"));
+        server
             .args(["eval", "OneCore.Release.serve()"])
             .env("ONE_SERVER_HOME", here.folder.join("home"))
             .env("ONE_ADDRESS", &address)
@@ -170,38 +173,73 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             .env("ONE_DEVICE", client.key())
             .env("ONE_NAME", client::name())
             .stdout(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("couldn't start the build {build}"))?;
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        if let (None, Ok(went_back)) = (&trying, fs::read_to_string(here.folder.join("went-back"))) {
+            server.env("ONE_WENT_BACK", went_back);
+        }
+        let mut server = server.spawn().with_context(|| format!("couldn't start the build {build}"))?;
+        // The last lines it said, on its output and its errors, which say why a build being tried didn't take.
+        let last = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+        let keep = {
+            let last = last.clone();
+            move |line: &str| {
+                let mut last = last.lock().unwrap();
+                if last.len() == LAST {
+                    last.pop_front();
+                }
+                last.push_back(line.to_owned());
+            }
+        };
+        let mut errors = BufReader::new(server.stderr.take().context("the server's errors")?).lines();
+        let keep_error = keep.clone();
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = errors.next_line().await {
+                eprintln!("{line}");
+                keep_error(&line);
+            }
+        });
         let mut said = BufReader::new(server.stdout.take().context("the server's output")?).lines();
         let running = async {
             while let Some(line) = said.next_line().await? {
                 say(&line)?;
+                keep(&line);
                 if line.starts_with(RUNNING) {
-                    return Ok::<_, anyhow::Error>(true);
+                    return Ok::<_, anyhow::Error>(Started::Running);
                 }
             }
-            Ok(false)
+            Ok(Started::Stopped)
         };
         let running = match &trying {
-            Some(_) => timeout(START, running).await.unwrap_or(Ok(false))?,
+            Some(_) => timeout(START, running).await.unwrap_or(Ok(Started::Late))?,
             None => running.await?,
         };
         if let Some(build) = &trying {
             fs::remove_file(here.folder.join("next"))?;
-            if running && answers(&client, &key, build).await {
-                let was = here.current()?;
-                here.point("previous", &was)?;
-                here.point("current", build)?;
-                here.prune()?;
-                println!("The server is on the build {build} now, from {was}.");
-            } else {
-                server.kill().await?;
-                println!("The build {build} didn't start and answer, so the server is back on {}.", here.current()?);
-                continue;
+            let why = match running {
+                Started::Running if answers(&client, &key, build).await => None,
+                Started::Running => Some(format!("it was running but didn't answer by its key within {} s", START.as_secs())),
+                Started::Late => Some(format!("it didn't report running within {} s", START.as_secs())),
+                Started::Stopped => Some(format!("it stopped before it was running ({})", server.wait().await?)),
+            };
+            let was = here.current()?;
+            match why {
+                None => {
+                    here.point("previous", &was)?;
+                    here.point("current", build)?;
+                    here.prune()?;
+                    let _ = fs::remove_file(here.folder.join("went-back"));
+                    println!("The server is on the build {build} now, from {was}.");
+                }
+                Some(why) => {
+                    server.kill().await?;
+                    let lines: Vec<String> = last.lock().unwrap().iter().cloned().collect();
+                    went_back(&here, &format!("Went back to {was} from {build}: {why}."), &lines)?;
+                    continue;
+                }
             }
         }
-        if !running {
+        if running != Started::Running {
             bail!("The server stopped before it was running: {}", server.wait().await?)
         }
         system::ready()?;
@@ -214,12 +252,38 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                         return Err(again(&program));
                     }
                     Ok(false) => println!("This device is on the latest builds already."),
-                    Err(error) => println!("The latest builds weren't taken: {error:#}"),
+                    Err(error) => {
+                        // It's said in `builds`, which the server says as it starts: it's started again to say it.
+                        went_back(&here, &format!("Stayed on {}: {error:#}.", here.current()?), &[])?;
+                        server.kill().await?;
+                        return Err(again(&program));
+                    }
                 }
             }
         }
         bail!("The server stopped: {}", server.wait().await?)
     }
+}
+
+/// How a build that was started went.
+#[derive(PartialEq)]
+enum Started {
+    Running,
+    Stopped,
+    Late,
+}
+
+/// How many of the last lines a build said are kept to say why it didn't take.
+const LAST: usize = 5;
+
+/// Keeps why an update didn't take, with the last lines the build said, in `went-back`, for the server to say.
+fn went_back(here: &Here, why: &str, lines: &[String]) -> Result<()> {
+    let said = match lines {
+        [] => why.to_owned(),
+        lines => format!("{why} Its last lines: {}", lines.join(" | ")),
+    };
+    println!("{said}");
+    Ok(fs::write(here.folder.join("went-back"), said)?)
 }
 
 /// Starts this program again in this one's place, as the system started it: the latest of it, which tries the
@@ -395,7 +459,7 @@ impl Here {
         fs::create_dir_all(&builds)?;
         let archive = builds.join(format!("{name}.tar.gz"));
         let unpacking = builds.join(format!("{name}.unpacking"));
-        fetch(build, &archive).await?;
+        fetch(build, &archive).await.with_context(|| format!("the build {name} didn't download"))?;
         let _ = fs::remove_dir_all(&unpacking);
         fs::create_dir_all(&unpacking)?;
         let unpacked =
@@ -405,9 +469,15 @@ impl Here {
         let said = std::process::Command::new(unpacking.join("bin/one_core"))
             .args(["eval", "OneCore.Release.check()"])
             .output()?;
-        if String::from_utf8_lossy(&said.stdout).trim() != name {
+        let (out, errors) = (String::from_utf8_lossy(&said.stdout), String::from_utf8_lossy(&said.stderr));
+        let out = out.trim();
+        if out != name {
             fs::remove_dir_all(&unpacking)?;
-            bail!("The build {name} doesn't start here: {}", String::from_utf8_lossy(&said.stderr).trim());
+            let last: Vec<&str> = errors.lines().rev().take(LAST).collect::<Vec<_>>().into_iter().rev().collect();
+            if out.is_empty() {
+                bail!("the build {name}'s start-up check failed; its last lines: {}", last.join(" | "));
+            }
+            bail!("the build {name} says it's {out}, not what was published");
         }
         fs::rename(&unpacking, &folder)?;
         Ok(name)

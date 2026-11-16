@@ -251,7 +251,7 @@ defmodule OneCore.Tools do
       description: """
       Has a server's machine take the latest builds, its server's and its program's, if it isn't on them already.
       It checks each before it runs it, hands its work to another server meanwhile, and goes back to the build it
-      had if the new one doesn't start and answer. `builds` then says which it's on.
+      had if the new one doesn't start and answer. `builds` then says which it's on, and if it went back, why.
       """,
       inputs: %{
         type: "object",

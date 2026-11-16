@@ -17,6 +17,8 @@ if home = System.get_env("ONE_SERVER_HOME") do
     device: System.get_env("ONE_DEVICE"),
     # What its machine is called, as its owner named it, which the server is listed by.
     name: System.get_env("ONE_NAME"),
+    # Why the last update didn't take, which `one builds` says until one does.
+    went_back: System.get_env("ONE_WENT_BACK"),
     # A network being built has its person's commands say who they act as, which only it lets them (`OneCore.User`),
     # and it was one of those that installed this server.
     development: System.get_env("ONE_AS") != nil,
