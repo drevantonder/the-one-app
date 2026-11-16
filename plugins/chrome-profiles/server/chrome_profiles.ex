@@ -5,7 +5,7 @@ defmodule ChromeProfiles do
 
   A profile is Chromium's whole user data dir, as Chrome hands it over: a gzipped tarball without caches. It's kept
   as a blob of an artifact this plugin makes for its person (`profiles`), named at random, encrypted with AES-256-GCM
-  under a key of its own. The key, the blob's name, the sites it was used on with when, and when it was last saved
+  under a key made for that save. The key, the blob's name, the sites it was used on with when, and when it was last saved
   are an item in the person's own Vault, `Chrome profile: <name>`, which this plugin keeps (`keep/4`), each a secret
   field: so only the servers its person chose for their Vault open a profile, and the bucket holds only what's
   encrypted. Nothing answers with a profile or its key: they go only into the person's own browser, as
@@ -131,8 +131,7 @@ defmodule ChromeProfiles do
     name = String.trim(name)
     if name == "", do: raise("A profile has a name")
     if Enum.any?(profiles(call), &(String.downcase(&1) == String.downcase(name))), do: raise("You have a profile called #{name} already")
-    key = Base.encode64(:crypto.strong_rand_bytes(32))
-    vault(call).keep(call, @item <> name, %{"key" => key, "blob" => "", "sites" => "{}", "saved" => ""})
+    vault(call).keep(call, @item <> name, %{"sites" => "{}", "saved" => ""})
     "Created #{name}. It's signed in to nothing yet: `update` opens it for your person to sign in to sites on."
   end
 
@@ -140,7 +139,8 @@ defmodule ChromeProfiles do
     from = profile!(call, from)
     to = String.trim(to)
     if Enum.any?(profiles(call), &(String.downcase(&1) == String.downcase(to) and &1 != from)), do: raise("You have a profile called #{to} already")
-    fields = Map.new(~w(key blob sites saved), &{&1, value(call, from, &1)})
+    kept = if value(call, from, "saved") == "", do: ~w(sites saved), else: ~w(key blob sites saved)
+    fields = Map.new(kept, &{&1, value(call, from, &1)})
     vault(call).keep(call, @item <> to, fields)
     vault(call).remove(call, @item <> from)
     for {session, %{"profile" => ^from} = note} <- notes(call), do: note(call, session, %{note | "profile" => to})
@@ -149,9 +149,9 @@ defmodule ChromeProfiles do
 
   def call("remove", %{"profile" => name}, call) do
     name = profile!(call, name)
-    blob = value(call, name, "blob")
+    blob = if value(call, name, "saved") != "", do: value(call, name, "blob")
     vault(call).remove(call, @item <> name)
-    if blob != "", do: Artifact.remove(saved(call), blob)
+    if blob, do: Artifact.remove(saved(call), blob)
     "Removed #{name}"
   end
 
@@ -218,9 +218,9 @@ defmodule ChromeProfiles do
   def hook("chrome.starting", %{"session" => session, "container" => container}, call) do
     with %{"profile" => name} <- note(call, session),
          true <- name in profiles(call),
-         blob when blob != "" <- value(call, name, "blob") do
-      {:ok, sealed, _tag} = Artifact.read(saved(call), blob)
-      tarball = unseal(key(call, name), sealed)
+         saved when saved != "" <- value(call, name, "saved") do
+      {:ok, sealed, _tag} = Artifact.read(saved(call), value(call, name, "blob"))
+      tarball = unseal(Base.decode64!(value(call, name, "key")), sealed)
       Call.tool(call, "containers", "write_file", %{"container" => container, "path" => @tarball, "data" => Base.encode64(tarball)})
       %{"user_data" => @tarball}
     else
@@ -242,15 +242,17 @@ defmodule ChromeProfiles do
     e -> {:refuse, "Couldn't save the profile: #{Exception.message(e)}"}
   end
 
-  # Saves a profile: its tarball, encrypted, as a new blob, which the Vault item then names, and the old one is
-  # removed. So the last to save is what's kept, and a save that fails halfway leaves the last whole one.
+  # Saves a profile: its tarball, encrypted under a new key, as a new blob, which the Vault item then names with its
+  # key, and the last save's blob is removed. So the last to save is what's kept, and a save that fails halfway
+  # leaves the last whole one.
   defp save(call, name, tarball, sites) do
     now = System.system_time(:millisecond)
-    blob = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-    :ok = Artifact.write(saved(call), blob, seal(key(call, name), tarball))
-    was = value(call, name, "blob")
-    vault(call).keep(call, @item <> name, %{"blob" => blob, "sites" => JSON.encode!(sites), "saved" => Integer.to_string(now)})
-    if was != "", do: Artifact.remove(saved(call), was)
+    {key, blob} = {:crypto.strong_rand_bytes(32), Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}
+    :ok = Artifact.write(saved(call), blob, seal(key, tarball))
+    was = if value(call, name, "saved") != "", do: value(call, name, "blob")
+    fields = %{"key" => Base.encode64(key), "blob" => blob, "sites" => JSON.encode!(sites), "saved" => Integer.to_string(now)}
+    vault(call).keep(call, @item <> name, fields)
+    if was, do: Artifact.remove(saved(call), was)
   end
 
   # The sites a profile was used on, from its History, newest first, at most 30: each one's registrable domain
@@ -296,8 +298,6 @@ defmodule ChromeProfiles do
       plain -> plain
     end
   end
-
-  defp key(call, name), do: Base.decode64!(value(call, name, "key"))
 
   # Where each of whoever this call is for's profiles is saved: an artifact made for them.
   defp saved(call), do: Call.make(call, "profiles")
