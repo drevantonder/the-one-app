@@ -77,7 +77,15 @@ async function signIn() {
   }
   if (invite && !called().trim()) throw new Error("Say your name first.")
   await auth.signOut()
-  const { error } = invite ? await auth.passkey.addPasskey({ context: invite, createSession: true }) : await auth.signIn.passkey()
+  const answered = invite ? await auth.passkey.addPasskey({ context: invite, createSession: true }) : await auth.signIn.passkey({ returnWebAuthnResponse: true })
+  const { error } = answered
+  if ((error as { code?: string } | null)?.code === "PASSKEY_NOT_FOUND") {
+    // The browser offered a passkey this network doesn't have: one since removed, or one an earlier network at this
+    // address made. WebAuthn's Signal API has the password manager remove it, so it isn't offered again.
+    const { webauthn } = answered as { webauthn?: { response: { id: string } } }
+    if (webauthn && PublicKeyCredential.signalUnknownCredential) PublicKeyCredential.signalUnknownCredential({ rpId: location.hostname, credentialId: webauthn.response.id })
+    throw new Error("This passkey is no longer valid for this network. Try again and choose another one, or ask to be invited again if you have no other.")
+  }
   if (error) throw new Error(error.message ?? "That passkey didn't work. Try again.")
   if (invite) await ask("/update-user", { called: called().trim() })
   if (request) {
