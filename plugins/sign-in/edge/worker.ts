@@ -51,6 +51,7 @@ const signerKey = (request: Request, body: string) => env.NETWORK.verifiedKey(re
 async function mcp(request: Request, auth: Auth, url: URL) {
   // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
   if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+  const traceparent = request.headers.get("traceparent") ?? undefined;
 
   // One of the network's own devices signs what it asks with its key. One that's nobody's is told so by the
   // server, and asks for a code to be let in by (`auth.ts`).
@@ -58,14 +59,14 @@ async function mcp(request: Request, auth: Auth, url: URL) {
     const body = await request.text();
     const device = await signerKey(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    return forward(body, device, [NETWORK]);
+    return forward(body, device, [NETWORK], traceparent);
   }
 
   // A browser signed in here is the device its session is (`auth.ts`). One that's nobody's signs in again.
   if (!request.headers.has("authorization")) {
     const signedIn = await auth.api.getSession({ headers: request.headers });
     if (signedIn) {
-      const answer = await forward(await request.text(), await browserDevice(signedIn.session.id), [`${who(signedIn.user)}/`, NETWORK]);
+      const answer = await forward(await request.text(), await browserDevice(signedIn.session.id), [`${who(signedIn.user)}/`, NETWORK], traceparent);
       return (await nobodys(answer)) ? refuse(401, "Sign in again") : answer;
     }
   }
@@ -76,7 +77,7 @@ async function mcp(request: Request, auth: Auth, url: URL) {
   const approve = requireMcpAuth(
     auth,
     async (request, claims) => {
-      const answer = await forward(await request.text(), await assistant(claims.azp as string, claims.sub as string), [`${claims.who}/`, NETWORK]);
+      const answer = await forward(await request.text(), await assistant(claims.azp as string, claims.sub as string), [`${claims.who}/`, NETWORK], traceparent);
       if (!(await nobodys(answer))) return answer;
       const challenge = `Bearer error="invalid_token", resource_metadata="${url.origin}/.well-known/oauth-protected-resource/mcp"`;
       return new Response(null, { status: 401, headers: { "www-authenticate": challenge } });
@@ -88,10 +89,10 @@ async function mcp(request: Request, auth: Auth, url: URL) {
 
 /**
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `device`, and answers what the server
- * did. What's asked says which device it's from and who it's for, and nothing else of itself.
+ * did. What's asked says which device it's from, who it's for and the span it's under, and nothing else of itself.
  */
-async function forward(message: string, device: string, of: string[]) {
-  let call: { method?: unknown; params?: { _meta?: { for?: unknown } } };
+async function forward(message: string, device: string, of: string[], header?: string) {
+  let call: { method?: unknown; params?: { _meta?: { for?: unknown; traceparent?: unknown } } };
   try {
     call = JSON.parse(message);
     if (typeof call?.method !== "string") throw new Error("not a request");
@@ -99,7 +100,8 @@ async function forward(message: string, device: string, of: string[]) {
     return refuse(400, "That isn't a JSON-RPC request");
   }
   const asks_for = call.params?._meta?.for;
-  const said = { device, ...(typeof asks_for === "string" && { for: asks_for }) };
+  const traceparent = traced(call.params?._meta?.traceparent ?? header);
+  const said = { device, traceparent, ...(typeof asks_for === "string" && { for: asks_for }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const reached = await env.RELAY.forward(servers, message);
@@ -107,6 +109,19 @@ async function forward(message: string, device: string, of: string[]) {
   // A notification has no answer.
   if (reached.answer === "") return new Response(null, { status: 202 });
   return new Response(reached.answer, { headers: { "content-type": "application/json" } });
+}
+
+/**
+ * The `traceparent` of this request's span, as W3C's Trace Context has it: under `parent`, the client's, which it
+ * sends in `_meta` as MCP has it or as a header, if any. It's said in a line Telemetry's Tail Worker reads
+ * (`plugins/telemetry/edge/worker.ts`), and carried to the server.
+ */
+function traced(parent: unknown) {
+  const random = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const under = typeof parent === "string" ? /^00-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec(parent) : null;
+  const traceparent = `00-${under?.[1] ?? random(16)}-${random(8)}-01`;
+  console.log(JSON.stringify({ telemetry: { traceparent, parent: under?.[0] } }));
+  return traceparent;
 }
 
 /** Whether a server answered that the device is nobody's. The answer is left to be sent on if it isn't. */

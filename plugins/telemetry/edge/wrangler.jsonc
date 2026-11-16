@@ -1,0 +1,9 @@
+{
+  "name": "network-telemetry",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  // What the network's Workers did reaches here as their Tail Worker's events, and is kept a minute at a time.
+  "durable_objects": { "bindings": [{ "name": "BATCH", "class_name": "Batch" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Batch"] }]
+}

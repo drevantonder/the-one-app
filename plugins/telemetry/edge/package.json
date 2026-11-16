@@ -1,0 +1,11 @@
+{
+  "name": "telemetry",
+  "description": "Telemetry's edge function: the Tail Worker of every other Worker of the network's edge, which keeps a span for each request it handled beside what servers recorded.",
+  "private": true,
+  "type": "module",
+  "tail": true,
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261116.1",
+    "typescript": "7.0.2"
+  }
+}

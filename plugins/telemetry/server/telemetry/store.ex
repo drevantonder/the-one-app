@@ -7,7 +7,8 @@ defmodule Telemetry.Store do
   - `batches/<day>/<hour>/hour-<bytes>` is all of an hour that's over, put together once it is (`prune/1`), with the
     batches it holds named in it, so it's put together once even if tidying stopped partway.
 
-  Each is Erlang's term format, compressed, and its size is in its name, so listing them says how much is kept.
+  Each is Erlang's term format, compressed, or JSON from the network's edge (`batches/<day>/<hour>/<to>-edge-<bytes>`,
+  which `edge/worker.ts` keeps), and its size is in its name, so listing them says how much is kept.
   What's older than `days/0`, and the oldest hours past `most_bytes/0`, are let go.
   """
   alias Telemetry.Read
@@ -39,7 +40,7 @@ defmodule Telemetry.Store do
     since = hour(from - 3_600_000_000_000)
     names = for name <- Artifact.list(own, "batches/"), Path.dirname(name) > since, do: name
 
-    for {:ok, data, _tag} <- Artifact.read_all(own, names), do: :erlang.binary_to_term(data, [:safe])
+    for {:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data)
   end
 
   @doc "How much is kept: since when, in milliseconds since 1970, how many bytes, for how many days, and the most."
@@ -80,7 +81,7 @@ defmodule Telemetry.Store do
 
   # An hour's batches as one blob, which says which batches it holds: a batch it holds already isn't added again.
   defp together(own, hour, names) do
-    batches = for {:ok, data, _tag} <- Artifact.read_all(own, names), do: :erlang.binary_to_term(data, [:safe])
+    batches = for {:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data)
     {hours, batches} = Enum.split_with(batches, &Map.has_key?(&1, "holds"))
     held = MapSet.new(Enum.flat_map(hours, & &1["holds"]))
     added = Enum.reject(batches, &(id(&1) in held))
@@ -105,6 +106,10 @@ defmodule Telemetry.Store do
       {over, [newest | kept]}
     end
   end
+
+  # A batch as a server keeps it, or as the edge does.
+  defp decode("{" <> _ = data), do: JSON.decode!(data)
+  defp decode(data), do: :erlang.binary_to_term(data, [:safe])
 
   defp id(batch), do: "#{batch["server"]}/#{batch["to"]}"
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")

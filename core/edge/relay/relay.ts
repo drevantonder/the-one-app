@@ -46,6 +46,8 @@ const SEEN = JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/seen" }
 const REACH = 5_000;
 /** MCP's ping, which a server answers at once, whoever asks. */
 const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
+/** A W3C `traceparent`: its trace and span. */
+const TRACE = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
 
 /** Who's on: `"on"` for one connected now, when the last one that was left (ms since 1970), or `null` for one never seen. */
 type Seen = "on" | number | null;
@@ -160,13 +162,26 @@ export default class extends WorkerEntrypoint<RelayEnv> {
    * call takes.
    */
   async forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null> {
+    // A span of its own under the caller's, which the server's is under in turn (W3C's Trace Context).
+    const call = JSON.parse(message);
+    const parent: string | undefined = call.params?._meta?.traceparent;
+    const traceparent = `00-${TRACE.exec(parent ?? "")?.[1] ?? hex.encode(crypto.getRandomValues(new Uint8Array(16)))}-${hex.encode(crypto.getRandomValues(new Uint8Array(8)))}-01`;
+    message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent } } });
+
     const tries = servers.map((server) => reach(this.relay(), server));
     const reached = await Promise.any(tries).catch(() => null);
     for (const tried of tries) tried.then((other) => other !== reached && other.close(), () => {});
-    if (!reached) return null;
-    const answer = await reached.ask(message);
-    reached.close();
-    return answer === null ? null : { server: reached.server, answer };
+    const answer = reached && (await reached.ask(message));
+    reached?.close();
+    // With none reached, every try has failed, and each says why.
+    const why = (tried: Promise<unknown>, at: number) => tried.then(() => "", (error: Error) => `${servers[at].slice(0, 8)} ${error.message}`);
+    const error = !reached
+      ? `None of its ${servers.length} servers answered: ${(await Promise.all(tries.map(why))).join("; ") || "it has none"}`
+      : answer === null
+        ? `${reached.server.slice(0, 8)} left before it answered`
+        : undefined;
+    console.log(JSON.stringify({ telemetry: { traceparent, parent, attributes: { "one.servers": servers.length, ...(reached && { "one.server": reached.server.slice(0, 8) }) }, error } }));
+    return reached && answer !== null ? { server: reached.server, answer } : null;
   }
 
   /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
@@ -202,7 +217,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
  */
 async function reach(relay: DurableObjectStub<Relay>, server: string) {
   const { webSocket } = await relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } });
-  if (!webSocket) throw new Error("That server isn't here");
+  if (!webSocket) throw new Error("isn't connected to the relay");
   webSocket.accept();
   let answered: ((answer: string | null) => void) | undefined;
   webSocket.addEventListener("message", (event) => answered?.(event.data as string));
@@ -215,7 +230,7 @@ async function reach(relay: DurableObjectStub<Relay>, server: string) {
   const pong = await Promise.race([ask(MCP_PING), scheduler.wait(REACH).then(() => null)]);
   if (pong === null) {
     close();
-    throw new Error("That server didn't answer");
+    throw new Error(`didn't answer a ping within ${REACH / 1000} s`);
   }
   return { server, ask, close };
 }

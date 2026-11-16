@@ -17,6 +17,10 @@
 // - `OWN` writes and removes blobs of its plugin's own artifact for the network, where its plugin's servers read.
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
 // - `RELAY` passes a call to a server and gives its answer, or tells every server something.
+//
+// A part whose `package.json` says `"tail": true` is a Tail Worker: every other Worker here that handles requests
+// for the network is given it as a tail consumer, so it hears what each did. The gateway only passes each on, and
+// the web client's are files; the presigner isn't either, since such a part is bound to it and so is deployed after.
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { $, Glob } from "bun";
@@ -58,6 +62,7 @@ rmSync(built, { recursive: true, force: true });
 mkdirSync(built, { recursive: true });
 const paths = { ...PIECES };
 const parts = [];
+const workers = [];
 for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins`)) {
   const plugin = config.split("/")[0];
   const part = `${built}/${plugin}`;
@@ -79,7 +84,13 @@ for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins
     { binding: "NETWORK", service: "network-presigner", entrypoint: "Network" },
     { binding: "RELAY", service: "network-relay" },
   ];
-  await Bun.write(`${part}/wrangler.jsonc`, JSON.stringify(worker, null, 2));
+  workers.push({ part, worker, tail: about.tail === true });
+}
+const tails = workers.filter(({ tail }) => tail).map(({ worker }) => ({ service: worker.name }));
+const tailed = (worker) => (tails.length ? { ...worker, tail_consumers: tails } : worker);
+// The tail parts go first, since the rest name them.
+for (const { part, worker, tail } of workers.sort((a, b) => b.tail - a.tail)) {
+  await Bun.write(`${part}/wrangler.jsonc`, JSON.stringify(tail ? worker : tailed(worker), null, 2));
   parts.push(relative(here, `${part}/wrangler.jsonc`));
 }
 const gateway = { name: "network-gateway", main: relative(built, `${here}/gateway/gateway.ts`), compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
@@ -88,15 +99,27 @@ await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, stdio: ["inherit", "inherit", "inherit"] }).exited;
-const pieces = ["relay", "presigner", "public-mcp", "web"].map((piece) => `${piece}/wrangler.jsonc`);
+// The relay and public MCP are told their tail parts in a copy of their config beside the gateway's.
+const config = {
+  web: "web/wrangler.jsonc",
+  presigner: "presigner/wrangler.jsonc",
+};
+for (const piece of ["relay", "public-mcp"]) {
+  const worker = (await import(`${here}/${piece}/wrangler.jsonc`)).default;
+  await Bun.write(`${built}/${piece}.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/${piece}/${worker.main}`) }), null, 2));
+  config[piece] = relative(here, `${built}/${piece}.jsonc`);
+}
+const pieces = Object.values(config);
 if (what === "dev") {
   process.exit(await wrangler("dev", ...[gatewayConfig, ...pieces, ...parts].flatMap((config) => ["-c", config]), ...rest));
 }
 // A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
 // its `wrangler.jsonc`, which only it holds, such as the presigner's and a plugin's part's keys to an outside service.
-for (const config of ["web/wrangler.jsonc", "presigner/wrangler.jsonc", "relay/wrangler.jsonc", ...parts, "public-mcp/wrangler.jsonc", gatewayConfig]) {
-  const file = `${dirname(config)}/secrets`;
+// The tail parts come first among the parts, before whatever names them.
+const [tailParts, otherParts] = [parts.slice(0, tails.length), parts.slice(tails.length)];
+for (const deployed of [config.web, config.presigner, ...tailParts, config.relay, ...otherParts, config["public-mcp"], gatewayConfig]) {
+  const file = `${dirname(deployed)}/secrets`;
   const secrets = existsSync(`${here}/${file}`) ? ["--secrets-file", file] : [];
-  const failed = await wrangler("deploy", "-c", config, ...secrets);
+  const failed = await wrangler("deploy", "-c", deployed, ...secrets);
   if (failed) process.exit(failed);
 }

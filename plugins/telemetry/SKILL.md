@@ -8,9 +8,15 @@ long each tool took and what AI used, and warnings, errors and crashes. It's kep
 to 256 MB, and nothing about it leaves. It holds no one's data: names, sizes, durations and outcomes, never what
 anyone wrote, was given or answered. What a server recorded arrives here about a minute later.
 
+The network's edge, where assistants, browsers and sharing links come in over the web, is in it too: a span for
+each request it handled (`POST /mcp`, `relay forward`, `POST /sign-in/auth/oauth2/token`), on the
+server `edge`, with its route, status, duration, the server it was passed to and why it failed, even when it never
+reached a server. A call that reached one is one trace with the server's span, and with the client's when the
+client sent a `traceparent`.
+
 - `overview` is what the Telemetry screen in Settings shows: what's failing, what's slowest and what AI cost, over
   the last `hours` (24 if left out, up to 336).
-- `errors` lists each kind of error once: where (a span's name, as `<plugin> <tool>`, or what logged it), its
+- `errors` lists each kind of error once: where (a span's name, as `<plugin> <tool>`, or `<method> <route>` for the edge's, or what logged it), its
   message, how often, when it was last, how long it lasted, and the trace of the newest. Start a bug there. What a
   client reported says which (`from`: "App on Andre's iPhone", "claude-code (MCP) on linux"): its requests that
   failed or were slow, as MCP names them (`tools/call gmail_search`), whose trace runs on into the server's span;
