@@ -40,15 +40,34 @@ let again = 1000
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let asking
 
+/// How long a request may take before it's reported as slow, as the app's client has it.
+const SLOW = 2000
+/** Random bytes in hex, as a trace's ids are. @param {number} bytes */
+const hex = (bytes) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")
+
 /// Asks the network's servers `method`, as this browser's person. → its result. A browser that's no longer
 /// signed in goes to sign in again.
-/** @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
+/** @param {string} method @param {Record<string, any>} params @returns {Promise<any>} */
 async function mcp(method, params = {}) {
+  // The span this request is, carried as W3C's `traceparent`, which the edge's span and a server's are under, so a
+  // trace runs from this browser on. It's reported if it fails or is slow, as the app's client reports its own
+  // (`span` in `core/client`), but not when it failed for no server answering while none was already: that's the
+  // outage, reported once it's over (`said`).
+  const tool = method === "tools/call" ? params.name : undefined
+  const span = { name: tool ? `${method} ${tool}` : method, traceId: hex(16), spanId: hex(8), kind: "client", attributes: { "mcp.method.name": method, "gen_ai.tool.name": tool, "one.reached": "edge" } }
+  const [started, was] = [performance.now(), answering]
+  /** @param {string} [error] */
+  const ended = (error) => {
+    const took = performance.now() - started
+    if ((error && (was || answering)) || took > SLOW) report({ ...span, took, error })
+  }
   let answer
   try {
-    answer = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
+    const headers = { "content-type": "application/json", traceparent: `00-${span.traceId}-${span.spanId}-01` }
+    answer = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
   } catch {
     said(false)
+    ended("Can't reach your network")
     throw new Error("Can't reach your network. Check this device is online.")
   }
   if (answer.status === 401) {
@@ -57,6 +76,7 @@ async function mcp(method, params = {}) {
   }
   said(answer.status !== 503)
   const { result, error } = await answer.json()
+  ended(error?.message ?? (result?.isError ? (result.content?.[0]?.text ?? "The tool failed") : undefined))
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return result
 }
