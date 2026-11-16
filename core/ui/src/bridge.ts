@@ -1,6 +1,7 @@
 // The bridge: how an app's page reaches its client, which is all it reaches. It speaks as an MCP App speaks to its
 // host, in JSON-RPC messages posted to the frame's parent, so one page is an app here and an MCP App in an
 // assistant.
+import { configureClientErrors } from "solid-js"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {
@@ -34,12 +35,19 @@ addEventListener("message", ({ source, data }) => {
 
 const tell = (method: string, params: object = {}) => parent.postMessage({ jsonrpc: "2.0", method, params }, "*")
 
-/// A page's uncaught errors are logged to its client, as an MCP App logs to its host (MCP's `notifications/message`),
-/// which tells Telemetry: the message, and the file and line.
+/// A page's errors are logged to its client, as an MCP App logs to its host (MCP's `notifications/message`), which
+/// tells Telemetry: the message, and the file and line. Those an `<Errored>` boundary caught and shows are too, once
+/// each, as Solid tells of them (`configureClientErrors`), with where they were thrown from their stack.
 const logged = (message: unknown, file?: string, line?: number) =>
   tell("notifications/message", { level: "error", data: { message: String(message), file, line } })
 addEventListener("error", ({ message, filename, lineno }) => logged(message, filename, lineno))
 addEventListener("unhandledrejection", ({ reason }) => logged(reason?.message ?? reason))
+configureClientErrors({
+  onError(error) {
+    const [, file, line] = /([a-z]+:\/\/[^\s()]+?):(\d+):\d+/.exec((error as Error)?.stack ?? "") ?? []
+    logged((error as Error)?.message ?? error, file, line ? Number(line) : undefined)
+  },
+})
 
 const ask = <Result>(method: string, params: object = {}) => new Promise<Result>((answered, refused) => {
   const id = ++asked
