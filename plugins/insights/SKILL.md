@@ -18,14 +18,14 @@ anyone wrote, was given or answered. What a server recorded arrives here about a
 - `slowest` lists tools by their 95th percentile, with their calls, failures and 50th and 99th percentiles in
   milliseconds, then how long each app took to open, from a tap to its first drawing.
 - `metric` gives one metric over time, per step, as its count, sum and quantiles, of the data with the
-  `attributes` given: `one.tool.duration` with `{"one.plugin": "ai-gateway", "one.tool": "chat"}`, say. With no
+  `attributes` given: `one.tool.duration` with `{"one.plugin": "backups", "one.tool": "now"}`, say. With no
   `name` it lists every metric there is, with its attributes.
-- `spending` gives AI Gateway's tokens in and out per model per day, and what they cost where the endpoint says
+- `spending` gives the tokens AI models took in and gave out, as plugins record them, per model per day, and what they cost where the endpoint says
   (OpenRouter does). It has no prices of its own.
 - Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
   doing is open, and who did what isn't.
 
-- `record` is how a plugin's tool records more of its call, as AI Gateway does:
+- `record` is how a plugin's tool records more of its call:
   `OneCore.Call.tool(call, "insights", "record", %{"records" => records})`, where Insights is added
   (`OneCore.Call.plugins/1`). Each record has a `name`, in OpenTelemetry's dotted lowercase and following its
   conventions where it has some (`gen_ai.client.token.usage`), and `attributes`: names, sizes and outcomes, never

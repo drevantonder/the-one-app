@@ -399,7 +399,7 @@ refused as carol for groups/family uninstall --name diary
 refused as bob for network deploy --name notes --files-from "$folder/notes"
 refused as bob for network uninstall --name relations
 refused as bob for network add_server --key "$(printf 'ab%.0s' {1..32})"
-refused as bob install_service --plugin load --service Load.Meter
+refused as bob install_service --plugin backups --service Backups.Disk
 may as alice for groups/family uninstall --name diary
 
 say "Anyone brings a server, which is theirs alone until they choose who else it acts for, and each agrees"
@@ -417,7 +417,7 @@ may via alices as alice uninstall --name mine
 refused via alices as bob diary write --text "At alice's"
 refused as bob add_server --key "${key[alices]}"
 refused as bob add_member --server "${key[alices]}" --who users/bob
-refused as bob install_service --plugin load --service Load.Meter --server "${key[alices]}"
+refused as bob install_service --plugin backups --service Backups.Disk --server "${key[alices]}"
 if [[ ${#at_address[@]} -gt 0 ]]; then
   echo "  alice's server has no credentials for the bucket, and asks the presigner for each of these:"
   (cd "$root/core/server" && mix run --no-start -e '

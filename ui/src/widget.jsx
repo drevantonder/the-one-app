@@ -163,7 +163,7 @@ function Part(props) {
   )
 }
 
-/// `<Widget name="Stay Awake" size="2x2" layout={layout()} onCall={(tool, inputs) => call(tool, inputs)} onOpen={open} />`:
+/// `<Widget name="Weather" size="2x2" layout={layout()} onCall={(tool, inputs) => call(tool, inputs)} onOpen={open} />`:
 /// a plugin's widget, as a card: the `layout` its tool answered, drawn from the parts a layout is made of (the
 /// skill `building-plugins` lists them), under its `name`, at a `size` of `2x2`, `4x2` or `4x4`. A button or a
 /// switch in it calls `onCall` with its tool and inputs, and pressing the card anywhere else calls `onOpen`. With a

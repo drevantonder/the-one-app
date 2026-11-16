@@ -238,8 +238,8 @@ defmodule Insights.Read do
   end
 
   @doc """
-  What AI used, per model per day, newest first: tokens in and out, and what it cost where the endpoint said, as AI
-  Gateway records them (OpenTelemetry's `gen_ai.client.token.usage`, and `gen_ai.client.cost` in US dollars).
+  What AI used, per model per day, newest first: tokens in and out, and what it cost where the endpoint said, as plugins
+  record them (OpenTelemetry's `gen_ai.client.token.usage`, and `gen_ai.client.cost` in US dollars).
   """
   def spending(batches) do
     points =

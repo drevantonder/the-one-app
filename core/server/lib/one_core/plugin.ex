@@ -355,8 +355,7 @@ defmodule OneCore.Plugin do
     from as a `Port`. The folder is a new one only when those files change, so a service that kept it can tell in
     `code_change/3` whether to build and start the program again. `needs/0` says what building and running it
     takes. The program stops when its input closes, which is when the service's process ends, and a program
-    that stops by itself should stop the service, so that both are started again. The plugin `load` does all of
-    this.
+    that stops by itself should stop the service, so that both are started again.
 
   A plugin's edge function is what of it has to be reached over the web: a page that opens in a
   browser, or a call from a service outside. It's an ordinary Cloudflare Worker in the plugin's folder `edge/`,

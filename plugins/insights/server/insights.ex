@@ -82,7 +82,7 @@ defmodule Insights do
             name: %{type: "string", description: "The metric's name, as one.tool.duration"},
             attributes: %{
               type: "object",
-              description: "Only the data with these attributes, as {\"one.plugin\": \"ai-gateway\"}",
+              description: "Only the data with these attributes, as {\"one.plugin\": \"backups\"}",
               additionalProperties: %{type: ["string", "number", "boolean"]}
             },
             hours: hours,
@@ -94,7 +94,7 @@ defmodule Insights do
         name: "spending",
         read_only: true,
         description:
-          "What AI Gateway's calls used, per model per day: tokens in and out, and what they cost where the endpoint says",
+          "What AI models used, as plugins record it, per model per day: tokens in and out, and what they cost where the endpoint says",
         inputs: %{
           type: "object",
           properties: %{
