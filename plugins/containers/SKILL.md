@@ -12,8 +12,10 @@ machines that run them.
   once: then `exec` runs commands in it, `read_file` and `write_file` move files, and `logs` reads what its own
   command printed. `list` shows yours and their state.
 - `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvfb, `DISPLAY=:99`) with Openbox and Chromium on
-  it. A running one is a screen in Computer Use, called what the container is: look at it and act on it there. Chromium's DevTools Protocol is on port 9222 inside it
-  (`exec` with `curl -s 127.0.0.1:9222/json`). The first desktop on a machine takes about 2 minutes to build.
+  it, the build Playwright pins. A running one is a screen in Computer Use, called what the container is: look at
+  it and act on it there. Chromium's DevTools Protocol is on port 9222 inside it (`exec` with `curl -s
+  127.0.0.1:9222/json`), and `playwright-mcp` is Playwright's MCP server, to start on it. The first desktop on a
+  machine takes a few minutes to build.
 - `commit` makes an image of a prepared container, and `create` from that image's name makes throwaway copies of
   it on the same machine. `remove_image` removes it.
 - A container reaches the internet but nothing of the machine's own: no files, no host network, no privileges.
