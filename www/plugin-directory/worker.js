@@ -73,7 +73,38 @@ const installs = (n) => `${number(n)} ${n === 1 ? "install" : "installs"}`;
 
 const TRUST = `<p class="trust">A plugin's server code runs on your own machine, with full access to it. Nothing here is reviewed by us: have your agent read a plugin before you install it. Plugins are listed and ranked by anonymous install counts; installing with <code>DO_NOT_TRACK=1</code> sends none.</p>`;
 
-const page = (title, body) =>
+const ORIGIN = "https://one.drevan.me";
+const CARD = { url: `${ORIGIN}/social-card.png`, alt: "The One App: make using AI to its full potential easy." };
+
+/** The tags that make a link to a page a card in a chat or on social media, and its canonical address. */
+const tags = (title, description, path) => {
+  const url = `${ORIGIN}${path}`;
+  const text = escape(description.length > 200 ? `${description.slice(0, 199).trimEnd()}…` : description);
+  return `<meta name="description" content="${text}">
+<link rel="canonical" href="${escape(url)}">
+<link rel="icon" href="/ring.png">
+<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="The One App">
+<meta property="og:title" content="${escape(title)}">
+<meta property="og:description" content="${text}">
+<meta property="og:url" content="${escape(url)}">
+<meta property="og:image" content="${CARD.url}">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="${CARD.alt}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${escape(title)}">
+<meta name="twitter:description" content="${text}">
+<meta name="twitter:image" content="${CARD.url}">
+<meta name="twitter:image:alt" content="${CARD.alt}">
+`;
+};
+
+/** A page; `meta` is `[description, path]` for one that's linked to, and none for the not-found page. */
+const page = (title, body, meta) =>
   new Response(
     `<!doctype html>
 <html lang="en">
@@ -81,7 +112,7 @@ const page = (title, body) =>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title>
-<link rel="stylesheet" href="/plugins/style.css">
+${meta ? tags(title, ...meta) : '<meta name="robots" content="noindex">\n<link rel="icon" href="/ring.png">\n'}<link rel="stylesheet" href="/plugins/style.css">
 </head>
 <body>
 <header><a href="/">The One App</a></header>
@@ -128,6 +159,7 @@ ${rows}
     document.querySelector(".empty").hidden = rows.some((row) => !row.hidden);
   });
 </script>`,
+    ["Plugins for The One App, from any git repo, ranked by installs.", "/plugins"],
   );
 }
 
@@ -150,6 +182,7 @@ function plugin(p) {
     setTimeout(() => (button.textContent = "Copy"), 1500);
   });
 </script>`,
+    [p.description, `/plugins/${p.source}/${p.name}`],
   );
 }
 
