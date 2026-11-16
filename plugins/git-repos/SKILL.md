@@ -13,7 +13,7 @@ Git signs in as the device does, with no password. `one` puts `git-remote-one` b
 time it runs, which is what git runs for `one::` addresses; where it couldn't, link it there: `ln -s one
 git-remote-one`, or on Windows `mklink /H git-remote-one.exe one.exe`.
 
-- `make --name notes` makes an empty repo, yours, or a group's with `ONE_FOR=groups/<name>`. Then push to it from a
+- `create --name notes` makes an empty repo, yours, or a group's with `ONE_FOR=groups/<name>`. Then push to it from a
   repo you have: `git remote add origin one::users/alice/made/git-repos/notes` and `git push -u origin main`.
 - `list` lists every repo you may read. `branches`, `tree`, `file`, `log` and `commit` read one without cloning it:
   a folder or a file at a ref, the history, one commit's diff.

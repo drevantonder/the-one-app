@@ -10,7 +10,7 @@ is named by where it is, like `users/alice/made/git-repos/notes`, and its owner 
   For a group's things, ask for the group (`ONE_FOR=groups/<name>`).
 - `restore --artifact <name>` brings one back as it was. If something new was made at the same name since, it says
   so: that has to be removed first.
-- `remove --artifact <name>` removes one. An app's own way of removing, such as `repos remove`, does the same and
+- `remove --artifact <name>` removes one. An app's own way of removing, such as `git-repos remove`, does the same and
   keeps its own list true, so use the app's when it has one. Remove only when asked.
 - A plugin someone deployed is removed the same way, by its artifact (`users/alice/plugins/notes`), once nobody has
   it installed: `uninstall` it for everyone first. It's gone from the App Store until it's restored.
