@@ -174,10 +174,15 @@ defmodule OneCore.Mcp do
 
     own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
 
+    # A tool with a page of its own names it as an MCP App's tool names its UI.
     plugins =
-      for {plugin, version} <- Enum.sort(Plugins.running(who)),
-          tool <- open.(version.tools),
-          do: listed.("#{plugin}_#{tool.name}", tool)
+      for {plugin, version} <- Enum.sort(Plugins.running(who)), tool <- open.(version.tools) do
+        listed = listed.("#{plugin}_#{tool.name}", tool)
+
+        if tool[:ui],
+          do: Map.put(listed, :_meta, %{ui: %{resourceUri: "ui://#{plugin}/#{version.code}/#{tool.ui}"}}),
+          else: listed
+      end
 
     {:ok, %{tools: own ++ plugins}}
   end
@@ -207,20 +212,29 @@ defmodule OneCore.Mcp do
       for %{uri: uri, frontmatter: %{"name" => name, "description" => description}} <- Skills.list(who),
           do: %{uri: uri, name: name, description: description, mimeType: "text/markdown"}
 
+    running = Enum.sort(Plugins.running(who))
+
+    uis =
+      Map.new(for {plugin, version} <- running, %{ui: ui} when is_binary(ui) <- version.tools, do: {{plugin, ui}, true})
+
     resources =
-      for {plugin, version} <- Enum.sort(Plugins.running(who)), path <- Version.files(version) do
+      for {plugin, version} <- running, path <- Version.files(version) do
         resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
 
+        # An app's category goes as it is: a client opens the launcher first, and what the rest mean is the
+        # launcher's. A page that's a tool's UI is an MCP App's page too.
         case Enum.find(version.apps, &(&1.page == path)) do
+          nil when is_map_key(uis, {plugin, path}) ->
+            resource
+
           nil ->
             %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
 
-          # A part of Settings says so, so a client that opens a plugin's app opens the one that isn't.
-          %{settings: true} = app ->
-            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}], _meta: %{settings: true}})
+          %{category: nil} = app ->
+            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}]})
 
           app ->
-            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}]})
+            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}], _meta: %{category: app.category}})
         end
       end
 

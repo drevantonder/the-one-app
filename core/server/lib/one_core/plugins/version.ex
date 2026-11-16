@@ -21,9 +21,10 @@ defmodule OneCore.Plugins.Version do
 
   `ui` is the code of the UI library its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
-  `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address, `settings`, whether
-  it's a part of Settings, and `account`, whether it's an outside account's. `widgets` lists its widgets: each one's `name`, the `tool` that answers its layout, and
-  the `sizes` it comes in.
+  `title` is its name where a person reads it and `icon` its icon as a `data:` address, its first app's unless it
+  says (`OneCore.Plugin`). `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address,
+  and its `category`, which is the plugin's to say and nil where it says none. `widgets` lists its widgets: each
+  one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
   `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
@@ -40,7 +41,7 @@ defmodule OneCore.Plugins.Version do
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code]
   defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :artifact,
-             essential: false]
+             :title, :icon, essential: false]
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
   @sizes ~w(2x2 4x2 4x4)
@@ -79,7 +80,7 @@ defmodule OneCore.Plugins.Version do
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
       own = Map.reject(rest, fn {path, _} -> client?(path) end)
       :persistent_term.put({__MODULE__, under}, %{files: served, hashes: hashes, skills: skills, own: own})
-      {:ok, %{version | code: code(files), ui: App.ui(files)}, warnings}
+      {:ok, %{version | code: code(files), ui: App.ui(files), title: version.title || name}, warnings}
     else
       {:error, why} ->
         unload(under)
@@ -110,7 +111,8 @@ defmodule OneCore.Plugins.Version do
     kept = :persistent_term.get({__MODULE__, under})
 
     said =
-      Map.take(version, [:tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential])
+      Map.take(version, [:tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential,
+                         :title, :icon])
 
     tools = for tool <- said.tools, do: Map.delete(tool, :takes)
     :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: kept.files, skills: kept.skills}))
@@ -130,7 +132,10 @@ defmodule OneCore.Plugins.Version do
           do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
     :persistent_term.put({__MODULE__, under}, %{files: said.files, hashes: %{}, skills: said.skills, own: %{}})
-    fields = Map.take(said, [:apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential])
+
+    fields =
+      Map.take(said, [:apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential, :title, :icon])
+
     {:ok, struct!(__MODULE__, Map.merge(fields, %{under: under, plugin: nil, tools: tools, artifact: artifact}))}
   rescue
     _ -> :error
@@ -285,6 +290,8 @@ defmodule OneCore.Plugins.Version do
       [plugin] ->
         tools = if function_exported?(plugin, :tools, 0), do: plugin.tools(), else: []
         apps = if function_exported?(plugin, :apps, 0), do: plugin.apps(), else: []
+        title = if function_exported?(plugin, :title, 0), do: plugin.title()
+        icon = if function_exported?(plugin, :icon, 0), do: plugin.icon()
         widgets = if function_exported?(plugin, :widgets, 0), do: plugin.widgets(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
         hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
@@ -294,12 +301,17 @@ defmodule OneCore.Plugins.Version do
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
         cond do
-          not (is_list(tools) and Enum.all?(tools, &tool?/1)) ->
-            {:error, "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}"}
+          not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
+            {:error,
+             "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and ui, if a tool has one, is a page of client/"}
 
           not (is_list(apps) and Enum.all?(apps, &app?(&1, rest))) ->
             {:error,
-             "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file here"}
+             "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
+               "here, and category, if it has one, is text"}
+
+          not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
+            {:error, "title/0 gives text, and icon/0 a file here"}
 
           not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
             {:error,
@@ -336,6 +348,12 @@ defmodule OneCore.Plugins.Version do
                   do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
 
             version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest)
+
+            version = %{
+              version
+              | title: title || version.title,
+                icon: if(icon, do: data(icon, rest), else: version.icon)
+            }
 
             with {:ok, jobs} <- jobs(jobs, tools),
                  do:
@@ -386,13 +404,12 @@ defmodule OneCore.Plugins.Version do
   # A module has one `behaviour` attribute for each behaviour it says it follows.
   defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
-  # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more.
+  # An app's icon goes to clients with its name, as a `data:` address, so a home screen asks for nothing more. A
+  # plugin is called and drawn as its first app is, unless it says otherwise.
   defp version(under, plugin, tools, apps, widgets, services, rest) do
     apps =
-      for %{name: name, page: page, icon: icon} = app <- apps do
-        icon = "data:#{kind(icon)};base64,#{Base.encode64(rest[icon])}"
-        %{name: name, page: page, icon: icon, settings: app[:settings] == true, account: app[:account] == true}
-      end
+      for %{name: name, page: page, icon: icon} = app <- apps,
+          do: %{name: name, page: page, icon: data(icon, rest), category: app[:category]}
 
     widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
 
@@ -401,6 +418,8 @@ defmodule OneCore.Plugins.Version do
       plugin: plugin,
       tools: tools,
       apps: apps,
+      title: List.first(for(app <- apps, do: app.name)),
+      icon: List.first(for(app <- apps, do: app.icon)),
       widgets: widgets,
       uses: [],
       services: services,
@@ -435,8 +454,10 @@ defmodule OneCore.Plugins.Version do
     end
   end
 
-  defp app?(%{name: name, page: page, icon: icon}, rest) when is_binary(name),
-    do: client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page) and is_map_key(rest, icon)
+  defp data(path, rest), do: "data:#{kind(path)};base64,#{Base.encode64(rest[path])}"
+
+  defp app?(%{name: name, page: page, icon: icon} = app, rest) when is_binary(name),
+    do: page?(page, rest) and is_map_key(rest, icon) and (app[:category] == nil or is_binary(app[:category]))
 
   defp app?(_, _), do: false
 
@@ -446,8 +467,13 @@ defmodule OneCore.Plugins.Version do
 
   defp widget?(_, _), do: false
 
-  defp tool?(%{name: name, description: description, inputs: %{}}) when is_binary(name) and is_binary(description),
-    do: name =~ ~r/^[a-z][a-z0-9_]*$/
+  defp page?(page, rest),
+    do: is_binary(page) and client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page)
 
-  defp tool?(_), do: false
+  # A tool may have a page of its own, its UI as MCP Apps has it, which a host shows for it.
+  defp tool?(%{name: name, description: description, inputs: %{}} = tool, rest)
+       when is_binary(name) and is_binary(description),
+       do: name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest))
+
+  defp tool?(_, _), do: false
 end

@@ -186,12 +186,24 @@ defmodule OneCore.Call do
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
-  `plugin` it is, as its artifact's name, who it was `installed` for, its `apps` and its `widgets`. A Home Screen page is
-  drawn from these.
+  `plugin` it is, as its artifact's name, who it was `installed` for, its `title` and `icon`, its `apps`, its `widgets`
+  and its `tools`' names and pages (`ui`). A Home Screen page is drawn from these.
   """
   def plugins(%__MODULE__{subject: who}) do
     for at <- Enum.reverse(Plugins.chain(who)), {name, version} <- Plugins.versions([at]), into: %{} do
-      {name, %{name: name, plugin: version.artifact, installed: at, apps: version.apps, widgets: version.widgets}}
+      tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui])
+
+      {name,
+       %{
+         name: name,
+         plugin: version.artifact,
+         installed: at,
+         title: version.title,
+         icon: version.icon,
+         apps: version.apps,
+         widgets: version.widgets,
+         tools: tools
+       }}
     end
     |> Map.values()
   end

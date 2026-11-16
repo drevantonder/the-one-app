@@ -210,12 +210,16 @@ defmodule OneCore.Plugin do
       @impl true
       def apps, do: [%{name: "Hello", page: "client/index.html", icon: "client/icon.svg"}]
 
-  - An app that's a part of Settings says `settings: true`: it's then on Settings, and on no Home Screen page.
-  - An app that's an outside account's (Google, WhatsApp) says `account: true`: it's then in the page's Accounts
-    folder, not on the page. Its plugin's tool `accounts` lists them, `[%{account: "sam@example.com", ok: true}]`,
-    with `about`, one line saying more, and when `ok` is false, `problem`, a few words for a person ("Sign in
-    again"). An account in the folder opens the app's page with the account after a `#`:
-    `client/index.html#sam@example.com`. With none, the page signs one in.
+  - An app may say its `category`, which One Core passes to clients as it is, as Android's intent categories are:
+    what each means is the launcher's to say, in its skill (`category: "settings"` puts an app in Settings). One
+    Core knows one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one,
+    installed for the network, so installing a second is refused, and so is uninstalling it; deploying another as
+    its new version replaces it.
+  - A plugin is called and drawn where a person reads it as its first app is. One with no app a person still sees
+    (one with accounts, say) gives `title/0`, its name, and `icon/0`, a file of its own: `def title, do: "Gmail"`.
+  - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
+    listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
+    an app.
   - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
     2.0 with the UI library, and its source is the folder `client/`: each `.html` there is a page, whose script is the
     app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more
@@ -437,6 +441,19 @@ defmodule OneCore.Plugin do
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
   @callback essential() :: boolean
-  @optional_callbacks tools: 0, call: 3, apps: 0, widgets: 0, uses: 0, hooks: 0, hook: 3, offers: 0, jobs: 0, schedule: 3,
-                      essential: 0
+  @callback title() :: String.t()
+  @callback icon() :: String.t()
+  @optional_callbacks tools: 0,
+                      call: 3,
+                      apps: 0,
+                      widgets: 0,
+                      uses: 0,
+                      hooks: 0,
+                      hook: 3,
+                      offers: 0,
+                      jobs: 0,
+                      schedule: 3,
+                      essential: 0,
+                      title: 0,
+                      icon: 0
 end

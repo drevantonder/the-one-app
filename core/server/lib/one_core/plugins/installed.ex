@@ -58,6 +58,7 @@ defmodule OneCore.Plugins.Installed do
     end
 
     with [] <- used_by,
+         :ok <- last_launcher(owner, name),
          artifact = Plugins.plugin(owner, name),
          :ok <- note(owner, removed) do
       {installed, _tag} = read(owner)
@@ -67,6 +68,18 @@ defmodule OneCore.Plugins.Installed do
     else
       {:error, why} -> {:error, why}
       used_by -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
+    end
+  end
+
+  # A network with no launcher has no way in, so the one it has stays until another version replaces it.
+  defp last_launcher(owner, name) do
+    with %{^name => version} <- Map.new(Plugins.versions([owner])),
+         true <- Deploy.launcher?(version) do
+      {:error,
+       "#{name} is this network's launcher, which every client opens first, and a network with none has no way in. " <>
+         "To replace it, deploy another as its new version: ONE_FOR=network one deploy --name #{name} --files-from <folder>"}
+    else
+      _ -> :ok
     end
   end
 

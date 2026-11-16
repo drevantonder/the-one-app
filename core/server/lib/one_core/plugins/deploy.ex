@@ -53,9 +53,9 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Every plugin anyone has deployed, with its apps as its latest version has them: `[%{plugin: artifact, apps:
-  [...]}]`. It's what lists every app there is, whether or not it's on anyone's page now. One that was removed
-  (Recently Deleted's `remove`) has no latest version, and isn't listed.
+  Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., icon: ...,
+  apps: [...], tools: [names]}]`. It's what lists every app there is, whether or not it's on anyone's page now.
+  One that was removed (Recently Deleted's `remove`) has no latest version, and isn't listed.
   """
   def deployed do
     blobs = Bucket.list(@deployed)
@@ -64,24 +64,33 @@ defmodule OneCore.Plugins.Deploy do
 
     for {[owner, name], {:ok, said, _tag}, {:ok, _latest, _}} <-
           Enum.zip([named, Bucket.read_all(blobs), Bucket.read_all(latest)]) do
-      apps =
-        for app <- JSON.decode!(said)["apps"],
-            do: %{
-              name: app["name"],
-              page: app["page"],
-              icon: app["icon"],
-              settings: app["settings"],
-              account: app["account"] == true
-            }
+      said = JSON.decode!(said)
 
-      %{plugin: "#{owner}/plugins/#{name}", apps: apps}
+      apps =
+        for app <- said["apps"],
+            do: %{name: app["name"], page: app["page"], icon: app["icon"], category: app["category"]}
+
+      %{
+        plugin: "#{owner}/plugins/#{name}",
+        title: said["title"] || name,
+        icon: said["icon"],
+        apps: apps,
+        tools: said["tools"] || []
+      }
     end
   end
 
   # That `owner` deployed the plugin `name`, with the apps this version has, among what everyone has deployed.
   defp listed(owner, name, version) do
     blob = "#{@deployed}#{owner}/#{name}"
-    said = JSON.encode!(%{apps: version.apps})
+
+    said =
+      JSON.encode!(%{
+        apps: version.apps,
+        title: version.title,
+        icon: version.icon,
+        tools: Enum.map(version.tools, & &1.name)
+      })
 
     case Bucket.read(blob) do
       {:ok, ^said, _tag} -> :ok
@@ -205,7 +214,37 @@ defmodule OneCore.Plugins.Deploy do
   uses a plugin that keeps them. `:ok`, or `{:error, why}`.
   """
   def fits(owner, name, version) do
-    with :ok <- bring(owner, name, version.uses), do: scheduled(owner, name, version)
+    with :ok <- launcher(owner, name, version),
+         :ok <- bring(owner, name, version.uses),
+         do: scheduled(owner, name, version)
+  end
+
+  @doc """
+  Whether a version has the launcher: the app in the category `launcher`, which every client opens first. A network
+  has exactly one, installed for the network.
+  """
+  def launcher?(version), do: Enum.any?(version.apps, &(&1.category == "launcher"))
+
+  defp launcher(owner, name, version) do
+    others = for {other, running} <- Plugins.versions([@network]), other != name, launcher?(running), do: other
+
+    cond do
+      not launcher?(version) ->
+        :ok
+
+      owner != @network ->
+        {:error, "#{name} is a launcher, which every client opens first, so it's installed only for the network."}
+
+      others != [] ->
+        [other | _] = others
+
+        {:error,
+         "#{other} is this network's launcher, and a network has one. To replace it, deploy #{name} as #{other}'s " <>
+           "new version: ONE_FOR=network one deploy --name #{other} --files-from <#{name}'s folder>"}
+
+      true ->
+        :ok
+    end
   end
 
   # A plugin's scheduled jobs are kept by a plugin it uses.
