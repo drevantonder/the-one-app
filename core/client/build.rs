@@ -2,14 +2,15 @@ use serde_json::Value;
 
 fn main() {
     // The build a program is, as `tooling/version` names it from the commit checked out, which a server and a phone's
-    // app are named by too. It's named again whenever the commit does: git's HEAD, the branch it's on, or what's
-    // staged changes.
+    // app are named by too. It's named again whenever the commit does: git's HEAD, or the branch it's on. Not when
+    // git's index does, which git writes whenever it looks at the files (`git status`), and every program would be
+    // built again for nothing: its `-dirty` is what was uncommitted when the commit last changed.
     let git = |asked: &[&str]| {
         let said = std::process::Command::new("git").args(asked).output().expect("git is there");
         String::from_utf8(said.stdout).expect("git says text").trim().to_owned()
     };
     let branch = git(&["symbolic-ref", "-q", "HEAD"]);
-    for watched in ["HEAD", "index", "packed-refs", branch.as_str()].into_iter().filter(|path| !path.is_empty()) {
+    for watched in ["HEAD", "packed-refs", branch.as_str()].into_iter().filter(|path| !path.is_empty()) {
         println!("cargo:rerun-if-changed={}", git(&["rev-parse", "--path-format=absolute", "--git-path", watched]));
     }
     let named = std::process::Command::new("sh").arg("../../tooling/version").output().expect("tooling/version names the build");
