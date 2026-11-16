@@ -90,6 +90,9 @@ defmodule IphoneSimulator.Simulator do
     end
 
     simctl!(service, ["bootstatus", udid, "-b"], 600)
+    # idb remembers each simulator's companion, in a file of its own, and keeps asking one that's gone, as each is once
+    # its simulator shuts down, rather than starting another: it's told to forget it.
+    %{exit: 0} = cmd(idb(service) ++ ["disconnect", udid], 30)
     describe(service, udid) || raise "idb couldn't reach it"
     :ok
   end
@@ -247,10 +250,10 @@ defmodule IphoneSimulator.Simulator do
   """
   def stream(service, udid, request) do
     touch(service, udid)
-    idb = idb(service)
+    [_, "--companion-path", companion] = idb(service)
     %{"points" => points} = describe(service, udid) || raise "It isn't running: `start` starts it"
     file = Path.join(OneCore.Service.folder(service), "stream-#{System.unique_integer([:positive])}.json")
-    asked = Map.merge(JSON.decode!(request), %{"idb" => idb, "udid" => udid, "points" => points, "log" => Path.join(OneCore.Service.folder(service), "stream.log")})
+    asked = Map.merge(JSON.decode!(request), %{"companion" => companion, "udid" => udid, "points" => points, "log" => Path.join(OneCore.Service.folder(service), "stream.log")})
     File.write!(file, JSON.encode!(asked))
 
     case cmd([python(service), Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do

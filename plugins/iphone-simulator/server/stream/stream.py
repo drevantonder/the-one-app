@@ -1,9 +1,11 @@
 # `python stream.py <file>`: a simulator's screen as live video to one viewer, over WebRTC (aiortc), with the viewer's
 # mouse and keys back over its data channel. The video is the H.264 that idb (fbidb.io) encodes from the simulator's
-# own display, sent on as it comes, never decoded; what the viewer does is played on the simulator with idb's `ui`.
+# own display, sent on as it comes, never decoded; what the viewer does is played on the simulator. Both go through
+# idb's client in this process, not its command: starting the command for each tap took two or three times as long
+# as the tap, and the command stopped by a signal leaves its video encoding in idb's companion for good.
 #
-# The file is JSON, `{"offer": <the viewer's SDP offer>, "iceServers": [<as RTCPeerConnection takes them>], "idb":
-# [<idb's command and its options>], "udid": <the simulator's>, "points": <its points per pixel>, "log": <a file>}`, and
+# The file is JSON, `{"offer": <the viewer's SDP offer>, "iceServers": [<as RTCPeerConnection takes them>],
+# "companion": <idb's companion>, "udid": <the simulator's>, "points": <its points per pixel>, "log": <a file>}`, and
 # is removed once read. It prints the SDP answer and carries on in a process of its own until the viewer goes. Both
 # ends reach each other only through TURN (`relay`), and the answer carries only relay candidates, so neither learns
 # the other's addresses.
@@ -41,14 +43,15 @@ os.dup2(log, 1)
 os.dup2(log, 2)
 
 import asyncio  # noqa: E402
+import logging  # noqa: E402
 from fractions import Fraction  # noqa: E402
 
 import av  # noqa: E402
 from aiortc import RTCConfiguration, RTCIceServer, RTCIceTransportPolicy, RTCPeerConnection, RTCRtpSender, RTCSessionDescription  # noqa: E402
 from aiortc.mediastreams import MediaStreamTrack  # noqa: E402
+from idb.common.types import HIDButtonType, VideoFormat  # noqa: E402
+from idb.grpc.management import ClientManager  # noqa: E402
 
-idb = asked["idb"]
-udid = ["--udid", asked["udid"]]
 points = asked["points"]
 
 # The USB HID usage of each key X names, which is how idb presses one.
@@ -79,8 +82,7 @@ class Screen(MediaStreamTrack):
         return await self.packets.get()
 
 
-async def main():
-    video = await asyncio.create_subprocess_exec(*idb, "video-stream", *udid, "--format", "h264", "--fps", "30", stdout=asyncio.subprocess.PIPE)
+async def main(client):
     screen = Screen()
     done = asyncio.Event()
 
@@ -88,23 +90,28 @@ async def main():
         """idb's Annex B H.264, cut into access units by FFmpeg's parser, each timed as it arrives."""
         parser = av.CodecContext.create("h264", "r")
         start = time.monotonic()
-        while data := await video.stdout.read(65536):
+        async for data in client.stream_video(output_file=None, fps=30, format=VideoFormat.H264, compression_quality=0.2):
             for packet in parser.parse(data):
                 packet.pts = int((time.monotonic() - start) * 1_000_000)
                 packet.time_base = Fraction(1, 1_000_000)
                 screen.packets.put_nowait(packet)
 
-    # What's done on the screen is played with idb, one after another, in the order it came.
+    # What's done on the screen is played by idb's client, one after another, in the order it came: each is a
+    # function of the client.
     acts = asyncio.Queue()
 
     async def play():
         while True:
-            args = await acts.get()
-            done_playing = await asyncio.create_subprocess_exec(*idb, "ui", *args, *udid)
-            await done_playing.wait()
+            next_act = await acts.get()
+            # One idb can't play, as text with a character it has no key for, is told to the log, and the rest are
+            # played: the viewer has no way to hear of it.
+            try:
+                await next_act(client)
+            except Exception as error:
+                print(f"{asked['udid']}: {error!r}", flush=True)
 
     def at(x, y):
-        return [str(round(x * points)), str(round(y * points))]
+        return round(x * points), round(y * points)
 
     pointer = {"at": (0, 0), "down": None}
 
@@ -120,26 +127,22 @@ async def main():
             x1, y1 = pointer["at"]
             held = time.monotonic() - since
             if abs(x1 - x0) + abs(y1 - y0) > 12:
-                acts.put_nowait(["swipe", *at(x0, y0), *at(x1, y1), "--duration", f"{max(held, 0.1):.2f}"])
+                acts.put_nowait(lambda c: c.swipe(at(x0, y0), at(x1, y1), duration=max(held, 0.1)))
             else:
-                acts.put_nowait(["tap", *at(x1, y1), *(["--duration", "1"] if b == 3 or held > 0.5 else [])])
+                acts.put_nowait(lambda c: c.tap(*at(x1, y1), duration=1 if b == 3 or held > 0.5 else None))
         elif m["t"] == "button" and m["b"] == 2 and m["down"]:
-            acts.put_nowait(["button", "HOME"])
+            acts.put_nowait(lambda c: c.button(HIDButtonType.HOME))
         elif m["t"] == "button" and m["b"] in (4, 5, 6, 7) and m["down"]:
             # A step of the wheel is a swipe of 60 points the other way, as a finger scrolls.
             x, y = pointer["at"]
             dx, dy = {4: (0, 60), 5: (0, -60), 6: (60, 0), 7: (-60, 0)}[m["b"]]
-            acts.put_nowait(["swipe", *at(x, y), *at(x + dx / points, y + dy / points), "--duration", "0.1"])
+            acts.put_nowait(lambda c: c.swipe(at(x, y), at(x + dx / points, y + dy / points), duration=0.1))
         elif m["t"] == "key":
             code = KEYS.get(m["key"]) or KEYS.get(m["key"].lower())
             if code:
-                acts.put_nowait(["key", str(code)])
+                acts.put_nowait(lambda c: c.key(code))
         elif m["t"] == "text":
-            for i, line in enumerate(m["text"].split("\n")):
-                if i:
-                    acts.put_nowait(["key", "40"])
-                if line:
-                    acts.put_nowait(["text", line])
+            acts.put_nowait(lambda c: c.text(m["text"]))
 
     # TURN over TCP, by its IPv4 address: aiortc takes one TURN server, half the allocations over UDP to Cloudflare's
     # get no answer from some machines, by the port they're from, and one over IPv6 can go nowhere, where TCP over
@@ -181,18 +184,26 @@ async def main():
 
     tasks = [asyncio.ensure_future(t) for t in (frames(), play(), never_connected())]
     try:
-        await asyncio.wait([tasks[0], asyncio.ensure_future(done.wait())], return_when=asyncio.FIRST_COMPLETED)
+        # It ends when the video or the playing of input does, or the viewer goes; one that broke says why.
+        ended, _ = await asyncio.wait([*tasks[:2], asyncio.ensure_future(done.wait())], return_when=asyncio.FIRST_COMPLETED)
+        for task in ended:
+            task.result()
     finally:
+        # Waited for, as the video's own ending is what tells idb's companion to stop encoding it.
         for task in tasks:
             task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await pc.close()
-        if video.returncode is None:
-            video.terminate()
-            await video.wait()
+
+
+async def streaming():
+    manager = ClientManager(companion_path=asked["companion"], logger=logging.getLogger("idb"))
+    async with manager.from_udid(asked["udid"]) as client:
+        await main(client)
 
 
 try:
-    asyncio.run(main())
+    asyncio.run(streaming())
 except Exception as error:
     print(repr(error), flush=True)
     answer({"error": f"{type(error).__name__}: {error}"})
