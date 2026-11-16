@@ -117,10 +117,27 @@ defmodule OneCore.Bucket.S3 do
     %{method: method, url: url, headers: headers}
   end
 
-  # Has the presigner sign `ask`, and sends what it signed.
+  # A read changes nothing, so one the internet lost or held up is asked for again, as Req asks any GET again. The
+  # bucket starts answering a read well within a second, so one it's said nothing of for this many milliseconds is
+  # taken as lost.
+  @reads_within 5_000
+
+  # Has the presigner sign `ask`, and sends what it signed. Req says a request's method as an atom, which is how it
+  # tells a GET it may ask again.
   defp request(address, ask, data \\ nil) do
     %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask)
-    sent(method: method, url: url, headers: headers, body: data, decode_body: false, compressed: false)
+    method = method |> String.downcase() |> String.to_existing_atom()
+    timeout = if method == :get, do: @reads_within, else: :timer.seconds(15)
+
+    sent(
+      method: method,
+      url: url,
+      headers: headers,
+      body: data,
+      decode_body: false,
+      compressed: false,
+      receive_timeout: timeout
+    )
   end
 
   # A sign changes nothing, so one the internet lost or held up is asked for again, as Req asks a read again. The
