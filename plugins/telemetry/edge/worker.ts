@@ -71,11 +71,13 @@ function span(item: TraceItem): Span | null {
     Object.assign(said, line, { attributes: { ...said.attributes, ...line.attributes } });
   }
   const thrown = item.exceptions[0];
+  const upgraded = request?.headers.upgrade?.toLowerCase() === "websocket";
   const error =
     said.error ||
     (thrown && `${thrown.name}: ${thrown.message}`) ||
-    (item.outcome === "canceled" && "The client went away before it was answered") ||
-    (item.outcome !== "ok" && `It ended ${item.outcome}`) ||
+    // A WebSocket ends when either end leaves, which is no failure.
+    (!upgraded && item.outcome === "canceled" && "The client went away before it was answered") ||
+    (!upgraded && item.outcome !== "ok" && `It ended ${item.outcome}`) ||
     (status !== undefined && status >= 500 && `It answered ${status}`) ||
     undefined;
   // As OpenTelemetry names an HTTP server's span, and a call between Workers by the Worker and its method.
