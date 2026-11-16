@@ -148,7 +148,15 @@ defmodule OneCore.Plugins.Version do
         :permissions
       ])
 
-    tools = for tool <- said.tools, do: Map.delete(tool, :takes)
+    # It holds only names any server knows: a tool's inputs as JSON has them, not the atoms its plugin wrote them
+    # with, which a server that never loaded the plugin doesn't have, and won't take from the bucket.
+    tools =
+      for tool <- said.tools do
+        tool
+        |> Map.take([:name, :description, :inputs, :read_only, :by_link, :ui])
+        |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
+      end
+
     :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: kept.files, skills: kept.skills}))
   end
 

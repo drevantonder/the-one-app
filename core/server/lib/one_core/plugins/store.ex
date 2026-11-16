@@ -158,9 +158,18 @@ defmodule OneCore.Plugins.Store do
          else: (:absent -> :error)
   end
 
-  @doc "Keeps what a loaded version says of itself, for the servers that don't load it. The first to say it is kept."
+  @doc """
+  Keeps what a loaded version says of itself, for the servers that don't load it, as this server says it.
+  """
   def describe(%Version{artifact: artifact, code: code} = version) do
-    Bucket.write("#{artifact}/described/#{code}", Version.description(version))
+    blob = "#{artifact}/described/#{code}"
+    said = Version.description(version)
+
+    # One said otherwise, as a server from before descriptions named only what any server knows said it, is said again.
+    with :exists <- Bucket.write(blob, said),
+         {:ok, was, tag} when was != said <- Bucket.read(blob),
+         do: Bucket.replace(blob, said, tag)
+
     :ok
   end
 
