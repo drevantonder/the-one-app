@@ -109,8 +109,9 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Calls.schedule(at, plugin, true) end)
   end
 
-  defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "hook" => hook} = params, _from, asked, forwarded) do
-    between(forwarded, fn -> Calls.hook(at, plugin, hook, params["about"], asked, true) end)
+  defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "kind" => kind, "hook" => hook} = params, _from, asked, forwarded)
+       when kind in ["observe", "mutate", "validate"] do
+    between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], asked, true) end)
   end
 
   defp result("tools/call", %{"name" => name} = params, _from, asked, forwarded) do

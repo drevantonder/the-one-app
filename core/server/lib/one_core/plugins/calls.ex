@@ -229,30 +229,22 @@ defmodule OneCore.Plugins.Calls do
   end
 
   @doc """
-  Calls the `hook/3` of the plugin that `name` is for `at`, at a hook it hooks into, for `asked`. Gives
-  `{:ok, answer}` with its answer as `OneCore.Hooks.answer/2` gives it, and otherwise what `call/5` does. A plugin
+  Calls the `hook/3` of the plugin that `name` is for `at`, at `hook`, a hook of `kind`, for `asked`. Gives
+  `{:ok, answer}` with its answer as `OneCore.Hooks.answer/3` gives it, and otherwise what `call/5` does. A plugin
   that no longer hooks into it has nothing to say. A hook gives no access of its own: a plugin that hears of an
   artifact changing is told only if it could already reach it, and isn't told what it changed itself.
   """
-  def hook(at, name, hook, about, asked, forwarded \\ false) do
+  def hook(at, name, kind, hook, about, asked, forwarded \\ false) do
     asked = asked(asked)
 
     Plugins.run([at], name, fn at, versions ->
       version = versions[name]
-
-      call =
-        called(
-          at,
-          name,
-          versions,
-          {"hooks/call", %{installed: at, plugin: name, hook: hook, about: about}},
-          asked,
-          forwarded
-        )
+      ask = {"hooks/call", %{installed: at, plugin: name, kind: kind, hook: hook, about: about}}
+      call = called(at, name, versions, ask, asked, forwarded)
 
       if hook in version.hooks and hears?(call, about),
-        do: {:ok, Hooks.answer(hook, Hooks.within(name, hook, fn -> version.plugin.hook(hook, about, call) end))},
-        else: {:ok, Hooks.answer(hook, Hooks.nothing(hook))}
+        do: {:ok, Hooks.answer(kind, hook, Hooks.within(name, hook, fn -> version.plugin.hook(hook, about, call) end))},
+        else: {:ok, Hooks.answer(kind, hook, Hooks.nothing(kind))}
     end)
   end
 
@@ -269,7 +261,7 @@ defmodule OneCore.Plugins.Calls do
 
       Hooks.within(name, "what it heard", fn ->
         for {hook, about, asked} <- heard, hook in version.hooks do
-          ask = {"hooks/call", %{installed: at, plugin: name, hook: hook, about: about}}
+          ask = {"hooks/call", %{installed: at, plugin: name, kind: :observe, hook: hook, about: about}}
           call = call(at, name, versions, ask, asked, false)
 
           try do

@@ -26,14 +26,15 @@ defmodule OneCore.Plugins.Version do
   the `sizes` it comes in.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
-  `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, and `jobs` lists its scheduled jobs: each one's
+  `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
+  `description`, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
   which whatever loaded it says.
   """
   alias OneCore.{App, Builds, Hooks, Server, Skills}
 
-  @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code]
-  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :jobs, :code, :ui, :artifact]
+  @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code]
+  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :artifact]
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
   @sizes ~w(2x2 4x2 4x4)
@@ -242,6 +243,7 @@ defmodule OneCore.Plugins.Version do
         widgets = if function_exported?(plugin, :widgets, 0), do: plugin.widgets(), else: []
         uses = if function_exported?(plugin, :uses, 0), do: plugin.uses(), else: []
         hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
+        offers = if function_exported?(plugin, :offers, 0), do: plugin.offers(), else: []
         jobs = if function_exported?(plugin, :jobs, 0), do: plugin.jobs(), else: []
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
@@ -261,11 +263,17 @@ defmodule OneCore.Plugins.Version do
           not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
             {:error, "uses/0 gives a list of plugins' names"}
 
-          not (is_list(hooks) and Enum.all?(hooks, &is_map_key(Hooks.kinds(), &1)) and
+          not (is_list(hooks) and Enum.all?(hooks, &Hooks.hook?/1) and
                    (hooks == [] or function_exported?(plugin, :hook, 3))) ->
             {:error,
-             "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are: " <>
-               Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ")}
+             "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
+               Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ") <>
+               ", and the ones plugins offer, each as <plugin>.<hook>: recently-deleted.removed"}
+
+          not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
+            {:error,
+             "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
+               "digits and _, and a kind of :observe, :mutate or :validate"}
 
           not Enum.all?(services, &(GenServer in behaviours(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) ->
             {:error,
@@ -284,7 +292,7 @@ defmodule OneCore.Plugins.Version do
             version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest)
 
             with {:ok, jobs} <- jobs(jobs, tools),
-                 do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), jobs: jobs}}
+                 do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), offers: offers, jobs: jobs}}
         end
 
       found ->
@@ -293,9 +301,14 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, uses/0, hooks/0, jobs/0 or a service's needs/0 or called/0 raised: " <>
+       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0 or a service's needs/0 or called/0 raised: " <>
          Exception.message(error)}
   end
+
+  defp offer?(%{name: name, kind: kind, description: description}),
+    do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate] and is_binary(description)
+
+  defp offer?(_offer), do: false
 
   # A scheduled job calls one of the plugin's tools with inputs the tool takes, so one that could never run is
   # found out when it's deployed.
@@ -341,6 +354,7 @@ defmodule OneCore.Plugins.Version do
       uses: [],
       services: services,
       hooks: [],
+      offers: [],
       jobs: [],
       code: nil
     }

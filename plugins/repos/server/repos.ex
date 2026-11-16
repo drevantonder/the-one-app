@@ -29,7 +29,7 @@ defmodule Repos do
   # A repo that's removed goes to Recently Deleted, which keeps it for 30 days (`RecentlyDeleted`), and tells this plugin what became
   # of it, so `list` leaves out what's in Recently Deleted.
   @impl true
-  def hooks, do: ["removed"]
+  def hooks, do: ["recently-deleted.removed"]
 
   @impl true
   def apps, do: [%{name: "Repos", page: "client/index.html", icon: "client/icon.svg"}]
@@ -162,7 +162,7 @@ defmodule Repos do
   end
 
   @impl true
-  def hook("removed", %{"artifact" => name, "what" => what}, call) do
+  def hook("recently-deleted.removed", %{"artifact" => name, "what" => what}, call) do
     # It's heard where the repo was removed, and its list is kept by a server acting for whoever Repos is installed for.
     if not OneCore.Servers.here?(call.installed), do: Call.forward(call, call.installed)
     if name =~ @repo, do: indexed(name, what)

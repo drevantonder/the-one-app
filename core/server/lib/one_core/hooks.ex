@@ -4,6 +4,10 @@ defmodule OneCore.Hooks do
   (`hooks/0`), and its `hook/3` is called at each, as that plugin, for whoever the moment is about. That's
   `asked` below: who asked for what brought the moment on, and who it runs for.
 
+  The hooks are One Core's, below, and the ones plugins offer (`offers/0`), each named with the plugin's name:
+  `recently-deleted.removed`. A plugin's hook is run here as One Core's are, and only that plugin runs it
+  (`OneCore.Call.run_hook/3`).
+
   A hook is one of three kinds, and how a kind is run is what keeps plugins from getting in each other's way:
 
   - No hook is handed what happens next to run or to leave out. It answers, and One Core carries on: nothing is
@@ -107,12 +111,6 @@ defmodule OneCore.Hooks do
      `blob`'s name in it, and `by`, the plugin that did it, as a who. A plugin is told only if it could already reach
      the artifact for whoever changed it, and isn't told what it changed itself.
      """},
-    {"removed", :observe,
-     """
-     What a plugin made for someone was removed, restored or purged, as the plugin that keeps what's
-     removed tells every plugin. It's about the `artifact`'s name, and `what` happened: `removed`, `restored` or
-     `purged`. A plugin that keeps a list of what it made hears it to keep its list true.
-     """},
     {"measured", :observe,
      """
      A client said what it measured of itself. It's heard by the plugins installed for the network, and it's about the `device`'s key, the
@@ -126,15 +124,23 @@ defmodule OneCore.Hooks do
      """}
   ]
 
-  @doc "Every hook's name, with its kind: `:observe`, `:mutate` or `:validate`."
+  @doc "Every one of One Core's hooks' names, with its kind: `:observe`, `:mutate` or `:validate`."
   def kinds, do: Map.new(@hooks, fn {hook, kind, _about} -> {hook, kind} end)
 
-  @doc "What a plugin's author reads about hooks: each kind, and each hook with its kind and what it's about."
+  @doc """
+  Whether `hook` is a name a plugin can hook into: one of One Core's hooks, or a plugin's, `<plugin>.<hook>`, which
+  may not be installed yet: then it's never run.
+  """
+  def hook?(hook), do: is_map_key(kinds(), hook) or (is_binary(hook) and hook =~ ~r/^[a-z0-9][a-z0-9-]*\.[a-z][a-z0-9_]*$/)
+
+  @doc "What a plugin's author reads about hooks: each kind, and each of One Core's hooks with its kind and what it's about."
   def listed do
     kinds = for {kind, how} <- @kinds, do: "- A hook that #{kind} #{flat(how)}"
-    hooks = for {hook, kind, about} <- @hooks, do: "- `#{hook}` #{kind}. #{flat(about)}"
-    Enum.join(kinds ++ ["", "The hooks:", ""] ++ hooks, "\n")
+    Enum.join(kinds ++ ["", "The hooks:", "", listed(@hooks)], "\n")
   end
+
+  @doc "Hooks, each `{name, kind, about}`, as a plugin's author reads them."
+  def listed(hooks), do: Enum.map_join(hooks, "\n", fn {hook, kind, about} -> "- `#{hook}` #{kind}. #{flat(about)}" end)
 
   defp flat(text), do: text |> String.split() |> Enum.join(" ")
 
@@ -198,38 +204,30 @@ defmodule OneCore.Hooks do
   there. Which hook into what is kept by `OneCore.Plugins`, by who they were installed for, as it looks at them.
   """
   def hooking(hook, who) do
-    for at <- Plugins.chain(who), name <- Map.get(installed(at), hook, []), do: {at, name}
+    for at <- Plugins.chain(who), {hooking, _offered} = installed(at), name <- Map.get(hooking, hook, []), do: {at, name}
   end
 
-  # The hooks that the plugins installed for an owner hook into, each with those plugins' names. An owner this server
-  # hasn't looked at is looked at first.
+  @doc "The kind of the hook `hook` that a plugin installed for `owner` offers, by its full name, or `nil` for none."
+  def offered(hook, owner), do: elem(installed(owner), 1)[hook]
+
+  # The hooks that the plugins installed for an owner hook into, each with those plugins' names, and the kinds of the
+  # hooks they offer, by their full names. An owner this server hasn't looked at is looked at first.
   defp installed(owner) do
     with [] <- :ets.lookup(__MODULE__, owner),
          _ = Plugins.reload(owner),
          [] <- :ets.lookup(__MODULE__, owner) do
-      %{}
+      {%{}, %{}}
     else
-      [{^owner, hooking}] -> hooking
+      [{^owner, hooking, offered}] -> {hooking, offered}
     end
   end
 
   @doc """
-  Whether a plugin installed for `owner` hooks into `hook`, as this server last looked at them: asking costs a lookup,
-  and never looks.
+  What a plugin's `hook/3` answered `hook`, of `kind`, as it's passed between servers: what JSON holds. Raises if it
+  isn't an answer of that kind.
   """
-  def hooked?(hook, owner) do
-    case :ets.lookup(__MODULE__, owner) do
-      [{^owner, hooking}] -> Map.has_key?(hooking, hook)
-      [] -> false
-    end
-  end
-
-  @doc """
-  What a plugin's `hook/3` answered, as it's passed between servers: what JSON holds. Raises if it isn't an answer
-  of the hook's kind.
-  """
-  def answer(hook, answer) do
-    case {Map.fetch!(kinds(), hook), answer} do
+  def answer(kind, hook, answer) do
+    case {kind, answer} do
       {:observe, _} ->
         nil
 
@@ -250,14 +248,10 @@ defmodule OneCore.Hooks do
     end
   end
 
-  @doc "What a plugin that has nothing to say answers `hook`."
-  def nothing(hook) do
-    case Map.fetch!(kinds(), hook) do
-      :observe -> nil
-      :mutate -> %{}
-      :validate -> :ok
-    end
-  end
+  @doc "What a plugin that has nothing to say answers a hook of `kind`."
+  def nothing(:observe), do: nil
+  def nothing(:mutate), do: %{}
+  def nothing(:validate), do: :ok
 
   @doc "Tells each plugin that hears `hook` what it's about, for `asked`."
   def observe(hook, about, {_by, who} = asked) do
@@ -272,7 +266,7 @@ defmodule OneCore.Hooks do
   """
   def mutate(hook, about, {_by, who} = asked, apart \\ nil) do
     Enum.reduce_while(hooking(hook, who) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed, {:ok, changes, by} ->
-      with {:ok, changed} <- answered(installed, hook, about, asked),
+      with {:ok, changed} <- answered(installed, :mutate, hook, about, asked),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
         {:cont, {:ok, Map.merge(changes, changed), by}}
@@ -305,7 +299,7 @@ defmodule OneCore.Hooks do
       decided =
         with :ok <- if(undecided, do: undecided(by), else: :ok) do
           Enum.find_value(hooking(hook, who) -- [apart], :ok, fn {_at, plugin} = installed ->
-            case answered(installed, hook, about, asked) do
+            case answered(installed, :validate, hook, about, asked) do
               {:ok, "ok"} ->
                 nil
 
@@ -369,8 +363,8 @@ defmodule OneCore.Hooks do
   end
 
   # A hook whose plugin keeps what it needs where another server writes it is answered there.
-  defp answered({at, plugin}, hook, about, asked) do
-    case Calls.hook(at, plugin, hook, about, asked) do
+  defp answered({at, plugin}, kind, hook, about, asked) do
+    case Calls.hook(at, plugin, kind, hook, about, asked) do
       {:ok, answer} -> {:ok, answer}
       {:forwarded, %{"answer" => answer}} -> {:ok, answer}
       {:error, why} -> {:error, why}

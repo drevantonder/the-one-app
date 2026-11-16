@@ -182,6 +182,16 @@ defmodule OneCore.Plugin do
     that user, and one installed for the network decides for everyone.
   #{OneCore.Hooks.listed()}
 
+  A plugin that knows which plugin it needs calls it (`OneCore.Call.tool/4`, `OneCore.Call.plugin/2`). One that can't
+  know who will answer offers a hook instead, and whoever wants to hooks into it. `offers/0` lists them, each with a
+  `name`, a `kind` (`:observe`, `:mutate` or `:validate`) and a `description`, and `OneCore.Call.run_hook/3` runs one,
+  as One Core runs its own of that kind, for whoever the call runs for. Another plugin hooks into it by its full name,
+  the plugin's name and the hook's, in its `hooks/0`, and before the offering plugin is installed it's never run:
+
+      def offers, do: [%{name: "removed", kind: :observe, description: "Something made for someone was removed"}]
+      OneCore.Call.run_hook(call, "removed", %{"artifact" => name})        # in recently-deleted
+      def hooks, do: ["recently-deleted.removed"]                           # in repos
+
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
   and its edge function. `apps/0`, if the plugin has one, names its apps, as many as it has, each a page of `client/`
@@ -384,15 +394,22 @@ defmodule OneCore.Plugin do
   """
   defdelegate nif(module, load), to: OneCore.Plugins.Version
 
-  @doc "One Core's own skill, `building-plugins`, as its `SKILL.md`: how to write a plugin, which is this module's."
-  def skill do
+  @doc """
+  One Core's own skill, `building-plugins`, as its `SKILL.md`: how to write a plugin, which is this module's, and the
+  hooks offered by the plugins `versions`, by their names.
+  """
+  def skill(versions) do
+    offered =
+      for {name, version} <- Enum.sort(versions), %{name: hook, kind: kind, description: about} <- version.offers,
+          do: {"#{name}.#{hook}", kind, about}
+
     """
     ---
     name: building-plugins
     description: Read before making or changing a plugin. It says how one is written, deployed and updated.
     ---
 
-    """ <> @text
+    """ <> @text <> if(offered == [], do: "", else: "\nThe hooks the plugins you have offer:\n\n" <> OneCore.Hooks.listed(offered) <> "\n")
   end
 
   @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map}]
@@ -402,7 +419,8 @@ defmodule OneCore.Plugin do
   @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]
   @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
+  @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate, description: String.t()}]
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-  @optional_callbacks tools: 0, call: 3, apps: 0, widgets: 0, uses: 0, hooks: 0, hook: 3, jobs: 0, schedule: 3
+  @optional_callbacks tools: 0, call: 3, apps: 0, widgets: 0, uses: 0, hooks: 0, hook: 3, offers: 0, jobs: 0, schedule: 3
 end

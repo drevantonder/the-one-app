@@ -45,6 +45,8 @@
 - **Package**: one piece built separately: the server, a client, or a plugin.
 - **Plugin hook**: a moment a plugin can be called at, such as a tool being called or an artifact changing. Each states
   whether a plugin observes it, mutates it, or validates it, as Kubernetes' admission webhooks do.
+  One Core offers some, and a plugin offers its own, named with its name (`recently-deleted.removed`), for plugins it
+  can't know of to hook into.
 - **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
   plugin.
 - **Sharing link**: a subject that is whoever holds it, without signing in. Making one writes a relation tuple naming it.

@@ -356,7 +356,8 @@ defmodule OneCore.Plugins do
 
     changed = Enum.uniq(changed ++ Map.keys(dropped))
 
-    # Which of each owner's plugins hooks into what is kept for every call to find without asking.
+    # Which of each owner's plugins hooks into what, and the hooks they offer, are kept for every call to find
+    # without asking.
     for {at, installed} <- state.installed, at == owner or Enum.any?(installed, fn {_name, artifact} -> artifact in changed end) do
       hooking =
         for {name, artifact} <- Enum.sort(installed),
@@ -366,7 +367,14 @@ defmodule OneCore.Plugins do
           hooking -> Map.update(hooking, hook, [name], &(&1 ++ [name]))
         end
 
-      :ets.insert(Hooks, {at, hooking})
+      offered =
+        for {name, artifact} <- installed,
+            %Version{offers: offers} <- [running[artifact]],
+            %{name: hook, kind: kind} <- offers,
+            into: %{},
+            do: {"#{name}.#{hook}", kind}
+
+      :ets.insert(Hooks, {at, hooking, offered})
     end
 
     {unload_unused(state, stale ++ Map.values(dropped)), changed, any}

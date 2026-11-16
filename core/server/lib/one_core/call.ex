@@ -59,6 +59,25 @@ defmodule OneCore.Call do
     end
   end
 
+  @doc """
+  Runs `hook`, one this call's plugin offers (`offers/0`), for whoever this call runs for, as One Core runs its own:
+  the plugins installed for them and for the network that hook into `<plugin>.<hook>` are asked. What it gives is
+  the kind's: an observe hook gives `:ok` at once, a mutate hook `{:ok, changes, by}` or `{:refuse, why}`, and a
+  validate hook `:ok` or `{:refuse, why}`. A plugin runs only the hooks it offers.
+
+      OneCore.Call.run_hook(call, "removed", %{"artifact" => name, "what" => "restored"})
+  """
+  def run_hook(%__MODULE__{installed: at, plugin: plugin, actor: by, subject: who}, hook, about) do
+    name = "#{plugin}.#{hook}"
+
+    case Hooks.offered(name, at) do
+      :observe -> Hooks.observe(name, about, {by, who})
+      :mutate -> Hooks.mutate(name, about, {by, who})
+      :validate -> Hooks.validate(name, about, {by, who})
+      nil -> raise "#{plugin} doesn't offer #{hook}. Its offers/0 names the hooks it offers."
+    end
+  end
+
   # What another server answered is text: JSON where the tool answered more than text.
   defp decoded(text) do
     case JSON.decode(text) do

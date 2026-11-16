@@ -15,5 +15,5 @@ is named by where it is, like `users/alice/made/repos/notes`, and its owner remo
 - `purge` is the clock's, each day: don't call it yourself.
 
 A plugin removes what someone asked it to delete with `OneCore.Call.tool(call, "recently-deleted", "remove", %{"artifact" =>
-name})`, never blob by blob, so it can be brought back. One that keeps a list of what it made hears `removed`,
+name})`, never blob by blob, so it can be brought back. One that keeps a list of what it made hooks into `recently-deleted.removed`, the hook this plugin offers,
 which says when one was removed, restored or purged, and keeps its list true from it.

@@ -6,7 +6,7 @@ defmodule OneCore.Skills do
 
   A plugin's skill is the `SKILL.md` at the root of its folder, named as the plugin is. A plugin offers more as
   folders of `skills/`, each a skill named as its folder: its `SKILL.md`, and any other files in the folder, which
-  the skill points to. One Core has one of its own, `building-plugins`, which is `OneCore.Plugin.skill/0`.
+  the skill points to. One Core has one of its own, `building-plugins`, which is `OneCore.Plugin.skill/1`.
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
@@ -111,14 +111,14 @@ defmodule OneCore.Skills do
 
     case found do
       [] -> :absent
-      [{_skill, :own, _at}] -> {:ok, Plugin.skill()}
+      [{_skill, :own, _at}] -> {:ok, Plugin.skill(Plugins.running(who))}
       [{skill, {artifact, code}, at}] -> Store.file(artifact, code, skill.at <> at)
     end
   end
 
   # Each skill by its path, with where its files are: One Core's own, then the plugins' by the names they're installed by.
   defp found(who) do
-    {:ok, own} = read(@own, Plugin.skill())
+    {:ok, own} = read(@own, Plugin.skill(Plugins.running(who)))
 
     plugins =
       for {installed, version} <- Enum.sort(Plugins.running(who)), skill <- Version.skills(version) do
