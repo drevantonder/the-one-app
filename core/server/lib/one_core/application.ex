@@ -24,12 +24,12 @@ defmodule OneCore.Application do
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do
-        shipped = fn ->
+        bundled = fn ->
           if Servers.here?("network"), do: Deploy.deploy_bundled()
           Deploy.rebuild()
         end
 
-        Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, shipped}, id: :bundled))
+        Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, bundled}, id: :bundled))
         started
       end
     else

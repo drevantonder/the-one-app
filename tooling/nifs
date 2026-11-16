@@ -72,7 +72,7 @@ for kind in "${kinds[@]}"; do
       [[ ! -e $unpacked/nifs ]] || while read -r sum file; do
         case $file in
           core/*) crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum" ;;
-          plugins/*) cp "$unpacked/shipped/${file#plugins/}" "$cache/$sum" ;;
+          plugins/*) cp "$unpacked/bundled/${file#plugins/}" "$cache/$sum" ;;
         esac
       done <"$unpacked/nifs"
       rm -r "$unpacked" "$unpacked.tar.gz"

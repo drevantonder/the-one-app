@@ -67,11 +67,11 @@ defmodule OneCore.MixProject do
       for toml <- Path.wildcard("#{__DIR__}/nif/*/Cargo.toml"), crate = Path.basename(Path.dirname(toml)),
           do: {crate, Path.join(__DIR__, "priv/native/#{crate}.so")}
 
-    shipped =
+    bundled =
       for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"), crate = Path.dirname(toml),
           do: {Path.basename(crate), "#{crate}/#{os}-#{arch}.so"}
 
-    for {crate, put} <- built ++ shipped do
+    for {crate, put} <- built ++ bundled do
       File.rm(put)
       File.cp!("#{target}/release/lib#{crate}.#{extension}", put)
     end
