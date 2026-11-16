@@ -178,17 +178,17 @@ defmodule Containers do
         name: "screenshot",
         read_only: true,
         description:
-          "A picture of a container's screen: the X display its DISPLAY names, as a PNG. A container of the image desktop has one, 1280×800, with Chromium on it; `exec` with xdotool moves, clicks and types there.",
+          "A picture of a container's screen: the X display its DISPLAY names, as a PNG. A container of the image desktop has one, 1280×800 until `screen` resizes it, with Chromium on it; `exec` with xdotool moves, clicks and types there.",
         inputs: one()
       },
       %{
         name: "screen",
         description:
-          "Look at or act on a container's screen, for Computer Use, whose tools are how agents use a screen: they say what each action takes.",
+          "Look at or act on a container's screen, for Computer Use, whose tools are how agents use a screen: they say what each action takes. `resize` makes the display width × height, and a maximised window follows it.",
         inputs:
           one(
             %{
-              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key)},
+              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key resize)},
               x: %{type: "integer", minimum: 0},
               y: %{type: "integer", minimum: 0},
               button: %{type: "string", enum: ~w(left right middle)},
@@ -196,7 +196,9 @@ defmodule Containers do
               direction: %{type: "string", enum: ~w(up down left right)},
               amount: %{type: "integer", minimum: 1, maximum: 50},
               text: %{type: "string"},
-              keys: %{type: "string"}
+              keys: %{type: "string"},
+              width: %{type: "integer", minimum: 320, maximum: 7680},
+              height: %{type: "integer", minimum: 240, maximum: 4320}
             },
             ["action"]
           )
@@ -328,6 +330,11 @@ defmodule Containers do
   def call("screenshot", inputs, call), do: {:blob, "image/png", Base.decode64!(on(call, inputs, :screenshot))}
 
   def call("screen", %{"action" => "screenshot"} = inputs, call), do: call("screenshot", inputs, call)
+
+  def call("screen", %{"action" => "resize", "width" => width, "height" => height} = inputs, call) when is_integer(width) and is_integer(height) do
+    on(call, inputs, :resize, [width, height])
+    "Resized to #{width}×#{height}"
+  end
 
   def call("screen", %{"action" => action} = inputs, call) do
     on(call, inputs, :xdotool, [xdotool(action, inputs)])

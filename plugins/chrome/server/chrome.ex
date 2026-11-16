@@ -49,9 +49,6 @@ defmodule Chrome do
     --exclude='./Default/DawnGraphiteCache' --exclude='./Default/DawnWebGPUCache' \\
     --exclude='./Default/Service Worker/CacheStorage' './Local State' ./Default
   """
-  @width 1280
-  @height 800
-
   @session %{type: "string", pattern: "^[a-z0-9][a-z0-9_.-]*$", description: "the browser, by the name `open` gave it"}
   @target %{type: "string", description: "the element: its ref from the snapshot, like e12, or a unique selector"}
   @element %{type: "string", description: "the element in a few words, as a person would name it"}
@@ -234,11 +231,11 @@ defmodule Chrome do
       %{
         name: "screen",
         description:
-          "Look at or act on a browser's screen by its pixels, #{@width}×#{@height}: the whole browser, its address bar and tabs too, for an app that lets its person use it. Computer Use's tools say what each action takes.",
+          "Look at or act on a browser's screen by its pixels: the whole browser, its address bar and tabs too, for an app that lets its person use it. Computer Use's tools say what each action takes. `resize` makes the screen width × height, and the browser, maximised, follows it.",
         inputs:
           object(
             %{
-              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key)},
+              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key resize)},
               x: %{type: "integer", minimum: 0},
               y: %{type: "integer", minimum: 0},
               button: %{type: "string", enum: ~w(left right middle)},
@@ -246,7 +243,9 @@ defmodule Chrome do
               direction: %{type: "string", enum: ~w(up down left right)},
               amount: %{type: "integer", minimum: 1, maximum: 50},
               text: %{type: "string"},
-              keys: %{type: "string", description: "as xdotool names them: ctrl+l, Return; several, space between"}
+              keys: %{type: "string", description: "as xdotool names them: ctrl+l, Return; several, space between"},
+              width: %{type: "integer", minimum: 320, maximum: 7680},
+              height: %{type: "integer", minimum: 240, maximum: 4320}
             },
             ["action"]
           )

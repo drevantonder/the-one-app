@@ -173,18 +173,34 @@ defmodule Containers.Podman do
   end
 
   @doc """
-  The running containers The One App made here that have a screen: a `DISPLAY` in their environment, and its size in
-  `SCREEN` (`1280x800x24`), as the image desktop has. Each as `list/1` gives it, with its `width` and `height`.
+  The running containers The One App made here that have a screen: a `DISPLAY` in their environment, as the image
+  desktop has. Each as `list/1` gives it, with its display's `width` and `height` as they are now.
   """
   def screens(service) do
     running = for c <- list(service), c.state == "running", do: c
     inspected = if running == [], do: [], else: podman_json!(service, ["container", "inspect" | Enum.map(running, & &1.id)])
 
     for {c, i} <- Enum.zip(running, inspected),
-        env = for(e <- i["Config"]["Env"] || [], [k, v] <- [String.split(e, "=", parts: 2)], into: %{}, do: {k, v}),
-        Map.has_key?(env, "DISPLAY"),
-        [_, width, height] <- [Regex.run(~r/^(\d+)x(\d+)/, env["SCREEN"] || "")],
+        Enum.any?(i["Config"]["Env"] || [], &String.starts_with?(&1, "DISPLAY=")),
+        %{exit: 0, stdout: size} <- [run(service, ["exec", c.id, "xdotool", "getdisplaygeometry"], 10)],
+        [width, height] = String.split(size),
         do: Map.merge(c, %{width: String.to_integer(width), height: String.to_integer(height)})
+  end
+
+  @doc """
+  Makes the container's display `width` × `height`, as RandR does a monitor's mode: the image desktop's X server,
+  Xvnc, takes any size, and its output is `VNC-0`. A mode already made is made again in vain, and that's let be.
+  """
+  def resize(service, id, width, height) do
+    touch(service, id)
+    mode = "#{width}x#{height}"
+
+    script =
+      "xrandr --newmode #{mode} 60 #{width} #{width} #{width} #{width} #{height} #{height} #{height} #{height} 2>/dev/null; " <>
+        "xrandr --addmode VNC-0 #{mode} 2>/dev/null; xrandr --fb #{mode} --output VNC-0 --mode #{mode}"
+
+    podman!(service, ["exec", id, "sh", "-c", script], 30)
+    :ok
   end
 
   @doc "Runs xdotool in the container, on its display, with `args` as its words, and gives what it printed."

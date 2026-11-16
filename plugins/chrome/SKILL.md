@@ -22,7 +22,7 @@ cheaper still.
 - `close` closes it and removes its container. `list` shows yours.
 - A running browser is a screen in Computer Use, called `chrome-<session>`: its person watches it there, and
   Computer Use's tools act on it by pixels, for what only a picture shows, the browser's own address bar and tabs
-  too. Its screen is 1280×800.
+  too. Its screen is 1280×800 until a person's view resizes it to fit, and a screenshot says its size.
 
 The first browser on a machine builds its image (about 1.5 GB, a few minutes); after that `open` takes a few
 seconds. Each

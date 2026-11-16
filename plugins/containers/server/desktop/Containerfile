@@ -1,11 +1,11 @@
-# The image `desktop`: a virtual display (Xvfb, :99) with a window manager (Openbox) and Chromium on it, for an agent
-# to see with `screenshot` and to drive with xdotool, through Chromium's DevTools Protocol on port 9222, or through
-# Playwright's MCP server (`playwright-mcp`). Chromium is the build Playwright pins, so every machine that builds this
+# The image `desktop`: a virtual display (TigerVNC's Xvnc, :99, which RandR resizes while it runs, as Xvfb can't) with a
+# window manager (Openbox) and Chromium on it, for an agent to see with `screenshot` and to drive with xdotool, through
+# Chromium's DevTools Protocol on port 9222, or through Playwright's MCP server (`playwright-mcp`). Chromium is the build Playwright pins, so every machine that builds this
 # runs the same one, and a profile made on one opens on another.
 FROM docker.io/library/node:22-bookworm-slim
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 RUN apt-get update \
- && apt-get install -y --no-install-recommends xvfb openbox xdotool imagemagick x11-utils sqlite3 \
+ && apt-get install -y --no-install-recommends tigervnc-standalone-server x11-xserver-utils openbox xdotool imagemagick x11-utils sqlite3 \
     fonts-dejavu-core fonts-noto-color-emoji ca-certificates curl procps \
  && npm install -g @playwright/mcp@0.0.85 \
  && /usr/local/lib/node_modules/@playwright/mcp/node_modules/.bin/playwright-core install --with-deps --no-shell chromium \
