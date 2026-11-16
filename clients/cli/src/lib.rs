@@ -3,6 +3,7 @@
 //! `one notes add --text milk` calls `notes_add`. `one notes` shows the plugin's skill and its tools, and
 //! `one mcp` serves MCP over stdio instead. A few words are about this device instead (`THIS_DEVICE`).
 
+mod install;
 mod mcp;
 #[cfg(unix)]
 pub mod serving;
@@ -14,7 +15,7 @@ use std::sync::Arc;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
-use client::{Client, InputResolver, DeviceAuthorization};
+use client::{Client, DeviceAuthorization, InputResolver};
 use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
@@ -85,6 +86,11 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         }
         #[cfg(unix)]
         ["update"] => printed(serving::update(&client).await?),
+        // A plugin from a git repo, as `npx skills add` adds a skill; with no repo, the plugin is the network's own.
+        ["install", repo, ..] if !repo.starts_with("--") => install::install(&client, &args[1..]).await?,
+        ["install"] if std::path::Path::new("plugins.lock").exists() => install::locked(&client).await?,
+        ["plugins", "check", ..] => install::check(&client, &args[2..]).await?,
+        ["plugins", "update", ..] => install::update(&client, &args[2..]).await?,
         _ => command(&client, &args).await?,
     };
     client.close().await;
@@ -317,7 +323,7 @@ fn takes(schema: &Value) -> String {
 /// A file's text, or a folder as its files by their paths in it, as `client::files` reads a folder: each one's text,
 /// or `{"base64": ...}` for one that isn't text, as `deploy` takes a plugin's files. A file for an input that says
 /// it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
-fn read(path: &Path, base64: bool) -> Result<Value> {
+pub(crate) fn read(path: &Path, base64: bool) -> Result<Value> {
     let couldnt = || format!("couldn't read {}", path.display());
     if base64 {
         return Ok(Value::String(BASE64.encode(&fs::read(path).with_context(couldnt)?)));
