@@ -225,6 +225,17 @@ defmodule OneCore.Plugins.Deploy do
   """
   def launcher?(version), do: Enum.any?(version.apps, &(&1.category == "launcher"))
 
+  @doc """
+  How someone who may not install a plugin for everyone asks for it, to end a sentence: by the network's launcher,
+  which takes such requests, named as it's installed, whose skill says how.
+  """
+  def ask_to_install do
+    case for {name, version} <- Plugins.versions([@network]), launcher?(version), do: name do
+      [launcher | _] -> "ask for it to be installed for everyone, by the network's launcher, #{launcher} (its skill says how)"
+      [] -> "ask an owner of the network to install it for everyone"
+    end
+  end
+
   defp launcher(owner, name, version) do
     others = for {other, running} <- Plugins.versions([@network]), other != name, launcher?(running), do: other
 

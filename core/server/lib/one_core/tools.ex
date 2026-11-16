@@ -29,7 +29,7 @@ defmodule OneCore.Tools do
       running stays.
       The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
       or for the network, it's theirs. Its code runs on a server of yours, so you need one: set one up in Devices, or
-      ask an owner to install it for everyone (home-screen_request). `recently-deleted remove --artifact <it>` removes one nobody has installed.
+      ask for it to be installed for everyone, by the network's launcher (its skill says how). `recently-deleted remove --artifact <it>` removes one nobody has installed.
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       """,
       inputs: %{
@@ -100,8 +100,8 @@ defmodule OneCore.Tools do
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
       Its code runs on a server of yours, so you need one; for the network, its owners and installers add plugins,
-      and anyone may ask them to (home-screen_request). An app of a plugin in use for the network goes on your page
-      with home-screen_add, which installs nothing.
+      and anyone may ask them to, by the network's launcher (its skill says how), which also puts an app of a plugin
+      in use for the network on your page without installing anything.
       `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
       It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
@@ -336,7 +336,7 @@ defmodule OneCore.Tools do
 
       Servers.running(owner) == [] ->
         raise "A plugin for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
-                "Set one up in Devices, or ask an owner to install it for everyone, with home-screen_request."
+                "Set one up in Devices, or #{Deploy.ask_to_install()}."
 
       true ->
         forward.({:running, owner})

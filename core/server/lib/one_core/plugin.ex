@@ -12,7 +12,7 @@ defmodule OneCore.Plugin do
   the network's servers for the network, and for a user or a group a server of their own, set up in Devices to act
   for them alone (or the network's, for the network's owners). So deploying or installing one for yourself takes a
   server of your own, and for the network its owners or an `installer` of it (`permissions`); anyone else asks them
-  with `home-screen_request`. While none of the servers it runs on is on, a call to it says so. Calls already running finish on the version they started on, and the next call
+  by the network's launcher, whose skill says how. While none of the servers it runs on is on, a call to it says so. Calls already running finish on the version they started on, and the next call
   gets the new one. A plugin a program ships with can have native code that the clients are built with, in
   `client/native/`, which is never deployed, and nor is its `test/`.
 
