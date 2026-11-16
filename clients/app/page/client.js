@@ -10,6 +10,10 @@ const { invoke } = window.__TAURI__.core
 const { listen } = window.__TAURI__.event
 
 const HOME = "home/client/index.html"
+/// Whether the window is wide enough for the Home Screen's sidebar, which the home plugin draws along the start of
+/// its frame, 16rem wide, and the other apps' frames leave clear. Tall enough too, so a phone on its side has none,
+/// as home.css has it.
+const beside = matchMedia("(min-width: 48rem) and (min-height: 30rem)")
 /// The apps that are open, by who each is for and what it is: `{ key, app, for, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
@@ -101,6 +105,7 @@ function load(app, who) {
   const view = { key: at, app, for: who, host: host(app, who) }
   view.frame = Object.assign(document.createElement("iframe"), { src: address(view), inert: true })
   view.frame.sandbox = "allow-scripts allow-same-origin allow-forms"
+  if (app === HOME) view.frame.className = "home"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`).
   view.frame.allow = "clipboard-write; web-share"
   open.set(at, view)
@@ -117,15 +122,15 @@ let shownByDevice = false
 /// them. Where the browser can't, or the user asked for no motion, it's a plain swap.
 function move(change, back = false) {
   const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
-  if (plain || shownByDevice) return void change()
+  // Beside the sidebar, an app takes the place of the last, as a sidebar's apps do.
+  if (plain || shownByDevice || beside.matches) return void change()
   document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
 }
 
 /// Shows the app that's open as `at` over the rest, or with none there, the Home Screen. `tapped` is when its icon
 /// was tapped.
 function show(at, tapped) {
-  const view = open.get(at) ?? open.get(key(HOME))
-  for (const other of open.values()) other.frame.inert = other !== view
+  const view = layer(at)
   problem()
   if (!view) return
   view.tapped = tapped
@@ -134,6 +139,17 @@ function show(at, tapped) {
   invoke("refresh", { view: view.key })
   opened(view)
 }
+
+/// Has the app that's open as `at` showing, or with none there, the Home Screen, and the Home Screen told which, for
+/// its sidebar, which stays beside every app where it's wide enough. → the one showing.
+function layer(at) {
+  const view = open.get(at) ?? open.get(key(HOME))
+  const home = open.get(key(HOME))
+  for (const other of open.values()) other.frame.inert = other !== view && !(other === home && beside.matches)
+  if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, for: view.for } })
+  return view
+}
+beside.addEventListener("change", () => layer(history.state))
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
 /// showing with what it drew from. The Home Screen' time is from when this page began to load.
@@ -354,3 +370,4 @@ else if (!signIn) {
   invoke("visible", { onScreen: !document.hidden })
   if (taps) hearTaps()
 }
+

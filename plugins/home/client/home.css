@@ -1,4 +1,5 @@
-/* The Home Screen: a strip of pages to swipe between, and under them the page's name and the dots. */
+/* The Home Screen: a strip of pages to swipe between, and under them the page's name and the dots. Where the window
+   is wide, the sidebar beside them. */
 html,
 body {
   height: 100%;
@@ -7,8 +8,128 @@ body {
 }
 .home {
   display: grid;
-  grid-template-rows: 1fr auto;
   height: 100%;
+}
+.pages {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 0;
+}
+
+/* The sidebar, as wide as the window's page (clients/app/page/client.css) leaves it clear of the app beside it, and
+   only where it's that wide and tall enough not to be a phone on its side. Its parts are shadcn's sidebar's. */
+.sidebar {
+  display: none;
+}
+@media (min-width: 48rem) and (min-height: 30rem) {
+  .home {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .sidebar {
+    box-sizing: border-box;
+    display: block;
+    width: 16rem;
+    padding: 0.5rem;
+    overflow-y: auto;
+    scrollbar-width: none;
+    border-inline-end: 1px solid var(--sidebar-border);
+    background: var(--sidebar);
+    color: var(--sidebar-foreground);
+  }
+}
+.sidebar .section {
+  padding-block: 0.375rem;
+}
+.sidebar .label {
+  display: flex;
+  align-items: center;
+  height: 2rem;
+  padding-inline: 0.5rem;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.sidebar .label:has([aria-current]) {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sidebar .name {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  padding: 0;
+  overflow: hidden;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The caret that collapses a section shows on a hover, and while it's collapsed. */
+.sidebar .caret {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  opacity: 0;
+}
+.sidebar .caret svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  transition: rotate var(--move-quick) var(--ease-quick);
+}
+.sidebar .caret[aria-expanded="true"] svg {
+  rotate: 90deg;
+}
+.sidebar .label:hover .caret,
+.sidebar .caret[aria-expanded="false"] {
+  opacity: 1;
+}
+.sidebar :is(.name, .caret):focus-visible,
+.sidebar .ui-row > .row:focus-visible {
+  outline: 2px solid var(--sidebar-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+/* Its apps are a menu's rows, not a list's card. */
+.sidebar .ui-list {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+}
+.sidebar .ui-row + .ui-row {
+  border-top: 0;
+}
+.sidebar .ui-row > .row {
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}
+.sidebar .ui-row .heading {
+  font-weight: 400;
+}
+.sidebar .ui-row[data-current] > .row {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar .ui-row[data-current] .heading {
+  font-weight: 500;
+}
+.sidebar .ui-row img {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 22.5%;
 }
 .strip {
   display: flex;
@@ -76,7 +197,8 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .cell,
-  .dots i {
+  .dots i,
+  .sidebar .caret svg {
     transition: none;
   }
 }

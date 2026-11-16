@@ -79,6 +79,15 @@ iframe {
   border: 0;
   background: var(--background);
 }
+/* Where the window is wide enough for the Home Screen's sidebar (client.js's `beside`), an app shows beside it, over
+   the Home Screen's frame, which WebKitGTK otherwise draws on top of it. */
+@media (min-width: 48rem) and (min-height: 30rem) {
+  iframe:not(.home) {
+    justify-self: end;
+    width: calc(100% - 16rem);
+    z-index: 1;
+  }
+}
 /* An app behind the one that's showing stays laid out, so it's back in one frame. */
 iframe[inert] {
   visibility: hidden;

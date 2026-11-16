@@ -1,12 +1,14 @@
 // The Home Screen: yours, each of your groups' and the network's, side by side, then Settings. Each is a grid of
 // the widgets put on it and its apps' icons. Swiping moves between them, and so does sliding along the dots.
 // Touch and hold, or right-click, for what an app or a widget offers; hold and move to put it somewhere else.
-import { createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
+// Where the window is wide, a sidebar lists every page's apps and Settings' beside them, and an app opens beside it.
+import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { call, changed, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 
 const SIZES = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
+const HOME = "home/client/index.html"
 const json = (tool, inputs, who) => call(tool, inputs, { for: who }).then(JSON.parse)
 
 /// Every page this user sees, and the parts of Settings. A network with nothing that keeps groups has none.
@@ -121,6 +123,83 @@ function Card(props) {
   )
 }
 
+/// What the window shows, as it says (`notifications/one/showing`): an app and who it's for, or this.
+const [showing, setShowing] = createSignal({ app: HOME })
+addEventListener("message", ({ source, data }) => source === parent && data?.method === "notifications/one/showing" && setShowing(data.params))
+
+/// The sidebar's sections its user collapsed, kept on this device.
+const [collapsed, setCollapsed] = createSignal(new Set(stored("collapsed") ?? []))
+function stored(name) {
+  try {
+    return JSON.parse(localStorage.getItem(name))
+  } catch {
+    return undefined
+  }
+}
+function collapse(section, shut) {
+  const now = new Set(collapsed())
+  if (shut) now.add(section)
+  else now.delete(section)
+  setCollapsed(now)
+  try {
+    localStorage.setItem("collapsed", JSON.stringify([...now]))
+  } catch {}
+}
+
+/// Every page's apps, then Settings', each a section that collapses. A section's name shows its page; an app opens
+/// beside the sidebar. Arrow keys move through it, and left and right on a section's name collapse and open it.
+function Sidebar(props) {
+  let nav
+  const home = () => showing().app === HOME
+  const current = (app) => !home() && showing().app === app.app && (showing().for ?? null) === (app.for ?? null)
+  // A section's name is selected while its page shows, or while it's collapsed over the app that's open.
+  const selected = (section, index) => (home() ? props.at() === index : collapsed().has(section.key) && section.apps.some(current))
+  const pick = (index) => {
+    props.go(index)
+    if (!home()) open(HOME)
+  }
+  const keys = (event) => {
+    const buttons = [...nav.querySelectorAll("button:not([tabindex='-1'])")]
+    const at = buttons.indexOf(document.activeElement)
+    const to = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: buttons.length - 1 }[event.key]
+    if (to !== undefined) {
+      event.preventDefault()
+      buttons[Math.max(0, Math.min(buttons.length - 1, to))]?.focus()
+    }
+    if (event.target.matches(".name") && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+      event.preventDefault()
+      collapse(event.target.closest("[data-section]").dataset.section, event.key === (document.dir === "rtl" ? "ArrowRight" : "ArrowLeft"))
+    }
+  }
+  // What's selected stays in view.
+  createEffect(() => [showing(), props.at(), collapsed()], () => nav.querySelector("[aria-current]")?.scrollIntoView({ block: "nearest" }))
+  return (
+    <nav class="sidebar" ref={nav} aria-label="Apps" onKeyDown={keys}>
+      <For each={props.sections} keyed={(section) => section.key}>
+        {(section, index) => (
+          <div class="section" data-section={section().key}>
+            <div class="label">
+              <button type="button" class="name" aria-current={selected(section(), index()) ? "page" : undefined} onClick={() => pick(index())}>
+                {section().name}
+              </button>
+              <button type="button" class="caret" tabindex="-1" aria-label={section().name} aria-expanded={String(!collapsed().has(section().key))} onClick={() => collapse(section().key, !collapsed().has(section().key))}>
+                <Icon name="caret-right" along />
+              </button>
+            </div>
+            <Show when={!collapsed().has(section().key)}>
+              <List>
+                <For each={section().apps} keyed={(app) => app.app}>
+                  {(app) => <Row start={<img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { for: app().for })} />}
+                </For>
+              </List>
+            </Show>
+          </div>
+        )}
+      </For>
+    </nav>
+  )
+}
+
 /// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts.
 function Tile(props) {
   return (
@@ -218,7 +297,7 @@ function Home(props) {
 
   onSettled(() => {
     const keys = (event) => {
-      if (event.target.closest?.("input, textarea, dialog")) return
+      if (event.target.closest?.("input, textarea, dialog, .sidebar")) return
       if (event.key === "ArrowRight") go(at() + 1)
       else if (event.key === "ArrowLeft") go(at() - 1)
     }
@@ -246,33 +325,40 @@ function Home(props) {
     capsule.addEventListener("pointercancel", up, { once: true })
   }
   const press = (does) => () => Date.now() > quiet && does()
+  const sections = () => [
+    ...props.home.pages.map((page) => ({ key: page.for ?? "you", name: page.name, apps: page.items.filter((item) => item.app).map((item) => ({ ...item, for: page.for })) })),
+    { key: "settings", name: "Settings", apps: props.home.settings },
+  ]
 
   return (
-    <main class="home">
-      <div class="strip" ref={strip} onScroll={() => setAt(Math.round(Math.abs(strip.scrollLeft) / strip.clientWidth))}>
-        <For each={props.home.pages} keyed={(page) => page.who}>
-          {(page) => <Page page={page()} />}
-        </For>
-        <section class="page">
-          <div class="grid">
-            <For each={props.home.settings} keyed={(part) => part.app}>
-              {(part) => <div class="cell"><Tile app={part()} /></div>}
-            </For>
-          </div>
-        </section>
-      </div>
-      <footer>
-        <p>{names()[at()]}</p>
-        <nav class="dots" onPointerDown={slide} aria-label="Pages">
+    <div class="home">
+      <Sidebar sections={sections()} at={at} go={(index) => go(index, false)} />
+      <main class="pages">
+        <div class="strip" ref={strip} onScroll={() => setAt(Math.round(Math.abs(strip.scrollLeft) / strip.clientWidth))}>
           <For each={props.home.pages} keyed={(page) => page.who}>
-            {(page, index) => <button type="button" class="dot" aria-label={page().name} aria-current={at() === index() ? "page" : undefined} onClick={press(() => go(index()))}><i /></button>}
+            {(page) => <Page page={page()} />}
           </For>
-          <button type="button" aria-label="Settings" aria-current={at() === names().length - 1 ? "page" : undefined} onClick={press(() => go(names().length - 1))}><Icon name="gear-six" /></button>
-        </nav>
-      </footer>
+          <section class="page">
+            <div class="grid">
+              <For each={props.home.settings} keyed={(part) => part.app}>
+                {(part) => <div class="cell"><Tile app={part()} /></div>}
+              </For>
+            </div>
+          </section>
+        </div>
+        <footer>
+          <p>{names()[at()]}</p>
+          <nav class="dots" onPointerDown={slide} aria-label="Pages">
+            <For each={props.home.pages} keyed={(page) => page.who}>
+              {(page, index) => <button type="button" class="dot" aria-label={page().name} aria-current={at() === index() ? "page" : undefined} onClick={press(() => go(index()))}><i /></button>}
+            </For>
+            <button type="button" aria-label="Settings" aria-current={at() === names().length - 1 ? "page" : undefined} onClick={press(() => go(names().length - 1))}><Icon name="gear-six" /></button>
+          </nav>
+        </footer>
+      </main>
       <Offers />
       <Adding />
-    </main>
+    </div>
   )
 }
 
