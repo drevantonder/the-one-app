@@ -95,7 +95,7 @@ s3=127.0.0.1:$(free_port) access=$(random 8) secret=$(random 24)
 mkdir "$folder/s3"
 RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$s3" "$folder/s3" >"$folder/s3.log" 2>&1 &
 started+=($!)
-curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$s3/"
+curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$s3/" >/dev/null
 (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$s3/backups bun -e '
   import { AwsClient } from "aws4fetch";
   const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;

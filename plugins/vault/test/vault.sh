@@ -227,7 +227,7 @@ say "An agent keeps what's pasted, asks its person for the rest, and uses it wit
 service=$(free_port)
 (cd "$root/core/edge" && MARKER=$marker exec bun "$root/plugins/vault/test/service.js" "$service") >"$folder/service.log" 2>&1 &
 started+=($!)
-curl -s -o /dev/null --retry 30 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$service/seen"
+curl -s --retry 30 --retry-all-errors --retry-delay 1 "http://127.0.0.1:$service/seen" >/dev/null
 echo "  an outside service runs on this machine, at 127.0.0.1:$service"
 may on laptop as alice vault set --item Pasted --field password --value-from "$folder/secrets/pasted"
 asked=$(on laptop as alice vault request --title "Stripe key" --fields '{"key":{"secret":true}}' --hosts "[\"127.0.0.1:$service\"]" --why "To read your invoices")

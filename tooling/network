@@ -73,7 +73,8 @@ if [[ -n $edge ]]; then
   mkdir -p "$folder/bucket"
   RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
   started+=($!)
-  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/"
+  # Not `-o /dev/null`: curl retrying after an answer it wrote there truncates the file, and fails (23) on /dev/null.
+  curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/" >/dev/null
   (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
     import { AwsClient } from "aws4fetch";
     const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
@@ -84,7 +85,7 @@ if [[ -n $edge ]]; then
     WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
     --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
   started+=($!)
-  curl -s -o /dev/null --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping"
+  curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping" >/dev/null
   # A passkey is for a name, which on one machine is `localhost`.
   at_address=(--address "http://localhost:$gateway" --first "$first")
 fi
