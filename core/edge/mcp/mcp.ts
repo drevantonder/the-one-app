@@ -46,7 +46,8 @@ export default {
     if (url.pathname.startsWith("/skills/")) return skill(request, env, url);
     if (url.pathname === "/apps") return apps(request, env);
     if (url.pathname.startsWith("/apps/")) return file(request, env, url);
-    // MCP's streamable HTTP: each message is a POST, answered with JSON. There's no stream to GET.
+    // MCP's streamable HTTP: each message is a POST, answered with JSON, or a stream of its progress and then its
+    // answer. There's no stream to GET.
     if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
     if (url.pathname === "/mcp") return mcp(request, env);
     if (url.pathname.startsWith("/link/")) return link(request, env, url);
@@ -171,8 +172,10 @@ async function link(request: Request, env: Env, url: URL) {
 /** What MCP says of a request in its `_meta`, under its own prefix: its version, and its client and what that can do. */
 const MCP = "io.modelcontextprotocol/";
 const VERSION = `${MCP}protocolVersion`;
+/** How often a request with a `progressToken` is told it's still running, as a server tells one (`client::THERE`). */
+const PROGRESS = 1_000;
 
-type Call = { method?: unknown; params?: { _meta?: Record<string, unknown>; name?: unknown; uri?: unknown } };
+type Call = { id?: unknown; method?: unknown; params?: { _meta?: Record<string, unknown>; name?: unknown; uri?: unknown } };
 
 /**
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `from`, a device or a sharing link's
@@ -193,11 +196,18 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   if (mismatch) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32020, message: `Header mismatch: ${mismatch}` } }, { status: 400 });
   const asks_for = "device" in from ? meta.for : undefined;
   const traceparent = traced(meta.traceparent ?? headers?.get("traceparent") ?? undefined);
-  const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP)));
+  const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP) || key === "progressToken"));
   const said = { ...mcp, ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
-  const reached = await env.RELAY.forward(servers, message);
+  const asked = env.RELAY.forward(servers, message);
+  // A request with a progress token from a client that takes a stream is told every second that it's still running,
+  // as MCP's streamable HTTP has it: once it's run that long, it's answered with a stream of its progress and then
+  // its answer, however long it runs. One answered sooner is answered as any other.
+  const token = meta.progressToken;
+  const streams = "id" in call && (typeof token === "string" || typeof token === "number") && headers?.get("accept")?.includes("text/event-stream");
+  if (streams && (await Promise.race([asked.then(() => false), scheduler.wait(PROGRESS).then(() => true)]))) return streamed(asked, call.id, token);
+  const reached = await asked;
   if (!reached) return refuse(503, "None of this network's servers answered. Try again once one is on.");
   // A notification has no answer.
   if (reached.answer === "") return new Response(null, { status: 202 });
@@ -205,6 +215,29 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   const code = modern && (JSON.parse(reached.answer) as { error?: { code?: number } }).error?.code;
   const status = code === -32022 ? 400 : code === -32601 ? 404 : 200;
   return new Response(reached.answer, { status, headers: { "content-type": "application/json" } });
+}
+
+/**
+ * The answer to the request `id`, which carries `token`, as a stream of server-sent events: MCP's progress
+ * notification every second while it runs, how far it is being the seconds it's run, as a server says it, and then
+ * the answer. Whoever asked closing it stops only the telling: the server runs the call to its end.
+ */
+function streamed(asked: Promise<{ answer: string } | null>, id: unknown, token: string | number) {
+  let ran = 1;
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const stream = writable.getWriter();
+  const send = (message: string) => stream.write(new TextEncoder().encode(`event: message\ndata: ${message}\n\n`));
+  const progress = () => send(JSON.stringify({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: token, progress: ran++ } }));
+  const telling = setInterval(() => progress().catch(() => clearInterval(telling)), PROGRESS);
+  (async () => {
+    await progress();
+    const reached = await asked;
+    clearInterval(telling);
+    const none = { jsonrpc: "2.0", id, error: { code: -32000, message: "None of this network's servers answered. Try again once one is on." } };
+    await send(reached?.answer ?? JSON.stringify(none));
+    await stream.close();
+  })().catch(() => clearInterval(telling));
+  return new Response(readable, { headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" } });
 }
 
 /**
@@ -240,7 +273,8 @@ function traced(parent: unknown) {
 
 /** Whether a server answered that the device is nobody's. The answer is left to be sent on if it isn't. */
 async function nobodys(answer: Response) {
-  if (answer.status !== 200) return false;
+  // A stream ran past what a server says of a device at once.
+  if (answer.status !== 200 || answer.headers.get("content-type") !== "application/json") return false;
   const said = await answer.clone().json<{ error?: { code?: number } }>();
   return said.error?.code === NOBODY;
 }
