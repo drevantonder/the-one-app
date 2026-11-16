@@ -3,11 +3,11 @@
 # with two people, a group, databases with rows, files and a Vault item is backed up to a folder, through the
 # service on its machine, and to S3-compatible storage (a local S3 store, as `tooling/network --edge` runs one),
 # while writes go on. What changed is backed up again, and only that is sent. Then the bucket is destroyed, and
-# the network restored into an empty one from each destination with nothing but the recovery key, a server started on
+# the network restored into an empty one from each destination with nothing but access to it, a server started on
 # it, and everything is back and the Vault opens. A file deleted before the last backup is brought back into the
-# running network. Another key restores nothing, and neither destination holds a name or the marker. A check reads a
-# backup back whole, and finds the one object that was changed, which the next backup sends again. It says how big
-# and how long each step was.
+# running network. The destinations hold the blobs as they are: the Vault item is as unreadable there as in the
+# bucket. A check reads a backup back whole, and finds the one object that was changed, which the next backup sends
+# again. It says how big and how long each step was.
 #
 #     mise exec -- plugins/backups/test/backups.sh
 set -euo pipefail
@@ -27,7 +27,6 @@ stop() {
 trap stop EXIT
 grep -q -m1 "A network is running" <(tail -F --pid="${started[0]}" -n +1 "$folder/network.log") || { cat "$folder/network.log"; exit 1; }
 one=$root/target/release/one
-(cd "$root" && cargo build --release -p encryption_client --example recovery_key 2>/dev/null)
 
 say() { printf '\n== %s\n' "$*"; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
@@ -84,13 +83,11 @@ as alice vault grant --servers "[\"$(ls "$folder/bucket/servers")\"]" | shown
 as alice vault set --item Marker --field secret --value-from "$folder/secrets/vault" | shown
 echo "  the bucket: $(size "$folder/bucket"), $(find "$folder/bucket" -type f -not -path '*/.*' | wc -l) blobs, of which $(holding "$folder/bucket") hold the marker: alice's diary.txt, which nothing encrypts"
 
-say "The network's key, whose recovery key restores, and the two destinations"
+say "The two destinations"
 as owner encryption approve | shown
 as owner for network encryption approve | shown
-ONE_AS=owner ONE_FOR=network ONE_HOME=$folder/client "$root/target/release/examples/recovery_key" "$folder/secrets/network"
-ONE_AS=owner ONE_HOME=$folder/client "$root/target/release/examples/recovery_key" "$folder/secrets/owner"
-echo "  the owner's window shows the network's recovery key once, which they write down (kept in a file here)"
 mkdir "$folder/disk"
+as owner for network install --plugin network/plugins/backups | shown
 as owner for network install_service --plugin backups --service Backups.Disk | shown
 backups add --folder "$folder/disk" --name Disk | shown
 # The S3-compatible storage: a local store, with keys made up for this run, which only the network's Vault holds.
@@ -137,25 +134,27 @@ backups restore --destination Disk --backup "$first" --blobs users/alice/made/sh
 as alice shelf all | grep -q letter.pdf && echo "  and it's back"
 backups restore --destination Disk --backup "$first" --blobs users/alice/ | shown
 
-say "The bucket is destroyed, and restored from the disk with the recovery key alone"
+say "The bucket is destroyed, and restored from the disk with nothing but the disk"
 down
 rm -rf "$folder/bucket"
 echo "  the server is stopped and the bucket is gone: $(ls "$folder" | grep -c '^bucket$' || true) buckets"
 mkdir "$folder/bucket"
-(time -p "$one" restore --from "$folder/disk" --to "$folder/bucket" --key-from "$folder/secrets/network") 2>&1 | grep -v '^user\|^sys' | shown
+(time -p "$one" restore --from "$folder/disk" --to "$folder/bucket") 2>&1 | grep -v '^user\|^sys' | shown
 up
 echo "  the server is started on it: $(size "$folder/bucket")"
 [[ $(everything) == "$before" ]] && echo "  every row and file of alice's, bob's and the family's is as it was at the last backup"
 as alice vault list | shown
 as alice vault list | grep -q '"Marker"' && echo "  alice's Vault opens, with her item in it"
 echo "  the destinations came back with it: $(backups destinations | grep -o '"name":"\(Disk\|Storage\)"' | cut -d'"' -f4 | paste -sd' ')"
+backups now --destination Storage | shown
+echo "  so the network's Vault item, restored from the disk, still opens for the server its owner chose: it signed that"
 
 say "Destroyed again, and restored from S3-compatible storage, as the first backup there was, made while bob wrote"
 down
 rm -rf "$folder/bucket"
 mkdir "$folder/bucket"
 oldest=$("$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --list | head -1)
-(time -p "$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --backup "$oldest" --to "$folder/bucket" --key-from "$folder/secrets/network") 2>&1 | grep -v '^user\|^sys' | shown
+(time -p "$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --backup "$oldest" --to "$folder/bucket") 2>&1 | grep -v '^user\|^sys' | shown
 up
 meanwhile=$(as bob shelf all | grep -o 'written meanwhile [0-9]*' | grep -o '[0-9]*$' | paste -sd' ')
 echo "  bob's notes written meanwhile, as that backup has them: ${meanwhile:0:60}..."
@@ -163,22 +162,12 @@ echo "  bob's notes written meanwhile, as that backup has them: ${meanwhile:0:60
 as alice shelf all | grep -q letter.pdf && echo "  and alice's letter.pdf, which she deleted after it"
 as alice vault list | grep -q '"Marker"' && echo "  alice's Vault opens, with her item in it"
 
-say "Another key restores nothing"
-mkdir "$folder/empty"
-"$one" restore --from "$folder/disk" --to "$folder/empty" --key-from "$folder/secrets/owner" 2>&1 | shown || true
-printf 'AAAA-BBBB-CCCC-DDDD-EEEE-FFFF-GGGG-HHHH-IIII-JJJJ-KKKK-LLLL-MMMQ' >"$folder/secrets/guess"
-"$one" restore --from "http://$s3/backups/network" --from-keys "$folder/secrets/s3" --to "$folder/empty" --key-from "$folder/secrets/guess" 2>&1 | shown || true
-echo "  files in the bucket they'd have gone to: $(find "$folder/empty" -type f | wc -l)"
-[[ $(find "$folder/empty" -type f | wc -l) == 0 ]]
-
-say "Whoever holds a destination reads nothing there"
-echo "  files in the bucket that hold the marker: $(holding "$folder/bucket"). At the destinations:"
-for destination in disk s3; do
-  named=$({ grep -r -a -l -E -e "users/|groups/|shelf|photo\.jpg|letter\.pdf|Marker" "$folder/$destination" 2>/dev/null || true; } | wc -l)
-  echo "    $destination: $(find "$folder/$destination" -type f | wc -l) files, of which $(holding "$folder/$destination") hold the marker and $named a blob's name; $(find "$folder/$destination" | grep -c -E 'users|groups|shelf|\.jpg|\.pdf' || true) paths name one"
-  [[ $(holding "$folder/$destination") == 0 && $named == 0 ]]
+say "The destinations hold the blobs as they are: what's encrypted in the bucket is encrypted there too"
+for destination in disk s3/backups; do
+  secrets=$({ grep -r -a -l -F -e "$marker-vault" -e "$secret" "$folder/$destination" 2>/dev/null || true; } | wc -l)
+  echo "    $destination: $(find "$folder/$destination" -type f | wc -l) files, of which $(holding "$folder/$destination") hold the marker (alice's diary.txt, which nothing encrypts) and $secrets alice's Vault secret or the storage's secret key"
+  [[ $(holding "$folder/$destination") -ge 1 && $secrets == 0 ]]
 done
-echo "  a file's name at the disk: $(find "$folder/disk/objects" -type f -print -quit | sed "s|$folder|<folder>|")"
 
 say "A check reads the newest backup this network knows of back whole, and finds the one object that was changed"
 backups check | shown

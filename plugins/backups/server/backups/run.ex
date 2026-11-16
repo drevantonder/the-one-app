@@ -3,9 +3,9 @@ defmodule Backups.Run do
   Backing up to a destination, checking what's there, and restoring from it into the running network.
 
   A backup reads every blob in the bucket and sends each one the destination hasn't been sent before, by what's in it,
-  as an object of its own: the blob encrypted to the destination's backup key for the object's name, which is random.
-  Then it sends the backup's list of blobs, encrypted the same way, named by when the backup began. What was sent
-  is kept here, so the destination's objects are never read to know what's there.
+  as an object of its own: the blob as it is, under a random name. Then it sends the backup's list of blobs, named by
+  when the backup began. What was sent is kept here, so the destination's objects are never read to know what's
+  there.
 
   A database is a snapshot and a log after it, where a snapshot is written whole and then the ones before the
   newest two are removed, and the log is only ever added to (`Database.Log`). So the log is listed last, once the
@@ -52,8 +52,7 @@ defmodule Backups.Run do
 
       name = String.pad_leading(Integer.to_string(began), 16, "0")
       json = JSON.encode!(%{at: began, blobs: listed})
-      {:ok, sealed} = Cipher.seal(destination["recipient"], "one/backups/1/backup\n" <> name, json)
-      Destination.put(opened, "backups/" <> name, sealed)
+      Destination.put(opened, "backups/" <> name, json)
       took = System.os_time(:millisecond) - began
       bytes = Enum.sum_by(listed, & &1.size)
       sent_bytes = Enum.sum_by(sent, & &1.stored)
@@ -81,8 +80,8 @@ defmodule Backups.Run do
             bytes,
             length(sent),
             sent_bytes,
-            byte_size(sealed),
-            digest(sealed),
+            byte_size(json),
+            digest(json),
             {:blob, :zlib.compress(json)}
           ]
         )
@@ -110,35 +109,50 @@ defmodule Backups.Run do
     end
   end
 
-  # Reads `keys` from the bucket, a few at once, and sends what the destination doesn't have: the blobs listed, and the
-  # objects sent. A blob removed since it was listed isn't there to back up.
+  # Reads `keys` from the bucket, a few at once, and sends what the destination doesn't have, a few at once too: the
+  # blobs listed, and the objects sent. A blob removed since it was listed isn't there to back up.
   defp copy(opened, keys, known, {listed, sent}) do
     keys
     |> Enum.chunk_every(@together)
-    |> Enum.reduce({listed, sent, known}, fn keys, acc ->
-      Enum.zip(keys, Bucket.read_all(keys))
-      |> Enum.reduce(acc, fn
-        {key, {:ok, data, _tag}}, {listed, sent, known} ->
-          sha256 = digest(data)
+    |> Enum.reduce({listed, sent, known}, fn keys, {listed, sent, known} ->
+      {listed, new, known} =
+        for {key, {:ok, data, _tag}} <- Enum.zip(keys, Bucket.read_all(keys)), reduce: {listed, [], known} do
+          {listed, new, known} ->
+            sha256 = digest(data)
 
-          {object, sent, known} =
-            case known do
-              %{^sha256 => object} ->
-                {object, sent, known}
+            {object, new, known} =
+              case known do
+                %{^sha256 => object} ->
+                  {object, new, known}
 
-              _ ->
-                object = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-                {:ok, sealed} = Cipher.seal(opened.destination["recipient"], "one/backups/1/object\n" <> object, data)
-                Destination.put(opened, "objects/" <> object, sealed)
-                new = %{object: object, sha256: sha256, stored: byte_size(sealed), digest: digest(sealed)}
-                {object, [new | sent], Map.put(known, sha256, object)}
-            end
+                _ ->
+                  object = Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+                  {object, [{object, data} | new], Map.put(known, sha256, object)}
+              end
 
-          {[%{key: key, object: object, size: byte_size(data), sha256: sha256} | listed], sent, known}
+            {[%{key: key, object: object, size: byte_size(data), sha256: sha256} | listed], new, known}
+        end
 
-        {_key, :absent}, acc ->
-          acc
+      # A failure is raised here, where it's kept as the backup's problem, not in the task that met it.
+      new
+      |> Task.async_stream(
+        fn {object, data} ->
+          try do
+            Destination.put(opened, "objects/" <> object, data)
+          rescue
+            failed -> {:failed, failed}
+          end
+        end,
+        max_concurrency: @together,
+        timeout: :infinity
+      )
+      |> Enum.each(fn
+        {:ok, {:failed, failed}} -> raise failed
+        {:ok, _put} -> :ok
       end)
+
+      sent = for {object, data} <- new, into: sent, do: %{object: object, sha256: digest(data), stored: byte_size(data), digest: digest(data)}
+      {listed, sent, known}
     end)
     |> then(fn {listed, sent, _known} -> {listed, sent} end)
   end
@@ -281,32 +295,12 @@ defmodule Backups.Run do
   end
 
   @doc """
-  Brings back what backup `backup` at `destination` holds under `blobs` that's gone from the bucket, with the backup key a
-  device handed over in `given`. Changes nothing that's there.
+  Brings back what backup `backup` at `destination` holds under `blobs` that's gone from the bucket. Changes nothing
+  that's there.
   """
-  def restore(call, destination, backup, blobs, given) do
+  def restore(call, destination, backup, blobs) do
     began = System.os_time(:millisecond)
     opened = Destination.open(call, destination)
-
-    sealed =
-      with {:ok, %{} = sealed} <- JSON.decode(given),
-           {:ok, sealed} <- Base.decode64(sealed[call.server] || "") do
-        sealed
-      else
-        _ -> raise "The network's backup key wasn't handed to this server. Ask again from your device."
-      end
-
-    {key, public} =
-      with {:ok, own} <- Cipher.key(OneCore.Server.key_file()),
-           {:ok, key} <- Cipher.open_keys(own, "one/backups/1/restoring\n" <> call.server, sealed),
-           {:ok, public} <- Cipher.public(key) do
-        {key, public}
-      else
-        {:error, _why} -> raise "The network's backup key wasn't handed to this server. Ask again from your device."
-      end
-
-    if public != destination["recipient"],
-      do: raise("#{destination["name"]}'s backups are encrypted to another key than the network's.")
 
     name =
       backup ||
@@ -314,8 +308,7 @@ defmodule Backups.Run do
         raise("#{destination["name"]} has no backup yet.")
 
     name = String.replace_prefix(name, "backups/", "")
-    sealed = Destination.get(opened, "backups/" <> name) || raise "#{destination["name"]} has no backup #{name}."
-    {:ok, listed} = open(key, "one/backups/1/backup\n" <> name, sealed)
+    listed = Destination.get(opened, "backups/" <> name) || raise "#{destination["name"]} has no backup #{name}."
 
     {gone, there} =
       JSON.decode!(listed)["blobs"]
@@ -323,8 +316,7 @@ defmodule Backups.Run do
       |> Enum.split_with(&(Bucket.size(&1["key"]) == :absent))
 
     for blob <- gone do
-      sealed = Destination.get(opened, "objects/" <> blob["object"]) || raise "#{blob["key"]} is missing from the backup."
-      {:ok, data} = open(key, "one/backups/1/object\n" <> blob["object"], sealed)
+      data = Destination.get(opened, "objects/" <> blob["object"]) || raise "#{blob["key"]} is missing from the backup."
       if digest(data) != blob["sha256"], do: raise("#{blob["key"]} isn't what was backed up: the backup was changed.")
       Bucket.write(blob["key"], data)
     end
@@ -340,13 +332,6 @@ defmodule Backups.Run do
           Enum.join(Enum.take(Enum.map(gone, & &1["key"]), 10), ", ") <>
           if(length(gone) > 10, do: " and more", else: "") <>
           if(there == [], do: ".", else: ". #{counted(length(there))} there already, unchanged.")
-    end
-  end
-
-  defp open(key, about, sealed) do
-    case Cipher.open(key, about, sealed) do
-      {:ok, data} -> {:ok, data}
-      {:error, _why} -> raise "Your backup key doesn't open that backup: it was changed."
     end
   end
 

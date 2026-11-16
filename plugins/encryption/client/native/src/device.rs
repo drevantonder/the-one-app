@@ -17,7 +17,7 @@ pub struct Encrypts;
 
 impl InputResolver for Encrypts {
     fn formats(&self) -> &'static [&'static str] {
-        &["secret", "owner-key", "artifact-keys", "backup-recipient", "backup-key"]
+        &["secret", "owner-key", "artifact-keys"]
     }
 
     fn resolve<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>> {
@@ -27,8 +27,6 @@ impl InputResolver for Encrypts {
                 ("secret", Some(text)) => secret(client, plugin, says, text, who).await?,
                 ("owner-key", typed) => owner_key_for(client, inputs, typed, who).await?,
                 ("artifact-keys", None) => artifact_keys(client, plugin, says, inputs, who).await?,
-                ("backup-recipient", None) => backups_key(client, plugin, says, who).await?.0.public().to_string(),
-                ("backup-key", None) => backup_key(client, plugin, says, who).await?,
                 _ => return Ok(None),
             };
             Ok(Some(filled))
@@ -147,34 +145,6 @@ async fn artifact_keys(
         );
     }
     Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots}).to_string())
-}
-
-/// The backup key of whoever the plugin's tool that the input names says owns the backups, with what the tool
-/// said.
-async fn backups_key(
-    client: &Client,
-    plugin: &str,
-    says: &Value,
-    who: Option<&str>,
-) -> Result<(iroh_base::SecretKey, Value)> {
-    let unlocked_on = unlocked_on(client, plugin, says, who).await?;
-    let owner = unlocked_on["owner"].as_str().context("the tool didn't say whose backup key it is")?;
-    Ok((cipher::backups(&owner_key_of(client, Some(owner)).await?.0), unlocked_on))
-}
-
-/// The backup key, encrypted to each server the plugin's tool lists, for one of them to restore with.
-async fn backup_key(client: &Client, plugin: &str, says: &Value, who: Option<&str>) -> Result<String> {
-    let (key, unlocked_on) = backups_key(client, plugin, says, who).await?;
-    let mut sealed = Map::new();
-    for server in unlocked_on["servers"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-        let to: PublicKey = server.parse().context("that isn't a server's key")?;
-        let key = zeroize::Zeroizing::new(key.to_bytes());
-        sealed.insert(
-            server.to_owned(),
-            BASE64.encode(&cipher::seal(&to, &cipher::for_restoring(server), key.as_slice())?).into(),
-        );
-    }
-    Ok(Value::Object(sealed).to_string())
 }
 
 /// The recovery key of `who`, or of whoever this client asks for: a person, or a group or the network they own.

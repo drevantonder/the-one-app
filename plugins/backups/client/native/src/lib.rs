@@ -1,10 +1,8 @@
 //! Restoring a whole network from a backup, on any machine and with no network running: `one restore`. The
-//! backups plugin writes a backup (`plugins/backups`), and this reads one with nothing but where it went and the
-//! recovery key of whoever added that destination.
+//! backups plugin writes a backup (`plugins/backups`), and this reads one with nothing but where it went.
 //!
-//! A destination holds `objects/<id>`, each one blob of the network's bucket encrypted to the backup key
-//! (`cipher::backups`) for its id, and `backups/<name>`, each a backup's list of blobs encrypted for its name: a
-//! JSON object whose `blobs` are each a blob's `key` in the bucket, the `object` holding it, its `size` and its
+//! A destination holds `objects/<id>`, each one blob of the network's bucket as it is, and `backups/<name>`, each a
+//! backup's list of blobs: a JSON object whose `blobs` are each a blob's `key` in the bucket, the `object` holding it, its `size` and its
 //! `sha256`. The name is when the backup was made, in milliseconds since 1970, so the newest is the last.
 
 use std::path::{Path, PathBuf};
@@ -18,14 +16,12 @@ use rusty_s3::{Bucket, Credentials, UrlStyle};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-use encryption_client::cipher;
-
-const USAGE: &str = "one restore --from <destination> --to <bucket> --key-from <file> [--backup <name>]\n\n\
+const USAGE: &str = "one restore --from <destination> --to <bucket> [--backup <name>]\n\n\
     Restores a whole network from a backup into an empty bucket, with no network running. A destination or a bucket is a\n\
     folder, or S3-compatible storage as https://<endpoint>/<bucket>[/<folder>], whose keys are in the file\n\
     --from-keys or --to-keys names, as ACCESS_KEY_ID=... and SECRET_ACCESS_KEY=... lines (the presigner's `secrets`\n\
-    has them). --key-from is a file holding the recovery key of whoever added the destination. --backup names one of\n\
-    the destination's backups, the newest if left out, and with --list the destination's backups are listed instead.";
+    has them). --backup names one of the destination's backups, the newest if left out, and with --list the\n\
+    destination's backups are listed instead.";
 
 /// How long a signed request to S3-compatible storage works for.
 const SIGNED_FOR: Duration = Duration::from_secs(300);
@@ -193,7 +189,7 @@ pub async fn restore(args: &[String]) -> Result<String> {
     while let Some(word) = words.next() {
         match word.as_str() {
             "--list" => said.insert("list", String::new()),
-            flag @ ("--from" | "--to" | "--key-from" | "--backup" | "--from-keys" | "--to-keys") => {
+            flag @ ("--from" | "--to" | "--backup" | "--from-keys" | "--to-keys") => {
                 said.insert(&flag[2..], words.next().context(USAGE)?.clone())
             }
             _ => bail!("{USAGE}"),
@@ -205,17 +201,13 @@ pub async fn restore(args: &[String]) -> Result<String> {
         return Ok(backups.iter().map(|name| name.trim_start_matches("backups/")).collect::<Vec<_>>().join("\n"));
     }
     let to = Destination::at(said.get("to").context(USAGE)?, said.get("to-keys"))?;
-    let recovery = fs::read_to_string(said.get("key-from").context(USAGE)?).context("couldn't read --key-from")?;
-    let key = cipher::backups(&cipher::recovered(&recovery)?);
 
     let name = match said.get("backup") {
         Some(name) => format!("backups/{name}"),
         None => backups.last().cloned().context("There's no backup there.")?,
     };
     let backup = name.trim_start_matches("backups/");
-    let sealed = from.get(&name).await?.with_context(|| format!("There's no backup {backup} there."))?;
-    let listed = cipher::open(&key, &cipher::for_backup(backup), &sealed)
-        .map_err(|_| anyhow::anyhow!("That recovery key doesn't open this backup. Nothing was restored."))?;
+    let listed = from.get(&name).await?.with_context(|| format!("There's no backup {backup} there."))?;
     let listed: Listed = serde_json::from_slice(&listed).context("that backup's list of blobs isn't one")?;
     if !to.list("").await?.is_empty() {
         bail!("{} isn't empty. A network is restored into an empty bucket.", said["to"])
@@ -227,14 +219,12 @@ pub async fn restore(args: &[String]) -> Result<String> {
     let began = Instant::now();
     for some in blobs.chunks(AT_ONCE) {
         try_join_all(some.iter().map(|blob| async {
-            let sealed = from.get(&format!("objects/{}", blob.object)).await?;
-            let sealed = sealed.with_context(|| format!("{} is missing from the backup", blob.key))?;
-            let data = cipher::open(&key, &cipher::for_object(&blob.object), &sealed)
-                .with_context(|| format!("{} doesn't open: the backup was changed", blob.key))?;
+            let data = from.get(&format!("objects/{}", blob.object)).await?;
+            let data = data.with_context(|| format!("{} is missing from the backup", blob.key))?;
             if data_encoding::HEXLOWER.encode(&Sha256::digest(&data)) != blob.sha256 {
                 bail!("{} isn't what was backed up: the backup was changed", blob.key)
             }
-            to.put(&blob.key, data.to_vec()).await
+            to.put(&blob.key, data).await
         }))
         .await?;
     }

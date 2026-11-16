@@ -322,7 +322,6 @@ dependencies = [
  "anyhow",
  "client",
  "data-encoding",
- "encryption_client",
  "futures-util",
  "rusty-s3",
  "serde",

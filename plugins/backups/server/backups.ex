@@ -1,18 +1,13 @@
 defmodule Backups do
   @moduledoc """
-  Backups: encrypted copies of the whole bucket, every user's and group's blobs, to destinations that can't read them: a
-  folder on one of the network's machines, as on a disk plugged into it, through the service `Backups.Disk`, or
-  S3-compatible storage, whose keys are an item in the network's Vault.
+  Backups: copies of the whole bucket, every user's and group's blobs as they are, to a folder on one of the network's
+  machines, as on a disk plugged into it, through the service `Backups.Disk`, or to S3-compatible storage, whose keys
+  are an item in the network's Vault. A blob that's encrypted in the bucket is encrypted in a backup too. Whoever can
+  reach the destination restores, with `one restore` and no network running (`plugins/backups/client/native/src/lib.rs`,
+  which says what a destination holds).
 
-  A backup is encrypted to the network's backup key: a key derived from the network's own key, the one its owners'
-  devices hold (`plugins/encryption/client/native/src/cipher.rs`, `backups`), whose public half an owner's device hands over as they add a
-  destination. So a server writes backups and reads none, any owner's device that holds the network's key restores, and
-  the network's recovery key alone opens every one, with `one restore` and no network
-  running (`plugins/backups/client/native/src/lib.rs`, which says what a destination holds).
-
-  What's kept here, in the plugin's database for the network, is what the destination can't say without the key: which
-  blobs each backup holds, and which of the destination's objects holds what, so a blob that's there already isn't sent
-  again (`Backups.Run`).
+  What's kept here, in the plugin's database for the network, is which blobs each backup holds, and which of the
+  destination's objects holds what, so a blob that's there already isn't sent again (`Backups.Run`).
   """
   @behaviour OneCore.Plugin
   alias Backups.{Disk, Run}
@@ -36,8 +31,8 @@ defmodule Backups do
     "create index objects_by_content on objects (destination, sha256)",
     "create table problems (destination text primary key, at integer not null, kind text not null, text text not null)",
     "create table settings (name text primary key, value text not null)",
-    # Every destination's backups are encrypted to the network's backup key, not to whoever added it.
-    "alter table destinations drop column whose"
+    "alter table destinations drop column whose",
+    "alter table destinations drop column recipient"
   ]
 
   # How often each schedule backs up, in seconds.
@@ -69,7 +64,7 @@ defmodule Backups do
       %{
         name: "add",
         description:
-          "Adds a destination to back up to: a folder on a machine of the network's, as on a disk plugged into it, or S3-compatible storage. It's tried first. Backups to it are encrypted to the network's backup key, so the network's recovery key restores them, and so does any owner's device that holds the network's key",
+          "Adds a destination to back up to: a folder on a machine of the network's, as on a disk plugged into it, or S3-compatible storage. It's tried first",
         inputs: %{
           type: "object",
           properties: %{
@@ -90,8 +85,7 @@ defmodule Backups do
               type: "string",
               description:
                 "The network's Vault item with its access_key_id and secret_access_key, switched on for backups"
-            },
-            key: %{type: "string", format: "backup-recipient", unlocked_on: "unlocked_on"}
+            }
           }
         }
       },
@@ -123,7 +117,7 @@ defmodule Backups do
       %{
         name: "restore",
         description:
-          "Brings back what a backup holds under `blobs` that's gone from the network, such as one person's or one plugin's data, or a file. It changes nothing that's there. Your device hands over the network's backup key",
+          "Brings back what a backup holds under `blobs` that's gone from the network, such as one person's or one plugin's data, or a file. It changes nothing that's there",
         inputs: %{
           type: "object",
           properties: %{
@@ -133,17 +127,10 @@ defmodule Backups do
               type: "string",
               description:
                 "What to bring back, by how its blobs' names start: users/alice/ for a person, users/alice/own/notes/ for what one plugin keeps for them, or one blob's whole name"
-            },
-            key: %{type: "string", format: "backup-key", unlocked_on: "unlocked_on"}
+            }
           },
           required: ["destination", "blobs"]
         }
-      },
-      %{
-        name: "unlocked_on",
-        read_only: true,
-        description: "Whose backup key a device hands over, the network's, and the servers it's handed to",
-        inputs: %{type: "object", properties: %{}}
       },
       %{
         name: "due",
@@ -154,10 +141,6 @@ defmodule Backups do
   end
 
   @impl true
-  def call("unlocked_on", _inputs, call) do
-    %{owner: "network", servers: OneCore.Servers.acting(call.installed)}
-  end
-
   def call("due", _inputs, call) do
     if call.actor, do: owner!(call)
 
@@ -233,10 +216,6 @@ defmodule Backups do
   end
 
   defp owned("add", inputs, call) do
-    recipient =
-      inputs["key"] ||
-        raise "Your device hands over the network's backup key: add a destination from the app, or with `one`."
-
     destination =
       case inputs do
         %{"folder" => folder} ->
@@ -268,7 +247,7 @@ defmodule Backups do
       end
 
     destination =
-      Map.merge(destination, %{"id" => Base.encode16(:crypto.strong_rand_bytes(8), case: :lower), "recipient" => recipient})
+      Map.put(destination, "id", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower))
 
     Backups.Destination.try(call, destination)
 
@@ -276,7 +255,7 @@ defmodule Backups do
       if query(db, "select 1 from destinations where name = ?", [destination["name"]]) != [],
         do: raise("There's a destination called #{destination["name"]} already.")
 
-      columns = ~w(id name kind machine folder endpoint bucket region item recipient)
+      columns = ~w(id name kind machine folder endpoint bucket region item)
 
       query(
         db,
@@ -285,7 +264,7 @@ defmodule Backups do
       )
     end)
 
-    "Added #{destination["name"]}. Backups go there #{every(call)}, and the network's recovery key restores them."
+    "Added #{destination["name"]}. Backups go there #{every(call)}."
   end
 
   defp owned("remove", %{"destination" => name}, call) do
@@ -320,11 +299,8 @@ defmodule Backups do
   end
 
   defp owned("restore", %{"destination" => name, "blobs" => blobs} = inputs, call) do
-    given =
-      inputs["key"] || raise "Your device hands over the network's backup key: restore from the app, or with `one`."
-
     [destination] = transaction(call, &named(&1, name))
-    Run.restore(call, destination, inputs["backup"], blobs, given)
+    Run.restore(call, destination, inputs["backup"], blobs)
   end
 
   # Does `fun` to each destination, and says what each said. One that failed doesn't keep the rest from being done, and

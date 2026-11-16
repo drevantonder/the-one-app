@@ -1,7 +1,6 @@
 // Backups, a part of Settings: the destinations backups go, each saying when it was last backed up and how big it is, or
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
-// Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network, and the
-// network's key restores them.
+// Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, toast } from "ui"
@@ -123,7 +122,6 @@ function Opened(props: { destination: Destination }) {
           <Row heading="Keys" text={`${destination().item}, in Everyone's Vault`} />
         </Show>
         <Row heading="Size" text={size(destination().size)} />
-        <Row heading="Restored With" text="Everyone's recovery key, or an owner's device that holds Everyone's key" />
       </List>
       <Show when={destination().backups.length}>
         <Section heading="Backups">
@@ -188,7 +186,6 @@ function AddSheet(props: { machines: All["machines"] }) {
         <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
           <Input name="name" />
         </Field>
-        <p class="hint">Backups there are encrypted to Everyone's key, so Everyone's recovery key restores them.</p>
         <Button type="submit" loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length}>Add</Button>
       </form>
     </Sheet>
