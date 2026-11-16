@@ -59,8 +59,16 @@ defmodule OneCore.Mcp do
   # Claude Code keeps only the first 4,096 characters of a server's instructions, so they stay under that.
   @instructions_limit 4000
 
-  # What a server speaks of MCP is the same in each of these.
-  @versions ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
+  # What a server speaks of MCP is the same in each of these. A client of the versions since 2026-07-28 says its
+  # version in each request (`_meta`), and one of the earlier ones in `initialize`.
+  @versions ~w(2026-07-28)
+  @initialized ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
+
+  @capabilities %{tools: %{}, resources: %{}, extensions: %{"io.modelcontextprotocol/skills" => %{}}}
+
+  # What a client keeps a list or a file of these for, before it asks again: none of it, since who's asking and
+  # what's installed for them changes what's there.
+  @cacheable ~w(server/discover tools/list resources/list resources/read)
 
   @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
   def answer(message, from) do
@@ -68,15 +76,19 @@ defmodule OneCore.Mcp do
       {:ok, %{"method" => method, "id" => id} = request} ->
         params = Map.get(request, "params", %{})
 
+        version = said(params)["io.modelcontextprotocol/protocolVersion"]
+
         try do
           Trace.follow(said(params)["traceparent"])
 
-          with {:ok, asked, forwarded} <- User.asking(from, said(params), method == "hooks/call"),
+          with :ok <- speaks(version),
+               {:ok, asked, forwarded} <- User.asking(from, said(params), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, asked, forwarded) do
-            JSON.encode!(%{jsonrpc: "2.0", id: id, result: result})
+            JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
           else
             {:error, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
             {:error, code, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
+            {:error, code, why, data} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why, data: data}})
           end
         rescue
           error ->
@@ -137,6 +149,30 @@ defmodule OneCore.Mcp do
   # What a request says of itself.
   defp said(%{"_meta" => %{} = said}), do: said
   defp said(_params), do: %{}
+
+  # A request with no version is of a client that said its version in `initialize`, or of a server.
+  defp speaks(nil), do: :ok
+  defp speaks(version) when version in @versions, do: :ok
+
+  defp speaks(version),
+    do: {:error, -32022, "Unsupported protocol version", %{supported: @versions, requested: version}}
+
+  # A result to a client of a version that says what kind of result it is, and how long it may keep it.
+  defp complete(result, _method, nil), do: result
+
+  defp complete(result, method, _version) when is_map(result) do
+    result = put_new(result, :resultType, "complete")
+    if method in @cacheable, do: result |> put_new(:ttlMs, 0) |> put_new(:cacheScope, "private"), else: result
+  end
+
+  defp complete(result, _method, _version), do: result
+
+  # A result is this server's, keyed by atoms, or another server's that it passed on, keyed by strings.
+  defp put_new(result, key, value) do
+    if Map.has_key?(result, key) or Map.has_key?(result, Atom.to_string(key)),
+      do: result,
+      else: Map.put(result, key, value)
+  end
 
   defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _asked, forwarded) do
     between(forwarded, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
@@ -201,9 +237,20 @@ defmodule OneCore.Mcp do
 
     {:ok,
      %{
-       protocolVersion: if(asked in @versions, do: asked, else: hd(@versions)),
-       capabilities: %{tools: %{}, resources: %{}, extensions: %{"io.modelcontextprotocol/skills" => %{}}},
-       serverInfo: %{name: "one", version: Builds.build()},
+       protocolVersion: if(asked in @initialized, do: asked, else: hd(@initialized)),
+       capabilities: @capabilities,
+       serverInfo: server_info(),
+       instructions: instructions(if(holder?(by), do: :holder, else: mode(params)), who)
+     }}
+  end
+
+  # What a client of a version since 2026-07-28 may ask first, or to tell whether a server speaks one at all.
+  defp result("server/discover", params, _from, {by, who}, _forwarded) do
+    {:ok,
+     %{
+       supportedVersions: @versions,
+       capabilities: @capabilities,
+       _meta: %{"io.modelcontextprotocol/serverInfo" => server_info()},
        instructions: instructions(if(holder?(by), do: :holder, else: mode(params)), who)
      }}
   end
@@ -447,6 +494,8 @@ defmodule OneCore.Mcp do
   end
 
   defp holder?(by), do: by != nil and User.link?(by)
+
+  defp server_info, do: %{name: "one", version: Builds.build()}
 
   # A sharing link's holder sees no skill.
   defp skills({by, who}), do: if(holder?(by), do: [], else: Skills.list(who))

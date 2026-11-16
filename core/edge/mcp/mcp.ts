@@ -136,19 +136,18 @@ async function signedIn(request: Request, env: Env) {
 }
 
 async function mcp(request: Request, env: Env) {
-  const traceparent = request.headers.get("traceparent") ?? undefined;
   // One of the network's own devices signs what it asks with its key. One that's nobody's is told so by the
   // server, and asks for a code to be let in by.
   if (request.headers.has("one-key")) {
     const body = await request.text();
     const device = await verifiedKey(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    return forward(env, body, { device }, [NETWORK], traceparent, mode(new URL(request.url)));
+    return forward(env, body, { device }, [NETWORK], request.headers, mode(new URL(request.url)));
   }
   // A browser or an assistant someone let in. One that's since become nobody's signs in, or is let in, again.
   const who = await signedIn(request, env);
   if ("refused" in who) return who.refused;
-  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], traceparent, mode(new URL(request.url)));
+  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], request.headers, mode(new URL(request.url)));
   if (!(await nobodys(answer))) return answer;
   return who.challenge ? new Response(null, { status: 401, headers: { "www-authenticate": who.challenge } }) : refuse(401, "Sign in again");
 }
@@ -166,32 +165,64 @@ async function link(request: Request, env: Env, url: URL) {
   const link = decodeURIComponent(url.pathname.slice("/link/".length));
   const of = LEADS_TO.exec(link)?.[0];
   if (!of) return refuse(404, "That isn't a sharing link");
-  return forward(env, await request.text(), { link }, [of, NETWORK], request.headers.get("traceparent") ?? undefined);
+  return forward(env, await request.text(), { link }, [of, NETWORK], request.headers);
 }
+
+/** What MCP says of a request in its `_meta`, under its own prefix: its version, and its client and what that can do. */
+const MCP = "io.modelcontextprotocol/";
+const VERSION = `${MCP}protocolVersion`;
+
+type Call = { method?: unknown; params?: { _meta?: Record<string, unknown>; name?: unknown; uri?: unknown } };
 
 /**
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `from`, a device or a sharing link's
- * holder, and answers what the server did. What's asked says who it's from, who it's for (a device's) and the span
- * it's under, and nothing else of itself.
+ * holder, and answers what the server did. What's asked says who it's from, who it's for (a device's), the span
+ * it's under and what MCP has it say, and nothing else of itself. `headers` are the HTTP request's, if it's one.
  */
-async function forward(env: Env, message: string, from: { device: string } | { link: string }, of: string[], header?: string, mode?: string) {
-  let call: { method?: unknown; params?: { _meta?: { for?: unknown; traceparent?: unknown } } };
+async function forward(env: Env, message: string, from: { device: string } | { link: string }, of: string[], headers?: Headers, mode?: string) {
+  let call: Call;
   try {
     call = JSON.parse(message);
     if (typeof call?.method !== "string") throw new Error("not a request");
   } catch {
     return refuse(400, "That isn't a JSON-RPC request");
   }
-  const asks_for = "device" in from ? call.params?._meta?.for : undefined;
-  const traceparent = traced(call.params?._meta?.traceparent ?? header);
-  const said = { ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
+  const meta = call.params?._meta ?? {};
+  const modern = headers && (VERSION in meta || (headers.get("mcp-protocol-version") ?? "") >= "2026-07-28");
+  const mismatch = modern && mismatched(headers, call);
+  if (mismatch) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32020, message: `Header mismatch: ${mismatch}` } }, { status: 400 });
+  const asks_for = "device" in from ? meta.for : undefined;
+  const traceparent = traced(meta.traceparent ?? headers?.get("traceparent") ?? undefined);
+  const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP)));
+  const said = { ...mcp, ...from, traceparent, ...(typeof asks_for === "string" && { for: asks_for }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: said } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const reached = await env.RELAY.forward(servers, message);
   if (!reached) return refuse(503, "None of this network's servers answered. Try again once one is on.");
   // A notification has no answer.
   if (reached.answer === "") return new Response(null, { status: 202 });
-  return new Response(reached.answer, { headers: { "content-type": "application/json" } });
+  // From MCP's 2026-07-28, a version or method a server doesn't have is said in the status too.
+  const code = modern && (JSON.parse(reached.answer) as { error?: { code?: number } }).error?.code;
+  const status = code === -32022 ? 400 : code === -32601 ? 404 : 200;
+  return new Response(reached.answer, { status, headers: { "content-type": "application/json" } });
+}
+
+/**
+ * Which of the headers MCP's streamable HTTP has a request carry, from 2026-07-28, doesn't say what its body does, if
+ * one doesn't. A name that isn't plain ASCII is sent in base64, between `=?base64?` and `?=`.
+ */
+function mismatched(headers: Headers, call: Call) {
+  const named = ["tools/call", "resources/read", "prompts/get"].includes(call.method as string);
+  const sent = headers.get("mcp-name");
+  const encoded = sent && /^=\?base64\?(.*)\?=$/.exec(sent);
+  const name = encoded ? new TextDecoder().decode(Uint8Array.from(atob(encoded[1]), (c) => c.charCodeAt(0))) : sent;
+  const expected: [string, unknown, string | null][] = [
+    ["MCP-Protocol-Version", call.params?._meta?.[VERSION], headers.get("mcp-protocol-version")],
+    ["Mcp-Method", call.method, headers.get("mcp-method")],
+    ...(named ? [["Mcp-Name", call.params?.name ?? call.params?.uri, name] as [string, unknown, string | null]] : []),
+  ];
+  const wrong = expected.find(([, body, header]) => header === null || body !== header);
+  return wrong && `${wrong[0]} header value '${wrong[2] ?? ""}' does not match body value '${wrong[1] ?? ""}'`;
 }
 
 /**
