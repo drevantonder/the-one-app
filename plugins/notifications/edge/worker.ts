@@ -1,10 +1,18 @@
 // Notifications' edge function. A server acting for the network asks it to wake phones and browsers
-// (`/notifications/send`) with what it encrypted to each, which this can't read either, and it does, through the push services whose keys only it holds (`senders.js`). A browser
+// (`/notifications/send`) with what it encrypted to each, which this can't read either, and it does, through the push services whose keys only it holds (`senders.ts`). A browser
 // asks it for the key it subscribes with (`/notifications/key`).
-import { send } from "./senders.js";
+import { send, type Device, type Keys } from "./senders.ts";
 
 /** A server on this list acts for the network, and so for everyone in it. */
 const NETWORK = "network/";
+
+/** Its bindings: who the network's own are (the presigner's `Network`, which the edge gives every plugin's part), and its keys. */
+interface NotificationsEnv extends Keys {
+  NETWORK: {
+    verifiedKey(url: string, headers: Record<string, string>, body: string): Promise<string | null>;
+    servers(of: string): Promise<string[]>;
+  };
+}
 
 export default {
   async fetch(request, env) {
@@ -18,7 +26,7 @@ export default {
     if (!server || !(await env.NETWORK.servers(NETWORK)).includes(server)) {
       return Response.json({ error: "Only a server acting for the network sends notifications" }, { status: 403 });
     }
-    const { devices } = JSON.parse(body);
+    const { devices }: { devices: Device[] } = JSON.parse(body);
     return Response.json(await send(fetch, env, devices));
   },
-};
+} satisfies ExportedHandler<NotificationsEnv>;

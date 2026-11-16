@@ -1,6 +1,6 @@
 {
   "name": "network-notifications",
-  "main": "worker.js",
+  "main": "worker.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false
   // Its keys to the push services are secrets, which README.md names.

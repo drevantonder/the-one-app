@@ -13,3 +13,5 @@ each send to it, and the plugin's `send` says so.
 - Web Push, for browsers: `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`, a P-256 key pair as base64url (the public
   key's 65 bytes, the private key's 32), and `VAPID_SUBJECT`, a `mailto:` or `https:` address the push services
   can reach whoever runs the network at. `bunx web-push generate-vapid-keys` makes a pair.
+
+It is TypeScript, which wrangler builds without checking; `bun run typecheck` here checks it.
