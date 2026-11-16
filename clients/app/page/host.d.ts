@@ -34,18 +34,60 @@ export interface Resource {
   _meta?: { category?: string }
 }
 
+/**
+ * Where a device is with its network, as the client says it (`Session` in core/client): opening, in, not in with the
+ * code it's let in by, or its network not answering.
+ */
+export type Session =
+  | { state: "opening" }
+  | { state: "signedIn" }
+  | { state: "signIn"; code?: { link: string; code: string }; why?: "denied" | "expired" | "removed" | null }
+  | { state: "unreachable"; why: string }
+
+/** What the page is told of the device's session: the session, its place in the order the page hears them in, and while it's signing in, where the window goes. */
+export interface Told {
+  seq: number
+  session: Session
+  link?: string | null
+}
+
+/** What the window shows of itself, one state at a time (`client.js`). */
+export type Shown =
+  | { state: "opening"; step: 0 | 1 | 2 }
+  | { state: "unreachable" }
+  | { state: "home" }
+  | { state: "unlisted"; why: string }
+  | { state: "tooOld" }
+  | { state: "updating"; message?: string }
+  | { state: "updateFailed"; why: string }
+
+/** What moves what the window shows (`client.js`). */
+export type Moved =
+  | { type: "session"; session: Session }
+  | { type: "listed" }
+  | { type: "unlisted"; why: string }
+  | { type: "tooOld" }
+  | { type: "drawn" }
+  | { type: "retry" }
+  | { type: "update" }
+  | { type: "updated"; message: string }
+  | { type: "updateFailed"; why: string }
+
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
-  /** Where the window starts: here, on the page that signs its device in, or why the network couldn't be reached. */
-  start(): { signIn?: string; unreached?: string; taps?: boolean }
+  /** Where the device is with its network as the window opens, and whether a phone hears taps on notifications. */
+  start(): Told & { taps?: boolean }
   /** The files a server lists for `subject`, and the plugins whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
-  client(): { device: string; network?: string; build?: string; server?: string }
+  client(): { device: string; network?: string; build?: string; target?: string; server?: string }
   upload(file: ArrayBuffer, options: { headers: { plugin: string } }): { upload: string }
-  enter(): void
+  /** Asks the network's address again now, which didn't answer. */
+  retry(): void
+  /** Signs this device out, once it's removed from its person's devices. */
+  sign_out(): void
   serve(args: { on: boolean }): string
   update(): string
   recovery_key(args: { subject: string | undefined }): string
@@ -70,6 +112,8 @@ export interface Events {
   changed: string
   /** Whether a server answered the last thing asked. */
   answering: boolean
+  /** Where the device is with its network, as it moves. */
+  session: Told
 }
 
 export type Listen = <Event extends keyof Events>(event: Event, handler: (event: { payload: Events[Event] }) => void) => unknown

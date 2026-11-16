@@ -9,7 +9,7 @@
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, invoke, listen, openLink, sandbox } from "./host.js"
-/** @import { View } from "./host.js" */
+/** @import { Moved, Shown, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -54,22 +54,9 @@ const listed = new Set()
 /** @param {string} app @param {string} [subject] */
 const host = (app, subject) => [app.split("/")[0], ...(subject ? subject.split("/").reverse() : [])].join(".")
 
-/// Whether a server answered the last thing this client asked, and since when none has, and why its files couldn't
-/// be listed, if they couldn't.
-let answering = true
-let unanswered = 0
-/** @type {string | undefined} */
-let unlisted
-/// Whether this app is too old for its network: its servers list no launcher, which every network has, as when how
-/// apps are listed has changed since this app was built.
-let tooOld = false
-/// Where the window starts, which it asks as it opens: here, or on the page its device is let in by while it's
-/// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
-/// answer. Then that's all the window says, until trying again opens it.
-const { signIn, unreached = null, taps } = await invoke("start")
-/// A phone's app is its network's, which its owner builds and updates, and a computer's updates itself.
-const phone = Boolean(taps)
-if (signIn) location.replace(signIn)
+/// A phone's app is its network's, which its owner builds and updates, and a computer's updates itself: what
+/// `start` says.
+let phone = false
 
 /// Light or dark, as Settings › Appearance has it on this device, or as the device is.
 const scheme = matchMedia("(prefers-color-scheme: dark)")
@@ -81,29 +68,142 @@ function dress() {
 }
 scheme.addEventListener("change", dress)
 
-/// Says over the launcher what keeps it from showing anything: the network's address didn't answer, its pages
-/// couldn't be listed, or this app is too old for the network. Fine is silent.
+/// What the window shows of itself, one state at a time, which only `on` moves: while its device's session opens,
+/// the steps it takes to its person's home; their home, once the launcher has drawn; or why it can't show, and an
+/// update under way. While the device isn't in its network, the window is on the network's own sign-in page
+/// instead, which the client brings it back from (`follows` in `src/lib.rs`).
+/** @type {Shown} */
+let shown = { state: "opening", step: 0 }
+
+/// The moves there are, from `now` on `event`: the next state, or nothing where `event` moves nothing from `now`.
+/** @param {Shown} now @param {Moved} event @returns {Shown | undefined} */
+function next(now, event) {
+  // Whether it waits for its apps to be listed: as it opens, or again after it updated or couldn't show home.
+  const listing = (now.state === "opening" && now.step === 1) || now.state === "updating" || now.state === "unlisted" || now.state === "tooOld"
+  switch (event.type) {
+    // The device's session moved: it's opening again, it's in and lists its apps next, or its network didn't answer.
+    case "session":
+      if (event.session.state === "opening") return { state: "opening", step: 0 }
+      if (event.session.state === "unreachable") return { state: "unreachable" }
+      if (event.session.state === "signedIn" && (now.state === "unreachable" || (now.state === "opening" && now.step === 0))) return { state: "opening", step: 1 }
+      return
+    // Its apps were listed with the launcher among them, which loads next, or without one, or not at all, or the
+    // launcher never drew.
+    case "listed":
+      return listing ? { state: "opening", step: 2 } : undefined
+    case "unlisted":
+      return listing || (now.state === "opening" && now.step === 2) ? { state: "unlisted", why: event.why } : undefined
+    case "tooOld":
+      return listing && now.state !== "tooOld" ? { state: "tooOld" } : undefined
+    // The launcher drew: home shows.
+    case "drawn":
+      return now.state === "opening" && now.step === 2 ? { state: "home" } : undefined
+    // Its person tried again, or pressed Update.
+    case "retry":
+      return now.state === "unlisted" ? { state: "opening", step: 1 } : now.state === "updateFailed" ? { state: "updating" } : undefined
+    case "update":
+      return now.state === "tooOld" ? { state: "updating" } : undefined
+    // What a device that's also a server was told as it asked its server to update, or why an update failed.
+    case "updated":
+      return now.state === "updating" ? { state: "updating", message: event.message } : undefined
+    case "updateFailed":
+      return now.state === "updating" ? { state: "updateFailed", why: event.why } : undefined
+  }
+}
+
+/// Moves what the window shows on `event`, if that's a move there is, draws it, and starts what the new state does.
+/** @param {Moved} event */
+function on(event) {
+  const moved = next(shown, event)
+  if (!moved) return
+  const was = shown
+  shown = moved
+  draw()
+  if (moved.state === "opening" && moved.step === 1) list()
+  if (moved.state === "opening" && moved.step === 2) start()
+  if (moved.state === "updating" && was.state !== "updating") {
+    // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
+    invoke("update").then(
+      (message) => on({ type: "updated", message }),
+      (error) => on({ type: "updateFailed", why: `${error}` }),
+    )
+  }
+}
+
+/// The steps the window takes as it opens, each ticked as it's done.
+const STEPS = ["Connecting to your network", "Getting your apps", "Opening Home Screen"]
+
+/// What each problem says: its heading, its one sentence, and the button that fixes it, if there is one.
+/** @param {Shown} now @returns {[string, string, string | undefined] | undefined} */
+function problemOf(now) {
+  switch (now.state) {
+    case "unreachable":
+      return ["Can't reach your network", "Check this device is online.", "Try Again"]
+    case "unlisted":
+      return ["Can't show your Home Screen", now.why, "Try Again"]
+    case "tooOld":
+      return ["This app needs updating", phone ? "Its owner updates this app." : "An update is ready.", phone ? undefined : "Update"]
+    case "updateFailed":
+      return ["Couldn't update", now.why, "Try Again"]
+  }
+}
+
+/// Draws what the window shows of itself, in its middle, over the frames: its mark and steps while it opens, a
+/// spinner and a line while it updates, or a problem. Home is the frames alone, and whether a server is answering.
 /** @type {string | undefined} */
 let lastProblem
-function problem() {
-  // A problem is said in place of the mark.
-  const nothing = unreached !== null || Boolean(unlisted) || tooOld
-  if (nothing) byId("opening").hidden = true
-  byId("problem").hidden = !nothing || Boolean(history.state)
-  byId("what").textContent = tooOld ? "This app needs updating" : unreached !== null ? "Can't reach your network" : "Can't show your Home Screen pages"
-  byId("why").textContent = tooOld
-    ? `Your network is on a newer version.${phone ? " Its owner updates this app." : ""}`
-    : unreached !== null ? `${unreached}. Check this device is online.` : (unlisted ?? "")
-  const action = byId("retry")
-  action.textContent = tooOld ? "Update" : "Try Again"
-  action.dataset.variant = tooOld ? "default" : "outline"
-  action.hidden = tooOld && phone
+function draw() {
+  const now = shown
+  byId("state").hidden = now.state === "home"
+  byId("mark").hidden = byId("steps").hidden = now.state !== "opening"
+  if (now.state === "opening") {
+    byId("steps").replaceChildren(
+      ...STEPS.map((step, i) => {
+        const item = Object.assign(document.createElement("li"), { className: i < now.step ? "done" : i === now.step ? "now" : "" })
+        const mark = i < now.step ? icon(CHECK) : i === now.step ? spinner() : Object.assign(document.createElement("span"), { className: "next" })
+        item.append(mark, Object.assign(document.createElement("span"), { textContent: step }))
+        return item
+      }),
+    )
+  }
+  byId("status").hidden = now.state !== "updating"
+  if (now.state === "updating") byId("status-text").textContent = now.message ?? ""
+  byId("status-text").hidden = !(now.state === "updating" && now.message)
+  const problem = problemOf(now)
+  byId("problem").hidden = !problem
+  if (problem) {
+    const [heading, text, action] = problem
+    byId("problem-heading").textContent = heading
+    byId("problem-text").textContent = text
+    byId("problem-action").hidden = !action
+    byId("retry").textContent = action ?? ""
+    byId("retry").dataset.variant = action === "Update" ? "default" : "outline"
+  }
   // What's shown is reported once, as it's shown.
-  const shown = nothing ? `${byId("what").textContent}: ${byId("why").textContent}` : undefined
-  if (shown && shown !== lastProblem) report("one.client.problem", shown)
-  lastProblem = shown
+  const said = problem && `${problem[0]}: ${problem[1]}`
+  if (said && said !== lastProblem) report("one.client.problem", said)
+  lastProblem = said
   status()
 }
+
+/// The UI library's check icon and spinner, which the window draws its steps with, as the UI library does.
+const CHECK = "M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"
+/** @param {string} path */
+function icon(path) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+  svg.setAttribute("class", "ui-icon")
+  svg.setAttribute("viewBox", "0 0 256 256")
+  svg.setAttribute("aria-hidden", "true")
+  const drawn = document.createElementNS("http://www.w3.org/2000/svg", "path")
+  drawn.setAttribute("d", path)
+  svg.append(drawn)
+  return svg
+}
+const spinner = () => /** @type {HTMLElement} */ (byId("connection-spinner").cloneNode(true))
+
+/// Whether a server answered the last thing this client asked, and since when none has.
+let answering = true
+let unanswered = 0
 
 /// How long no server answering goes unsaid, as a moment's gap while the client reconnects by itself, and how long
 /// before the window says it's showing what was saved.
@@ -111,15 +211,24 @@ const BLIP = 3000
 const LONG = 15000
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let saying
-/// Says in one quiet line, over whatever's showing, that no server is answering for now: nothing for a blip, then
-/// that it's reconnecting, and once that's taken a while, or the device is offline, that it shows what was saved.
+/// Whether a server is answering, while home shows: one that is, or none for a blip, which say nothing; then none for
+/// a few seconds, reconnecting, and for longer, which says it shows what was saved; and the device offline.
+/** @returns {"answering" | "blip" | "reconnecting" | "waiting" | "offline"} */
+function connection() {
+  if (answering) return "answering"
+  if (!navigator.onLine) return "offline"
+  const waited = performance.now() - unanswered
+  return waited < BLIP ? "blip" : waited < LONG ? "reconnecting" : "waiting"
+}
+/// Says the connection in one quiet line at the foot of the window, over whatever's showing: a spinner and that it's
+/// reconnecting, and nothing while it's fine. A blip and reconnecting each end by the clock.
 function status() {
   clearTimeout(saying)
-  const line = byId("status")
-  const waited = performance.now() - unanswered
-  line.hidden = answering || unreached !== null || Boolean(unlisted) || tooOld || waited < BLIP
-  if (!answering && waited < LONG) saying = setTimeout(status, (waited < BLIP ? BLIP : LONG) - waited)
-  line.textContent = !navigator.onLine ? "You're offline. Showing what was saved." : waited < LONG ? "Reconnecting…" : "Reconnecting… Showing what was saved."
+  const now = shown.state === "home" ? connection() : "answering"
+  byId("connection").hidden = now === "answering" || now === "blip"
+  byId("connection-spinner").hidden = now === "offline"
+  byId("connection-text").textContent = { answering: "", blip: "", reconnecting: "Reconnecting…", waiting: "Reconnecting… Showing what was saved.", offline: "You're offline. Showing what was saved." }[now]
+  if (now === "blip" || now === "reconnecting") saying = setTimeout(status, (now === "blip" ? BLIP : LONG) - (performance.now() - unanswered))
 }
 addEventListener("offline", status)
 // Back online, the client asks at once, rather than when it next would have.
@@ -128,8 +237,21 @@ addEventListener("online", () => {
   if (!answering) invoke("refresh", { view: key(launcher) })
 })
 
+/// Whether this device is behind the latest build of its program for its kind of machine, as its network says
+/// (`builds`): a browser, or an app whose network says nothing of its build, isn't.
+async function behind() {
+  const { build, target } = await invoke("client")
+  if (!build || !target) return false
+  const response = /** @type {{ structuredContent?: { latest?: Record<string, { build: string }> } }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name: "builds" } }))
+  const latest = response.structuredContent?.latest?.[`one/${target}`]?.build
+  return Boolean(latest) && latest !== build
+}
+
 /// Lists the files a server has for `subject`, which the client keeps, so an app opens with no server up. An open app
-/// whose plugins have a new version loads again.
+/// whose plugins have a new version loads again. This user's own list says whether home can show: with a launcher
+/// in it, without one, or not at all. A launcher missing from a later list, as during a release, leaves the one that's
+/// open as it is. Its list missing a launcher says this app needs updating only where its network says an update is
+/// ready for it (`behind`): otherwise it's the network that has none right now.
 /** @param {string} [subject] */
 async function list(subject) {
   listed.add(subject)
@@ -137,7 +259,6 @@ async function list(subject) {
     const { resources, outdated } = await invoke("apps", { subject })
     for (const view of open.values()) if (outdated.includes(view.host)) view.stale = true
     if (!subject) {
-      unlisted = undefined
       // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
       const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
       const named = (/** @type {string} */ uri) => {
@@ -147,14 +268,14 @@ async function list(subject) {
       // The last one set for a plugin is the one kept: its first, and one with no category before one with one.
       const order = pages.toReversed().sort((a, b) => Number(Boolean(b._meta?.category)) - Number(Boolean(a._meta?.category)))
       first = new Map(order.map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
-      launcher = named(pages.find(({ _meta }) => _meta?.category === "launcher")?.uri ?? "ui:///")
-      tooOld = launcher === "/"
-      if (tooOld) launcher = ""
+      const found = pages.find(({ _meta }) => _meta?.category === "launcher")
+      if (found) launcher = named(found.uri)
+      if (launcher) on({ type: "listed" })
+      else on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "unlisted", why: "Your network has no Home Screen right now." })
     }
   } catch (error) {
-    if (!subject) unlisted = `${error}`.replace(/[^.]$/, "$&.")
+    if (!subject) on({ type: "unlisted", why: `${error}`.replace(/[^.]$/, "$&.") })
   }
-  problem()
   reload()
 }
 
@@ -216,12 +337,14 @@ function move(change, back = false) {
 /** @param {string | null} at @param {number} tapped */
 function show(at, tapped) {
   const view = layer(at)
-  problem()
   reload()
   if (!view) return
   view.tapped = tapped
   setTimeout(() => {
-    if (view.tapped === tapped && !view.drawn) report("one.client.open", `Didn't open in ${NEVER / 1000} s`, { "one.view": view.app.split("/")[0] })
+    if (view.tapped !== tapped || view.drawn) return
+    report("one.client.open", `Didn't open in ${NEVER / 1000} s`, { "one.view": view.app.split("/")[0] })
+    // A launcher that never draws leaves nothing to show: trying again loads it again.
+    if (view.app === launcher) on({ type: "unlisted", why: "It didn't open. Try again in a moment." })
   }, NEVER)
   if (!view.drawn) return
   // Its user returned to it.
@@ -254,9 +377,9 @@ function opened(view) {
     const name = view.app.split("/")[0]
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
-    // The device hears its person's notifications once they see their home, which has drawn over the mark.
+    // The device hears its person's notifications once they see their home, which has drawn over the steps.
     if (view.app === launcher) {
-      byId("opening").hidden = true
+      on({ type: "drawn" })
       invoke("listen")
     }
   }))
@@ -337,7 +460,7 @@ async function respond(view, method, params) {
   }
   // What an app is told of its client, and the few things one changes of it.
   if (method === "one/client") {
-    if (params.leave) return invoke("enter")
+    if (params.leave) return invoke("sign_out")
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
     if ("serve" in params) return { message: await invoke("serve", { on: params.serve === true }) }
     if (params.update) return { message: await invoke("update") }
@@ -440,38 +563,34 @@ addEventListener("popstate", (event) => {
 })
 
 listen("answering", ({ payload }) => {
+  const back = !answering && payload
   if (answering && !payload) unanswered = performance.now()
   answering = payload
-  problem()
-  // What couldn't be listed is asked for again now that a server answers.
-  if (answering && unlisted) start()
+  status()
+  // What couldn't be listed is asked for again now that a server answers, and so is what a server that updated
+  // lists once it's back.
+  if (back && (shown.state === "unlisted" || shown.state === "updating")) list()
 })
-byId("retry").addEventListener("click", async () => {
-  if (tooOld) {
-    // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
-    byId("why").textContent = await invoke("update").catch((error) => `${error}`)
-  } else if (unreached !== null) invoke("enter")
-  else start()
+byId("retry").addEventListener("click", () => {
+  if (shown.state === "unreachable") invoke("retry")
+  else on({ type: shown.state === "tooOld" ? "update" : "retry" })
 })
 
 /// The user returned to the window, so what's showing asks again, and its apps' files are listed again, for a new
 /// version of any. While the window is on screen, what's showing asks again when a server says something changed.
 function returned() {
-  if (signIn || unreached !== null) return
+  if (shown.state !== "home") return
   invoke("visible", { onScreen: !document.hidden })
   if (document.hidden) return void reload()
-  if (unlisted) start()
-  else for (const subject of listed) list(subject)
+  for (const subject of listed) list(subject)
   invoke("refresh", { view: key(launcher) })
   if (open.has(history.state)) invoke("refresh", { view: history.state })
 }
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
-/// Lists this user's files, and shows the launcher once there are some to show it from.
-async function start() {
-  await list()
-  if (unlisted || tooOld) return
+/// Shows the launcher, once this user's files have listed one: loaded, or loaded again where it was open.
+function start() {
   const home = open.get(key(launcher))
   if (home) /** @type {Window} */ (home.frame.contentWindow).location.replace(address(home))
   else load(launcher)
@@ -480,10 +599,24 @@ async function start() {
   show(null, 0)
 }
 
-dress()
-if (unreached !== null) problem()
-else if (!signIn) {
-  await start()
-  invoke("visible", { onScreen: !document.hidden })
-  if (taps) hearTaps()
+/// Follows the device's session as it moves, each move heard once and in order: the page may hear one as it opens
+/// before `start` has said where it was. While the device isn't in its network, the window goes where it signs in.
+let heard = -1
+/** @param {Told} told */
+function hear({ seq, session, link }) {
+  if (seq <= heard) return
+  heard = seq
+  if (session.state === "signIn" && link) location.replace(link)
+  else on({ type: "session", session })
 }
+
+dress()
+draw()
+await listen("session", ({ payload }) => hear(payload))
+// Where the window starts: where its device is with its network, as the client says it (`Session`), which it
+// follows from then on. A phone's app hears a tap on a notification through its push plugin.
+const { taps, ...told } = await invoke("start")
+phone = Boolean(taps)
+hear(told)
+invoke("visible", { onScreen: !document.hidden }).catch(() => {})
+if (taps) hearTaps()

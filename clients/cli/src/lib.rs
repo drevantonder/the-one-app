@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
-use client::{Client, DeviceAuthorization, InputResolver};
+use client::{Client, InputResolver, NotApproved, Session};
 use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
@@ -73,16 +73,8 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     if args.first().is_some_and(|word| word == "restore") {
         return Ok(printed(backups_client::restore(&args[1..]).await?));
     }
-    // A device that isn't in its network yet says its code and where it's let in, and carries on once it is.
-    let client = match Client::open(client::home()?, resolvers()).await {
-        Err(error) if error.is::<DeviceAuthorization>() => {
-            let not_in = error.downcast::<DeviceAuthorization>()?;
-            eprintln!("{not_in}");
-            not_in.wait_for_approval().await?;
-            Client::open(client::home()?, resolvers()).await?
-        }
-        opened => opened?,
-    };
+    let client = Client::open(client::home()?, resolvers()).await?;
+    signed_in(&client).await?;
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let code = match words.as_slice() {
         ["mcp"] | ["mcp", "--code"] => {
@@ -122,6 +114,23 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     };
     client.close().await;
     Ok(code)
+}
+
+/// Waits until this device is in its network. One that isn't says its code and where it's let in, and carries on
+/// once it is; one whose code was denied or ended, or whose network didn't answer, says so and stops.
+async fn signed_in(client: &Client) -> Result<()> {
+    let mut session = client.session();
+    loop {
+        match &*session.borrow_and_update() {
+            Session::SignedIn => return Ok(()),
+            Session::Opening => {}
+            out @ (Session::Unreachable { .. } | Session::SignIn { why: Some(NotApproved::Denied | NotApproved::Expired), .. }) => {
+                bail!("{out}")
+            }
+            out @ Session::SignIn { .. } => eprintln!("{out}"),
+        }
+        session.changed().await?;
+    }
 }
 
 fn printed(text: String) -> ExitCode {

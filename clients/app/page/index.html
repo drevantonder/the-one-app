@@ -10,16 +10,26 @@
   <script type="module" src="client.js"></script>
 </head>
 <body>
-  <!-- What the window shows from its first paint, until its person's home has drawn over it. -->
-  <img id="opening" src="Logo.png" alt="">
-  <section id="problem" role="alert" hidden>
-    <svg viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg>
-    <strong id="what"></strong>
-    <p id="why"></p>
-    <button id="retry" class="ui-button press ring" data-variant="outline">Try Again</button>
-  </section>
+  <!-- What the window shows of itself, in its middle, over the frames, as the UI library's Steps, Status and Problem
+       draw it (core/ui/src/states.tsx): its mark from its first paint and the steps it takes as it opens, until its
+       person's home has drawn over them; an update under way; or a problem. -->
+  <div id="state" class="ui-state middle">
+    <img id="mark" src="Logo.png" alt="">
+    <ol id="steps" class="steps" role="status"></ol>
+    <div id="status" class="status" role="status" hidden>
+      <span class="ui-spinner" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span>
+      <strong>Updating…</strong>
+      <p id="status-text"></p>
+    </div>
+    <div id="problem" class="problem" role="alert" hidden>
+      <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg>
+      <strong id="problem-heading"></strong>
+      <p id="problem-text"></p>
+      <div id="problem-action" class="action"><button id="retry" class="ui-button press ring" data-variant="outline">Try Again</button></div>
+    </div>
+  </div>
   <div id="passing">
-    <p id="status" role="status" hidden></p>
+    <p id="connection" role="status" hidden><span id="connection-spinner" class="ui-spinner" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span id="connection-text"></span></p>
     <div id="update" class="ui-toast" role="status" hidden>
       <p>Update ready</p>
       <button id="reload" class="press ring">Reload</button>

@@ -1,6 +1,7 @@
-//! The app: a window on One Core in a client (`core/client`). Its own page (`page`) draws nothing of its own but a problem: it
-//! holds the frames. The window always opens there, and asks where it starts (`start`): a device that isn't in its
-//! network yet is sent on to the network's sign-in page, with the code it's let in by, until its person has. Each app is a page of its plugin's, drawn in a frame of its own, which
+//! The app: a window on One Core in a client (`core/client`). Its own page (`page`) draws nothing of its own but its
+//! device's session and what's under way or wrong with it: it holds the frames. The window always opens there, and
+//! follows the client's session (`Session`): a device that isn't in its network is sent on to the network's sign-in
+//! page, with the code it's let in by, until its person has let it in. Each app is a page of its plugin's, drawn in a frame of its own, which
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The launcher
 //! is an app too, the one a network lists in the category `launcher`, which the window shows first and under every other.
 
@@ -11,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use ::client::{Client, DeviceAuthorization, NotApproved, Subscription};
+use ::client::{Client, Session, Subscription};
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
@@ -176,14 +177,15 @@ async fn refresh(views: State<'_, Views>, view: String) -> Result<(), ()> {
     Ok(())
 }
 
-/// This device's key, as its network knows it, the network's address, if it has one, the build it's on, and its
-/// server's key, if it's a server.
+/// This device's key, as its network knows it, the network's address, if it has one, the build it's on and its kind
+/// of machine, as builds are named, and its server's key, if it's a server.
 #[tauri::command]
 fn client(views: State<'_, Views>) -> Value {
     json!({
         "device": views.client.key(),
         "network": views.client.address(),
         "build": ::client::BUILD,
+        "target": ::client::target(),
         "server": cli::serving::server(),
     })
 }
@@ -257,29 +259,50 @@ fn close(views: State<'_, Views>, view: String) {
     views.subscriptions.lock().expect("no view panics").remove(&view);
 }
 
-/// Opens the client again, which couldn't be as the app started, and opens the window again where it starts now.
+/// Asks the network's address again now, which didn't answer, as its person does with Try Again. A client that
+/// couldn't open at all is opened again.
 #[tauri::command]
-async fn enter(app: AppHandle) {
-    let not_in = starts(&app, None).await;
-    home(&app);
-    if let Some(not_in) = not_in {
-        tauri::async_runtime::spawn(await_approval(app, not_in));
+fn retry(app: AppHandle) {
+    match app.try_state::<Views>() {
+        Some(views) => views.client.retry(),
+        None => drop(tauri::async_runtime::spawn(opens(app))),
     }
 }
 
-/// Where the window starts, as its page asks once it has opened, which waits for the client to open: `{}` for its
-/// person's home, `{signIn}` for the link this device is let in by while it's nobody's, or `{unreached}`, what went
-/// wrong as the network's address didn't answer.
+/// Signs this device out once its person has removed it from their devices (Devices' Sign Out): what it kept of
+/// theirs goes, and the window follows it to the sign-in page.
+#[tauri::command]
+async fn sign_out(views: State<'_, Views>) -> Result<(), String> {
+    views.client.sign_out().await.map_err(|error| format!("{error:#}"))
+}
+
+/// Where this device is with its network, as the window's page asks once it has opened (`told`), which waits for
+/// the client to open, and whether a phone hears a tap on a notification, through its push plugin, which the page
+/// listens to. The page follows the session from there (`session`).
 #[tauri::command]
 async fn start(app: AppHandle) -> Result<Value, ()> {
-    let mut opened = app.state::<Start>().0.subscribe();
-    let opened = opened.wait_for(Option::is_some).await.map_err(drop)?.clone();
-    Ok(match opened.expect("it waited for one") {
-        // A phone hears a tap on a notification through its push plugin, which the page listens to.
-        Opened::SignedIn => json!({"taps": cfg!(mobile)}),
-        Opened::SignIn(link) => json!({"signIn": link.as_str()}),
-        Opened::Unreachable(why) => json!({"unreached": why}),
-    })
+    let mut session = app.state::<Start>().0.subscribe();
+    let (seq, session) = session.wait_for(Option::is_some).await.map_err(drop)?.clone().expect("it waited for one");
+    let mut told = told(seq, &session);
+    told["taps"] = json!(cfg!(mobile));
+    Ok(told)
+}
+
+/// What the window's page is told of where this device is now: its session, the session's place in the order the
+/// page hears them in, and while the device is signing in, where the window goes: the network's sign-in page with its
+/// code, told it's in the app (`&app`), which has no passkeys, and why it shows a new code, if it says.
+fn told(seq: u64, session: &Session) -> Value {
+    let link = match session {
+        Session::SignIn { code, why } => code.link.parse::<Url>().ok().map(|mut link| {
+            link.query_pairs_mut().append_key_only("app");
+            if let Some(why) = why {
+                link.query_pairs_mut().append_pair("why", why.why());
+            }
+            link.to_string()
+        }),
+        _ => None,
+    };
+    json!({"seq": seq, "session": session, "link": link})
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
@@ -315,51 +338,39 @@ fn report(views: State<'_, Views>, record: Value) {
     views.client.report(record);
 }
 
-/// Where the window starts, as the client last opened (`starts`): nothing until it first has.
-struct Start(tokio::sync::watch::Sender<Option<Opened>>);
+/// Where this device is with its network, as the window follows it (`follows`), with how many moves it has made:
+/// nothing until the client has opened, and a client that couldn't open at all is `Unreachable`, saying why.
+struct Start(tokio::sync::watch::Sender<Option<(u64, Session)>>);
 
-/// How the client opened: in its network, or not in it yet, or not at all, since the network's address didn't
-/// answer, which says what went wrong. While the device isn't in, the window starts on the link it's let in by,
-/// which is the network's own sign-in page with its code. A web view has no passkeys, so the page is told it's in the
-/// app (`&app`), and shows the code, and its button opens the link in the device's own browser.
-#[derive(Clone)]
-enum Opened {
-    SignedIn,
-    SignIn(Url),
-    Unreachable(String),
-}
-
-/// The home screen, as the window is sent to it. Android's and Windows' web views load only http.
-#[cfg(any(windows, target_os = "android"))]
-const HOME: &str = "http://tauri.localhost/index.html";
-#[cfg(not(any(windows, target_os = "android")))]
-const HOME: &str = "tauri://localhost/index.html";
-
-/// Opens the client and gives the window its views, or if this device isn't in its network yet, gives what lets it
-/// in and the link it's let in by, which says `why` it shows a new code, if it does.
-async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Option<(Url, DeviceAuthorization)>> {
+/// Opens the client, gives the window its views, and has the window follow the client's session from then on
+/// (`follows`). A client that couldn't open at all, as one whose home can't be read, is said as the network not
+/// answering would be, which trying again opens again.
+async fn opens(app: AppHandle) {
     // A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
     // the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
     // when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone::home`).
-    #[cfg(target_os = "android")]
-    let home = app.path().app_data_dir()?;
-    #[cfg(target_os = "ios")]
-    let home =
-        phone::home(&app.path().app_data_dir()?, std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new))?;
-    #[cfg(desktop)]
-    let home = ::client::home()?;
-    let client = match Client::open(home, cli::resolvers()).await {
+    let opened = async {
+        #[cfg(target_os = "android")]
+        let home = app.path().app_data_dir()?;
+        #[cfg(target_os = "ios")]
+        let home = phone::home(
+            &app.path().app_data_dir()?,
+            std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new),
+        )?;
+        #[cfg(desktop)]
+        let home = ::client::home()?;
+        Client::open(home, cli::resolvers()).await
+    };
+    let client = match opened.await {
         Ok(client) => client,
         Err(error) => {
-            let not_in = error.downcast::<DeviceAuthorization>()?;
-            let mut start: Url = not_in.link.parse()?;
-            start.query_pairs_mut().append_key_only("app");
-            if let Some(why) = why {
-                start.query_pairs_mut().append_pair("why", why.why());
-            }
-            return Ok(Some((start, not_in)));
+            eprintln!("{error:#}");
+            let unreachable = Session::Unreachable { why: format!("{error:#}") };
+            app.state::<Start>().0.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), unreachable)));
+            return home(&app);
         }
     };
+    eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
     client.service("app");
     app.manage(Views {
         client: client.clone(),
@@ -403,51 +414,44 @@ async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Op
             }
         }
     });
-    tauri::async_runtime::spawn(async move { client.watch(true).await });
-    Ok(None)
+    client.watch(true).await;
+    follows(app, client).await
 }
 
-/// Opens the client (`entered`) and keeps where the window starts: its person's home, or while this device isn't
-/// in its network, the link it's let in by, with what waits for its person to answer. If the network's address
-/// didn't answer, the home screen says so, told what went wrong, and nothing more.
-async fn starts(app: &AppHandle, why: Option<NotApproved>) -> Option<DeviceAuthorization> {
-    let (opened, not_in) = match entered(app, why).await {
-        Ok(None) => (Opened::SignedIn, None),
-        Ok(Some((link, not_in))) => (Opened::SignIn(link), Some(not_in)),
-        Err(error) => {
-            eprintln!("{error:#}");
-            (Opened::Unreachable(format!("{error:#}")), None)
+/// Has the window follow the client's session as it moves (`Session`). The window's own page draws each state but
+/// one, and hears each move (`session`). The one is signing in, which is the network's own sign-in page with this
+/// device's code: a web view has no passkeys, so the page is told it's in the app (`&app`), and shows the code, and
+/// its button opens the link in the device's own browser. The window goes there from its own page, and is brought
+/// back to its own page once the device has moved on, which asks where it is then.
+async fn follows(app: AppHandle, client: Arc<Client>) {
+    let mut session = client.session();
+    loop {
+        let now = session.borrow_and_update().clone();
+        let seq = app.state::<Start>().0.borrow().as_ref().map_or(0, |(seq, _)| seq + 1);
+        eprintln!("this device's session: {now:?}");
+        let was = app.state::<Start>().0.send_replace(Some((seq, now.clone())));
+        if matches!(was, Some((_, Session::SignIn { .. }))) {
+            home(&app);
+        } else {
+            drop(app.emit("session", told(seq, &now)));
         }
-    };
-    eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
-    app.state::<Start>().0.send_replace(Some(opened));
-    not_in
-}
-
-/// Opens the window again at the home screen, which goes on to where it starts now, in place of where it was: what
-/// it leaves (a code that's been answered, a network that didn't answer) is gone, so the device's own back doesn't
-/// lead there.
-fn home(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
+        if session.changed().await.is_err() {
+            return;
+        }
     }
 }
 
-/// Waits for this device's person to answer, and then the window goes to the home screen once the device is in, or
-/// to a new code if they stopped it or the last one ended.
-async fn await_approval(app: AppHandle, mut not_in: DeviceAuthorization) {
-    loop {
-        let why = match not_in.wait_for_approval().await {
-            Ok(()) => None,
-            Err(error) => {
-                eprintln!("{error:#}");
-                error.downcast_ref::<NotApproved>().copied()
-            }
-        };
-        let next = starts(&app, why).await;
-        home(&app);
-        let Some(next) = next else { return };
-        not_in = next;
+/// The home screen, as the window is sent to it. Android's and Windows' web views load only http.
+#[cfg(any(windows, target_os = "android"))]
+const HOME: &str = "http://tauri.localhost/index.html";
+#[cfg(not(any(windows, target_os = "android")))]
+const HOME: &str = "tauri://localhost/index.html";
+
+/// Opens the window again at its own page, which asks where the device is now, in place of where it was: what it
+/// leaves (a code that's been answered) is gone, so the device's own back doesn't lead there.
+fn home(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
     }
 }
 
@@ -457,8 +461,8 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
     let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())
         || to.host_str().is_some_and(|host| host.ends_with(".localhost"));
     let start = match &*app.state::<Start>().0.borrow() {
-        Some(Opened::SignIn(start)) => {
-            (start.origin(), start.path(), start.query()) == (to.origin(), to.path(), to.query())
+        Some((_, Session::SignIn { code, .. })) => {
+            code.link.parse::<Url>().is_ok_and(|start| (start.origin(), start.path()) == (to.origin(), to.path()))
         }
         _ => false,
     };
@@ -505,16 +509,11 @@ pub fn run() {
         .setup(move |app| {
             app.manage(Start(tokio::sync::watch::Sender::new(None)));
             app.manage(started);
-            // The window opens at home at once, which draws the mark until the client has opened behind it, and
-            // then goes on to where it starts: a device that isn't in its network yet to the page that signs it
+            // The window opens at its own page at once, which draws the mark until the client has opened behind it,
+            // and then follows where the device is: a device that isn't in its network to the page that signs it
             // in. A phone opens the window again at the same address as it's made again (a change of text size),
-            // so that's home too, which asks where to go now.
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Some(not_in) = starts(&handle, None).await {
-                    await_approval(handle, not_in).await
-                }
-            });
+            // so that's home too, which asks where the device is now.
+            tauri::async_runtime::spawn(opens(app.handle().clone()));
             let goes = app.handle().clone();
             let page = HOME.parse().expect("the home screen has an address");
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page))
@@ -556,7 +555,8 @@ pub fn run() {
             update,
             visible,
             close,
-            enter,
+            retry,
+            sign_out,
             start,
             listen,
             tapped,

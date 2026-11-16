@@ -143,12 +143,14 @@ async function doing(does: () => Promise<unknown>) {
 /// Has a server take the latest builds, or this device: `one update`.
 const update = (thing: Thing) => (thing.kind ? client({ update: true }).then(({ message }) => toast(message)) : call("update", { server: thing.id }, { subject: thing.subject }))
 
-/// Takes a device out once its person has said so. Taking this one out is signing out, and the client starts again
-/// where a device that isn't in does. A device that's taken out forgets what it kept of theirs when it's next on.
+/// Takes a device out once its person has said so. Taking this one out is signing out: what it kept of theirs goes,
+/// and the client opens again where a device that isn't in does. Another that's taken out shows its person where to
+/// sign in when it's next on, and keeps what it kept of theirs until someone else signs in on it (`Session` in
+/// core/client).
 async function remove(device: Thing) {
   const question = device.here
     ? { heading: "Sign out of this device?", text: "It stops acting as you, and has to be approved again.", action: "Sign Out" }
-    : { heading: `Remove ${device.name}?`, text: "It stops acting as you at once, and erases what it kept of yours when it's next on.", action: "Remove" }
+    : { heading: `Remove ${device.name}?`, text: "It stops acting as you at once. What it kept of yours is erased if someone else signs in on it.", action: "Remove" }
   if (!(await confirm({ ...question, destructive: true }))) return
   if (await doing(() => call("sign-in_remove_device", { device: device.id })) && device.here) client({ leave: true })
 }

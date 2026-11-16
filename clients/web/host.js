@@ -192,20 +192,21 @@ const NO_KEY = "A browser can't hold your key. Use the app on your phone or comp
 
 /** @type {{ [Command in keyof Commands]?: (...args: Parameters<Commands[Command]>) => ReturnType<Commands[Command]> | Promise<ReturnType<Commands[Command]>> }} */
 const commands = {
-  /// Signed in here, or sent to sign in. A browser keeps nothing of a network's, so with its address not answering
-  /// there's nothing to show.
+  /// Where this browser is with its network, as the app's client says a device's session (`Session` in core/client):
+  /// signed in here, or sent to sign in. A browser keeps nothing of a network's, so with its address not answering
+  /// there's nothing to show, and trying again opens the page again. It's told once, so it's the first in order.
   async start() {
     let response
     try {
       response = await fetch("/apps")
     } catch {
-      return { unreached: "Your network's address didn't answer" }
+      return { seq: 0, session: { state: "unreachable", why: "Your network's address didn't answer" } }
     }
-    if (response.status === 401) return { signIn: await signIn() }
-    if (!response.ok) return { unreached: `Your network's address answered ${response.status}` }
+    if (response.status === 401) return { seq: 0, session: { state: "signIn" }, link: await signIn() }
+    if (!response.ok) return { seq: 0, session: { state: "unreachable", why: `Your network's address answered ${response.status}` } }
     ;({ apps, device } = await response.json())
     sendReports()
-    return {}
+    return { seq: 0, session: { state: "signedIn" } }
   },
   /// The files a server lists for `subject`, and the open apps that are out of date.
   async apps({ subject }) {
@@ -232,7 +233,8 @@ const commands = {
     if (!sent.ok) throw new Error("The file couldn't be sent. Try again.")
     return { upload: to.upload }
   },
-  enter: () => location.reload(),
+  retry: () => location.reload(),
+  sign_out: () => location.reload(),
   serve: cannot("A browser can't be a server. Make your phone or computer one in its app."),
   update: cannot("A browser has the latest each time it opens."),
   recovery_key: cannot(NO_KEY),

@@ -186,32 +186,97 @@ impl AuthorizationServer {
     }
 }
 
-/// Why a client that knows its network isn't in it: its device is nobody's there yet. It has asked the network's
-/// authorization server for a code to be let in by, as RFC 8628 has it, naming its key as its `client_id` and
-/// signing what it asks with it, so the code is only ever for this key.
-#[derive(Debug)]
+/// Where a device is with its network, from when its client opens: what every client shows, the app's window a
+/// page for each and the CLI and MCP a line. It moves only as `moves_to` says, and only by its client's own steps
+/// (`sessions`, `Client::admit`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum Session {
+    /// Asking its network's address for its token, or for a code to be let in by.
+    Opening,
+    /// In its network: it asks its servers, as whoever it signed in as.
+    SignedIn,
+    /// Not in its network: it never was, or its network's address says it was taken out since, which a server's
+    /// word alone never decides. It shows `code`, and is in once its person approves it where they sign in. What it
+    /// kept stays until someone else signs in on it (`NetworkConfig::store_token`). `why` says why it's out, if
+    /// it says: its last code was denied or expired, or it was removed.
+    SignIn { code: DeviceAuthorization, why: Option<NotApproved> },
+    /// Its network's address didn't answer, and it has no token to carry on with, so it can't say which. It asks
+    /// again by itself, sooner at first and then less often, and at once when its person tries again (`retry`).
+    Unreachable { why: String },
+}
+
+impl Session {
+    /// Whether a device in this state moves to `next`: the only moves there are.
+    fn moves_to(&self, next: &Session) -> bool {
+        use Session::*;
+        matches!(
+            (self, next),
+            // It's given its token, or a code to be let in by, or its network's address didn't answer.
+            (Opening, SignedIn | SignIn { .. } | Unreachable { .. })
+            // Its network's address says it's nobody's now, or its person signed out on it.
+            | (SignedIn, SignIn { .. } | Opening)
+            // Its person approved it, or its code was denied or expired, which it asks about again.
+            | (SignIn { .. }, Opening)
+            // It tries again.
+            | (Unreachable { .. }, Opening)
+        )
+    }
+}
+
+impl std::fmt::Display for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Opening => f.write_str("Opening…"),
+            Self::SignedIn => f.write_str("Signed in."),
+            Self::SignIn { code, why: Some(NotApproved::Removed) } => {
+                write!(f, "This device was removed from your network. Open this where you sign in, and check it shows {}:\n{}", code.code, code.link)
+            }
+            Self::SignIn { code, why } => {
+                let why = why.map(|why| format!("{why} ")).unwrap_or_default();
+                write!(f, "{why}This device isn't in your network yet. Open this where you sign in, and check it shows {}:\n{}", code.code, code.link)
+            }
+            Self::Unreachable { why } => write!(f, "Can't reach your network. {why}"),
+        }
+    }
+}
+
+/// A code a device that isn't in its network is let in by, as the network's authorization server gave it (RFC 8628),
+/// which it asked for naming its key as its `client_id` and signing what it asked with it, so the code is only ever
+/// for this key. A device's person sees the `link` and `code`, and nothing else of it is said anywhere.
+#[derive(Clone, Serialize)]
 pub struct DeviceAuthorization {
     /// Where its person lets it in: a page at the network's address, carrying the code.
     pub link: String,
     /// The code, as it's shown: WDJB-MJHT.
     pub code: String,
     /// Where it asks for its answer.
+    #[serde(skip)]
     token_endpoint: String,
+    #[serde(skip)]
     key: SecretKey,
     /// What the device asks for its answer with, which only it was given.
+    #[serde(skip)]
     device_code: String,
     /// How long it waits between asks.
+    #[serde(skip)]
     interval: Duration,
+    /// When the code ends, as the authorization server said.
+    #[serde(skip)]
+    expires: Instant,
 }
 
-impl std::fmt::Display for DeviceAuthorization {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let how = "This device isn't in your network yet. Open this where you sign in, and check it shows";
-        write!(f, "{how} {}:\n{}", self.code, self.link)
+impl PartialEq for DeviceAuthorization {
+    fn eq(&self, other: &Self) -> bool {
+        self.device_code == other.device_code
     }
 }
 
-impl std::error::Error for DeviceAuthorization {}
+impl std::fmt::Debug for DeviceAuthorization {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeviceAuthorization").field("link", &self.link).field("code", &self.code).finish_non_exhaustive()
+    }
+}
 
 impl DeviceAuthorization {
     /// Asks the network's authorization server for a code to let the device with `key` in by, under this
@@ -235,27 +300,34 @@ impl DeviceAuthorization {
             key: key.clone(),
             device_code: device_code.to_owned(),
             interval: Duration::from_secs(response["interval"].as_u64().unwrap_or(5)),
+            expires: Instant::now() + Duration::from_secs(response["expires_in"].as_u64().unwrap_or(30 * 60)),
         })
     }
 
-    /// Waits for this device's person to answer, asking the network's authorization server as often as it allows. It's an
-    /// error if they stopped it, or its code ended first.
-    pub async fn wait_for_approval(mut self) -> Result<()> {
+    /// Waits for this device's person to answer, asking the network's authorization server as often as it allows,
+    /// and again after an ask that wasn't answered, as a phone that's offline for a moment asks: `Ok` once they
+    /// approved it, or why it isn't, if they stopped it or its code ended first.
+    async fn wait_for_approval(&self) -> Result<(), NotApproved> {
+        let mut interval = self.interval;
         loop {
-            sleep(self.interval).await;
+            sleep(interval).await;
+            if Instant::now() > self.expires {
+                return Err(NotApproved::Expired);
+            }
             let ask = serde_urlencoded::to_string([
                 ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
                 ("device_code", &self.device_code),
                 ("client_id", &self.key.public().to_string()),
-            ])?;
-            let (given, response) = ask_edge(&self.token_endpoint, &self.key, FORM, ask).await?;
+            ])
+            .expect("a form of strings is one");
+            let Ok((given, response)) = ask_edge(&self.token_endpoint, &self.key, FORM, ask).await else { continue };
             match response["error"].as_str() {
                 _ if given => return Ok(()),
-                Some("authorization_pending") => {}
-                Some("slow_down") => self.interval += Duration::from_secs(5),
-                Some("access_denied") => bail!(NotApproved::Denied),
-                Some("expired_token") => bail!(NotApproved::Expired),
-                _ => bail!("{}", response["error_description"].as_str().unwrap_or("the network's edge didn't answer")),
+                Some("slow_down") => interval += Duration::from_secs(5),
+                Some("access_denied") => return Err(NotApproved::Denied),
+                Some("expired_token") => return Err(NotApproved::Expired),
+                // Still waiting, or an answer that isn't one, which is asked again.
+                _ => {}
             }
         }
     }
@@ -338,12 +410,15 @@ pub fn name() -> String {
     named().unwrap_or_else(|_| "An Android phone".to_owned())
 }
 
-/// Why a device's person didn't let it in: they stopped it where they signed in, or its code ended first. The app
-/// says it on the sign-in page it shows the next code on, told it as `why`, in these same words.
-#[derive(Debug, Clone, Copy)]
+/// Why a device isn't in its network now, where it says: its person stopped it where they signed in, its code ended
+/// first, or it was in and was removed since. The app says it on the sign-in page it shows the next code on, told it
+/// as `why`, in these same words (`plugins/sign-in/edge/page`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NotApproved {
     Denied,
     Expired,
+    Removed,
 }
 
 impl NotApproved {
@@ -352,6 +427,7 @@ impl NotApproved {
         match self {
             Self::Denied => "denied",
             Self::Expired => "expired",
+            Self::Removed => "removed",
         }
     }
 }
@@ -361,6 +437,7 @@ impl std::fmt::Display for NotApproved {
         f.write_str(match self {
             Self::Denied => "It was denied where you signed in.",
             Self::Expired => "Its code expired before it was approved. Try again.",
+            Self::Removed => "This device was removed from your network.",
         })
     }
 }
@@ -383,6 +460,11 @@ async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) 
 }
 
 impl NetworkConfig {
+    /// What a client of the network at `address` keeps before it has joined it.
+    fn at(address: &str) -> Self {
+        Self { address: address.to_owned(), authorization_server: None, token: None, who: None, build: None }
+    }
+
     /// What's kept in `home`, if it's there whole.
     fn read(home: &Path) -> Option<Self> {
         serde_json::from_slice(&fs::read(home.join("network")).ok()?).ok()
@@ -402,31 +484,37 @@ impl NetworkConfig {
     }
 
     /// Asks the network's edge for this device's token, signed with its key, and keeps it in `home` with whose
-    /// device it is (`took`). A device that's nobody's there asks for a code to be let in by, and keeps nothing of
-    /// whoever's it was: the next person on it sees none of it.
-    async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<()> {
+    /// device it is (`store_token`). Gives whether the device is someone's. One that's nobody's drops its token,
+    /// which nothing takes now, and keeps whose it was and what it kept for them: the edge's word alone takes
+    /// nothing else from it, and what it kept goes only once someone else signs in on it.
+    async fn admit(&mut self, key: &SecretKey, home: &Path) -> Result<bool> {
         let ask = json!({"jsonrpc": "2.0", "id": 1, "method": "one/token", "params": {"build": device_info()}});
         let mcp = format!("{}/mcp", self.address.trim_end_matches('/'));
         let (_, response) = ask_edge(&mcp, key, "application/json", ask.to_string()).await?;
         if response["error"]["code"] == NOBODY {
-            if self.who.is_some() {
-                (self.token, self.who) = (None, None);
-                self.keep(home)?;
+            if self.token.take().is_some() {
+                write(&home.join("network"), &serde_json::to_vec(self)?)?;
             }
-            let server = match self.authorization_server.clone() {
-                Some(server) => server,
-                None => AuthorizationServer::discovered(&self.address).await?,
-            };
-            let requested = DeviceAuthorization::request(&server, key).await;
-            // What it found is kept for the next time, and what didn't answer is looked for again then.
-            self.authorization_server = requested.is_ok().then_some(server);
-            write(&home.join("network"), &serde_json::to_vec(self)?)?;
-            bail!(requested?)
+            return Ok(false);
         }
         if response["result"].is_null() {
             bail!("{}", response["error"]["message"].as_str().unwrap_or("the network's edge gave this device no token"))
         }
-        self.store_token(&response["result"], home)
+        self.store_token(&response["result"], home)?;
+        Ok(true)
+    }
+
+    /// Asks the network's authorization server for a code this device is let in by, signed with its key.
+    async fn device_code(&mut self, key: &SecretKey, home: &Path) -> Result<DeviceAuthorization> {
+        let server = match self.authorization_server.clone() {
+            Some(server) => server,
+            None => AuthorizationServer::discovered(&self.address).await?,
+        };
+        let requested = DeviceAuthorization::request(&server, key).await;
+        // What it found is kept for the next time, and what didn't answer is looked for again then.
+        self.authorization_server = requested.is_ok().then_some(server);
+        write(&home.join("network"), &serde_json::to_vec(self)?)?;
+        requested
     }
 
     /// Keeps a token this device was given, `{token, who}`, in `home`. Once the device is someone else's, what it kept
@@ -739,7 +827,16 @@ struct Reach {
 pub struct Client {
     home: PathBuf,
     key: SecretKey,
-    /// Its endpoint, its network and whose device it is, which are made again with each new token (`renew`).
+    /// Its network's address, if it has one: a network on one machine has none.
+    address: Option<String>,
+    /// Where its device is with its network, which only `moved` changes.
+    session: watch::Sender<Session>,
+    /// One ask of the network's address for this device's token at a time (`admit`), however many find at once that
+    /// it may be nobody's.
+    admitting: Mutex<()>,
+    /// Said by its person trying again, so a network that didn't answer is asked now rather than when it next would.
+    again: Arc<tokio::sync::Notify>,
+    /// Its endpoint, its network and whose device it is, which are made again with each new token (`relink`).
     link: std::sync::RwLock<Link>,
     reach: Mutex<Reach>,
     notifications: broadcast::Sender<Value>,
@@ -801,6 +898,8 @@ impl Link {
 
 impl Client {
     /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do.
+    /// It opens whether or not its device is in its network: where that is, is its `session`, which it moves on by
+    /// itself from here (`sessions`). Only a home it can't read is an error.
     pub async fn open(home: impl Into<PathBuf>, resolvers: Vec<Arc<dyn InputResolver>>) -> Result<Arc<Self>> {
         let home = home.into();
         let config = match fs::read(home.join("network")) {
@@ -808,111 +907,165 @@ impl Client {
                 Some(serde_json::from_slice::<NetworkConfig>(&network).context("`network` isn't a network's address")?)
             }
             // An app built for one network knows its address.
-            Err(error) if error.kind() == ErrorKind::NotFound => BUILT_FOR.map(|address| NetworkConfig {
-                address: address.to_owned(),
-                authorization_server: None,
-                token: None,
-                who: None,
-                build: None,
-            }),
+            Err(error) if error.kind() == ErrorKind::NotFound => BUILT_FOR.map(NetworkConfig::at),
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
-        // A device with no token yet asks for one at the network's address, and while it's nobody's, for a code to
-        // be let in by.
         let key = key(&home.join("key"))?;
-        // A device that's a new build since it last got its token gets its next one now, which says so.
-        let built_same = config.as_ref().is_some_and(|config| config.build.as_deref() == Some(BUILD));
         // What a program of this device was on before is kept with its token: one that's now on another was updated.
         let updated = config.as_ref().and_then(|config| config.build.clone()).filter(|was| was != BUILD);
-        let (network, who) = match config {
-            Some(mut config) => {
-                if config.token.is_none() {
-                    match config.admit(&key, &home).await {
-                        Err(error) if !error.is::<DeviceAuthorization>() => {
-                            let error = error.context(format!("Couldn't join the network at {}", config.address));
-                            let mut record = json!({"name": "one.client.join", "error": format!("{error:#}")});
-                            record["attributes"] = Value::Object(resource());
-                            record["attributes"]["host.name"] = json!(name());
-                            report(&home, &record);
-                            return Err(error);
-                        }
-                        admitted => admitted?,
-                    }
+        // A device with a token is in, and renews it as it goes, but one whose token has ended renews it before
+        // anything is asked with it, as no server takes it, and carries on with it if its network doesn't answer.
+        // One with none asks for one, and while it's nobody's, for a code to be let in by. A network on one machine
+        // has no address, and whatever started it says who this acts as.
+        let (network, who, session) = match &config {
+            None => (None, None, Session::SignedIn),
+            Some(config) => match &config.token {
+                Some(token) => {
+                    let network = Network { address: config.address.clone(), token: token.clone() };
+                    let session = if config.ends() > SystemTime::now() { Session::SignedIn } else { Session::Opening };
+                    (Some(network), config.who.clone(), session)
                 }
-                let token = config.token.context("this device has no token")?;
-                (Some(Network { address: config.address, token }), config.who)
-            }
-            None => (None, None),
+                None => (None, None, Session::Opening),
+            },
         };
         let link = Link::run(&key, network, who).await?;
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("subject", "ONE_SUBJECT")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
         let notifications = broadcast::channel(16).0;
         accept(link.endpoint.clone(), notifications.clone());
-        let renews = link.network.is_some();
         let link = std::sync::RwLock::new(link);
         let (watching, connected) = (AtomicBool::new(false), watch::Sender::new(true));
         let listed = std::sync::Mutex::default();
         let reach = Mutex::default();
         let resource = Arc::new(std::sync::RwLock::new(resource()));
         let reporting = AtomicBool::new(home.join(REPORTS).exists());
+        let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
-            home, key, link, reach, notifications, says, watching, connected, resolvers, listed, resource,
-            reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(), me: me.clone(),
-            runtime: tokio::runtime::Handle::current(),
+            home, key, address, session: watch::Sender::new(session), admitting: Mutex::default(),
+            again: Arc::default(), link, reach, notifications, says, watching, connected, resolvers,
+            listed, resource, reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
+            me: me.clone(), runtime: tokio::runtime::Handle::current(),
         });
         client.panics();
         if let Some(was) = updated {
             client.report(json!({"name": "one.client.updated", "attributes": {"one.build.previous": was}}));
         }
-        // A token that's about to end is renewed before anything is asked with it, and so is one a new build hasn't
-        // renewed yet, and the next while this runs.
-        if renews {
-            let left = match client.network().left() {
-                left if !left.is_zero() && built_same => left,
-                _ => match client.renew().await {
-                    Err(error) if error.is::<DeviceAuthorization>() => return Err(error),
-                    renewed => renewed.unwrap_or(AGAIN),
-                },
-            };
-            tokio::spawn(renewing(Arc::downgrade(&client), left));
-        }
+        tokio::spawn(sessions(Arc::downgrade(&client)));
         tokio::spawn(reconnecting(Arc::downgrade(&client)));
         Ok(client)
     }
 
-    /// What this client keeps of its network, as it is now.
-    fn network(&self) -> NetworkConfig {
-        let Link { network, who, .. } = self.link();
-        let network = network.expect("only a client of a network with an address has a token");
-        let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
-        NetworkConfig {
-            address: network.address,
-            authorization_server,
-            token: Some(network.token),
-            who,
-            build: Some(BUILD.to_owned()),
-        }
+    /// Where this device is with its network, as that changes.
+    pub fn session(&self) -> watch::Receiver<Session> {
+        self.session.subscribe()
     }
 
-    /// Asks for this device's next token, and makes the run's endpoint again to show it, since iroh shows a relay the
-    /// token an endpoint was made with. The new one has a key of its own too, as the old one is still there. A server
-    /// gives a token to a device that's someone's. One that can't be reached, as where the token this has ended, is
-    /// asked at the network's address, which says where its person signs in for a device that's nobody's now. The
-    /// old endpoint goes once its token ends, so what was asked over it finishes, and what's asked from now on is
-    /// asked from the new one, whose run the device now attests to. Gives how long the new token lasts before it's
-    /// renewed.
-    async fn renew(&self) -> Result<Duration> {
-        let mut config = self.network();
+    /// Moves this device's session to `next`, if that's a move there is from where it is (`Session::moves_to`).
+    /// Gives whether it moved.
+    fn moved(&self, next: Session) -> bool {
+        self.session.send_if_modified(|now| {
+            let moves = now.moves_to(&next);
+            if moves {
+                *now = next;
+            }
+            moves
+        })
+    }
+
+    /// Asks its network's address again now, where it didn't answer, as its person does by trying again.
+    pub fn retry(&self) {
+        self.again.notify_one();
+    }
+
+    /// Signs this device out, as its person does once they've removed it from their devices: what it kept of
+    /// theirs goes now, as it would for someone else signing in on it, and it opens again as a device that isn't in.
+    pub async fn sign_out(&self) -> Result<()> {
+        let _one = self.admitting.lock().await;
+        let mut config = self.config().context("A device signs out of a network with an address")?;
+        (config.token, config.who) = (None, None);
+        config.keep(&self.home)?;
+        self.moved(Session::Opening);
+        Ok(())
+    }
+
+    /// What this client keeps of its network, as it is now in its home, where every client of the device keeps
+    /// it: nothing for a network on one machine.
+    fn config(&self) -> Option<NetworkConfig> {
+        let address = self.address.as_deref()?;
+        Some(NetworkConfig::read(&self.home).unwrap_or_else(|| NetworkConfig::at(address)))
+    }
+
+    /// Asks its network's address for this device's token, one ask at a time, while its session is still `from`,
+    /// and moves the session on by what that says (`Session::moves_to`): in, with the token, out, with a code to be
+    /// let in by, or, for a device that has no token to carry on with, unreachable. Only the address says a device
+    /// is nobody's, never a server alone, and an address that doesn't answer takes nothing from one that's in. `why`
+    /// is why it asks for a new code, if it does: its last one was denied or expired. Gives how long until it asks
+    /// again, while it's in.
+    async fn admit(&self, from: &Session, why: Option<NotApproved>) -> Duration {
+        let _one = self.admitting.lock().await;
+        let Some(mut config) = self.config().filter(|_| *self.session.borrow() == *from) else { return AGAIN };
+        let failed = match config.admit(&self.key, &self.home).await {
+            Ok(true) => match self.relink(&config).await {
+                Ok(()) => {
+                    self.moved(Session::SignedIn);
+                    self.rewatch().await;
+                    return config.left();
+                }
+                Err(error) => error,
+            },
+            Ok(false) => {
+                let removed = config.who.is_some().then_some(NotApproved::Removed);
+                match config.device_code(&self.key, &self.home).await {
+                    Ok(code) => {
+                        self.moved(Session::SignIn { code, why: why.or(removed) });
+                        return AGAIN;
+                    }
+                    Err(error) => error,
+                }
+            }
+            Err(error) => error,
+        };
+        let failed = failed.context(format!("Couldn't join the network at {}", config.address));
+        // A device that's in carries on with the token it has, and asks again soon.
+        if *from == Session::SignedIn || config.token.is_some() {
+            self.moved(Session::SignedIn);
+        } else {
+            self.report(json!({"name": "one.client.join", "error": format!("{failed:#}")}));
+            self.moved(Session::Unreachable { why: format!("{failed:#}") });
+        }
+        AGAIN
+    }
+
+    /// Asks for this device's next token while it's in. A server gives one to a device that's someone's. One that
+    /// can't be reached, as where the token this has ended, is asked at the network's address, which also says
+    /// whether the device is nobody's now (`admit`). Gives how long until it asks again.
+    async fn renew(&self) -> Duration {
+        let Some(mut config) = self.config() else { return AGAIN };
         // No server takes a token that has ended, so that's asked at the address straight away.
         let given = match config.ends() > SystemTime::now() {
             true => self.request("one/token", json!({"build": device_info()})).await.ok(),
             false => None,
         };
-        match given {
-            Some(given) => config.store_token(&given, &self.home)?,
-            None => config.admit(&self.key, &self.home).await?,
+        let Some(given) = given else { return self.admit(&Session::SignedIn, None).await };
+        let _one = self.admitting.lock().await;
+        let renewed = async {
+            config.store_token(&given, &self.home)?;
+            self.relink(&config).await
+        };
+        match renewed.await {
+            Ok(()) => {
+                self.rewatch().await;
+                config.left()
+            }
+            Err(_) => AGAIN,
         }
+    }
+
+    /// Makes the run's endpoint again to show the token `config` now has, since iroh shows a relay the token an
+    /// endpoint was made with. The new one has a key of its own too, as the old one is still there. The old endpoint
+    /// goes once its token ends, so what was asked over it finishes, and what's asked from now on is asked from the
+    /// new one, whose run the device now attests to.
+    async fn relink(&self, config: &NetworkConfig) -> Result<()> {
         let token = config.token.clone().context("this device was given no token")?;
         let network = Network { address: config.address.clone(), token };
         let new = Link::run(&self.key, Some(network), config.who.clone()).await?;
@@ -923,15 +1076,21 @@ impl Client {
             sleep(RENEW).await;
             old.endpoint.close().await
         });
-        // Servers reach this run where it now is.
+        Ok(())
+    }
+
+    /// Says again that this client is watching, if it is, as servers reach it where its run now is (`relink`).
+    async fn rewatch(&self) {
         if self.watching.load(Ordering::Relaxed) {
             self.watch(true).await;
         }
-        Ok(config.left())
     }
 
-    /// Whose device this is, once it's someone's: the user it signed in as.
+    /// Whose device this is, while it's in its network: the user it signed in as.
     pub fn who(&self) -> Option<String> {
+        if *self.session.borrow() != Session::SignedIn {
+            return None;
+        }
         self.link().who
     }
 
@@ -948,7 +1107,7 @@ impl Client {
 
     /// The network's address, if it has one.
     pub fn address(&self) -> Option<String> {
-        self.link().network.map(|network| network.address)
+        self.address.clone()
     }
 
     fn link(&self) -> Link {
@@ -965,9 +1124,12 @@ impl Client {
     /// its user. While it is, each tells it when something changed, and keeps telling it once it starts again. A
     /// server that isn't up now is told when it's next asked anything, and one that isn't told the app has gone
     /// finds out when it next has something to say. It's said again where a server may not know it: from this run's
-    /// next endpoint (`renew`), and once a server answers again after none did, as one that's new may not have heard.
+    /// next endpoint (`relink`), and once a server answers again after none did, as one that's new may not have heard.
     pub async fn watch(&self, watching: bool) {
         self.watching.store(watching, Ordering::Relaxed);
+        if *self.session.borrow() != Session::SignedIn {
+            return;
+        }
         let Ok(Some(servers)) = self.servers(false).await else { return };
         let watches = servers.into_iter().map(|server| async move {
             if let Some(open) = self.connect(server).await
@@ -1009,6 +1171,12 @@ impl Client {
     /// as MCP's progress notifications. A request is asked for them with a `progressToken` of its own where it
     /// carries none, since they're what keeps a long one from being taken for a server that went away.
     pub async fn ask_notified(&self, message: &[u8], notified: impl Fn(&[u8])) -> Result<Vec<u8>> {
+        // Only a device that's in asks its servers. One that's opening is asked once it's in or isn't.
+        let mut session = self.session.subscribe();
+        match &*session.wait_for(|session| *session != Session::Opening).await? {
+            Session::SignedIn => {}
+            out => bail!("{out}"),
+        }
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
         let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<Value>) =
@@ -1087,22 +1255,19 @@ impl Client {
     }
 
     /// What a server answered, unless it says this device is nobody's: one that was taken out of its network since
-    /// it got its token. Then the answer says where its person lets it in again, as the network's edge says it.
+    /// it got its token. A server alone may be wrong, so its network's address is asked (`admit`), and only if it
+    /// says so too is the device out, and the answer says where its person lets it in again.
     async fn taken_out(&self, bytes: Vec<u8>) -> Vec<u8> {
-        let (Some(network), Ok(mut response)) = (self.link().network, serde_json::from_slice::<Value>(&bytes)) else {
-            return bytes;
-        };
-        if response["error"]["code"] != NOBODY {
+        let Ok(mut response) = serde_json::from_slice::<Value>(&bytes) else { return bytes };
+        if response["error"]["code"] != NOBODY || self.address.is_none() {
             return bytes;
         }
-        let authorization_server = NetworkConfig::read(&self.home).and_then(|config| config.authorization_server);
-        let mut config =
-            NetworkConfig { address: network.address, authorization_server, token: None, who: self.link().who, build: None };
-        let admitted = config.admit(&self.key, &self.home).await;
-        match admitted.as_ref().map_err(|error| error.downcast_ref::<DeviceAuthorization>()) {
-            Err(Some(not_in)) => response["error"]["message"] = json!(not_in.to_string()),
-            _ => return bytes,
+        self.admit(&Session::SignedIn, None).await;
+        let session = self.session.borrow().clone();
+        if !matches!(session, Session::SignIn { .. }) {
+            return bytes;
         }
+        response["error"]["message"] = json!(session.to_string());
         response.to_string().into_bytes()
     }
 
@@ -1486,18 +1651,71 @@ fn accept(endpoint: Endpoint, notifications: broadcast::Sender<Value>) {
     });
 }
 
-/// Keeps a device's token fresh while its client runs: once `left` has passed, the next is asked for (`renew`). One
-/// that can't be asked for, as on a device that's offline, is asked for again a minute later, and a device that's
-/// nobody's now has none to renew.
-async fn renewing(client: std::sync::Weak<Client>, mut left: Duration) {
+/// Moves a device's session on (`Session`), for as long as its client is open: asks for its token while it's
+/// opening, renews it while it's in, waits for its person to approve it while it shows a code, and asks its
+/// network's address again while that doesn't answer. A server saying the device is nobody's asks the address too
+/// (`Client::taken_out`), through the same `admit`.
+async fn sessions(client: std::sync::Weak<Client>) {
+    // Why it asks for a new code, when it does: its last one was denied or expired.
+    let mut why = None;
+    // How long until it renews its token, while it's in.
+    let mut renews = None;
+    // How long until it asks again, while its network doesn't answer.
+    let mut again = Duration::from_secs(1);
     loop {
-        sleep(left).await;
-        let Some(client) = client.upgrade() else { return };
-        left = match client.renew().await {
-            Ok(left) => left,
-            Err(error) if error.is::<DeviceAuthorization>() => return,
-            Err(_) => AGAIN,
-        };
+        let Some(open) = client.upgrade() else { return };
+        let mut session = open.session.subscribe();
+        let now = session.borrow_and_update().clone();
+        match &now {
+            Session::Opening => {
+                renews = Some(open.admit(&now, why.take()).await);
+                continue;
+            }
+            Session::SignedIn => {
+                again = Duration::from_secs(1);
+                // A network on one machine has no token to renew. One a new build hasn't renewed yet is renewed now,
+                // which says so.
+                let Some(config) = open.config() else {
+                    drop(open);
+                    if session.changed().await.is_err() {
+                        return;
+                    }
+                    continue;
+                };
+                let built_same = config.build.as_deref() == Some(BUILD);
+                let left = renews.take().unwrap_or_else(|| if built_same { config.left() } else { Duration::ZERO });
+                drop(open);
+                tokio::select! {
+                    _ = sleep(left) => {}
+                    changed = session.changed() => if changed.is_err() { return } else { continue },
+                }
+                let Some(open) = client.upgrade() else { return };
+                renews = Some(open.renew().await);
+            }
+            Session::SignIn { code, .. } => {
+                again = Duration::from_secs(1);
+                drop(open);
+                let answered = tokio::select! {
+                    answered = code.wait_for_approval() => answered,
+                    changed = session.changed() => if changed.is_err() { return } else { continue },
+                };
+                let Some(open) = client.upgrade() else { return };
+                why = answered.err();
+                open.moved(Session::Opening);
+            }
+            Session::Unreachable { .. } => {
+                let tried = open.again.clone();
+                drop(open);
+                tokio::select! {
+                    _ = sleep(again) => {}
+                    _ = tried.notified() => {}
+                    changed = session.changed() => if changed.is_err() { return } else { continue },
+                }
+                again = (again * 2).min(Duration::from_secs(30));
+                let Some(open) = client.upgrade() else { return };
+                open.moved(Session::Opening);
+            }
+        }
     }
 }
 
