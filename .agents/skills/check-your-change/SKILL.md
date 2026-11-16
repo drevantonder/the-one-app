@@ -1,6 +1,6 @@
 ---
 name: check-your-change
-description: Use before you commit a change, to choose the cheapest check that shows it works, and to know whether it needs one of the repo's six kept tests.
+description: Use before you commit a change, to choose the cheapest check that shows it works, and to know whether it needs one of the repo's seven kept tests.
 ---
 
 Check your work with a throwaway test and don't commit it. Pick the cheapest thing that shows the change works:
@@ -23,9 +23,10 @@ say what they do and how to run them.
 | `core/server/test/failover.sh` | a database outlives the server writing it | the database plugin, leases, servers taking over |
 | `core/server/test/install.sh` | how releases are built, installed and updated | `tooling/release`, `one serve`, `one update`, the server's release (about 15 min) |
 | `clients/app/test/isolation.sh` | what a plugin's app may reach in the real app | the app's bridge, its web view, `clients/app/` |
+| `plugins/sign-in/test/devices.sh` | what a device keeps as it's let in, taken out and let in again | signing in, a device's token or session (`core/client`), the sign-in plugin's edge |
 
 Once `cargo build --release` has run, `failover.sh` takes about 30 s and `isolation.sh` about 10 s here. `who.sh`,
-`vault.sh` and `backups.sh` each start a whole network with `tooling/network`, so minutes; `install.sh` about 15. Run `install.sh` on its own: it builds into the repo's shared `target/`, which makes a test running beside it rebuild everything and time out.
+`vault.sh`, `backups.sh` and `devices.sh` each start a whole network with `tooling/network`, so minutes; `install.sh` about 15. Run `install.sh` on its own: it builds into the repo's shared `target/`, which makes a test running beside it rebuild everything and time out.
 
 ## Mistakes already made
 
