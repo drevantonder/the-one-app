@@ -22,6 +22,9 @@ while it runs stops you there: nothing updates the servers afterwards.
 
 A plugin change that uses something new in `core/server/` (often in the same commit) waits for the server release:
 deploy it once every server is on that build, since a server on the old build refuses or breaks it.
+The other way round too: a server change that a live plugin depends on (a field it reads, a call it makes) ships
+with that plugin's new version in the same step, the first server's update and the plugin's deploy back to back, or
+the plugin breaks for whoever uses it meanwhile. A plugin someone deployed by hand isn't redeployed by the server.
 
 On a device that is also a server, `one update` asks the program keeping that server running (`one serve run`) to
 take the latest builds, the program's among them, and answers before it has. What it did is in that program's log,
