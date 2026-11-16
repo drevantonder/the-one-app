@@ -303,8 +303,14 @@ fn tapped(app: AppHandle, tapped: Value) {
 #[tauri::command]
 fn opened(views: State<'_, Views>, view: String, ms: u32) {
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
-    let client = views.client.clone();
-    tauri::async_runtime::spawn(async move { client.record(&view, ms).await });
+    views.client.report(json!({"name": "one.client.open.duration", "value": ms, "attributes": {"one.view": view}}));
+}
+
+/// Reports what the window's page saw go wrong (`Client::report`): what it showed its person, a page's error, an
+/// app that never drew.
+#[tauri::command]
+fn report(views: State<'_, Views>, record: Value) {
+    views.client.report(record);
 }
 
 /// Where the window starts, as the client last opened (`starts`): nothing until it first has.
@@ -352,6 +358,7 @@ async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Op
             return Ok(Some((start, not_in)));
         }
     };
+    client.service("app");
     app.manage(Views {
         client: client.clone(),
         app: app.clone(),
@@ -526,7 +533,8 @@ pub fn run() {
             start,
             listen,
             tapped,
-            opened
+            opened,
+            report
         ])
         .run(tauri::generate_context!())
         .expect("the app runs");

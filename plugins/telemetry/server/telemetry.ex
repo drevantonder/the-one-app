@@ -110,7 +110,7 @@ defmodule Telemetry do
       %{
         name: "record",
         description:
-          "Records what a plugin's tool call measured, under that call: each a number (value), something that took a while and ended now (took, in milliseconds, with an error if it failed), or else a log line. Names, sizes and outcomes only: never what anyone wrote, was given or answered, and never a secret",
+          "Records what a plugin's tool call measured, under that call: each a number (value), something that took a while and ended now (took, in milliseconds, with an error if it failed), or else a log line, an error if it has one. Names, sizes and outcomes only: never what anyone wrote, was given or answered, and never a secret",
         inputs: %{
           type: "object",
           properties: %{

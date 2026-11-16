@@ -54,9 +54,14 @@ defmodule OneCore.Mcp do
         Server.watch(from, said["params"]["address"])
         ""
 
-      # A client saying how long its apps took to open, and which of its calls failed before a server answered.
-      {:ok, %{"method" => "notifications/one/measured", "params" => %{} = said}} when from != nil ->
-        Hooks.observe("measured", Map.put(said, "device", from), {nil, "network"})
+      # A client saying what it measured of itself, as from the device and person its request proves it is, which
+      # is all that's believed of who said it.
+      {:ok, %{"method" => "notifications/one/measured", "params" => %{} = params}} ->
+        with {:ok, {by, _for}, false} <- User.asking(from, said(params)) do
+          about = %{"records" => List.wrap(params["records"]), "device" => User.device(from, said(params)), "who" => by}
+          Hooks.observe("measured", about, {nil, "network"})
+        end
+
         ""
 
       # The relay at the network's address saying one of its servers came or went.

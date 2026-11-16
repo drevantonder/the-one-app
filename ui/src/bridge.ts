@@ -34,6 +34,13 @@ addEventListener("message", ({ source, data }) => {
 
 const tell = (method: string, params: object = {}) => parent.postMessage({ jsonrpc: "2.0", method, params }, "*")
 
+/// A page's uncaught errors are logged to its client, as an MCP App logs to its host (MCP's `notifications/message`),
+/// which tells Telemetry: the message, and the file and line.
+const logged = (message: unknown, file?: string, line?: number) =>
+  tell("notifications/message", { level: "error", data: { message: String(message), file, line } })
+addEventListener("error", ({ message, filename, lineno }) => logged(message, filename, lineno))
+addEventListener("unhandledrejection", ({ reason }) => logged(reason?.message ?? reason))
+
 const ask = <Result>(method: string, params: object = {}) => new Promise<Result>((answered, refused) => {
   const id = ++asked
   waiting.set(id, ({ result, error }) => {

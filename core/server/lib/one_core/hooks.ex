@@ -113,9 +113,10 @@ defmodule OneCore.Hooks do
      """},
     {"measured", :observe,
      """
-     A client said what it measured of itself. It's heard by the plugins installed for the network, and it's about the `device`'s key, the
-     `client`'s operating system, the views it `opened`, each as its `view` and how many `ms` it took from a tap to
-     its first drawing, and the calls that `failed` before a server answered, each as its `tool` and `why`.
+     A client said what it measured of itself. It's heard by the plugins installed for the network, and it's about the
+     `device`'s key and `who` it's of, as its request proved, and its `records`, each as Telemetry's tool `record`
+     takes one, with the `time` it was made, in milliseconds since 1970, and the client's own say of which it is in
+     its `attributes`: what went wrong or was slow there, kept on the device until a server could be told.
      """},
     {"joined", :observe,
      """

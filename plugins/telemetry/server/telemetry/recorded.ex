@@ -9,11 +9,14 @@ defmodule Telemetry.Recorded do
   - A span for each tool call, from the hook `called`: its plugin, its tool, whose it was as an owner's prefix
     (`users/alice`), how long it took and how it ended. A call passed on is a span on both servers, the one that
     ran it under the one that passed it on.
-  - Numbers, summed and spread as OpenTelemetry's exponential histograms: how long each tool took, how long a
-    client took to open a view (the hook `measured`), and what a plugin records (`record/2`).
-  - Log lines: what a plugin records, calls a client couldn't get answered, and every warning and error said to
-    `Logger` on the server, which Telemetry installed for the network hears. A crash is kept as its exception's banner
-    and never as the state or message it crashed on.
+  - Numbers, summed and spread as OpenTelemetry's exponential histograms: how long each tool took, and what a
+    plugin records (`record/2`) or a client reports.
+  - Log lines: what a plugin records, and every warning and error said to `Logger` on the server, which Telemetry
+    installed for the network hears. A crash is kept as its exception's banner and never as the state or message it
+    crashed on.
+  - What a client reported of itself (the hook `measured`), as records: its requests that failed or were slow, each
+    a span its server's span of it is under, how long no server answered it, how long its views took to open, and
+    its pages' errors and its own crashes.
 
   None of it is inputs, answers, secrets or anything a person wrote: names, sizes, durations and outcomes only.
   """
@@ -61,21 +64,22 @@ defmodule Telemetry.Recorded do
     heard(call, spans: [span], numbers: numbers)
   end
 
-  @doc "What a client measured of itself, as the hook `measured` told it."
-  def measured(call, said) do
-    kind = short(said["client"] || "client", 40)
+  @doc """
+  What a client reported of itself, as the hook `measured` told it: records as `record` takes them, each with the
+  `time` the client made it, which may be well before it could tell a server. Each is the device's and its
+  person's, as the client's request proved, whatever it says of itself.
+  """
+  def measured(call, %{"records" => records, "device" => device, "who" => who}) do
+    proved = %{"one.device" => device, "one.for" => User.owner(who || "") || "link"}
 
-    numbers =
-      for %{"view" => view, "ms" => ms} <- List.wrap(said["opened"]),
-          is_binary(view) and is_number(ms),
-          do: {"one.client.open.duration", %{"one.view" => short(view, 80), "one.client" => kind}, ms}
+    records =
+      for %{"name" => name} = record <- records, is_binary(name), is_map(record["attributes"] || %{}) do
+        attributes = Map.merge(record["attributes"] || %{}, proved)
+        time = if is_integer(record["time"]), do: record["time"] * 1_000_000, else: System.os_time(:nanosecond)
+        %{record | "attributes" => attributes} |> Map.put("time", time)
+      end
 
-    logs =
-      for %{"tool" => tool, "why" => why} <- List.wrap(said["failed"]),
-          is_binary(tool) and is_binary(why),
-          do: log("WARN", "one.client.failed", short(why), %{"one.tool" => short(tool, 80), "one.client" => kind}, nil)
-
-    heard(call, numbers: numbers, logs: logs)
+    heard(call, records(records, %{}))
   end
 
   @doc """
@@ -85,12 +89,25 @@ defmodule Telemetry.Recorded do
   def record(call, records) do
     # The span running here is the call to `record`: what it records is of the call that made it.
     trace = Trace.current() || %{}
-    under = %{"traceId" => trace["traceId"], "spanId" => trace["parentSpanId"]}
     now = System.os_time(:nanosecond)
 
+    heard(
+      call,
+      records(Enum.map(records, &Map.put(&1, "time", now)), %{
+        "traceId" => trace["traceId"],
+        "spanId" => trace["parentSpanId"]
+      })
+    )
+  end
+
+  # Records as spans, numbers and logs, under the span `under`, or each in the trace and span it says it is, as a
+  # client's are.
+  defp records(records, under) do
     {spans, numbers, logs} =
       Enum.reduce(records, {[], [], []}, fn record, {spans, numbers, logs} ->
         attributes = attributes(record["attributes"] || %{})
+        now = record["time"]
+        trace = record["traceId"] || under["traceId"]
 
         case record do
           %{"value" => value} when is_number(value) ->
@@ -98,11 +115,15 @@ defmodule Telemetry.Recorded do
 
           %{"took" => took} when is_number(took) ->
             span = %{
-              "traceId" => under["traceId"] || hex(16),
-              "spanId" => hex(8),
+              "traceId" => if(is_binary(trace) and trace =~ ~r/^[0-9a-f]{32}$/, do: trace, else: hex(16)),
+              "spanId" =>
+                if(is_binary(record["spanId"]) and record["spanId"] =~ ~r/^[0-9a-f]{16}$/,
+                  do: record["spanId"],
+                  else: hex(8)
+                ),
               "parentSpanId" => under["spanId"],
               "name" => short(record["name"]),
-              "kind" => "internal",
+              "kind" => if(record["kind"] == "client", do: "client", else: "internal"),
               "start" => now - round(took * 1_000_000),
               "end" => now,
               "attributes" => attributes,
@@ -115,12 +136,16 @@ defmodule Telemetry.Recorded do
 
             {[span | spans], numbers, logs}
 
+          %{"error" => error} when is_binary(error) ->
+            {spans, numbers,
+             [%{log("ERROR", short(record["name"]), short(error), attributes, under) | "time" => now} | logs]}
+
           _ ->
-            {spans, numbers, [log("INFO", short(record["name"]), nil, attributes, under) | logs]}
+            {spans, numbers, [%{log("INFO", short(record["name"]), nil, attributes, under) | "time" => now} | logs]}
         end
       end)
 
-    heard(call, spans: spans, numbers: numbers, logs: logs)
+    [spans: spans, numbers: numbers, logs: logs]
   end
 
   defp heard(call, heard) do

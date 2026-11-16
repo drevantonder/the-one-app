@@ -11,7 +11,13 @@ anyone wrote, was given or answered. What a server recorded arrives here about a
 - `overview` is what the Telemetry screen in Settings shows: what's failing, what's slowest and what AI cost, over
   the last `hours` (24 if left out, up to 336).
 - `errors` lists each kind of error once: where (a span's name, as `<plugin> <tool>`, or what logged it), its
-  message, how often, when it was last, and the trace of the newest. Start a bug there.
+  message, how often, when it was last, how long it lasted, and the trace of the newest. Start a bug there. What a
+  client reported says which (`from`: "App on Andre's iPhone", "claude-code (MCP) on linux"): its requests that
+  failed or were slow, as MCP names them (`tools/call gmail_search`), whose trace runs on into the server's span;
+  how long no server answered it (`one.client.unanswered`); what its window showed went wrong
+  (`one.client.problem`), an app that never opened (`one.client.open`), a sign-in that failed (`one.client.join`),
+  an app's page's error (`<plugin> page`) and a crash (`exception`). A client keeps them while it can't reach a
+  server, and tells one once it can.
 - `trace` reads one trace whole by its `id`, across every server it went through: each span's depth, server,
   start and duration in milliseconds, outcome, message and events. A call that one server passed to another is
   one trace, the other server's span under the first's.
@@ -32,4 +38,4 @@ anyone wrote, was given or answered. What a server recorded arrives here about a
   what anyone wrote, was given or answered, and never a secret. With a `value` it's a number, summed and spread
   over each minute by its name and attributes and read back with `metric`; with `took`, in milliseconds, it's
   something that ended now, a span under the call, with an `error` if it failed; and otherwise a log line of the
-  call, read in its trace.
+  call, read in its trace, and an error if it has one.

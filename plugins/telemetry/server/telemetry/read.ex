@@ -44,15 +44,25 @@ defmodule Telemetry.Read do
   call was may be shown.
   """
   def errors(batches, shown) do
+    all = Enum.flat_map(batches, & &1["spans"])
+    # A client's request that a server answered with an error is that server's span, said to be from the client.
+    clients = for %{"kind" => "client"} = span <- all, into: %{}, do: {span["traceId"], from(span)}
+    answered = for span <- all, span["kind"] == "server", failed?(span), into: MapSet.new(), do: span["traceId"]
+
     spans =
-      for span <- Enum.flat_map(batches, & &1["spans"]), failed?(span), span["attributes"]["one.forwarded"] != true do
+      for span <- all,
+          failed?(span),
+          span["attributes"]["one.forwarded"] != true,
+          span["kind"] != "client" or not MapSet.member?(answered, span["traceId"]) do
         %{
           where: span["name"],
           message: span["status"]["message"],
           at: ms(span["end"]),
+          took: took(span),
           trace: span["traceId"],
           whose: whose(span, shown),
           server: span["server"],
+          from: from(span) || clients[span["traceId"]],
           span: true
         }
       end
@@ -64,9 +74,11 @@ defmodule Telemetry.Read do
           where: logged(log),
           message: log["body"],
           at: ms(log["time"]),
+          took: nil,
           trace: log["traceId"],
           whose: nil,
           server: log["server"],
+          from: from(log),
           span: false
         }
       end
@@ -81,8 +93,10 @@ defmodule Telemetry.Read do
         message: message,
         count: length(all),
         at: newest.at,
+        took: newest.took,
         trace: newest.trace,
         server: newest.server,
+        from: newest.from,
         whose: newest.whose,
         span: newest.span
       }
@@ -180,7 +194,7 @@ defmodule Telemetry.Read do
             parent: span["parentSpanId"],
             name: span["name"],
             depth: depth.(span),
-            server: span["server"],
+            server: from(span) || span["server"],
             start: ms(span["start"] - began),
             took: took(span),
             outcome: if(failed?(span), do: "error", else: "ok"),
@@ -271,11 +285,30 @@ defmodule Telemetry.Read do
     |> Enum.sort_by(&{&1.day, &1.model}, :desc)
   end
 
-  # Where a log line is from, as a person reads it: a call a device made that no server answered, or the server
-  # that logged it.
-  defp logged(%{"eventName" => "one.client.failed", "attributes" => %{"one.tool" => tool}}), do: "#{tool}, unanswered"
+  # Where a log line is from, as a person reads it: an app's page or a client that failed, or the server that logged
+  # it.
+  defp logged(%{"eventName" => "exception", "attributes" => %{"one.plugin" => plugin}}), do: "#{plugin} page"
+  defp logged(%{"eventName" => name, "attributes" => %{"service.name" => _}}), do: name
   defp logged(%{"severity" => "WARN", "server" => server}), do: "Warning on #{server}"
   defp logged(%{"server" => server}), do: "Error on #{server}"
+
+  @doc """
+  Which client a record is from, as a person reads it, from what the client said of itself: "App on Andre's
+  iPhone", "claude-code (MCP) on linux". `nil` for a server's own.
+  """
+  def from(%{"attributes" => %{"service.name" => service} = said}) do
+    on = if said["host.name"], do: " on #{said["host.name"]}", else: ""
+
+    case service do
+      "app" -> "App#{on}"
+      "mcp" -> "#{said["mcp.client.name"] || "An assistant"} (MCP)#{on}"
+      "cli" -> "one#{on}"
+      "web" -> "Web, #{said["user_agent.name"] || "a browser"}"
+      other -> "#{other}#{on}"
+    end
+  end
+
+  def from(_record), do: nil
 
   ## Histograms
 

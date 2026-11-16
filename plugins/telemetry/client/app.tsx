@@ -29,6 +29,9 @@ interface Failure {
   count: number
   at: number
   trace?: string
+  /** The client it happened on, if it wasn't a server: "App on Andre's iPhone". */
+  from?: string | null
+  took?: number | null
 }
 
 /** A day of a model's use of AI. */
@@ -279,7 +282,7 @@ function Telemetry(props: { all: Overview }) {
                   <Row
                     start={<span class="bad"><Icon name="warning-circle" /></span>}
                     heading={failure().span ? named(failure().where, all().names) : failure().where}
-                    text={failure().message || "Failed"}
+                    text={[failure().from, failure().message || "Failed", failure().took != null && failure().took! >= 1000 && `for ${took(failure().took)}`].filter(Boolean).join(" · ")}
                     end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at)}`}
                     current={open()?.trace === failure().trace}
                     onClick={failure().trace ? () => setOpen({ trace: failure().trace, where: failure().where }) : undefined}

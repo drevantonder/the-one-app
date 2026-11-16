@@ -531,6 +531,15 @@ impl Reached {
         &self.connection
     }
 
+    /// How the connection reaches its server now: `direct`, or through a `relay`.
+    pub fn path(&self) -> &'static str {
+        match self.connection.paths().iter().find(|path| path.is_selected()) {
+            Some(path) if path.is_relay() => "relay",
+            Some(_) => "direct",
+            None => "none",
+        }
+    }
+
     /// Whether the connection is still one to ask over: it hasn't closed, and its server hasn't been found gone.
     pub fn open(&self) -> bool {
         self.connection.close_reason().is_none()
@@ -613,9 +622,18 @@ pub struct Client {
     resolvers: Vec<Arc<dyn InputResolver>>,
     /// The inputs this device fills in of each tool, as a server last listed them (`resolve`).
     resolvable: std::sync::Mutex<Option<Arc<resolve::Resolvable>>>,
-    /// The calls that failed before a server answered them, each by its tool and why, until a server is told
-    /// (`record`).
-    failed: std::sync::Mutex<Vec<Value>>,
+    /// What this client says of itself in each record it reports (`report`), as OpenTelemetry's resource attributes
+    /// say a service: which client it is (`service.name`), its build, its device's name and its operating system.
+    resource: Arc<std::sync::RwLock<serde_json::Map<String, Value>>>,
+    /// Whether this client reported something since it last told a server, and the telling, one at a time.
+    reporting: AtomicBool,
+    sending: Mutex<()>,
+    /// Since when no server has answered, if none has.
+    unanswered: std::sync::Mutex<Option<Instant>>,
+    me: std::sync::Weak<Client>,
+    /// The runtime the client was opened on, which telling a server runs on, since a record may come from a thread
+    /// with none, as a window's commands do.
+    runtime: tokio::runtime::Handle,
 }
 
 /// A client's endpoint, and its network: the network's address, if it has one, where the client asks which servers
@@ -667,13 +685,19 @@ impl Client {
         let key = key(&home.join("key"))?;
         // A device that's a new build since it last got its token gets its next one now, which says so.
         let said = told.as_ref().is_some_and(|told| told.build.as_deref() == Some(BUILD));
+        // What a program of this device was on before is kept with its token: one that's now on another was updated.
+        let updated = told.as_ref().and_then(|told| told.build.clone()).filter(|was| was != BUILD);
         let (network, who) = match told {
             Some(mut told) => {
                 if told.token.is_none() {
                     match told.admit(&key, &home).await {
                         Err(error) if !error.is::<DeviceAuthorization>() => {
-                            return Err(error)
-                                .with_context(|| format!("Couldn't join the network at {}", told.address));
+                            let error = error.context(format!("Couldn't join the network at {}", told.address));
+                            let mut record = json!({"name": "one.client.join", "error": format!("{error:#}")});
+                            record["attributes"] = Value::Object(resource());
+                            record["attributes"]["host.name"] = json!(name());
+                            report(&home, &record);
+                            return Err(error);
                         }
                         admitted => admitted?,
                     }
@@ -691,9 +715,19 @@ impl Client {
         let renews = link.network.is_some();
         let link = std::sync::RwLock::new(link);
         let (watching, connected) = (AtomicBool::new(false), watch::Sender::new(true));
-        let (resolvable, failed) = (std::sync::Mutex::default(), std::sync::Mutex::default());
+        let resolvable = std::sync::Mutex::default();
         let reach = Mutex::default();
-        let client = Arc::new(Self { home, key, link, reach, notifications, says, watching, connected, resolvers, resolvable, failed });
+        let resource = Arc::new(std::sync::RwLock::new(resource()));
+        let reporting = AtomicBool::new(home.join(REPORTS).exists());
+        let client = Arc::new_cyclic(|me| Self {
+            home, key, link, reach, notifications, says, watching, connected, resolvers, resolvable, resource,
+            reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(), me: me.clone(),
+            runtime: tokio::runtime::Handle::current(),
+        });
+        client.panics();
+        if let Some(was) = updated {
+            client.report(json!({"name": "one.client.updated", "attributes": {"one.build.previous": was}}));
+        }
         // A token that's about to end is renewed before anything is asked with it, and so is one a new build hasn't
         // renewed yet, and the next while this runs.
         if renews {
@@ -823,21 +857,25 @@ impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
     /// has gone was asked nothing, so whichever answers now is asked instead.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
-        // A request is read once on its way out: for what this device fills in of it, and what it says of itself.
-        let (message, lists, tool): (std::borrow::Cow<[u8]>, bool, Option<String>) =
+        // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
+        // the span it is of a trace (`span`).
+        let (message, lists, span): (std::borrow::Cow<[u8]>, bool, Option<Value>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
                     self.resolve(&mut request).await?;
                     self.say(&mut request);
-                    let calls = request["method"] == "tools/call";
-                    let tool = calls.then(|| request["params"]["name"].as_str().map(str::to_owned)).flatten();
-                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", tool)
+                    let span = request.get("id").is_some().then(|| self.span(&mut request));
+                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", span)
                 }
                 _ => (message.into(), false, None),
             };
+        let started = Instant::now();
+        let reached = std::sync::Mutex::new("none");
         let asked = async {
             for _ in 0..2 {
-                match self.reached().await?.ask(&message).await {
+                let open = self.reached().await?;
+                *reached.lock().expect("no ask panics") = open.path();
+                match open.ask(&message).await {
                     Ok(answer) => return Ok(answer),
                     Err(RequestError::Unreachable) => continue,
                     Err(RequestError::Stopped) => bail!(
@@ -849,13 +887,25 @@ impl Client {
             bail!(UNANSWERED)
         };
         let answer = asked.await;
-        if let (Err(why), Some(tool)) = (&answer, tool) {
-            let mut failed = self.failed.lock().expect("no ask panics");
-            if failed.len() < FAILED_KEPT {
-                failed.push(json!({"tool": tool, "why": why.to_string()}));
+        self.answered(answer.is_ok());
+        if let Some(mut span) = span {
+            let refused = match &answer {
+                Err(why) => Some(why.to_string()),
+                Ok(answer) => refused(answer),
+            };
+            let took = started.elapsed();
+            if refused.is_some() || took > SLOW {
+                span["took"] = json!(took.as_secs_f64() * 1000.0);
+                span["attributes"]["one.reached"] = json!(*reached.lock().expect("no ask panics"));
+                if let Some(refused) = refused {
+                    span["error"] = json!(refused);
+                }
+                self.report(span);
             }
         }
-        self.connected.send_if_modified(|answering| std::mem::replace(answering, answer.is_ok()) != answer.is_ok());
+        if answer.is_ok() {
+            self.send_soon();
+        }
         match answer {
             Ok(answer) => {
                 // What a device fills in of each tool's inputs is what the latest list of them says.
@@ -903,18 +953,6 @@ impl Client {
         }
     }
 
-    /// Tells a server how long a view took to open, from its tap to its first drawing, and the calls that failed
-    /// before a server answered them since one was last told, for the plugins that hear `measured`. Says nothing of
-    /// what was asked.
-    pub async fn record(&self, view: &str, ms: u32) {
-        let failed = std::mem::take(&mut *self.failed.lock().expect("no ask panics"));
-        let said = json!({"jsonrpc": "2.0", "method": "notifications/one/measured", "params": {
-            "client": std::env::consts::OS, "opened": [{"view": view, "ms": ms}], "failed": failed.clone()}});
-        if self.ask(said.to_string().as_bytes()).await.is_err() {
-            self.failed.lock().expect("no ask panics").extend(failed);
-        }
-    }
-
     /// Asks the server for `method`, and gives its result.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let message = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
@@ -928,10 +966,142 @@ impl Client {
         Ok(result)
     }
 
+    /// Has `request` carry the span it is, as W3C's `traceparent` in its `_meta`, which a server's span of it is under,
+    /// so a trace runs from this client on. Gives the span as a record for `report`, should it fail or be slow.
+    /// An MCP client's `initialize` says which it is, for what it reports.
+    fn span(&self, request: &mut Value) -> Value {
+        let ids = SecretKey::generate().to_bytes();
+        let (trace, span) = (hex(&ids[..16]), hex(&ids[16..24]));
+        let meta = &mut request["params"]["_meta"];
+        if meta["traceparent"].is_null() {
+            meta["traceparent"] = json!(format!("00-{trace}-{span}-01"));
+        }
+        let method = request["method"].as_str().unwrap_or_default();
+        if method == "initialize" {
+            let mut resource = self.resource.write().expect("no report panics");
+            resource.insert("service.name".into(), json!("mcp"));
+            resource.insert("mcp.client.name".into(), request["params"]["clientInfo"]["name"].clone());
+        }
+        // A span's name is MCP's: its method, and the tool it calls, if it calls one.
+        let tool = request["params"]["name"].as_str().filter(|_| method == "tools/call");
+        json!({
+            "name": tool.map_or(method.to_owned(), |tool| format!("{method} {tool}")),
+            "traceId": trace,
+            "spanId": span,
+            "kind": "client",
+            "attributes": {"mcp.method.name": method, "gen_ai.tool.name": tool},
+        })
+    }
+
+    /// Says whether a server answered what was just asked, and once one does after none did for longer than a
+    /// person is shown nothing of it, reports how long none did.
+    fn answered(&self, now: bool) {
+        if self.connected.send_if_modified(|answering| std::mem::replace(answering, now) != now) {
+            let mut since = self.unanswered.lock().expect("no ask panics");
+            match (now, since.take()) {
+                (false, _) => *since = Some(Instant::now()),
+                (true, Some(since)) if since.elapsed() > UNNOTICED => self.report(json!({
+                    "name": "one.client.unanswered",
+                    "took": since.elapsed().as_secs_f64() * 1000.0,
+                    "error": "No server is answering",
+                })),
+                _ => {}
+            }
+        }
+    }
+
+    /// Keeps `record` for Telemetry, as from this client, and tells a server once one answers, with whatever else
+    /// this device's clients kept: so what went wrong while nothing could be reached is told once something can. A
+    /// record is Telemetry's (its tool `record`): a `name` and `attributes`, and a `value`, or how long something
+    /// `took` with its `error` if it failed, or else a log line, with an `error` if it is one. Names, sizes and
+    /// outcomes only: never what anyone wrote, was given or answered, and never a secret.
+    pub fn report(&self, mut record: Value) {
+        let mut resource = self.resource.write().expect("no report panics");
+        if !resource.contains_key("host.name") {
+            resource.insert("host.name".into(), json!(name()));
+        }
+        for (attribute, value) in resource.iter() {
+            record["attributes"][attribute] = value.clone();
+        }
+        drop(resource);
+        report(&self.home, &record);
+        self.reporting.store(true, Ordering::Relaxed);
+        if *self.connected.borrow() {
+            self.send_soon();
+        }
+    }
+
+    /// Which client this is, as what it reports says: OpenTelemetry's `service.name`, such as `app`. It's `cli`
+    /// unless said, and an MCP client's says which it is as it starts.
+    pub fn service(&self, name: &str) {
+        self.resource.write().expect("no report panics").insert("service.name".into(), json!(name));
+    }
+
+    /// Reports a panic of this program's when it happens, so it's told next time any of its device's clients
+    /// reaches a server, if not before.
+    fn panics(&self) {
+        static HOOKED: std::sync::Once = std::sync::Once::new();
+        let (home, resource) = (self.home.clone(), self.resource.clone());
+        HOOKED.call_once(move || {
+            let before = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |panic| {
+                let said = panic.payload_as_str().unwrap_or("panicked");
+                let mut record = json!({"name": "exception", "error": said.lines().next().unwrap_or(said),
+                    "attributes": {"exception.type": "panic"}});
+                if let Some(at) = panic.location() {
+                    record["attributes"]["code.file.path"] = json!(at.file());
+                    record["attributes"]["code.line.number"] = json!(at.line());
+                }
+                for (attribute, value) in resource.read().map(|resource| resource.clone()).unwrap_or_default() {
+                    record["attributes"][attribute] = value;
+                }
+                report(&home, &record);
+                before(panic)
+            }));
+        });
+    }
+
+    /// Tells a server what was reported, soon after it's asked something else, and never in the way of that.
+    fn send_soon(&self) {
+        if let Some(me) = self.me.upgrade()
+            && self.reporting.load(Ordering::Relaxed)
+        {
+            self.runtime.spawn(async move { me.send_reports().await });
+        }
+    }
+
+    /// Tells a server, in one batch, what this device's clients reported and kept (`report`), for the plugins that
+    /// hear `measured`. What it can't tell is kept again for next time. Telling reports nothing itself.
+    async fn send_reports(&self) {
+        let _one = self.sending.lock().await;
+        if !self.reporting.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        // The kept records are this run's to tell once it has moved them: other clients keep theirs anew.
+        let sending = self.home.join(format!("{REPORTS}.{}", self.link().endpoint.id()));
+        if fs::rename(self.home.join(REPORTS), &sending).is_err() {
+            return;
+        }
+        let kept = fs::read_to_string(&sending).unwrap_or_default();
+        let _ = fs::remove_file(&sending);
+        let records: Vec<Value> = kept.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+        let said = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"records": records}});
+        if !records.is_empty() && self.ask(said.to_string().as_bytes()).await.is_err() {
+            for record in &records {
+                keep(&self.home, record);
+            }
+            self.reporting.store(true, Ordering::Relaxed);
+        }
+    }
+
     /// Ends the connection, if one was made, and tells the server. The goodbye leaves this machine at once. What
     /// else closing an endpoint waits for is a server that was tried and never answered, which QUIC gives three
     /// seconds, so that isn't waited for.
     pub async fn close(&self) {
+        // What's left to tell is told first, to a server this run reached.
+        if self.reach.lock().await.open.is_some() {
+            self.send_reports().await;
+        }
         if let Some(open) = self.reach.lock().await.open.take() {
             open.connection().close(0u32.into(), b"done");
             let _ = timeout(Duration::from_millis(100), self.link().endpoint.close()).await;
@@ -1016,8 +1186,59 @@ const RENEW: Duration = Duration::from_secs(30 * 60);
 /// How soon a token that couldn't be asked for is asked for again: the device may be offline.
 const AGAIN: Duration = Duration::from_secs(60);
 
-/// The most failed calls kept until a server is told of them.
-const FAILED_KEPT: usize = 50;
+/// What a client's records are kept in until a server is told (`Client::report`): a line of JSON each, in its home
+/// folder, which every client of the device adds to, and past this many bytes, a few hundred records, no more.
+const REPORTS: &str = "reports";
+const REPORTS_MOST: u64 = 128 * 1024;
+
+/// What a client tells a server of what it reported, for the plugins that hear `measured`.
+const MEASURED: &str = "notifications/one/measured";
+
+/// How long a request takes before it's reported though it was answered.
+const SLOW: Duration = Duration::from_secs(2);
+
+/// How long no server answering goes unshown: the window's page shows nothing for a moment's gap.
+const UNNOTICED: Duration = Duration::from_secs(3);
+
+/// What a client says of itself in what it reports, until it says more (`Client::report`).
+fn resource() -> serde_json::Map<String, Value> {
+    serde_json::Map::from_iter([
+        ("service.name".to_owned(), json!("cli")),
+        ("service.version".to_owned(), json!(BUILD)),
+        ("os.type".to_owned(), json!(env::consts::OS)),
+    ])
+}
+
+/// Keeps `record` in `home`, now, for whichever client of the device next reaches a server (`Client::report`).
+fn report(home: &Path, record: &Value) {
+    let mut record = record.clone();
+    record["time"] = json!(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64);
+    keep(home, &record);
+}
+
+fn keep(home: &Path, record: &Value) {
+    let file = home.join(REPORTS);
+    if fs::metadata(&file).is_ok_and(|kept| kept.len() > REPORTS_MOST) {
+        return;
+    }
+    let line = format!("{record}\n");
+    let kept = fs::OpenOptions::new().create(true).append(true).open(&file);
+    let _ = kept.and_then(|mut kept| kept.write_all(line.as_bytes()));
+}
+
+/// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
+/// A refusal is short, and a long answer isn't read twice to find it isn't one.
+fn refused(answer: &[u8]) -> Option<String> {
+    if answer.len() > 16 << 10 {
+        return None;
+    }
+    let answer: Value = serde_json::from_slice(answer).ok()?;
+    if let Some(why) = answer["error"]["message"].as_str() {
+        return Some(why.to_owned());
+    }
+    let result = &answer["result"];
+    (result["isError"] == true).then(|| result["content"][0]["text"].as_str().unwrap_or("The tool failed").to_owned())
+}
 
 /// What a person is told when no server answered: what went wrong, and what to do about it.
 const UNANSWERED: &str = "No server is answering. Check this device is online and a server is on, then try again.";

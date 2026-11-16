@@ -49,13 +49,45 @@ async function mcp(method, params = {}) {
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return result
 }
+/// What this browser reported to Telemetry (`report`), kept in its storage until a server is told, a few hundred
+/// at most, as the app's client keeps them on disk. Telling reports nothing itself.
+const REPORTS = "reports"
+/** @returns {Record<string, unknown>[]} */
+const reports = () => JSON.parse(localStorage.getItem(REPORTS) ?? "[]")
+/** @param {Record<string, any>} record */
+function report(record) {
+  const kept = reports()
+  const browser = ["Edge", "Firefox", "Chrome", "Safari"].find((name) => navigator.userAgent.includes(name === "Edge" ? "Edg/" : `${name}/`))
+  const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser }
+  if (kept.length < 300) localStorage.setItem(REPORTS, JSON.stringify([...kept, { ...record, attributes, time: Date.now() }]))
+  if (answering) sendReports()
+}
+/// Reports are told a few seconds after the first of them, as one batch.
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let sending
+const sendReports = () => void (sending ??= setTimeout(() => ((sending = undefined), send()), 5000))
+async function send() {
+  const kept = reports()
+  if (!kept.length) return
+  localStorage.removeItem(REPORTS)
+  const said = { jsonrpc: "2.0", method: "notifications/one/measured", params: { records: kept } }
+  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(said) }).catch(() => undefined)
+  if (!sent?.ok) localStorage.setItem(REPORTS, JSON.stringify([...kept, ...reports()].slice(0, 300)))
+}
+/// Since when no server has answered, which once one does is reported, if it was long enough to show.
+let unanswered = 0
+
 /// While no server answers, this browser asks again by itself, sooner at first and then less often, as what's
 /// outside a device comes and goes, and no person should have to ask for what was going to come back anyway. Once
 /// one answers, every open app asks again, for what it missed.
 /** @param {boolean} now */
 function said(now) {
-  if (now && !answering) for (const view of views.keys()) refresh(view)
-  if (now !== answering) emit("answering", (answering = now))
+  const was = answering
+  if (now && !was) for (const view of views.keys()) refresh(view)
+  if (now !== was) emit("answering", (answering = now))
+  if (!now && was) unanswered = performance.now()
+  if (now && !was && performance.now() - unanswered > 3000) report({ name: "one.client.unanswered", took: performance.now() - unanswered, error: "No server is answering" })
+  else if (now && !was) sendReports()
   if (now) again = 1000
   else asking ??= setTimeout(() => {
     asking = undefined
@@ -141,6 +173,7 @@ const commands = {
     if (answer.status === 401) return { signIn: SIGN_IN }
     if (!answer.ok) return { unreached: `Your network's address answered ${answer.status}` }
     ;({ apps, device } = await answer.json())
+    sendReports()
     return {}
   },
   /// The files a server lists for `who`, and the open apps that are out of date.
@@ -173,10 +206,10 @@ const commands = {
   update: cannot("A browser has the latest each time it opens."),
   recovery_key: cannot(NO_KEY),
   recover: cannot(NO_KEY),
-  // What the app does as it's seen, which a browser doesn't: its time to open goes to Telemetry, and it hears
-  // notifications.
+  report: ({ record }) => report(record),
+  opened: ({ view, ms }) => report({ name: "one.client.open.duration", value: ms, attributes: { "one.view": view } }),
+  // What the app does as it's seen, which a browser doesn't: it hears notifications.
   visible() {},
-  opened() {},
   listen() {},
 }
 

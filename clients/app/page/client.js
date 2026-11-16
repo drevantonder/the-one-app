@@ -11,6 +11,23 @@ import { address, invoke, listen, openLink, sandbox } from "./host.js"
 /** @import { View } from "./host.js" */
 
 const HOME = "home-screen/client/index.html"
+
+/// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
+/// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
+/// what was shown only, never what anyone typed.
+/** @param {string} name @param {string} error @param {Record<string, unknown>} [attributes] */
+const report = (name, error, attributes = {}) => invoke("report", { record: { name, error, attributes } }).catch(() => {})
+/// An error as OpenTelemetry's `exception` says one: its message, and the file and line it was thrown at, by its
+/// path alone, which leaves out anything a query had in it.
+/** @param {unknown} message @param {unknown} [file] @param {unknown} [line] @param {string} [plugin] */
+function exception(message, file, line, plugin) {
+  const path = typeof file === "string" && URL.canParse(file) ? new URL(file).pathname : undefined
+  report("exception", String(message).slice(0, 500), { "code.file.path": path, "code.line.number": typeof line === "number" ? line : undefined, "one.plugin": plugin })
+}
+addEventListener("error", ({ message, filename, lineno }) => exception(message, filename, lineno))
+addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message ?? reason))
+/// How long an app may take from its tap to drawing before it's reported as never having opened.
+const NEVER = 15000
 /** An element of the page's own, which is there. @param {string} id */
 const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
 /// Whether the window is wide enough for the Home Screen's sidebar, which the plugin `home-screen` draws along the start of
@@ -66,6 +83,8 @@ scheme.addEventListener("change", dress)
 
 /// Says over the Home Screen what keeps it from showing anything: the network's address didn't answer, its pages
 /// couldn't be listed, or this app is too old for the network. Fine is silent.
+/** @type {string | undefined} */
+let said
 function problem() {
   // A problem is said in place of the mark.
   const nothing = unreached !== null || Boolean(unlisted) || tooOld
@@ -79,6 +98,10 @@ function problem() {
   action.textContent = tooOld ? "Update" : "Try Again"
   action.dataset.variant = tooOld ? "default" : "outline"
   action.hidden = tooOld && phone
+  // What's shown is reported once, as it's shown.
+  const shown = nothing ? `${byId("what").textContent}: ${byId("why").textContent}` : undefined
+  if (shown && shown !== said) report("one.client.problem", shown)
+  said = shown
   status()
 }
 
@@ -193,6 +216,9 @@ function show(at, tapped) {
   reload()
   if (!view) return
   view.tapped = tapped
+  setTimeout(() => {
+    if (view.tapped === tapped && !view.drawn) report("one.client.open", `Didn't open in ${NEVER / 1000} s`, { "one.view": view.app.split("/")[0] })
+  }, NEVER)
   if (!view.drawn) return
   // Its user returned to it.
   invoke("refresh", { view: view.key })
@@ -337,6 +363,8 @@ addEventListener("message", async ({ source, data }) => {
     if (method === "notifications/one/over") view.over = params.over === true
     // The Home Screen, loaded again, is told which app is showing beside it.
     if (method === "ui/notifications/initialized" && view.app === HOME) layer(history.state)
+    // An app's page logs its errors as an MCP App logs to its host, and they're its plugin's, whatever it says.
+    if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.app.split("/")[0])
     return
   }
   try {
