@@ -52,5 +52,4 @@ before choosing.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
   the background and let your harness tell you when it ends.
 - Stop what you start once you're done with it, since every thread shares these machines, and remove your worktree.
-- The machines here also run the app as it was before, whose command is `one`. Never install over it or stop it.
 - How to do the common things is in `.agents/skills/`.
