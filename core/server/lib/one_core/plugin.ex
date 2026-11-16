@@ -17,7 +17,7 @@ defmodule OneCore.Plugin do
   `client/native/`, which is never deployed, and nor is its `test/`.
 
   A plugin can run in sandbox mode instead (`deploy` with `sandbox: true`): its server code runs in an Erlang VM of
-  its own, behind its machine's sandbox, never in the server's. Any of the network's servers runs it for anyone, so
+  its own, for each user, group or network it's installed for, behind its machine's sandbox, never in the server's. Any of the network's servers runs it for anyone, so
   it needs no server of yours, and whatever its code tries, it reaches only what's offered it, as whoever it runs
   for. What's offered is this interface, each function a message to the server: `tools/0`, `call/3`, `apps/0`,
   `widgets/0`, `uses/0`, `jobs/0` and `permissions/0`; `OneCore.Artifact`'s functions but `link`;
