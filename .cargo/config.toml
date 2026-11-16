@@ -1,0 +1,8 @@
+# A macOS library records where it was built as its install name unless it's given one, and zig's linker hashes the
+# debug information of C code, which names the folder, into its UUID. So the same commit built in two folders is two
+# different libraries. A NIF is loaded by path, so any name does.
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-install_name,@rpath/nif.so"]
+
+[env]
+CFLAGS_aarch64_apple_darwin = "-g0"
