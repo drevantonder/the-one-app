@@ -3,7 +3,10 @@ import { Icon } from "./button.tsx"
 import { useField } from "./field.tsx"
 import { touch } from "./shared.ts"
 import { popover } from "./popover.ts"
-import { machine } from "./zag.jsx"
+import { machine, type Part, type Root } from "./zag.tsx"
+import type { JSX } from "@solidjs/web"
+import type * as select from "@zag-js/select"
+import type { CollectionItem } from "@zag-js/collection"
 
 const { Ark, use, live, draw } = machine("select", () => import("./zag/select.ts"), ["div", "getRootProps"], {
   Label: ["label", "getLabelProps"],
@@ -26,26 +29,42 @@ const { Ark, use, live, draw } = machine("select", () => import("./zag/select.ts
     })
   },
   // Until its machine is here, its face says what's chosen, and nothing opens.
-  still: (root) => {
+  still: (root: Partial<select.Props>) => {
     const value = root.value ?? root.defaultValue ?? []
     return {
       collection: root.collection,
       value,
-      valueAsString: value.map((one) => root.collection.stringifyItem(root.collection.find(one))).join(", "),
+      valueAsString: value.map((one) => root.collection!.stringifyItem(root.collection!.find(one))).join(", "),
       disabled: root.disabled,
     }
   },
 })
 
 // An item's parts read which item it is.
-const Item = createContext()
+const Item = createContext<() => select.ItemProps>()
 
 /// `<Field label="Category"><Select.Root name="category" collection={categories} /></Field>`: one of a few, from a
 /// collection (`createListCollection`). It's Ark UI's select (ark-ui.com/docs/components/select), with its parts
 /// and props: `value` and `onValueChange` (`({ value: ["meals"] })`), and `placeholder` until something's chosen;
 /// with none the first is chosen, as a `<select>` does. Given no parts, it draws them all, and then under a finger
 /// it opens the device's own picker. In a form it's sent as `name`.
-export const Select = {
+export const Select: {
+  Root: Root<select.Props & { placeholder?: string; name?: string }, "collection">
+  Label: Part<{}, HTMLLabelElement>
+  Control: Part
+  Trigger: Part<{}, HTMLButtonElement>
+  ValueText: Part<{ placeholder?: string }>
+  Indicator: Part
+  ClearTrigger: Part<{}, HTMLButtonElement>
+  Positioner: Part
+  Content: Part
+  ItemGroup: Part<select.ItemGroupProps>
+  ItemGroupLabel: Part<select.ItemGroupLabelProps>
+  Item: Part<select.ItemProps>
+  ItemText: Part
+  ItemIndicator: Part
+  HiddenSelect: Part<{}, HTMLSelectElement>
+} = {
   ...Ark,
   Root: (props) => {
     const inside = children(() => props.children)
@@ -82,12 +101,12 @@ export const Select = {
   ItemText: (props) => {
     const api = use()
     const item = useContext(Item)
-    return draw("span", () => api().getItemTextProps(item()), props)
+    return draw("span", () => api().getItemTextProps(item!()), props)
   },
   ItemIndicator: (props) => {
     const api = use()
     const item = useContext(Item)
-    return draw("span", () => api().getItemIndicatorProps(item()), props)
+    return draw("span", () => api().getItemIndicatorProps(item!()), props)
   },
   /// The `<select>` a form is sent, which Zag has choose what the select chooses.
   HiddenSelect: (props) => {
@@ -95,7 +114,7 @@ export const Select = {
     return (
       <Show when={live()}>
         <select {...omit(props, "children")} {...api().getHiddenSelectProps()}>
-          <For each={api().collection.items}>{(item) => <option value={api().collection.getItemValue(item)}>{api().collection.stringifyItem(item)}</option>}</For>
+          <For each={api().collection.items as CollectionItem[]}>{(item) => <option value={api().collection.getItemValue(item)}>{api().collection.stringifyItem(item)}</option>}</For>
         </select>
       </Show>
     )
@@ -104,7 +123,7 @@ export const Select = {
 
 /// Every part of a select, as the UI library draws one. Under a finger the device's own `<select>` lies over the face,
 /// unseen, so a tap opens the device's own picker; with a mouse the face opens ours.
-function Whole(props) {
+function Whole(props: { placeholder?: string }) {
   const api = use()
   const field = useField()
   return (
@@ -126,7 +145,7 @@ function Whole(props) {
             <Show when={props.placeholder}>
               <option value="" disabled hidden selected={!api().value.length}>{props.placeholder}</option>
             </Show>
-            <For each={api().collection.items}>
+            <For each={api().collection.items as CollectionItem[]}>
               {(item) => {
                 const value = () => api().collection.getItemValue(item)
                 return <option value={value()} disabled={api().collection.getItemDisabled(item)} selected={api().value.includes(value())}>{api().collection.stringifyItem(item)}</option>
@@ -138,7 +157,7 @@ function Whole(props) {
       <Show when={!touch()}>
         <Select.Positioner>
           <Select.Content>
-            <For each={api().collection.items}>
+            <For each={api().collection.items as CollectionItem[]}>
               {(item) => (
                 <Select.Item item={item}>
                   <Select.ItemText>{api().collection.stringifyItem(item)}</Select.ItemText>

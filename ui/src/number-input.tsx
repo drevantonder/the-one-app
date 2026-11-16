@@ -1,6 +1,7 @@
 import { children, omit, Show } from "solid-js"
 import { useField } from "./field.tsx"
-import { machine } from "./zag.jsx"
+import { machine, type Part, type Root } from "./zag.tsx"
+import type * as numberInput from "@zag-js/number-input"
 
 const { Ark, use } = machine("number-input", () => import("./zag/number-input.ts"), ["div", "getRootProps"], {
   Label: ["label", "getLabelProps"],
@@ -28,7 +29,16 @@ const { Ark, use } = machine("number-input", () => import("./zag/number-input.ts
 /// (`({ value, valueAsNumber })`), `min`, `max` and `step`, which the arrow keys step it by, and `formatOptions`,
 /// as `Intl.NumberFormat` takes them. Given no parts, it draws its box. In a form it's sent as `name`, the plain
 /// number ("8.5").
-export const NumberInput = {
+export const NumberInput: {
+  Root: Root<numberInput.Props & { name?: string }>
+  Label: Part<{}, HTMLLabelElement>
+  Control: Part
+  Input: Part<{}, HTMLInputElement>
+  IncrementTrigger: Part<{}, HTMLButtonElement>
+  DecrementTrigger: Part<{}, HTMLButtonElement>
+  ValueText: Part
+  Scrubber: Part
+} = {
   ...Ark,
   Root: (props) => {
     const inside = children(() => props.children)
@@ -37,14 +47,14 @@ export const NumberInput = {
       <Ark.Root {...omit(props, "children", "name")} class={["ui-number", props.class]}>
         {inside.toArray().length ? inside() : <Ark.Input class="ui-box ring" aria-describedby={field?.message} />}
         <Show when={props.name}>
-          <Value name={props.name} />
+          <Value name={props.name!} />
         </Show>
       </Ark.Root>
     )
   },
 }
 
-function Value(props) {
+function Value(props: { name: string }) {
   const api = use()
   return <input type="hidden" name={props.name} value={Number.isNaN(api().valueAsNumber) ? "" : String(api().valueAsNumber)} />
 }

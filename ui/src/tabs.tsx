@@ -1,11 +1,12 @@
-import { machine } from "./zag.jsx"
+import { machine, type Part, type Root } from "./zag.tsx"
+import type * as tabs from "@zag-js/tabs"
 
 // Until its machine is here, the tab that's chosen shows, and is marked as chosen.
-const still = (root) => {
-  const chosen = (value) => value === (root.value ?? root.defaultValue)
+const still = (root: Partial<tabs.Props>) => {
+  const chosen = (value: string) => value === (root.value ?? root.defaultValue)
   return {
-    getTriggerProps: (props) => ({ "data-tabs-trigger": "", role: "tab", type: "button", "data-selected": chosen(props.value) ? "" : undefined }),
-    getContentProps: (props) => ({ "data-tabs-content": "", role: "tabpanel", hidden: !chosen(props.value) }),
+    getTriggerProps: (props: tabs.TriggerProps) => ({ "data-tabs-trigger": "", role: "tab", type: "button", "data-selected": chosen(props.value) ? "" : undefined }),
+    getContentProps: (props: tabs.ContentProps) => ({ "data-tabs-content": "", role: "tabpanel", hidden: !chosen(props.value) }),
     getIndicatorProps: () => ({ "data-tabs-indicator": "", hidden: true }),
   }
 }
@@ -21,7 +22,13 @@ const { Ark } = machine("tabs", () => import("./zag/tabs.ts"), ["div", "getRootP
 /// a `<Tabs.Indicator />`, then a `<Tabs.Content value="all">...</Tabs.Content>` for each: a few views of one thing,
 /// one showing at a time. It's Ark UI's tabs (ark-ui.com/docs/components/tabs), with its parts and props: `value`
 /// and `onValueChange` say which is showing.
-export const Tabs = {
+export const Tabs: {
+  Root: Root<tabs.Props>
+  List: Part
+  Trigger: Part<tabs.TriggerProps, HTMLButtonElement>
+  Content: Part<tabs.ContentProps>
+  Indicator: Part
+} = {
   ...Ark,
   Trigger: (props) => <Ark.Trigger {...props} class={["press ring reach", props.class]} />,
 }

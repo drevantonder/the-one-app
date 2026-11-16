@@ -2,7 +2,9 @@ import { children, omit } from "solid-js"
 import { Icon } from "./button.tsx"
 import { said } from "./shared.ts"
 import { popover } from "./popover.ts"
-import { machine } from "./zag.jsx"
+import { machine, type Part, type Root } from "./zag.tsx"
+import type { ButtonProps } from "./button.tsx"
+import type * as menu from "@zag-js/menu"
 
 const { Ark, use } = machine("menu", () => import("./zag/menu.ts"), null, {
   Trigger: ["button", "getTriggerProps"],
@@ -22,7 +24,17 @@ const { Ark, use } = machine("menu", () => import("./zag/menu.ts"), null, {
 /// named `aria-label` (More unless said); with words in it, it's a button of `variant` (a `Button`'s, `outline`
 /// unless said) that says them, and `size="icon"` keeps one with an icon in it to its icon. An item starts with an
 /// `<Icon />` if it's given one, and `destructive` is for what can't be undone.
-export const Menu = {
+export const Menu: {
+  Root: Root<menu.Props>
+  Trigger: Part<Pick<ButtonProps, "variant" | "size">, HTMLButtonElement>
+  Indicator: Part
+  Positioner: Part
+  Content: Part
+  Item: Part<menu.ItemProps & { destructive?: boolean }>
+  ItemGroup: Part<menu.ItemGroupProps>
+  ItemGroupLabel: Part<menu.ItemGroupLabelProps>
+  Separator: Part<{}, HTMLHRElement>
+} = {
   ...Ark,
   Root: (props) => <Ark.Root {...props} positioning={{ strategy: "fixed", placement: "bottom-end", gutter: 4, ...props.positioning }} />,
   Trigger: (props) => {

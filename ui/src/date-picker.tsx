@@ -4,7 +4,9 @@ import { Icon } from "./button.tsx"
 import { useField } from "./field.tsx"
 import { said, touch } from "./shared.ts"
 import { popover } from "./popover.ts"
-import { machine } from "./zag.jsx"
+import { machine, type Api, type Part, type Root } from "./zag.tsx"
+import type { JSX } from "@solidjs/web"
+import type * as datePicker from "@zag-js/date-picker"
 
 const { Ark, use, draw } = machine("date-picker", () => import("./zag/date-picker.ts"), ["div", "getRootProps"], {
   Label: ["label", "getLabelProps"],
@@ -26,22 +28,22 @@ const { Ark, use, draw } = machine("date-picker", () => import("./zag/date-picke
     })
   },
   // Until its machine is here, its face says the day, and nothing opens.
-  still: (root) => ({ value: root.value ?? root.defaultValue ?? [], min: root.min, max: root.max, disabled: root.disabled }),
+  still: (root: Partial<datePicker.Props>) => ({ value: root.value ?? root.defaultValue ?? [], min: root.min, max: root.max, disabled: root.disabled }),
 })
 
 // The view a part is in (`day`, `month` or `year`), and the cell a cell's trigger is in.
-const View = createContext("day")
-const Cell = createContext()
+const View = createContext<datePicker.DateView>("day")
+const Cell = createContext<() => object>()
 
 /// A part of a view, whose attributes Zag gives for the view it's in.
-const inView = (element, get) => (props) => {
+const inView = <Of extends HTMLElement>(element: string, get: string): Part<{}, Of> => (props) => {
   const api = use()
   const view = useContext(View)
   return draw(element, () => api()[get]({ view }), props)
 }
 
 // What each view's cells are called by Zag.
-const cells = { day: "getDayTableCell", month: "getMonthTableCell", year: "getYearTableCell" }
+const cells: Record<datePicker.DateView, string> = { day: "getDayTableCell", month: "getMonthTableCell", year: "getYearTableCell" }
 
 
 const shown = new Intl.DateTimeFormat(navigator.language, { dateStyle: "medium", timeZone: "UTC" })
@@ -53,7 +55,30 @@ const digits = new Intl.NumberFormat(navigator.language, { useGrouping: false })
 /// does (`parseDate("2026-11-14")`, and `value[0].toString()` back), `min` and `max` too. Given no parts, it draws
 /// them all: a face that shows the day as the user's language writes it, which opens a calendar, or under a finger
 /// the device's own picker. In a form it's sent as `name`, written as `<input type="date">` writes it.
-export const DatePicker = {
+export const DatePicker: {
+  Root: Root<datePicker.Props & { placeholder?: string; name?: string; required?: boolean }>
+  Label: Part<{}, HTMLLabelElement>
+  Control: Part
+  Input: Part<datePicker.InputProps, HTMLInputElement>
+  Trigger: Part<{}, HTMLButtonElement>
+  ClearTrigger: Part<{}, HTMLButtonElement>
+  Positioner: Part
+  Content: Part
+  View: Part<{ view: datePicker.DateView }>
+  ViewControl: Part
+  PrevTrigger: Part<{}, HTMLButtonElement>
+  ViewTrigger: Part<{}, HTMLButtonElement>
+  NextTrigger: Part<{}, HTMLButtonElement>
+  RangeText: Part
+  Table: Part<{ columns?: number }, HTMLTableElement>
+  TableHead: Part<{}, HTMLTableSectionElement>
+  TableHeader: Part<{ scope?: string }, HTMLTableCellElement>
+  TableBody: Part<{}, HTMLTableSectionElement>
+  TableRow: Part<{}, HTMLTableRowElement>
+  TableCell: Part<{ value: datePicker.DateValue | number; disabled?: boolean; columns?: number; visibleMonth?: datePicker.DateValue }, HTMLTableCellElement>
+  TableCellTrigger: Part
+  Context: (props: { children: (api: () => Api) => JSX.Element }) => JSX.Element
+} = {
   ...Ark,
   Root: (props) => {
     const inside = children(() => props.children)
@@ -102,7 +127,7 @@ export const DatePicker = {
     const api = use()
     const view = useContext(View)
     const cell = useContext(Cell)
-    return draw("div", () => api()[`${cells[view]}TriggerProps`](cell()), props)
+    return draw("div", () => api()[`${cells[view]}TriggerProps`](cell!()), props)
   },
   /// `<DatePicker.Context>{(api) => ...}</DatePicker.Context>`: what's in the calendar now, to draw from.
   Context: (props) => props.children(use()),
@@ -111,16 +136,16 @@ export const DatePicker = {
 /// Every part of a date picker, as the UI library draws one. Under a finger the device's own `<input type="date">` lies
 /// over the face, unseen, so a tap opens the device's own picker; with a mouse the face opens our calendar, and the
 /// device's control only holds the day, for the form.
-function Whole(props) {
+function Whole(props: { placeholder?: string; name?: string; required?: boolean }) {
   const api = use()
   const field = useField()
   const day = () => api().value[0]?.toString() ?? ""
-  const bound = (value) => value?.toString()
+  const bound = (value?: datePicker.DateValue) => value?.toString()
   return (
     <>
       <DatePicker.Control class="ui-picker">
         <Show when={!touch()}>
-          <DatePicker.Trigger class="ui-box ring" aria-labelledby={field && `${field.label} ${field.id}`} aria-describedby={field?.message} data-invalid={field?.invalid() ? "" : undefined}>
+          <DatePicker.Trigger class="ui-box ring" aria-labelledby={field ? `${field.label} ${field.id}` : undefined} aria-describedby={field?.message} data-invalid={field?.invalid() ? "" : undefined}>
             <Face day={day()} placeholder={props.placeholder} />
           </DatePicker.Trigger>
         </Show>
@@ -159,7 +184,7 @@ function Whole(props) {
   )
 }
 
-function Face(props) {
+function Face(props: { day: string; placeholder?: string }) {
   return (
     <>
       <span class={{ placeholder: !props.day }}>{props.day ? shown.format(new Date(props.day)) : props.placeholder}</span>
@@ -171,14 +196,14 @@ function Face(props) {
 /// The calendar: a month of days, and from its heading the months of a year, and from theirs the years.
 function Calendar() {
   const api = use()
-  const bar = (text) => (
+  const bar = (text: () => string) => (
     <DatePicker.ViewControl class="bar">
       <DatePicker.PrevTrigger class="press ring"><Icon name="caret-left" along /></DatePicker.PrevTrigger>
       <DatePicker.ViewTrigger class="press ring">{text()}</DatePicker.ViewTrigger>
       <DatePicker.NextTrigger class="press ring"><Icon name="caret-right" along /></DatePicker.NextTrigger>
     </DatePicker.ViewControl>
   )
-  const grid = (rows) => (
+  const grid = (rows: () => { value: number; label: string }[][]) => (
     <DatePicker.Table columns={4}>
       <DatePicker.TableBody>
         <For each={rows()}>
