@@ -13,8 +13,8 @@ harness tell you when it ends; put the folder in your scratch folder.
 ## The fastest loop
 
 - A plugin changed: deploy it into the running network, which takes under a second, its app built again too:
-  `ONE_FOR=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>`. Not its NIF: a server
-  can't load a new one over the one it has loaded, so that takes a new folder.
+  `ONE_FOR=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>`. A new build of its NIF
+  is deployed too, but a server runs the one it loaded until it's started again in the same folder.
 - Anything else changed (`core/`, `clients/`): stop it and start it again in the same folder. Only what changed is
   built again, so that's seconds.
 - A commit, or a rebase that moves it, builds `one` again once (about 30 s): a build is named by its commit.
