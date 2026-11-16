@@ -14,10 +14,22 @@ An app is a network's: the commands that build it are in that repo's `app/README
 
 - No Apple account is signed in to Xcode, so `xcodebuild -allowProvisioningUpdates` and `cargo tauri ios build`'s
   own signing and export fail (`errSecInternalComponent`).
-- Signing uses the Apple Development identity in a keychain of its own, not the login keychain, and the team's
-  wildcard profile ("iOS Team Provisioning Profile: *", in
-  `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`). A wildcard profile carries no push and no App Group,
-  so such a build has no notifications, and the app keeps its client in its own folder instead of the group's.
+- Signing uses the Apple Development identity in a keychain of its own, not the login keychain, and a development
+  profile of the app's own App ID, in `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` (named by UUID:
+  `security cms -D -i <file>` shows each one's `Name`, App ID and entitlements). The App IDs (the app's identifier,
+  and its `.notifications`) have Push Notifications and App Groups on. The wildcard profile ("iOS Team Provisioning
+  Profile: *") carries neither, so a build signed with it isn't woken by notifications.
+- The team's App Store Connect API key (Admin) makes App IDs and profiles with the API itself: `POST /v1/bundleIds`,
+  `/v1/bundleIdCapabilities` and `/v1/profiles` (`IOS_APP_DEVELOPMENT`, the team's `DEVELOPMENT` certificate and the
+  phone from `/v1/devices`), whose `profileContent` is the profile. A profile is made again when its App ID changes,
+  which leaves it invalid. The key's item is in Agent Memory.
+- That key can't make an App Group or put one on an App ID: the API has nothing for it, and Xcode's own developer
+  services, which `xcodebuild -allowProvisioningUpdates -authenticationKeyPath ...` uses, refuse it (401). The group
+  (`group.` and the app's identifier) is made and ticked on both App IDs on the developer website; until it is, a
+  profile's `com.apple.security.application-groups` is empty, the app keeps its client in its own folder, and the
+  notification extension can't be signed.
+- A development profile's `aps-environment` is `development`, so the phone's APNs token is the sandbox's, which the
+  network's edge reaches only with `APNS_SANDBOX=1` (`plugins/notifications/edge/README.md`).
 - The phone is paired with the Mac: `xcrun devicectl list devices` names it.
 
 ## Building and signing
@@ -28,10 +40,12 @@ An app is a network's: the commands that build it are in that repo's `app/README
    archive succeeds and its export fails (`errSecInternalComponent`), and the app is
    `gen/apple/build/app_iOS.xcarchive/Products/Applications/<name>.app`. Or build for the simulator with
    `--target aarch64-sim --debug`, which needs no signing.
-2. Put the wildcard profile in the app as `embedded.mobileprovision` (the profiles' files are named by UUID:
-   `security cms -D -i <file>` shows each one's `Name`), and sign with entitlements that hold only
-   `application-identifier` (`<team>.<the app's identifier>`), `com.apple.developer.team-identifier` and `get-task-allow`.
-   Remove the notification extension (`PlugIns/`) first: it can't be signed without the App Group.
+2. Put each target's profile in it as `embedded.mobileprovision`, and sign it with that profile's own entitlements
+   less `keychain-access-groups` (a wildcard, which a signature can't hold) and an empty
+   `com.apple.security.application-groups`: `security cms -D -i <profile> > p.plist`,
+   `plutil -extract Entitlements xml1 -o e.plist p.plist`, then `/usr/libexec/PlistBuddy -c "Delete :<key>" e.plist`
+   (`plutil` reads the dots in `com.apple...` as a path). Sign
+   `PlugIns/Notifications.appex` first, then the app; with no profile for the extension, remove `PlugIns/` instead.
 3. Unlock the keychain and `codesign` in the same ssh connection: `security -i` reads `unlock-keychain -p ...` on
    stdin, then `codesign --force --keychain <it> --sign "Apple Development" --entitlements <file> <app>`. The
    password goes on stdin, never in a command line, where `ps` and logs see it. The key's partition list must
@@ -49,3 +63,4 @@ The keychain's password is in the owner's password manager; ask the orchestrator
 - Signing through anything running in the owner's logged-in session (Xcode, a GUI `osascript`, a Terminal tab):
   each signature put a password dialog on his screen. Only ssh, and only a keychain unlocked in that connection.
 - Leaving signing to `cargo tauri ios build` or Xcode's export, which fail with no account signed in.
+- Signing with the wildcard profile: the phone got no APNs token and said it isn't woken by notifications.
