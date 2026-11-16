@@ -24,6 +24,8 @@ everyone it's installed for is `for`. A plugin that says it's `sensitive` (Vault
 into. In sandbox mode the same tools look inside the plugin's own VM on that server, which a call starts.
 
 Each server runs its own calls: `server` names which to look on, by its machine's name; left out, it's one that
-runs the plugin. The answer says which.
+runs the plugin. The answer says which. A follow is on one server, and a client may ask another next time, so pass
+the `server` the first answer names to each `logs` call after it, and call the plugin through that one too where
+you can.
 
 On a network on your own machine (`tooling/network`), attach to the server with `iex --remsh` instead.
