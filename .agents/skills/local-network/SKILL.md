@@ -5,10 +5,19 @@ description: Use to run a whole network of your own on this machine, to try a ch
 
     tooling/network <folder> [--standby] [--edge] [--owner <name>]
 
-Its header says what each flag does. It builds what isn't built (`cargo build --release`, the UI library,
-`mix deps.get && mix compile`), starts the server, and prints how to use it once it's running. From a fresh
-worktree that's about two minutes here; after that, seconds. Run it in the background and let your harness tell
-you when it ends; put the folder in your scratch folder.
+Its header says what each flag does. It builds what isn't built (the UI library, then `mix deps.get && mix compile`,
+which builds the Rust workspace with `cargo build --release`), starts the server, and prints how to use it once it's
+running. From a fresh worktree that's under two minutes here; after that, about 3 s. Run it in the background and let your
+harness tell you when it ends; put the folder in your scratch folder.
+
+## The fastest loop
+
+- A plugin changed: deploy it into the running network, which takes under a second, its app built again too:
+  `ONE_FOR=network target/release/one deploy --name <plugin> --files-from plugins/<plugin>`. Not its NIF: a server
+  can't load a new one over the one it has loaded, so that takes a new folder.
+- Anything else changed (`core/`, `clients/`): stop it and start it again in the same folder. Only what changed is
+  built again, so that's seconds.
+- A commit, or a rebase that moves it, builds `one` again once (about 30 s): a build is named by its commit.
 
 ## Acting as someone
 
@@ -31,8 +40,9 @@ group. Never `pkill` or `killall`: other agents run networks on this machine too
 
 ## Mistakes already made
 
-- Running a test or `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` and
-  `cargo build --release` first (`tooling/network` does both itself).
+- Running a test or `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
+  (`tooling/network` does it itself).
+- Restarting the network to try a change to a plugin, rather than deploying it into the running one.
 - Rebuilding from scratch in a new worktree each time. Keep one worktree built and rebase it, rather than making a
   new one for every check.
 - Starting the app where there's no desktop without `dbus-run-session` (see `see-it-running`).

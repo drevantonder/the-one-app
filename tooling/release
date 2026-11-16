@@ -177,7 +177,7 @@ for kind in "${servers[@]}"; do
   for app in "$release"/lib/*; do
     [[ ! -d $vm/lib/$(basename "$app")/priv ]] || { rm -rf "$app/priv" && cp -R "$vm/lib/$(basename "$app")/priv" "$app/priv"; }
   done
-  priv=$(echo "$release"/lib/one_core-*/priv/native)
+  priv=$(echo "$release"/lib/one_core-*)/priv/native
   rm -rf "$priv" && mkdir -p "$priv"
   for crate in "${crates[@]}"; do
     cp "$native/lib$crate".so "$priv/$crate.so" 2>/dev/null || cp "$native/lib$crate.dylib" "$priv/$crate.so"

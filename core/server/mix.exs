@@ -11,8 +11,6 @@ defmodule OneCore.MixProject do
         {:ex_json_schema, "~> 0.11"},
         {:mime, "~> 2.0"},
         {:req, "~> 0.5"},
-        # A crash in a Rust NIF ends the VM. Rust panics are caught, and what's left is rare.
-        {:rustler, "~> 0.38", runtime: false},
         {:tz, "~> 0.28"},
         {:yaml_elixir, "~> 2.12"}
       ],
@@ -45,20 +43,34 @@ defmodule OneCore.MixProject do
   defp elixirc_paths(:dev), do: ["lib", Path.expand("../../tooling/network.ex", __DIR__)]
   defp elixirc_paths(_env), do: ["lib"]
 
-  # The NIFs of the plugins The One App ships with, built for this machine and put beside their source, where a
-  # plugin brings them (`OneCore.Plugin`): here, its folder is what's deployed. `tooling/nifs` builds them for every
-  # kind of machine, as a server built for one is.
+  # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` runs it: built as one, it
+  # has one set of features, so nothing in it is built twice or again for nothing. One Core's go where the server
+  # loads them (`priv/native`), and those of the plugins The One App ships with beside their source, where a plugin
+  # brings them (`OneCore.Plugin`): here, its folder is what's deployed. `tooling/release` and `tooling/nifs` build
+  # them for every kind of machine, as a server built for one is. A crash in a Rust NIF ends the VM: Rust panics are
+  # caught, and what's left is rare. Each is removed before it's put there again, since a
+  # server running from this checkout has it loaded.
   defp nifs(_args) do
     root = Path.expand("../..", __DIR__)
-    crates = for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"), do: Path.dirname(toml)
-    {_, 0} = System.cmd("cargo", ["build", "--release" | Enum.flat_map(crates, &["-p", Path.basename(&1)])], cd: root)
+    {_, 0} = System.cmd("cargo", ["build", "--release"], cd: root)
     target = System.get_env("CARGO_TARGET_DIR", "#{root}/target")
     # The kind of machine this is, as builds are named (`OneCore.Builds.target/0`).
     [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
     {os, extension} = if :os.type() == {:unix, :darwin}, do: {"macos", "dylib"}, else: {"linux", "so"}
+    File.mkdir_p!(Path.join(__DIR__, "priv/native"))
 
-    for crate <- crates,
-        do: File.cp!("#{target}/release/lib#{Path.basename(crate)}.#{extension}", "#{crate}/#{os}-#{arch}.so")
+    built =
+      for toml <- Path.wildcard("#{__DIR__}/nif/*/Cargo.toml"), crate = Path.basename(Path.dirname(toml)),
+          do: {crate, Path.join(__DIR__, "priv/native/#{crate}.so")}
+
+    shipped =
+      for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"), crate = Path.dirname(toml),
+          do: {Path.basename(crate), "#{crate}/#{os}-#{arch}.so"}
+
+    for {crate, put} <- built ++ shipped do
+      File.rm(put)
+      File.cp!("#{target}/release/lib#{crate}.#{extension}", put)
+    end
   end
 
   # The build this is, as `tooling/version` names it from the commit it's built from, as a client's is.

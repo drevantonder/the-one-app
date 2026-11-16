@@ -50,8 +50,8 @@ mkdir -p "$folder"
 folder=$(cd "$folder" && pwd)
 one=$root/target/release/one
 
-(cd "$root" && cargo build --release)
 (cd "$root/core/ui" && bun install --frozen-lockfile && bun build.js)
+# Compiling builds the Rust workspace too: `one`, and the NIFs (`core/server/mix.exs`).
 (cd "$root/core/server" && mix deps.get && mix compile)
 
 started=()

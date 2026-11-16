@@ -5,7 +5,7 @@ node_modules/
 *.beam
 erl_crash.dump
 .DS_Store
-# One Core's Rust NIFs as Rustler builds them, a plugin's as they're built beside their source, and the server's
+# One Core's Rust NIFs as they're built for the server to load, a plugin's as they're built beside their source, and the server's
 # tests' folders
 /core/server/priv/native/
 /plugins/*/server/nif/*/*.so
