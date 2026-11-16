@@ -706,6 +706,7 @@ impl Client {
             };
             tokio::spawn(renewing(Arc::downgrade(&client), left));
         }
+        tokio::spawn(reconnecting(Arc::downgrade(&client)));
         Ok(client)
     }
 
@@ -744,6 +745,10 @@ impl Client {
             sleep(RENEW).await;
             old.endpoint.close().await
         });
+        // Servers reach this run where it now is.
+        if self.watching.load(Ordering::Relaxed) {
+            self.watch(true).await;
+        }
         Ok(told.left())
     }
 
@@ -778,13 +783,13 @@ impl Client {
         self.connected.subscribe()
     }
 
-    /// Says whether this client is to hear what changes, as the app does while it runs. While it is, every server
-    /// acting for its user tells it when something changed. A server that isn't up now is told when it's next asked
-    /// anything, and one that isn't told the app has gone finds out when it next has something to say.
+    /// Says whether this client is to hear what changes, as the app does while it runs, to every server acting for
+    /// its user. While it is, each tells it when something changed, and keeps telling it once it starts again. A
+    /// server that isn't up now is told when it's next asked anything, and one that isn't told the app has gone
+    /// finds out when it next has something to say. It's said again where a server may not know it: from this run's
+    /// next endpoint (`renew`), and once a server answers again after none did, as one that's new may not have heard.
     pub async fn watch(&self, watching: bool) {
-        if self.watching.swap(watching, Ordering::Relaxed) == watching {
-            return;
-        }
+        self.watching.store(watching, Ordering::Relaxed);
         let Ok(Some(servers)) = self.servers(false).await else { return };
         let told = servers.into_iter().map(|server| async move {
             if let Some(open) = self.connect(server).await
@@ -1053,6 +1058,30 @@ async fn renewing(client: std::sync::Weak<Client>, mut left: Duration) {
             Err(error) if error.is::<DeviceAuthorization>() => return,
             Err(_) => AGAIN,
         };
+    }
+}
+
+/// While a client that's watching has no server answering it, it asks again by itself, sooner at first and then
+/// less often, as the device or the servers may be back any time: what's outside a device comes and goes, and no
+/// person should have to ask for what was going to come back anyway. Once one answers, it says again that it's
+/// watching, to every server, since one that was starting may not have heard.
+async fn reconnecting(client: std::sync::Weak<Client>) {
+    let Some(mut connected) = client.upgrade().map(|client| client.connected()) else { return };
+    while connected.changed().await.is_ok() {
+        let mut again = Duration::from_secs(1);
+        while !*connected.borrow_and_update() {
+            tokio::select! {
+                _ = connected.changed() => continue,
+                _ = sleep(again) => {}
+            }
+            let Some(client) = client.upgrade().filter(|client| client.watching.load(Ordering::Relaxed)) else { break };
+            let _ = client.request("ping", json!({})).await;
+            again = (again * 2).min(Duration::from_secs(30));
+        }
+        let Some(client) = client.upgrade() else { return };
+        if *connected.borrow() && client.watching.load(Ordering::Relaxed) {
+            client.watch(true).await;
+        }
     }
 }
 
