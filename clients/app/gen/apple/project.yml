@@ -42,6 +42,7 @@ targets:
         excludes: ["**/*.a"]
       - path: app_iOS
       - path: assets
+        optional: true
         buildPhase: resources
         type: folder
       - path: LaunchScreen.storyboard
