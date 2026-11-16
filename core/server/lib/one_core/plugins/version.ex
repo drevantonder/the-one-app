@@ -92,9 +92,10 @@ defmodule OneCore.Plugins.Version do
       Map.split_with(Map.new(rest), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
 
     with {:ok, skills} <- Skills.found(name, skills),
-         nil <- Enum.find_value(nifs, &compile_nif(&1, rest)),
+         {:ok, kept} <- nifs(nifs, rest),
          {:ok, modules, warnings} <- compile(under, sources),
          {:ok, version} <- describe(under, modules, rest) do
+      warnings = Enum.join(Enum.reject([warnings | kept], &(&1 == "")), "\n")
       hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
       own = Map.reject(rest, fn {path, _} -> client?(path) end)
@@ -270,8 +271,20 @@ defmodule OneCore.Plugins.Version do
 
   # A NIF's module, `server/nif/<name>.ex`, is compiled under the name it gives it, which its library was built for,
   # with that library as it's built for this kind of machine, `server/nif/<name>/<kind>.so`, written to a folder named
-  # by the build. A name holds one build in the VM, which nothing running on it may lose: the same build again is the
-  # one loaded, and another is refused. Gives nil, or what's wrong.
+  # by the build. The VM loads a library into a module once, and Rustler can't swap it for another while the module's
+  # in use (it has no `upgrade`), so a name holds the first build loaded until the server restarts: the same build
+  # again is that one, and another is kept for the next start, which loads the latest version's, and is said in the
+  # warnings. Gives `{:ok, warnings}`, or what's wrong.
+  defp nifs(nifs, rest) do
+    Enum.reduce_while(nifs, {:ok, []}, fn nif, {:ok, kept} ->
+      case compile_nif(nif, rest) do
+        :ok -> {:cont, {:ok, kept}}
+        {:kept, warning} -> {:cont, {:ok, [warning | kept]}}
+        {:error, _why} = error -> {:halt, error}
+      end
+    end)
+  end
+
   defp compile_nif({path, source}, rest) do
     library = Path.rootname(path) <> "/#{Builds.target()}.so"
     build = code({source, rest[library]})
@@ -296,12 +309,15 @@ defmodule OneCore.Plugins.Version do
         :persistent_term.erase({__MODULE__, module})
         said = if said == file, do: Enum.map_join(diagnostics, "\n", & &1.message), else: said
         {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{said}"}
+      else
+        :ok
       end
     else
       {:built, false} -> {:error, "#{path} has no build for this kind of machine, #{library}"}
-      {^build, _} -> nil
+      {^build, _} -> :ok
+      {_other, _} -> {:kept, "#{path}: this server runs the NIF it loaded until it restarts, and this one after"}
       names when is_list(names) -> {:error, "#{path} defines one module, which its library was built for"}
-      _ -> {:error, "#{path}'s module is loaded already as another build. A new build takes a new module name."}
+      _ -> {:error, "#{path}'s module is one of the server's own"}
     end
   end
 

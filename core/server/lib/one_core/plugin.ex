@@ -164,8 +164,9 @@ defmodule OneCore.Plugin do
     a server runs on, `linux-x86_64.so`, `linux-aarch64.so` and `macos-aarch64.so`, which are. The module the
     library was built for is `server/nif/sqlite.ex`, which keeps its name rather than taking its version's, and
     loads it with `@on_load :load` and `def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))`.
-    A deploy whose NIF doesn't load on the server fails, saying why. A name holds one build while the server runs:
-    deploying the same again keeps it, and a new build takes a new name. The plugin `database` brings `Sqlite`.
+    A deploy whose NIF doesn't load on the server fails, saying why. A name holds the first build loaded until the
+    server restarts: a deploy with another build is kept, says so in its warnings, and runs from the next start.
+    The plugin `database` brings `Sqlite`.
 
   A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
 
