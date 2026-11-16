@@ -11,7 +11,8 @@ defmodule OneCore.Skills do
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
-  with each file's digest and size. Whoever asks sees One Core's own, and those of the plugins that run for them.
+  with each file's digest and size. The `skills` tool lists and reads them too, as Executor's does, for a client that
+  reads neither. Whoever asks sees One Core's own, and those of the plugins that run for them.
 
   A skill's path ends with its name, as the extension has it, and what comes before is the plugin's, as it's found
   where it runs: the name it's installed by there, then the plugin's own name, as its folder is. So a plugin's skill is
@@ -149,6 +150,85 @@ defmodule OneCore.Skills do
       end
     end)
   end
+
+  @doc "The tool, as MCP lists it, for a client that reads no skills of its own (`skills/list`, `resources/read`)."
+  def tool do
+    %{
+      name: "skills",
+      description: """
+      Lists the skills you have and reads one. A skill says when and how to use a plugin's tools, and One Core's own \
+      say how to make a plugin (building-plugins), install one (installing-plugins) and write its app (ui). {} lists \
+      every skill, each with its plugin, name, what it's for and its other files; { plugin: "gmail" } lists one \
+      plugin's; { plugin: "gmail", name: "gmail" } reads that skill, and { name: "building-plugins" } one of One \
+      Core's own; add file to read one of its other files.\
+      """,
+      inputSchema: %{
+        type: "object",
+        properties: %{
+          plugin: %{type: "string", description: "The plugin the skill is in, by the name its tools start with"},
+          name: %{
+            type: "string",
+            description: "The skill's name, as its list gives it: a plugin's own is named as the plugin"
+          },
+          file: %{type: "string", description: "One of the skill's other files, by its path in the skill's folder"}
+        },
+        dependentRequired: %{file: ["name"]}
+      },
+      annotations: %{readOnlyHint: true}
+    }
+  end
+
+  @doc """
+  The answer to `skills` for `who`: the skills they have, or one plugin's, as JSON, or a skill's file. Gives
+  `{:ok, text}` or `{:error, why}`.
+  """
+  def run(inputs, who) do
+    skills =
+      for {path, skill, file} <- found(who), inputs["plugin"] in [nil, plugin(path, file)] do
+        %{
+          plugin: plugin(path, file),
+          name: skill.frontmatter["name"],
+          description: skill.frontmatter["description"],
+          path: path,
+          files: Enum.map(skill.files, & &1.path)
+        }
+      end
+
+    named = if inputs["name"], do: Enum.filter(skills, &(&1.name == inputs["name"])), else: skills
+
+    # What its schema says (`dependentRequired`), which the schema's validator doesn't know.
+    case {inputs["name"], named} do
+      {nil, _skills} when is_map_key(inputs, "file") ->
+        {:error, ~s(file is one of a skill's files, so it needs the skill's name: { name: "building-plugins", file: "..." }.)}
+
+      {nil, []} ->
+        {:error, "#{inputs["plugin"]} has no skills here. skills {} lists every one."}
+
+      {nil, skills} ->
+        listed =
+          for skill <- skills, do: skill |> Map.delete(:path) |> Map.reject(fn {_, value} -> value in [nil, []] end)
+
+        {:ok, JSON.encode!(%{skills: listed})}
+
+      {name, []} ->
+        {:error,
+         "There's no skill #{name}#{if inputs["plugin"], do: " in #{inputs["plugin"]}"}. skills {} lists every one."}
+
+      {_name, [skill]} ->
+        case text(who, "skill://#{skill.path}/#{inputs["file"] || "SKILL.md"}") do
+          {:ok, text} -> {:ok, text}
+          :absent -> {:error, "#{skill.name} has no file #{inputs["file"]}. Its files: #{Enum.join(skill.files, ", ")}"}
+        end
+
+      {name, several} ->
+        {:error,
+         "Several plugins have a skill #{name}: say which, as plugin, one of #{Enum.map_join(several, ", ", & &1.plugin)}."}
+    end
+  end
+
+  # The plugin a skill is in, by the name its tools start with, or none for One Core's own.
+  defp plugin(path, {artifact, _code}) when is_binary(artifact), do: hd(String.split(path, "/"))
+  defp plugin(_path, _file), do: nil
 
   @doc "The skills that whoever a request is for sees, each as the Skills Extension lists one."
   def list(who), do: for({path, skill, _file} <- found(who), do: listed(path, skill))

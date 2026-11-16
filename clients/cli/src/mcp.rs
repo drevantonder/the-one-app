@@ -1,6 +1,6 @@
 //! MCP over stdio. Servers speak MCP themselves, so each message read is passed to the server and its answer
-//! written back. With `--code`, each says it's for code mode (`OneCore.Mcp`), and a script `execute` runs is run here,
-//! on this device (`codemode`).
+//! written back. With `--code`, each says it's for code mode (`OneCore.Mcp`), and a script `execute` runs, and the
+//! calls `call` makes, are run here, on this device (`codemode`).
 
 use std::sync::Arc;
 
@@ -37,8 +37,10 @@ pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
             }
             let message = if request.is_object() { request.to_string() } else { message };
             let progress = !request["params"]["_meta"]["progressToken"].is_null();
-            let response = if request["method"] == "tools/call" && request["params"]["name"] == "execute" {
-                execute(&client, &request).await
+            let local = request["method"] == "tools/call"
+                && ["execute", "call"].contains(&request["params"]["name"].as_str().unwrap_or_default());
+            let response = if local {
+                here(&client, &request).await
             } else {
                 let notified = |line: &[u8]| drop(progress.then(|| lines.send(line.to_vec())));
                 match client.ask_notified(message.as_bytes(), notified).await {
@@ -56,12 +58,21 @@ pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
     writing.await?
 }
 
-/// The answer to a call of `execute`: its script, run here. It says it's a complete result, as MCP has every result say
-/// from 2026-07-28, which a client of an earlier version ignores.
-async fn execute(client: &Arc<Client>, request: &Value) -> Vec<u8> {
-    let code = request["params"]["arguments"]["code"].as_str().unwrap_or_default();
-    let (ok, text) = crate::codemode::run(client, code).await.unwrap_or_else(|error| (false, format!("{error:#}")));
-    let result = json!({"resultType": "complete", "content": [{"type": "text", "text": text}], "isError": !ok});
+/// The answer to a call of `execute`, its script run here, or of `call`, its calls asked from here. It says it's a
+/// complete result, as MCP has every result say from 2026-07-28, which a client of an earlier version ignores.
+async fn here(client: &Arc<Client>, request: &Value) -> Vec<u8> {
+    let arguments = &request["params"]["arguments"];
+    let result = if request["params"]["name"] == "call" {
+        crate::codemode::call(client, &arguments["calls"]).await
+    } else {
+        let code = arguments["code"].as_str().unwrap_or_default();
+        crate::codemode::run(client, code)
+            .await
+            .map(|(ok, text)| json!({"content": [{"type": "text", "text": text}], "isError": !ok}))
+    };
+    let mut result = result
+        .unwrap_or_else(|error| json!({"content": [{"type": "text", "text": format!("{error:#}")}], "isError": true}));
+    result["resultType"] = json!("complete");
     json!({"jsonrpc": "2.0", "id": request["id"], "result": result}).to_string().into_bytes()
 }
 

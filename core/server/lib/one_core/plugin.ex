@@ -79,9 +79,11 @@ defmodule OneCore.Plugin do
   - A `SKILL.md` at the root of the folder, if the plugin has one, is its skill: text for agents on when and how
     to use its tools, which an agent reads when it needs it, at `skill://hello/hello/SKILL.md`, and `one hello`
     shows with the plugin's tools. Its address starts with the name the plugin is installed by, which is where an
-    agent finds it: installed as `greeter`, it's `skill://greeter/hello/SKILL.md`. It's an Agent Skill (agentskills.io):
-    it starts with the skill's `name`, which is the plugin's, and its `description`, one line saying when an agent
-    should read it, as YAML between two lines of `---`. Its `metadata`, which Agent Skills leaves to whoever reads
+    agent finds it: installed as `greeter`, it's `skill://greeter/hello/SKILL.md`, which the `skills` tool reads as
+    `{ plugin: "greeter", name: "hello" }`, and `search` gives it with the tools of it that match. It's an Agent
+    Skill (agentskills.io): it starts with the skill's `name`, which is the plugin's, and its `description`, one line
+    saying when an agent should read it, as YAML between two lines of `---`, whose words `search` finds the plugin's
+    tools by too. Its `metadata`, which Agent Skills leaves to whoever reads
     it, is what a person reads where the plugin's listed (the App Store, the plugin directory): its `subtitle`, a
     few words under its name, as an App Store app's is, and `about`, a few plain sentences on its page, as Google
     Play's "About this app" is. Both say what it does for a person, with no word of an agent's; each is one line, as

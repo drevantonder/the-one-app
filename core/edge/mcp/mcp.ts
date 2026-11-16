@@ -86,20 +86,22 @@ at a time, in everyday words.
 
 There are two ways in, and you choose the one that fits you, or tell the person in one line which you're adding and why:
 
-- Every tool, and \`search\` to find them. For an agent that finds tools itself: Claude Code, OpenCode, Codex, Cursor.
+- Every tool, and \`skills\`. For an agent whose client searches tools itself: Claude Code, OpenCode, Codex, Cursor.
   On one of their computers, \`one mcp\` over stdio (\`claude mcp add --scope user one -- one mcp\`); anywhere else,
   \`${origin}/mcp\` over streamable HTTP (\`claude mcp add --transport http one ${origin}/mcp\`).
-- Code mode: \`search\` finds what's possible, \`execute\` runs a short script that calls several tools in one go, and
-  \`deploy\`, \`vault_request\` and \`vault_status\` stay tools of their own. For every other agent. \`one mcp --code\`,
-  or \`${origin}/mcp?code\`.
+- Code mode, as Executor's: \`search\` finds what's possible, \`call\` calls one tool or several at once, \`execute\`
+  runs a short script where one call's answer feeds the next, and \`skills\` reads the skills. For every other agent.
+  \`one mcp --code\`, or \`${origin}/mcp?code\`.
 
 ## Finding your way
 
-- Each plugin has a skill that says when and how to use its tools: read it before them. MCP's \`skills/list\` and
-  \`resources/list\` list them, under \`skill://\`, and \`one <plugin>\` prints one with its tools. Whoever signed in
-  reads them at \`${origin}/skills/<path>\` too, as \`${origin}/skills/building-plugins/SKILL.md\`.
-- \`search\` (\`one search "<words>"\`) finds the tools for a task across every plugin, each with how to call it and its
-  plugin's skill. Before saying you can't, search: a plugin they haven't installed yet may do it, and search offers it.
+- Each plugin has a skill that says when and how to use its tools: read it before them. The \`skills\` tool lists
+  and reads them, as do MCP's \`skills/list\` and \`resources/read\`, under \`skill://\`, and \`one <plugin>\` prints one
+  with its tools. Whoever signed in reads them at \`${origin}/skills/<path>\` too, as
+  \`${origin}/skills/building-plugins/SKILL.md\`.
+- \`one search "<words>"\`, and code mode's \`search\`, find the tools for a task across every plugin, each with how to
+  call it and its plugin's skill. Before saying you can't, search: a plugin they haven't installed yet may do it, and
+  search offers it.
 - Every MCP tool is also a command: \`gmail_search\` is \`one gmail search\`. \`one run <file>\` runs a script as
   \`execute\` does.
 - When the person asks for an app, tracker or tool, make it here as a plugin, where it's on all their devices: the

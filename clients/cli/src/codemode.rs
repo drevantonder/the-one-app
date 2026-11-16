@@ -1,7 +1,8 @@
-//! Code mode on this device: `one run <file>`, and `execute` in `one mcp --code`. A script runs in OpenCode's
-//! interpreter under a pinned Bun (`core/codemode/run.js`), and each tool it calls comes back here and is asked of the
-//! network as this client asks any tool, so what this device fills in of a tool's inputs (`client::InputResolver`) is
-//! filled in for a script's calls too. A server runs the same runner for `execute` over the web (`OneCore.CodeMode`).
+//! Code mode on this device: `one run <file>`, and `execute` and `call` in `one mcp --code`. A script runs in
+//! OpenCode's interpreter under a pinned Bun (`core/codemode/run.js`), and each tool it calls comes back here and is
+//! asked of the network as this client asks any tool, so what this device fills in of a tool's inputs
+//! (`client::InputResolver`) is filled in for a script's calls too, and for `call`'s. A server does the same for both
+//! over the web (`OneCore.CodeMode`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use client::Client;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::Digest;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -62,13 +63,26 @@ const STOPPED: Duration = Duration::from_secs(11 * 60);
 /// what it returned or what went wrong, with what it logged.
 pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
     ensure!(!code.trim().is_empty(), "Give the script as code");
-    let listed = client.request("tools/list", json!({})).await?;
-    let tools: Vec<Value> = listed["tools"]
+    let (listed, skills) =
+        tokio::join!(client.request("tools/list", json!({})), client.request("skills/list", json!({})));
+    let tools: Vec<Value> = listed?["tools"]
         .as_array()
         .into_iter()
         .flatten()
         .map(|tool| {
             json!({"name": tool["name"], "plugin": tool["_meta"]["plugin"], "description": tool["description"], "input": tool["inputSchema"]})
+        })
+        .collect();
+    // What each plugin is for, which its own skill says (`skill://<plugin>/<its own name>/SKILL.md`), as a server
+    // gives a script (`OneCore.Search.described/1`).
+    let namespaces: Map<String, Value> = skills?["skills"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|skill| {
+            let path = skill["uri"].as_str()?.strip_prefix("skill://")?.strip_suffix("/SKILL.md")?;
+            let [plugin, _own] = path.split('/').collect::<Vec<_>>()[..] else { return None };
+            Some((plugin.to_owned(), skill["frontmatter"]["description"].clone()))
         })
         .collect();
     let (bun, folder) = runner().await?;
@@ -83,7 +97,10 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
         .spawn()?;
     let to = Arc::new(Mutex::new(child.stdin.take().context("the runner has a stdin")?));
     let mut from = BufReader::new(child.stdout.take().context("the runner has a stdout")?).lines();
-    to.lock().await.write_all(format!("{}\n", json!({"code": code, "tools": tools})).as_bytes()).await?;
+    to.lock()
+        .await
+        .write_all(format!("{}\n", json!({"code": code, "tools": tools, "namespaces": namespaces})).as_bytes())
+        .await?;
     let listening = async {
         while let Some(line) = from.next_line().await? {
             let Ok(response) = serde_json::from_str::<Value>(&line) else { continue };
@@ -93,8 +110,9 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
             let (client, to) = (client.clone(), to.clone());
             // Each call runs beside the others, as the script makes them.
             tokio::spawn(async move {
-                let called =
-                    client.request("tools/call", json!({"name": response["name"], "arguments": response["input"]})).await;
+                let called = client
+                    .request("tools/call", json!({"name": response["name"], "arguments": response["input"]}))
+                    .await;
                 let reply = match called {
                     Ok(result) if result["isError"] == true => {
                         json!({"reply": response["call"], "error": texts(&result["content"])})
@@ -119,6 +137,85 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
         Ok(Err(error)) => Err(error),
         Err(_) => Ok((false, "The script ran past its time and was stopped.".to_owned())),
     }
+}
+
+/// `call`'s answer, as MCP's result: each of `calls`, one `{path, input}` or a list of them, asked of the network at
+/// once by its path, as search gives it (`tools.gmail.search`) or without its `tools.`. Each answers, in order, as JSON
+/// with its `path`, `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, after that.
+pub async fn call(client: &Arc<Client>, calls: &Value) -> Result<Value> {
+    let listed = client.request("tools/list", json!({})).await?;
+    let mut named = HashMap::new();
+    for tool in listed["tools"].as_array().into_iter().flatten() {
+        let name = tool["name"].as_str().unwrap_or_default().to_owned();
+        let dotted = match tool["_meta"]["plugin"].as_str() {
+            Some(plugin) => format!("{plugin}.{}", name.strip_prefix(&format!("{plugin}_")).unwrap_or(&name)),
+            None => name.clone(),
+        };
+        named.insert(path(&dotted), name.clone());
+        named.insert(dotted, name);
+    }
+    let calls = match calls {
+        Value::Array(calls) => calls.clone(),
+        call => vec![call.clone()],
+    };
+    let asked: Vec<_> = calls
+        .into_iter()
+        .map(|request| {
+            let (client, name) = (client.clone(), request["path"].as_str().and_then(|path| named.get(path)).cloned());
+            tokio::spawn(async move {
+                let path = request["path"].clone();
+                let Some(name) = name else {
+                    let why = format!(
+                        "{} isn't a tool's path. search gives each exactly, as tools.gmail.search.",
+                        path.as_str().map_or_else(|| path.to_string(), str::to_owned)
+                    );
+                    return (path, Err(why));
+                };
+                let called = client.request("tools/call", json!({"name": name, "arguments": request["input"]})).await;
+                match called {
+                    Ok(result) if result["isError"] == true => (path, Err(texts(&result["content"]))),
+                    Ok(result) => (path, Ok(result["content"].clone())),
+                    Err(error) => (path, Err(format!("{error:#}"))),
+                }
+            })
+        })
+        .collect();
+    let (mut content, mut failed) = (Vec::new(), 0);
+    let count = asked.len();
+    for answer in asked {
+        match answer.await? {
+            (path, Ok(parts))
+                if parts.as_array().is_some_and(|parts| parts.iter().all(|part| part["type"] == "text")) =>
+            {
+                content.push(json!({"type": "text", "text": json!({"path": path, "ok": true, "value": value(&parts)}).to_string()}));
+            }
+            // What isn't text, as a picture is, stays MCP's content, for whoever called to see.
+            (path, Ok(parts)) => {
+                content.push(json!({"type": "text", "text": json!({"path": path, "ok": true}).to_string()}));
+                content.extend(parts.as_array().into_iter().flatten().cloned());
+            }
+            (path, Err(why)) => {
+                failed += 1;
+                content.push(
+                    json!({"type": "text", "text": json!({"path": path, "ok": false, "error": why}).to_string()}),
+                );
+            }
+        }
+    }
+    Ok(json!({"content": content, "isError": failed == count}))
+}
+
+/// A tool's path in a script, from its path there, as OpenCode writes it: `tools.gmail.search`,
+/// `tools["google-calendar"].events` (`OneCore.Search.path/1`).
+fn path(dotted: &str) -> String {
+    let identifier = |segment: &str| {
+        let mut chars = segment.chars();
+        chars.next().is_some_and(|first| first.is_ascii_alphabetic() || first == '_' || first == '$')
+            && chars.all(|next| next.is_ascii_alphanumeric() || next == '_' || next == '$')
+    };
+    dotted.split('.').fold("tools".to_owned(), |path, segment| {
+        if identifier(segment) { format!("{path}.{segment}") } else { format!("{path}[{}]", json!(segment)) }
+    })
 }
 
 /// A call's answer as the script gets it: text that's JSON is that, other text is a string, and anything else is

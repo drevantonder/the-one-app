@@ -22,9 +22,11 @@ defmodule OneCore.Mcp do
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
 
   An agent's client chooses how it calls tools, by what its requests say (`_meta.mode`), which the CLI says for
-  `one mcp --code` and the network's address for `/mcp?code`: with none, every tool is listed, and `search` finds
-  them (`OneCore.Search`); in code mode, `search`, `execute`, which runs a script that calls them (`OneCore.CodeMode`),
-  and the few every agent needs from the start (`@direct`). `one search` says `cli`, for calls written as commands.
+  `one mcp --code` and the network's address for `/mcp?code`. With none, every tool is listed, and `skills`, and the
+  client finds tools itself, as Claude Code's tool search and the model APIs' deferred tools do. In code mode, as
+  Executor's MCP server has it, only `search`, which finds them (`OneCore.Search`), `execute`, which runs a script that
+  calls them, `call`, which calls them without one (`OneCore.CodeMode`), and `skills` (`OneCore.Skills`). `one search`
+  says `cli`, for calls written as commands.
   """
   require Logger
 
@@ -46,11 +48,7 @@ defmodule OneCore.Mcp do
     User
   }
 
-  alias OneCore.Plugins.{Calls, Store, Version}
-
-  # The tools code mode lists besides `search` and `execute`: deploying a plugin, and asking the person for a secret
-  # rather than for it in the chat.
-  @direct ~w(deploy vault_request vault_status)
+  alias OneCore.Plugins.{Calls, Deploy, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
   @external_resource Path.expand("../../priv/rules.md", __DIR__)
@@ -198,10 +196,11 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], principal, true) end)
   end
 
-  # `search` and `execute` are this server's own, and a sharing link's holder has only the tools it's given.
+  # `search`, `execute`, `call` and `skills` are this server's own, and a sharing link's holder has only the tools
+  # it's given.
   defp result("tools/call", %{"name" => name} = params, from, {actor, _subject} = principal, forwarded)
-       when name in ["search", "execute"] do
-    tool = if name == "search", do: Search.tool(), else: CodeMode.tool()
+       when name in ["search", "execute", "call", "skills"] do
+    tool = Enum.find([Search.tool(), Skills.tool() | CodeMode.tools()], &(&1.name == name))
     inputs = Map.get(params, "arguments") || %{}
 
     cond do
@@ -281,8 +280,8 @@ defmodule OneCore.Mcp do
     tools =
       cond do
         holder?(actor) -> listed
-        mode(params) == :code -> [Search.tool(), CodeMode.tool() | Enum.filter(listed, &(&1.name in @direct))]
-        true -> [Search.tool() | listed]
+        mode(params) == :code -> [Search.tool() | CodeMode.tools()] ++ [Skills.tool()]
+        true -> [Skills.tool() | listed]
       end
 
     {:ok, %{tools: tools}}
@@ -396,22 +395,58 @@ defmodule OneCore.Mcp do
 
   defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
+  # What anyone has deployed is read from the bucket, meanwhile.
   defp own("search", %{"query" => query} = inputs, params, _from, {_actor, subject}, _forwarded) do
-    text = Search.run(query, Map.get(inputs, "limit", 8), subject, mode(params))
+    deployed = Task.async(&Deploy.deployed/0)
+    tools = scripted(subject)
+    deployed = Task.await(deployed, 30_000)
+    text = Search.run(query, Map.get(inputs, "limit", 8), tools, Plugins.running(subject), deployed, mode(params))
     {:ok, %{content: [%{type: "text", text: text}]}}
   end
 
-  # A script's calls are each answered here as that call of the tool would be, for whoever asked.
-  defp own("execute", %{"code" => code}, _params, from, {_actor, subject} = principal, forwarded) do
-    call = fn name, inputs -> result("tools/call", %{"name" => name, "arguments" => inputs}, from, principal, forwarded) end
+  defp own("skills", inputs, _params, _from, {_actor, subject}, _forwarded) do
+    case Skills.run(inputs, subject) do
+      {:ok, text} -> {:ok, %{content: [%{type: "text", text: text}]}}
+      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+    end
+  end
 
+  # A script's calls are each answered here as that call of the tool would be, for whoever asked, and so are
+  # `call`'s. A plugin's tools in a script are in a namespace of its name, which says what the plugin is for.
+  defp own("execute", %{"code" => code}, _params, from, {_actor, subject} = principal, forwarded) do
     tools =
-      for tool <- listed(subject, false),
+      for tool <- scripted(subject),
           do: %{name: tool.name, plugin: tool[:_meta][:plugin], description: tool.description, input: tool.inputSchema}
 
-    {done, text} = CodeMode.run(code, tools, call)
+    namespaces = Map.new(Plugins.running(subject), fn {name, version} -> {name, Search.described(version)} end)
+    {done, text} = CodeMode.run(code, tools, namespaces, called(from, principal, forwarded))
     {:ok, %{content: [%{type: "text", text: text}], isError: done == :error}}
   end
+
+  defp own("call", %{"calls" => calls}, _params, from, {_actor, subject} = principal, forwarded) do
+    # A path as search gives it, or without its `tools.`, as a script's `search()` gives it.
+    named =
+      Map.new(
+        for tool <- scripted(subject),
+            dotted = dotted(tool),
+            path <- [Search.path(dotted), dotted],
+            do: {path, tool.name}
+      )
+
+    {:ok, CodeMode.calls(calls, named, called(from, principal, forwarded))}
+  end
+
+  defp called(from, principal, forwarded),
+    do: fn name, inputs ->
+      result("tools/call", %{"name" => name, "arguments" => inputs}, from, principal, forwarded)
+    end
+
+  # A tool's path in a script, `gmail.search` or `deploy`.
+  defp dotted(%{_meta: %{plugin: plugin}} = tool), do: plugin <> "." <> String.replace_prefix(tool.name, plugin <> "_", "")
+  defp dotted(tool), do: tool.name
+
+  # The tools a script has, and that `search` finds among: those every client is listed but code mode's own.
+  defp scripted(who), do: [Skills.tool() | listed(who, false)]
 
   # How whoever asks calls tools: as MCP's tools, in a code mode script, or as commands.
   defp mode(params) do
@@ -520,25 +555,26 @@ defmodule OneCore.Mcp do
         :code ->
           """
           `search` finds the tools for a task across every plugin, with each one's exact call in a script and its \
-          plugin's skill. `execute` runs a short script with them, `const r = await tools.<plugin>.<tool>({ ... }); \
-          return r`, calling several in one go: what it returns comes back to you. Skills name tools \
-          <plugin>_<tool>, which in a script is tools.<plugin>.<tool>, and One Core's own are tools.<tool>.\
+          plugin's skill: search before you guess, to learn a plugin, and before saying you can't, since it offers \
+          plugins you could install. `call` calls one or several at once, by their paths, and `execute` runs a short \
+          script where one call's answer feeds the next, `const r = await tools.<plugin>.<tool>({ ... }); return r`: \
+          what it returns comes back to you. Skills name tools <plugin>_<tool>, which in a script is \
+          tools.<plugin>.<tool>, and One Core's own are tools.<tool>.\
           """
 
         _ ->
           """
-          `search` finds the tools for a task across every plugin, each with its exact call and its plugin's skill: \
-          call it before you guess, to learn a plugin, and before saying you can't, since it offers plugins you \
-          could install. Where `one` runs, every tool is also a command: gmail_search is `one gmail search`.\
+          Every tool is listed, and your client's own tool search finds them. Where `one` runs, every tool is also a \
+          command: gmail_search is `one gmail search`, and `one search <words>` finds the tools for a task and offers \
+          plugins you could install: use it before saying you can't.\
           """
       end
 
     skills = """
     A plugin's skill says when and how to use its tools, and the skill building-plugins how to make a plugin: when \
-    the person asks for an app, tracker or tool, make it here, where it's on all their devices. skills/list and \
-    resources/list list the skills, and resources/read reads one: a plugin's are under skill://<plugin>/, and \
-    building-plugins is skill://building-plugins/SKILL.md. Where your client reads no resources, `search` gives a \
-    skill's text by its name.\
+    the person asks for an app, tracker or tool, make it here, where it's on all their devices. `skills` lists them \
+    and reads one, as do skills/list and resources/read: a plugin's are under skill://<plugin>/, and building-plugins \
+    is skill://building-plugins/SKILL.md.\
     """
 
     case mode do
@@ -551,7 +587,7 @@ defmodule OneCore.Mcp do
   defp fitted(text, []), do: text
 
   defp fitted(text, plugins) do
-    more = ", and more: search finds them."
+    more = ", and more: `skills` lists them."
     instructions = text <> "\n\nThe plugins here, whose tools start with their names: "
 
     Enum.reduce_while(plugins, {instructions, ""}, fn plugin, {instructions, sep} ->

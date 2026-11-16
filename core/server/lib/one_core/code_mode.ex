@@ -1,10 +1,11 @@
 defmodule OneCore.CodeMode do
   @moduledoc """
-  MCP's `execute` over the web: a short script that calls tools, run by OpenCode's interpreter under this server's
-  Bun (`core/codemode/run.js`), where nothing but `tools` reaches the world. Each call it makes comes back here and is
-  run as whoever asked, exactly as their MCP call would be, its inputs checked against what the tool takes. The CLI
-  runs the same runner on its own device (`clients/cli/src/codemode.rs`), so that what a device fills in of a tool's
-  inputs is filled in there.
+  Code mode's `execute` and `call` over the web, as Executor has them. `execute` runs a short script that calls tools,
+  by OpenCode's interpreter under this server's Bun (`core/codemode/run.js`), where nothing but `tools` reaches the
+  world. Each call it makes comes back here and is run as whoever asked, exactly as their MCP call would be, its
+  inputs checked against what the tool takes. `call` makes one call or several at once with no script. The CLI does
+  both on its own device (`clients/cli/src/codemode.rs`), so that what a device fills in of a tool's inputs is filled
+  in there.
   """
   alias OneCore.{App, Server}
 
@@ -17,16 +18,20 @@ defmodule OneCore.CodeMode do
   # The script's own limits are the runner's: ten minutes, and a minute for its last call to come back.
   @stopped :timer.minutes(11)
 
-  @doc "The tool, as MCP lists it."
-  def tool do
+  @doc "`execute` and `call`, as MCP lists them."
+  def tools, do: [execute(), call()]
+
+  defp execute do
     %{
       name: "execute",
       description: """
       Runs a short script that calls tools, and gives back what it returns. It's JavaScript without imports, timers \
       or network: call a tool as `await tools.<plugin>.<tool>({ ... })`, or One Core's own as `await \
-      tools.<tool>({ ... })` (search gives each exact call), use plain JavaScript between calls, and `return` what you \
-      want back; what it logs comes back too. Each call runs as you, as any tool does, so what sends or can't be undone \
-      waits for the person's yes, as always. Up to 100 calls, 10 minutes and 60 KB back.\
+      tools.<tool>({ ... })` (search gives each exact call, and `search({ query })` in the script finds them too), use \
+      plain JavaScript between calls, and `return` what you want back; what it logs comes back too. Use it where one \
+      call's answer feeds another, or to cut a large answer down; for one call or a few that don't depend on each \
+      other, use call. Each call runs as you, as any tool does, so what sends or can't be undone waits for the \
+      person's yes, as always. Up to 100 calls, 10 minutes and 60 KB back.\
       """,
       inputSchema: %{
         type: "object",
@@ -37,11 +42,78 @@ defmodule OneCore.CodeMode do
     }
   end
 
+  defp call do
+    request = %{
+      type: "object",
+      properties: %{
+        path: %{type: "string", description: "The tool's path, exactly as search gives it: tools.gmail.search"},
+        input: %{type: "object", description: "Its inputs, as its signature says"}
+      },
+      required: ["path"]
+    }
+
+    %{
+      name: "call",
+      description: """
+      Calls tools without a script: give one { path, input }, or several in a list, which run at once. Each path is \
+      exactly as search gives it, like tools.gmail.search. Answers each in the same order, with ok and its value or \
+      its error; a picture comes back as one. Use execute instead where one call's answer feeds another, or to cut a \
+      large answer down before it reaches you. Each call runs as you, as any tool does, so what sends or can't be \
+      undone waits for the person's yes, as always.\
+      """,
+      inputSchema: %{
+        type: "object",
+        properties: %{calls: %{anyOf: [request, %{type: "array", items: request, minItems: 1}]}},
+        required: ["calls"]
+      },
+      annotations: %{readOnlyHint: false}
+    }
+  end
+
   @doc """
-  Runs `code` with `tools`, each `%{name, plugin, description, input}`. `call` runs one: given its name and inputs, it gives MCP's result of calling it. Gives `{:ok, text}` or
+  `call`'s answer, as MCP's result: each of `calls` run at once by `call`, given a tool's name and inputs as `run/4`'s
+  is, `named` giving the name of the tool at each path a script reaches. Each answers, in order, as JSON with its
+  `path`, `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, after that.
+  """
+  def calls(calls, named, call) do
+    calls
+    |> List.wrap()
+    |> Task.async_stream(
+      fn request ->
+        path = request["path"]
+        name = named[path]
+
+        if name,
+          do: {path, answered(call, name, request["input"])},
+          else: {path, {:error, "#{path} isn't a tool's path. search gives each exactly, as tools.gmail.search."}}
+      end,
+      timeout: @stopped,
+      ordered: true
+    )
+    |> Enum.map(fn {:ok, answer} -> answer end)
+    |> then(fn answers ->
+      content =
+        Enum.flat_map(answers, fn
+          {path, {:ok, content}} ->
+            if text?(content),
+              do: [%{type: "text", text: JSON.encode!(%{path: path, ok: true, value: value(content)})}],
+              # What isn't text, as a picture is, stays MCP's content, for whoever called to see.
+              else: [%{type: "text", text: JSON.encode!(%{path: path, ok: true})} | content]
+
+          {path, {:error, why}} ->
+            [%{type: "text", text: JSON.encode!(%{path: path, ok: false, error: why})}]
+        end)
+
+      %{content: content, isError: Enum.all?(answers, &match?({_, {:error, _}}, &1))}
+    end)
+  end
+
+  @doc """
+  Runs `code` with `tools`, each `%{name, plugin, description, input}`, and `namespaces`, what each plugin is for by
+  its name. `call` runs one: given its name and inputs, it gives MCP's result of calling it. Gives `{:ok, text}` or
   `{:error, text}`: what it returned or what went wrong, with what it logged.
   """
-  def run(code, tools, call) do
+  def run(code, tools, namespaces, call) do
     with {:ok, bun} <- App.bun(),
          {:ok, folder} <- runner(bun) do
       port =
@@ -55,7 +127,7 @@ defmodule OneCore.CodeMode do
           {:env, [{~c"DO_NOT_TRACK", ~c"1"}]}
         ])
 
-      Port.command(port, JSON.encode!(%{code: code, tools: tools}) <> "\n")
+      Port.command(port, JSON.encode!(%{code: code, tools: tools, namespaces: namespaces}) <> "\n")
 
       try do
         listen(port, call, %{}, "", [], System.monotonic_time(:millisecond) + @stopped)
@@ -100,32 +172,35 @@ defmodule OneCore.CodeMode do
   # One call, as MCP answered it: text that's JSON is that, other text is a string, and anything else is MCP's
   # content as it is. An error is what the script's call throws.
   defp called(call, name, input) do
-    case call.(name, input || %{}) do
-      {:ok, %{isError: true, content: content}} -> %{error: texts(content)}
-      {:ok, %{"isError" => true, "content" => content}} -> %{error: texts(content)}
-      {:ok, %{content: content}} -> %{ok: value(content)}
-      {:ok, %{"content" => content}} -> %{ok: value(content)}
-      {:error, _code, why} -> %{error: why}
+    case answered(call, name, input) do
+      {:ok, content} -> %{ok: if(text?(content), do: value(content), else: content)}
       {:error, why} -> %{error: why}
     end
-  rescue
-    error -> %{error: Exception.message(error)}
-  catch
-    :exit, why -> %{error: Exception.format_exit(why)}
   end
 
+  defp answered(call, name, input) do
+    case call.(name, input || %{}) do
+      {:ok, %{isError: true, content: content}} -> {:error, texts(content)}
+      {:ok, %{"isError" => true, "content" => content}} -> {:error, texts(content)}
+      {:ok, %{content: content}} -> {:ok, JSON.decode!(JSON.encode!(content))}
+      {:ok, %{"content" => content}} -> {:ok, content}
+      {:error, _code, why} -> {:error, why}
+      {:error, why} -> {:error, why}
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    :exit, why -> {:error, Exception.format_exit(why)}
+  end
+
+  defp text?(content), do: Enum.all?(content, &(&1["type"] == "text"))
+
   defp value(content) do
-    content = JSON.decode!(JSON.encode!(content))
+    text = texts(content)
 
-    if Enum.all?(content, &(&1["type"] == "text")) do
-      text = texts(content)
-
-      case JSON.decode(text) do
-        {:ok, value} -> value
-        _ -> text
-      end
-    else
-      content
+    case JSON.decode(text) do
+      {:ok, value} -> value
+      _ -> text
     end
   end
 

@@ -95,6 +95,17 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   Its support for client ID metadata documents wants a fetch that pins the address a name resolved to, which a
   Worker's fetch can't, so assistants register themselves, which MCP still allows.
 
+- **Executor** (executor.sh, `UsefulSoftwareCo/executor`, MIT): an MCP server that gives agents many apps' tools
+  through a few of its own: `skills`, `search`, `describe`, `call`, `execute` and `resume`. Its `search` is BM25 over
+  each tool's path, description and labels, and the `search()` inside an `execute` script ranks the same; `call`
+  makes one call or several at once with no script. Chosen on 16 November 2026 as how agents find and call tools
+  here: code mode is `search`, `call`, `execute` and `skills` as it has them, and `search` ranks as OpenCode's
+  `search()` in a script does, with a plugin's description as its namespace's, so the two agree. MCP without code
+  mode lists every tool and `skills`, since clients there search tools themselves. Left out: `describe`, as our
+  `search` gives each tool's whole signature, and `resume`, as nothing of ours pauses a script for a person to
+  answer. Its index of tools kept as rows in a database neither: a network has hundreds of tools, not thousands, so
+  they're ranked in memory as they're asked for.
+
 ## Decided earlier, and easy to miss
 
 - **How devices link.** Five options were compared in a table earlier in November 2026: A, everything through the
