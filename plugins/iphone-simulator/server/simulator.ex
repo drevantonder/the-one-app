@@ -142,7 +142,7 @@ defmodule IphoneSimulator.Simulator do
   """
   def act(service, udid, action, inputs) do
     touch(service, udid)
-    %{"points" => points} = describe(service, udid) || raise "It isn't running: `start` starts it"
+    %{"points" => points} = describe(service, udid) || raise "It isn't running.\n\n`start` starts it."
     at = fn x, y -> [round(x * points), round(y * points)] end
 
     plays =
@@ -251,7 +251,7 @@ defmodule IphoneSimulator.Simulator do
   def stream(service, udid, request) do
     touch(service, udid)
     [_, "--companion-path", companion] = idb(service)
-    %{"points" => points} = describe(service, udid) || raise "It isn't running: `start` starts it"
+    %{"points" => points} = describe(service, udid) || raise "It isn't running.\n\n`start` starts it."
     file = Path.join(OneCore.Service.folder(service), "stream-#{System.unique_integer([:positive])}.json")
     config = Map.merge(JSON.decode!(request), %{"companion" => companion, "udid" => udid, "points" => points, "log" => Path.join(OneCore.Service.folder(service), "stream.log")})
     File.write!(file, JSON.encode!(config))

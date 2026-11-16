@@ -402,7 +402,7 @@ defmodule Containers do
     name = inputs["name"]
     if Enum.any?(containers(call), &(&1.name == name)), do: raise("You have a container called #{name} already")
     servers = Service.servers(call, Podman)
-    if servers == [], do: raise("No machine runs containers yet: `install_service` runs Containers.Podman on one.")
+    if servers == [], do: raise("No computer runs containers yet. Ask your network's admin to set one up.\n\n`install_service` runs Containers.Podman on one.")
     {image, server} = image(call, inputs["image"], inputs["machine"] && machine(servers, inputs["machine"]))
     server = server || hd(servers)
 

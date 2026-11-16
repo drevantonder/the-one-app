@@ -203,7 +203,7 @@ defmodule IphoneSimulator do
   def call("create", %{"name" => name} = inputs, call) do
     if Enum.any?(simulators(call), &(&1["name"] == name)), do: raise("You have a simulator called #{name} already")
     servers = Service.servers(call, Simulator)
-    if servers == [], do: raise("No Mac runs simulators yet: `install_service` runs IphoneSimulator.Simulator on one.")
+    if servers == [], do: raise("No Mac runs simulators yet. Ask your network's admin to set one up.\n\n`install_service` runs IphoneSimulator.Simulator on one.")
     server = if inputs["machine"], do: machine(servers, inputs["machine"]), else: hd(servers)
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
 

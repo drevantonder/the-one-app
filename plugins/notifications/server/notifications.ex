@@ -388,7 +388,7 @@ defmodule Notifications do
 
     case transaction(call, &query(&1, removed, [token, user])) do
       [%{"name" => name}] -> %{device: name}
-      [] -> raise "No device of yours has that token. `devices` lists them."
+      [] -> raise "No device of yours has that token.\n\n`devices` lists them."
     end
   end
 
@@ -405,7 +405,7 @@ defmodule Notifications do
       case inputs do
         %{"id" => id} ->
           if query(db, sql <> " where user = ? and id = ? returning id", [user, id]) == [],
-            do: raise("#{none}: you have none with id #{id}. `inbox` lists them.")
+            do: raise("#{none}: you have none with id #{id}.\n\n`inbox` lists them.")
 
           1
 

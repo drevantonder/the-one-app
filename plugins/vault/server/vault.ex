@@ -637,7 +637,7 @@ defmodule Vault do
   def call("grant", %{"servers" => _servers} = inputs, call) do
     keys =
       inputs["keys"] ||
-        raise "Which servers open your Vault is chosen from a trusted device: in the Vault's app there, or with `one vault grant` on it."
+        raise "Which servers open your Vault is chosen in the Vault's app on a trusted device.\n\nOr with `one vault grant` on it."
 
     %{servers: encryption(call).choose(call, items_artifact(call), keys)}
   end

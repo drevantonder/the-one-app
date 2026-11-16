@@ -31,7 +31,7 @@ defmodule OneCore.Service do
     servers = if server, do: [server], else: Services.servers(plugin, service, call.subject)
 
     if servers == [] do
-      raise "No server runs #{service}. `services` says what it needs, and `install_service` runs it on one."
+      raise "None of your network's computers can do this yet. Ask your network's admin to set one up.\n\nNo server runs #{service}: `services` says what it needs, and `install_service` runs it on one."
     end
 
     meta = %{actor: call.actor, subject: call.subject, forwarded: true}

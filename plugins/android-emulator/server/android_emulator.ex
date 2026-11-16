@@ -226,7 +226,7 @@ defmodule AndroidEmulator do
   def call("create", %{"name" => name} = inputs, call) do
     if Enum.any?(emulators(call), &(&1["name"] == name)), do: raise("You have an emulator called #{name} already")
     servers = Service.servers(call, Emulator)
-    if servers == [], do: raise("No machine runs Android emulators yet: `install_service` runs AndroidEmulator.Emulator on one.")
+    if servers == [], do: raise("No computer runs Android emulators yet. Ask your network's admin to set one up.\n\n`install_service` runs AndroidEmulator.Emulator on one.")
     server = if inputs["machine"], do: machine(servers, inputs["machine"]), else: hd(servers)
     id = "#{name}-#{Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)}"
 

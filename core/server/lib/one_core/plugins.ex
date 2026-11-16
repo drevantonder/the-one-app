@@ -67,10 +67,19 @@ defmodule OneCore.Plugins do
 
     kind, reason ->
       Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
-      {:error, Enum.reduce(versions, why(kind, reason, __STACKTRACE__), &Version.own_names(&2, &1))}
+      why = Enum.reduce(versions, why(kind, reason, __STACKTRACE__), &Version.own_names(&2, &1))
+      {:error, if(said?(kind, reason), do: why, else: "Something went wrong.\n\n" <> why)}
   after
     if held, do: release(held)
   end
+
+  # Whether what was raised is the plugin saying why, `raise "..."`, also in a process the call waited on. Anything
+  # else is a fault, in its code or in what it waited on: a tool error's first paragraph is what a person's screen
+  # shows of it (`ui`'s `call`), so theirs is only that something went wrong, and the rest is for an agent.
+  defp said?(:error, %RuntimeError{}), do: true
+  defp said?(:exit, {%RuntimeError{}, raised}) when is_list(raised), do: true
+  defp said?(:exit, {reason, {module, function, arguments}}) when is_atom(module) and is_atom(function) and is_list(arguments), do: said?(:exit, reason)
+  defp said?(_kind, _reason), do: false
 
   # What whoever called is told went wrong: what was raised, also where a process the call waited on raised it, and
   # otherwise what Elixir says of it. It's redacted (`OneCore.Redact`), since it's passed on, to agents and to

@@ -743,7 +743,7 @@ defmodule GitRepos do
     case state["pull_requests"][pull_request] do
       %{"state" => "open"} = about -> about
       %{"state" => was} -> raise "#{pull_request} was #{was} already."
-      nil -> raise "There's no pull_request #{pull_request}. `repos pull_requests` lists them."
+      nil -> raise "There's no pull request #{pull_request}.\n\n`repos pull_requests` lists them."
     end
   end
 
@@ -779,7 +779,7 @@ defmodule GitRepos do
 
   defp repo!(name) do
     if not (name =~ @repo),
-      do: raise("#{name} isn't a repo's name, as `repos list` gives them: users/alice/made/git-repos/notes")
+      do: raise("#{name} isn't a repo's name.\n\nA repo's name is as `repos list` gives them: users/alice/made/git-repos/notes")
   end
 
   # A ref asked for, which git checks; the default branch if none was.

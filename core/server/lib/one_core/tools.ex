@@ -831,7 +831,7 @@ defmodule OneCore.Tools do
       reaches!(principal, owner(), "owner")
 
       if not Application.get_env(:one_core, :installed, false),
-        do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
+        do: raise("#{here()} can't update itself.\n\nIt wasn't installed with `one serve on`, so it doesn't update itself.")
 
       %{server: Server.key(), update: Release.update()}
     end)

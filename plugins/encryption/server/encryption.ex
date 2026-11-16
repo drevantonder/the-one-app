@@ -175,7 +175,7 @@ defmodule Encryption do
       secret
     else
       _ ->
-        raise "That wasn't encrypted on a device for this server, so it isn't kept. A secret is typed on a device of yours, or given to `one` there: an assistant somewhere else asks its person for it instead."
+        raise "That wasn't encrypted on a device for this server, so it isn't kept.\n\nA secret is typed on a device of yours, or given to `one` there: an assistant somewhere else asks its person for it instead."
     end
   end
 

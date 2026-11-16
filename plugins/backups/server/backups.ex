@@ -364,7 +364,7 @@ defmodule Backups do
           }
 
         _ ->
-          raise "Say a `folder` (on a `machine`), or S3-compatible storage's `endpoint`, `bucket` and Vault `item`."
+          raise "Choose a folder, or S3-compatible storage.\n\nSay a `folder` (on a `machine`), or S3-compatible storage's `endpoint`, `bucket` and Vault `item`."
       end
 
     destination =
@@ -479,7 +479,7 @@ defmodule Backups do
 
   defp named(db, name) do
     case query(db, "select * from destinations where name = ?", [name]) do
-      [] -> raise "There's no destination called #{name}. `destinations` lists them."
+      [] -> raise "There's no destination called #{name}.\n\n`destinations` lists them."
       found -> found
     end
   end

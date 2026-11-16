@@ -2,6 +2,7 @@
 // host, in JSON-RPC messages posted to the frame's parent, so one page is an app here and an MCP App in an
 // assistant.
 import { configureClientErrors } from "solid-js"
+import { readable } from "./shared.ts"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {
@@ -99,7 +100,8 @@ interface Content {
 
 /// `await call("notes_add", { text: "Milk" })`: calls a tool and gives its answer, which is text. A file a
 /// tool answers with is its address, which an `<img>` takes as its `src`: a `data:` one, or for a large file, one
-/// the client keeps the file at. A tool that refuses throws what it said. The client keeps the answer of a tool
+/// the client keeps the file at. A tool that refuses throws an `Error` whose `message` is what a person reads of
+/// what it said (`readable`), and whose `cause` is all of it, as an agent reads it. The client keeps the answer of a tool
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
 /// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
 /// An app opened from a group's Home Screen page is answered for the group, with nothing said. A page that shows more
@@ -108,7 +110,7 @@ export async function call(tool: string, inputs: object = {}, { subject }: Subje
   await greet()
   const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
   const text = content.map(({ type, text, uri, data, mimeType, resource }) => text ?? (type === "resource_link" ? uri : `data:${mimeType ?? resource?.mimeType};base64,${data ?? resource?.blob}`)).join("\n")
-  if (isError) throw new Error(text)
+  if (isError) throw new Error(readable(text), { cause: text })
   return text
 }
 

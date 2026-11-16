@@ -148,8 +148,8 @@ defmodule Containers.Podman do
     within(service, fn folder ->
       podman!(service, ["cp", "#{id}:#{path}", folder])
       file = Path.join(folder, Path.basename(path))
-      if File.dir?(file), do: raise("#{path} is a folder: `exec` with ls lists it")
-      if File.stat!(file).size > @largest, do: raise("#{path} is larger than 16 MB: `exec` reads part of it")
+      if File.dir?(file), do: raise("#{path} is a folder.\n\n`exec` with ls lists it.")
+      if File.stat!(file).size > @largest, do: raise("#{path} is larger than 16 MB.\n\n`exec` reads part of it.")
       Base.encode64(File.read!(file))
     end)
   end

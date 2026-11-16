@@ -1,7 +1,7 @@
 import { Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Icon, Spinner } from "./button.tsx"
-import { messages } from "./shared.ts"
+import { messages, readable } from "./shared.ts"
 
 /// `<Empty>No notes yet.</Empty>`: an empty screen or list: one grey line, and a button (`action`) only when
 /// there's an obvious first step.
@@ -34,6 +34,7 @@ export function Skeleton(props: { rows?: number }) {
 /// `<Problem heading="Couldn't load notes" text="The server didn't answer." action={<Button>Try again</Button>} />`:
 /// a problem, shown on the thing it's about: a symbol, a short `heading`, one sentence of `text`, and the action
 /// that fixes it. Red, for what needs the user now; `warn` for what can wait. It's what `<Errored fallback>` shows.
+/// A `text` that's a tool's error, as a screen was given it, shows what a person reads of it (`readable`).
 export function Problem(props: { heading: JSX.Element; text?: JSX.Element; action?: JSX.Element; warn?: boolean }) {
   return (
     <div class="ui-state" role="alert">
@@ -41,7 +42,7 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element; actio
         <Icon name="warning-circle" />
         <strong>{props.heading}</strong>
         <Show when={props.text}>
-          <p>{props.text}</p>
+          <p>{typeof props.text === "string" ? readable(props.text) : props.text}</p>
         </Show>
         <Show when={props.action}>
           <div class="action">{props.action}</div>

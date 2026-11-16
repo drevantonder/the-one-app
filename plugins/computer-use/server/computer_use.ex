@@ -222,7 +222,7 @@ defmodule ComputerUse do
 
     case Enum.filter(screens, &(&1["name"] == name or "#{&1["plugin"]}/#{&1["name"]}" == name)) do
       [s] -> s
-      [] when failed == %{} -> raise "You have no screen called #{name}: `screens` lists yours"
+      [] when failed == %{} -> raise "You have no screen called #{name}.\n\n`screens` lists yours."
       [] -> raise "You have no screen called #{name}, and #{Enum.map_join(failed, ", ", fn {plugin, why} -> "#{plugin} couldn't list its screens: #{why}" end)}"
       two -> raise "#{Enum.map_join(two, " and ", &"#{&1["plugin"]}/#{name}")} are both called #{name}: name one so"
     end

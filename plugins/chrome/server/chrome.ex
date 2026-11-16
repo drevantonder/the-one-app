@@ -618,7 +618,7 @@ defmodule Chrome do
       case browser(call, session) do
         nil -> raise "You have no browser called #{session}"
         %{"state" => "running"} -> reraise e, __STACKTRACE__
-        %{} -> raise "#{session} was stopped after going unused: `open` starts it again, afresh"
+        %{} -> raise "The browser was stopped after going unused.\n\n`open` starts #{session} again, afresh."
       end
   end
 

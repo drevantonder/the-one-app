@@ -97,7 +97,7 @@ defmodule AndroidEmulator.Emulator do
   that didn't save would take its disk back to then.
   """
   def start(service, id) do
-    if processes()[id], do: raise("It's running, or still stopping: try again once `list` says it's stopped")
+    if processes()[id], do: raise("It's running, or still stopping. Try again once it's stopped.\n\n`list` says when it is.")
     sdk = sdk!(service)
     port = port()
     log = log(service, id)
@@ -462,7 +462,7 @@ defmodule AndroidEmulator.Emulator do
   defp serial(id) do
     case processes()[id] do
       %{port: port} when is_integer(port) -> "emulator-#{port}"
-      _ -> raise "It isn't running: `start` starts it"
+      _ -> raise "It isn't running.\n\n`start` starts it."
     end
   end
 
@@ -473,7 +473,7 @@ defmodule AndroidEmulator.Emulator do
   defp adb!(service, id, args, timeout) do
     case adb(service, id, args, timeout) do
       %{exit: 0} = done -> done
-      %{exit: -1} -> raise "It stopped answering: adb had no answer in #{timeout} s. `stop` and `start` it if it stays so"
+      %{exit: -1} -> raise "It stopped answering.\n\nadb had no answer in #{timeout} s. `stop` and `start` it if it stays so."
       %{stdout: stdout, stderr: stderr} -> raise String.trim(stderr <> "\n" <> stdout)
     end
   end

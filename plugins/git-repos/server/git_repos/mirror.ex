@@ -145,7 +145,7 @@ defmodule GitRepos.Mirror do
     case Artifact.read(repo, "repo.json") do
       {:ok, json, tag} -> {JSON.decode!(json), tag}
       :absent ->
-        raise "There's no repo #{Artifact.name(repo)}. `repos list` lists the ones you may read, and its owner " <>
+        raise "There's no repo #{Artifact.name(repo)}.\n\n`repos list` lists the ones you may read, and its owner " <>
                 "brings back one removed in the last 30 days with `repos restore`."
     end
   end
@@ -223,7 +223,7 @@ defmodule GitRepos.Mirror do
   # Where this server finds git, or a sentence that says it can't.
   defp git_program do
     System.find_executable("git") ||
-      raise "This server can't find git, which Git Repos needs: install it, then run `one serve on` again on its machine."
+      raise "This server can't find git, which Git Repos needs. Ask your network's admin to install it.\n\nInstall git, then run `one serve on` again on its machine."
   end
 
   @doc "Runs git as `git!/3` does, and gives what it printed and how it ended."

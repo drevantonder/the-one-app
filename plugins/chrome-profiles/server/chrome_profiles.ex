@@ -472,7 +472,7 @@ defmodule ChromeProfiles do
     case {running, note(call, session)} do
       {nil, _} -> false
       {_, %{"profile" => ^name}} -> true
-      _ -> raise "#{session} is open already, not on #{name}: Chrome's `close` closes it, or open another session"
+      _ -> raise "#{session} is open already, not on #{name}.\n\nChrome's `close` closes it, or open another session."
     end
   end
 
@@ -481,7 +481,7 @@ defmodule ChromeProfiles do
 
   defp profile!(call, name) do
     Enum.find(profiles(call), &(String.downcase(&1) == String.downcase(String.trim(name)))) ||
-      raise "You have no profile called #{name}: `list` shows yours, and `create` makes one"
+      raise "You have no profile called #{name}.\n\n`list` shows yours, and `create` makes one."
   end
 
   defp value(call, name, field), do: vault(call).value(call, @item <> name, field)
