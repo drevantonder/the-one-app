@@ -205,6 +205,7 @@ for kind in "${servers[@]}"; do
   # What it ships with: the plugins, which it deploys as a folder is (`client::files`), with their NIFs built beside
   # their source, the UI library's build, which it builds apps against and serves, and the Bun it builds apps with.
   mkdir -p "$release/shipped"
+  [[ ! -e $target/nifs/$kind ]] || cp "$target/nifs/$kind" "$release/nifs"
   git archive HEAD plugins | tar -x -C "$release/shipped" --strip-components=1
   for built in plugins/*/server/nif/*/*.so plugins/*/server/bin/*/{linux,macos,windows}-*; do cp "$built" "$release/shipped/${built#plugins/}"; done
   cp -R core/ui/dist "$release/ui"

@@ -273,19 +273,20 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
             .iter()
             .map(|kind| {
                 let (os, arch) = kind.split_once('-').unwrap_or((kind.as_str(), ""));
-                let (triple, glibc, file) = match os {
-                    "macos" => (format!("{arch}-apple-darwin"), "", "dylib"),
-                    _ => (format!("{arch}-unknown-linux-gnu"), ".2.35", "so"),
+                let (triple, build, glibc, file) = match os {
+                    "macos" => (format!("{arch}-apple-darwin"), "build", "", "dylib"),
+                    _ => (format!("{arch}-unknown-linux-gnu"), "zigbuild", ".2.35", "so"),
                 };
                 format!(
-                    "    rustup target add {triple} && CARGO_TARGET_DIR=target cargo zigbuild --release --target {triple}{glibc} \
+                    "    rustup target add {triple} && CARGO_TARGET_DIR=target cargo {build} --release --target {triple}{glibc} \
                      && cp target/{triple}/release/lib{library}.{file} {kind}.so"
                 )
             })
             .collect();
         bail!(
             "{name} has native code, the NIF in {}, which isn't built for {}, where the network's servers run. Build it \
-             with zig (cargo-zigbuild), as tooling/nifs does, then install it again:\n\n    cd {}\n{}",
+             as tooling/nifs does, Linux's with zig (cargo-zigbuild) for a server's glibc and a Mac's on a Mac, then \
+             install it again:\n\n    cd {}\n{}",
             crate_folder.display(),
             missing.iter().map(|kind| kind.as_str()).collect::<Vec<_>>().join(" and "),
             crate_folder.display(),

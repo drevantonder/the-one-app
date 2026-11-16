@@ -10,7 +10,7 @@ A release is part of your change: it isn't done until it's live.
 | Changed | Release |
 | --- | --- |
 | A plugin (`plugins/<name>/`, here or in a network's repo) | `ONE_FOR=network one deploy --name <name> --files-from plugins/<name>`, from that repo (about 12 s). Refused, someone else's newer change is live: rebase and deploy again, never `--force` |
-| A plugin with a NIF (`server/nif/`) | `tooling/nifs`, then the same deploy |
+| A plugin with a NIF (`server/nif/`) | `tooling/nifs`, then the same deploy. A Mac's NIF whose inputs haven't changed is the one last published (or cached here); one that changed is built on the Mac, which must be awake |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |

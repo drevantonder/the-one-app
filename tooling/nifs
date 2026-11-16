@@ -12,7 +12,9 @@
 # (`tooling/release`) and Windows' with cargo-xwin, as a DLL, which is kept under the same kind of name,
 # `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. From Linux, a Mac's are built on the Mac `ssh
 # mac` reaches, in its checkout ~/scratch/one-release, at the same commit, which is on GitHub, so what's built is
-# committed.
+# committed. The Mac sleeps, so only one whose inputs changed is built there: one that hasn't is the one built before,
+# from this machine's cache or from the latest server published for a Mac, whose `nifs` lists what each of its NIFs
+# was built from, as `$target/nifs/<kind>` does for the ones here, which `tooling/release` puts in a server.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -26,6 +28,20 @@ here=$(uname -s)
 crates=($(dirname core/server/nif/*/Cargo.toml plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml))
 target=${CARGO_TARGET_DIR:-$root/target}
 
+# What a crate's NIF or program for a target is built from, as a SHA-256: the Rust that builds it, the workspace's
+# settings, and the crate and every package it uses, with their features: one of the workspace's by its files, and
+# one from a registry by its version, which Cargo.lock pins to one checksum.
+inputs() {
+  {
+    echo "$2" && rustc -V && sha256sum Cargo.toml .cargo/config.toml
+    cargo tree --locked -q -p "$(basename "$1")" --target "$2" -e normal,build --prefix none -f '{p} {f}' | sed 's/ (\*)$//' | sort -u |
+      while read -r package; do
+        echo "${package/"$root/"/}"
+        [[ $package != *"($root/"* ]] || { dir=${package#*"($root/"} && git ls-files -co --exclude-standard -z -- "${dir%%)*}" | xargs -0r sha256sum; }
+      done
+  } | sha256sum | cut -d' ' -f1
+}
+
 for kind in "${kinds[@]}"; do
   case $kind in
     linux-x86_64 | linux-aarch64) triple=${kind#*-}-unknown-linux-gnu build="zigbuild --target $triple.2.35" library=lib%s.so ;;
@@ -35,9 +51,38 @@ for kind in "${kinds[@]}"; do
   esac
 
   if [[ $kind == macos-* && $here == Linux ]]; then
+    cache=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/nifs
+    mkdir -p "$cache" "$target/nifs"
+    declare -A sums=()
+    for crate in "${crates[@]}"; do
+      file=$crate/$kind && [[ $crate == */bin/* ]] || file+=.so
+      sums[$file]=$(inputs "$crate" "$triple")
+    done
+    for file in "${!sums[@]}"; do echo "${sums[$file]} $file"; done | sort -k2 >"$target/nifs/$kind"
+    changed() { for file in "${!sums[@]}"; do cp "$cache/${sums[$file]}" "$file" 2>/dev/null || echo "$file"; done; }
+
+    published=$(one download --target "$kind" | jq -c '.server // empty')
+    if [[ -n $(changed) && -n $published ]]; then
+      unpacked=$(mktemp -d -p "$target")
+      mapfile -t headers < <(jq -r '.link.headers | to_entries[] | "-H", "\(.key): \(.value)"' <<<"$published")
+      curl -fsSL "${headers[@]}" -o "$unpacked.tar.gz" "$(jq -r .link.url <<<"$published")"
+      [[ $(sha256sum "$unpacked.tar.gz" | cut -d' ' -f1) == $(jq -r .sha256 <<<"$published") ]] || { echo "The server published for $kind isn't what it should be" >&2 && exit 1; }
+      tar -xzf "$unpacked.tar.gz" -C "$unpacked"
+      # Where `tooling/release` puts each in a server: One Core's beside its code, and the plugins' in theirs.
+      [[ ! -e $unpacked/nifs ]] || while read -r sum file; do
+        case $file in
+          core/*) crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum" ;;
+          plugins/*) cp "$unpacked/shipped/${file#plugins/}" "$cache/$sum" ;;
+        esac
+      done <"$unpacked/nifs"
+      rm -r "$unpacked" "$unpacked.tar.gz"
+    fi
+
+    mac=($(changed))
+    ((${#mac[@]})) || continue
     [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: the Mac builds the commit." >&2 && exit 1; }
     commit=$(git rev-parse HEAD)
-    (ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && tooling/nifs $kind >&2 && tar -c --no-mac-metadata --no-xattrs core/server/nif/*/$kind.so plugins/*/server/nif/*/$kind.so plugins/*/server/bin/*/$kind'" 2> >(sed 's/^/mac: /' >&2) | tar -x) &
+    (ssh -o ConnectTimeout=15 mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && tooling/nifs $kind >&2 && tar -c --no-mac-metadata --no-xattrs ${mac[*]}'" 2> >(sed 's/^/mac: /' >&2) | tar -x) &
     on_mac=$!
     continue
   elif [[ $kind != macos-* && $here != Linux ]]; then
@@ -56,4 +101,7 @@ for kind in "${kinds[@]}"; do
     fi
   done
 done
-[[ -z ${on_mac-} ]] || wait "$on_mac" || { echo "The Mac didn't build its NIFs." >&2 && exit 1; }
+if [[ -n ${on_mac-} ]]; then
+  wait "$on_mac" || { echo "${mac[*]} changed since the last build of it, so the Mac builds it, and it didn't: wake the Mac and run this again." >&2 && exit 1; }
+  for file in "${mac[@]}"; do cp "$file" "$cache/${sums[$file]}"; done
+fi
