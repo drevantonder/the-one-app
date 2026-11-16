@@ -13,9 +13,10 @@
 # has a Windows build. --dry-run says what it would build, and builds nothing.
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
-# the network's owner. Linux builds Linux's builds and Windows', with the MSVC toolchain cargo-xwin downloads, and a
-# Mac a Mac's, which needs its system's frameworks: from Linux, what's for a Mac is built on the Mac `ssh mac`
-# reaches, in its checkout ~/scratch/one-release, at the same commit. One release runs on a machine at a time;
+# the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its plugins as
+# the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac builds a Mac's
+# `one`, which needs its system's frameworks: from Linux, it's built on the Mac `ssh mac` reaches, in its checkout
+# ~/scratch/one-release, at the same commit. One release runs on a machine at a time;
 # another waits for it. A commit older than one the network has
 # published is refused, so a release that finishes late doesn't undo a newer one. A build already published is
 # left as it is.
@@ -23,8 +24,8 @@
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
-# with them, One Core's Rust NIFs built for that machine (for Linux with zig, for the same glibc), the plugins The One App ships
-# with, with their NIFs and programs built for every kind of machine (`tooling/nifs`), and the UI library's build, and the Bun it
+# with them, One Core's Rust NIFs built for that machine, the plugins The One App ships with, with their NIFs and
+# programs built for every kind of machine (both by `tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
 # target/builds/<build>.
 set -euo pipefail
@@ -80,7 +81,9 @@ for name in "${names[@]}"; do
   kind=${name#*/}
   if [[ $(jq -r --arg n "$name" '.latest[$n].build // ""' <<<"$builds") == "$build" ]]; then
     echo "$name  $build is published already"
-  elif [[ ($name == server/* && ${kind%%-*} == ${here%%-*}) || $kind == "$here" || ($here == linux-* && $kind == windows-*) ]]; then
+  elif [[ $name == server/* && $here != linux-* ]]; then
+    echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
+  elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && $kind == windows-*) ]]; then
     mine+=("$name")
   elif [[ $here == linux-* && $kind == macos-* ]]; then
     mac+=("$name")
@@ -103,7 +106,10 @@ if command -v flock >/dev/null; then
   echo "$build, pid $$" >"$lock"
 fi
 
-# The Mac builds its part from the same commit meanwhile.
+servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
+((${#servers[@]})) && tooling/nifs
+
+# The Mac builds its part from the same commit meanwhile, once it's built its NIFs in the same checkout.
 if ((${#mac[@]})); then
   ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
   on_mac=$!
@@ -122,7 +128,6 @@ fetched() {
   echo "$file"
 }
 
-servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 if ((${#servers[@]})); then
   otp=$(erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(string:trim(V)), halt().')
   bun=$(bun --version)
@@ -132,16 +137,15 @@ if ((${#servers[@]})); then
   (cd core/ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
   (cd core/server && mix deps.get --only prod >/dev/null)
   bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
-  tooling/nifs
 fi
 
 for kind in "${servers[@]}"; do
   echo "Building the server for $kind"
   case $kind in
-    linux-x86_64) triple=x86_64-unknown-linux-gnu hex=amd64 bunzip=bun-linux-x64-baseline.zip ;;
-    linux-aarch64) triple=aarch64-unknown-linux-gnu hex=arm64 bunzip=bun-linux-aarch64.zip ;;
-    macos-aarch64) triple=aarch64-apple-darwin bunzip=bun-darwin-aarch64.zip ;;
-    windows-x86_64) triple=x86_64-pc-windows-msvc bunzip=bun-windows-x64-baseline.zip ;;
+    linux-x86_64) hex=amd64 bunzip=bun-linux-x64-baseline.zip ;;
+    linux-aarch64) hex=arm64 bunzip=bun-linux-aarch64.zip ;;
+    macos-aarch64) bunzip=bun-darwin-aarch64.zip ;;
+    windows-x86_64) bunzip=bun-windows-x64-baseline.zip ;;
     *) echo "There's no server for $kind" >&2 && exit 1 ;;
   esac
 
@@ -155,7 +159,7 @@ for kind in "${servers[@]}"; do
     sum=$(curl -fsSL "https://api.github.com/repos/erlang/otp/releases/tags/OTP-$otp" | jq -r --arg z "$zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
     archive=$(fetched "https://github.com/erlang/otp/releases/download/OTP-$otp/$zip" "otp-$otp-$kind.zip" "$sum")
   else
-    url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-$triple.tar.gz"
+    url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-aarch64-apple-darwin.tar.gz"
     [[ -e $cache/otp-$otp-$kind.tar.gz ]] || curl -fsSL -o "$cache/otp-$otp-$kind.tar.gz" "$url"
     archive=$cache/otp-$otp-$kind.tar.gz
   fi
@@ -178,19 +182,6 @@ for kind in "${servers[@]}"; do
   # Hex's builds are made whole where they're put by their own script.
   [[ ! -x $vm/Install || -e $vm/bin/erl ]] || (cd "$vm" && ./Install -minimal "$vm" >/dev/null)
 
-  # One Core's Rust NIFs, for that machine.
-  crates=($(basename -a core/server/nif/*/))
-  if [[ $kind == linux-* ]]; then
-    cargo zigbuild --release --target "$triple.2.35" "${crates[@]/#/-p}"
-    native=$target/$triple/release
-  elif [[ $kind == windows-* ]]; then
-    cargo xwin build --release --target "$triple" "${crates[@]/#/-p}"
-    native=$target/$triple/release
-  else
-    cargo build --release "${crates[@]/#/-p}"
-    native=$target/release
-  fi
-
   release=$target/release-builds/$kind
   rm -rf "$release"
   # The build's name is in the app's environment (`mix.exs`), which Mix writes again only when Elixir changed. It's
@@ -203,10 +194,10 @@ for kind in "${servers[@]}"; do
   done
   priv=$(echo "$release"/lib/one_core-*)/priv/native
   rm -rf "$priv" && mkdir -p "$priv"
-  for crate in "${crates[@]}"; do
+  for nif in core/server/nif/*/$kind.so; do
     # The VM loads a NIF by its name without its extension, which on Windows is a DLL's.
-    cp "$native/lib$crate".so "$priv/$crate.so" 2>/dev/null || cp "$native/lib$crate.dylib" "$priv/$crate.so" 2>/dev/null ||
-      cp "$native/$crate.dll" "$priv/$crate.dll"
+    crate=$(basename "$(dirname "$nif")")
+    if [[ $kind == windows-* ]]; then cp "$nif" "$priv/$crate.dll"; else cp "$nif" "$priv/$crate.so"; fi
   done
   # Windows' VM keeps its debugging symbols apart already.
   [[ $kind == windows-* ]] || "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"

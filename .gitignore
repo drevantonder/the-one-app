@@ -5,10 +5,10 @@ node_modules/
 *.beam
 erl_crash.dump
 .DS_Store
-# One Core's Rust NIFs as they're built for the server to load, a plugin's NIFs and programs as they're built beside their
-# source, and the server's
-# tests' folders
+# One Core's Rust NIFs as they're built for the server to load and for each kind of machine beside their source, a
+# plugin's NIFs and programs as they're built beside their source, and the server's tests' folders
 /core/server/priv/native/
+/core/server/nif/*/*.so
 /plugins/*/server/nif/*/*.so
 /plugins/*/server/bin/*/linux-*
 /plugins/*/server/bin/*/macos-*

@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# Builds the NIFs and programs of the plugins The One App ships with for every kind of machine a server runs on, each
-# beside its source as a plugin brings it (`OneCore.Plugin`): `plugins/<name>/server/nif/<crate>/<kind>.so`, and
-# `plugins/<name>/server/bin/<crate>/<kind>`. A plugin is the same
+# Builds every NIF and program a server needs, One Core's and those of the plugins The One App ships with, for each
+# kind of machine a server runs on, or the kinds given, each beside its source: `core/server/nif/<crate>/<kind>.so`,
+# which `tooling/release` puts in a server, and as a plugin brings them (`OneCore.Plugin`),
+# `plugins/<name>/server/nif/<crate>/<kind>.so` and `plugins/<name>/server/bin/<crate>/<kind>`. A plugin is the same
 # files on every server of a network, so it's deployed with all of them:
 #
-#     tooling/nifs && ONE_FOR=network one deploy --name <name> --files-from plugins/<name>
+#     tooling/nifs [kind...] && ONE_FOR=network one deploy --name <name> --files-from plugins/<name>
 #
-# With zig, from one machine, and for Linux for the same glibc as a server's VM (`tooling/release`); for Windows with
-# cargo-xwin, as a DLL, which the plugin keeps under the same kind of name, `windows-x86_64.so`.
+# Each kind is built in one place, so every server build of a commit ships the same bytes, and a server finds the
+# plugins it ships unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM
+# (`tooling/release`) and Windows' with cargo-xwin, as a DLL, which is kept under the same kind of name,
+# `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. From Linux, a Mac's are built on the Mac `ssh
+# mac` reaches, in its checkout ~/scratch/one-release, at the same commit, which is on GitHub, so what's built is
+# committed.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -15,23 +20,40 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
-crates=($(dirname plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml))
-# Each kind of machine needs Rust's standard library for it, which a Mac or a new machine may not have yet.
-rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc >/dev/null
+kinds=("$@")
+((${#kinds[@]})) || kinds=(linux-x86_64 linux-aarch64 windows-x86_64 macos-aarch64)
+here=$(uname -s)
+crates=($(dirname core/server/nif/*/Cargo.toml plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml))
 target=${CARGO_TARGET_DIR:-$root/target}
-for triple in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-windows-msvc; do
-  case $triple in
-    *linux*) os=linux build="zigbuild --target $triple.2.35" library=lib%s.so ;;
-    *apple*) os=macos build="zigbuild --target $triple" library=lib%s.dylib ;;
-    *windows*) os=windows build="xwin build --target $triple" library=%s.dll ;;
+
+for kind in "${kinds[@]}"; do
+  case $kind in
+    linux-x86_64 | linux-aarch64) triple=${kind#*-}-unknown-linux-gnu build="zigbuild --target $triple.2.35" library=lib%s.so ;;
+    windows-x86_64) triple=x86_64-pc-windows-msvc build="xwin build --target $triple" library=%s.dll ;;
+    macos-aarch64) triple=aarch64-apple-darwin build="build --target $triple" library=lib%s.dylib ;;
+    *) echo "No server runs on $kind" >&2 && exit 1 ;;
   esac
+
+  if [[ $kind == macos-* && $here == Linux ]]; then
+    [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: the Mac builds the commit." >&2 && exit 1; }
+    commit=$(git rev-parse HEAD)
+    (ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && tooling/nifs $kind >&2 && tar -c --no-mac-metadata --no-xattrs core/server/nif/*/$kind.so plugins/*/server/nif/*/$kind.so plugins/*/server/bin/*/$kind'" 2> >(sed 's/^/mac: /' >&2) | tar -x) &
+    on_mac=$!
+    continue
+  elif [[ $kind != macos-* && $here != Linux ]]; then
+    echo "$kind's are built on Linux" >&2 && exit 1
+  fi
+
+  # Each kind of machine needs Rust's standard library for it, which a new machine may not have yet.
+  rustup target add "$triple" >/dev/null
   cargo $build --release $(printf -- '-p %s ' $(basename -a "${crates[@]}"))
   for crate in "${crates[@]}"; do
     if [[ $crate == */bin/* ]]; then
       program=$target/$triple/release/$(basename "$crate")
-      cp "$program" "$crate/$os-${triple%%-*}" 2>/dev/null || cp "$program.exe" "$crate/$os-${triple%%-*}"
+      cp "$program" "$crate/$kind" 2>/dev/null || cp "$program.exe" "$crate/$kind"
     else
-      cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$crate/$os-${triple%%-*}.so"
+      cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$crate/$kind.so"
     fi
   done
 done
+[[ -z ${on_mac-} ]] || wait "$on_mac" || { echo "The Mac didn't build its NIFs." >&2 && exit 1; }
