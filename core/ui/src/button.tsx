@@ -6,6 +6,7 @@ import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
 import caretUpDown from "@phosphor-icons/core/assets/regular/caret-up-down.svg?raw"
 import check from "@phosphor-icons/core/assets/regular/check.svg?raw"
+import copy from "@phosphor-icons/core/assets/regular/copy.svg?raw"
 import cornersIn from "@phosphor-icons/core/assets/regular/corners-in.svg?raw"
 import cornersOut from "@phosphor-icons/core/assets/regular/corners-out.svg?raw"
 import dotsThree from "@phosphor-icons/core/assets/regular/dots-three.svg?raw"
@@ -26,6 +27,7 @@ const svgs = {
   "caret-right": caretRight,
   "caret-up-down": caretUpDown,
   check,
+  copy,
   "corners-in": cornersIn,
   "corners-out": cornersOut,
   "dots-three": dotsThree,

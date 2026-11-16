@@ -7,21 +7,42 @@ export const [messages, setMessages] = createStore({
   cancel: "Cancel",
   clear: "Clear",
   close: "Close",
+  copied: "Copied",
+  copy: "Copy",
+  details: "Details",
   exitFullScreen: "Exit Full Screen",
   file: "Choose a file",
   fullScreen: "Full Screen",
+  hideDetails: "Hide Details",
   loading: "Loading",
   more: "More",
   ok: "OK",
   remove: "Remove",
+  showDetails: "Show Details",
 })
 
-/// `words({ back: "Zurück", cancel: "Abbrechen", close: "Schließen" })`: says the UI library's own words in the user's
-/// language, once, for every component on the page. A word the UI library doesn't say throws the words it does.
 /// What a person reads of a tool's error: its first paragraph. What follows a blank line is for an agent, as MCP's
 /// text is the model's: which tool to call next, or what went wrong inside a plugin.
 export const readable = (error: string): string => error.split(/\n\s*\n/, 1)[0]
 
+/// The whole of each tool error `call` threw of late, by its first paragraph: a screen hands `Problem` or `toast` an
+/// error's `message`, and they show the rest under Details. The last few are kept, as a screen shows one soon after.
+const errors = new Map<string, string>()
+
+/// What `call` throws of a tool's `error`: what a person reads of it, kept with the whole of it for `whole`.
+export function thrown(error: string): string {
+  const message = readable(error)
+  errors.delete(message)
+  errors.set(message, error)
+  if (errors.size > 20) errors.delete(errors.keys().next().value!)
+  return message
+}
+
+/// All there is of an error a screen shows: the whole tool error `text` is the first paragraph of, or `text` itself.
+export const whole = (text: string): string => errors.get(text) ?? text
+
+/// `words({ back: "Zurück", cancel: "Abbrechen", close: "Schließen" })`: says the UI library's own words in the user's
+/// language, once, for every component on the page. A word the UI library doesn't say throws the words it does.
 export function words(theirs: Partial<Record<keyof typeof messages, string>>): void {
   for (const name in theirs) if (!(name in messages)) throw new Error(`The UI library has no word "${name}". It has: ${Object.keys(messages).join(", ")}`)
   setMessages((words) => void Object.assign(words, theirs))

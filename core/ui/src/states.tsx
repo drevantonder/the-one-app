@@ -1,7 +1,7 @@
-import { Show } from "solid-js"
+import { createSignal, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Icon, Spinner } from "./button.tsx"
-import { messages, readable } from "./shared.ts"
+import { Button, Icon, Spinner } from "./button.tsx"
+import { messages, readable, whole } from "./shared.ts"
 
 /// `<Empty>No notes yet.</Empty>`: an empty screen or list: one grey line, and a button (`action`) only when
 /// there's an obvious first step.
@@ -34,20 +34,46 @@ export function Skeleton(props: { rows?: number }) {
 /// `<Problem heading="Couldn't load notes" text="The server didn't answer." action={<Button>Try again</Button>} />`:
 /// a problem, shown on the thing it's about: a symbol, a short `heading`, one sentence of `text`, and the action
 /// that fixes it. Red, for what needs the user now; `warn` for what can wait. It's what `<Errored fallback>` shows.
-/// A `text` that's a tool's error, as a screen was given it, shows what a person reads of it (`readable`).
+/// A `text` that's a tool's error, or the `message` of one `call` threw, shows what a person reads of it
+/// (`readable`), and the rest under Show Details, to copy for an agent or for support.
 export function Problem(props: { heading: JSX.Element; text?: JSX.Element; action?: JSX.Element; warn?: boolean }) {
+  const all = () => (typeof props.text === "string" ? whole(props.text) : undefined)
+  const [open, setOpen] = createSignal(false)
   return (
     <div class="ui-state" role="alert">
       <div class={["problem", { warn: props.warn }]}>
         <Icon name="warning-circle" />
         <strong>{props.heading}</strong>
         <Show when={props.text}>
-          <p>{typeof props.text === "string" ? readable(props.text) : props.text}</p>
+          <p>{all() === undefined ? props.text : readable(all()!)}</p>
+        </Show>
+        <Show when={all() && all() !== readable(all()!)}>
+          <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+            <summary class="ring">
+              <Icon name="caret-right" along />
+              {open() ? messages.hideDetails : messages.showDetails}
+            </summary>
+            <Details text={all()!} />
+          </details>
         </Show>
         <Show when={props.action}>
           <div class="action">{props.action}</div>
         </Show>
       </div>
+    </div>
+  )
+}
+
+/// What follows the first paragraph of a tool's error, which is for an agent, and Copy, which takes all of it to
+/// paste to an agent or to support. Under a problem's Show Details, and in what a toast's Details opens.
+export function Details(props: { text: string }) {
+  const [copied, setCopied] = createSignal(false)
+  return (
+    <div class="ui-details">
+      <pre>{props.text.slice(readable(props.text).length).trim()}</pre>
+      <Button variant="ghost" size="icon" aria-label={copied() ? messages.copied : messages.copy} title={messages.copy} onClick={() => navigator.clipboard.writeText(props.text).then(() => setCopied(true))}>
+        <Icon name={copied() ? "check" : "copy"} />
+      </Button>
     </div>
   )
 }

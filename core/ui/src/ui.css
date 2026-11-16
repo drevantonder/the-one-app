@@ -1530,6 +1530,64 @@ button.ui-box {
 .ui-state .problem p {
   opacity: 0.9;
 }
+/* Show Details: quiet, under the sentence, and what an agent reads of the problem once it's open. */
+.ui-state .problem > details {
+  grid-column: 2;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+}
+.ui-state .problem summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  list-style: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ui-state .problem summary::-webkit-details-marker {
+  display: none;
+}
+.ui-state .problem summary .ui-icon {
+  transition: rotate var(--move-quick) var(--ease-quick);
+}
+.ui-state .problem details[open] summary .ui-icon {
+  rotate: 90deg;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ui-state .problem summary:hover {
+    color: var(--foreground);
+  }
+}
+.ui-state .problem .ui-details {
+  margin-top: 0.5rem;
+}
+/* The rest of a tool's error, as it was written, with Copy in its corner as a code block has. */
+.ui-details {
+  position: relative;
+}
+.ui-details pre {
+  min-height: var(--control);
+  max-height: 12rem;
+  margin: 0;
+  padding: 0.5rem;
+  padding-inline: 0.75rem var(--control);
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  color: var(--foreground);
+  font: var(--text-sm) / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ui-details .ui-button {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  color: var(--muted-foreground);
+}
 .ui-state .problem .action {
   justify-self: start;
   margin-top: 0.5rem;

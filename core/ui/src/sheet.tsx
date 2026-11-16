@@ -2,7 +2,8 @@ import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { covers } from "./bridge.ts"
 import { Button, Icon } from "./button.tsx"
-import { messages } from "./shared.ts"
+import { messages, readable } from "./shared.ts"
+import { Details } from "./states.tsx"
 import { hold } from "./toast.tsx"
 import type { JSX } from "@solidjs/web"
 
@@ -191,4 +192,33 @@ export function confirm(question: Question): Promise<boolean> {
     ask = (question) => new Promise<boolean>((done) => ((resolve = done), setQuestion(question)))
   }
   return ask(question)
+}
+
+let detail: ((text: string) => void) | undefined
+
+/// Shows all of a tool's error in a sheet: what a person reads of it, then the rest and Copy. What a toast's Details
+/// opens.
+export function details(text: string): void {
+  if (!detail) {
+    const [shown, setShown] = createSignal<string>()
+    const [open, setOpen] = createSignal(false)
+    const host = document.body.appendChild(document.createElement("div"))
+    render(
+      () => (
+        <Sheet heading={messages.details} open={open()} onClose={() => setOpen(false)}>
+          <Show when={shown()} keyed>
+            {(text) => (
+              <>
+                <p>{readable(text)}</p>
+                <Details text={text} />
+              </>
+            )}
+          </Show>
+        </Sheet>
+      ),
+      host,
+    )
+    detail = (text) => (setShown(text), setOpen(true))
+  }
+  detail(text)
 }
