@@ -5,8 +5,8 @@ description: Read before signing a Google account in to Gmail, Google Calendar, 
 
 Each Google app (gmail, google-calendar, google-drive, google-docs, google-sheets) has its own `accounts`,
 `sign_in` and `sign_out`.
-`apps` lists the ones the person has. Their Google screen shows each app's accounts, with Add Account and Sign
-Out, which is where a person does this themselves.
+`apps` lists the ones the person has. Accounts, on their Home Screen, shows each app's accounts, with Add Account,
+Sign In and Sign Out, which is where a person does this themselves.
 
 - `<app>_sign_in` gives a link: give it to the person to open in their browser. Google signs them in and sends
   them back to the network's address, which finishes it. Nothing is pasted back. With `account`, Google suggests

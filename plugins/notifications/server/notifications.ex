@@ -55,7 +55,7 @@ defmodule Notifications do
   @impl true
   def apps do
     [
-      %{name: "Notifications", page: "client/index.html", icon: "client/icon.svg", settings: true}
+      %{name: "Notifications", page: "client/index.html", icon: "client/icon.svg", category: "settings"}
     ]
   end
 

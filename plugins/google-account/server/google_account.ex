@@ -29,9 +29,6 @@ defmodule GoogleAccount do
   def uses, do: ["vault"]
 
   @impl true
-  def apps, do: [%{name: "Google", page: "client/index.html", icon: "client/icon.svg", account: true}]
-
-  @impl true
   def tools do
     [
       %{
@@ -39,13 +36,6 @@ defmodule GoogleAccount do
         read_only: true,
         description:
           "The Google apps you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Each one's accounts tool lists its accounts.",
-        inputs: %{type: "object", properties: %{}}
-      },
-      %{
-        name: "accounts",
-        read_only: true,
-        description:
-          "Your Google accounts, as every Google app you have signs in to them: each { account, ok, about }, about the apps that use it, with problem when one of them needs it signed in again. Each app's own accounts tool says why.",
         inputs: %{type: "object", properties: %{}}
       }
     ]
@@ -60,19 +50,6 @@ defmodule GoogleAccount do
           do: Map.put(Map.take(version.plugin.google(), [:title, :about]), :name, name)
 
     Enum.sort_by(apps, & &1.title)
-  end
-
-  def call("accounts", _inputs, call) do
-    using =
-      for app <- call("apps", %{}, call),
-          account <- OneCore.Call.tool(call, app.name, "accounts", %{}),
-          do: {account["account"], app, account["ok"]}
-
-    for {email, uses} <- Enum.group_by(using, &elem(&1, 0), &Tuple.delete_at(&1, 0)) do
-      titles = Enum.map_join(uses, ", ", fn {app, _ok} -> app.title end)
-      account = %{account: email, ok: Enum.all?(uses, &elem(&1, 1)), about: titles}
-      if account.ok, do: account, else: Map.put(account, :problem, "Sign in again")
-    end
   end
 
   @doc """

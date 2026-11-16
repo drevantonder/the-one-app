@@ -10,6 +10,13 @@ defmodule Gmail do
   @api "https://gmail.googleapis.com/gmail/v1/users/me/"
   @upload "https://gmail.googleapis.com/upload/gmail/v1/users/me/"
 
+  # It has no app, so it says how it's called and drawn in Accounts and the App Store.
+  @impl true
+  def title, do: google().title
+
+  @impl true
+  def icon, do: "icon.svg"
+
   @doc "What Gmail asks of Google, for the `google-account` plugin."
   def google do
     %{

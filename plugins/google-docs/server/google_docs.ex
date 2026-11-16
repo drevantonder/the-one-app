@@ -8,6 +8,13 @@ defmodule GoogleDocs do
   @api "https://docs.googleapis.com/v1/"
   @ordered ~r/DECIMAL|ALPHA|ROMAN|ZERO/
 
+  # It has no app, so it says how it's called and drawn in Accounts and the App Store.
+  @impl true
+  def title, do: google().title
+
+  @impl true
+  def icon, do: "icon.svg"
+
   @doc "What Google Docs asks of Google, for the `google-account` plugin."
   def google do
     %{
@@ -189,7 +196,9 @@ defmodule GoogleDocs do
             _ -> nil
           end
 
-        line = if markdown and level && String.trim(text) != "", do: "#{String.duplicate("#", level)} #{text}", else: text
+        line =
+          if (markdown and level) && String.trim(text) != "", do: "#{String.duplicate("#", level)} #{text}", else: text
+
         {lines ++ [line], %{}}
     end
   end

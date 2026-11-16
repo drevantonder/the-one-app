@@ -1,9 +1,18 @@
-// Apps: every app that could be on a page, and which of your pages each is on. Adding one to a page puts it on
-// the clients of everyone who sees that page. Taking one off keeps what it kept, and adding it back brings that back.
+// Apps: every plugin with an app or accounts that could be on a page, and which of your pages each is on. Adding one
+// to a page puts it on the clients of everyone who sees that page. Taking one off keeps what it kept, and adding it
+// back brings that back. Opened as `#accounts` (Accounts' Add Account for Another App), it lists those that sign in.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Sheet, Skeleton, Switch, toast } from "ui"
-import type { App, Item, Page } from "./types.ts"
+import type { Page } from "./types.ts"
+
+/** A plugin, as `home-screen_store` lists it. */
+interface App {
+  plugin: string
+  name: string
+  icon: string
+  accounts: boolean
+}
 
 const named = (who?: string) => (!who ? "You" : who === "network" ? "Everyone" : who.replace("groups/", "").replace(/^./, (first) => first.toUpperCase()))
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
@@ -12,13 +21,20 @@ const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => ca
 const store = createMemo(async () => {
   const groups = await json<{ group: string }[]>("permissions_groups").catch((): { group: string }[] => [])
   const whos = [undefined, ...groups.map(({ group }) => group), "network"]
-  const [apps, pages] = await Promise.all([json<App[]>("home-screen_store"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, for: who, name: named(who) }))))])
+  const [all, pages] = await Promise.all([json<App[]>("home-screen_store"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, for: who, name: named(who) }))))])
+  const apps = location.hash === "#accounts" ? all.filter((app) => app.accounts) : all
   return { apps, pages }
 })
 changed(() => refresh(store))
 
-/// The page's app that is this plugin's, if the plugin is on the page, or in its Accounts folder.
-const on = (page: Page, app: App) => page.items.flatMap((item): Item[] => item.folder ?? [item]).find((item) => item.plugin === app.plugin)
+/// The plugin, by its name there, if it's on the page: its app, or its accounts. `put` says it was put there
+/// rather than installed for it.
+function on(page: Page, app: App): { name: string; put?: boolean } | undefined {
+  const item = page.items.find((item) => item.plugin === app.plugin)
+  if (item?.app) return { name: item.app.split("/")[0], put: item.put }
+  const signs = page.accounts.find((signs) => signs.plugin === app.plugin)
+  return signs && { name: signs.name }
+}
 const [managing, setManaging] = createSignal<string>()
 
 /// Puts an app on a page or takes it off. One in use for the network goes on without installing anything, and any
@@ -28,7 +44,7 @@ async function put(page: Page, app: App, there: boolean) {
   try {
     if (there) await call("home-screen_add", { plugin: app.plugin }, { for: page.for }).catch(() => call("install", { plugin: app.plugin }, { for: page.for }))
     else if (item?.put) await call("home-screen_remove", { plugin: app.plugin }, { for: page.for })
-    else await call("uninstall", { name: item!.app!.split("/")[0] }, { for: page.for })
+    else await call("uninstall", { name: item!.name }, { for: page.for })
   } catch (error) {
     toast((error as Error).message)
   }

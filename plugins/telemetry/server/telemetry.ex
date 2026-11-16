@@ -24,7 +24,7 @@ defmodule Telemetry do
   def jobs, do: [%{tool: "prune", every: 3600}]
 
   @impl true
-  def apps, do: [%{name: "Telemetry", page: "client/index.html", icon: "client/icon.svg", settings: true}]
+  def apps, do: [%{name: "Telemetry", page: "client/index.html", icon: "client/icon.svg", category: "settings"}]
 
   @impl true
   def tools do

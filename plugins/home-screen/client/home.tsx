@@ -4,13 +4,14 @@
 // Where the window is wide, a sidebar lists every page's apps and Settings' beside them, and an app opens beside it.
 // There it is how you pick a page, so the page's name and the dots, which are for where there is none, aren't shown.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
+import { render, type JSX } from "@solidjs/web"
 import { call, changed, confirm, Empty, Icon, List, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
-import type { Account, App, Item, Page, Size, Widget as WidgetItem } from "./types.ts"
+import type { Account, App, Item, Page, Signs, Size, Widget as WidgetItem } from "./types.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Wide", "4x4": "Large" }
 const HOME = "home-screen/client/index.html"
+const ACCOUNTS = "home-screen/client/accounts.html"
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { for: who }).then(JSON.parse)
 
 /// Every page this user sees, and the parts of Settings. A network with nothing that keeps groups has none.
@@ -19,7 +20,9 @@ const home = createMemo(async () => {
   // Each page is named for whose it is: a group by what it's called.
   const whos: { for?: string; name: string }[] = [{ name: "You" }, ...groups.map(({ group, called }) => ({ for: group, name: called })), { for: "network", name: "Everyone" }]
   const [settings, pages] = await Promise.all([json<App[]>("home-screen_settings"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who.for).then((page): Page => ({ ...page, ...who }))))])
-  return { pages, settings }
+  // Every page's plugins with accounts, each once, are in the one Accounts folder.
+  const accounts = [...new Map(pages.flatMap((page) => page.accounts.map((signs): [string, Signs] => [signs.plugin, { ...signs, for: page.for }]))).values()]
+  return { pages, settings, accounts }
 })
 changed(() => refresh(home))
 
@@ -132,11 +135,12 @@ function Card(props: { item: WidgetItem; page: Page }) {
 const [showing, setShowing] = createSignal<{ app: string; for?: string | null }>({ app: HOME })
 addEventListener("message", ({ source, data }) => source === parent && data?.method === "notifications/one/showing" && setShowing(data.params))
 
-/// Whether the window is wide and tall enough for the sidebar: the window's page (clients/app/page/client.js) keeps
-/// an app beside it on the same query.
+/// Whether the window is wide and tall enough for the sidebar. The client keeps an app beside it, as wide as this
+/// says (`notifications/one/beside`) whenever that changes.
 const beside = matchMedia("(min-width: 48rem) and (min-height: 30rem)")
 const [sidebar, setSidebar] = createSignal(beside.matches)
-beside.addEventListener("change", () => setSidebar(beside.matches))
+const room = () => parent.postMessage({ jsonrpc: "2.0", method: "notifications/one/beside", params: beside.matches ? { width: getComputedStyle(document.documentElement).getPropertyValue("--sidebar-width").trim() } : {} }, "*")
+beside.addEventListener("change", () => (setSidebar(beside.matches), room()))
 
 /// The sidebar's sections its user collapsed, kept on this device.
 const [collapsed, setCollapsed] = createSignal(new Set<string>(stored("collapsed") ?? []))
@@ -166,11 +170,10 @@ interface Section {
   apps: App[]
 }
 
-function Sidebar(props: { sections: Section[]; at: () => number; go: (index: number) => void }) {
+function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => number; go: (index: number) => void }) {
   let nav!: HTMLElement
   const home = () => showing().app === HOME
-  // The Accounts folder is current while it, or an account in it, shows.
-  const current = (app: App) => !home() && (showing().for ?? null) === (app.for ?? null) && [app, ...(app.folder ?? [])].some((one) => showing().app.split("#")[0] === one.app)
+  const current = (app: App) => !home() && (showing().app === ACCOUNTS ? app.app === ACCOUNTS : (showing().for ?? null) === (app.for ?? null) && showing().app.split("#")[0] === app.app)
   // A section's name is selected while its page shows, or while it's collapsed over the app that's open.
   const selected = (section: Section, index: number) => (home() ? props.at() === index : collapsed().has(section.key) && section.apps.some(current))
   const pick = (index: number) => {
@@ -208,7 +211,7 @@ function Sidebar(props: { sections: Section[]; at: () => number; go: (index: num
             <Show when={!collapsed().has(section().key)}>
               <List>
                 <For each={section().apps} keyed={(app) => app.app}>
-                  {(app) => <Row start={<img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { for: app().for })} />}
+                  {(app) => <Row start={app().app === ACCOUNTS ? <Folder signs={props.accounts} /> : <img src={app().icon} alt="" />} heading={app().name} current={current(app())} onClick={() => open(app().app, { for: app().for })} />}
                 </For>
               </List>
             </Show>
@@ -219,28 +222,45 @@ function Sidebar(props: { sections: Section[]; at: () => number; go: (index: num
   )
 }
 
-/// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts. The
-/// Accounts folder has a dot while an account in it needs its person.
-function Tile(props: { app: App; for?: string }) {
+/// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts.
+function Tile(props: { app: App; for?: string; icon?: JSX.Element }) {
   return (
     <button type="button" class="tile" onPointerDown={() => open(props.app.app, { for: props.for, behind: true })} onClick={() => Date.now() > quiet && open(props.app.app, { for: props.for })}>
-      <span class="icon">
-        <img src={props.app.icon} alt="" />
-        <Show when={props.app.folder}>
-          <Loading>
-            <Attention apps={props.app.folder!} for={props.for} />
-          </Loading>
-        </Show>
-      </span>
+      <span class="icon">{props.icon ?? <img src={props.app.icon} alt="" />}</span>
       <span>{props.app.name}</span>
     </button>
   )
 }
 
-/// A dot while any account of the folder's apps is not ok, as each plugin's `accounts` answers.
-function Attention(props: { apps: App[]; for?: string }) {
+/// A folder, as a phone draws one: a frosted rounded square holding the icons of up to nine of its plugins, small,
+/// in a 3×3 grid from the top left.
+function Folder(props: { signs: Signs[] }) {
+  return (
+    <span class="folder">
+      <For each={props.signs.slice(0, 9)} keyed={(signs) => signs.plugin}>
+        {(signs) => <img src={signs().icon} alt="" />}
+      </For>
+    </span>
+  )
+}
+
+/// The Accounts folder, last on the first page and not moved: it has a dot while an account in it needs its person.
+function AccountsTile(props: { signs: Signs[] }) {
+  const icon = (
+    <>
+      <Folder signs={props.signs} />
+      <Loading>
+        <Attention signs={props.signs} />
+      </Loading>
+    </>
+  )
+  return <Tile app={{ app: ACCOUNTS, name: "Accounts", icon: "" }} icon={icon} />
+}
+
+/// A dot while any account of the folder's plugins is not ok, as each plugin's `accounts` answers.
+function Attention(props: { signs: Signs[] }) {
   const needed = createMemo(async () => {
-    const lists = await Promise.all(props.apps.map((app) => json<Account[]>(`${app.app.split("/")[0]}_accounts`, {}, props.for).catch((): Account[] => [])))
+    const lists = await Promise.all(props.signs.map((signs) => json<Account[]>(`${signs.name}_accounts`, {}, signs.for).catch((): Account[] => [])))
     return lists.flat().some((account) => !account.ok)
   })
   onSettled(() => changed(() => refresh(needed)))
@@ -251,10 +271,10 @@ function Attention(props: { apps: App[]; for?: string }) {
   )
 }
 
-function PageGrid(props: { page: Page }) {
+function PageGrid(props: { page: Page; accounts?: Signs[] }) {
   return (
     <section class="page" ref={held(() => props.page)}>
-      <Show when={props.page.items.length} fallback={<Empty>No apps yet.</Empty>}>
+      <Show when={props.page.items.length || props.accounts} fallback={<Empty>No apps yet.</Empty>}>
         <div class="grid">
           <For each={props.page.items} keyed={(item) => (item.widget ?? item.app) + (item.size ?? "")}>
             {(item) => (
@@ -265,6 +285,11 @@ function PageGrid(props: { page: Page }) {
               </div>
             )}
           </For>
+          <Show when={props.accounts}>
+            <div class="cell">
+              <AccountsTile signs={props.accounts!} />
+            </div>
+          </Show>
         </div>
       </Show>
     </section>
@@ -294,7 +319,7 @@ function Offers() {
             </For>
             <Row heading="Remove Widget" onClick={done(() => arrange(page(), others()))} />
           </Show>
-          <Show when={item()?.app && !item()!.folder}>
+          <Show when={item()?.app}>
             <Row heading={`Remove from ${page().name}`} onClick={off} />
           </Show>
           <Show when={page().widgets.length}>
@@ -330,13 +355,14 @@ function Adding() {
   )
 }
 
-function Home(props: { home: { pages: Page[]; settings: App[] } }) {
+function Home(props: { home: { pages: Page[]; settings: App[]; accounts: Signs[] } }) {
   let strip!: HTMLDivElement
   const [at, setAt] = createSignal(0)
   const names = () => [...props.home.pages.map((page) => page.name), "Settings"]
   const go = (to: number, smooth = true) => strip.scrollTo({ left: Math.max(0, Math.min(names().length - 1, to)) * strip.clientWidth * (document.dir === "rtl" ? -1 : 1), behavior: smooth ? "smooth" : "instant" })
 
   onSettled(() => {
+    room()
     const keys = (event: KeyboardEvent) => {
       if (sidebar() || (event.target as Element).closest?.("input, textarea, dialog")) return
       if (event.key === "ArrowRight") go(at() + 1)
@@ -367,19 +393,23 @@ function Home(props: { home: { pages: Page[]; settings: App[] } }) {
   }
   const press = (does: () => void) => () => Date.now() > quiet && does()
   const sections = (): Section[] => [
-    ...props.home.pages.map((page) => ({ key: page.for ?? "you", name: page.name, apps: page.items.filter((item): item is Extract<Item, App> => !!item.app).map((item) => ({ ...item, for: page.for })) })),
+    ...props.home.pages.map((page, index) => ({
+      key: page.for ?? "you",
+      name: page.name,
+      apps: [...page.items.filter((item): item is Extract<Item, App> => !!item.app).map((item) => ({ ...item, for: page.for })), ...(index ? [] : [{ app: ACCOUNTS, name: "Accounts", icon: "" }])],
+    })),
     { key: "settings", name: "Settings", apps: props.home.settings },
   ]
 
   return (
     <div class={["home", { beside: sidebar() }]}>
       <Show when={sidebar()}>
-        <Sidebar sections={sections()} at={at} go={(index) => go(index, false)} />
+        <Sidebar sections={sections()} accounts={props.home.accounts} at={at} go={(index) => go(index, false)} />
       </Show>
       <main class="pages">
         <div class="strip" ref={strip} onScroll={() => setAt(Math.round(Math.abs(strip.scrollLeft) / strip.clientWidth))}>
           <For each={props.home.pages} keyed={(page) => page.who}>
-            {(page) => <PageGrid page={page()} />}
+            {(page, index) => <PageGrid page={page()} accounts={index() ? undefined : props.home.accounts} />}
           </For>
           <section class="page">
             <div class="grid">

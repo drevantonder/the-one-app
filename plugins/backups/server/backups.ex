@@ -44,7 +44,7 @@ defmodule Backups do
   def uses, do: ["database", "vault"]
 
   @impl true
-  def apps, do: [%{name: "Backups", page: "client/index.html", icon: "client/icon.svg", settings: true}]
+  def apps, do: [%{name: "Backups", page: "client/index.html", icon: "client/icon.svg", category: "settings"}]
 
   @impl true
   def jobs, do: [%{tool: "due", every: 3600}]

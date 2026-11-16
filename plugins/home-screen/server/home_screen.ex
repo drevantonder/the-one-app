@@ -15,7 +15,10 @@ defmodule HomeScreen do
   here, over the tools of whatever keeps them (`permissions`).
 
   Every tool here is asked for whoever's page it is, as an app opened from that page is. What draws the pages is
-  this plugin's `client/`, which a client shows first.
+  this plugin's `client/`: its app in the category `launcher`, which a client shows first.
+
+  A plugin has accounts when it has the tools `accounts`, `sign_in` and `sign_out` (SKILL.md). Those are in
+  Accounts, a folder at the end of the first page, rather than on a page, unless they have an app of their own.
   """
   @behaviour OneCore.Plugin
 
@@ -29,11 +32,16 @@ defmodule HomeScreen do
   @impl true
   def apps do
     [
-      %{name: "Apps", page: "client/apps.html", icon: "client/apps.svg", settings: true},
-      %{name: "Groups", page: "client/groups.html", icon: "client/groups.svg", settings: true},
-      %{name: "Appearance", page: "client/appearance.html", icon: "client/appearance.svg", settings: true}
+      %{name: "Home Screen", page: "client/index.html", icon: "client/home.svg", category: "launcher"},
+      %{name: "Apps", page: "client/apps.html", icon: "client/apps.svg", category: "settings"},
+      %{name: "Groups", page: "client/groups.html", icon: "client/groups.svg", category: "settings"},
+      %{name: "Appearance", page: "client/appearance.html", icon: "client/appearance.svg", category: "settings"}
     ]
   end
+
+  # The tools a plugin with accounts has (SKILL.md).
+  @accounts ~w(accounts sign_in sign_out)
+  defp accounts?(tools), do: @accounts -- tools == []
 
   @impl true
   def tools do
@@ -57,8 +65,8 @@ defmodule HomeScreen do
         read_only: true,
         description: """
         Gives your Home Screen page: its apps and widgets in order (`items`), the widgets that could be put on it
-        (`widgets`), and whether you may arrange it. Outside accounts' apps are in its Accounts folder, an item whose
-        `folder` lists them. Asked for a group or for the network, it's theirs.
+        (`widgets`), the plugins with accounts (`accounts`), which are in the Accounts folder, and whether you may
+        arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none
       },
@@ -100,7 +108,8 @@ defmodule HomeScreen do
       %{
         name: "store",
         read_only: true,
-        description: "Lists every app anyone has deployed, which could be added to a page, each with its plugin",
+        description:
+          "Lists every plugin anyone has deployed that has an app or accounts, which could be added to a page: each with whether it has accounts (`accounts`)",
         inputs: none
       },
       %{
@@ -170,27 +179,29 @@ defmodule HomeScreen do
           plugin.installed == call.subject or Enum.any?(plugin.apps, &("#{plugin.name}/#{&1.page}" in put)),
           do: plugin
 
-    all =
-      for plugin <- here, app <- plugin.apps, not app.settings do
+    # An app in a category is somewhere else: Settings, or this one.
+    apps =
+      for plugin <- here, app <- plugin.apps, app.category == nil do
         %{
           app: "#{plugin.name}/#{app.page}",
           plugin: plugin.plugin,
           name: app.name,
           icon: app.icon,
-          account: app.account,
           put: plugin.installed != call.subject
         }
       end
 
-    # Outside accounts' apps are in one Accounts folder, which this plugin's page `accounts.html` opens. Its icon is
-    # a file beside that page, where every page of this plugin finds it.
-    {accounts, apps} = Enum.split_with(all, & &1.account)
-    folder = %{app: "#{call.plugin}/client/accounts.html", name: "Accounts", icon: "accounts.svg", folder: accounts}
-    apps = Enum.map(apps, &Map.delete(&1, :account)) ++ if(accounts == [], do: [], else: [folder])
+    # A plugin with accounts is in Accounts, and signs one in on its `sign_in`'s page if it has one.
+    accounts =
+      for plugin <- here, names = Enum.map(plugin.tools, & &1.name), accounts?(names) do
+        page = Enum.find_value(plugin.tools, &(&1.name == "sign_in" && &1[:ui]))
+        signs_in = if page, do: %{sign_in: "#{plugin.name}/#{page}"}, else: %{}
+        Map.merge(%{plugin: plugin.plugin, name: plugin.name, title: plugin.title, icon: plugin.icon}, signs_in)
+      end
 
     widgets =
       for plugin <- here, widget <- plugin.widgets do
-        opens = Enum.find(all, &String.starts_with?(&1.app, plugin.name <> "/"))
+        opens = Enum.find(apps, &String.starts_with?(&1.app, plugin.name <> "/"))
         Map.merge(widget, %{widget: "#{plugin.name}/#{widget.tool}", opens: opens && opens.app})
       end
 
@@ -203,7 +214,8 @@ defmodule HomeScreen do
 
     # An app added since the page was last arranged goes after the rest.
     items = placed ++ Enum.sort_by(apps -- placed, &String.downcase(&1.name))
-    %{who: call.subject, arranges: Call.owns?(call), items: items, widgets: widgets}
+    accounts = Enum.sort_by(accounts, &String.downcase(&1.title))
+    %{who: call.subject, arranges: Call.owns?(call), items: items, widgets: widgets, accounts: accounts}
   end
 
   def call("arrange", %{"items" => items}, call) do
@@ -218,7 +230,7 @@ defmodule HomeScreen do
 
   def call("settings", _inputs, call) do
     parts =
-      for plugin <- Call.plugins(call), app <- plugin.apps, app.settings do
+      for plugin <- Call.plugins(call), app <- plugin.apps, app.category == "settings" do
         %{app: "#{plugin.name}/#{app.page}", name: app.name, icon: app.icon}
       end
 
@@ -228,12 +240,13 @@ defmodule HomeScreen do
   # Every plugin anyone deployed, whether or not it's on a page now. One that isn't in use for a group someone's in
   # or the network, nor shared with them, is listed for them too, and adding it says why it can't be.
   def call("store", _inputs, call) do
-    apps =
-      for %{plugin: plugin, apps: apps} <- Call.deployed(call), app <- apps, not app.settings do
-        %{plugin: plugin, name: app.name, icon: app.icon}
-      end
+    plugins =
+      for plugin <- Call.deployed(call),
+          accounts = accounts?(plugin.tools),
+          accounts or Enum.any?(plugin.apps, &(&1.category == nil)),
+          do: %{plugin: plugin.plugin, name: plugin.title, icon: plugin.icon, accounts: accounts}
 
-    Enum.sort_by(apps, &String.downcase(&1.name))
+    Enum.sort_by(plugins, &String.downcase(&1.name))
   end
 
   def call("add", %{"plugin" => plugin}, call) do
@@ -248,8 +261,11 @@ defmodule HomeScreen do
         "It's on the page already, installed for #{at}."
 
       found ->
-        apps = for app <- found.apps, not app.settings, do: %{"app" => "#{found.name}/#{app.page}"}
-        if apps == [], do: raise("#{plugin} has no app to put on a page.")
+        apps = for app <- found.apps, app.category == nil, do: %{"app" => "#{found.name}/#{app.page}"}
+
+        if apps == [],
+          do: raise("#{plugin} has no app to put on a page. Its accounts, if it has any, are in Accounts already.")
+
         keep(call, JSON.encode!(Enum.uniq(kept(call) ++ apps)))
         "Its app is on #{call.subject}'s page. Nothing was installed: it's the one in use for #{found.installed}."
     end

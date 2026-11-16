@@ -8,6 +8,13 @@ defmodule GoogleCalendar do
   @api "https://www.googleapis.com/calendar/v3/"
   @day 86_400
 
+  # It has no app, so it says how it's called and drawn in Accounts and the App Store.
+  @impl true
+  def title, do: google().title
+
+  @impl true
+  def icon, do: "icon.svg"
+
   @doc "What Google Calendar asks of Google, for the `google-account` plugin."
   def google do
     %{
