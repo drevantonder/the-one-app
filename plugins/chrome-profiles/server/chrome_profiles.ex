@@ -15,6 +15,13 @@ defmodule ChromeProfiles do
   `open` or `update` opens it: Chrome hands a browser that's starting the note's profile, and as it closes
   (`chrome.closing`) what it closed with is saved to it, unless the note says not to. An update's note says when it
   ends: the job `save_updates` saves and closes any past it.
+
+  An update's note also holds its `state`, so every app and agent sees the same one. It changes only as `@steps`
+  says, and every app watching is told as it does: `starting` (its container made, which may mean building or
+  pulling its image), `opening` (the profile going in), `ready`, then `saving` or `discarding`, and the note is gone
+  once it's closed. `failed`, with `why`, is one that couldn't start. Each call is one step from the state it finds,
+  so a step that isn't one (Save while it's starting, Update while it's saving) is refused, and one a server left
+  half done is carried on by the next call or `save_updates`.
   """
   @behaviour OneCore.Plugin
   alias OneCore.{Artifact, Call}
@@ -24,6 +31,33 @@ defmodule ChromeProfiles do
   # Where a profile is handed over in a browser's container, as Chrome's hooks say.
   @tarball "/tmp/user-data.tar.gz"
   @profile %{type: "string", description: "the profile, by its name, like Personal or Work"}
+
+  # An update's states, by the state it's in and what happens, as the moduledoc says. `update` is `update` on a
+  # browser that's ready, `start` on any other, and `expire` is `save_updates`.
+  @steps %{
+    {nil, "start"} => "starting",
+    {"failed", "start"} => "starting",
+    {"ready", "start"} => "starting",
+    {"ready", "update"} => "ready",
+    {"starting", "opening"} => "opening",
+    {"starting", "opened"} => "ready",
+    {"opening", "opened"} => "ready",
+    {"ready", "opened"} => "ready",
+    {"starting", "fail"} => "failed",
+    {"opening", "fail"} => "failed",
+    {"ready", "save"} => "saving",
+    {"ready", "discard"} => "discarding",
+    {"failed", "discard"} => "discarding",
+    {"saving", "fail"} => "ready",
+    {"discarding", "fail"} => "ready",
+    {"ready", "expire"} => "saving",
+    {"starting", "expire"} => "discarding",
+    {"opening", "expire"} => "discarding",
+    {"failed", "expire"} => "discarding",
+    {"saving", "expire"} => "saving",
+    {"discarding", "expire"} => "discarding"
+  }
+  @states @steps |> Map.values() |> Enum.uniq()
 
   @impl true
   def uses, do: ["vault", "containers", "chrome"]
@@ -67,8 +101,15 @@ defmodule ChromeProfiles do
                   saved: %{type: ["integer", "null"], description: "When it was last saved, in milliseconds since 1970"},
                   updating: %{
                     type: ["object", "null"],
-                    description: "While your person is updating it: its browser's session, and when that ends",
-                    properties: %{session: %{type: "string"}, until: %{type: "integer"}}
+                    description:
+                      "While your person is updating it: its browser's session, when that ends, its state, and why, where it went wrong",
+                    properties: %{
+                      session: %{type: "string"},
+                      until: %{type: "integer"},
+                      state: %{type: "string", enum: @states},
+                      why: %{type: ["string", "null"]}
+                    },
+                    required: ["session", "until", "state", "why"]
                   }
                 },
                 required: ["profile", "sites", "saved", "updating"]
@@ -172,7 +213,11 @@ defmodule ChromeProfiles do
 
   @impl true
   def call("list", _inputs, call) do
-    updating = for {session, %{"update" => until} = note} <- notes(call), until, into: %{}, do: {note["profile"], %{session: session, until: until}}
+    updating =
+      for {session, %{"update" => until} = note} <- notes(call),
+          until,
+          into: %{},
+          do: {note["profile"], %{session: session, until: until, state: note["state"], why: note["why"]}}
 
     profiles =
       for name <- profiles(call) do
@@ -229,18 +274,24 @@ defmodule ChromeProfiles do
   def call("update", %{"profile" => name} = inputs, call) do
     name = profile!(call, name)
     session = update_session(name)
-    open!(call, session, name)
+    running = open!(call, session, name)
     until = System.system_time(:millisecond) + @update_minutes * 60_000
-    note(call, session, %{"profile" => name, "save" => true, "update" => until})
+    changes = %{"profile" => name, "save" => true, "update" => until, "why" => nil}
+    # Only a browser that's ready is carried on with as it is: any other (one a carry left half done) starts.
+    event = if running and match?(%{"state" => "ready"}, note(call, session)), do: "update", else: "start"
+    %{"update" => until, "state" => state} = step(call, session, event, changes)
     opening = Map.merge(%{"session" => session, "description" => "Updating #{name}"}, Map.take(inputs, ["url"]))
 
     try do
       Call.tool(call, "chrome", "open", opening)
     rescue
+      # One that was running already is as it was: the caller hears why.
       e ->
-        forget(call, session)
+        if state != "ready", do: step(call, session, "fail", %{"why" => Exception.message(e)})
         reraise e, __STACKTRACE__
     end
+
+    step(call, session, "opened")
 
     %{
       profile: name,
@@ -255,15 +306,13 @@ defmodule ChromeProfiles do
 
   def call("save", %{"profile" => name}, call) do
     name = profile!(call, name)
-    close_update(call, name)
+    close_update(call, name, "save")
     %{profile: name}
   end
 
   def call("discard", %{"profile" => name}, call) do
     name = profile!(call, name)
-    session = update_session(name)
-    with %{} = note <- note(call, session), do: note(call, session, %{note | "save" => false})
-    close_update(call, name)
+    close_update(call, name, "discard")
     %{profile: name}
   end
 
@@ -272,7 +321,7 @@ defmodule ChromeProfiles do
 
     saved =
       for {session, %{"update" => until, "profile" => name}} <- notes(call), until && until < now do
-        close_update(call, name)
+        close_update(call, name, "expire")
         session
       end
 
@@ -282,6 +331,8 @@ defmodule ChromeProfiles do
   # A browser on a profile is starting: the profile's last save, if it has one, goes into its container.
   @impl true
   def hook("chrome.starting", %{"session" => session, "container" => container}, call) do
+    if match?(%{"state" => "starting"}, note(call, session)), do: step(call, session, "opening")
+
     with %{"profile" => name} <- note(call, session),
          true <- name in profiles(call),
          saved when saved != "" <- value(call, name, "saved") do
@@ -371,22 +422,57 @@ defmodule ChromeProfiles do
   # The browser a person updates a profile in.
   defp update_session(name), do: "update-" <> (name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-"))
 
-  defp close_update(call, name) do
+  # Saves or discards an update (`event`), as a step to `saving` or `discarding`, then closes its browser.
+  defp close_update(call, name, event) do
     session = update_session(name)
     if not match?(%{"update" => until} when until != nil, note(call, session)), do: raise("#{name} isn't being updated")
-    # A browser that had stopped closes without `chrome.closing`, so its note goes here. One that didn't close keeps
-    # its note, and the next `save_updates` closes it.
-    Call.tool(call, "chrome", "close", %{"session" => session})
+    %{"state" => state} = step(call, session, event)
+    if state == "discarding", do: step(call, session, nil, %{"save" => false})
+
+    # A browser that had stopped closes without `chrome.closing`, so its note goes here. One that didn't close is
+    # ready again, saying why, and the next `save_updates` past its end closes it.
+    try do
+      Call.tool(call, "chrome", "close", %{"session" => session})
+    rescue
+      e ->
+        if note(call, session), do: step(call, session, "fail", %{"why" => Exception.message(e)})
+        reraise e, __STACKTRACE__
+    end
+
     forget(call, session)
   end
 
+  # Takes an update one step (`event`, by `@steps`) from the state its note is in, with `changes` to the note, and
+  # gives the note. A `nil` event only changes the note.
+  defp step(call, session, event, changes \\ %{}) do
+    note = note(call, session)
+    was = note && note["state"]
+
+    state =
+      cond do
+        event == nil -> was
+        to = @steps[{was, event}] -> to
+        true -> raise "#{(note || changes)["profile"]} can't #{event} while it's #{was || "not being updated"}"
+      end
+
+    note = Map.merge(note || %{}, changes) |> Map.put("state", state)
+
+    note =
+      if state in ~w(starting ready saving discarding) and event != "fail", do: Map.put(note, "why", nil), else: note
+
+    note(call, session, note)
+    Call.changed(call)
+    note
+  end
+
   # A browser that's open already is only carried on with on the same profile: Chrome hands it a profile as it starts.
+  # Whether it's running.
   defp open!(call, session, name) do
     running = Enum.find(Call.tool(call, "chrome", "list", %{})["browsers"], &(&1["session"] == session and &1["state"] == "running"))
 
     case {running, note(call, session)} do
-      {nil, _} -> :ok
-      {_, %{"profile" => ^name}} -> :ok
+      {nil, _} -> false
+      {_, %{"profile" => ^name}} -> true
       _ -> raise "#{session} is open already, not on #{name}: Chrome's `close` closes it, or open another session"
     end
   end

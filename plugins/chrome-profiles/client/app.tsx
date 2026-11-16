@@ -2,7 +2,7 @@
 // you click and type on as you would Chrome, then save.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, Field, Input, leave, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Skeleton, Split, toast } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Input, leave, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Skeleton, Split, Status, Steps, toast } from "ui"
 import "./app.css"
 
 /** A profile, as `chrome-profiles_list` answers it. */
@@ -10,8 +10,13 @@ interface Profile {
   profile: string
   sites: { site: string; used: number }[]
   saved?: number
-  updating?: { session: string; until: number }
+  updating?: { session: string; until: number; state: State; why?: string }
 }
+
+/** An update's state, as the server keeps it (chrome_profiles.ex's `@steps`). */
+type State = "starting" | "opening" | "ready" | "saving" | "discarding" | "failed"
+// What a profile's row says while it's being updated.
+const SAYS: Record<State, string> = { starting: "Starting", opening: "Starting", ready: "Updating", saving: "Saving", discarding: "Closing", failed: "Couldn't start" }
 
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 /// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
@@ -24,15 +29,17 @@ function since(at: number) {
 const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 const summary = (p: Profile) =>
   p.updating
-    ? "Updating"
+    ? SAYS[p.updating.state]
     : [p.sites.length ? p.sites.map((s) => s.site).join(", ") : "No sites yet", p.saved && `Saved ${since(p.saved)}`].filter(Boolean).join(" · ")
 
 const [open, setOpen] = createSignal<string>()
 const [asking, setAsking] = createSignal<"add" | "rename">()
 
-/// The profile's browser, open for its person: the browser as it is, with its own address bar and tabs, then Save.
+/// The profile's browser, open for its person, in the state its update is in: its steps while it starts, then the
+/// browser as it is, with its own address bar and tabs, then Save.
 function Updating(props: { profile: Profile }) {
   const p = () => props.profile
+  const u = () => p().updating!
   const [busy, setBusy] = createSignal<"save" | "discard">()
   const finish = async (tool: "save" | "discard") => {
     setBusy(tool)
@@ -41,15 +48,42 @@ function Updating(props: { profile: Profile }) {
       .catch((error) => toast(error.message))
     setBusy()
   }
+  const again = () => call("chrome-profiles_update", { profile: p().profile }).catch((error) => toast(error.message))
+  const session = u().session
+  // One function for as long as it's ready, so the list asked again doesn't connect to it again.
+  const screen = (inputs: { action: string }) => call("chrome_screen", { session, ...inputs })
   return (
     <Section heading="Updating">
-      <Show when={p().updating!.session} keyed>
-        {(session) => <LiveScreen label="The browser" screen={(inputs) => call("chrome_screen", { session, ...inputs })} />}
+      <LiveScreen label="The browser" screen={u().state === "ready" ? screen : undefined}>
+        <Show when={u().state === "failed"}>
+          <Problem heading="Couldn't start the browser" text={u().why} action={<Button variant="outline" onClick={again}>Try Again</Button>} />
+        </Show>
+        <Show when={u().state === "starting" || u().state === "opening"}>
+          <Steps
+            steps={["Getting a browser ready", `Opening ${p().profile}`]}
+            at={u().state === "starting" ? 0 : 1}
+            text={u().state === "starting" ? "The first time on a device takes a few minutes." : undefined}
+          />
+        </Show>
+        <Show when={u().state === "saving" || u().state === "discarding"}>
+          <Status heading={u().state === "saving" ? `Saving ${p().profile}…` : "Closing the browser…"} />
+        </Show>
+      </LiveScreen>
+      <Show when={u().state === "ready" && u().why}>
+        <Problem warn heading="Couldn't close the browser" text={u().why} />
       </Show>
-      <p class="hint">Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(p().updating!.until)}.</p>
+      <Show when={u().state !== "failed"}>
+        <p class="hint">Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(u().until)}.</p>
+      </Show>
       <div class="actions">
-        <Button loading={busy() === "save"} disabled={!!busy()} onClick={() => finish("save")}>Save</Button>
-        <Button variant="outline" loading={busy() === "discard"} disabled={!!busy()} onClick={() => finish("discard")}>Discard</Button>
+        <Show when={u().state !== "failed"}>
+          <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onClick={() => finish("save")}>
+            Save
+          </Button>
+        </Show>
+        <Button variant="outline" loading={busy() === "discard" || u().state === "discarding"} disabled={!["ready", "failed"].includes(u().state) || !!busy()} onClick={() => finish("discard")}>
+          Discard
+        </Button>
       </div>
     </Section>
   )
@@ -80,7 +114,7 @@ function Detail(props: { profile: Profile }) {
         </Menu.Root>
       }
     >
-      <Show when={p().updating} fallback={<Update profile={p().profile} />}>
+      <Show when={p().updating?.session} keyed fallback={<Update profile={p().profile} />}>
         <Updating profile={p()} />
       </Show>
       <Section heading="Sites">
