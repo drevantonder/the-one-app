@@ -58,16 +58,6 @@ defmodule Backups.Run do
       sent_bytes = Enum.sum_by(sent, & &1.stored)
 
       transaction(call, fn db ->
-        for object <- sent do
-          query(db, "insert or ignore into objects (destination, object, sha256, stored, digest) values (?, ?, ?, ?, ?)", [
-            destination["id"],
-            object.object,
-            object.sha256,
-            object.stored,
-            object.digest
-          ])
-        end
-
         query(
           db,
           "insert into backups (destination, name, at, took, blobs, bytes, sent, sent_bytes, stored, digest, listed) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -136,6 +126,19 @@ defmodule Backups.Run do
       for {object, data} <- Enum.reverse(new), do: Destination.put(opened, "objects/" <> object, data)
 
       new = for {object, data} <- new, do: %{object: object, sha256: digest(data), stored: byte_size(data), digest: digest(data)}
+
+      # What was sent is kept as it's sent, so a backup cut short, as by its server restarting, isn't sent again.
+      transaction(opened.call, fn db ->
+        for object <- new do
+          query(db, "insert or ignore into objects (destination, object, sha256, stored, digest) values (?, ?, ?, ?, ?)", [
+            opened.destination["id"],
+            object.object,
+            object.sha256,
+            object.stored,
+            object.digest
+          ])
+        end
+      end)
       {listed, new ++ sent, known}
     end)
     |> then(fn {listed, sent, _known} -> {listed, sent} end)
