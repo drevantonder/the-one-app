@@ -3,24 +3,32 @@
 // passkey, and an app's files come from the edge too (`/apps/`). It's what the app's Rust half answers, the same
 // commands by the same names, less what a browser can't do, which each says.
 
+/** @import { Commands } from "../app/page/host.js" */
+
 const SIGN_IN = "/sign-in/"
 
 /// What hears each event, by its name.
+/** @type {Map<string, Set<(event: { payload: unknown }) => void>>} */
 const hearing = new Map()
-export function listen(event, heard) {
+/** @type {typeof import("../app/page/host.js").listen} */
+export const listen = (event, heard) => {
   if (!hearing.has(event)) hearing.set(event, new Set())
-  hearing.get(event).add(heard)
+  hearing.get(event)?.add(/** @type {(event: { payload: unknown }) => void} */ (heard))
 }
+/** @param {string} event @param {unknown} payload */
 const emit = (event, payload) => hearing.get(event)?.forEach((heard) => heard({ payload }))
 
 /// Where this browser's apps' files are, and this browser as Devices lists it, once it's signed in (`start`).
+/** @type {string} */
 let apps
+/** @type {string} */
 let device
 /// Whether a server answered the last thing asked.
 let answering = true
 
 /// Asks the network's servers `method`, as this browser's person. → its result. A browser that's no longer
 /// signed in goes to sign in again.
+/** @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function mcp(method, params = {}) {
   let answer
   try {
@@ -38,15 +46,19 @@ async function mcp(method, params = {}) {
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return result
 }
+/** @param {boolean} now */
 function said(now) {
   if (now !== answering) emit("answering", (answering = now))
 }
 
 /// What each open app was answered that only reads, by what it asked: it's answered that again until something
 /// changes, as the app's client answers a view (`Subscription` in `core/client`).
+/** @type {Map<string, Map<string, { method: string, params: Record<string, unknown>, answer: unknown }>>} */
 const views = new Map()
-const answered = (view) => views.get(view) ?? views.set(view, new Map()).get(view)
+/** @param {string} view */
+const answered = (view) => /** @type {NonNullable<ReturnType<typeof views.get>>} */ (views.get(view) ?? views.set(view, new Map()).get(view))
 
+/** @param {string} view @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function read(view, method, params) {
   const asked = JSON.stringify([method, params])
   const kept = answered(view).get(asked)
@@ -57,14 +69,16 @@ async function read(view, method, params) {
 }
 
 /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
+/** @param {string} view @param {string} method @param {Record<string, unknown>} params */
 async function reads(view, method, params) {
   if (["tools/list", "resources/list", "resources/read"].includes(method)) return true
   if (method !== "tools/call") return false
   const { tools } = await read(view, "tools/list", {})
-  return tools.some((tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
+  return tools.some((/** @type {{ name: string, annotations?: { readOnlyHint?: boolean } }} */ tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
 }
 
 /// Asks again for everything `view` was answered, and tells it if any of it changed.
+/** @param {string} view */
 async function refresh(view) {
   let changed = false
   await Promise.all(
@@ -80,9 +94,11 @@ async function refresh(view) {
 }
 
 /// What a browser can't do, as it's said where it's asked.
+/** @param {string} why */
 const cannot = (why) => () => Promise.reject(new Error(why))
 const NO_KEY = "A browser can't hold your key. Use the app on your phone or computer for that."
 
+/** @type {{ [Command in keyof Commands]?: (...args: Parameters<Commands[Command]>) => ReturnType<Commands[Command]> | Promise<ReturnType<Commands[Command]>> }} */
 const commands = {
   /// Signed in here, or sent to sign in. A browser keeps nothing of a network's, so with its address not answering
   /// there's nothing to show.
@@ -134,13 +150,15 @@ const commands = {
   listen() {},
 }
 
-export function invoke(command, ...args) {
+/** @type {typeof import("../app/page/host.js").invoke} */
+export const invoke = (command, ...args) => {
   if (!commands[command]) return Promise.reject(new Error(`A browser has no ${command}`))
   return Promise.resolve(commands[command](...args))
 }
 
 /// Where an app's page is: the edge's, under where this browser's apps' files are, by what names its address
 /// (`<plugin>[.<who, last part first>]`), as the app has its own address for each.
+/** @type {typeof import("../app/page/host.js").address} */
 export const address = (view) => `${apps}/${view.host}/${view.app}`
 
 /// What an app's frame may do. Its address is this page's, so it's given an origin of its own, which reaches
@@ -148,4 +166,5 @@ export const address = (view) => `${apps}/${view.host}/${view.app}`
 export const sandbox = "allow-scripts allow-forms"
 
 /// A web address an app opens, in a tab of its own.
+/** @type {typeof import("../app/page/host.js").openLink} */
 export const openLink = (url) => void open(url, "_blank", "noopener")

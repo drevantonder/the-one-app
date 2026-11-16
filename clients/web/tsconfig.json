@@ -1,0 +1,16 @@
+// The page is JavaScript, served as it is with no build, and TypeScript checks it: `bunx --package typescript@7.0.2 tsc -p .`.
+{
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "types": [],
+    "allowJs": true,
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["host.js"]
+}

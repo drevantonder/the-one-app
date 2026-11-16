@@ -8,8 +8,11 @@
 // The Home Screen are an app too: the plugin `home-screen`'s, which reaches this client from a server as every plugin
 // does. It's the one this page shows first, under every other, and it opens the rest (`one/open`).
 import { address, invoke, listen, openLink, sandbox } from "./host.js"
+/** @import { View } from "./host.js" */
 
 const HOME = "home-screen/client/index.html"
+/** An element of the page's own, which is there. @param {string} id */
+const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
 /// Whether the window is wide enough for the Home Screen's sidebar, which the plugin `home-screen` draws along the start of
 /// its frame, 16rem wide, and the other apps' frames leave clear. Tall enough too, so a phone on its side has none,
 /// as home.css has it.
@@ -17,21 +20,27 @@ const beside = matchMedia("(min-width: 48rem) and (min-height: 30rem)")
 /// The apps that are open, by who each is for and what it is: `{ key, app, for, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
+/** @type {Map<string, View>} */
 const open = new Map()
+/** @param {string} app @param {string} [who] */
 const key = (app, who) => `${who ?? ""}|${app}`
 /// Each plugin's first app, by the plugin's name, among this user's, and one that isn't a part of Settings if it
 /// has one: what a notification from it opens.
+/** @type {Map<string, string>} */
 let first = new Map()
 /// Who this client has listed files for: its user (`undefined`), and each group or the network an app was opened
 /// for.
+/** @type {Set<string | undefined>} */
 const listed = new Set()
 
 /// What an app's address is named by: its plugin's name, then who it's for if that isn't its user, last part first.
+/** @param {string} app @param {string} [who] */
 const host = (app, who) => [app.split("/")[0], ...(who ? who.split("/").reverse() : [])].join(".")
 
 /// Whether a server answered the last thing this client asked, and why its files couldn't be listed, if they
 /// couldn't.
 let answering = true
+/** @type {string | undefined} */
 let unlisted
 /// Where the window starts, which it asks as it opens: here, or on the page its device is let in by while it's
 /// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
@@ -53,22 +62,24 @@ scheme.addEventListener("change", dress)
 /// over what this device kept, as what can wait. Fine is silent.
 function problem() {
   // A problem is said in place of the mark.
-  if (unreached !== null || unlisted) document.getElementById("opening").hidden = true
-  const box = document.getElementById("problem")
+  if (unreached !== null || unlisted) byId("opening").hidden = true
+  const box = byId("problem")
   const nothing = Boolean(unlisted) || unreached !== null
   box.hidden = (answering && !nothing) || Boolean(history.state)
   box.toggleAttribute("data-waits", !nothing)
-  document.getElementById("what").textContent =
+  byId("what").textContent =
     unreached !== null ? "Can't reach your network" : unlisted ? "Can't show your Home Screen pages" : "No server is answering"
-  document.getElementById("why").textContent = unreached !== null
+  byId("why").textContent = unreached !== null
     ? `${unreached}. Check this device is online.`
     : unlisted ?? "This is what this device kept. Check it's online and a server is on."
 }
 
 /// Lists the files a server has for `who`, which the client keeps, so an app opens with no server up. An open app
 /// whose plugins have a new version loads again.
+/** @param {string} [who] */
 async function list(who) {
   listed.add(who)
+  /** @type {string[]} */
   let outdated = []
   try {
     const { resources, ...rest } = await invoke("apps", { who })
@@ -78,7 +89,7 @@ async function list(who) {
       // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
       const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
       // The last one set for a plugin is the one kept: its first, and one that isn't a part of Settings before one that is.
-      const order = pages.toReversed().sort((a, b) => Boolean(b._meta?.settings) - Boolean(a._meta?.settings))
+      const order = pages.toReversed().sort((a, b) => Number(Boolean(b._meta?.settings)) - Number(Boolean(a._meta?.settings)))
       first = new Map(order.map(({ uri }) => uri.slice("ui://".length).split("/")).map(([plugin, _version, ...page]) => [plugin, `${plugin}/${page.join("/")}`]))
     }
   } catch (error) {
@@ -91,18 +102,21 @@ async function list(who) {
     await invoke("close", { view: view.key })
     view.drawn = false
     // Loaded again in place, so the way back still leads out of the app.
-    view.frame.contentWindow.location.replace(address(view))
+    const page = /** @type {Window} */ (view.frame.contentWindow)
+    page.location.replace(address(view))
   }
 }
 
 /// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown.
+/** @param {string} app @param {string} [who] @returns {View} */
 function load(app, who) {
   const at = key(app, who)
-  if (open.has(at)) return open.get(at)
+  const opened = open.get(at)
+  if (opened) return opened
   if (!listed.has(who)) list(who)
-  const view = { key: at, app, for: who, host: host(app, who) }
-  view.frame = Object.assign(document.createElement("iframe"), { src: address(view), inert: true })
-  view.frame.sandbox = sandbox
+  const place = { key: at, app, for: who, host: host(app, who) }
+  const view = { ...place, frame: Object.assign(document.createElement("iframe"), { src: address(place), inert: true }) }
+  view.frame.setAttribute("sandbox", sandbox)
   if (app === HOME) view.frame.className = "home"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`).
   view.frame.allow = "clipboard-write; web-share"
@@ -118,6 +132,7 @@ let shownByDevice = false
 /// Changes between the Home Screen and an app as a move, as the UI library moves between an app's screens
 /// (ui/src/screen.jsx): the browser slides the app in over the Home Screen, or with `back`, back out from over
 /// them. Where the browser can't, or the user asked for no motion, it's a plain swap.
+/** @param {() => void} change */
 function move(change, back = false) {
   const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
   // Beside the sidebar, an app takes the place of the last, as a sidebar's apps do.
@@ -127,6 +142,7 @@ function move(change, back = false) {
 
 /// Shows the app that's open as `at` over the rest, or with none there, the Home Screen. `tapped` is when its icon
 /// was tapped.
+/** @param {string | null} at @param {number} tapped */
 function show(at, tapped) {
   const view = layer(at)
   problem()
@@ -140,8 +156,9 @@ function show(at, tapped) {
 
 /// Has the app that's open as `at` showing, or with none there, the Home Screen, and the Home Screen told which, for
 /// its sidebar, which stays beside every app where it's wide enough. → the one showing.
+/** @param {string | null} at */
 function layer(at) {
-  const view = open.get(at) ?? open.get(key(HOME))
+  const view = open.get(at ?? "") ?? open.get(key(HOME))
   const home = open.get(key(HOME))
   for (const other of open.values()) other.frame.inert = other !== view && !(other === home && beside.matches)
   if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, for: view.for } })
@@ -151,6 +168,7 @@ beside.addEventListener("change", () => layer(history.state))
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
 /// showing with what it drew from. The Home Screen' time is from when this page began to load.
+/** @param {View} view */
 function opened(view) {
   if (view.tapped === undefined) return
   const tapped = view.tapped
@@ -161,7 +179,7 @@ function opened(view) {
     invoke("opened", { view: name, ms: Math.round(duration) })
     // The device hears its person's notifications once they see their home, which has drawn over the mark.
     if (view.app === HOME) {
-      document.getElementById("opening").hidden = true
+      byId("opening").hidden = true
       invoke("listen")
     }
   }))
@@ -170,24 +188,26 @@ function opened(view) {
 /// Shows this device's person their recovery key, or with `typed`, asks them for it and lets the device in with
 /// it: theirs, or that of `who`, a group or the network the app asking is for. → `{ done }`: whether they saw it,
 /// or the device is in now. It's over whatever app asked, and the app is told only that.
+/** @param {boolean} typed @param {string} [who] @returns {Promise<{ done: boolean }>} */
 function recoveryKey(typed, who) {
-  const dialog = document.getElementById("recovery")
-  const [key, entry, problem, form] = [".key", ".entry", ".wrong", "form"].map((part) => dialog.querySelector(part))
-  dialog.dataset.typed = typed
+  const dialog = /** @type {HTMLDialogElement} */ (byId("recovery"))
+  const [key, entry, problem, form] = /** @type {[HTMLElement, HTMLInputElement, HTMLElement, HTMLFormElement]} */ ([".key", ".entry", ".wrong", "form"].map((part) => dialog.querySelector(part)))
+  dialog.dataset.typed = String(typed)
   entry.value = key.textContent = problem.textContent = dialog.returnValue = ""
   if (!typed) invoke("recovery_key", { who }).then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
   dialog.showModal()
   return new Promise((answered) => {
     form.onsubmit = async (event) => {
       event.preventDefault()
-      if (typed && event.submitter?.value !== "cancel") {
+      const pressed = /** @type {HTMLButtonElement | null} */ (event.submitter)
+      if (typed && pressed?.value !== "cancel") {
         try {
           await invoke("recover", { key: entry.value, who })
         } catch (error) {
           return void (problem.textContent = `${error}`)
         }
       }
-      dialog.returnValue = event.submitter?.value === "cancel" ? "" : "done"
+      dialog.returnValue = pressed?.value === "cancel" ? "" : "done"
       dialog.close()
     }
     dialog.onclose = () => {
@@ -197,9 +217,11 @@ function recoveryKey(typed, who) {
   })
 }
 
+/** @param {View} view @param {Record<string, unknown>} message */
 const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc: "2.0", ...message }, "*")
 
 /// What this page answers an app itself. The rest is the client's to answer.
+/** @param {View} view @param {string} method @param {Record<string, any>} params */
 async function answer(view, method, params) {
   if (method === "ui/initialize") {
     return {
@@ -270,7 +292,8 @@ addEventListener("message", async ({ source, data }) => {
   try {
     post(view, { id, result: await answer(view, method, params) })
   } catch (error) {
-    post(view, { id, error: { code: error.code ?? -32000, message: error.message ?? String(error) } })
+    const { code, message } = /** @type {{ code?: number, message?: string }} */ (error)
+    post(view, { id, error: { code: code ?? -32000, message: message ?? String(error) } })
   }
   // It has what it draws from once the client has answered it something.
   if (method.startsWith("ui/") || method.startsWith("one/")) return
@@ -280,6 +303,7 @@ addEventListener("message", async ({ source, data }) => {
 
 /// Shows an app over whatever's showing: by its plugin's name, and its page if it isn't the plugin's first app,
 /// for `who`. With `behind` it only starts. → whether there is one here.
+/** @param {string} app @param {string} [who] @param {boolean} [behind] */
 function go(app, who, behind) {
   const page = app.includes("/") ? app : first.get(app)
   if (!page) return false
@@ -305,7 +329,7 @@ async function hearTaps() {
 
 listen("changed", ({ payload: view }) => {
   if (view === "client") for (const who of listed) list(who)
-  else if (open.has(view)) post(open.get(view), { method: "notifications/one/changed" })
+  else if (open.has(view)) post(/** @type {View} */ (open.get(view)), { method: "notifications/one/changed" })
 })
 
 /// The device's own back, where a device has one (the app's window there calls this): what's open over the app
@@ -333,7 +357,7 @@ listen("answering", ({ payload }) => {
   // What couldn't be listed is asked for again now that a server answers.
   if (answering && unlisted) start()
 })
-document.getElementById("retry").addEventListener("click", () =>
+byId("retry").addEventListener("click", () =>
   unreached !== null ? invoke("enter") : unlisted ? start() : invoke("refresh", { view: key(HOME) }),
 )
 
@@ -354,7 +378,8 @@ addEventListener("focus", returned)
 async function start() {
   await list()
   if (unlisted) return
-  if (open.has(key(HOME))) open.get(key(HOME)).frame.contentWindow.location.replace(address(open.get(key(HOME))))
+  const home = open.get(key(HOME))
+  if (home) /** @type {Window} */ (home.frame.contentWindow).location.replace(address(home))
   else load(HOME)
   // The app that was showing when the page was loaded again is gone, so the Home Screen show.
   if (history.state) history.replaceState(null, "")
