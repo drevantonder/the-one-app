@@ -73,13 +73,13 @@ pub const STOPPED: VarInt = VarInt::from_u32(2);
 /// made again when there's something to ask.
 const IDLE: Duration = Duration::from_secs(2);
 /// How long a connection lasts once nothing arrives over it, which is how a server that went away while it ran a
-/// call is found out: one that's running it says so every `THERE`, and its QUIC answers a keep-alive that often
-/// too, whatever its build, as QUIC takes the shorter of the two sides' `SILENT`. It's many of those, since one running a long
-/// call may be filling its own uplink, as a backup does, and what it says then waits behind what it sends. Whoever
-/// opens a connection closes it once it's `IDLE`, so one a server that stopped left behind ends then, and that
-/// server is found where it starts again: iroh sends what it has for a machine only where a connection it still has
-/// with it last was.
-const SILENT: Duration = Duration::from_secs(15);
+/// call, or before it answered one just sent, is found out: both ends send a QUIC keep-alive every `THERE`, which
+/// the other's QUIC acknowledges at once, and one that's running a call says so every `THERE` too. So a few of
+/// those missed in a row is a machine that's gone, and whatever was asked of it is asked elsewhere this soon after
+/// it went. QUIC takes the shorter of the two sides' `SILENT`. Whoever opens a connection closes it once it's
+/// `IDLE`, so one a server that stopped left behind ends then, and that server is found where it starts again: iroh
+/// sends what it has for a machine only where a connection it still has with it last was.
+const SILENT: Duration = Duration::from_secs(4);
 
 /// A network's address, and the token this machine shows there: what says it's one of the network's own.
 #[derive(Clone, Deserialize)]
