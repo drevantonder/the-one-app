@@ -1,13 +1,16 @@
 defmodule GoogleAccount do
   @moduledoc """
   What the Google apps (gmail, google-calendar, google-drive, google-docs and google-sheets) share: Google's
-  sign-in and each account signed in, kept in the Vault, and their calls to Google's APIs. An app uses this
-  plugin, says what it asks of Google in its public `google/0` (`%{title: "Gmail", about: "...", scopes: [...]}`),
-  and passes that here with its call.
+  sign-in and each account signed in, kept in the Vault, and their calls to Google's APIs. An app calls this
+  plugin's tools, which act for the app that called them (its `caller`), with the app's `title`, and `scopes` to
+  sign in with.
 
   Each Google account is one item of its person's Vault, "Google <address>", shared by every Google app signed in
   to it. Signing in to it for another app adds that app's scopes to it (Google's incremental authorization) and
-  switches the item on for that app too. Signing out of one app switches it off for that app alone.
+  switches the item on for that app too. Signing out of one app switches it off for that app alone. This plugin
+  uses the Vault's tools on behalf of the app, so the Vault ties each account to the apps it's switched on for, and
+  neither this plugin nor an app is ever handed a token: one in sandbox mode uses an account as safely as one
+  that isn't.
 
   Every Google address is written here and in the apps as Google's own: a test points them at a fake Google by
   rewriting them.
@@ -17,19 +20,25 @@ defmodule GoogleAccount do
   # Google's OAuth: https://developers.google.com/identity/protocols/oauth2/web-server. Every API host a Google
   # app calls is the account's, since one account's tokens serve every app signed in to it.
   @service %{
-    name: "Google",
-    authorize: "https://accounts.google.com/o/oauth2/v2/auth",
-    token: "https://oauth2.googleapis.com/token",
-    hosts: ~w(gmail.googleapis.com www.googleapis.com docs.googleapis.com sheets.googleapis.com openidconnect.googleapis.com),
-    client: "Google client"
+    "name" => "Google",
+    "authorize" => "https://accounts.google.com/o/oauth2/v2/auth",
+    "token" => "https://oauth2.googleapis.com/token",
+    "hosts" =>
+      ~w(gmail.googleapis.com www.googleapis.com docs.googleapis.com sheets.googleapis.com openidconnect.googleapis.com),
+    "client" => "Google client"
   }
   @userinfo "https://openidconnect.googleapis.com/v1/userinfo"
 
   @impl true
-  def uses, do: ["vault"]
+  def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_stop_using)
 
   @impl true
   def tools do
+    string = &%{type: "string", description: &1}
+    title = string.("The app's name, as a person reads it, like Gmail")
+    account = string.("Which account: its address, or a part of it only it has. The first if left out")
+    app = &%{type: "object", properties: Map.put(&1, :title, title), required: ["title" | &2]}
+
     [
       %{
         name: "apps",
@@ -37,6 +46,58 @@ defmodule GoogleAccount do
         description:
           "The Google apps you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Each one's accounts tool lists its accounts.",
         inputs: %{type: "object", properties: %{}}
+      },
+      %{
+        name: "accounts",
+        read_only: true,
+        description:
+          "For a Google app's code: the Google accounts signed in for the app that calls this, each with ok, and why when it's false.",
+        inputs: app.(%{}, [])
+      },
+      %{
+        name: "sign_in",
+        description:
+          "For a Google app's code: starts signing a Google account in to the app that calls this, and gives the url its person opens.",
+        inputs:
+          app.(
+            %{
+              scopes: %{type: "array", items: %{type: "string"}, description: "What the app asks of Google"},
+              account: string.("The account's address, to suggest it to Google")
+            },
+            ["scopes"]
+          )
+      },
+      %{
+        name: "sign_out",
+        description: "For a Google app's code: signs a Google account out of the app that calls this.",
+        inputs: app.(%{account: account}, ["account"])
+      },
+      %{
+        name: "request",
+        description: """
+        For a Google app's code: calls a Google API as one of the accounts signed in for the app that calls this,
+        and gives its status, headers and body, decoded where it's JSON. An answer that isn't a success raises,
+        saying what went wrong for whoever reads it.
+        """,
+        inputs:
+          app.(
+            %{
+              account: account,
+              method: string.("GET if left out"),
+              url: string.("The API's address"),
+              query: %{
+                type: "object",
+                description: "The query, by name: a list is given once for each, and null or \"\" not at all"
+              },
+              json: %{description: "The body, as JSON"},
+              body: string.("Or the body as text, with type. Neither may say {{...}}: base64 it"),
+              type: string.("The body's MIME type"),
+              headers: %{type: "object", additionalProperties: %{type: "string"}, description: "More headers"},
+              missing: string.("What to say when what the URL names isn't there, or the account can't open it"),
+              hint: string.("What to add to what Google says about an input it can't take")
+            },
+            ["url"]
+          )
       }
     ]
   end
@@ -45,49 +106,95 @@ defmodule GoogleAccount do
   def call("apps", _inputs, call) do
     apps =
       for {name, version} <- OneCore.Plugins.running(call.subject),
-          "google-account" in version.uses,
-          function_exported?(version.plugin, :google, 0),
-          do: Map.put(Map.take(version.plugin.google(), [:title, :about]), :name, name)
+          "google-account" in version.permissions,
+          do: %{name: name, title: version.title}
 
     Enum.sort_by(apps, & &1.title)
   end
 
-  @doc """
-  An app's `accounts`, `sign_in` and `sign_out` tools, which every Google app has: `call` is the app's, and `app`
-  its `google/0`.
-  """
-  def account_call("accounts", _inputs, call, app) do
+  def call(_tool, _inputs, %OneCore.Call{caller: nil}),
+    do:
+      raise(
+        "google-account's tools are for the Google apps' code. Each app has its own accounts, sign_in and sign_out."
+      )
+
+  def call("accounts", %{"title" => title}, call) do
     for email <- emails(call) do
-      case vault(call).fetch(call, item(email), get(@userinfo)) do
-        %{status: 200} -> %{account: email, ok: true}
-        answer -> %{account: email, ok: false, why: trouble(call, app, email, answer)}
+      case vault(call, "fetch", Map.put(get(@userinfo), "item", item(email))) do
+        %{"status" => 200} -> %{account: email, ok: true}
+        answer -> %{account: email, ok: false, why: trouble(call, title, email, answer)}
       end
     end
   end
 
-  def account_call("sign_in", inputs, call, app) do
+  def call("sign_in", %{"scopes" => scopes} = inputs, call) do
     params = %{"access_type" => "offline", "prompt" => "consent", "include_granted_scopes" => "true"}
     params = if hint = inputs["account"], do: Map.put(params, "login_hint", hint), else: params
-    service = Map.merge(@service, %{scopes: ["openid", "email" | app.scopes], params: params})
+    service = Map.merge(@service, %{"scopes" => ["openid", "email" | scopes], "params" => params})
 
     %{
-      url: vault(call).sign_in(call, service, "Google {{email}}"),
+      url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}"}),
       then:
-        "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. #{call.plugin}_accounts then lists the account."
+        "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. #{app(call)}_accounts then lists the account."
     }
   end
 
-  def account_call("sign_out", %{"account" => name}, call, app) do
+  def call("sign_out", %{"account" => name, "title" => title}, call) do
     email = account(call, name)
-    vault(call).stop_using(call, item(email))
-    "Signed #{email} out of #{app.title}. Other Google apps that use it still do."
+    vault(call, "stop_using", %{"item" => item(email)})
+    "Signed #{email} out of #{title}. Other Google apps that use it still do."
   end
 
-  @doc "The address of the account a call names, as `accounts` lists them: the whole address, or a part only it has. The first when it names none."
-  def account(call, name \\ nil) do
+  def call("request", %{"url" => url, "title" => title} = inputs, call) do
+    email = account(call, inputs["account"])
+
+    {body, type} =
+      if Map.has_key?(inputs, "json"),
+        do: {unfilled(JSON.encode!(inputs["json"])), "application/json"},
+        else: {unfilled!(inputs["body"]), inputs["type"]}
+
+    query =
+      for {key, values} <- inputs["query"] || %{},
+          value <- List.wrap(values),
+          value not in [nil, ""],
+          do: {key, value}
+
+    url = if query == [], do: url, else: url <> "?" <> URI.encode_query(query)
+    headers = Map.merge(if(type, do: %{"content-type" => type}, else: %{}), inputs["headers"] || %{})
+
+    request = %{
+      "item" => item(email),
+      "url" => url,
+      "method" => inputs["method"] || "GET",
+      "headers" => Map.put(headers, "authorization", "Bearer {{access_token}}")
+    }
+
+    request = if body, do: Map.put(request, "body", body), else: request
+
+    answer = vault(call, "fetch", request)
+
+    if answer["status"] not in 200..299,
+      do: raise(trouble(call, title, email, answer, Map.take(inputs, ["missing", "hint"])))
+
+    %{status: answer["status"], headers: answer["headers"], body: decoded(answer["body"])}
+  end
+
+  defp decoded(nil), do: nil
+  defp decoded(""), do: nil
+
+  defp decoded(body) do
+    case JSON.decode(body) do
+      {:ok, json} -> json
+      {:error, _} -> body
+    end
+  end
+
+  # The address of the account a call names, as `accounts` lists them: the whole address, or a part only it has.
+  # The first when it names none.
+  defp account(call, name) do
     case {emails(call), name} do
       {[], _} ->
-        raise "Sign in to a Google account first: #{call.plugin}_sign_in gives the link."
+        raise "Sign in to a Google account first: #{app(call)}_sign_in gives the link."
 
       {[first | _], blank} when blank in [nil, ""] ->
         first
@@ -104,44 +211,8 @@ defmodule GoogleAccount do
     end
   end
 
-  @doc """
-  Calls a Google API as the account `email`, and gives what it answered, decoded from JSON. `options`:
-
-  - `query`: a keyword list or map; a list value is given once for each, and `nil` or `""` not at all.
-  - `json`: the body, as JSON; or `body` with its `type`. Neither may say `{{...}}`: the Vault would fill it in.
-  - `headers`: more headers.
-  - `missing`: what to say when what the URL names isn't there, or the account can't open it.
-  - `hint`: what to add to what Google says about an input it can't take.
-  """
-  def request(call, app, email, method, url, options \\ []) do
-    answer = fetch(call, app, email, method, url, options)
-    if answer.body == "", do: nil, else: JSON.decode!(answer.body)
-  end
-
-  @doc "As `request/6`, and gives the whole answer: its `status`, `headers` and `body`."
-  def fetch(call, app, email, method, url, options \\ []) do
-    {body, type} =
-      if json = options[:json],
-        do: {unfilled(JSON.encode!(json)), "application/json"},
-        else: {unfilled!(options[:body]), options[:type]}
-
-    query = for {key, values} <- options[:query] || [], value <- List.wrap(values), value not in [nil, ""], do: {key, value}
-    url = if query == [], do: url, else: url <> "?" <> URI.encode_query(query)
-    headers = if type, do: %{"content-type" => type}, else: %{}
-
-    headers = Map.merge(headers, Map.new(options[:headers] || %{}))
-    request = %{url: url, method: method, headers: Map.put(headers, "authorization", "Bearer {{access_token}}"), body: body}
-    answer = vault(call).fetch(call, item(email), request)
-
-    if answer.status in 200..299 do
-      answer
-    else
-      raise trouble(call, app, email, answer, Map.new(Keyword.take(options, [:missing, :hint])))
-    end
-  end
-
   # The Vault fills {{<field>}} in wherever it's written in a body, so what a person or an agent wrote, as an
-  # email or a cell, must never say one. In JSON a { inside a string can be written as \u007b, and a { that
+  # email or a cell, must never say one. In JSON a { inside a string can be written as {, and a { that
   # starts an object is never followed by another.
   defp unfilled(json), do: String.replace(json, ~r/\{(?=\{)/, fn _brace -> "\\u007b" end)
 
@@ -152,37 +223,35 @@ defmodule GoogleAccount do
     body
   end
 
-  @doc "A part of a URL's path, as Google takes it: an id or a range, with anything but letters and digits escaped."
-  def path(part), do: URI.encode(to_string(part), &URI.char_unreserved?/1)
-
   # What went wrong with a call, said for whoever's reading.
-  defp trouble(call, app, email, answer, said \\ %{}) do
-    message = message(answer.body) || "#{answer.status}"
-    again = "#{email} needs signing in again, to let #{app.title} in: #{call.plugin}_sign_in with account #{email}."
+  defp trouble(call, title, email, answer, said \\ %{}) do
+    status = answer["status"]
+    message = message(answer["body"]) || "#{status}"
+    again = "#{email} needs signing in again, to let #{title} in: #{app(call)}_sign_in with account #{email}."
 
     cond do
-      answer.status == 401 ->
+      status == 401 ->
         again
 
-      answer.status == 403 and message =~ ~r/insufficient|scope/i ->
+      status == 403 and message =~ ~r/insufficient|scope/i ->
         again
 
       # Gmail answers an id that was made up with 400 "Invalid id value", and Calendar a deleted event with 410.
-      said[:missing] && (answer.status in [404, 410] or message =~ ~r/invalid id value/i) ->
-        said.missing
+      said["missing"] && (status in [404, 410] or message =~ ~r/invalid id value/i) ->
+        said["missing"]
 
-      said[:missing] && answer.status == 403 ->
-        "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (#{call.plugin}_accounts lists them), or ask its owner to share it."
+      said["missing"] && status == 403 ->
+        "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (#{app(call)}_accounts lists them), or ask its owner to share it."
 
-      said[:hint] && answer.status == 400 ->
-        "#{app.title}: #{String.trim_trailing(message, ".")}: #{said.hint}"
+      said["hint"] && status == 400 ->
+        "#{title}: #{String.trim_trailing(message, ".")}: #{said["hint"]}"
 
       true ->
-        "#{app.title}: #{message}"
+        "#{title}: #{message}"
     end
   end
 
-  defp message(body) do
+  defp message(body) when is_binary(body) do
     case JSON.decode(body) do
       {:ok, %{"error" => %{"message" => message}}} when is_binary(message) -> message
       {:ok, %{"error_description" => message}} when is_binary(message) -> message
@@ -191,12 +260,19 @@ defmodule GoogleAccount do
     end
   end
 
-  # The addresses of the Google accounts signed in for the app whose call this is, by address.
+  defp message(_body), do: nil
+
+  # The addresses of the Google accounts signed in for the app that called, by address.
   defp emails(call) do
-    for %{name: "Google " <> email, sign_in: "Google"} <- vault(call).items(call), do: email
+    for %{"name" => "Google " <> email, "sign_in" => "Google"} <- vault(call, "items", %{}), do: email
   end
 
+  # The app that called, by the name its tools start with.
+  defp app(call), do: Path.basename(call.caller)
+
   defp item(email), do: "Google #{email}"
-  defp get(url), do: %{url: url, headers: %{"authorization" => "Bearer {{access_token}}"}}
-  defp vault(call), do: OneCore.Call.plugin(call, "vault")
+  defp get(url), do: %{"url" => url, "headers" => %{"authorization" => "Bearer {{access_token}}"}}
+
+  # The Vault's tools, for the app that called.
+  defp vault(call, tool, inputs), do: OneCore.Call.tool(call, "vault", tool, inputs, on_behalf_of: call.caller)
 end

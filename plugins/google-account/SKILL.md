@@ -19,4 +19,5 @@ Sign In and Sign Out, which is where a person does this themselves.
 
 The first sign-in needs the item "Google client" in the person's Vault: `client_id` (not secret) and
 `client_secret` of a Google Cloud OAuth client of the Web application kind, whose authorized redirect URI is the
-network's address followed by `/vault/back`. Ask for it with `vault_request`; never ask for it in the chat.
+network's address followed by `/vault/back`, with `oauth2.googleapis.com` its site, where its secret goes. Ask
+for it with `vault_request` (`hosts: ["oauth2.googleapis.com"]`); never ask for it in the chat.

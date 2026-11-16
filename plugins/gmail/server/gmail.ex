@@ -21,13 +21,12 @@ defmodule Gmail do
   def google do
     %{
       title: "Gmail",
-      about: "Sign in to Gmail, and your agents can search, read and draft your email.",
       scopes: ["https://www.googleapis.com/auth/gmail.modify"]
     }
   end
 
   @impl true
-  def uses, do: ["google-account", "vault"]
+  def permissions, do: ["google-account"]
 
   @impl true
   def tools do
@@ -200,12 +199,9 @@ defmodule Gmail do
 
   @impl true
   def call(tool, inputs, call) when tool in ~w(accounts sign_in sign_out),
-    do: google(call).account_call(tool, inputs, call, google())
+    do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
 
-  def call(tool, inputs, call) do
-    email = google(call).account(call, inputs["account"])
-    run(tool, inputs, %{call: call, email: email})
-  end
+  def call(tool, inputs, call), do: run(tool, inputs, %{call: call, account: inputs["account"]})
 
   defp run("profile", _inputs, at) do
     profile = api(at, "GET", "profile")
@@ -499,12 +495,12 @@ defmodule Gmail do
       "--#{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n#{JSON.encode!(meta)}\r\n" <>
         "--#{boundary}\r\nContent-Type: message/rfc822\r\n\r\n#{Mime.rfc822(mail)}\r\n--#{boundary}--\r\n"
 
-    google(at.call).request(at.call, google(), at.email, method, @upload <> path,
+    request(at, method, @upload <> path,
       query: [uploadType: "multipart"],
       body: body,
       type: "multipart/related; boundary=#{boundary}",
       missing: missing
-    )
+    )["body"]
   end
 
   # Each message's headers, ten at a time.
@@ -520,11 +516,27 @@ defmodule Gmail do
 
   defp label_names(at), do: Map.new(api(at, "GET", "labels")["labels"] || [], &{&1["id"], &1["name"]})
 
-  defp api(at, method, path, options \\ []),
-    do: google(at.call).request(at.call, google(), at.email, method, @api <> path, options)
+  defp api(at, method, path, options \\ []), do: request(at, method, @api <> path, options)["body"]
 
-  defp path(at, part), do: google(at.call).path(part)
-  defp google(call), do: OneCore.Call.plugin(call, "google-account")
+  # A part of a URL's path, as Google takes it: an id or a range, with anything but letters and digits escaped.
+  defp path(_at, part), do: URI.encode(to_string(part), &URI.char_unreserved?/1)
+
+  # Google's API as the account `at` names, through google-account, which gives the answer's status, headers and
+  # body, or raises with what went wrong.
+  defp request(at, method, url, options) do
+    given = for {option, value} <- options, value != nil, into: %{}, do: {to_string(option), value}
+    inputs = Map.merge(given, %{"method" => method, "url" => url})
+    google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
+  end
+
+  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
+  defp google(call, tool, inputs) do
+    inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
+    OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
+  end
+
+  defp query({"query", query}), do: {"query", Map.new(query)}
+  defp query(input), do: input
 
   defp most(nil), do: 20
   defp most(given), do: min(given, 100)

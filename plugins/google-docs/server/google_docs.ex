@@ -19,13 +19,12 @@ defmodule GoogleDocs do
   def google do
     %{
       title: "Google Docs",
-      about: "Sign in to Google, and your agents can read your documents and, when you ask, write in them.",
       scopes: ["https://www.googleapis.com/auth/documents"]
     }
   end
 
   @impl true
-  def uses, do: ["google-account", "vault"]
+  def permissions, do: ["google-account"]
 
   @impl true
   def tools do
@@ -106,10 +105,10 @@ defmodule GoogleDocs do
 
   @impl true
   def call(tool, inputs, call) when tool in ~w(accounts sign_in sign_out),
-    do: google(call).account_call(tool, inputs, call, google())
+    do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
 
   def call(tool, inputs, call) do
-    run(tool, inputs, %{call: call, email: google(call).account(call, inputs["account"])})
+    run(tool, inputs, %{call: call, account: inputs["account"]})
   end
 
   defp run("read", %{"documentId" => given} = inputs, at) do
@@ -279,9 +278,25 @@ defmodule GoogleDocs do
   defp no_document(id),
     do: "No document #{id}: give its id or its address (docs.google.com/document/d/...). google-drive_files_list finds documents."
 
-  defp api(at, method, path, options),
-    do: google(at.call).request(at.call, google(), at.email, method, @api <> path, options)
+  defp api(at, method, path, options), do: request(at, method, @api <> path, options)["body"]
 
-  defp path(at, part), do: google(at.call).path(part)
-  defp google(call), do: OneCore.Call.plugin(call, "google-account")
+  # A part of a URL's path, as Google takes it: an id or a range, with anything but letters and digits escaped.
+  defp path(_at, part), do: URI.encode(to_string(part), &URI.char_unreserved?/1)
+
+  # Google's API as the account `at` names, through google-account, which gives the answer's status, headers and
+  # body, or raises with what went wrong.
+  defp request(at, method, url, options) do
+    given = for {option, value} <- options, value != nil, into: %{}, do: {to_string(option), value}
+    inputs = Map.merge(given, %{"method" => method, "url" => url})
+    google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
+  end
+
+  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
+  defp google(call, tool, inputs) do
+    inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
+    OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
+  end
+
+  defp query({"query", query}), do: {"query", Map.new(query)}
+  defp query(input), do: input
 end

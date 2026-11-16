@@ -27,13 +27,12 @@ defmodule GoogleDrive do
   def google do
     %{
       title: "Google Drive",
-      about: "Sign in, and your apps and agents can find, upload and move files in your Drive.",
       scopes: ["https://www.googleapis.com/auth/drive"]
     }
   end
 
   @impl true
-  def uses, do: ["google-account", "vault"]
+  def permissions, do: ["google-account", "https://www.googleapis.com"]
 
   @impl true
   def tools do
@@ -169,10 +168,10 @@ defmodule GoogleDrive do
 
   @impl true
   def call(tool, inputs, call) when tool in ~w(accounts sign_in sign_out),
-    do: google(call).account_call(tool, inputs, call, google())
+    do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
 
   def call(tool, inputs, call) do
-    run(tool, inputs, %{call: call, email: google(call).account(call, inputs["account"])})
+    run(tool, inputs, %{call: call, account: inputs["account"]})
   end
 
   defp run("files_get", %{"fileId" => id} = inputs, at) do
@@ -225,7 +224,7 @@ defmodule GoogleDrive do
     type = inputs["type"] || metadata["mimeType"] || raise("Give type: the file's MIME type, like application/pdf.")
 
     started =
-      google(at.call).fetch(at.call, google(), at.email, "POST", @upload,
+      request(at, "POST", @upload,
         json: Map.put_new(metadata, "mimeType", type),
         query: [uploadType: "resumable", fields: inputs["fields"] || @made, supportsAllDrives: true],
         headers: %{"x-upload-content-type" => type},
@@ -233,12 +232,11 @@ defmodule GoogleDrive do
         hint: @fields_hint
       )
 
-    session = started.headers["location"] || raise("Google Drive gave nowhere to upload to.")
+    session = started["headers"]["location"] || raise("Google Drive gave nowhere to upload to.")
 
-    case Req.put(session, body: bytes, headers: [{"content-type", type}], retry: false, decode_body: false) do
-      {:ok, %{status: status, body: body}} when status in [200, 201] -> JSON.decode!(body)
-      {:ok, %{status: status}} -> raise "Google Drive didn't take the file (#{status})."
-      {:error, _unreached} -> raise "Google Drive couldn't be reached."
+    case OneCore.Call.fetch(at.call, %{url: session, method: "PUT", body: bytes, headers: %{"content-type" => type}}) do
+      %{status: status, body: body} when status in [200, 201] -> JSON.decode!(body)
+      %{status: status} -> raise "Google Drive didn't take the file (#{status})."
     end
   end
 
@@ -260,11 +258,27 @@ defmodule GoogleDrive do
     %{ids: api(at, "GET", "files/generateIds", query: [count: count, space: "drive", type: "files"])["ids"]}
   end
 
-  defp api(at, method, path, options),
-    do: google(at.call).request(at.call, google(), at.email, method, @api <> path, options)
+  defp api(at, method, path, options), do: request(at, method, @api <> path, options)["body"]
 
-  defp path(at, part), do: google(at.call).path(part)
-  defp google(call), do: OneCore.Call.plugin(call, "google-account")
+  # A part of a URL's path, as Google takes it: an id or a range, with anything but letters and digits escaped.
+  defp path(_at, part), do: URI.encode(to_string(part), &URI.char_unreserved?/1)
+
+  # Google's API as the account `at` names, through google-account, which gives the answer's status, headers and
+  # body, or raises with what went wrong.
+  defp request(at, method, url, options) do
+    given = for {option, value} <- options, value != nil, into: %{}, do: {to_string(option), value}
+    inputs = Map.merge(given, %{"method" => method, "url" => url})
+    google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
+  end
+
+  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
+  defp google(call, tool, inputs) do
+    inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
+    OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
+  end
+
+  defp query({"query", query}), do: {"query", Map.new(query)}
+  defp query(input), do: input
 
   defp no_file(id),
     do: "No file #{id}, or not one this account can see: file ids come from google-drive_files_list (root is My Drive)."
