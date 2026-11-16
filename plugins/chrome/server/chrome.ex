@@ -1,47 +1,56 @@
 defmodule Chrome do
   @moduledoc """
-  Chrome: a headless Chromium in a container of the Containers plugin, driven by Microsoft's Playwright MCP server,
-  which runs beside it in that container (the image `mcr.microsoft.com/playwright/mcp`). Its tools are that server's,
-  named as it names them without `browser_`, and each takes the browser's `session`.
+  Chrome: a Chromium in a container of the Containers plugin, of its image `desktop`, headed on that container's
+  display, and driven by Microsoft's Playwright MCP server, which runs beside it and reaches it over its DevTools
+  Protocol. Its tools are that server's, named as it names them without `browser_`, and each takes the browser's
+  `session`.
 
   A session is the container `chrome-<session>`, created through Containers' tools for whoever opened it, so whose
   it is and who reaches it is what Containers says, and Containers stops it once it's gone unused for its
   `idle_hours`. The MCP server's own session id for each is kept in the plugin's own artifact, under
   `sessions/<whose>/<session>`.
 
-  As a browser starts, when it's created or started again after being stopped, it offers `chrome.starting`, for a
-  plugin to hand it a storage state to start with, and as it closes `chrome.closing`, with the storage state it
-  closed with, for that plugin to keep.
+  A browser's profile is its user data dir, `/root/.chromium` in its container. As one is created it offers
+  `chrome.starting`, for a plugin to hand it a user data dir to start from, and as it closes `chrome.closing`, with
+  the one it closed with, for that plugin to keep: each a gzipped tarball in its container, which the plugin writes
+  or reads with Containers' tools, so no hook carries a profile's bytes.
 
-  A running browser is a screen in Computer Use (`computer-use.screens`), acted on by `screen` with Playwright's own
-  mouse and keyboard, so its person can watch it and use it: to sign in, or to get an agent past a captcha.
+  A running browser is a screen in Computer Use, as every container with a display is, and `screen` acts on it for an
+  app that lets its person use the browser: to sign in, or to get an agent past a captcha.
   """
   @behaviour OneCore.Plugin
   alias OneCore.{Artifact, Call}
 
-  @image "mcr.microsoft.com/playwright/mcp:v0.0.85"
   @port 8931
-  # The MCP server's flags, after the image's own (headless Chromium, no sandbox): HTTP on the container's
-  # interfaces, from whatever host `request` names it by, with the storage state tools and the mouse by coordinates
-  # (vision), a viewport the size a screen says it is, and one browser that every MCP session shares, so a session
-  # started again finds the same pages.
+  @user_data "/root/.chromium"
+  # Where a user data dir is handed over, as a gzipped tarball, in the browser's container.
+  @tarball "/tmp/user-data.tar.gz"
+  # Starts Chromium (the image's `browser`), at the page given or a new tab, and the MCP server beside it: HTTP on the container's
+  # interfaces, from whatever host `request` names it by, on Chromium's DevTools Protocol, with one browser context
+  # that every MCP session shares, so a session started again finds the same pages. Neither is the container's own
+  # command, so each is started in a session of its own, to keep running once this has.
+  @launch ~s(setsid browser "$@" </dev/null >/dev/null 2>&1 & ) <>
+            ~s(setsid playwright-mcp --port #{@port} --host 0.0.0.0 --allowed-hosts '*' ) <>
+            ~s(--cdp-endpoint http://127.0.0.1:9222 --shared-browser-context </dev/null >/tmp/mcp.log 2>&1 &)
+  # Quits Chromium as a person would, over its DevTools Protocol (Browser.close), so it writes everything down, which
+  # a signal doesn't wait for. Once it has (or, after 10 seconds, it's killed, as are its helpers) packs what of its
+  # user data dir travels: `Local State` and the profile, `Default`, without its caches. The rest is what Chromium
+  # downloads by itself (its components, tens of MB). A Service Worker's ScriptCache stays: it's the only copy of an
+  # extension's background script.
+  @pack ~s"""
+  main=$(pgrep -o -f -- '[-]-user-data-dir=#{@user_data}')
+  node -e 'const ws = new WebSocket(process.argv[1]); ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: "Browser.close" }))' \\
+    "$(curl -s 127.0.0.1:9222/json/version | sed -n 's/.*"webSocketDebuggerUrl": "\\(.*\\)".*/\\1/p')" &
+  for i in $(seq 100); do kill -0 "$main" 2>/dev/null || break; sleep 0.1; done
+  pkill -9 -f -- '[-]-user-data-dir=#{@user_data}'
+  sed -i 's/"exit_type":"Crashed"/"exit_type":"Normal"/' #{@user_data}/Default/Preferences 2>/dev/null
+  cd #{@user_data} && tar -czf #{@tarball} --anchored --warning=no-file-changed \\
+    --exclude='./Default/Cache' --exclude='./Default/Code Cache' --exclude='./Default/GPUCache' \\
+    --exclude='./Default/DawnGraphiteCache' --exclude='./Default/DawnWebGPUCache' \\
+    --exclude='./Default/Service Worker/CacheStorage' './Local State' ./Default
+  """
   @width 1280
   @height 800
-  @command [
-    "--port",
-    "#{@port}",
-    "--host",
-    "0.0.0.0",
-    "--allowed-hosts",
-    "*",
-    "--caps",
-    "storage,vision",
-    "--viewport-size",
-    "#{@width}x#{@height}",
-    "--shared-browser-context"
-  ]
-  # Where the storage state is written in the container: the MCP server's workspace is its user's home.
-  @state "/home/node/state.json"
 
   @session %{type: "string", pattern: "^[a-z0-9][a-z0-9_.-]*$", description: "the browser, by the name `open` gave it"}
   @target %{type: "string", description: "the element: its ref from the snapshot, like e12, or a unique selector"}
@@ -51,27 +60,27 @@ defmodule Chrome do
   def uses, do: ["containers"]
 
   @impl true
-  def hooks, do: ["computer-use.screens"]
-
-  @impl true
   def offers do
     [
       %{
         name: "starting",
         kind: :mutate,
         description:
-          "A browser is about to start, created or started again after being stopped, for whoever the call is for: its " <>
-            "`session`, `description` and the `url` it opens, " <>
-            "and `storage_state`, nil. A plugin answers %{\"storage_state\" => state}: Playwright's storage state, " <>
-            "%{\"cookies\" => [...], \"origins\" => [%{\"origin\" => ..., \"localStorage\" => [%{\"name\" => ..., \"value\" => ...}]}]}, " <>
-            "which the browser starts with."
+          "A browser is about to start for the first time, for whoever the call is for: its `session`, `description`, " <>
+            "the `url` it opens, its `container`, as Containers' tools name it, and `user_data`, nil. A plugin that has " <>
+            "a user data dir for it writes it into that container as a gzipped tarball of the folder's contents " <>
+            "(Containers' `write_file`, at #{@tarball}), and answers %{\"user_data\" => \"#{@tarball}\"}: the browser " <>
+            "starts from it."
       },
       %{
         name: "closing",
-        kind: :observe,
+        kind: :validate,
         description:
-          "A browser was closed with `close`: its `session`, `description` and `storage_state`, its cookies and local " <>
-            "storage as it closed, in Playwright's shape, for a plugin to keep."
+          "A browser is being closed with `close`, and Chromium has quit: its `session`, `description`, `container`, " <>
+            "and `user_data`, the path in that container of a gzipped tarball of its user data dir as it closed, " <>
+            "without caches, for a plugin to read now (Containers' `read_file`), before the container is removed. " <>
+            "A plugin refuses when it couldn't keep what it needed of it: the browser then stays, its Chromium " <>
+            "stopped, and `close` says why."
       }
     ]
   end
@@ -82,9 +91,9 @@ defmodule Chrome do
       %{
         name: "open",
         description:
-          "Open a browser: a headless Chromium of yours in a container, signed in to nothing. Opening one that's open " <>
-            "already, or that was stopped after going unused, carries on with it. The first on a machine pulls its " <>
-            "image, about a minute; after that it's a few seconds.",
+          "Open a browser: a Chromium of yours in a container, signed in to nothing. Opening one that's open " <>
+            "already, or that was stopped after going unused, carries on with it. The first on a machine builds its " <>
+            "image, a few minutes; after that it's a few seconds.",
         inputs:
           object(%{description: %{type: "string", description: "what it's for, in a few words"}, url: %{type: "string", description: "the page to open"}}, [
             "description"
@@ -225,7 +234,7 @@ defmodule Chrome do
       %{
         name: "screen",
         description:
-          "Look at or act on a browser's page by its pixels, for Computer Use, whose tools say what each action takes, and for an app that lets its person use the browser.",
+          "Look at or act on a browser's screen by its pixels, #{@width}×#{@height}: the whole browser, its address bar and tabs too, for an app that lets its person use it. Computer Use's tools say what each action takes.",
         inputs:
           object(
             %{
@@ -256,21 +265,21 @@ defmodule Chrome do
   end
 
   def call("open", %{"session" => session} = inputs, call) do
-    # A container started again has a new MCP server, which knows none of the sessions kept from before.
     case Enum.find(containers(call), &(session(&1) == session)) do
-      %{"state" => "running"} -> :ok
-      %{} = stopped ->
+      %{"state" => "running"} ->
+        if inputs["url"], do: mcp(call, session, "browser_navigate", %{"url" => inputs["url"]}), else: "Opened #{session}"
+
+      # A container started again keeps its files, its user data dir with them, and has a new MCP server, which knows
+      # none of the sessions kept from before.
+      %{} ->
         forget(call, session)
-        state = starting(call, Map.put(inputs, "description", stopped["description"]))
         containers(call, "start", session)
-        load(call, session, state)
+        launch(call, session, inputs["url"])
 
       nil ->
         forget(call, session)
         create(call, inputs)
     end
-
-    if inputs["url"], do: mcp(call, session, "browser_navigate", %{"url" => inputs["url"]}), else: "Opened #{session}"
   end
 
   def call("close", %{"session" => session}, call) do
@@ -279,9 +288,9 @@ defmodule Chrome do
         raise "You have no browser called #{session}"
 
       %{"state" => "running"} = c ->
-        mcp(call, session, "browser_storage_state", %{"filename" => Path.basename(@state)})
-        state = JSON.decode!(containers(call, "read_file", session, %{"path" => @state}))
-        about = %{"session" => session, "description" => c["description"], "storage_state" => state}
+        packed = containers(call, "exec", session, %{"command" => @pack, "timeout" => 120})
+        if packed["exit"] != 0, do: raise("Couldn't close #{session}: #{String.trim(packed["stderr"])}")
+        about = %{"session" => session, "description" => c["description"], "container" => c["name"], "user_data" => @tarball}
         run_hook(call, "closing", about)
 
       %{} ->
@@ -293,133 +302,46 @@ defmodule Chrome do
     "Closed #{session}"
   end
 
-  def call("screen", %{"session" => session, "action" => "screenshot"}, call),
-    do: mcp(call, session, "browser_take_screenshot", %{"type" => "png"})
-
-  # What's typed is often a password, and the MCP server says back the code it ran, which holds it: so nothing it
-  # says is passed on.
-  def call("screen", %{"session" => session, "action" => "type", "text" => text}, call) do
-    code = "async (page) => { await page.keyboard.type(#{JSON.encode!(text)}) }"
-
-    try do
-      mcp(call, session, "browser_run_code_unsafe", %{"code" => code})
-    rescue
-      _ -> raise "Couldn't type in #{session}"
-    end
-
-    "Typed #{String.length(text)} characters"
-  end
-
-  def call("screen", %{"session" => session, "action" => action} = inputs, call) do
-    for {tool, arguments} <- pointer(action, inputs), do: mcp(call, session, tool, arguments)
-    did(action, inputs)
-  end
+  def call("screen", %{"session" => session} = inputs, call), do: containers(call, "screen", session, Map.delete(inputs, "session"))
 
   def call(tool, %{"session" => session} = inputs, call) do
     mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session"))
   end
 
+  # Creates the browser's container, with its display and no Chromium yet, puts in the user data dir a plugin hands
+  # it, if one does, and starts Chromium on it.
   defp create(call, %{"session" => session} = inputs) do
-    state = starting(call, inputs)
+    c =
+      Call.tool(call, "containers", "create", %{
+        "image" => "desktop",
+        "name" => "chrome-" <> session,
+        "description" => inputs["description"],
+        "size" => "medium",
+        "ports" => [@port],
+        "command" => ["desktop", "--no-browser"]
+      })
 
-    Call.tool(call, "containers", "create", %{
-      "image" => @image,
-      "name" => "chrome-" <> session,
-      "description" => inputs["description"],
-      "size" => "medium",
-      "ports" => [@port],
-      "command" => @command
-    })
+    about = %{"session" => session, "description" => inputs["description"], "url" => inputs["url"], "container" => c["name"], "user_data" => nil}
 
-    load(call, session, state)
+    case run_hook(call, "starting", about)["user_data"] do
+      nil ->
+        :ok
+
+      tarball ->
+        unpack = "mkdir -p #{@user_data} && tar -xzf #{shell(tarball)} -C #{@user_data} && rm #{shell(tarball)}"
+        unpacked = containers(call, "exec", session, %{"command" => unpack})
+        if unpacked["exit"] != 0, do: raise("Couldn't open the profile #{session} was handed: #{String.trim(unpacked["stderr"])}")
+    end
+
+    launch(call, session, inputs["url"])
   end
 
-  # The storage state a plugin hands a browser that's starting, if one does.
-  defp starting(call, inputs) do
-    about = %{"session" => inputs["session"], "description" => inputs["description"], "url" => inputs["url"], "storage_state" => nil}
-    run_hook(call, "starting", about)["storage_state"]
+  defp launch(call, session, url) do
+    containers(call, "exec", session, %{"command" => "sh -c #{shell(@launch)} sh #{if url, do: shell(url)}"})
+    "Opened #{session}" <> if(url, do: " at #{url}", else: "")
   end
 
-  defp load(_call, _session, nil), do: :ok
-
-  defp load(call, session, state) do
-    containers(call, "write_file", session, %{"path" => @state, "text" => JSON.encode!(state)})
-    mcp(call, session, "browser_set_storage_state", %{"filename" => Path.basename(@state)})
-  end
-
-  # Computer Use asks for the caller's screens: each running browser of theirs is one, called what its session is.
-  @impl true
-  def hook("computer-use.screens", _about, call) do
-    screens =
-      for c <- containers(call), c["state"] == "running" do
-        %{
-          "name" => session(c),
-          "description" => "#{c["description"]}, a browser on #{c["machine"]}",
-          "width" => @width,
-          "height" => @height,
-          "tool" => "screen",
-          "inputs" => %{"session" => session(c)}
-        }
-      end
-
-    %{call.plugin => screens}
-  end
-
-  # Computer Use's actions, as the MCP server's mouse and keys: each a tool and its arguments.
-  defp pointer("click", %{"x" => x, "y" => y} = inputs),
-    do: [{"browser_mouse_click_xy", %{"x" => x, "y" => y, "button" => inputs["button"] || "left"}}]
-
-  defp pointer("double_click", %{"x" => x, "y" => y}), do: [{"browser_mouse_click_xy", %{"x" => x, "y" => y, "clickCount" => 2}}]
-  defp pointer("move", %{"x" => x, "y" => y}), do: [{"browser_mouse_move_xy", %{"x" => x, "y" => y}}]
-
-  defp pointer("drag", %{"path" => [first | rest]}) do
-    moves = for p <- rest, do: {"browser_mouse_move_xy", %{"x" => p["x"], "y" => p["y"]}}
-    [{"browser_mouse_move_xy", %{"x" => first["x"], "y" => first["y"]}}, {"browser_mouse_down", %{}}] ++ moves ++ [{"browser_mouse_up", %{}}]
-  end
-
-  defp pointer("scroll", %{"x" => x, "y" => y, "direction" => direction} = inputs) do
-    by = (inputs["amount"] || 5) * 100
-    {dx, dy} = %{"up" => {0, -by}, "down" => {0, by}, "left" => {-by, 0}, "right" => {by, 0}}[direction]
-    [{"browser_mouse_move_xy", %{"x" => x, "y" => y}}, {"browser_mouse_wheel", %{"deltaX" => dx, "deltaY" => dy}}]
-  end
-
-  defp pointer("key", %{"keys" => keys}), do: for(k <- String.split(keys), do: {"browser_press_key", %{"key" => key(k)}})
-  defp pointer(action, _inputs), do: raise("#{action} needs more: Computer Use's tools say what each action takes")
-
-  # A key as xdotool names it (ctrl+l, Return, BackSpace) as Playwright does (Control+l, Enter, Backspace).
-  @keys %{
-    "ctrl" => "Control",
-    "control" => "Control",
-    "alt" => "Alt",
-    "shift" => "Shift",
-    "super" => "Meta",
-    "meta" => "Meta",
-    "return" => "Enter",
-    "enter" => "Enter",
-    "backspace" => "Backspace",
-    "tab" => "Tab",
-    "escape" => "Escape",
-    "delete" => "Delete",
-    "space" => "Space",
-    "left" => "ArrowLeft",
-    "right" => "ArrowRight",
-    "up" => "ArrowUp",
-    "down" => "ArrowDown",
-    "home" => "Home",
-    "end" => "End",
-    "prior" => "PageUp",
-    "page_up" => "PageUp",
-    "next" => "PageDown",
-    "page_down" => "PageDown"
-  }
-  defp key(keys), do: keys |> String.split("+") |> Enum.map_join("+", &(@keys[String.downcase(&1)] || &1))
-
-  defp did("click", %{"x" => x, "y" => y} = inputs), do: "Clicked #{inputs["button"] || "left"} at #{x}, #{y}"
-  defp did("double_click", %{"x" => x, "y" => y}), do: "Double-clicked at #{x}, #{y}"
-  defp did("move", %{"x" => x, "y" => y}), do: "Moved to #{x}, #{y}"
-  defp did("drag", %{"path" => path}), do: "Dragged through #{length(path)} points"
-  defp did("scroll", %{"direction" => direction} = inputs), do: "Scrolled #{direction} #{inputs["amount"] || 5}"
-  defp did("key", %{"keys" => keys}), do: "Pressed #{keys}"
+  defp shell(word), do: "'" <> String.replace(word, "'", ~S('\'')) <> "'"
 
   # Runs one of the hooks Chrome offers, and gives what's changed: nothing on a server from before plugins could
   # offer hooks (One Core 7929556e6), where no plugin can join one.
@@ -529,8 +451,9 @@ defmodule Chrome do
       end
   end
 
-  # The browsers whoever this call is for may use: their containers of Chrome's image.
-  defp containers(call), do: Enum.filter(Call.tool(call, "containers", "list", %{}), &(&1["image"] == @image and String.starts_with?(&1["name"], "chrome-")))
+  # The browsers whoever this call is for may use: their containers called chrome-<session>, of the image desktop.
+  defp containers(call),
+    do: Enum.filter(Call.tool(call, "containers", "list", %{}), &(String.starts_with?(&1["name"], "chrome-") and &1["image"] =~ "containers-desktop"))
 
   defp session(%{"name" => "chrome-" <> session}), do: session
 end
