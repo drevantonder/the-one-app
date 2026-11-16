@@ -18,14 +18,14 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
   theirs, where the request waits at the top; `status` says when they've answered. Allowing it switches the
   item on for whoever asked.
 - `fetch` fills `{{<field>}}` into a request's url, headers or body, for an item agents may use, and answers
-  the status, headers and body. A secret goes only to one of the item's sites, and one the site says back is
+  the status, headers and body. It goes only to one of the item's sites, and a secret the site says back is
   blotted out.
 - `set` keeps one field of an item, making the item if there's none. Say `secret: false` for what may be
   shown, as a username, and `hosts` for the sites its secrets go to. The value is encrypted on the device you
   run on before it's sent, so `set` is for `one` or MCP on a device. An assistant that reaches the network
   over the web has no device: it asks with `request` instead.
-- `use` switches a plugin on for an item, or off. A plugin that's switched on is handed the secret itself, so
-  that's trusting its code with it. `agents` lets agents use an item with `fetch`: that's the person's to
+- `use` switches a plugin on for an item, or off. A plugin that's switched on uses it through the Vault's tools
+  without seeing it, or, one with a service, is handed the secret itself, which trusts its code with it. `agents` lets agents use an item with `fetch`: that's the person's to
   decide, in the Vault's app or by allowing a request, so ask with `request` and don't call it for yourself.
 - `grant` chooses the servers that open the Vault, from a device that holds its person's key (the skill
   `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
@@ -34,46 +34,54 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
 - Removing an item, switching a plugin on and choosing servers are a person's decisions. Do them when asked
   to, and say what you did.
 
-A plugin uses an account by using this plugin, and never keeps a secret itself:
+A plugin uses an account through this plugin's tools, which act for the plugin that calls them (its `caller`),
+and never sees a secret, so a plugin in sandbox mode can use one too. It names them in its `permissions/0`:
 
-    def uses, do: ["vault"]
+    def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_stop_using)
 
     @github %{
-      name: "GitHub",
-      authorize: "https://github.com/login/oauth/authorize",
-      token: "https://github.com/login/oauth/access_token",
-      scopes: ["repo"],
-      hosts: ["api.github.com"],
-      client: "GitHub client"
+      "name" => "GitHub",
+      "authorize" => "https://github.com/login/oauth/authorize",
+      "token" => "https://github.com/login/oauth/access_token",
+      "scopes" => ["repo"],
+      "hosts" => ["api.github.com"],
+      "client" => "GitHub client"
     }
 
-    def call("sign_in", _inputs, call), do: OneCore.Call.plugin(call, "vault").sign_in(call, @github)
+    def call("sign_in", _inputs, call), do: OneCore.Call.tool(call, "vault", "sign_in", %{"service" => @github})
 
     def call("me", _inputs, call) do
-      vault = OneCore.Call.plugin(call, "vault")
-      vault.fetch(call, "GitHub", %{url: "https://api.github.com/user", headers: %{"authorization" => "Bearer {{access_token}}"}}).body
+      request = %{"item" => "GitHub", "url" => "https://api.github.com/user", "headers" => %{"authorization" => "Bearer {{access_token}}"}}
+      OneCore.Call.tool(call, "vault", "fetch", request)["body"]
     end
 
-- `sign_in(call, service)` starts an OAuth sign-in and gives the link its person opens in their browser. The
-  service sends them back to the network's address, and their tokens become the item named as the service is,
-  or as a third argument says, for a second account, switched on for the plugin. All the plugin says is the
-  service's own: where it signs in (`authorize`), where it gives tokens (`token`), its `scopes`, the sites its
-  tokens are sent to (`hosts`), anything more its sign-in page is asked with (`params`), and `client`, the
-  item that holds the `client_id` the service gave whoever registered the plugin with it, and its
-  `client_secret` if it has one. A network without an address has nowhere to be sent back to. An item's name
-  that says `{{<claim>}}` is filled in from who signed in, as the service's OpenID Connect ID token says:
-  `"Google {{email}}"`, with `openid` and `email` among the scopes, is an item for each account.
-- `fetch(call, item, request)` makes a web request with the item's fields filled in where `{{<field>}}` is
-  written, and gives `%{status: ..., headers: ..., body: ...}`. A secret goes only to one of the item's sites.
-  It waits 15 seconds for an answer, or `timeout` seconds if the request says. A signed-in item's
-  `access_token` is renewed when it has ended, or when the service says it has.
+- `sign_in` starts an OAuth sign-in and gives the link its person opens in their browser. The service sends
+  them back to the network's address, and their tokens become the item named as the service is, or as `item`
+  says, for a second account, switched on for the plugin. All the plugin says is the service's own: where it
+  signs in (`authorize`), where it gives tokens (`token`), its `scopes`, the sites its tokens are sent to
+  (`hosts`), anything more its sign-in page is asked with (`params`), and `client`, the item that holds the
+  `client_id` the service gave whoever registered the plugin with it, and its `client_secret` if it has one,
+  which goes only to that item's sites: its person keeps the service's token address among them. A network
+  without an address has nowhere to be sent back to. An item's name that says `{{<claim>}}` is filled in from
+  who signed in, as the service's OpenID Connect ID token says: `"Google {{email}}"`, with `openid` and `email`
+  among the scopes, is an item for each account.
+- `fetch`, called by a plugin, makes a web request with an item switched on for it, to one of the item's sites,
+  with `{{<field>}}` filled in, and answers the whole of what the site said. It waits 15 seconds for an answer,
+  or `timeout`. A signed-in item's `access_token` is renewed when it has ended, or when the service says it has.
+- `items` lists the items switched on for the plugin, each with the service whose sign-in made it:
+  `[{"name": "Google a@example.com", "sign_in": "Google"}]`. `stop_using` switches one off for it, as signing
+  out does, and leaves it to whatever else uses it.
+- The other tools are its person's, and refuse a plugin.
+- A plugin that does something for other plugins, as `google-account` does for the Google apps, calls these on
+  behalf of whichever called it: `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`.
+
+A plugin trusted with a secret itself, whose service hands it to a program, uses this plugin (`def uses, do:
+["vault"]`) and calls its functions, which run on a server of its owner's:
+
 - `value(call, item, field)` gives one field itself, to hand to a program a service brings. Hand it over on the
   program's input, and never answer with it, raise it or log it.
 - `keep(call, item, fields)` keeps secrets the plugin made itself or an outside service handed it, such as the
   key a session it holds is encrypted with, in an item it makes, switched on for it. `remove(call, item)` removes
-  one, as when that account is signed out.
-- `items(call)` lists the items switched on for the plugin, each with the service whose sign-in made it:
-  `[%{name: "Google a@example.com", sign_in: "Google"}]`. `stop_using(call, item)` switches one off for it, as
-  signing out does, and leaves it to whatever else uses it.
-- `fetch` and `value` raise unless the item is switched on for the plugin, which its person does in the Vault's
-  app or with `use`, or which `keep` did.
+  one, as when that account is signed out. `items(call)` lists what's switched on for it.
+- `value` raises unless the item is switched on for the plugin, which its person does in the Vault's app or
+  with `use`, or which `keep` did.

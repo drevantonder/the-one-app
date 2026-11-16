@@ -278,6 +278,7 @@ echo "  she opens it in her browser, where the service signs her in and sends he
 browser "$link"
 may on laptop as alice vault list
 may on laptop as alice fake me
+refused on laptop as alice nosy me
 echo "  the service has seen: $(curl -s "http://127.0.0.1:$service/seen")"
 # Its tokens last two seconds, whatever it said, and the clock has to pass.
 sleep 3

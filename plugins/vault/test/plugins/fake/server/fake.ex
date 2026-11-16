@@ -2,17 +2,19 @@ defmodule Fake do
   @moduledoc """
   An app that signs its person in to an outside service, for the Vault's test (`plugins/vault/test/vault.sh`): all it
   says of the service is the service's own, its addresses, scopes and sites, and the Vault does the rest. The
-  service is the fake one the test runs on this machine (`vault/service.js`), at the port written here as PORT.
+  service is the fake one the test runs on this machine (`vault/service.js`), at the port written here as PORT. It
+  signs in and uses its account through the Vault's tools, as a plugin in sandbox mode does, and is handed secrets
+  themselves through its functions, as one with a service is.
   """
   @behaviour OneCore.Plugin
 
   @service %{
-    name: "Fake",
-    authorize: "http://127.0.0.1:PORT/authorize",
-    token: "http://127.0.0.1:PORT/token",
-    scopes: ["me.read"],
-    hosts: ["127.0.0.1:PORT"],
-    client: "Fake client"
+    "name" => "Fake",
+    "authorize" => "http://127.0.0.1:PORT/authorize",
+    "token" => "http://127.0.0.1:PORT/token",
+    "scopes" => ["me.read"],
+    "hosts" => ["127.0.0.1:PORT"],
+    "client" => "Fake client"
   }
 
   @impl true
@@ -48,13 +50,13 @@ defmodule Fake do
   end
 
   @impl true
-  def call("sign_in", _inputs, call), do: OneCore.Call.plugin(call, "vault").sign_in(call, @service)
+  def call("sign_in", _inputs, call), do: OneCore.Call.tool(call, "vault", "sign_in", %{"service" => @service})
 
   def call("me", _inputs, call) do
-    request = %{url: "http://127.0.0.1:PORT/me", headers: %{"authorization" => "Bearer {{access_token}}"}}
-    answer = OneCore.Call.plugin(call, "vault").fetch(call, "Fake", request)
-    if answer.status != 200, do: raise("Fake answered #{answer.status}")
-    "Fake says you're #{JSON.decode!(answer.body)["account"]}."
+    request = %{"item" => "Fake", "url" => "http://127.0.0.1:PORT/me", "headers" => %{"authorization" => "Bearer {{access_token}}"}}
+    answer = OneCore.Call.tool(call, "vault", "fetch", request)
+    if answer["status"] != 200, do: raise("Fake answered #{answer["status"]}")
+    "Fake says you're #{JSON.decode!(answer["body"])["account"]}."
   end
 
   def call("keep", %{"item" => item}, call) do

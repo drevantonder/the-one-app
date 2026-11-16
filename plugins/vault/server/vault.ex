@@ -10,10 +10,14 @@ defmodule Vault do
   answers with one, and nothing a tool raises says one: what handles them raises only words of its own
   (`quietly/2`).
 
-  A plugin that uses the Vault calls its functions: `fetch/3` makes a web request with an item's fields filled
-  in, `value/3` gives one field to hand to a program, `sign_in/3` starts an OAuth sign-in whose tokens become an
-  item (`Vault.OAuth`), which `fetch/3` then keeps fresh, and `keep/4` keeps secrets the plugin made itself.
-  `items/1` lists what it may use, and `stop_using/2` switches one off for it.
+  A plugin uses an account through the Vault's tools, which act for the plugin that calls them (its `caller`), so
+  no secret reaches its code: `fetch` makes a web request with an item's fields filled in, `sign_in` starts an
+  OAuth sign-in whose tokens become an item (`Vault.OAuth`), which `fetch` then keeps fresh, `items` lists what it
+  may use, and `stop_using` switches one off for it. The rest of the tools are its person's, and refuse a plugin.
+
+  A plugin trusted with secrets themselves, whose service hands one to a program, calls the functions: `value/3`
+  gives one field, `keep/4` keeps secrets the plugin made itself, `remove/2` removes one, and `items/1` lists what
+  it may use.
   """
   @behaviour OneCore.Plugin
 
@@ -196,8 +200,9 @@ defmodule Vault do
         name: "fetch",
         description: """
         Makes a web request with an item's fields filled in, without seeing them: write {{<field>}} where a value
-        goes, in the url, a header or the body. Only an item its person lets agents use, and a secret only to one
-        of the item's sites. Answers status, headers and body, with any secret the site echoed blotted out.
+        goes, in the url, a header or the body. Only to one of the item's sites, and only an item its person lets
+        agents use, or, called by a plugin, one switched on for that plugin. Answers status, headers and body, with
+        any secret the site echoed blotted out: body_base64 where it isn't text.
         """,
         inputs: %{
           type: "object",
@@ -210,10 +215,65 @@ defmodule Vault do
               additionalProperties: %{type: "string"},
               description: "Like {\"authorization\": \"Bearer {{token}}\"}"
             },
-            body: %{type: "string", description: "The request's body, with {{<field>}} where a value goes"}
+            body: %{type: "string", description: "The request's body, with {{<field>}} where a value goes"},
+            timeout: %{type: "integer", description: "How many seconds it may take to answer. 15 if left out"}
           },
           required: ["item", "url"]
         }
+      },
+      %{
+        name: "items",
+        read_only: true,
+        description: """
+        For a plugin's code: the items switched on for the plugin that calls this, each with the service whose
+        sign-in made it, if one did: [{"name": "Google a@example.com", "sign_in": "Google"}].
+        """,
+        inputs: %{type: "object", properties: %{}}
+      },
+      %{
+        name: "sign_in",
+        description: """
+        For a plugin's code: starts an OAuth sign-in to an outside service for the plugin that calls this, and
+        answers the link its person opens in their browser. The tokens become the item `item`, switched on for the
+        plugin. `client` is the item holding the client_id the service gave, and its client_secret, which goes only
+        to its sites, so the service's token address is one of them.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            service: %{
+              type: "object",
+              properties: %{
+                name: %{type: "string", description: "The service's name, like Google"},
+                authorize: %{type: "string", description: "Where it signs people in"},
+                token: %{type: "string", description: "Where it gives tokens"},
+                scopes: %{type: "array", items: %{type: "string"}},
+                hosts: Map.put(hosts, :description, "The sites its tokens are sent to"),
+                client: %{type: "string", description: "The item holding the client_id it gave"},
+                params: %{
+                  type: "object",
+                  additionalProperties: %{type: "string"},
+                  description: "More to ask its sign-in page with"
+                }
+              },
+              required: ["name", "authorize", "token", "scopes", "hosts", "client"]
+            },
+            item: %{
+              type: "string",
+              description:
+                "The item its tokens become, the service's name if left out. {{<claim>}} is filled in from who signed in, as its OpenID Connect ID token says: Google {{email}}"
+            }
+          },
+          required: ["service"]
+        }
+      },
+      %{
+        name: "stop_using",
+        description: """
+        For a plugin's code: switches an item off for the plugin that calls this, as signing out of it does.
+        Whatever else it's switched on for still uses it.
+        """,
+        inputs: %{type: "object", properties: %{item: item}, required: ["item"]}
       },
       %{
         name: "grant",
@@ -259,15 +319,6 @@ defmodule Vault do
       }
     ]
   end
-
-  @doc """
-  Makes a web request with an item's fields filled in, for the plugin that calls this, which its person switched
-  on for the item: `vault.fetch(call, "GitHub", %{url: "https://api.github.com/user", headers: %{"authorization"
-  => "Bearer {{token}}"}})`, with `method` and `body` if it has them, and `timeout`, how many seconds it may
-  take to answer, when that's more than 15. A secret goes only to one of the item's sites. Gives the answer's `status`, `headers` and `body`. An item that a sign-in made has its tokens renewed when
-  they've ended.
-  """
-  def fetch(%Call{} = call, item, request), do: fetched(call, reached(call), item, request, {:plugin, call.who})
 
   @doc """
   One field of an item, for the plugin that calls this, which its person switched on for the item: to hand to a
@@ -333,30 +384,74 @@ defmodule Vault do
   end
 
   @doc """
-  Starts a sign-in to an outside service, for the plugin that calls this, and gives the link its person opens in
-  their browser. `service` is the service's own: `%{name: "Fake", authorize: url, token: url, scopes: [...],
-  hosts: [...], client: "Fake client"}`, where `client` names the item that holds the plugin's `client_id` there,
-  and its `client_secret` if it has one, and `params`, if given, is more to ask the service's sign-in page with.
-  The tokens become the item `item`, switched on for this plugin, and `fetch/3` renews them when they end. Where
-  `item` says `{{<claim>}}`, it's filled in from who the service says signed in, its OpenID Connect ID token, so
-  each account is an item of its own: `"Google {{email}}"`, with `openid` and `email` among `scopes`.
+  The items switched on for the plugin that calls this, each with the service whose sign-in made it, if one did:
+  `[%{name: "Google a@example.com", sign_in: "Google"}]`, by name. None before anything is.
   """
-  def sign_in(%Call{} = call, service, item \\ nil) do
+  def items(%Call{} = call) do
+    if Call.reaches?(call, theirs(call), "editor"),
+      do: transaction(call, reached(call), &used_by(&1, call.who)),
+      else: []
+  end
+
+  defp used_by(db, plugin) do
+    used =
+      "select items.name, items.oauth from items join uses on uses.item = items.id where uses.plugin = ? order by items.name collate nocase"
+
+    for item <- query(db, used, [plugin]),
+        do: %{name: item["name"], sign_in: item["oauth"] && JSON.decode!(item["oauth"])["name"]}
+  end
+
+  # The tools a plugin's code calls, which act for it. The rest are its person's.
+  @plugins ~w(fetch items sign_in stop_using)
+
+  @impl true
+  def call(tool, _inputs, %Call{caller: caller}) when caller != nil and tool not in @plugins,
+    do: raise("vault_#{tool} is its person's, not a plugin's. A plugin calls #{Enum.join(@plugins, ", ")}.")
+
+  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(items sign_in stop_using),
+    do: raise("vault_#{tool} is for a plugin's code, and acts for the plugin that calls it.")
+
+  def call("items", _inputs, call), do: transaction(call, own(call), &used_by(&1, call.caller))
+
+  def call("stop_using", %{"item" => name}, call) do
+    transaction(call, own(call), fn db ->
+      query(db, "delete from uses where item = ? and plugin = ?", [item!(db, name)["id"], call.caller])
+    end)
+
+    "#{Path.basename(call.caller)} no longer uses #{name}."
+  end
+
+  def call("sign_in", %{"service" => given} = inputs, call) do
     address = address()
-    # The plugin reaches the Vault as an editor of it from here on, which its person's asking for this says.
-    share(call, "share", theirs(call), call.who)
-    artifact = reached(call)
-    name = item || service.name
+    artifact = own(call)
+
+    service = %{
+      name: given["name"],
+      authorize: given["authorize"],
+      token: given["token"],
+      scopes: given["scopes"],
+      hosts: hosts!(given["hosts"]),
+      client: given["client"],
+      params: Map.get(given, "params", %{})
+    }
 
     quietly("Starting the sign-in", fn ->
       {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{random(24)}", random(48)}
 
       client =
         transaction(call, artifact, fn db ->
-          client = fields(db, item!(db, service.client))
+          item = item!(db, service.client)
+          client = fields(db, item)
 
           client["client_id"] ||
             raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
+
+          # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
+          if client["client_secret"] && not OAuth.to?(service.token, JSON.decode!(item["hosts"])),
+            do:
+              raise(
+                "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
+              )
 
           kept = JSON.encode!(Map.take(service, [:name, :token, :hosts, :client]))
           query(db, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
@@ -365,8 +460,8 @@ defmodule Vault do
             state,
             verifier,
             kept,
-            call.who,
-            name,
+            call.caller,
+            inputs["item"] || service.name,
             now()
           ])
 
@@ -377,40 +472,6 @@ defmodule Vault do
     end)
   end
 
-  @doc """
-  The items switched on for the plugin that calls this, each with the service whose sign-in made it, if one did:
-  `[%{name: "Google a@example.com", sign_in: "Google"}]`, by name. None before anything is.
-  """
-  def items(%Call{} = call) do
-    if Call.reaches?(call, theirs(call), "editor") do
-      transaction(call, reached(call), fn db ->
-        used =
-          "select items.name, items.oauth from items join uses on uses.item = items.id where uses.plugin = ? order by items.name collate nocase"
-
-        for item <- query(db, used, [call.who]),
-            do: %{name: item["name"], sign_in: item["oauth"] && JSON.decode!(item["oauth"])["name"]}
-      end)
-    else
-      []
-    end
-  end
-
-  @doc """
-  Switches an item off for the plugin that calls this, as signing out of it does. Whatever else it's switched on
-  for still uses it, and a sign-in for this plugin switches it on again.
-  """
-  def stop_using(%Call{} = call, name) do
-    unused =
-      transaction(call, reached(call), fn db ->
-        query(db, "delete from uses where item = ? and plugin = ?", [item!(db, name)["id"], call.who])
-        not used?(db, call.who)
-      end)
-
-    if unused, do: share(call, "unshare", theirs(call), call.who)
-    :ok
-  end
-
-  @impl true
   def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, made(call))
 
   def call("grant", %{"servers" => _servers} = inputs, call) do
@@ -427,7 +488,13 @@ defmodule Vault do
 
   def call("list", _inputs, call) do
     names = names(call)
-    use_it = Enum.sort(for {name, version} <- Plugins.running(call.subject), "vault" in version.uses, do: name)
+
+    use_it =
+      Enum.sort(
+        for {name, version} <- Plugins.running(call.subject),
+            "vault" in version.uses or Enum.any?(version.permissions, &(&1 == "vault" or &1 =~ ~r/^vault_/)),
+            do: name
+      )
 
     transaction(call, own(call), fn db ->
       items =
@@ -567,7 +634,8 @@ defmodule Vault do
     plugin =
       if name = inputs["plugin"],
         do:
-          Plugins.plugin(call.subject, name) || Plugins.plugin("network", name) || raise("There's no plugin named #{name}.")
+          Plugins.plugin(call.subject, name) || Plugins.plugin("network", name) ||
+            raise("There's no plugin named #{name}.")
 
     if fields == %{}, do: raise("A request names the fields it needs.")
     fields = for {name, about} <- fields, do: %{name: field!(name), secret: Map.get(about, "secret", true)}
@@ -663,15 +731,18 @@ defmodule Vault do
       url: url,
       method: Map.get(inputs, "method", "GET"),
       headers: Map.get(inputs, "headers", %{}),
-      body: inputs["body"]
+      body: inputs["body"],
+      timeout: inputs["timeout"]
     }
 
-    answer = fetched(call, own(call), item, request, :agents)
+    by = if call.caller, do: {:plugin, call.caller}, else: :agents
+    answer = fetched(call, own(call), item, request, by)
 
+    # What an agent reads is cut short, and what a plugin's code reads is whole.
     {body, cut} =
-      case answer.body do
-        <<body::binary-size(@most), rest::binary>> -> {body, "#{byte_size(rest)} more bytes were left out"}
-        body -> {body, nil}
+      case {by, answer.body} do
+        {:agents, <<body::binary-size(@most), rest::binary>>} -> {body, "#{byte_size(rest)} more bytes were left out"}
+        {_by, body} -> {body, nil}
       end
 
     body = if String.valid?(body), do: %{body: body}, else: %{body_base64: Base.encode64(body)}

@@ -77,9 +77,9 @@ defmodule Vault.OAuth do
 
   @doc """
   Makes a web request with `{{<field>}}` filled in from `fields` wherever it's written: in the URL, a header or
-  the body. `secret` names the fields that are secret, which are filled in only for one of `hosts`, and blotted
-  out of what the site answers. Gives `%{status: ..., headers: ..., body: ...}`. A redirect is answered as it is,
-  not followed: it may lead to another site.
+  the body, only to one of `hosts`, so what's asked with an item goes nowhere else. `secret` names the fields that
+  are secret, which are blotted out of what the site answers. Gives `%{status: ..., headers: ..., body: ...}`. A
+  redirect is answered as it is, not followed: it may lead to another site.
   """
   def request(request, fields, secret, hosts) do
     uri = URI.parse(request.url)
@@ -95,8 +95,7 @@ defmodule Vault.OAuth do
 
     for field <- used, not is_map_key(fields, field), do: raise("It has no field named #{field}.")
 
-    if Enum.any?(used, &(&1 in secret)) and site not in hosts and uri.host not in hosts,
-      do: raise("Its secrets go only to #{said(hosts)}, and that's #{site}.")
+    if not to?(request.url, hosts), do: raise("It's used only with #{said(hosts)}, and that's #{site}.")
 
     fill = &Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, &1, fn _all, field -> fields[field] end)
     headers = for {name, value} <- request[:headers] || %{}, do: {fill.(name), fill.(value)}
@@ -121,6 +120,12 @@ defmodule Vault.OAuth do
       {:error, _unreached} ->
         raise "#{site} couldn't be reached."
     end
+  end
+
+  @doc "Whether a request to `url` goes to one of `hosts`: its site's name, or its host's."
+  def to?(url, hosts) do
+    uri = URI.parse(url)
+    site!(uri) in hosts or uri.host in hosts
   end
 
   # The fields a text names.
