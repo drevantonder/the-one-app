@@ -68,7 +68,7 @@ defmodule OneCore.Plugins.Deploy do
   its skill's, icon: ..., apps: [...], tools: [names], permissions: [...], sandbox: ...}]`, its permissions as
   `permissions/0` gives them
   and whether it runs in sandbox mode. It's what lists every app there is, whether or not it's on anyone's page
-  now. One that was removed (Recently Deleted's `remove`) has no latest version, and isn't listed.
+  now. One that was removed, by the plugin that keeps what's deleted, has no latest version, and isn't listed.
   """
   def deployed do
     blobs = Bucket.list(@deployed)

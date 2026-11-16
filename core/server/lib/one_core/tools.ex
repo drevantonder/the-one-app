@@ -32,7 +32,8 @@ defmodule OneCore.Tools do
       ask for it to be installed for everyone, by the network's launcher (its skill says how). In sandbox mode
       (`sandbox`) it runs in a VM of its own behind its machine's sandbox, on any of the network's servers, so it needs
       no server of yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0
-      names. It answers with them. `recently-deleted remove --artifact <it>` removes one nobody has installed.
+      names. It answers with them. One nobody has installed is removed as anything deleted is, by the plugin that keeps
+      what's deleted, which `search` finds.
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
       refused where the live version came from a commit that yours doesn't contain, unless `--force`.
