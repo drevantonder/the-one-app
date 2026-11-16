@@ -12,8 +12,14 @@ defmodule Permissions do
   @impl true
   def essential, do: true
 
-  # An owner is an editor, and an editor is a viewer: what each relation is enough for.
-  @enough %{"viewer" => ~w(viewer editor owner), "editor" => ~w(editor owner owner), "owner" => ~w(owner owner owner)}
+  # An owner is an editor, and an editor is a viewer: what each relation is enough for. An installer adds plugins
+  # for a user, a group or the network, which their owner does too, and is nothing more.
+  @enough %{
+    "viewer" => ~w(viewer editor owner),
+    "editor" => ~w(editor owner owner),
+    "owner" => ~w(owner owner owner),
+    "installer" => ~w(installer owner owner)
+  }
 
   @schema [
     """
@@ -47,7 +53,7 @@ defmodule Permissions do
       description: "Who: users/<name>, groups/<name>, everyone, a plugin's artifact's name, or a link's holder"
     }
 
-    relation = %{type: "string", enum: ~w(viewer editor owner member parent), description: "The relation"}
+    relation = %{type: "string", enum: ~w(viewer editor owner installer member parent), description: "The relation"}
     reaching = %{type: "string", enum: ~w(viewer editor owner), description: "The relation. viewer if left out"}
     tuple = %{type: "object", properties: %{artifact: artifact, relation: relation, who: who}}
     tuple = Map.put(tuple, :required, ["artifact", "relation", "who"])
@@ -73,6 +79,18 @@ defmodule Permissions do
             who: Map.put(who, :description, "Who. You, if left out")
           },
           required: ["artifact"]
+        }
+      },
+      %{
+        name: "users",
+        read_only: true,
+        description:
+          "Lists the users who have a relation to an artifact, through the groups they're in: who owns the network, " <>
+            "or may install plugins for it",
+        inputs: %{
+          type: "object",
+          properties: %{artifact: artifact, relation: Map.put(relation, :enum, ~w(viewer editor owner installer))},
+          required: ["artifact", "relation"]
         }
       },
       %{
@@ -146,6 +164,15 @@ defmodule Permissions do
       else: {:refuse, "#{who} isn't a member of #{of}. Whoever owns it adds them, with permissions_share."}
   end
 
+  def hook("reach", %{"who" => who, "relation" => "installer", "artifact" => artifact}, call) do
+    if transaction(call, &may?(&1, who, "installer", artifact)),
+      do: :ok,
+      else:
+        {:refuse,
+         "#{who} can't install plugins for #{artifact}. Ask whoever can, with home-screen_request, or its owner " <>
+           "lets them, with permissions_share --relation installer."}
+  end
+
   def hook("reach", %{"who" => who, "relation" => relation, "artifact" => artifact}, call) do
     if transaction(call, &may?(&1, who, relation, artifact)),
       do: :ok,
@@ -187,6 +214,21 @@ defmodule Permissions do
     transaction(call, fn db ->
       if who != call.subject, do: reaches!(db, call.subject, "viewer", artifact)
       %{who: who, relation: relation, artifact: artifact, may: may?(db, who, relation, artifact)}
+    end)
+  end
+
+  # Whoever may see an artifact, or is in it, sees who has which relation to it: everyone in the network sees who
+  # owns it and installs its plugins. A tuple's who is a user, a group, whose members are followed, or everyone,
+  # which is said as it is.
+  def call("users", %{"artifact" => artifact, "relation" => relation}, call) do
+    transaction(call, fn db ->
+      if not (member?(db, call.subject, artifact) or may?(db, call.subject, "viewer", artifact)),
+        do: raise("#{call.subject} isn't in #{artifact}, nor sees it, so doesn't see who has it.")
+
+      up = followed(db, @parents, Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"]), [])
+      tuples = "select who as next from tuples where artifact = ? and relation in (?, ?, ?)"
+      named = for at <- up, %{"next" => who} <- query(db, tuples, [at | Map.fetch!(@enough, relation)]), do: who
+      Enum.sort(Enum.filter(followed(db, @members, named, []), &(user?(&1) or &1 == "everyone")))
     end)
   end
 
@@ -279,9 +321,9 @@ defmodule Permissions do
 
   # Raises unless whoever asks may write or remove a tuple with this relation to the artifact: an owner or an
   # editor shares up to their own relation and says who's a member, and only an owner adds or removes an owner
-  # or a parent.
+  # or a parent, or says who installs plugins.
   defp shares!(db, call, artifact, relation) do
-    reaches!(db, call.subject, if(relation in ["owner", "parent"], do: "owner", else: "editor"), artifact)
+    reaches!(db, call.subject, if(relation in ["owner", "installer", "parent"], do: "owner", else: "editor"), artifact)
   end
 
   defp reaches!(db, who, relation, artifact) do

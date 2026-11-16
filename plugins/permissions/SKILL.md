@@ -10,7 +10,7 @@ plugin deciding, nobody but the network's first owner does anything.
 Its words:
 
 - **Relation tuple**: one line of who may do what, as in Zanzibar: an artifact, a relation (`owner`, `editor`, `viewer`,
-  `parent`, `member`) and a subject, as in SpiceDB and OpenFGA. An owner is an editor, and an editor is a viewer. A
+  `installer`, `parent`, `member`) and a subject, as in SpiceDB and OpenFGA. An owner is an editor, and an editor is a viewer. A
   user, a group, everyone, a server, a plugin and the holder of a sharing link are all a subject. Whoever asks for a
   call is its actor. Avoid: fact, grant.
 
@@ -28,6 +28,9 @@ Its words:
   has it to everything that's theirs: a group's owner owns its plugins and what they keep. `member` puts a user or
   a group in a group. `parent` names another artifact as who, and gives whoever has a relation to that one the
   same relation to this.
+- `installer` of the network (or of a group) may install plugins for it, as its owner does, and nothing more an owner
+  may: `share --artifact network --relation installer --who users/carol`, which only an owner writes or removes.
+  `users --artifact network --relation installer` lists who may, owners among them; anyone in the network sees it.
 - `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
   adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
   and `check` says whether someone may reach it.
