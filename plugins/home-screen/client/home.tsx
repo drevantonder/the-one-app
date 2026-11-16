@@ -193,8 +193,11 @@ function Sidebar(props: { sections: Section[]; accounts: Signs[]; at: () => numb
       collapse(event.target.closest<HTMLElement>("[data-section]")!.dataset.section!, event.key === (document.dir === "rtl" ? "ArrowRight" : "ArrowLeft"))
     }
   }
-  // What's selected stays in view.
-  createEffect(() => [showing(), props.at(), collapsed()], () => nav.querySelector("[aria-current]")?.scrollIntoView({ block: "nearest" }))
+  // What's selected stays in view. What an effect returns is its cleanup, and Chrome's `scrollIntoView` returns a
+  // promise, so this returns nothing.
+  createEffect(() => [showing(), props.at(), collapsed()], () => {
+    nav.querySelector("[aria-current]")?.scrollIntoView({ block: "nearest" })
+  })
   return (
     <nav class="sidebar" ref={nav} aria-label="Apps" onKeyDown={keys}>
       <For each={props.sections} keyed={(section) => section.key}>
