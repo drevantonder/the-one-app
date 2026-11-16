@@ -151,7 +151,8 @@ function collapse(section, shut) {
 function Sidebar(props) {
   let nav
   const home = () => showing().app === HOME
-  const current = (app) => !home() && showing().app === app.app && (showing().for ?? null) === (app.for ?? null)
+  // The Accounts folder is current while it, or an account in it, shows.
+  const current = (app) => !home() && (showing().for ?? null) === (app.for ?? null) && [app, ...(app.folder ?? [])].some((one) => showing().app.split("#")[0] === one.app)
   // A section's name is selected while its page shows, or while it's collapsed over the app that's open.
   const selected = (section, index) => (home() ? props.at() === index : collapsed().has(section.key) && section.apps.some(current))
   const pick = (index) => {
@@ -200,13 +201,35 @@ function Sidebar(props) {
   )
 }
 
-/// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts.
+/// An app's icon with its name under it. It starts as a finger lands on it, and shows as the finger lifts. The
+/// Accounts folder has a dot while an account in it needs its person.
 function Tile(props) {
   return (
     <button type="button" class="tile" onPointerDown={() => open(props.app.app, { for: props.for, behind: true })} onClick={() => Date.now() > quiet && open(props.app.app, { for: props.for })}>
-      <img src={props.app.icon} alt="" />
+      <span class="icon">
+        <img src={props.app.icon} alt="" />
+        <Show when={props.app.folder}>
+          <Loading>
+            <Attention apps={props.app.folder} for={props.for} />
+          </Loading>
+        </Show>
+      </span>
       <span>{props.app.name}</span>
     </button>
+  )
+}
+
+/// A dot while any account of the folder's apps is not ok, as each plugin's `accounts` answers.
+function Attention(props) {
+  const needed = createMemo(async () => {
+    const lists = await Promise.all(props.apps.map((app) => json(`${app.app.split("/")[0]}_accounts`, {}, props.for).catch(() => [])))
+    return lists.flat().some((account) => !account.ok)
+  })
+  onSettled(() => changed(() => refresh(needed)))
+  return (
+    <Show when={needed()}>
+      <i class="attention" aria-label="An account needs you" />
+    </Show>
   )
 }
 
@@ -253,7 +276,7 @@ function Offers(props) {
             </For>
             <Row heading="Remove Widget" onClick={done(() => arrange(page(), others()))} />
           </Show>
-          <Show when={item()?.app}>
+          <Show when={item()?.app && !item().folder}>
             <Row heading={`Remove from ${page().name}`} onClick={off} />
           </Show>
           <Show when={page().widgets.length}>

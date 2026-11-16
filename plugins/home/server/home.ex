@@ -36,7 +36,8 @@ defmodule Home do
         read_only: true,
         description: """
         Gives your Home Screen page: its apps and widgets in order (`items`), the widgets that could be put on it
-        (`widgets`), and whether you may arrange it. Asked for a group or for the network, it's theirs.
+        (`widgets`), and whether you may arrange it. Outside accounts' apps are in its Accounts folder, an item whose
+        `folder` lists them. Asked for a group or for the network, it's theirs.
         """,
         inputs: none
       },
@@ -88,14 +89,26 @@ defmodule Home do
   def call("page", _inputs, call) do
     here = for plugin <- Call.plugins(call), plugin.installed == call.subject, do: plugin
 
-    apps =
+    all =
       for plugin <- here, app <- plugin.apps, not app.settings do
-        %{app: "#{plugin.name}/#{app.page}", plugin: plugin.plugin, name: app.name, icon: app.icon}
+        %{
+          app: "#{plugin.name}/#{app.page}",
+          plugin: plugin.plugin,
+          name: app.name,
+          icon: app.icon,
+          account: app.account
+        }
       end
+
+    # Outside accounts' apps are in one Accounts folder, which this plugin's page `accounts.html` opens. Its icon is
+    # a file beside that page, where every page of this plugin finds it.
+    {accounts, apps} = Enum.split_with(all, & &1.account)
+    folder = %{app: "#{call.plugin}/client/accounts.html", name: "Accounts", icon: "accounts.svg", folder: accounts}
+    apps = Enum.map(apps, &Map.delete(&1, :account)) ++ if(accounts == [], do: [], else: [folder])
 
     widgets =
       for plugin <- here, widget <- plugin.widgets do
-        opens = Enum.find(apps, &String.starts_with?(&1.app, plugin.name <> "/"))
+        opens = Enum.find(all, &String.starts_with?(&1.app, plugin.name <> "/"))
         Map.merge(widget, %{widget: "#{plugin.name}/#{widget.tool}", opens: opens && opens.app})
       end
 

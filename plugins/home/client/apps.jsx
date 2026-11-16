@@ -16,8 +16,8 @@ const store = createMemo(async () => {
 })
 changed(() => refresh(store))
 
-/// The page's app that is this plugin's, if the plugin is on the page.
-const on = (page, app) => page.items.find((item) => item.plugin === app.plugin)
+/// The page's app that is this plugin's, if the plugin is on the page, or in its Accounts folder.
+const on = (page, app) => page.items.flatMap((item) => item.folder ?? [item]).find((item) => item.plugin === app.plugin)
 const [managing, setManaging] = createSignal()
 
 /// Puts an app on a page or takes it off, which is adding or removing its plugin for whoever's page it is.

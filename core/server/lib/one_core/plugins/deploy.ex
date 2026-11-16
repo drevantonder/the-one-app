@@ -56,7 +56,13 @@ defmodule OneCore.Plugins.Deploy do
 
       apps =
         for app <- JSON.decode!(said)["apps"],
-            do: %{name: app["name"], page: app["page"], icon: app["icon"], settings: app["settings"]}
+            do: %{
+              name: app["name"],
+              page: app["page"],
+              icon: app["icon"],
+              settings: app["settings"],
+              account: app["account"] == true
+            }
 
       %{plugin: "#{owner}/plugins/#{name}", apps: apps}
     end

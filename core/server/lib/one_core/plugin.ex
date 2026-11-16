@@ -201,6 +201,11 @@ defmodule OneCore.Plugin do
       def apps, do: [%{name: "Hello", page: "client/index.html", icon: "client/icon.svg"}]
 
   - An app that's a part of Settings says `settings: true`: it's then on Settings, and on no Home Screen page.
+  - An app that's an outside account's (Google, WhatsApp) says `account: true`: it's then in the page's Accounts
+    folder, not on the page. Its plugin's tool `accounts` lists them, `[%{account: "sam@example.com", ok: true}]`,
+    with `about`, one line saying more, and when `ok` is false, `problem`, a few words for a person ("Sign in
+    again"). An account in the folder opens the app's page with the account after a `#`:
+    `client/index.html#sam@example.com`. With none, the page signs one in.
   - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
     2.0 with the UI library, and its source is the folder `client/`: each `.html` there is a page, whose script is the
     app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more

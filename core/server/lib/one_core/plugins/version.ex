@@ -21,8 +21,8 @@ defmodule OneCore.Plugins.Version do
 
   `ui` is the code of the UI library its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
-  `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address, and `settings`, whether
-  it's a part of Settings. `widgets` lists its widgets: each one's `name`, the `tool` that answers its layout, and
+  `apps` lists its apps: each one's `name`, its `page`, its `icon` as a `data:` address, `settings`, whether
+  it's a part of Settings, and `account`, whether it's an outside account's. `widgets` lists its widgets: each one's `name`, the `tool` that answers its layout, and
   the `sizes` it comes in.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
@@ -340,7 +340,7 @@ defmodule OneCore.Plugins.Version do
     apps =
       for %{name: name, page: page, icon: icon} = app <- apps do
         icon = "data:#{kind(icon)};base64,#{Base.encode64(rest[icon])}"
-        %{name: name, page: page, icon: icon, settings: app[:settings] == true}
+        %{name: name, page: page, icon: icon, settings: app[:settings] == true, account: app[:account] == true}
       end
 
     widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}

@@ -225,6 +225,7 @@ body {
   touch-action: manipulation;
 }
 .tile img {
+  display: block;
   width: var(--tile, 3.75rem);
   height: var(--tile, 3.75rem);
   border-radius: 22.5%;
@@ -329,4 +330,19 @@ footer p {
   justify-items: center;
   margin-inline: auto;
   text-align: center;
+}
+/* The Accounts folder's dot, at its icon's corner, in the colour of something that needs its person. */
+.tile .icon {
+  position: relative;
+  overflow: visible;
+}
+.tile .attention {
+  position: absolute;
+  inset-block-start: -0.1875rem;
+  inset-inline-end: -0.1875rem;
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid var(--background);
+  border-radius: 50%;
+  background: var(--warning);
 }
