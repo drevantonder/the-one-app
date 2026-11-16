@@ -497,7 +497,7 @@ defmodule OneCore.Sandbox do
 
     # What a version's VM compiled is kept on this machine for its next VM, whoever's it is, which loads it instead:
     # its own code and the child's side of One Core, as this server has it.
-    runtime = File.read!(Application.app_dir(:one_core, "priv/sandbox/child.ex"))
+    runtime = for file <- ~w(child.ex redact.ex), do: File.read!(Application.app_dir(:one_core, "priv/sandbox/#{file}"))
     cache = if version, do: Path.join([Server.home(), "sandbox", Version.code({key, runtime})])
 
     context = %{
@@ -573,7 +573,8 @@ defmodule OneCore.Sandbox do
       if cache,
         do: "",
         else:
-          "{ok, _, _} = 'Elixir.Kernel.ParallelCompiler':compile_to_path([<<\"#{child}/child.ex\"/utf8>>], " <>
+          "{ok, _, _} = 'Elixir.Kernel.ParallelCompiler':compile_to_path([<<\"#{child}/child.ex\"/utf8>>, " <>
+            "<<\"#{child}/redact.ex\"/utf8>>], " <>
             "unicode:characters_to_binary(filename:join(os:getenv(\"TMPDIR\"), \"runtime\")), " <>
             "[{return_diagnostics, true}]), "
 
@@ -581,7 +582,7 @@ defmodule OneCore.Sandbox do
       ~w(-noshell -noinput +fnu +S 1:1 +SDcpu 1:1 +SDio 1 +A 1 +MIscs 128 -boot) ++
         [boot, "-boot_var", "RELEASE_LIB", Path.join(root, "lib")] ++
         Enum.flat_map(List.wrap(cache) ++ ebins, &["-pa", &1]) ++
-        ["-eval", "application:ensure_all_started(elixir), #{compile}'Elixir.OneCore.Sandbox.Child':main()."]
+        ["-eval", "application:ensure_all_started([elixir, logger]), #{compile}'Elixir.OneCore.Sandbox.Child':main()."]
 
     env = %{
       "ROOTDIR" => root,

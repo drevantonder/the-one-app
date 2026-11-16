@@ -13,6 +13,8 @@ defmodule OneCore.Application do
   # for both.
   @impl true
   def start(_type, _args) do
+    # What a crash reports holds what it was working with, which may be a person's tokens: none of it reaches the log.
+    OneCore.Redact.install()
     # Plugins tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
     {:ok, key} = Iroh.key(Server.key_file())

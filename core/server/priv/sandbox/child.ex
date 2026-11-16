@@ -167,6 +167,7 @@ defmodule OneCore.Sandbox.Child do
     # Every level is said, as on a server, and only warnings and errors reach the server's log.
     :logger.set_primary_config(:level, :all)
     :logger.add_handler(:server, __MODULE__.Logged, %{level: :warning})
+    OneCore.Redact.install()
     {:ok, _} = Registry.start_link(keys: :unique, name: __MODULE__.Processes)
     port = Port.open({:fd, 0, 1}, [:binary, :eof, packet: 4])
     loop(%{port: port, waiting: %{}, calls: %{}, next: 0, loaded: %{}})
@@ -203,7 +204,9 @@ defmodule OneCore.Sandbox.Child do
       {:DOWN, _monitor, :process, pid, why} ->
         case Enum.find(state.calls, fn {_id, called} -> called == pid end) do
           {id, _} ->
-            if why != :normal, do: answer(state.port, id, {:raised, "It stopped: #{Exception.format_exit(why)}"})
+            if why != :normal,
+              do: answer(state.port, id, {:raised, "It stopped: #{Exception.format_exit(OneCore.Redact.redact(why))}"})
+
             loop(%{state | calls: Map.delete(state.calls, id)})
 
           nil ->
@@ -251,9 +254,10 @@ defmodule OneCore.Sandbox.Child do
         call = call(id, about)
         {:answered, encoded(run(what, call))}
       rescue
-        error -> {:raised, Exception.message(error)}
+        # What it raised is redacted (`OneCore.Redact`), as a call on the server is (`OneCore.Plugins.held/3`).
+        error -> {:raised, Exception.message(OneCore.Redact.redact(error))}
       catch
-        kind, reason -> {:raised, Exception.format_banner(kind, reason)}
+        kind, reason -> {:raised, Exception.format_banner(kind, OneCore.Redact.redact(reason))}
       end
 
     send(__MODULE__, {:send, JSON.encode!(Map.merge(%{"answer" => id}, answered(result)))})
@@ -490,14 +494,10 @@ defmodule OneCore.Sandbox.Child do
 
   defmodule Logged do
     @moduledoc false
-    # A warning or an error said to Logger goes to the server's log, as the plugin's.
+    # A warning or an error said to Logger goes to the server's log, as the plugin's: a report as Elixir translated it,
+    # redacted (`OneCore.Redact`).
     def log(%{level: level} = event, _config) do
-      text =
-        case event.msg do
-          {:string, text} -> IO.chardata_to_string(text)
-          {:report, report} -> inspect(report)
-          {format, args} -> IO.chardata_to_string(:io_lib.format(format, args))
-        end
+      text = IO.chardata_to_string(:logger_formatter.format(event, %{template: [:msg], single_line: false}))
 
       OneCore.Sandbox.Child.send_json(%{"log" => to_string(level), "text" => String.slice(text, 0, 8000)})
     end

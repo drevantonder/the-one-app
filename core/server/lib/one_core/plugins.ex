@@ -66,14 +66,15 @@ defmodule OneCore.Plugins do
       outcome
 
     kind, reason ->
-      Logger.error(Exception.format(kind, reason, __STACKTRACE__))
+      Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
       {:error, Enum.reduce(versions, why(kind, reason, __STACKTRACE__), &Version.own_names(&2, &1))}
   after
     if held, do: release(held)
   end
 
   # What whoever called is told went wrong: what was raised, also where a process the call waited on raised it, and
-  # otherwise what Elixir says of it.
+  # otherwise what Elixir says of it. It's redacted (`OneCore.Redact`), since it's passed on, to agents and to
+  # Telemetry, and what an error holds may be a person's tokens.
   defp why(:exit, {reason, {module, function, arguments}}, stacktrace)
        when is_atom(module) and is_atom(function) and is_list(arguments),
        do: why(:exit, reason, stacktrace)
@@ -83,10 +84,10 @@ defmodule OneCore.Plugins do
 
   defp why(:error, error, stacktrace) do
     {blamed, _} = Exception.blame(:error, error, stacktrace)
-    Exception.message(blamed)
+    Exception.message(OneCore.Redact.redact(blamed))
   end
 
-  defp why(kind, reason, _stacktrace), do: Exception.format_banner(kind, reason)
+  defp why(kind, reason, _stacktrace), do: Exception.format_banner(kind, OneCore.Redact.redact(reason))
 
   @doc """
   Holds the latest version of the plugin `artifact` loaded: `{:ok, held, version}`, or `:absent` if it isn't

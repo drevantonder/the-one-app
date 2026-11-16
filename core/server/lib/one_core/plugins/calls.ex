@@ -279,7 +279,7 @@ defmodule OneCore.Plugins.Calls do
             if observes?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
           catch
             :throw, {Call, _forwarded} -> :ok
-            kind, reason -> Logger.error(Exception.format(kind, reason, __STACKTRACE__))
+            kind, reason -> Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
           end
         end
       end)

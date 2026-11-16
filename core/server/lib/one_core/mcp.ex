@@ -92,14 +92,16 @@ defmodule OneCore.Mcp do
           end
         rescue
           error ->
-            Logger.error(Exception.format(:error, error, __STACKTRACE__))
-            JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.message(error)}})
+            Logger.error(OneCore.Redact.format(:error, error, __STACKTRACE__))
+            message = Exception.message(OneCore.Redact.redact(error))
+            JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: message}})
         catch
           # What exits, as a call that took too long does, is answered too: only a server that went away answers
           # nothing.
           :exit, why ->
-            Logger.error(Exception.format(:exit, why, __STACKTRACE__))
-            JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.format_exit(why)}})
+            Logger.error(OneCore.Redact.format(:exit, why, __STACKTRACE__))
+            message = Exception.format_exit(OneCore.Redact.redact(why))
+            JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: message}})
         end
 
       # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.

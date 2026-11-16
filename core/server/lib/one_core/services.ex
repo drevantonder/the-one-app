@@ -218,7 +218,7 @@ defmodule OneCore.Services do
     state = %{state | monitors: monitors, stopped: Map.put(state.stopped, service, why)}
 
     if service in here() do
-      Logger.warning("#{plugin}'s #{name} stopped, and is started again: #{said(plugin, why)}")
+      Logger.warning("#{plugin}'s #{name} stopped, and is started again: #{said(plugin, OneCore.Redact.redact(why))}")
       wait = max(0, state.started[service] + @apart - System.monotonic_time(:millisecond))
       Process.send_after(self(), {:start, service}, wait)
     else
