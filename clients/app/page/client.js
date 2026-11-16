@@ -37,15 +37,21 @@ const listed = new Set()
 /** @param {string} app @param {string} [who] */
 const host = (app, who) => [app.split("/")[0], ...(who ? who.split("/").reverse() : [])].join(".")
 
-/// Whether a server answered the last thing this client asked, and why its files couldn't be listed, if they
-/// couldn't.
+/// Whether a server answered the last thing this client asked, and since when none has, and why its files couldn't
+/// be listed, if they couldn't.
 let answering = true
+let unanswered = 0
 /** @type {string | undefined} */
 let unlisted
+/// Whether this app is too old for its network: its servers list no Home Screen where this page opens it, as when
+/// a plugin's name or files have moved since this app was built.
+let tooOld = false
 /// Where the window starts, which it asks as it opens: here, or on the page its device is let in by while it's
 /// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
 /// answer. Then that's all the window says, until trying again opens it.
 const { signIn, unreached = null, taps } = await invoke("start")
+/// A phone's app comes from its store, and a computer's updates itself.
+const phone = Boolean(taps)
 if (signIn) location.replace(signIn)
 
 /// Light or dark, as Settings › Appearance has it on this device, or as the device is.
@@ -58,32 +64,55 @@ function dress() {
 }
 scheme.addEventListener("change", dress)
 
-/// Says over the Home Screen that no server is answering: with nothing to show, as what needs its user now, and
-/// over what this device kept, as what can wait. Fine is silent.
+/// Says over the Home Screen what keeps it from showing anything: the network's address didn't answer, its pages
+/// couldn't be listed, or this app is too old for the network. Fine is silent.
 function problem() {
   // A problem is said in place of the mark.
-  if (unreached !== null || unlisted) byId("opening").hidden = true
-  const box = byId("problem")
-  const nothing = Boolean(unlisted) || unreached !== null
-  box.hidden = (answering && !nothing) || Boolean(history.state)
-  box.toggleAttribute("data-waits", !nothing)
-  byId("what").textContent =
-    unreached !== null ? "Can't reach your network" : unlisted ? "Can't show your Home Screen pages" : "No server is answering"
-  byId("why").textContent = unreached !== null
-    ? `${unreached}. Check this device is online.`
-    : unlisted ?? "This is what this device kept. Check it's online and a server is on."
+  const nothing = unreached !== null || Boolean(unlisted) || tooOld
+  if (nothing) byId("opening").hidden = true
+  byId("problem").hidden = !nothing || Boolean(history.state)
+  byId("what").textContent = tooOld ? "This app needs updating" : unreached !== null ? "Can't reach your network" : "Can't show your Home Screen pages"
+  byId("why").textContent = tooOld
+    ? phone ? `Get the latest version from the ${/iPhone|iPad/.test(navigator.userAgent) ? "App Store" : "Play Store"}.` : "Your network is on a newer version."
+    : unreached !== null ? `${unreached}. Check this device is online.` : (unlisted ?? "")
+  const action = byId("retry")
+  action.textContent = tooOld ? "Update" : "Try Again"
+  action.dataset.variant = tooOld ? "default" : "outline"
+  action.hidden = tooOld && phone
+  status()
 }
+
+/// How long no server answering goes unsaid, as a moment's gap while the client reconnects by itself, and how long
+/// before the window says it's showing what was saved.
+const BLIP = 3000
+const LONG = 15000
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let saying
+/// Says in one quiet line, over whatever's showing, that no server is answering for now: nothing for a blip, then
+/// that it's reconnecting, and once that's taken a while, or the device is offline, that it shows what was saved.
+function status() {
+  clearTimeout(saying)
+  const line = byId("status")
+  const waited = performance.now() - unanswered
+  line.hidden = answering || unreached !== null || Boolean(unlisted) || tooOld || waited < BLIP
+  if (!answering && waited < LONG) saying = setTimeout(status, (waited < BLIP ? BLIP : LONG) - waited)
+  line.textContent = !navigator.onLine ? "You're offline. Showing what was saved." : waited < LONG ? "Reconnecting…" : "Reconnecting… Showing what was saved."
+}
+addEventListener("offline", status)
+// Back online, the client asks at once, rather than when it next would have.
+addEventListener("online", () => {
+  status()
+  if (!answering) invoke("refresh", { view: key(HOME) })
+})
 
 /// Lists the files a server has for `who`, which the client keeps, so an app opens with no server up. An open app
 /// whose plugins have a new version loads again.
 /** @param {string} [who] */
 async function list(who) {
   listed.add(who)
-  /** @type {string[]} */
-  let outdated = []
   try {
-    const { resources, ...rest } = await invoke("apps", { who })
-    outdated = rest.outdated
+    const { resources, outdated } = await invoke("apps", { who })
+    for (const view of open.values()) if (outdated.includes(view.host)) view.stale = true
     if (!who) {
       unlisted = undefined
       // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
@@ -91,13 +120,26 @@ async function list(who) {
       // The last one set for a plugin is the one kept: its first, and one that isn't a part of Settings before one that is.
       const order = pages.toReversed().sort((a, b) => Number(Boolean(b._meta?.settings)) - Number(Boolean(a._meta?.settings)))
       first = new Map(order.map(({ uri }) => uri.slice("ui://".length).split("/")).map(([plugin, _version, ...page]) => [plugin, `${plugin}/${page.join("/")}`]))
+      tooOld = !resources.some(({ uri }) => {
+        const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
+        return `${plugin}/${page.join("/")}` === HOME
+      })
     }
   } catch (error) {
     if (!who) unlisted = `${error}`.replace(/[^.]$/, "$&.")
   }
   problem()
+  reload()
+}
+
+/// Loads again each open app that has a new version, as a web app picks up its own, unless its person may be in
+/// the middle of something there: it's the one showing, and has the keyboard. That one says an update is ready, and
+/// loads again once they press Reload, leave it, or put the window away. With `now`, every one does.
+async function reload(now = false) {
   for (const view of open.values()) {
-    if (!outdated.includes(view.host)) continue
+    const busy = !document.hidden && view === showing(history.state) && document.activeElement === view.frame
+    if (!view.stale || (busy && !now)) continue
+    view.stale = false
     post(view, { id: "teardown", method: "ui/resource-teardown", params: { reason: "A new version" } })
     await invoke("close", { view: view.key })
     view.drawn = false
@@ -105,7 +147,9 @@ async function list(who) {
     const page = /** @type {Window} */ (view.frame.contentWindow)
     page.location.replace(address(view))
   }
+  byId("update").hidden = ![...open.values()].some(({ stale }) => stale)
 }
+byId("reload").addEventListener("click", () => reload(true))
 
 /// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown.
 /** @param {string} app @param {string} [who] @returns {View} */
@@ -146,6 +190,7 @@ function move(change, back = false) {
 function show(at, tapped) {
   const view = layer(at)
   problem()
+  reload()
   if (!view) return
   view.tapped = tapped
   if (!view.drawn) return
@@ -158,13 +203,16 @@ function show(at, tapped) {
 /// its sidebar, which stays beside every app where it's wide enough. → the one showing.
 /** @param {string | null} at */
 function layer(at) {
-  const view = open.get(at ?? "") ?? open.get(key(HOME))
+  const view = showing(at)
   const home = open.get(key(HOME))
   for (const other of open.values()) other.frame.inert = other !== view && !(other === home && beside.matches)
   if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, for: view.for } })
   return view
 }
 beside.addEventListener("change", () => layer(history.state))
+/// The app that's open as `at`, or with none there, the Home Screen.
+/** @param {string | null} at */
+const showing = (at) => open.get(at ?? "") ?? open.get(key(HOME))
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
 /// showing with what it drew from. The Home Screen' time is from when this page began to load.
@@ -287,6 +335,8 @@ addEventListener("message", async ({ source, data }) => {
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && history.state) history.back()
     // Something is open over its page, or nothing is any more.
     if (method === "notifications/one/over") view.over = params.over === true
+    // The Home Screen, loaded again, is told which app is showing beside it.
+    if (method === "ui/notifications/initialized" && view.app === HOME) layer(history.state)
     return
   }
   try {
@@ -352,22 +402,28 @@ addEventListener("popstate", (event) => {
 })
 
 listen("answering", ({ payload }) => {
+  if (answering && !payload) unanswered = performance.now()
   answering = payload
   problem()
   // What couldn't be listed is asked for again now that a server answers.
   if (answering && unlisted) start()
 })
-byId("retry").addEventListener("click", () =>
-  unreached !== null ? invoke("enter") : unlisted ? start() : invoke("refresh", { view: key(HOME) }),
-)
+byId("retry").addEventListener("click", async () => {
+  if (tooOld) {
+    // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
+    byId("why").textContent = await invoke("update").catch((error) => `${error}`)
+  } else if (unreached !== null) invoke("enter")
+  else start()
+})
 
-/// The user returned to the window, so what's showing asks again. While the window is on screen, what's showing
-/// asks again when a server says something changed.
+/// The user returned to the window, so what's showing asks again, and its apps' files are listed again, for a new
+/// version of any. While the window is on screen, what's showing asks again when a server says something changed.
 function returned() {
   if (signIn || unreached !== null) return
   invoke("visible", { onScreen: !document.hidden })
-  if (document.hidden) return
+  if (document.hidden) return void reload()
   if (unlisted) start()
+  else for (const who of listed) list(who)
   invoke("refresh", { view: key(HOME) })
   if (open.has(history.state)) invoke("refresh", { view: history.state })
 }
@@ -377,7 +433,7 @@ addEventListener("focus", returned)
 /// Lists this user's files, and shows the Home Screen once there are some to show them from.
 async function start() {
   await list()
-  if (unlisted) return
+  if (unlisted || tooOld) return
   const home = open.get(key(HOME))
   if (home) /** @type {Window} */ (home.frame.contentWindow).location.replace(address(home))
   else load(HOME)

@@ -23,6 +23,8 @@ export interface View {
   tapped?: number
   drawn?: boolean
   over?: boolean
+  /** Whether one of its plugins has a new version it hasn't loaded yet. */
+  stale?: boolean
 }
 
 /** A file a server lists for an app's page (MCP's `resources/list`). */

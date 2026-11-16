@@ -40,6 +40,8 @@ struct Views {
     started: Instant,
     /// Whether the window is on screen, so its views ask again when something changed.
     on_screen: AtomicBool,
+    /// Whether a server said something changed while the window wasn't on screen, so its views ask again once it is.
+    missed: AtomicBool,
     /// Whether this device hears its notifications yet: from when the window first shows its person's home.
     hearing: AtomicBool,
 }
@@ -194,16 +196,26 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
     done.map_err(|error| format!("{error:#}"))
 }
 
-/// Takes the latest builds for this device, as `one update` does. Gives what it says.
+/// Takes the latest builds for this device, as `one update` does, and starts again on them, as an app does once
+/// it has updated. Gives what it says, which a device that's also a server says before its program has taken them.
 #[tauri::command]
-async fn update(views: State<'_, Views>) -> Result<String, String> {
-    cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))
+async fn update(app: AppHandle, views: State<'_, Views>) -> Result<String, String> {
+    let said = cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))?;
+    if cli::serving::server().is_none() {
+        app.restart()
+    }
+    Ok(said)
 }
 
-/// Says whether the window is on screen. While it is, its views ask again when something changed.
+/// Says whether the window is on screen. While it is, its views ask again when something changed, and as it's back,
+/// if something changed while it wasn't.
 #[tauri::command]
-fn visible(views: State<'_, Views>, on_screen: bool) {
+async fn visible(views: State<'_, Views>, on_screen: bool) -> Result<(), ()> {
     views.on_screen.store(on_screen, Ordering::Relaxed);
+    if on_screen && views.missed.swap(false, Ordering::Relaxed) {
+        views.refresh().await
+    }
+    Ok(())
 }
 
 /// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
@@ -347,15 +359,20 @@ async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Op
         loaded: Mutex::default(),
         started: *app.state::<Instant>(),
         on_screen: AtomicBool::new(true),
+        missed: AtomicBool::new(false),
         hearing: AtomicBool::new(false),
     });
 
-    // The home screen says when no server is answering, which is what the last thing asked found.
+    // The window says when no server is answering, which is what the last thing asked found, and once one answers
+    // again, every view asks again, so it picks up what it missed where it was.
     let (handle, mut answering) = (app.clone(), client.connected());
     tauri::async_runtime::spawn(async move {
         while answering.changed().await.is_ok() {
             let now = *answering.borrow_and_update();
             drop(handle.emit("answering", now));
+            if now {
+                handle.state::<Views>().refresh().await
+            }
         }
     });
 
@@ -366,9 +383,14 @@ async fn entered(app: &AppHandle, why: Option<NotApproved>) -> anyhow::Result<Op
     tauri::async_runtime::spawn(async move {
         while let Ok(message) = told.recv().await {
             let views = handle.state::<Views>();
-            if message["method"] == "notifications/one/changed" && views.on_screen.load(Ordering::Relaxed) {
+            if message["method"] != "notifications/one/changed" {
+                continue;
+            }
+            if views.on_screen.load(Ordering::Relaxed) {
                 eprintln!("a server said something changed");
                 views.refresh().await
+            } else {
+                views.missed.store(true, Ordering::Relaxed)
             }
         }
     });

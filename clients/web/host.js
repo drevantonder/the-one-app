@@ -23,8 +23,11 @@ const emit = (event, payload) => hearing.get(event)?.forEach((heard) => heard({ 
 let apps
 /** @type {string} */
 let device
-/// Whether a server answered the last thing asked.
+/// Whether a server answered the last thing asked, how soon it's asked again while none does, and that ask.
 let answering = true
+let again = 1000
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let asking
 
 /// Asks the network's servers `method`, as this browser's person. → its result. A browser that's no longer
 /// signed in goes to sign in again.
@@ -46,9 +49,19 @@ async function mcp(method, params = {}) {
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return result
 }
+/// While no server answers, this browser asks again by itself, sooner at first and then less often, as what's
+/// outside a device comes and goes, and no person should have to ask for what was going to come back anyway. Once
+/// one answers, every open app asks again, for what it missed.
 /** @param {boolean} now */
 function said(now) {
+  if (now && !answering) for (const view of views.keys()) refresh(view)
   if (now !== answering) emit("answering", (answering = now))
+  if (now) again = 1000
+  else asking ??= setTimeout(() => {
+    asking = undefined
+    again = Math.min(again * 2, 30000)
+    mcp("ping").catch(() => {})
+  }, again)
 }
 
 /// What each open app was answered that only reads, by what it asked: it's answered that again until something
@@ -93,6 +106,22 @@ async function refresh(view) {
   if (changed) emit("changed", view)
 }
 
+/// The version of each plugin a server last listed, by who it's listed for.
+/** @type {Map<string | undefined, Map<string, string>>} */
+const versions = new Map()
+/// The open apps for `who` whose plugins have a new version since the last list, each as its address names it
+/// (`<plugin>[.<who, last part first>]`): a new UI library is every app's.
+/** @param {string | undefined} who @param {{ uri: string }[]} resources */
+function outdated(who, resources) {
+  const now = new Map(resources.map(({ uri }) => /** @type {[string, string]} */ (uri.slice("ui://".length).split("/", 2))))
+  const was = versions.get(who)
+  versions.set(who, now)
+  if (!was) return []
+  const changed = [...now].filter(([plugin, version]) => was.has(plugin) && was.get(plugin) !== version).map(([plugin]) => plugin)
+  const whose = who ? `.${who.split("/").reverse().join(".")}` : ""
+  return (changed.includes("ui") ? [...now.keys()] : changed).map((plugin) => plugin + whose)
+}
+
 /// What a browser can't do, as it's said where it's asked.
 /** @param {string} why */
 const cannot = (why) => () => Promise.reject(new Error(why))
@@ -114,9 +143,10 @@ const commands = {
     ;({ apps, device } = await answer.json())
     return {}
   },
-  /// The files a server lists for `who`. An open app loads its plugin's latest files as it's opened again.
+  /// The files a server lists for `who`, and the open apps that are out of date.
   async apps({ who }) {
-    return { ...(await mcp("resources/list", who ? { _meta: { for: who } } : {})), outdated: [] }
+    const listed = await mcp("resources/list", who ? { _meta: { for: who } } : {})
+    return { ...listed, outdated: outdated(who, listed.resources) }
   },
   async request({ view, method, params }) {
     if (await reads(view, method, params)) return read(view, method, params)

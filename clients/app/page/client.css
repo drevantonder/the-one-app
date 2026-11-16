@@ -20,8 +20,8 @@ body {
   user-select: none;
   overscroll-behavior: none;
 }
-/* A problem is shown above the Home Screen, as the UI library's `Problem` shows one: red for what needs the user now, and
-   the warning's colour for what can wait. It takes its own room, so it covers none of what this device kept. */
+/* A problem is shown above the Home Screen, as the UI library's `Problem` shows one, red for what needs the user now. It
+   takes its own room, so it covers none of what this device kept. */
 #problem {
   justify-self: center;
   box-sizing: border-box;
@@ -37,9 +37,6 @@ body {
   background: var(--card);
   color: var(--destructive);
   line-height: 1.4;
-}
-#problem[data-waits] {
-  color: var(--warning);
 }
 #problem svg {
   width: 1.25em;
@@ -62,6 +59,36 @@ body {
   justify-self: start;
   margin-top: 0.5rem;
 }
+/* What's passing shows at the foot of the window, over whatever's showing, where a mail or chat app says it's
+   reconnecting and a web app offers its update: it covers little and moves nothing. */
+#passing {
+  z-index: 2;
+  grid-area: 2 / 1;
+  justify-self: center;
+  align-self: end;
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  margin: 0 1rem 1rem;
+  pointer-events: none;
+}
+#passing > * {
+  pointer-events: auto;
+}
+/* No server answering for now is one quiet line. */
+#status {
+  margin: 0;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+#update p {
+  margin: 0;
+}
+
 /* The mark, in the middle of the window, over the frames: what shows while the client opens and home draws. */
 #opening {
   z-index: 1;
