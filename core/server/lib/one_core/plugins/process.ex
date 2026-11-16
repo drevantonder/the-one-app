@@ -109,6 +109,9 @@ defmodule OneCore.Plugins.Process do
   # code.
   @impl true
   def init({plugin, name, key, argument}) do
+    # What it logs is its plugin's, as a call's is (`OneCore.Plugins.Calls.running/2`), for no call in particular.
+    Logger.metadata(who: plugin)
+
     case held(plugin, name, key) do
       {:ok, held, module} ->
         {:ok, %{plugin: plugin, name: name, key: key, held: held, module: module}, {:continue, {__MODULE__, argument}}}

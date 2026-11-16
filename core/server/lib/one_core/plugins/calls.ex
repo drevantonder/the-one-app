@@ -223,7 +223,7 @@ defmodule OneCore.Plugins.Calls do
 
       case plugin && exported(plugin, function, length(arguments) + 1) do
         nil -> {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
-        function -> {:ok, apply(plugin, function, [call | arguments])}
+        function -> {:ok, running(call, fn -> apply(plugin, function, [call | arguments]) end)}
       end
     end)
   end
@@ -338,10 +338,29 @@ defmodule OneCore.Plugins.Calls do
 
   # A plugin's tool or hook, run by its module here or, in sandbox mode, in its own VM.
   defp invoked(versions, name, what, call) do
-    case {versions[name], what} do
-      {%Version{sandbox: true}, what} -> Sandbox.call(versions, name, what, call)
-      {version, {:tool, tool, inputs}} -> version.plugin.call(tool, inputs, call)
-      {version, {:hook, hook, about}} -> version.plugin.hook(hook, about, call)
+    running(call, fn ->
+      case {versions[name], what} do
+        {%Version{sandbox: true}, what} -> Sandbox.call(versions, name, what, call)
+        {version, {:tool, tool, inputs}} -> version.plugin.call(tool, inputs, call)
+        {version, {:hook, hook, about}} -> version.plugin.hook(hook, about, call)
+      end
+    end)
+  end
+
+  @doc """
+  Runs `fun`, a plugin's code for `call`, with the process saying so in its Logger metadata: the plugin as a who
+  (`who`), whoever it was `installed` for and whoever the call runs for (`subject`). Every call of a plugin runs in
+  it. It's how what a process logs, or is traced doing, is told apart by whose call it was, which only the call
+  knows: the plugin `server-debug` reads that metadata, and traces this function to hear a call begin and end.
+  """
+  def running(%Call{} = call, fun) do
+    was = Logger.metadata()
+    Logger.metadata(who: call.who, installed: call.installed, subject: call.subject)
+
+    try do
+      fun.()
+    after
+      Logger.reset_metadata(was)
     end
   end
 

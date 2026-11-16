@@ -196,7 +196,10 @@ defmodule OneCore.Plugin do
   What a plugin does shows in Telemetry, where it's installed, in Settings and to agents through its tools. Every tool
   call is a span there already, with whose it was, how long it took and how it ended, and so is every warning, error
   and crash said to `Logger`: Logger's info and debug aren't kept, so they can say more. A plugin records more by
-  calling Telemetry' tool `record`, whose skill says how.
+  calling Telemetry' tool `record`, whose skill says how. Whoever may deploy it looks into it as it runs on a server
+  with `server-debug`, where it's added: its Logger output at every level, its processes and a trace of a function,
+  of their own calls. `sensitive/0`, if a plugin gives `true`, says what it's given and keeps are secrets, as
+  Vault's are, and nothing looks into it.
 
   A plugin hooks into a moment that isn't one of its own tools being called, to hear of it, to change it or to
   decide it. `hooks/0` names the hooks it hooks into, and `hook/3` is called at each:
@@ -480,6 +483,7 @@ defmodule OneCore.Plugin do
   @callback title() :: String.t()
   @callback icon() :: String.t()
   @callback permissions() :: [String.t()]
+  @callback sensitive() :: boolean
   @optional_callbacks tools: 0,
                       call: 3,
                       apps: 0,
@@ -493,5 +497,6 @@ defmodule OneCore.Plugin do
                       essential: 0,
                       title: 0,
                       icon: 0,
-                      permissions: 0
+                      permissions: 0,
+                      sensitive: 0
 end

@@ -18,6 +18,10 @@ defmodule Encryption do
   @impl true
   def essential, do: true
 
+  # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are keys, and what they decrypt.
+  @impl true
+  def sensitive, do: true
+
   alias Encryption.Keys
   alias OneCore.{Artifact, Call, Hooks, Server, User}
   alias OneCore.Plugins.Calls

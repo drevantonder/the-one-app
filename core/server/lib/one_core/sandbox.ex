@@ -18,7 +18,8 @@ defmodule OneCore.Sandbox do
   The protocol, over the child's standard input and output, each message a frame of a 4-byte length:
 
   - This server sends Erlang terms, which the child trusts: `{:load, sets, target}`, the plugins' files to compile,
-    those it uses first; `{:call, id, what, about}`, a tool, a hook heard or a schedule to run, with who it's for;
+    those it uses first; `{:call, id, what, about}`, a tool, a hook heard, a schedule to run or what `server-debug`
+    asks (`debug/5`), with who it's for;
     `{:reply, request, result}`; and `{:cancel, id}`.
   - The child sends JSON, which never reaches `binary_to_term`: `{"answer": id, "ok" | "raised": ...}`,
     `{"request": n, "call": id, "op": ..., ...}`, one of the functions below, and `{"log": level, "text": ...}`.
@@ -169,6 +170,34 @@ defmodule OneCore.Sandbox do
     after
       GenServer.cast(child, {:ended, id})
     end
+  end
+
+  @doc """
+  Asks the VM of the plugin `name` among `versions`, the one for `owner`, what the plugin `server-debug` asks of it:
+  `request`, a map JSON holds, which its side of One Core answers (`OneCore.Sandbox.Child.Debug`). Gives what it
+  answered, or raises with why it didn't. Only a VM that's running is asked, unless `start` says to start one.
+  """
+  def debug(owner, versions, name, request, start \\ false) do
+    version = versions[name]
+
+    if not start and Registry.lookup(@registry, {owner, key(version, Map.delete(versions, name))}) == [],
+      do: raise("#{name} has no VM running for #{owner} on this server: its first call starts one")
+
+    call = %Call{
+      own: %Artifact{prefix: "#{owner}/own/#{name}/"},
+      installed: owner,
+      folder: nil,
+      server: Server.key(),
+      subject: owner,
+      actor: nil,
+      plugin: name,
+      who: version.artifact,
+      request: nil,
+      uses: %{},
+      forwarded: false
+    }
+
+    call(versions, name, {:debug, request}, call)
   end
 
   defp waited(child, port, id, call, context) do
@@ -369,7 +398,7 @@ defmodule OneCore.Sandbox do
   # The child of a version with the versions it uses, for whoever it's installed for, `owner`, started if there's
   # none: `{:ok, child, port, context}`, or `{:error, why}` with why it couldn't start or load.
   defp child(owner, version, used, files \\ nil) do
-    key = {version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
+    key = key(version, used)
 
     child =
       case Registry.lookup(@registry, {owner, key}) do
@@ -390,6 +419,9 @@ defmodule OneCore.Sandbox do
   catch
     :exit, _ -> {:error, "#{Path.basename(version.artifact)} stopped as it started"}
   end
+
+  # What tells a version's child from another's: its code, and the code of the versions it uses.
+  defp key(version, used), do: {version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
 
   # A child that runs once, to say what a set of files is, and stops.
   defp once(key, name, sets) do
@@ -514,10 +546,13 @@ defmodule OneCore.Sandbox do
 
     # Erlang's and Elixir's applications, and the server's libraries, but not the server's own code, which an
     # installed server's release keeps beside them.
+    # Recon, which a plugin is debugged with (`debug/5`), is among them in a release, and is added where it isn't.
     apps =
       for ebin <- Enum.uniq(Path.wildcard(Path.join(root, "lib/*/ebin")) ++ Path.wildcard(Path.join(elixir, "*/ebin"))),
           not String.starts_with?(Path.basename(Path.dirname(ebin)), "one_core-"),
           do: Path.dirname(ebin)
+
+    apps = Enum.uniq(apps ++ [to_string(:code.lib_dir(:recon))])
 
     ebins = for app <- apps, do: Path.join(app, "ebin")
 

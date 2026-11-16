@@ -8,7 +8,8 @@
 # someone with none adds none for themselves but in sandbox mode, where it calls only the tools it's permitted and a
 # stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
-# the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
+# the rest. Whoever may deploy a plugin looks into it as it runs, at their own calls alone, and not into a sensitive
+# one. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
 # a tuple, and a job that's being called when the server calling it is killed is called once by the standby. It says
 # what a check costs a call.
 #
@@ -585,6 +586,14 @@ for server in server standby; do
   echo "    $(timed $server bob notes_read "$reads")  bob reads it: one check, of bob, asked once"
   echo "    $(timed $server bob reader_read "$reads")  bob reads it with reader: a check of reader too, asked once"
 done
+
+say "Whoever may deploy a plugin looks into it as it runs, at only their own calls, and never into one that's sensitive"
+as owner for network install --plugin network/plugins/server-debug >/dev/null
+may as owner server-debug processes --plugin notes
+may as owner server-debug processes --plugin notes --for network
+refused as alice server-debug processes --plugin notes
+refused as owner server-debug logs --plugin notes --for users/alice
+refused as owner server-debug trace --plugin vault --module Vault
 
 say "A plugin that decides and breaks has refused, for whoever it was installed for, and has no say in its own removal"
 may as alice deploy --name stuck --files-from "$folder/stuck"

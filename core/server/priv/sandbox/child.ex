@@ -129,6 +129,7 @@ defmodule OneCore.Plugin do
   @callback schedule(struct, [map], (map -> term)) :: term
   @callback essential() :: boolean
   @callback permissions() :: [String.t()]
+  @callback sensitive() :: boolean
   @optional_callbacks tools: 0,
                       call: 3,
                       apps: 0,
@@ -140,7 +141,8 @@ defmodule OneCore.Plugin do
                       jobs: 0,
                       schedule: 3,
                       essential: 0,
-                      permissions: 0
+                      permissions: 0,
+                      sensitive: 0
 end
 
 defmodule OneCore.Service do
@@ -162,6 +164,8 @@ defmodule OneCore.Sandbox.Child do
     with pid when is_pid(pid) <- Process.whereis(:standard_error), do: Process.unregister(:standard_error)
     Process.register(sink, :standard_error)
     :logger.remove_handler(:default)
+    # Every level is said, as on a server, and only warnings and errors reach the server's log.
+    :logger.set_primary_config(:level, :all)
     :logger.add_handler(:server, __MODULE__.Logged, %{level: :warning})
     {:ok, _} = Registry.start_link(keys: :unique, name: __MODULE__.Processes)
     port = Port.open({:fd, 0, 1}, [:binary, :eof, packet: 4])
@@ -236,9 +240,11 @@ defmodule OneCore.Sandbox.Child do
   defp answer(port, id, {:answered, answer}), do: Port.command(port, JSON.encode!(%{"answer" => id, "ok" => answer}))
   defp answer(port, id, {:raised, why}), do: Port.command(port, JSON.encode!(%{"answer" => id, "raised" => why}))
 
-  # A call runs in a process of its own, which answers it.
+  # A call runs in a process of its own, which answers it. `server-debug` traces this function to hear one begin.
   defp called(id, what, about) do
     Process.put(:"$one_call", id)
+    # Whose call it is, as a server's process running one says (`OneCore.Plugins.Calls`).
+    Logger.metadata(installed: about["installed"], subject: about["subject"])
 
     result =
       try do
@@ -258,6 +264,47 @@ defmodule OneCore.Sandbox.Child do
 
   defp run({:tool, tool, inputs}, call), do: plugin().call(tool, inputs, call)
   defp run({:hook, hook, about}, call), do: plugin().hook(hook, about, call)
+
+  # What `server-debug` asks: its own code to run here, and what to ask it, as it would run on a server for a plugin
+  # there. A call here runs for whoever it says, and the plugin's processes kept between calls are its own. A plugin
+  # that says it's sensitive is never looked into.
+  defp run({:debug, %{"source" => source, "request" => request, "scope" => scope}}, _call) do
+    if function_exported?(plugin(), :sensitive, 0) and plugin().sensitive(),
+      do: raise("It's sensitive: what it's given and keeps are secrets, so nothing looks into it as it runs")
+
+    probe =
+      with nil <- :persistent_term.get({__MODULE__, :probe, source}, nil) do
+        probe =
+          Enum.find_value(Code.compile_string(source), fn {module, _} ->
+            function_exported?(module, :run, 2) && module
+          end)
+
+        :persistent_term.put({__MODULE__, :probe, source}, probe)
+        probe
+      end
+
+    label = fn pid ->
+      case Registry.keys(__MODULE__.Processes, pid) do
+        [{module, _key}] -> inspect(module)
+        [] -> nil
+      end
+    end
+
+    module = fn name ->
+      module = Module.concat([name])
+      if :persistent_term.get({__MODULE__, :files, module}, nil), do: module, else: raise("It has no module #{name}")
+    end
+
+    probe.run(request, %{
+      subject: scope["subject"],
+      who: nil,
+      own: if(scope["own"], do: &(label.(&1) != nil)),
+      label: label,
+      module: module,
+      name: & &1,
+      calls: {__MODULE__, :called, [:_, :_, %{"subject" => scope["subject"]}]}
+    })
+  end
 
   # A job is called by the server, as the clock: whichever plugin it uses keeps its schedule.
   defp run({:schedule, jobs}, call) do

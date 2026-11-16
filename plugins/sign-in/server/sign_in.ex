@@ -16,6 +16,10 @@ defmodule SignIn do
   @impl true
   def essential, do: true
 
+  # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are what people sign in with.
+  @impl true
+  def sensitive, do: true
+
   require Logger
   alias OneCore.{Artifact, Call, Edge}
 
