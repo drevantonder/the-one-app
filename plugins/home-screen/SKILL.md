@@ -31,8 +31,8 @@ instead, on no page. `launcher` is this one's.
 
 ## Accounts
 
-A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts. That's three tools, and
-nothing more:
+A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts. That's an icon and three
+tools, and nothing more:
 
 - `accounts` lists them, the default first: `[%{account: "sam@example.com", ok: true}]`, and when `ok` is false,
   `why`, a few words saying what's wrong. It may add fields of its own.

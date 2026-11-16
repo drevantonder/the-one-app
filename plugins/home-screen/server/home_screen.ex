@@ -17,7 +17,7 @@ defmodule HomeScreen do
   Every tool here is asked for whoever's page it is, as an app opened from that page is. What draws the pages is
   this plugin's `client/`: its app in the category `launcher`, which a client shows first.
 
-  A plugin has accounts when it has the tools `accounts`, `sign_in` and `sign_out` (SKILL.md). Those are in
+  A plugin has accounts when it has an icon and the tools `accounts`, `sign_in` and `sign_out` (SKILL.md). Those are in
   Accounts, a folder at the end of the first page, rather than on a page, unless they have an app of their own.
   """
   @behaviour OneCore.Plugin
@@ -39,9 +39,10 @@ defmodule HomeScreen do
     ]
   end
 
-  # The tools a plugin with accounts has (SKILL.md).
+  # The tools a plugin with accounts has, beside its icon (SKILL.md). A plugin that only serves other plugins' code
+  # (google-account) may have tools named the same, and no icon.
   @accounts ~w(accounts sign_in sign_out)
-  defp accounts?(tools), do: @accounts -- tools == []
+  defp accounts?(%{icon: icon}, tools), do: icon != nil and @accounts -- tools == []
 
   @impl true
   def tools do
@@ -212,7 +213,7 @@ defmodule HomeScreen do
 
     # A plugin with accounts is in Accounts, and signs one in on its `sign_in`'s page if it has one.
     accounts =
-      for plugin <- here, names = Enum.map(plugin.tools, & &1.name), accounts?(names) do
+      for plugin <- here, names = Enum.map(plugin.tools, & &1.name), accounts?(plugin, names) do
         page = Enum.find_value(plugin.tools, &(&1.name == "sign_in" && &1[:ui]))
         signs_in = if page, do: %{sign_in: "#{plugin.name}/#{page}"}, else: %{}
         Map.merge(%{plugin: plugin.plugin, name: plugin.name, title: plugin.title, icon: plugin.icon}, signs_in)
@@ -269,7 +270,7 @@ defmodule HomeScreen do
                 icon: plugin.icon,
                 subtitle: plugin.subtitle,
                 about: plugin.about,
-                accounts: accounts?(plugin.tools)
+                accounts: accounts?(plugin, plugin.tools)
               }
 
     Enum.sort_by(plugins, &String.downcase(&1.name))
