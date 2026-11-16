@@ -21,12 +21,13 @@ defmodule OneCore.Plugins.Deploy do
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
-  (`OneCore.App`). Gives its version's number and the compiler's warnings.
+  (`OneCore.App`). `from` is the git repo its files came from, if they did (`OneCore.Plugins.Store`). Gives its
+  version's number and the compiler's warnings.
   """
-  def deploy(owner, name, files), do: deploy(owner, name, files, fn _version -> true end)
+  def deploy(owner, name, files, from \\ nil), do: deploy(owner, name, files, from, fn _version -> true end)
 
-  # Deploys as `deploy/3` does, installing it for `owner` only where `install?` says so of the version.
-  defp deploy(owner, name, files, install?) do
+  # Deploys as `deploy/4` does, installing it for `owner` only where `install?` says so of the version.
+  defp deploy(owner, name, files, from, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
 
     with :ok <- check(name, files),
@@ -36,7 +37,7 @@ defmodule OneCore.Plugins.Deploy do
       install = install?.(version)
 
       with :ok <- if(install, do: fits(owner, name, version), else: :ok),
-           {:ok, number} <- Store.keep(artifact, name, kept, files),
+           {:ok, number} <- Store.keep(artifact, name, kept, files, from),
            :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
         listed(owner, name, version)
         if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}]), else: Version.unload(version)
@@ -52,14 +53,16 @@ defmodule OneCore.Plugins.Deploy do
 
   @doc """
   Every plugin anyone has deployed, with its apps as its latest version has them: `[%{plugin: artifact, apps:
-  [...]}]`. It's what lists every app there is, whether or not it's on anyone's page now.
+  [...]}]`. It's what lists every app there is, whether or not it's on anyone's page now. One that was removed
+  (Recently Deleted's `remove`) has no latest version, and isn't listed.
   """
   def deployed do
     blobs = Bucket.list(@deployed)
+    named = for blob <- blobs, do: Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob, capture: :all_but_first)
+    latest = for [owner, name] <- named, do: "#{owner}/plugins/#{name}/latest"
 
-    for {blob, {:ok, said, _tag}} <- Enum.zip(blobs, Bucket.read_all(blobs)) do
-      [_, owner, name] = Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob)
-
+    for {[owner, name], {:ok, said, _tag}, {:ok, _latest, _}} <-
+          Enum.zip([named, Bucket.read_all(blobs), Bucket.read_all(latest)]) do
       apps =
         for app <- JSON.decode!(said)["apps"],
             do: %{
@@ -143,7 +146,7 @@ defmodule OneCore.Plugins.Deploy do
     with true <- files != %{} || {:error, "There are no files to deploy it from"},
          {installed, _tag} = Installed.read(@network),
          install? = &(&1.essential or is_map_key(installed, name)),
-         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, install?),
+         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, install?),
          :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")
       deploying(name, nil)

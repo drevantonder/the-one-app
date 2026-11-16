@@ -15,7 +15,7 @@ defmodule OneCore.Tools do
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
   """
-  alias OneCore.{Artifact, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
+  alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Plugins.{Installed, Calls, Deploy, Store}
 
   @tools [
@@ -27,7 +27,8 @@ defmodule OneCore.Tools do
       once, with its tools listed and called as <name>_<tool>. If either fails, it says why, and the version already
       running stays.
       The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
-      or for the network, it's theirs.
+      or for the network, it's theirs. `recently-deleted remove --artifact <it>` removes one nobody has installed.
+      `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       """,
       inputs: %{
         type: "object",
@@ -48,6 +49,18 @@ defmodule OneCore.Tools do
                 }
               ]
             }
+          },
+          from: %{
+            type: "object",
+            description:
+              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, and the `commit`",
+            properties: %{
+              source: %{type: "string"},
+              ref: %{type: ["string", "null"]},
+              commit: %{type: "string", pattern: "^[0-9a-f]{40}$"}
+            },
+            required: ["source", "commit"],
+            additionalProperties: false
           }
         },
         required: ["name", "files"]
@@ -68,9 +81,23 @@ defmodule OneCore.Tools do
       }
     },
     %{
+      name: "plugins",
+      read_only: true,
+      description: """
+      Lists the plugins installed for you and for the network, as `npm ls` does packages: asked for a group, for it
+      and the network. Each with the name it's installed by, who it's installed `for`, its artifact (`plugin`), its
+      latest version, the hash of the files that version was deployed from (`source`), and, if it was installed from
+      a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, and the `hash` of the files
+      as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
+      have moved on upstream or changed since, and `one plugins update` installs the newer.
+      """,
+      inputs: %{type: "object", properties: %{}}
+    },
+    %{
       name: "install",
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
+      `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
       It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
       with you first, as a viewer. The plugins it uses are installed for you first.
@@ -291,13 +318,13 @@ defmodule OneCore.Tools do
 
   # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
   # deployed for.
-  defp run("deploy", %{"name" => name, "files" => files}, {_by, who} = asked, forward) do
+  defp run("deploy", %{"name" => name, "files" => files} = inputs, {_by, who} = asked, forward) do
     case Plugins.plugin(who, name) do
       nil -> at(who, forward) && reaches!(asked, who, "owner")
       plugin -> at(User.owner(plugin), forward) && reaches!(asked, plugin, "editor")
     end
 
-    case Deploy.deploy(who, name, Store.received(files)) do
+    case Deploy.deploy(who, name, Store.received(files), inputs["from"]) do
       {:ok, number, ""} -> "#{name} is running, at version #{number}."
       {:ok, number, warnings} -> "#{name} is running, at version #{number}. The compiler warns:\n#{warnings}"
       {:error, why} -> raise why
@@ -313,6 +340,29 @@ defmodule OneCore.Tools do
       _ ->
         raise "There's no plugin named #{name}"
     end
+  end
+
+  defp run("plugins", _inputs, {_by, who}, _pass) do
+    installed =
+      for at <- Plugins.chain(who), {name, version} <- Enum.sort(Plugins.versions([at])), do: {at, name, version}
+
+    latest = Bucket.read_all(for {_at, _name, version} <- installed, do: version.artifact <> "/latest")
+
+    plugins =
+      for {{at, name, version}, read} <- Enum.zip(installed, latest) do
+        about = with {:ok, latest, _tag} <- read, do: JSON.decode!(latest), else: (_ -> %{})
+
+        %{
+          name: name,
+          for: at,
+          plugin: version.artifact,
+          version: about["number"],
+          source: about["source"],
+          from: about["from"]
+        }
+      end
+
+    JSON.encode!(%{for: User.owner(who), plugins: plugins})
   end
 
   defp run("install", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
@@ -463,7 +513,9 @@ defmodule OneCore.Tools do
   defp opens!({by, _who} = asked, plugin) do
     with {:refuse, why} <- reaches(asked, plugin, "viewer") do
       in_use =
-        for of <- [User.owner(plugin) | Installed.installed_for(plugin)], of == "network" or match?("groups/" <> _, of), do: of
+        for of <- [User.owner(plugin) | Installed.installed_for(plugin)],
+            of == "network" or match?("groups/" <> _, of),
+            do: of
 
       member = &(Hooks.validate("reach", %{"who" => by, "relation" => "member", "artifact" => &1}, {by, &1}) == :ok)
       if not Enum.any?(Enum.uniq(in_use), member), do: raise(why)

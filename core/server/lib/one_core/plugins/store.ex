@@ -6,7 +6,9 @@ defmodule OneCore.Plugins.Store do
   which set it runs now, with that version's number. A deploy replaces `latest` only if it's unchanged, so two
   deploys at once can't both be the plugin's next version, and first writes the version it replaces to
   `versions/<number>`, so a plugin keeps its history. `latest` names the files it was deployed from too, by their
-  hash, its `source`.
+  hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
+  it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
+  version after keeps its `from`, so one whose `source` isn't that hash was changed since.
   """
   require Logger
   alias OneCore.Bucket
@@ -60,16 +62,23 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc "The hash of the files the plugin `artifact`'s latest version was deployed from, or `nil` if there's none."
-  def latest_source(artifact) do
-    with {:ok, latest, _tag} <- Bucket.read("#{artifact}/latest"), do: JSON.decode!(latest)["source"], else: (_ -> nil)
+  def latest_source(artifact), do: about(artifact)["source"]
+
+  @doc """
+  What the plugin `artifact`'s latest version says of itself: its `number`, `code`, `source` and, where the files came
+  from a git repo, `from`. Empty if there's no such plugin.
+  """
+  def about(artifact) do
+    with {:ok, latest, _tag} <- Bucket.read("#{artifact}/latest"), do: JSON.decode!(latest), else: (_ -> %{})
   end
 
   @doc """
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
-  latest is there. Gives the version's number.
+  latest is there, and `from`, the git repo its files came from, is kept with it (`nil` keeps what the version before
+  said). Gives the version's number.
   """
-  def keep(artifact, name, files, deployed) do
+  def keep(artifact, name, files, deployed, from) do
     code = Version.code(files)
     for {path, text} <- files, do: Bucket.write("#{artifact}/code/#{code}/#{path}", text)
 
@@ -78,7 +87,9 @@ defmodule OneCore.Plugins.Store do
 
     was = latest(artifact)
     number = if was, do: elem(was, 0) + 1, else: 1
-    next = JSON.encode!(%{number: number, code: code, source: Version.code(deployed)})
+    source = Version.code(deployed)
+    from = if from, do: Map.put(from, "hash", source), else: about(artifact)["from"]
+    next = JSON.encode!(Map.reject(%{number: number, code: code, source: source, from: from}, &is_nil(elem(&1, 1))))
 
     wrote =
       with {before, code, tag} <- was do

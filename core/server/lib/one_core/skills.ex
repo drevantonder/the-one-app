@@ -6,7 +6,8 @@ defmodule OneCore.Skills do
 
   A plugin's skill is the `SKILL.md` at the root of its folder, named as the plugin is. A plugin offers more as
   folders of `skills/`, each a skill named as its folder: its `SKILL.md`, and any other files in the folder, which
-  the skill points to. One Core has one of its own, `building-plugins`, which is `OneCore.Plugin.skill/1`.
+  the skill points to. One Core has two of its own: `building-plugins`, which is `OneCore.Plugin.skill/1`, and
+  `installing-plugins`, which is here.
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
@@ -15,12 +16,45 @@ defmodule OneCore.Skills do
   A skill's path ends with its name, as the extension has it, and what comes before is the plugin's, as it's found
   where it runs: the name it's installed by there, then the plugin's own name, as its folder is. So a plugin's skill is
   `skill://<installed by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
-  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own is `skill://building-plugins/SKILL.md`,
-  the only skill whose path is its name alone. No two plugins are installed by one name, so no skill's address is
+  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own are `skill://building-plugins/SKILL.md`
+  and `skill://installing-plugins/SKILL.md`, the only skills whose paths are their names alone. No two plugins are installed by one name, so no skill's address is
   another's.
   """
   alias OneCore.{Plugin, Plugins}
   alias OneCore.Plugins.{Store, Version}
+
+  @installing """
+  ---
+  name: installing-plugins
+  description: Read before installing a plugin from a git repo (`one install <owner>/<repo> --plugin <name>`), or updating one (`one plugins update`). It says how to check it for the person first.
+  ---
+
+  A plugin from a git repo is code someone else wrote, and its server code runs on the person's own machines with
+  everything they can reach: their files, the network, their other plugins' tools and the Vault items it asks for.
+  Nothing sandboxes it. So you check it for them, as a colleague would before running a stranger's script, and
+  install it only once they say yes.
+
+  1. `one install <owner>/<repo> --list` fetches the repo and lists its plugins, and says the folder it's in on this
+     device. Pin what you read: `<owner>/<repo>@<commit>`, which `--list` says, so what you install is what you read.
+  2. Read the plugin's folder there: every file of `server/` (its tools, what each does with its inputs, what it
+     reads and writes, and anything it starts or calls out to: `System.cmd`, `Port`, `:httpc`, `Req`, files outside
+     its own artifact), its `edge/` function if it has one (what comes in from the internet, and what it lets in),
+     the plugins it `uses` and the Vault items it asks for. `server/nif/` is native code: say so, and read its source.
+  3. Tell the person, in a few plain sentences: what it does, what it reaches, anything that surprised you (code that
+     sends data somewhere it doesn't need to, that's hidden or obfuscated, that downloads and runs more code, or that
+     does more than its `SKILL.md` says), and whether it has native code. Then ask whether to install it.
+  4. On their yes, `one install <owner>/<repo>@<commit> --plugin <name>` (`ONE_FOR=groups/<name>` or `network` for a
+     group or everyone). It's their own copy, theirs to change, and the network keeps where it came from. In a
+     network's repo, `plugins.lock` records it, and `one install` there installs everything it records again.
+
+  An update is read the same way: `one plugins check` says which have moved on, and `git -C <its folder> diff
+  <installed commit> <new commit> -- plugins/<name>` shows what changed. Tell the person what's new in what it
+  reaches before `one plugins update <name>`. One changed in the network since it was installed is left as it is
+  unless they say to overwrite it (`--force`): bring their change across by hand if they want both.
+
+  A plugin with a NIF that isn't built for the network's servers stops with what to build, for which machines, and
+  the command: build it from the source you read, then install again.
+  """
 
   @own "building-plugins"
 
@@ -112,6 +146,7 @@ defmodule OneCore.Skills do
     case found do
       [] -> :absent
       [{_skill, :own, _at}] -> {:ok, Plugin.skill(Plugins.running(who))}
+      [{_skill, {:own, text}, _at}] -> {:ok, text}
       [{skill, {artifact, code}, at}] -> Store.file(artifact, code, skill.at <> at)
     end
   end
@@ -119,6 +154,7 @@ defmodule OneCore.Skills do
   # Each skill by its path, with where its files are: One Core's own, then the plugins' by the names they're installed by.
   defp found(who) do
     {:ok, own} = read(@own, Plugin.skill(Plugins.running(who)))
+    {:ok, installing} = read("installing-plugins", @installing)
 
     plugins =
       for {installed, version} <- Enum.sort(Plugins.running(who)), skill <- Version.skills(version) do
@@ -126,7 +162,11 @@ defmodule OneCore.Skills do
         {path, skill, {version.artifact, version.code}}
       end
 
-    [{@own, Map.merge(own, %{at: "", files: []}), :own} | plugins]
+    [
+      {@own, Map.merge(own, %{at: "", files: []}), :own},
+      {"installing-plugins", Map.merge(installing, %{at: "", files: []}), {:own, @installing}}
+      | plugins
+    ]
   end
 
   defp listed(path, skill) do
