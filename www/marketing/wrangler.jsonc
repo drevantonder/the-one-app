@@ -1,0 +1,7 @@
+{
+  "name": "one-www-marketing",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  // One static page; anything else is its 404.
+  "assets": { "directory": "public", "not_found_handling": "404-page" }
+}

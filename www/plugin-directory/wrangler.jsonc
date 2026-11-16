@@ -1,0 +1,13 @@
+{
+  "name": "one-www-plugin-directory",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  // Its stylesheet, at /plugins/style.css.
+  "assets": { "directory": "public" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "one-www-plugin-directory", "database_id": "e1b04493-e3c5-4a5f-8258-6063098fce2f" }
+  ],
+  // At most 10 installs a minute from one address, counted by Cloudflare's rate limiter, which keeps nothing of ours.
+  "ratelimits": [{ "name": "INSTALLS", "namespace_id": "4801", "simple": { "limit": 10, "period": 60 } }]
+}

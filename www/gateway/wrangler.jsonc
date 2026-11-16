@@ -1,0 +1,11 @@
+{
+  "name": "one-www-gateway",
+  "main": "gateway.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  "routes": [{ "pattern": "one.drevan.me", "custom_domain": true }],
+  "services": [
+    { "binding": "PLUGIN_DIRECTORY", "service": "one-www-plugin-directory" },
+    { "binding": "MARKETING", "service": "one-www-marketing" }
+  ]
+}

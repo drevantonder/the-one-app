@@ -18,3 +18,4 @@ erl_crash.dump
 /core/edge/presigner/secrets
 /plugins/*/edge/secrets
 /clients/web/dist/
+/www/plugin-directory/seed.sql

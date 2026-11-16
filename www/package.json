@@ -1,0 +1,9 @@
+{
+  "name": "www",
+  "description": "The One App's own website at one.drevan.me: the gateway, the marketing page and the plugin directory, each a Worker.",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "^4.160.0"
+  }
+}

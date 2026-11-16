@@ -1,0 +1,78 @@
+/* The UI library's look (ui/src/tokens.css): shadcn's neutral, light and dark, the system's own type. */
+:root {
+  color-scheme: light dark;
+  --background: light-dark(oklch(1 0 0), oklch(0.145 0 0));
+  --foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
+  --primary: light-dark(oklch(0.205 0 0), oklch(0.922 0 0));
+  --primary-foreground: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
+  --muted: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --muted-foreground: light-dark(oklch(0.54 0 0), oklch(0.708 0 0));
+  --accent: light-dark(oklch(0.97 0 0), oklch(0.269 0 0));
+  --border: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 10%));
+  --input: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 15%));
+  --ring: light-dark(oklch(0.45 0 0), oklch(0.708 0 0));
+  --radius: 0.625rem;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+*, ::before, ::after { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font: 0.9375rem / 1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, p, ol { margin: 0; }
+a { color: inherit; }
+header { max-width: 48rem; margin: 0 auto; padding: 1rem 1rem 0; font-size: 0.875rem; font-weight: 600; }
+header a { text-decoration: none; }
+main { max-width: 48rem; margin: 0 auto; padding: 2rem 1rem 3rem; display: grid; gap: 1rem; }
+h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+h2 { font-size: 1rem; font-weight: 600; margin-top: 0.75rem; }
+.lead, .source, .back, .empty, .trust { color: var(--muted-foreground); }
+.back { font-size: 0.875rem; }
+.back a { text-decoration: none; }
+.back a::before { content: "‹ "; }
+.source a { text-decoration: none; }
+.source a:hover, .back a:hover { text-decoration: underline; }
+.trust { font-size: 0.8125rem; border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1.5rem; }
+code { font-family: var(--font-mono); font-size: 0.875em; }
+
+.controls { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+input[type="search"] {
+  flex: 1 1 14rem; height: 2.25rem; padding: 0 0.75rem; font: inherit; font-size: 0.875rem; color: inherit;
+  background: transparent; border: 1px solid var(--input); border-radius: var(--radius); outline: none;
+}
+input[type="search"]:focus-visible { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent); }
+.tabs { display: inline-flex; padding: 3px; background: var(--muted); border-radius: var(--radius); }
+.tabs a {
+  padding: 0.25rem 0.75rem; border-radius: calc(var(--radius) - 2px); font-size: 0.875rem; font-weight: 500;
+  text-decoration: none; color: var(--muted-foreground);
+}
+.tabs a[aria-current] { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px 0 oklch(0 0 0 / 8%); }
+
+.plugins { list-style: none; padding: 0; }
+.plugins a {
+  display: grid; grid-template-columns: 1.75rem 1fr auto; gap: 0.75rem; align-items: baseline;
+  padding: 0.75rem 0.5rem; margin: 0 -0.5rem; border-radius: var(--radius); text-decoration: none;
+}
+.plugins a:hover { background: var(--accent); }
+.rank, .count { color: var(--muted-foreground); font-variant-numeric: tabular-nums; font-size: 0.875rem; }
+.count { text-align: end; }
+.name { font-weight: 600; }
+.what .source { font-size: 0.8125rem; }
+.description { display: block; color: var(--muted-foreground); font-size: 0.875rem; margin-top: 0.125rem;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.command {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  background: var(--muted); border-radius: var(--radius);
+}
+.command code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.command button { flex: none; }
+.command button {
+  height: 2rem; padding: 0 0.75rem; font: inherit; font-size: 0.8125rem; font-weight: 500; color: inherit; cursor: pointer;
+  background: var(--background); border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px);
+}
+.command button:hover { background: var(--accent); }
