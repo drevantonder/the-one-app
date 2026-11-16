@@ -10,8 +10,8 @@ defmodule OneCore.Sandbox do
   installed for, with the versions of the plugins it uses, which run inside it as it (`database` among them, its
   SQLite too). So a child only ever runs one owner's calls, and what a stranger's plugin keeps from one person's call
   isn't there in another's: its handles are its own, and a request for an artifact or a call that isn't its own is
-  refused. It's started by the first call, compiles the code itself, behind the wall, and stops after five idle
-  minutes. One that stops, or is stopped, fails the calls it was running and nothing else; the next call starts
+  refused. It's started by the first call, compiles the code itself, behind the wall, and stops after a minute
+  idle. One that stops, or is stopped, fails the calls it was running and nothing else; the next call starts
   another. What the first child of a version compiled is kept on this machine, and every owner's next child loads it
   read-only instead.
 
@@ -44,7 +44,7 @@ defmodule OneCore.Sandbox do
   @supervisor __MODULE__.Supervisor
 
   # How long a child that runs no call is kept, in milliseconds.
-  @idle :timer.minutes(5)
+  @idle :timer.minutes(1)
   # How long a call waits on its child saying nothing, in milliseconds, before it's cancelled.
   @silent :timer.minutes(2)
   # The largest frame a child may send, and the most memory it may have.

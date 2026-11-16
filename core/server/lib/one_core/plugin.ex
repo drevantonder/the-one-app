@@ -25,7 +25,7 @@ defmodule OneCore.Plugin do
   `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks that hear. The plugins it uses
   run in its VM too, as it, `database` among them. It has no services, no hooks that change or decide, no other
   plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
-  which goes when the VM stops, after a few idle minutes. Deploying one that uses what sandbox mode doesn't offer
+  which goes when the VM stops, a minute after its last call. Deploying one that uses what sandbox mode doesn't offer
   says each, with its file and line, and what to do instead.
 
   One module in the plugin, in a file of `server/` such as `server/hello.ex`, says `@behaviour OneCore.Plugin`, and
