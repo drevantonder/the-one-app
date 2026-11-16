@@ -6,7 +6,7 @@ metadata:
   about: "Gives your AI a Chrome of its own on your machine, signed in to nothing, to open pages, click and fill in forms. You can watch it as it goes."
 ---
 
-Chrome is a Chromium of your own, in a container on the user's machine, signed in to nothing, on a screen of its
+Chrome is a Google Chrome of your own, in a container on the user's machine, signed in to nothing, on a screen of its
 own that its person can watch. Use it for anything that's a web page. For anything that isn't (a desktop app, a phone), or a site that
 blocks automated browsers, use Computer Use instead. To only fetch a page's HTML or an API, an HTTP request is
 cheaper still.

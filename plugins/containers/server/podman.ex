@@ -203,6 +203,26 @@ defmodule Containers.Podman do
     :ok
   end
 
+  @doc """
+  Streams the container's display as WebRTC video, to the app whose SDP offer `request` has, as JSON, with the ICE
+  servers to use: the image desktop's `webrtc-stream` answers it and carries on by itself until the app goes. Gives
+  the SDP answer.
+  """
+  def stream(service, id, request) do
+    touch(service, id)
+    file = "/tmp/webrtc-stream-#{System.unique_integer([:positive])}.json"
+
+    within(service, fn folder ->
+      File.write!(Path.join(folder, "request"), request)
+      podman!(service, ["cp", Path.join(folder, "request"), "#{id}:#{file}"])
+    end)
+
+    case run(service, ["exec", id, "webrtc-stream", file], 30) do
+      %{exit: 0, stdout: answer} -> answer
+      %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
+    end
+  end
+
   @doc "Runs xdotool in the container, on its display, with `args` as its words, and gives what it printed."
   def xdotool(service, id, args) do
     touch(service, id)
@@ -240,12 +260,21 @@ defmodule Containers.Podman do
     }
   end
 
-  # The image to create from: the plugin's own `desktop`, built here from its Containerfile when it changed, or as
-  # it's named, which Podman pulls if it isn't here.
+  # The image to create from: the plugin's own `desktop`, built here from its Containerfile when it changed, and
+  # again each week from scratch, for Google Chrome's security fixes, which it downloads as it's built; or as it's
+  # named, which Podman pulls if it isn't here. A desktop's build removes the ones before it, but those a container
+  # still uses, which Podman refuses to remove: a later build does.
   defp image(service, "desktop") do
     folder = OneCore.Service.folder(service, "server/desktop")
-    image = "localhost/containers-desktop:" <> Path.basename(folder)
-    if run(service, ["image", "exists", image], 10).exit != 0, do: podman!(service, ["build", "-t", image, folder], 900)
+    {year, week} = :calendar.iso_week_number()
+    image = "localhost/containers-desktop:#{Path.basename(folder)}-#{year}-#{week}"
+
+    if run(service, ["image", "exists", image], 10).exit != 0 do
+      podman!(service, ["build", "--pull=newer", "--no-cache", "-t", image, folder], 900)
+      built = podman!(service, ["images", "--format", "{{.Repository}}:{{.Tag}}", "localhost/containers-desktop"])
+      for before <- String.split(built, "\n", trim: true), before != image, do: run(service, ["rmi", before], 60)
+    end
+
     image
   end
 

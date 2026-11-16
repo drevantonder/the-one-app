@@ -1,6 +1,6 @@
 ---
 name: containers
-description: Read before creating or using a Linux container on the user's machines, as a scratch machine, a dev environment, somewhere to run Chromium or a desktop to look at.
+description: Read before creating or using a Linux container on the user's machines, as a scratch machine, a dev environment, somewhere to run Chrome or a desktop to look at.
 metadata:
   subtitle: "Linux machines when you need one"
   about: "Starts Linux containers on your own machines: somewhere to install, build and try things without touching your devices. Open one's desktop to watch."
@@ -14,11 +14,11 @@ machines that run them.
   large). A shell image such as `docker.io/library/ubuntu:24.04` keeps running with no command. It's started at
   once: then `exec` runs commands in it, `read_file` and `write_file` move files, and `logs` reads what its own
   command printed. `list` shows yours and their state.
-- `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvnc, `DISPLAY=:99`, which `screen` resizes) with Openbox and Chromium on
-  it, the build Playwright pins. A running one is a screen in Computer Use, called what the container is: look at
-  it and act on it there. Chromium's DevTools Protocol is on port 9222 inside it (`exec` with `curl -s
-  127.0.0.1:9222/json`), and `playwright-mcp` is Playwright's MCP server, to start on it. The first desktop on a
-  machine takes a few minutes to build.
+- `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvnc, `DISPLAY=:99`, which `screen` resizes) with Openbox and Google
+  Chrome on it, downloaded from Google as each machine builds the image, and again each week. A running one is a
+  screen in Computer Use, called what the container is: look at it and act on it there. Chrome's DevTools Protocol
+  is on port 9222 inside it (`exec` with `curl -s 127.0.0.1:9222/json`), and `playwright-mcp` is Playwright's MCP
+  server, to start on it. The first desktop on a machine takes a few minutes to build.
 - `commit` makes an image of a prepared container, and `create` from that image's name makes throwaway copies of
   it on the same machine. `remove_image` removes it.
 - A container reaches the internet but nothing of the machine's own: no files, no host network, no privileges.

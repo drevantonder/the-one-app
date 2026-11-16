@@ -15,7 +15,7 @@ defmodule Containers do
   @container %{type: "string", description: "the container, by its name"}
 
   @impl true
-  def uses, do: ["database"]
+  def uses, do: ["database", "webrtc"]
 
   @impl true
   def jobs, do: [%{tool: "stop_idle", every: 3600}]
@@ -60,7 +60,7 @@ defmodule Containers do
             image: %{
               type: "string",
               description:
-                ~s(the image: "desktop" for a Linux desktop with Chromium on a display you can screenshot, one you made with `commit`, or any from a registry, like "docker.io/library/ubuntu:24.04")
+                ~s(the image: "desktop" for a Linux desktop with Google Chrome on a display you can screenshot, one you made with `commit`, or any from a registry, like "docker.io/library/ubuntu:24.04")
             },
             name: %{type: "string", pattern: "^[a-z0-9][a-z0-9_.-]*$", description: "its name, unique among yours"},
             description: %{type: "string", description: "what it's for, in a few words, for whoever sees it later"},
@@ -178,17 +178,18 @@ defmodule Containers do
         name: "screenshot",
         read_only: true,
         description:
-          "A picture of a container's screen: the X display its DISPLAY names, as a PNG. A container of the image desktop has one, 1280×800 until `screen` resizes it, with Chromium on it; `exec` with xdotool moves, clicks and types there.",
+          "A picture of a container's screen: the X display its DISPLAY names, as a PNG. A container of the image desktop has one, 1280×800 until `screen` resizes it, with Google Chrome on it; `exec` with xdotool moves, clicks and types there.",
         inputs: one()
       },
       %{
         name: "screen",
         description:
-          "Look at or act on a container's screen, for Computer Use, whose tools are how agents use a screen: they say what each action takes. `resize` makes the display width × height, and a maximised window follows it.",
+          "Look at or act on a container's screen, for Computer Use, whose tools are how agents use a screen: they say what each action takes. `resize` makes the display width × height, and a maximised window follows it. `stream` is for a person's app to show it as live video over WebRTC (the image desktop's): with no `offer`, the ICE servers to connect with; with the app's whole SDP `offer`, {answer}, the screen's.",
         inputs:
           one(
             %{
-              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key resize)},
+              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key resize stream)},
+              offer: %{type: "string", description: "for stream: the app's SDP offer, with its candidates"},
               x: %{type: "integer", minimum: 0},
               y: %{type: "integer", minimum: 0},
               button: %{type: "string", enum: ~w(left right middle)},
@@ -336,6 +337,18 @@ defmodule Containers do
     "Resized to #{width}×#{height}"
   end
 
+  # A stream's ICE servers, for the app, then, with its offer, the sender in the container (`webrtc-stream`) started
+  # with its own, and its answer. Both are given only to whoever reaches the container, as everything here is.
+  def call("screen", %{"action" => "stream"} = inputs, call) do
+    c = container!(call, inputs)
+    ice_servers = Call.tool(call, "webrtc", "ice_servers", %{})
+
+    case inputs["offer"] do
+      nil -> ice_servers
+      offer -> %{"answer" => Service.call(call, Podman, :stream, [c.id, JSON.encode!(Map.put(ice_servers, "offer", offer))], c.server)}
+    end
+  end
+
   def call("screen", %{"action" => action} = inputs, call) do
     on(call, inputs, :xdotool, [xdotool(action, inputs)])
     did(action, inputs)
@@ -446,11 +459,13 @@ defmodule Containers do
 
   # Runs a function of the service on the container called `inputs["container"]`, where it is.
   defp on(call, inputs, function, arguments \\ []) do
-    name = inputs["container"]
-    c = Enum.find(containers(call), &(&1.name == name)) || raise "You have no container called #{name}"
+    c = container!(call, inputs)
     answer = Service.call(call, Podman, function, [c.id | arguments], c.server)
-    if answer == "ok", do: "#{String.capitalize(to_string(function))}: #{name}", else: answer
+    if answer == "ok", do: "#{String.capitalize(to_string(function))}: #{c.name}", else: answer
   end
+
+  defp container!(call, %{"container" => name}),
+    do: Enum.find(containers(call), &(&1.name == name)) || raise("You have no container called #{name}")
 
   # The containers this call may use, on every machine that's up.
   defp containers(call) do

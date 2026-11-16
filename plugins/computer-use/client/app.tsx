@@ -32,7 +32,13 @@ function Detail(props: { screen: AgentScreen }) {
   return (
     <Screen heading={s().name} back onBack={() => setOpen()}>
       <Show when={address(s())} keyed>
-        {(screen) => <LiveScreen label={`${s().name} as it is now`} watch screen={(inputs) => call("computer-use_screenshot", { screen, ...inputs })} />}
+        {(screen) => (
+          <LiveScreen
+            label={`${s().name} as it is now`}
+            watch
+            screen={({ action, ...inputs }) => call(action === "stream" ? "computer-use_stream" : "computer-use_screenshot", { screen, ...inputs })}
+          />
+        )}
       </Show>
       <Section heading="Last Used">
         <List>

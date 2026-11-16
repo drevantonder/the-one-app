@@ -3,7 +3,7 @@ defmodule ChromeProfiles do
   Chrome Profiles: browser profiles, like Personal and Work, that a Chrome browser starts from, signed in to what its
   person signed in to.
 
-  A profile is Chromium's whole user data dir, as Chrome hands it over: a gzipped tarball without caches. It's kept
+  A profile is Chrome's whole user data dir, as Chrome hands it over: a gzipped tarball without caches. It's kept
   as a blob of an artifact this plugin makes for its person (`profiles`), named at random, encrypted with AES-256-GCM
   under a key made for that save. The key, the blob's name, the sites it was used on with when, and when it was last saved
   are an item in the person's own Vault, `Chrome profile: <name>`, which this plugin keeps (`keep/4`), each a secret
@@ -256,12 +256,12 @@ defmodule ChromeProfiles do
   end
 
   # The sites a profile was used on, from its History, newest first, at most 30: each one's registrable domain
-  # (github.com, example.com.au) with when it was last visited, in ms since 1970. Chromium counts in microseconds
+  # (github.com, example.com.au) with when it was last visited, in ms since 1970. Chrome counts in microseconds
   # since 1601. A short list of second-level labels stands in for the public suffix list.
   @second ~w(com co org net gov edu ac id asn)
   defp sites(call, container) do
     query = "select url, last_visit_time / 1000 - 11644473600000 from urls where url like 'http%'"
-    # Chromium leaves what it wrote last in History's write-ahead log, which a copy of both opens with.
+    # Chrome leaves what it wrote last in History's write-ahead log, which a copy of both opens with.
     copy = "cp /root/.chromium/Default/History /tmp/history && cp /root/.chromium/Default/History-wal /tmp/history-wal"
     command = ~s{(#{copy}; sqlite3 -separator ' ' /tmp/history "#{query}"; rm -f /tmp/history*) 2>/dev/null}
     %{"stdout" => out} = Call.tool(call, "containers", "exec", %{"container" => container, "command" => command})

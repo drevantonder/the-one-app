@@ -1,6 +1,6 @@
 defmodule Chrome do
   @moduledoc """
-  Chrome: a Chromium in a container of the Containers plugin, of its image `desktop`, headed on that container's
+  Chrome: Google Chrome in a container of the Containers plugin, of its image `desktop`, headed on that container's
   display, and driven by Microsoft's Playwright MCP server, which runs beside it and reaches it over its DevTools
   Protocol. Its tools are that server's, named as it names them without `browser_`, and each takes the browser's
   `session`.
@@ -25,16 +25,16 @@ defmodule Chrome do
   @user_data "/root/.chromium"
   # Where a user data dir is handed over, as a gzipped tarball, in the browser's container.
   @tarball "/tmp/user-data.tar.gz"
-  # Starts Chromium (the image's `browser`), at the page given or a new tab, and the MCP server beside it: HTTP on the container's
-  # interfaces, from whatever host `request` names it by, on Chromium's DevTools Protocol, with one browser context
+  # Starts Chrome (the image's `browser`), at the page given or a new tab, and the MCP server beside it: HTTP on the container's
+  # interfaces, from whatever host `request` names it by, on Chrome's DevTools Protocol, with one browser context
   # that every MCP session shares, so a session started again finds the same pages. Neither is the container's own
   # command, so each is started in a session of its own, to keep running once this has.
   @launch ~s(setsid browser "$@" </dev/null >/dev/null 2>&1 & ) <>
             ~s(setsid playwright-mcp --port #{@port} --host 0.0.0.0 --allowed-hosts '*' ) <>
             ~s(--cdp-endpoint http://127.0.0.1:9222 --shared-browser-context </dev/null >/tmp/mcp.log 2>&1 &)
-  # Quits Chromium as a person would, over its DevTools Protocol (Browser.close), so it writes everything down, which
+  # Quits Chrome as a person would, over its DevTools Protocol (Browser.close), so it writes everything down, which
   # a signal doesn't wait for. Once it has (or, after 10 seconds, it's killed, as are its helpers) packs what of its
-  # user data dir travels: `Local State` and the profile, `Default`, without its caches. The rest is what Chromium
+  # user data dir travels: `Local State` and the profile, `Default`, without its caches. The rest is what Chrome
   # downloads by itself (its components, tens of MB). A Service Worker's ScriptCache stays: it's the only copy of an
   # extension's background script.
   @pack ~s"""
@@ -73,10 +73,10 @@ defmodule Chrome do
         name: "closing",
         kind: :validate,
         description:
-          "A browser is being closed with `close`, and Chromium has quit: its `session`, `description`, `container`, " <>
+          "A browser is being closed with `close`, and Chrome has quit: its `session`, `description`, `container`, " <>
             "and `user_data`, the path in that container of a gzipped tarball of its user data dir as it closed, " <>
             "without caches, for a plugin to read now (Containers' `read_file`), before the container is removed. " <>
-            "A plugin refuses when it couldn't keep what it needed of it: the browser then stays, its Chromium " <>
+            "A plugin refuses when it couldn't keep what it needed of it: the browser then stays, its Chrome " <>
             "stopped, and `close` says why."
       }
     ]
@@ -88,7 +88,7 @@ defmodule Chrome do
       %{
         name: "open",
         description:
-          "Open a browser: a Chromium of yours in a container, signed in to nothing. Opening one that's open " <>
+          "Open a browser: a Google Chrome of yours in a container, signed in to nothing. Opening one that's open " <>
             "already, or that was stopped after going unused, carries on with it. The first on a machine builds its " <>
             "image, a few minutes; after that it's a few seconds.",
         inputs:
@@ -231,11 +231,12 @@ defmodule Chrome do
       %{
         name: "screen",
         description:
-          "Look at or act on a browser's screen by its pixels: the whole browser, its address bar and tabs too, for an app that lets its person use it. Computer Use's tools say what each action takes. `resize` makes the screen width × height, and the browser, maximised, follows it.",
+          "Look at or act on a browser's screen by its pixels: the whole browser, its address bar and tabs too, for an app that lets its person use it. Computer Use's tools say what each action takes. `resize` makes the screen width × height, and the browser, maximised, follows it. `stream` shows it as live video over WebRTC: with no `offer`, the ICE servers to connect with; with the app's whole SDP `offer`, {answer}.",
         inputs:
           object(
             %{
-              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key resize)},
+              action: %{type: "string", enum: ~w(screenshot click double_click move drag scroll type key resize stream)},
+              offer: %{type: "string", description: "for stream: the app's SDP offer, with its candidates"},
               x: %{type: "integer", minimum: 0},
               y: %{type: "integer", minimum: 0},
               button: %{type: "string", enum: ~w(left right middle)},
@@ -307,8 +308,8 @@ defmodule Chrome do
     mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session"))
   end
 
-  # Creates the browser's container, with its display and no Chromium yet, puts in the user data dir a plugin hands
-  # it, if one does, and starts Chromium on it.
+  # Creates the browser's container, with its display and no Chrome yet, puts in the user data dir a plugin hands
+  # it, if one does, and starts Chrome on it.
   defp create(call, %{"session" => session} = inputs) do
     c =
       Call.tool(call, "containers", "create", %{

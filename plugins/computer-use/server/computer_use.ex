@@ -31,7 +31,7 @@ defmodule ComputerUse do
         name: "screens",
         kind: :mutate,
         description:
-          "The screens the caller may use. It's about nothing. A plugin with screens answers with its own name, `%{call.plugin => screens}`, so that each plugin's list is its own: each screen a map of its `name`, what it is (`description`, a few words), its `width` and `height` in pixels, and how it's acted on: the plugin's `tool` and the `inputs` that name the screen to it. That tool is then called as the caller, with those inputs and an `action`: `screenshot` (answered with a PNG as `{:blob, \"image/png\", data}`), `click` (x, y, button: left, right or middle), `double_click` (x, y), `move` (x, y), `drag` (path: a list of {x, y}), `scroll` (x, y, direction: up, down, left or right, amount: steps), `type` (text) or `key` (keys, as xdotool names them: ctrl+l, Return; space between presses one after another). It answers anything but a screenshot in a few words."
+          "The screens the caller may use. It's about nothing. A plugin with screens answers with its own name, `%{call.plugin => screens}`, so that each plugin's list is its own: each screen a map of its `name`, what it is (`description`, a few words), its `width` and `height` in pixels, and how it's acted on: the plugin's `tool` and the `inputs` that name the screen to it. That tool is then called as the caller, with those inputs and an `action`: `screenshot` (answered with a PNG as `{:blob, \"image/png\", data}`), `click` (x, y, button: left, right or middle), `double_click` (x, y), `move` (x, y), `drag` (path: a list of {x, y}), `scroll` (x, y, direction: up, down, left or right, amount: steps), `type` (text) or `key` (keys, as xdotool names them: ctrl+l, Return; space between presses one after another). It answers anything but a screenshot in a few words. A screen that a person's app can show as live video over WebRTC takes `stream` too: with no `offer`, it answers the ICE servers to connect with (WebRTC's `ice_servers`); with the app's whole SDP `offer`, `%{\"answer\" => sdp}`."
       }
     ]
   end
@@ -93,6 +93,16 @@ defmodule ComputerUse do
         inputs: act(%{keys: %{type: "string", description: "the keys, as xdotool names them"}}, ["keys"])
       },
       %{
+        name: "stream",
+        description:
+          "For a person's app that shows a screen as live video over WebRTC, not for agents: with no offer, the ICE servers to connect with; with the app's whole SDP offer, the screen's answer.",
+        inputs: %{
+          type: "object",
+          required: ["screen"],
+          properties: %{screen: @screen, offer: %{type: "string", description: "the app's SDP offer, with its candidates"}}
+        }
+      },
+      %{
         name: "wait",
         read_only: true,
         description: "Wait for the screen to settle, then give a screenshot.",
@@ -122,6 +132,12 @@ defmodule ComputerUse do
   def call("wait", inputs, call) do
     Process.sleep(round(Map.get(inputs, "seconds", 1) * 1000))
     call("screenshot", inputs, call)
+  end
+
+  # Watching a screen is no use of it, so it isn't noted.
+  def call("stream", inputs, call) do
+    s = screen(call, inputs["screen"])
+    Call.tool(call, s["plugin"], s["tool"], inputs |> Map.delete("screen") |> Map.merge(s["inputs"]) |> Map.put("action", "stream"))
   end
 
   def call(action, inputs, call) when action in @actions do
