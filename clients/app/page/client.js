@@ -5,12 +5,11 @@
 // where the page runs (`host.js`): the app's Rust half, or in a browser, the network's edge (`clients/web/host.js`),
 // which answers what only reads from what it kept and says when that has changed.
 //
-// The Home Screen are an app too: the plugin `home-screen`'s, which reaches this client from a server as every plugin
-// does. It's the one this page shows first, under every other, and it opens the rest (`one/open`).
+// The launcher is an app too, which reaches this client from a server as every plugin's does: the app in the category
+// `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
+// opens the rest (`one/open`).
 import { address, invoke, listen, openLink, sandbox } from "./host.js"
 /** @import { View } from "./host.js" */
-
-const HOME = "home-screen/client/index.html"
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -30,10 +29,11 @@ addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message
 const NEVER = 15000
 /** An element of the page's own, which is there. @param {string} id */
 const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
-/// Whether the window is wide enough for the Home Screen's sidebar, which the plugin `home-screen` draws along the start of
-/// its frame, 16rem wide, and the other apps' frames leave clear. Tall enough too, so a phone on its side has none,
-/// as home.css has it.
-const beside = matchMedia("(min-width: 48rem) and (min-height: 30rem)")
+/// The launcher's page, as this user's apps list it, once they're listed: `<plugin>/<page>`.
+let launcher = ""
+/// The room the launcher keeps along the start of its frame beside the app that's showing, which that app's frame
+/// leaves clear: a CSS length, as the launcher says (`notifications/one/beside`), or none.
+let room = ""
 /// The apps that are open, by who each is for and what it is: `{ key, app, for, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
@@ -60,8 +60,8 @@ let answering = true
 let unanswered = 0
 /** @type {string | undefined} */
 let unlisted
-/// Whether this app is too old for its network: its servers list no Home Screen where this page opens it, as when
-/// a plugin's name or files have moved since this app was built.
+/// Whether this app is too old for its network: its servers list no launcher, which every network has, as when how
+/// apps are listed has changed since this app was built.
 let tooOld = false
 /// Where the window starts, which it asks as it opens: here, or on the page its device is let in by while it's
 /// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
@@ -81,7 +81,7 @@ function dress() {
 }
 scheme.addEventListener("change", dress)
 
-/// Says over the Home Screen what keeps it from showing anything: the network's address didn't answer, its pages
+/// Says over the launcher what keeps it from showing anything: the network's address didn't answer, its pages
 /// couldn't be listed, or this app is too old for the network. Fine is silent.
 /** @type {string | undefined} */
 let said
@@ -125,7 +125,7 @@ addEventListener("offline", status)
 // Back online, the client asks at once, rather than when it next would have.
 addEventListener("online", () => {
   status()
-  if (!answering) invoke("refresh", { view: key(HOME) })
+  if (!answering) invoke("refresh", { view: key(launcher) })
 })
 
 /// Lists the files a server has for `who`, which the client keeps, so an app opens with no server up. An open app
@@ -140,13 +140,16 @@ async function list(who) {
       unlisted = undefined
       // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
       const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
-      // The last one set for a plugin is the one kept: its first, and one that isn't a part of Settings before one that is.
-      const order = pages.toReversed().sort((a, b) => Number(Boolean(b._meta?.settings)) - Number(Boolean(a._meta?.settings)))
-      first = new Map(order.map(({ uri }) => uri.slice("ui://".length).split("/")).map(([plugin, _version, ...page]) => [plugin, `${plugin}/${page.join("/")}`]))
-      tooOld = !resources.some(({ uri }) => {
+      const named = (/** @type {string} */ uri) => {
         const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
-        return `${plugin}/${page.join("/")}` === HOME
-      })
+        return `${plugin}/${page.join("/")}`
+      }
+      // The last one set for a plugin is the one kept: its first, and one with no category before one with one.
+      const order = pages.toReversed().sort((a, b) => Number(Boolean(b._meta?.category)) - Number(Boolean(a._meta?.category)))
+      first = new Map(order.map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
+      launcher = named(pages.find(({ _meta }) => _meta?.category === "launcher")?.uri ?? "ui:///")
+      tooOld = launcher === "/"
+      if (tooOld) launcher = ""
     }
   } catch (error) {
     if (!who) unlisted = `${error}`.replace(/[^.]$/, "$&.")
@@ -184,7 +187,7 @@ function load(app, who) {
   const place = { key: at, app, for: who, host: host(app, who) }
   const view = { ...place, frame: Object.assign(document.createElement("iframe"), { src: address(place), inert: true }) }
   view.frame.setAttribute("sandbox", sandbox)
-  if (app === HOME) view.frame.className = "home"
+  if (app === launcher) view.frame.className = "launcher"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`).
   view.frame.allow = "clipboard-write; web-share"
   open.set(at, view)
@@ -196,18 +199,18 @@ function load(app, who) {
 /// mustn't show it a second time.
 let shownByDevice = false
 
-/// Changes between the Home Screen and an app as a move, as the UI library moves between an app's screens
-/// (core/ui/src/screen.tsx): the browser slides the app in over the Home Screen, or with `back`, back out from over
+/// Changes between the launcher and an app as a move, as the UI library moves between an app's screens
+/// (core/ui/src/screen.tsx): the browser slides the app in over the launcher, or with `back`, back out from over
 /// them. Where the browser can't, or the user asked for no motion, it's a plain swap.
 /** @param {() => void} change */
 function move(change, back = false) {
   const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
-  // Beside the sidebar, an app takes the place of the last, as a sidebar's apps do.
-  if (plain || shownByDevice || beside.matches) return void change()
+  // Beside the launcher's sidebar, an app takes the place of the last, as a sidebar's apps do.
+  if (plain || shownByDevice || room) return void change()
   document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
 }
 
-/// Shows the app that's open as `at` over the rest, or with none there, the Home Screen. `tapped` is when its icon
+/// Shows the app that's open as `at` over the rest, or with none there, the launcher. `tapped` is when its icon
 /// was tapped.
 /** @param {string | null} at @param {number} tapped */
 function show(at, tapped) {
@@ -225,23 +228,22 @@ function show(at, tapped) {
   opened(view)
 }
 
-/// Has the app that's open as `at` showing, or with none there, the Home Screen, and the Home Screen told which, for
-/// its sidebar, which stays beside every app where it's wide enough. → the one showing.
+/// Has the app that's open as `at` showing, or with none there, the launcher, and the launcher told which, for what it
+/// keeps beside every app where it keeps room. → the one showing.
 /** @param {string | null} at */
 function layer(at) {
   const view = showing(at)
-  const home = open.get(key(HOME))
-  for (const other of open.values()) other.frame.inert = other !== view && !(other === home && beside.matches)
+  const home = open.get(key(launcher))
+  for (const other of open.values()) other.frame.inert = other !== view && !(other === home && room)
   if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, for: view.for } })
   return view
 }
-beside.addEventListener("change", () => layer(history.state))
-/// The app that's open as `at`, or with none there, the Home Screen.
+/// The app that's open as `at`, or with none there, the launcher.
 /** @param {string | null} at */
-const showing = (at) => open.get(at ?? "") ?? open.get(key(HOME))
+const showing = (at) => open.get(at ?? "") ?? open.get(key(launcher))
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
-/// showing with what it drew from. The Home Screen' time is from when this page began to load.
+/// showing with what it drew from. The launcher's time is from when this page began to load.
 /** @param {View} view */
 function opened(view) {
   if (view.tapped === undefined) return
@@ -252,7 +254,7 @@ function opened(view) {
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
     // The device hears its person's notifications once they see their home, which has drawn over the mark.
-    if (view.app === HOME) {
+    if (view.app === launcher) {
       byId("opening").hidden = true
       invoke("listen")
     }
@@ -346,7 +348,7 @@ async function answer(view, method, params) {
     return { ...(await invoke("client")), theme: chosen() }
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
-  // An app opened from a group's Home Screen page is answered for the group.
+  // An app opened from a group's page is answered for the group.
   const who = params._meta?.for ?? view.for
   if (who && !listed.has(who)) list(who)
   return invoke("request", { view: view.key, method, params: who ? { ...params, _meta: { ...params._meta, for: who } } : params })
@@ -357,12 +359,19 @@ addEventListener("message", async ({ source, data }) => {
   if (!view || typeof data?.method !== "string") return
   const { id, method, params = {} } = data
   if (id === undefined) {
-    // The app's user went back out of it. The app stays open behind the Home Screen.
+    // The app's user went back out of it. The app stays open behind the launcher.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && history.state) history.back()
     // Something is open over its page, or nothing is any more.
     if (method === "notifications/one/over") view.over = params.over === true
-    // The Home Screen, loaded again, is told which app is showing beside it.
-    if (method === "ui/notifications/initialized" && view.app === HOME) layer(history.state)
+    // The launcher, loaded again, is told which app is showing beside it.
+    if (method === "ui/notifications/initialized" && view.app === launcher) layer(history.state)
+    // The launcher says how much room it keeps beside other apps, as the window's size changes.
+    if (method === "notifications/one/beside" && view.app === launcher) {
+      room = typeof params.width === "string" ? params.width : ""
+      document.body.style.setProperty("--beside", room || "0px")
+      document.body.toggleAttribute("data-beside", Boolean(room))
+      layer(history.state)
+    }
     // An app's page logs its errors as an MCP App logs to its host, and they're its plugin's, whatever it says.
     if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.app.split("/")[0])
     return
@@ -412,9 +421,9 @@ listen("changed", ({ payload: view }) => {
 
 /// The device's own back, where a device has one (the app's window there calls this): what's open over the app
 /// that's showing shuts first. → whether anything was. If nothing was, the device goes back through this window's
-/// history, which leads back through an app's screens and out of it, and from the Home Screen out of the app.
+/// history, which leads back through an app's screens and out of it, and from the launcher out of the app.
 window.back = () => {
-  const view = open.get(history.state) ?? open.get(key(HOME))
+  const view = open.get(history.state) ?? open.get(key(launcher))
   if (!view?.over || view.frame.inert) return false
   post(view, { method: "notifications/one/back" })
   return true
@@ -452,20 +461,20 @@ function returned() {
   if (document.hidden) return void reload()
   if (unlisted) start()
   else for (const who of listed) list(who)
-  invoke("refresh", { view: key(HOME) })
+  invoke("refresh", { view: key(launcher) })
   if (open.has(history.state)) invoke("refresh", { view: history.state })
 }
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
-/// Lists this user's files, and shows the Home Screen once there are some to show them from.
+/// Lists this user's files, and shows the launcher once there are some to show it from.
 async function start() {
   await list()
   if (unlisted || tooOld) return
-  const home = open.get(key(HOME))
+  const home = open.get(key(launcher))
   if (home) /** @type {Window} */ (home.frame.contentWindow).location.replace(address(home))
-  else load(HOME)
-  // The app that was showing when the page was loaded again is gone, so the Home Screen show.
+  else load(launcher)
+  // The app that was showing when the page was loaded again is gone, so the launcher shows.
   if (history.state) history.replaceState(null, "")
   show(null, 0)
 }

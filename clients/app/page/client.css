@@ -1,4 +1,4 @@
-/* The window's own page: the frames its apps are drawn in, the Home Screen' under the rest, and a problem above
+/* The window's own page: the frames its apps are drawn in, the launcher's under the rest, and a problem above
    them. An app has the whole window but what the device keeps for itself. Not every web view tells a frame of the safe
    area (Android's doesn't), so the page keeps the app clear of it, and the app keeps none of its own. */
 html,
@@ -20,7 +20,7 @@ body {
   user-select: none;
   overscroll-behavior: none;
 }
-/* A problem is shown above the Home Screen, as the UI library's `Problem` shows one, red for what needs the user now. It
+/* A problem is shown above the launcher, as the UI library's `Problem` shows one, red for what needs the user now. It
    takes its own room, so it covers none of what this device kept. */
 #problem {
   justify-self: center;
@@ -106,14 +106,12 @@ iframe {
   border: 0;
   background: var(--background);
 }
-/* Where the window is wide enough for the Home Screen's sidebar (client.js's `beside`), an app shows beside it, over
-   the Home Screen's frame, which WebKitGTK otherwise draws on top of it. */
-@media (min-width: 48rem) and (min-height: 30rem) {
-  iframe:not(.home) {
-    justify-self: end;
-    width: calc(100% - 16rem);
-    z-index: 1;
-  }
+/* Where the launcher keeps room beside other apps (client.js's `room`, which it says), an app shows beside it, over
+   the launcher's frame, which WebKitGTK otherwise draws on top of it. */
+body[data-beside] iframe:not(.launcher) {
+  justify-self: end;
+  width: calc(100% - var(--beside));
+  z-index: 1;
 }
 /* An app behind the one that's showing stays laid out, so it's back in one frame. */
 iframe[inert] {
@@ -123,8 +121,8 @@ iframe[inert] {
   display: none !important;
 }
 
-/* Between the Home Screen and an app, as the UI library moves between screens (core/ui/src/ui.css): the app slides in over
-   the Home Screen from the end of the line, and going back it slides out again. */
+/* Between the launcher and an app, as the UI library moves between screens (core/ui/src/ui.css): the app slides in over
+   the launcher from the end of the line, and going back it slides out again. */
 :root {
   --toward-end: 1;
 }
