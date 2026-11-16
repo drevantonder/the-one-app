@@ -7,7 +7,7 @@
   margin: 0;
   max-width: var(--readable);
   color: var(--muted-foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 /* A line of values, as the widgets' sparkline draws one. */
@@ -57,7 +57,7 @@
 .calls figcaption,
 .over-time figcaption {
   color: var(--muted-foreground);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 
 .over-time {
@@ -89,7 +89,7 @@
   display: flex;
   justify-content: space-between;
   gap: var(--gap);
-  font-size: 0.875rem;
+  font-size: var(--text-base);
 }
 .waterfall .took {
   color: var(--muted-foreground);
@@ -118,6 +118,6 @@
 .waterfall .about {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }

@@ -81,6 +81,19 @@
   --text-lg: 1.0625rem;
   --text-title: 1.75rem;
 
+  /* The type styles, which every text is one of: body; label, for what's pressed, named or a row's heading; title,
+     for a screen's, a dialog's and a big widget text; figure, for a big number. Each is a weight and, for the big
+     ones, a tracking pulled in a little. Figures are tabular (`tabular-nums`) wherever numbers change or line up:
+     widgets, a row's end, times. Allo's optical size follows the text's size by itself (`font-optical-sizing` is
+     `auto` unless said otherwise). Light text on dark looks heavier, so dark takes `--lighter` off every weight. */
+  --lighter: 0;
+  --body-weight: calc(450 - var(--lighter));
+  --label-weight: calc(550 - var(--lighter));
+  --title-weight: calc(650 - var(--lighter));
+  --figure-weight: calc(600 - var(--lighter));
+  --title-tracking: -0.015em;
+  --figure-tracking: -0.025em;
+
   /* How tall what's pressed or typed in is, and an icon in it. */
   --control: 2.25rem;
   --icon: 1rem;
@@ -101,6 +114,17 @@
   --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
   --move-travel: 300ms;
   --ease-travel: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Dark, as the page's `light` or `dark` class says (a client sets it from Settings › Appearance), or the device's own
+   where nothing says. Weight can't follow `color-scheme` as a colour does. */
+:root.dark {
+  --lighter: 25;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --lighter: 25;
+  }
 }
 
 /* Under a finger: a target of 44px, and text an iPhone doesn't zoom into a field to show. */

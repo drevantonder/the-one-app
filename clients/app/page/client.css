@@ -14,6 +14,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font: var(--text-base) / 1.5 var(--font-sans);
+  font-weight: var(--body-weight);
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
@@ -139,7 +140,7 @@ iframe[inert] {
 }
 #recovery .key,
 #recovery .entry {
-  font: 500 var(--text-base) / 1.6 var(--font-mono);
+  font: var(--label-weight) var(--text-base) / 1.6 var(--font-mono);
   letter-spacing: 0.04em;
   overflow-wrap: anywhere;
   -webkit-user-select: text;

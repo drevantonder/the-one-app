@@ -29,7 +29,7 @@
   padding: 0.375rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  font-weight: 500;
+  font-weight: var(--label-weight);
   fill: currentColor;
 }
 
@@ -39,7 +39,7 @@
   align-items: center;
   gap: 0.25rem;
   min-width: 0;
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 
 .crumb {
@@ -55,7 +55,7 @@
 
 .here {
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: var(--title-weight);
 }
 
 .box {
@@ -82,7 +82,7 @@
 }
 
 .latest .who {
-  font-weight: 600;
+  font-weight: var(--label-weight);
   white-space: nowrap;
 }
 
@@ -211,7 +211,7 @@
   margin: 0;
   padding: 0.625rem 1rem;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: var(--label-weight);
   border-bottom: 1px solid var(--border);
 }
 
@@ -223,7 +223,7 @@
 .markdown pre,
 .markdown code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   background: var(--muted);
   border-radius: var(--radius-sm);
 }

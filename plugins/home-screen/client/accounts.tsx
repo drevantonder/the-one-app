@@ -97,7 +97,7 @@ render(
   () => (
     <Screen heading="Accounts" back onBack={leave}>
       <style>{`
-        .heading { display: flex; align-items: center; gap: 0.75rem; max-width: var(--readable); color: var(--foreground); font-size: var(--text-base); font-weight: 600; }
+        .heading { display: flex; align-items: center; gap: 0.75rem; max-width: var(--readable); color: var(--foreground); font-size: var(--text-base); font-weight: var(--label-weight); }
         .heading > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .logo { display: block; width: 2rem; height: 2rem; border-radius: 22.5%; }
         .warn { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--warning); }

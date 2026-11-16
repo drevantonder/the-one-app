@@ -60,8 +60,13 @@ const ask = <Result>(method: string, params: object = {}) => new Promise<Result>
   parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
 })
 
-/// Light or dark, where the client says which (Settings › Appearance), and otherwise the device's own.
-const dress = (context: HostContext | undefined) => context && "theme" in context && (document.documentElement.style.colorScheme = context.theme ?? "")
+/// Light or dark, where the client says which (Settings › Appearance), and otherwise the device's own: as
+/// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css).
+function dress(context: HostContext | undefined) {
+  if (!context || !("theme" in context)) return
+  document.documentElement.style.colorScheme = context.theme ?? ""
+  for (const name of ["light", "dark"]) document.documentElement.classList.toggle(name, context.theme === name)
+}
 
 /// A client answers a page once the page has said what it is, which it does before the first thing it asks.
 let greeted: Promise<void> | undefined

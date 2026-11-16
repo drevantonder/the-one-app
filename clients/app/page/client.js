@@ -64,6 +64,7 @@ const chosen = () => localStorage.getItem("theme")
 const theme = () => chosen() ?? (scheme.matches ? "dark" : "light")
 function dress() {
   document.documentElement.style.colorScheme = chosen() ?? ""
+  for (const name of ["light", "dark"]) document.documentElement.classList.toggle(name, theme() === name)
   for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { theme: theme() } })
 }
 scheme.addEventListener("change", dress)

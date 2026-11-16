@@ -1,9 +1,9 @@
 /* What's unread stands out by its weight alone. */
 .inbox .heading {
-  font-weight: 400;
+  font-weight: var(--body-weight);
 }
 .inbox .unread {
-  font-weight: 600;
+  font-weight: var(--label-weight);
 }
 /* A phone turning on its notifications: a spinner and one line. */
 .push {

@@ -45,7 +45,7 @@ body {
   border-radius: var(--radius-md);
   color: var(--muted-foreground);
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .sidebar .label:has([aria-current]) {
   background: var(--sidebar-accent);
@@ -114,14 +114,14 @@ body {
   font-size: var(--text-sm);
 }
 .sidebar .ui-row .heading {
-  font-weight: 400;
+  font-weight: var(--body-weight);
 }
 .sidebar .ui-row[data-current] > .row {
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
 }
 .sidebar .ui-row[data-current] .heading {
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .sidebar .ui-row img {
   width: 1.25rem;
@@ -264,7 +264,7 @@ footer p {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: var(--label-weight);
   line-height: 1.25;
 }
 .dots {

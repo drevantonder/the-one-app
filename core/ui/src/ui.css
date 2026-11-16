@@ -18,6 +18,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   font: var(--text-base) / 1.5 var(--font-sans);
+  font-weight: var(--body-weight);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
@@ -27,6 +28,14 @@ body {
 }
 h1, h2, h3, p {
   margin: 0;
+}
+/* What markup says is a heading is a title, and what it says is strong a label (tokens.css). */
+h1, h2, h3 {
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+}
+b, strong {
+  font-weight: var(--label-weight);
 }
 /* A form's fields, one under another. */
 form {
@@ -170,7 +179,7 @@ html:has(.ui-dialog[open]) {
   color: var(--primary-foreground);
   font: inherit;
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--label-weight);
   white-space: nowrap;
   vertical-align: middle;
   cursor: pointer;
@@ -256,7 +265,7 @@ html:has(.ui-dialog[open]) {
 }
 .ui-field > label {
   justify-self: start;
-  font-weight: 500;
+  font-weight: var(--label-weight);
   line-height: 1.25;
 }
 .ui-field > p {
@@ -393,7 +402,7 @@ button.ui-box {
   justify-self: stretch;
   gap: 0.625rem;
   min-height: var(--control);
-  font-weight: 400;
+  font-weight: var(--body-weight);
   cursor: pointer;
 }
 .ui-choice:has(:disabled) {
@@ -402,13 +411,13 @@ button.ui-box {
 .ui-choice > span {
   flex: 1;
   min-width: 0;
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .ui-choice small {
   display: block;
   color: var(--muted-foreground);
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: var(--body-weight);
 }
 .ui-choice input {
   appearance: none;
@@ -562,7 +571,7 @@ button.ui-box {
   color: var(--muted-foreground);
 }
 .ui-file .ui-box {
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .ui-file .native::file-selector-button {
   cursor: pointer;
@@ -665,7 +674,7 @@ button.ui-box {
   padding: 0.375rem 0.5rem;
   color: var(--muted-foreground);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 
 /* A select's own list, with a mouse. */
@@ -712,7 +721,7 @@ button.ui-box {
   padding: 0 0.5rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 [data-date-picker-view-control] button:hover {
   background: var(--accent);
@@ -728,7 +737,7 @@ button.ui-box {
   height: var(--cell);
   color: var(--muted-foreground);
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: var(--body-weight);
 }
 [data-date-picker-table-cell] {
   padding: 0;
@@ -805,7 +814,7 @@ button.ui-box {
   border-radius: var(--radius-md);
   color: var(--muted-foreground);
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--label-weight);
   white-space: nowrap;
 }
 [data-tabs-trigger][data-selected] {
@@ -874,7 +883,7 @@ button.ui-box {
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 @media (hover: hover) and (pointer: fine) {
   .ui-toast button:hover {
@@ -962,7 +971,7 @@ button.ui-box {
   white-space: nowrap;
 }
 .ui-row .heading {
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .ui-row .text, .ui-row .row > .ui-icon {
   color: var(--muted-foreground);
@@ -1002,7 +1011,6 @@ button.ui-box {
   min-width: 0;
   overflow: hidden;
   font-size: var(--text-lg);
-  font-weight: 600;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1044,7 +1052,8 @@ button.ui-box {
 .ui-section > h2 {
   color: var(--muted-foreground);
   font-size: var(--text-sm);
-  font-weight: 500;
+  font-weight: var(--label-weight);
+  letter-spacing: normal;
 }
 
 /* A screen as it is now, as a remote desktop app shows one: as wide as its place, and as tall as fits under the bar
@@ -1232,7 +1241,6 @@ button.ui-box {
   flex: 1;
   min-width: 0;
   font-size: var(--text-lg);
-  font-weight: 600;
   line-height: 1.3;
 }
 /* A sheet: up from the foot of a narrow window. By the window's width, not its own, as it lies over the window. */
@@ -1474,7 +1482,6 @@ button.ui-box {
 .ui-state .status strong {
   color: var(--foreground);
   font-size: var(--text-base);
-  font-weight: 500;
 }
 .ui-state .status p {
   margin: 0;
@@ -1516,9 +1523,6 @@ button.ui-box {
 }
 .ui-state .problem > .ui-icon {
   margin-top: 0.15em;
-}
-.ui-state .problem strong {
-  font-weight: 500;
 }
 .ui-state .problem > :is(p, .action) {
   grid-column: 2;
@@ -1562,8 +1566,6 @@ button.ui-box {
 .ui-sign-in h1 {
   margin: 0;
   font-size: var(--text-title);
-  font-weight: 650;
-  letter-spacing: -0.02em;
   line-height: 1.15;
 }
 .ui-sign-in :where(.warning, .problem) {
@@ -1588,7 +1590,7 @@ button.ui-box {
 .ui-sign-in .code .shown {
   margin-top: 0.25rem;
   color: var(--foreground);
-  font: 650 var(--text-title) / 1.15 var(--font-mono);
+  font: var(--title-weight) var(--text-title) / 1.15 var(--font-mono);
   letter-spacing: 0.08em;
 }
 .ui-sign-in .ui-field {
@@ -1630,6 +1632,7 @@ html:has(.ui-sign-in) {
   background: var(--muted);
   color: var(--foreground);
   font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
   line-height: 1.3;
   overflow: hidden;
   -webkit-user-select: none;
@@ -1642,7 +1645,7 @@ html:has(.ui-sign-in) {
   flex: none;
   color: var(--muted-foreground);
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: var(--label-weight);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1699,11 +1702,13 @@ html:has(.ui-sign-in) {
 }
 .ui-widget .xl {
   font-size: 1.625rem;
-  font-weight: 600;
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
 }
 .ui-widget .lg {
   font-size: 1.0625rem;
-  font-weight: 600;
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
 }
 .ui-widget .sm {
   font-size: 0.8125rem;
@@ -1712,10 +1717,10 @@ html:has(.ui-sign-in) {
   font-size: 0.75rem;
 }
 .ui-widget .medium {
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .ui-widget .bold {
-  font-weight: 700;
+  font-weight: var(--title-weight);
 }
 /* A figure is never cut: in a row, a stat keeps at least its own width and the others give way. */
 .ui-widget .stat {
@@ -1728,14 +1733,14 @@ html:has(.ui-sign-in) {
 }
 .ui-widget .stat strong {
   font-size: 2.125rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  font-weight: var(--figure-weight);
+  letter-spacing: var(--figure-tracking);
   line-height: 1.1;
 }
 .ui-widget .stat span {
   color: var(--muted-foreground);
   font-size: 1.0625rem;
-  font-weight: 500;
+  font-weight: var(--label-weight);
 }
 .ui-widget small {
   display: block;
@@ -1757,7 +1762,8 @@ html:has(.ui-sign-in) {
 }
 .ui-widget .gauge text {
   fill: currentColor;
-  font-weight: 600;
+  font-weight: var(--figure-weight);
+  letter-spacing: var(--figure-tracking);
 }
 .ui-widget .progress {
   display: grid;
@@ -1842,7 +1848,6 @@ html:has(.ui-sign-in) {
 .ui-widget .item .end {
   flex: none;
   color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
 }
 .ui-widget img {
   flex: none;
@@ -1883,7 +1888,7 @@ html:has(.ui-sign-in) {
   border-radius: 999px;
   background: color-mix(in oklab, var(--foreground) 10%, transparent);
   color: var(--tone, var(--foreground));
-  font: 500 0.8125rem var(--font-sans);
+  font: var(--label-weight) 0.8125rem var(--font-sans);
   cursor: pointer;
 }
 .ui-widget .ui-choice {
