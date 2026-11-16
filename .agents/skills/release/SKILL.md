@@ -18,6 +18,10 @@ A release is part of your change: it isn't done until it's live.
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, tests, `tooling/`, `.agents/` | Nothing |
 
+Windows' builds, `server/windows-x86_64` and `one-cli/windows-x86_64`, are made on Linux like the others, and are
+built only for a network with a Windows server or device. They haven't yet run on a Windows PC: until
+`core/server/test/install.sh <pc>` has passed on one, a Windows PC isn't made a server of the live network.
+
 A plugin change that uses something new in `core/server/` (often in the same commit) waits for the server release:
 deploy it once every server is on that build, since a server on the old build refuses or breaks it.
 The other way round too: a server change that a live plugin depends on (a field it reads, a call it makes) ships

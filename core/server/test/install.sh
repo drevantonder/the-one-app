@@ -1,23 +1,30 @@
 #!/usr/bin/env bash
-# Tests a server installs on a machine as one thing, with the one command, and updates in place, on Linux and on
-# a Mac. On a network with its edge on this machine (`tooling/network --edge`), a second machine, a home folder of
-# its own whose PATH has no Erlang, Elixir, Rust or Bun on it, and with only `one` from a build: turns itself into a
-# server of the network's (`one serve on`), which the system keeps running, a real systemd user unit on Linux and
-# a LaunchAgent on a Mac; runs with its person's login PATH; shows other users of the machine no secret and listens
+# Tests a server installs on a machine as one thing, with the one command, and updates in place, on Linux, on a Mac
+# and on Windows. On a network with its edge on this machine (`tooling/network --edge`), a second machine, a home
+# folder of its own whose PATH has no Erlang, Elixir, Rust or Bun on it, or the Windows PC named, and with only
+# `one` from a build: turns itself into a server of the network's (`one serve on`), which the system keeps running,
+# a real systemd user unit on Linux, a LaunchAgent on a Mac and a scheduled task on Windows; runs with its person's
+# login PATH, or on Windows their environment; shows other users of the machine no secret and listens
 # as no Erlang node; runs a call and deploys an app through that server alone; is killed and started again by the
 # system; takes a newer build when it's asked, while the network's other server answers; goes back by itself from a
 # build that can't start; and is removed, leaving nothing behind. The builds are made by `tooling/release` from this
 # repo's commit and two made on top of it.
 #
-#     cargo build --release && mise exec -- core/server/test/install.sh
+#     cargo build --release && mise exec -- core/server/test/install.sh [<a Windows PC, as ssh reaches it>]
 #
-# Each server is the system's under a name of its key, `one-server-<key>.service` or `app.theone.server.<key>`, so
-# none that's already on the machine is touched. A Mac needs GNU's tail, as `gtail` (Homebrew's coreutils). It takes
+# Windows' builds are made here (`tooling/release`), and the PC is reached by ssh, which carries the network's edge
+# and bucket to it at the same addresses as here. It's the PC's person's own: the server is theirs, in a folder of
+# its own, and once Task Scheduler starts it again after it's killed it does so within a minute. Not yet run on a PC:
+# Windows' server, its task and its wall are built and type-checked, and haven't run on Windows' hardware.
+#
+# Each server is the system's under a name of its key, `one-server-<key>.service`, `app.theone.server.<key>` or
+# `The One App server <key>`, so none that's already on the machine is touched. A Mac needs GNU's tail, as `gtail` (Homebrew's coreutils). It takes
 # about fifteen minutes, most of it building.
 set -euo pipefail
 set -m # The network is a job with a process group of its own.
 
 root=$(cd "$(dirname "$0")/../../.." && pwd)
+pc=${1-}
 # Short, as a Mac keeps the path of a socket in its folder under 104 bytes.
 folder=$(mktemp -d /tmp/one-install.XXXXXX)
 one=$root/target/release/one
@@ -30,6 +37,7 @@ started=()
 tail=$(command -v gtail || command -v tail)
 trap '[[ -z $frozen ]] || kill -CONT "$frozen"
       [[ -z $service ]] || remove
+      [[ -z $pc ]] || ps1 <<<"Remove-Item -Recurse -Force -LiteralPath \"$machine\" -ErrorAction SilentlyContinue"
       for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait 2>/dev/null || true; rm -rf "$folder"' EXIT
 
 say() { printf '\n== %s\n' "$*"; }
@@ -57,15 +65,53 @@ release() {
     (cd "$clone" && eval "$2")
     git -C "$clone" -c user.name=test -c user.email=test@localhost commit -q --allow-empty -am "$1"
   fi
-  (cd "$clone" && PATH=$root/target/release:$PATH ONE_HOME=$client ONE_AS=owner ONE_FOR=network tooling/release "server/$kind" "one/$kind") >"$folder/release-$1.log" 2>&1 ||
+  (cd "$clone" && PATH=$root/target/release:$PATH ONE_HOME=$client ONE_AS=owner ONE_FOR=network tooling/release "server/$kind" "$program/$kind") >"$folder/release-$1.log" 2>&1 ||
     { tail -30 "$folder/release-$1.log" >&2; exit 1; }
-  grep -E "^(server|one)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
+  grep -E "^(server|one|one-cli)/" "$folder/release-$1.log" | sed 's/^/  /' >&2
   "$clone/tooling/version"
 }
 
-# This kind of machine, as builds are named, and what the system keeps the server running with here.
-kind="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
-if [[ $kind == linux-* ]]; then
+# The second machine's kind, as builds are named, which `one` it runs, and what the system keeps the server running
+# with there. What's there is listed, sized and looked for with `there_*`.
+kind="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)" program=one
+there_ls() { ls "$1" | paste -sd' ' -; }
+there_size() { du -sh "$1" | cut -f1; }
+there_exists() { [[ -e $1 ]]; }
+there_files() { (cd "$1" && find . -type f | sort); }
+command_lines() { ps -o args= -p "$1"; }
+process_names() { ps -o comm= -p "$1"; }
+kill_server() { kill -9 "$1"; }
+if [[ -n $pc ]]; then
+  kind=windows-x86_64 program=one-cli
+  # A PowerShell script, from its input, run on the PC.
+  ps1() { ssh "$pc" "powershell -NoProfile -NonInteractive -EncodedCommand $({ echo '$ProgressPreference = "SilentlyContinue"'; cat; } | iconv -t utf-16le | base64 -w0)" | tr -d '\r'; }
+  # A file or folder of this machine's put on the PC, by where it is there.
+  there() { scp -q -r "$1" "$pc:${machine//\\//}/" && echo "$machine\\$(basename "$1")"; }
+  there_ls() { ps1 <<<"(Get-ChildItem -Name -LiteralPath '$1') -join ' '"; }
+  there_size() { ps1 <<<"'{0:N0} MB' -f ((Get-ChildItem -Recurse -File -LiteralPath '$1' | Measure-Object Length -Sum).Sum / 1MB)"; }
+  there_exists() { [[ $(ps1 <<<"Test-Path -LiteralPath '$1'") == True ]]; }
+  there_files() { ps1 <<<"Get-ChildItem -Recurse -File -LiteralPath '$1' | ForEach-Object { \$_.FullName.Substring('$1'.Length) } | Sort-Object"; }
+  command_lines() { ps1 <<<"(Get-CimInstance Win32_Process -Filter 'ProcessId = $(sed 's/,/ or ProcessId = /g' <<<"$1")').CommandLine"; }
+  process_names() { ps1 <<<"(Get-Process -Id $1).ProcessName"; }
+  kill_server() { ps1 <<<"Stop-Process -Force -Id $1"; }
+  data=
+  named() { service="The One App server ${1:0:12}"; }
+  task() { ssh "$pc" "schtasks /query /tn \"$service\" /fo csv /nh /v" | tr -d '\r'; }
+  running() { task | grep -q '"Running"'; }
+  # The program Task Scheduler runs, and everything started from the folder it's in.
+  main_pid() { ps1 <<<"(Get-CimInstance Win32_Process -Filter \"Name = 'one.exe'\" | Where-Object ExecutablePath -eq '$machine\one.exe').ProcessId"; }
+  restarts() { echo "by its task, last at $(task | cut -d, -f6 | tr -d '"')"; }
+  processes() { ps1 <<<"(Get-CimInstance Win32_Process | Where-Object { \$_.ExecutablePath -like '$machine\*' }).ProcessId -join ','"; }
+  listening() { ps1 <<<"Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object OwningProcess -in @($1) | Out-String"; }
+  its_path() { echo "(its person's own, as they log on)"; }
+  mark() { cursor=$(($(ps1 <<<"@(Get-Content -LiteralPath '$log').Count") + 1)); }
+  said() {
+    local wait=; [[ ${1-} != -f ]] || wait=-Wait
+    ps1 <<<"Get-Content -LiteralPath '$log' $wait | Select-Object -Skip $((cursor - 1))"
+  }
+  remove() { ssh "$pc" "schtasks /end /tn \"$service\" & schtasks /delete /tn \"$service\" /f" >/dev/null 2>&1 || true; }
+  gone() { ! ssh "$pc" "schtasks /query /tn \"$service\"" >/dev/null 2>&1; }
+elif [[ $kind == linux-* ]]; then
   data=.local/share
   named() { service=one-server-${1:0:12}.service; }
   running() { [[ $(systemctl --user is-active "$service") == active && $(systemctl --user is-enabled "$service") == enabled ]]; }
@@ -107,25 +153,49 @@ a=$(release this)
 echo "build $a, in $(since "$began")"
 
 say "The second machine: its own home, a PATH with no Erlang, Elixir, Rust or Bun, and one from the build"
-mkdir -p "$machine/home" "$machine/bin"
-gzip -dc "$CARGO_TARGET_DIR/builds/$a/one-$kind.gz" >"$machine/bin/one"
-chmod +x "$machine/bin/one"
-home=$machine/home/$data/app.theone.client
 # It's one of the network's devices: a network being built gives its device a token as it's started, as `mix
-# network` gives its own client one.
-key=$(cd "$root/core/server" && mix run --no-start -e "
-  {:ok, key} = OneCore.Iroh.key(\"$home/key\")
-  Application.put_env(:one_core, :home, \"$folder/network/server\")
-  File.write!(\"$home/network\", JSON.encode!(%{address: \"$(grep -o '"address":"[^"]*"' "$client/network" | cut -d'"' -f4)\", token: OneCore.Edge.token(key)}))
-  IO.puts(key)")
-# Each command there is given five minutes.
-on_machine() {
-  timeout 300 env -i HOME="$machine/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR-}" \
-    DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS-}" ONE_AS=owner ONE_FOR=network "$machine/bin/one" "$@"
+# network` gives its own client one. Made here, and on Windows copied to the PC.
+token() {
+  (cd "$root/core/server" && mix run --no-start -e "
+    {:ok, key} = OneCore.Iroh.key(\"$1/key\")
+    Application.put_env(:one_core, :home, \"$folder/network/server\")
+    File.write!(\"$1/network\", JSON.encode!(%{address: \"$address\", token: OneCore.Edge.token(key)}))
+    IO.puts(key)")
 }
-for tool in erl elixir mix cargo rustc bun; do
-  ! env -i PATH=/usr/bin:/bin sh -c "command -v $tool" >/dev/null || { echo "$tool is on the machine's PATH" && exit 1; }
-done
+address=$(grep -o '"address":"[^"]*"' "$client/network" | cut -d'"' -f4)
+if [[ -n $pc ]]; then
+  machine=$(ps1 <<<"(New-Item -ItemType Directory -Force (Join-Path \$env:LOCALAPPDATA 'Temp\\$(basename "$folder")')).FullName")
+  home=$machine\\home
+  log=$home\\server\\server.log
+  mkdir -p "$folder/pc/home"
+  key=$(token "$folder/pc/home")
+  gzip -dc "$CARGO_TARGET_DIR/builds/$a/one-cli-$kind.gz" >"$folder/pc/one.exe"
+  there "$folder/pc/one.exe" >/dev/null && there "$folder/pc/home" >/dev/null
+  # The network's edge and bucket, which the PC reaches at the same addresses, through ssh.
+  bucket=$(owner download --target "$kind" | grep -o 'http://[^/"]*' | head -1 | sed 's|http://||')
+  gateway=${address##*:}
+  ssh -N -o ExitOnForwardFailure=yes -R "$gateway:localhost:$gateway" -R "${bucket##*:}:$bucket" "$pc" &
+  started+=($!)
+  on_machine() { timeout 300 ssh "$pc" "set ONE_HOME=$home&& set ONE_AS=owner&& set ONE_FOR=network&& \"$machine\\one.exe\" $*" | tr -d '\r'; }
+  for tool in erl elixir mix cargo rustc bun; do
+    ! ssh "$pc" "where $tool" >/dev/null 2>&1 || { echo "$tool is on the PC's PATH" && exit 1; }
+  done
+else
+  mkdir -p "$machine/home" "$machine/bin"
+  gzip -dc "$CARGO_TARGET_DIR/builds/$a/one-$kind.gz" >"$machine/bin/one"
+  chmod +x "$machine/bin/one"
+  home=$machine/home/$data/app.theone.client
+  key=$(token "$home")
+  there() { echo "$1"; }
+  # Each command there is given five minutes.
+  on_machine() {
+    timeout 300 env -i HOME="$machine/home" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR-}" \
+      DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS-}" ONE_AS=owner ONE_FOR=network "$machine/bin/one" "$@"
+  }
+  for tool in erl elixir mix cargo rustc bun; do
+    ! env -i PATH=/usr/bin:/bin sh -c "command -v $tool" >/dev/null || { echo "$tool is on the machine's PATH" && exit 1; }
+  done
+fi
 echo "its device: $key"
 echo "one --version: $(on_machine --version)"
 
@@ -147,13 +217,13 @@ owner builds | grep -o "\"server\":\"$server\"" >/dev/null && echo "it's on the 
 say "What other users of the machine see of it"
 procs=$(processes)
 # Every process of the server, as ps shows it to anyone: its cookie is the word the release names, never a secret.
-ps -o pid=,args= -p "$procs" | grep -o -- "-setcookie [^ ]*" | sort -u | sed 's/^/  /'
-ps -o args= -p "$procs" | grep -o -- "-setcookie [^ ]*" | grep -qv -- "-setcookie no-distribution$" &&
+command_lines "$procs" | grep -o -- "-setcookie [^ ]*" | sort -u | sed 's/^/  /'
+command_lines "$procs" | grep -o -- "-setcookie [^ ]*" | grep -qv -- "-setcookie no-distribution$" &&
   { echo "a cookie that isn't the release's word is on a command line" && exit 1; }
 # It reaches others by its key over UDP, and nothing listens as an Erlang node: no epmd, no distribution port.
 listening=$(listening "$procs")
 [[ -z $listening ]] || { echo "it listens on TCP: $listening" && exit 1; }
-ps -o comm= -p "$procs" | grep -q epmd && { echo "epmd runs with it" && exit 1; }
+process_names "$procs" | grep -q epmd && { echo "epmd runs with it" && exit 1; }
 echo "  it listens on no TCP port, and no epmd runs with it"
 
 say "Through it alone: the network's other server is frozen"
@@ -181,7 +251,7 @@ import { render } from "@solidjs/web"
 render(() => <p>Hello</p>, document.body)
 EOF
 began=$(now)
-on_machine deploy --name hello --files-from "$folder/hello"
+on_machine deploy --name hello --files-from "$(there "$folder/hello")"
 echo "deployed, its app built with the Bun the server fetched, in $(since "$began")"
 began=$(now)
 on_machine hello hi
@@ -192,8 +262,8 @@ frozen=
 say "Killed, it's started again by the system"
 mark
 pid=$(main_pid)
-kill -9 "$pid"
-echo "killed $pid with kill -9"
+kill_server "$pid"
+echo "killed $pid, as kill -9 does"
 heard "A server is running"
 echo "running again as $(main_pid), restarted $(restarts) time(s), answering as $(build_of "$server")"
 
@@ -206,7 +276,7 @@ echo "while it updates, the network's other server answers: $(owner builds | gre
 heard "The server is on the build"
 said | grep -E "^The server is on the build" | sed 's/^/  /'
 echo "in $(since "$began"); it answers as $(build_of "$server"), and the machine's one is $(on_machine --version)"
-echo "kept: $(ls "$home/server/builds" | paste -sd' ' -)"
+echo "kept: $(there_ls "$home/server/builds")"
 
 say "A build that can't start, which it goes back from by itself"
 c=$(release broken "perl -pi -e 's/  def serve do/  def serve do\n    raise \"this build can'\''t start\"/' core/server/lib/one_core/release.ex")
@@ -218,9 +288,8 @@ heard "A server is running"
 echo "it answers as $(build_of "$server"), not $c"
 
 say "Sizes"
-echo "  the server installed: $(size "$home/server/builds/$b") (build $b), and its Bun, fetched once: $(size "$home/server/home/bun")"
-echo "  one: $(size "$machine/bin/one")"
-echo "  what an update downloads: $(size "$CARGO_TARGET_DIR/builds/$b/server-$kind.tar.gz") for the server, $(size "$CARGO_TARGET_DIR/builds/$b/one-$kind.gz") for one"
+echo "  the server installed: $(there_size "$home/server/builds/$b") (build $b), and its Bun, fetched once: $(there_size "$home/server/home/bun")"
+echo "  what an update downloads: $(size "$CARGO_TARGET_DIR/builds/$b/server-$kind.tar.gz") for the server, $(size "$CARGO_TARGET_DIR/builds/$b/$program-$kind.gz") for one"
 
 say "one serve off"
 began=$(now)
@@ -228,8 +297,8 @@ mark
 on_machine serve off || { said | tail -20; exit 1; }
 echo "in $(since "$began")"
 gone || { echo "the system still has $service" && exit 1; }
-[[ ! -e $home/server ]] || { echo "left behind: $home/server" && exit 1; }
+! there_exists "$home/server" || { echo "left behind: $home/server" && exit 1; }
 owner builds | grep -q "\"server\":\"$server\"" && { echo "it's still on the network's list" && exit 1; }
 echo "the system has no $service, the machine has nothing of it, and the network's list doesn't name it: what's left is"
 service=
-(cd "$machine" && find . -type f | sort | sed 's/^/  /')
+there_files "$machine" | sed 's/^/  /'
