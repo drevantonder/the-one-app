@@ -169,8 +169,9 @@ defmodule OneCore.Plugins.Version do
     tools =
       for tool <- description.tools do
         tool
-        |> Map.take([:name, :description, :inputs, :read_only, :by_link, :ui])
+        |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui])
         |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
+        |> Map.replace_lazy(:outputs, &JSON.decode!(JSON.encode!(&1)))
       end
 
     :erlang.term_to_binary(%{description | tools: tools} |> Map.merge(%{files: cached.files, skills: cached.skills}))
@@ -179,7 +180,7 @@ defmodule OneCore.Plugins.Version do
   @doc """
   A version of the plugin `artifact` from what it said of itself (`description/1`): `{:ok, version}`, or `:error`
   where that isn't one. It was written by a server that runs the plugin, whoever's that is, so only what's
-  listed of it is taken, and what each tool takes is read from its inputs again.
+  listed of it is taken, and what each tool takes and gives is read from its inputs and outputs again.
   """
   def described(artifact, description) do
     # Its skills are as `OneCore.Skills` says them, whose names a server that has just started may not know yet.
@@ -187,9 +188,7 @@ defmodule OneCore.Plugins.Version do
     description = :erlang.binary_to_term(description, [:safe])
     under = {:described, artifact, description.code}
 
-    tools =
-      for tool <- description.tools,
-          do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
+    tools = Enum.map(description.tools, &schemas/1)
 
     :persistent_term.put({__MODULE__, under}, %{files: description.files, hashes: %{}, skills: description.skills, own: %{}})
 
@@ -239,7 +238,7 @@ defmodule OneCore.Plugins.Version do
       for offer <- taken.(description["offers"], ~w(name kind description)), do: Map.update(offer, :kind, nil, &hook_kind/1)
 
     description = %{
-      tools: taken.(description["tools"], ~w(name description inputs read_only by_link ui)),
+      tools: taken.(description["tools"], ~w(name description inputs outputs read_only by_link ui)),
       apps: taken.(description["apps"], ~w(name page icon category)),
       title: description["title"],
       icon: description["icon"],
@@ -493,7 +492,8 @@ defmodule OneCore.Plugins.Version do
     cond do
       not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
         {:error,
-         "tools/0 gives a list of %{name: ..., description: ..., inputs: ...}, and ui, if a tool has one, is a page of client/"}
+         "tools/0 gives a list of %{name: ..., description: ..., inputs: ..., outputs: ...}, where outputs is a JSON " <>
+           "Schema of an object, and ui, if a tool has one, is a page of client/"}
 
       not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
         {:error, "title/0 gives text, and icon/0 a file here"}
@@ -530,10 +530,7 @@ defmodule OneCore.Plugins.Version do
            "(`https://api.example.com`, `https://*.googleapis.com`)"}
 
       true ->
-        # What each tool takes is read once here, as the schema its inputs are checked against on every call.
-        tools =
-          for tool <- tools,
-              do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
+        tools = Enum.map(tools, &schemas/1)
 
         version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest, icon)
         version = %{version | title: title || version.title}
@@ -668,10 +665,26 @@ defmodule OneCore.Plugins.Version do
   defp page?(page, rest),
     do: is_binary(page) and client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page)
 
-  # A tool may have a page of its own, its UI as MCP Apps has it, which a host shows for it.
+  # A tool may have a page of its own, its UI as MCP Apps has it, which a host shows for it. What it answers is an
+  # object, which is what every version of MCP a client speaks takes as a tool's `outputSchema`. A version deployed
+  # before tools said what they answer says nothing of it, and still loads (`OneCore.Plugins.Deploy` refuses a new one).
   defp tool?(%{name: name, description: description, inputs: %{}} = tool, rest)
        when is_binary(name) and is_binary(description),
-       do: name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest))
+       do: name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest)) and outputs?(tool[:outputs])
 
   defp tool?(_, _), do: false
+
+  defp outputs?(nil), do: true
+  defp outputs?(%{} = outputs), do: JSON.decode!(JSON.encode!(outputs))["type"] == "object"
+  defp outputs?(_outputs), do: false
+
+  @doc """
+  A tool with what it takes and what it gives read once, as the JSON Schemas its inputs and its answers are checked
+  against on every call: `takes` from its `inputs`, and `gives` from its `outputs`, where it says them.
+  """
+  def schemas(tool) do
+    resolve = &ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(&1)))
+    tool = Map.put(tool, :takes, resolve.(tool.inputs))
+    if tool[:outputs], do: Map.put(tool, :gives, resolve.(tool.outputs)), else: tool
+  end
 end

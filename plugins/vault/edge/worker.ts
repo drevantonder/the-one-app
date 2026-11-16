@@ -45,9 +45,11 @@ async function callback(params: URLSearchParams) {
   const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers(NETWORK))]);
   const reached = await env.RELAY.forward([...servers], message);
   if (!reached) return { problem: "None of this network's servers answered. Start the sign-in again once one is on." };
-  const { result, error }: { result?: { isError?: boolean; content?: { text?: string }[] }; error?: { message?: string } } = JSON.parse(reached.answer);
-  const text = result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened.";
-  return result && !result.isError ? { done: text } : { problem: text };
+  type Result = { isError?: boolean; content?: { text?: string }[]; structuredContent?: { service: string; item: string } };
+  const { result, error }: { result?: Result; error?: { message?: string } } = JSON.parse(reached.answer);
+  const signed = result?.structuredContent;
+  if (result && !result.isError && signed) return { done: `Signed in to ${signed.service}. It's kept in your Vault as ${signed.item}.` };
+  return { problem: result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened." };
 }
 
 export default {

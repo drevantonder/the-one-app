@@ -135,7 +135,7 @@ function Ask() {
 }
 
 function App() {
-  const profiles = createMemo(() => call("chrome-profiles_list").then((text): Profile[] => JSON.parse(text)))
+  const profiles = createMemo(() => call("chrome-profiles_list").then((text): Profile[] => JSON.parse(text).profiles))
   changed(() => refresh(profiles))
   const opened = () => profiles().find((p) => p.profile === open())
   return (

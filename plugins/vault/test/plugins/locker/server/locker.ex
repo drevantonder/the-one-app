@@ -18,19 +18,26 @@ defmodule Locker do
     keys = %{type: "string", format: "artifact-keys", unlocked_on: "unlocked_on"}
 
     [
-      %{name: "ping", read_only: true, description: "Answers, calling nothing", inputs: none},
+      %{name: "ping", read_only: true, description: "Answers, calling nothing", inputs: none, outputs: none},
       %{
         name: "keep",
         description: "Keeps a note, encrypted",
-        inputs: %{type: "object", properties: %{text: text}, required: ["text"]}
+        inputs: %{type: "object", properties: %{text: text}, required: ["text"]},
+        outputs: none
       },
       %{
         name: "read",
         read_only: true,
         description: "Opens the note, and gives its SHA-256 and the server that opened it",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{blob: %{type: "string"}, rows: %{type: "array", items: %{type: "string"}}, opened_on: %{type: "string"}},
+          required: ["blob", "rows", "opened_on"]
+        }
       },
-      %{name: "unlocked_on", read_only: true, description: "Says which servers open your locker", inputs: none},
+      # What the encryption plugin answers, as its own tools say.
+      %{name: "unlocked_on", read_only: true, description: "Says which servers open your locker", inputs: none, outputs: none},
       %{
         name: "grant",
         description: "Chooses the servers that open your locker",
@@ -38,22 +45,23 @@ defmodule Locker do
           type: "object",
           properties: %{servers: %{type: "array", items: %{type: "string"}}, keys: keys},
           required: ["servers"]
-        }
+        },
+        outputs: %{type: "object", properties: %{servers: %{type: "array", items: %{type: "string"}}}, required: ["servers"]}
       }
     ]
   end
 
   @impl true
-  def call("ping", _inputs, _call), do: "pong"
+  def call("ping", _inputs, _call), do: %{}
   def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, Call.make(call, "notes"))
-  def call("grant", %{"keys" => keys}, call), do: encryption(call).choose(call, Call.make(call, "notes"), keys)
+  def call("grant", %{"keys" => keys}, call), do: %{servers: encryption(call).choose(call, Call.make(call, "notes"), keys)}
 
   def call("keep", %{"text" => text}, call) do
     notes = notes(call)
     text = encryption(call).secret(call, text)
     Artifact.write(notes, "note", text)
     transaction(call, notes, fn database, db -> database.query(db, "insert into notes (text) values (?)", [text]) end)
-    "Kept."
+    %{}
   end
 
   def call("read", _inputs, call) do

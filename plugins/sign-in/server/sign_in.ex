@@ -46,6 +46,14 @@ defmodule SignIn do
           type: "object",
           properties: %{name: %{type: "string", description: "Their name: lowercase letters, digits and hyphens"}},
           required: ["name"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            who: %{type: "string", description: "users/<name>"},
+            link: %{type: "string", description: "Where they join, within a week. It's shown once, so pass it on now"}
+          },
+          required: ["who", "link"]
         }
       },
       %{
@@ -53,7 +61,26 @@ defmodule SignIn do
         read_only: true,
         description:
           "Lists everyone in the network and everyone invited to it: the name each goes by, and whether they've joined",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            people: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  who: %{type: "string", description: "users/<name>"},
+                  called: %{type: ["string", "null"], description: "The name they go by"},
+                  email: %{type: ["string", "null"]},
+                  joined: %{type: "boolean", description: "Whether they've joined, or are only invited"}
+                },
+                required: ["who", "called", "email", "joined"]
+              }
+            }
+          },
+          required: ["people"]
+        }
       },
       %{
         name: "remove_person",
@@ -63,19 +90,57 @@ defmodule SignIn do
           type: "object",
           properties: %{who: %{type: "string", pattern: "^users/[a-z][a-z0-9-]*$", description: "Who: users/<name>"}},
           required: ["who"]
-        }
+        },
+        outputs: %{type: "object", properties: %{who: %{type: "string"}}, required: ["who"]}
       },
       %{
         name: "add_passkey",
         description:
           "Makes a link that you make another passkey by, in a browser, within a quarter of an hour. Open it, don't pass it on",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{link: %{type: "string", description: "Where to make it, in a browser, within a quarter of an hour"}},
+          required: ["link"]
+        }
       },
       %{
         name: "devices",
         read_only: true,
         description: "Lists your devices, assistants and browsers, and your passkeys",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            devices: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "string", description: "What remove_device takes"},
+                  kind: %{type: "string", description: "app, assistant or browser"},
+                  name: %{type: "string"},
+                  added: %{type: "string", description: "When, ISO 8601"},
+                  seen: %{type: "string", description: "on, or when an app was last seen, ISO 8601"}
+                },
+                required: ["id", "kind", "name", "added"]
+              }
+            },
+            passkeys: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "string", description: "What remove_passkey takes"},
+                  name: %{type: "string"},
+                  added: %{type: "string", description: "When, ISO 8601"}
+                },
+                required: ["id", "name", "added"]
+              }
+            }
+          },
+          required: ["devices", "passkeys"]
+        }
       },
       %{
         name: "people",
@@ -91,7 +156,16 @@ defmodule SignIn do
               description: "Who: users/<name>. You, if left out"
             }
           }
-        }
+        },
+        outputs: %{type: "object", properties: %{people: %{type: "array", items: %{
+          type: "object",
+          properties: %{
+            who: %{type: "string", description: "users/<name>"},
+            called: %{type: ["string", "null"], description: "The name they go by"},
+            email: %{type: ["string", "null"], description: "Their email, where signing in has one"}
+          },
+          required: ["who", "called", "email"]
+        }}}, required: ["people"]}
       },
       %{
         name: "name",
@@ -100,7 +174,8 @@ defmodule SignIn do
           type: "object",
           properties: %{called: %{type: "string", minLength: 1, description: "Your name, as people know you"}},
           required: ["called"]
-        }
+        },
+        outputs: %{type: "object", properties: %{called: %{type: "string"}}, required: ["called"]}
       },
       %{
         name: "approve",
@@ -109,6 +184,11 @@ defmodule SignIn do
           type: "object",
           properties: %{code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"}},
           required: ["code"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{approved: %{type: "string", description: "The device's name, which is yours now"}},
+          required: ["approved"]
         }
       },
       %{
@@ -118,7 +198,8 @@ defmodule SignIn do
           type: "object",
           properties: %{device: %{type: "string", description: "The device's id, as `devices` lists it"}},
           required: ["device"]
-        }
+        },
+        outputs: %{type: "object", properties: %{removed: %{type: "string", description: "Its name"}}, required: ["removed"]}
       },
       %{
         name: "remove_passkey",
@@ -127,7 +208,8 @@ defmodule SignIn do
           type: "object",
           properties: %{passkey: %{type: "string", description: "The passkey's id, as `devices` lists it"}},
           required: ["passkey"]
-        }
+        },
+        outputs: %{type: "object", properties: %{removed: %{type: "string", description: "Its name"}}, required: ["removed"]}
       }
     ]
   end
@@ -163,24 +245,25 @@ defmodule SignIn do
   # an editor of it.
   def call("invite", %{"name" => name}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
-    invite(name)
+    %{"link" => link} = ask(%{ask: "invite", who: name})
+    %{who: "users/#{name}", link: link}
   end
 
   def call("everyone", _inputs, call) do
     if not Call.member?(call, "network"), do: raise("Only a member of the network sees who's in it.")
-    ask(%{ask: "everyone"})["people"]
+    %{people: ask(%{ask: "everyone"})["people"]}
   end
 
   # Whoever invites takes out, and nobody takes themselves out.
   def call("remove_person", %{"who" => who}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
     if who == call.actor, do: raise("You can't take yourself out of the network.")
-    %{"removed" => name} = ask(%{ask: "remove_person", who: who})
+    ask(%{ask: "remove_person", who: who})
     Call.tool(call, "permissions", "forget", %{"who" => who})
-    "#{name} is out of the network. What they made stays."
+    %{who: who}
   end
 
-  def call("add_passkey", _inputs, call), do: ask(%{ask: "passkey", who: person(call)})["link"]
+  def call("add_passkey", _inputs, call), do: %{link: ask(%{ask: "passkey", who: person(call)})["link"]}
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
 
@@ -192,37 +275,35 @@ defmodule SignIn do
     if users -- [call.actor] != [] and not Call.member?(call, "network"),
       do: raise("Only a member of the network sees who's in it.")
 
-    for "users/" <> name = user <- users do
-      case Artifact.read(call.own, "people/" <> name) do
-        {:ok, stored, _tag} -> Map.put(JSON.decode!(stored), "who", user)
-        :absent -> %{"who" => user, "called" => nil, "email" => nil}
+    people =
+      for "users/" <> name = user <- users do
+        case Artifact.read(call.own, "people/" <> name) do
+          {:ok, stored, _tag} -> Map.merge(%{"called" => nil, "email" => nil}, Map.put(JSON.decode!(stored), "who", user))
+          :absent -> %{"who" => user, "called" => nil, "email" => nil}
+        end
       end
-    end
+
+    %{people: people}
   end
 
   def call("name", %{"called" => called}, call) do
     %{"called" => called} = ask(%{ask: "called", who: person(call), called: called})
-    "You go by #{called} now."
+    %{called: called}
   end
 
   def call("approve", %{"code" => code}, call) do
     %{"approved" => name} = ask(%{ask: "approve", who: person(call), code: code})
-    "Let in: #{name} is yours now."
+    %{approved: name}
   end
 
   def call("remove_device", %{"device" => device}, call) do
     %{"removed" => name} = ask(%{ask: "remove_device", who: person(call), device: device})
-    "#{name} is removed, and signed out from now on."
+    %{removed: name}
   end
 
   def call("remove_passkey", %{"passkey" => passkey}, call) do
     %{"removed" => name} = ask(%{ask: "remove_passkey", who: person(call), passkey: passkey})
-    "#{name} is removed."
-  end
-
-  defp invite(name) do
-    %{"link" => link} = ask(%{ask: "invite", who: name})
-    joins(name, link)
+    %{removed: name}
   end
 
   defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."

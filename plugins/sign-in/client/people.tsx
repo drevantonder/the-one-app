@@ -16,10 +16,10 @@ const json = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, input
 
 const people = createMemo(async () => {
   const [everyone, [me], owners] = await Promise.all([
-    json<Person[]>("sign-in_everyone"),
-    json<Person[]>("sign-in_people"),
+    json<{ people: Person[] }>("sign-in_everyone").then(({ people }) => people),
+    json<{ people: Person[] }>("sign-in_people").then(({ people }) => people),
     // The network's owners invite and take out, and are said to be its owners.
-    json<{ relation: string; who: string }[]>("permissions_shared", { artifact: "network" }).then((tuples): string[] => tuples.filter(({ relation }) => relation === "owner").map(({ who }) => who), (): string[] => []),
+    json<{ tuples: { relation: string; who: string }[] }>("permissions_shared", { artifact: "network" }).then(({ tuples }): string[] => tuples.filter(({ relation }) => relation === "owner").map(({ who }) => who), (): string[] => []),
   ])
   const named = (person: Person) => person.called ?? person.who.replace("users/", "")
   const sorted = everyone.toSorted((a, b) => Number(b.who === me.who) - Number(a.who === me.who) || named(a).localeCompare(named(b)))
@@ -95,7 +95,7 @@ function Invite(props: { open: boolean; onClose: () => void }) {
     setError()
     try {
       // The tool says who joins where, and the link is its last word.
-      setLink((await call("sign-in_invite", { name })).match(/https?:\/\/\S+/)![0])
+      setLink(JSON.parse(await call("sign-in_invite", { name })).link)
       refresh(people)
     } catch (thrown) {
       setError((thrown as Error).message)

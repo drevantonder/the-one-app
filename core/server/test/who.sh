@@ -101,12 +101,13 @@ defmodule Spy do
   @impl true
   def tools do
     text = %{type: "string"}
+    read = %{type: "object", properties: %{read: text}, required: ["read"]}
 
     [
-      %{name: "keep", description: "Keeps text in its own artifact, and both in its VM", inputs: %{type: "object", properties: %{text: text}}},
-      %{name: "kept", description: "What its VM kept", inputs: %{type: "object"}},
-      %{name: "steal", description: "Reads an artifact by a handle", inputs: %{type: "object", properties: %{handle: text, name: text}}},
-      %{name: "reach", description: "Reads an artifact by its name", inputs: %{type: "object", properties: %{name: text}}}
+      %{name: "keep", description: "Keeps text in its own artifact, and both in its VM", inputs: %{type: "object", properties: %{text: text}}, outputs: %{type: "object", properties: %{kept: %{type: "boolean"}}}},
+      %{name: "kept", description: "What its VM kept", inputs: %{type: "object"}, outputs: %{type: "object", properties: %{text: text, handle: text, name: text}}},
+      %{name: "steal", description: "Reads an artifact by a handle", inputs: %{type: "object", properties: %{handle: text, name: text}}, outputs: read},
+      %{name: "reach", description: "Reads an artifact by its name", inputs: %{type: "object", properties: %{name: text}}, outputs: read}
     ]
   end
 
@@ -114,15 +115,15 @@ defmodule Spy do
   def call("keep", %{"text" => text}, call) do
     Artifact.write(call.own, "secret", text)
     :persistent_term.put(:spy, %{"text" => text, "handle" => "#{call.own.handle}", "name" => Artifact.name(call.own)})
-    "kept"
+    %{kept: true}
   end
 
   def call("kept", _inputs, _call), do: :persistent_term.get(:spy, %{})
 
   def call("steal", %{"handle" => handle, "name" => name}, _call),
-    do: inspect(Artifact.read(%Artifact{handle: String.to_integer(handle), prefix: name <> "/"}, "secret"))
+    do: %{read: inspect(Artifact.read(%Artifact{handle: String.to_integer(handle), prefix: name <> "/"}, "secret"))}
 
-  def call("reach", %{"name" => name}, call), do: inspect(Artifact.read(Call.reach(call, name, "viewer"), "secret"))
+  def call("reach", %{"name" => name}, call), do: %{read: inspect(Artifact.read(Call.reach(call, name, "viewer"), "secret"))}
 end
 EOF
 cat >"$folder/boxed/server/boxed.ex" <<'EOF'
@@ -135,7 +136,8 @@ defmodule Boxed do
   @impl true
   def tools do
     inputs = %{plugin: %{type: "string"}, note: %{type: "string"}}
-    [%{name: "read", description: "Reads a note by a plugin's tool", inputs: %{type: "object", properties: inputs}}]
+    read = %{type: "object", properties: %{text: %{type: "string"}}, required: ["text"]}
+    [%{name: "read", description: "Reads a note by a plugin's tool", inputs: %{type: "object", properties: inputs}, outputs: read}]
   end
 
   @impl true
@@ -167,48 +169,52 @@ defmodule Notes do
   def tools do
     note = %{type: "string", description: "The note's name"}
     text = %{type: "string", description: "What it says"}
+    named = %{type: "object", properties: %{note: note}, required: ["note"]}
 
     [
-      %{name: "ping", read_only: true, description: "Answers, calling nothing", inputs: %{type: "object"}},
+      %{name: "ping", read_only: true, description: "Answers, calling nothing", inputs: %{type: "object"}, outputs: %{type: "object"}},
       %{
         name: "write",
         description: "Writes a note of your own, and gives its name",
-        inputs: %{type: "object", properties: %{id: %{type: "string"}, text: text}, required: ["id", "text"]}
+        inputs: %{type: "object", properties: %{id: %{type: "string"}, text: text}, required: ["id", "text"]},
+        outputs: named
       },
       %{
         name: "read",
         read_only: true,
         by_link: true,
         description: "Reads a note",
-        inputs: %{type: "object", properties: %{note: note}, required: ["note"]}
+        inputs: %{type: "object", properties: %{note: note}, required: ["note"]},
+        outputs: %{type: "object", properties: %{text: text}, required: ["text"]}
       },
       %{
         name: "change",
         description: "Changes what a note says",
-        inputs: %{type: "object", properties: %{note: note, text: text}, required: ["note", "text"]}
+        inputs: %{type: "object", properties: %{note: note, text: text}, required: ["note", "text"]},
+        outputs: named
       }
     ]
   end
 
   @impl true
-  def call("ping", _inputs, _call), do: "pong"
+  def call("ping", _inputs, _call), do: %{}
 
   def call("write", %{"id" => id, "text" => text}, call) do
     note = Call.make(call, id)
     Artifact.write(note, "text", text)
-    Artifact.name(note)
+    %{note: Artifact.name(note)}
   end
 
   def call("read", %{"note" => note}, call) do
     {:ok, text, _tag} = Artifact.read(Call.reach(call, note), "text")
-    text
+    %{text: text}
   end
 
-  def call("change", %{"note" => note, "text" => text}, call) do
-    note = Call.reach(call, note, "editor")
+  def call("change", %{"note" => name, "text" => text}, call) do
+    note = Call.reach(call, name, "editor")
     {:ok, _was, tag} = Artifact.read(note, "text")
     :ok = Artifact.replace(note, "text", text, tag)
-    "Changed."
+    %{note: name}
   end
 end
 EOF
@@ -219,13 +225,14 @@ defmodule Reader do
   @impl true
   def tools do
     note = %{type: "string", description: "The note's name"}
-    [%{name: "read", read_only: true, description: "Reads a note that another plugin made", inputs: %{type: "object", properties: %{note: note}, required: ["note"]}}]
+    read = %{type: "object", properties: %{text: %{type: "string"}}, required: ["text"]}
+    [%{name: "read", read_only: true, description: "Reads a note that another plugin made", inputs: %{type: "object", properties: %{note: note}, required: ["note"]}, outputs: read}]
   end
 
   @impl true
   def call("read", %{"note" => note}, call) do
     {:ok, text, _tag} = OneCore.Artifact.read(OneCore.Call.reach(call, note), "text")
-    text
+    %{text: text}
   end
 end
 EOF
@@ -234,13 +241,13 @@ defmodule Approvals do
   @behaviour OneCore.Plugin
 
   @impl true
-  def tools, do: [%{name: "approve", description: "Approves, for an editor of the plugin's own artifact", inputs: %{type: "object"}}]
+  def tools, do: [%{name: "approve", description: "Approves, for an editor of the plugin's own artifact", inputs: %{type: "object"}, outputs: %{type: "object", properties: %{approved: %{type: "boolean"}}, required: ["approved"]}}]
 
   @impl true
   def call("approve", _inputs, call) do
     own = OneCore.Artifact.name(call.own)
     if not OneCore.Call.reaches?(call, own, "editor"), do: raise("Only an editor of #{own} approves.")
-    "Approved."
+    %{approved: true}
   end
 end
 EOF
@@ -267,13 +274,19 @@ defmodule Diary do
   @impl true
   def tools do
     text = %{type: "object", properties: %{text: %{type: "string", description: "What to write"}}, required: ["text"]}
-    [%{name: "write", description: "Writes an entry in the diary of whoever this is installed for", inputs: text}]
+    written = %{
+      type: "object",
+      properties: %{diary: %{type: "string"}, entries: %{type: "integer"}, for: %{type: "string"}, by: %{type: "string"}, server: %{type: "string"}},
+      required: ["diary", "entries", "for", "by", "server"]
+    }
+
+    [%{name: "write", description: "Writes an entry in the diary of whoever this is installed for", inputs: text, outputs: written}]
   end
 
   @impl true
   def call("write", %{"text" => text}, %{own: own} = call) do
     Artifact.write(own, "#{length(Artifact.list(own)) + 1}", text)
-    "#{Artifact.name(own)} has #{length(Artifact.list(own))}: ran for #{call.subject}, asked by #{call.actor}, on #{call.server}"
+    %{diary: Artifact.name(own), entries: length(Artifact.list(own)), for: call.subject, by: call.actor, server: call.server}
   end
 end
 EOF
@@ -300,8 +313,8 @@ defmodule Ticker do
   @impl true
   def tools do
     [
-      %{name: "tick", description: "Writes when it was due, and which server called it", inputs: %{type: "object"}},
-      %{name: "ticks", read_only: true, description: "Lists the ticks", inputs: %{type: "object"}}
+      %{name: "tick", description: "Writes when it was due, and which server called it", inputs: %{type: "object"}, outputs: %{type: "object", properties: %{due: %{type: "string"}}, required: ["due"]}},
+      %{name: "ticks", read_only: true, description: "Lists the ticks", inputs: %{type: "object"}, outputs: %{type: "object", properties: %{ticks: %{type: "array", items: %{type: "object"}}}, required: ["ticks"]}}
     ]
   end
 
@@ -317,12 +330,12 @@ defmodule Ticker do
       database.query(db, "insert into ticks (due, at, server) values (?, ?, ?)", [time.(due), time.(now), call.server])
     end)
 
-    "Ticked."
+    %{due: time.(due)}
   end
 
   def call("ticks", _inputs, call) do
     database = OneCore.Call.plugin(call, "database")
-    database.transaction(call, @schema, &database.query(&1, "select due, at, server from ticks order by rowid"))
+    %{ticks: database.transaction(call, @schema, &database.query(&1, "select due, at, server from ticks order by rowid"))}
   end
 end
 EOF
@@ -330,7 +343,7 @@ EOF
 for plugin in notes reader ticker; do as owner for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
 
 say "One can't read the other's artifact until a tuple says so"
-note=$(as alice notes write --id shopping --text "Buy milk")
+note=$(as alice notes write --id shopping --text "Buy milk" | grep -o '"note":"[^"]*"' | cut -d'"' -f4)
 echo "  alice wrote $note"
 may as alice notes read --note "$note"
 refused as bob notes read --note "$note"
@@ -469,7 +482,7 @@ may as bob install --plugin users/alice/plugins/diary
 
 say "A plugin's code is open to everyone it's in use for, and to nobody else, and what it keeps stays whoever's it is"
 may as alice deploy --name recipes --files-from "$folder/notes"
-recipe=$(as alice recipes write --id soup --text "Leek and potato")
+recipe=$(as alice recipes write --id soup --text "Leek and potato" | grep -o '"note":"[^"]*"' | cut -d'"' -f4)
 echo "  alice wrote $recipe with it"
 may as alice code --name recipes
 refused as carol install --plugin users/alice/plugins/recipes

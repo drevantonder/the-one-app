@@ -54,7 +54,7 @@ function Container(props: { container: Listed }) {
 }
 
 function App() {
-  const containers = createMemo(() => call("containers_list").then((text): Listed[] => JSON.parse(text)))
+  const containers = createMemo(() => call("containers_list").then((text): Listed[] => JSON.parse(text).containers))
   changed(() => refresh(containers))
   return (
     <Screen heading="Containers" back onBack={leave}>

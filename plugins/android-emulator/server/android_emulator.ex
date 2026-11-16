@@ -14,6 +14,21 @@ defmodule AndroidEmulator do
   @idle_hours 2
   @emulator %{type: "string", description: "the emulator, by its name"}
 
+  # One, as `list` answers each.
+  @listed %{
+    type: "object",
+    properties: %{
+      name: %{type: "string"},
+      description: %{type: ["string", "null"], description: "What it's for"},
+      state: %{type: "string", description: "running, starting, stopping or stopped"},
+      machine: %{type: ["string", "null"]},
+      by: %{type: ["string", "null"], description: "Who created it"},
+      created: %{type: "integer", description: "In milliseconds since 1970"},
+      last_used: %{type: "integer", description: "In milliseconds since 1970"}
+    },
+    required: ["name", "description", "state", "machine", "by", "created", "last_used"]
+  }
+
   @impl true
   def uses, do: ["database", "webrtc"]
 
@@ -34,13 +49,32 @@ defmodule AndroidEmulator do
         read_only: true,
         description:
           "The emulators you can use, on every machine: each one's name, state (running, starting, stopping, stopped), machine, what it's for, who created it, and when it was created and last used (ms since 1970).",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{type: "object", properties: %{emulators: %{type: "array", items: @listed}}, required: ["emulators"]}
       },
       %{
         name: "machines",
         read_only: true,
         description: "The machines that run emulators, each by the name `create` takes, whether it's on now, and if not when it last was (ms since 1970).",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            machines: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  machine: %{type: ["string", "null"], description: "What create's machine takes"},
+                  on: %{type: "boolean"},
+                  last_on: %{type: "integer", description: "When it last was, if it's off, in milliseconds since 1970"}
+                },
+                required: ["machine", "on"]
+              }
+            }
+          },
+          required: ["machines"]
+        }
       },
       %{
         name: "create",
@@ -54,11 +88,15 @@ defmodule AndroidEmulator do
             description: %{type: "string", description: "what it's for, in a few words, for whoever sees it later"},
             machine: %{type: "string", description: "the machine to run it on, as `machines` names it; default the first"}
           }
-        }
+        },
+        outputs: @listed
       },
-      %{name: "start", description: "Start a stopped emulator, carrying on from where it was when it stopped. Takes up to a minute or two.", inputs: one()},
-      %{name: "stop", description: "Stop an emulator. It saves what it was doing, and `start` carries on from there.", inputs: one()},
-      %{name: "remove", description: "Remove an emulator and everything on it, for good.", inputs: one()},
+      %{name: "start", description: "Start a stopped emulator, carrying on from where it was when it stopped. Takes up to a minute or two.", inputs: one(),
+      outputs: %{type: "object", properties: %{emulator: %{type: "string"}}, required: ["emulator"]}},
+      %{name: "stop", description: "Stop an emulator. It saves what it was doing, and `start` carries on from there.", inputs: one(),
+      outputs: %{type: "object", properties: %{emulator: %{type: "string"}}, required: ["emulator"]}},
+      %{name: "remove", description: "Remove an emulator and everything on it, for good.", inputs: one(),
+      outputs: %{type: "object", properties: %{emulator: %{type: "string"}}, required: ["emulator"]}},
       %{
         name: "install",
         description: "Install an app on a running emulator from its APK, granting what it asks for. Give the APK as an upload, or its url.",
@@ -66,12 +104,14 @@ defmodule AndroidEmulator do
           one(%{
             apk: %{type: "string", format: "upload", description: "the APK, uploaded"},
             url: %{type: "string", description: "or a URL to download the APK from"}
-          })
+          }),
+        outputs: %{type: "object", properties: %{emulator: %{type: "string"}, said: %{type: "string", description: "What installing it said"}}, required: ["emulator", "said"]}
       },
       %{
         name: "open_url",
         description: "Open a URL on a running emulator, in the app for it or the browser (Chrome).",
-        inputs: one(%{url: %{type: "string", description: "the URL, like https://example.com or myapp://home"}}, ["url"])
+        inputs: one(%{url: %{type: "string", description: "the URL, like https://example.com or myapp://home"}}, ["url"]),
+        outputs: %{type: "object", properties: %{emulator: %{type: "string"}, url: %{type: "string"}}, required: ["emulator", "url"]}
       },
       %{
         name: "shell",
@@ -84,13 +124,28 @@ defmodule AndroidEmulator do
               timeout: %{type: "integer", minimum: 1, maximum: 600, description: "seconds to wait, 1 to 600; default 60"}
             },
             ["command"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            exit: %{type: "integer", description: "0 when it worked, -1 once its timeout passed"},
+            stdout: %{type: "string"},
+            stderr: %{type: "string"}
+          },
+          required: ["exit", "stdout", "stderr"]
+        }
       },
       %{
         name: "screenshot",
         read_only: true,
         description: "A picture of a running emulator's screen, as a PNG, in the phone's own pixels.",
-        inputs: one()
+        inputs: one(),
+        outputs: %{
+          type: "object",
+          description: "The screen, a PNG: an agent sees it",
+          properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}},
+          required: ["mimeType"]
+        }
       },
       %{
         name: "screen",
@@ -113,13 +168,38 @@ defmodule AndroidEmulator do
               height: %{type: "integer"}
             },
             ["action"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          description: "As Computer Use says: a screenshot, what it did, or for stream, the ICE servers or the screen's answer",
+          properties: %{
+            mimeType: %{type: "string"},
+            size: %{type: "integer"},
+            done: %{type: "string", description: "What it did, in a few words"},
+            iceServers: %{type: "array", items: %{type: "object"}},
+            answer: %{type: "string", description: "The screen's SDP answer"}
+          }
+        }
       },
       %{
         name: "stop_idle",
         description:
           "Stop every running emulator, anyone's, that has gone unused for #{@idle_hours} hours, on each machine. It's run every hour, and gives the ones it stopped.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            stopped: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{machine: %{type: ["string", "null"]}, name: %{type: "string"}},
+                required: ["machine", "name"]
+              }
+            }
+          },
+          required: ["stopped"]
+        }
       }
     ]
   end
@@ -129,15 +209,18 @@ defmodule AndroidEmulator do
   end
 
   @impl true
-  def call("list", _inputs, call), do: Enum.map(emulators(call), &Map.drop(&1, ["server", "artifact", "id"]))
+  def call("list", _inputs, call), do: %{emulators: listed(call)}
 
   def call("machines", _inputs, call) do
-    for server <- Service.servers(call, Emulator) do
-      case Service.seen(server) do
-        at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
-        _ -> %{machine: Service.name(server), on: true}
+    machines =
+      for server <- Service.servers(call, Emulator) do
+        case Service.seen(server) do
+          at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
+          _ -> %{machine: Service.name(server), on: true}
+        end
       end
-    end
+
+    %{machines: machines}
   end
 
   def call("create", %{"name" => name} = inputs, call) do
@@ -156,13 +239,18 @@ defmodule AndroidEmulator do
     }
 
     Service.call(call, Emulator, :create, [spec], server)
-    call("list", %{}, call) |> Enum.find(&(&1["name"] == name))
+    Enum.find(listed(call), &(&1["name"] == name))
   end
 
-  def call("start", inputs, call), do: on(call, inputs, :start) && "Started #{inputs["emulator"]}"
-  def call("stop", inputs, call), do: on(call, inputs, :stop) && "Stopping #{inputs["emulator"]}: it saves what it was doing first"
-  def call("remove", inputs, call), do: on(call, inputs, :remove) && "Removed #{inputs["emulator"]}"
-  def call("open_url", %{"url" => url} = inputs, call), do: on(call, inputs, :open_url, [url]) && "Opened #{url}"
+  def call(tool, %{"emulator" => name} = inputs, call) when tool in ~w(start stop remove) do
+    on(call, inputs, String.to_existing_atom(tool))
+    %{emulator: name}
+  end
+
+  def call("open_url", %{"url" => url} = inputs, call) do
+    on(call, inputs, :open_url, [url])
+    %{emulator: inputs["emulator"], url: url}
+  end
 
   def call("install", inputs, call) do
     apk =
@@ -179,7 +267,7 @@ defmodule AndroidEmulator do
           raise "Give the APK, uploaded, or its url"
       end
 
-    on(call, inputs, :install, [apk])
+    %{emulator: inputs["emulator"], said: on(call, inputs, :install, [apk])}
   end
 
   def call("shell", %{"command" => command} = inputs, call), do: on(call, inputs, :shell, [command, Map.get(inputs, "timeout", 60)])
@@ -201,18 +289,21 @@ defmodule AndroidEmulator do
     end
   end
 
-  def call("screen", %{"action" => "move"}, _call), do: "A phone has no pointer to move: nothing to do"
+  def call("screen", %{"action" => "move"}, _call), do: %{done: "A phone has no pointer to move: nothing to do"}
 
   def call("screen", %{"action" => action} = inputs, call) do
     for args <- input(action, inputs), do: on(call, inputs, :input, [args])
-    did(action, inputs)
+    %{done: did(action, inputs)}
   end
 
   def call("stop_idle", _inputs, call) do
-    for server <- Service.servers(call, Emulator),
-        not is_integer(Service.seen(server)),
-        name <- Service.call(call, Emulator, :stop_idle, [@idle_hours * 3_600_000], server),
-        do: %{machine: Service.name(server), name: name}
+    stopped =
+      for server <- Service.servers(call, Emulator),
+          not is_integer(Service.seen(server)),
+          name <- Service.call(call, Emulator, :stop_idle, [@idle_hours * 3_600_000], server),
+          do: %{machine: Service.name(server), name: name}
+
+    %{stopped: stopped}
   end
 
   # Computer Use asks for the caller's screens: each running emulator of theirs is one, called what it is, and acted
@@ -295,6 +386,8 @@ defmodule AndroidEmulator do
     do: Enum.find(emulators(call), &(&1["name"] == name)) || raise("You have no emulator called #{name}")
 
   # The emulators this call may use, on every machine that's up.
+  defp listed(call), do: Enum.map(emulators(call), &Map.drop(&1, ["server", "artifact", "id"]))
+
   defp emulators(call) do
     for server <- Service.servers(call, Emulator),
         e <- each(call, server, :list),

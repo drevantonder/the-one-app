@@ -46,29 +46,64 @@ defmodule GoogleDocs do
         read_only: true,
         description:
           "The Google accounts Google Docs can use, the default first, each with ok, and why when it's false (google-docs_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            accounts: %{
+              type: "array",
+              description: "The default first",
+              items: %{
+                type: "object",
+                properties: %{
+                  account: string.("Its address"),
+                  ok: %{type: "boolean", description: "Whether it can be used now"},
+                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
+                },
+                required: ["account", "ok"]
+              }
+            }
+          },
+          required: ["accounts"]
+        }
       },
       %{
         name: "sign_in",
         description:
           "Starts signing a Google account in to Google Docs, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-docs_accounts lists it")}}
+        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-docs_accounts lists it")}},
+        outputs: %{
+          type: "object",
+          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
+          required: ["url", "then"]
+        }
       },
       %{
         name: "sign_out",
         description: "Signs a Google account out of Google Docs. Other Google apps that use it still do, and google-docs_sign_in signs it in again.",
-        inputs: with_account.(%{}, ["account"])
+        inputs: with_account.(%{}, ["account"]),
+        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "read",
         read_only: true,
         description:
-          "A document (Docs' documents.get) as text: its title, address and body, as markdown (headings, lists, tables, bold, italic, links) or plain text.",
+          "A document (Docs' documents.get): its title, address and body, as markdown (headings, lists, tables, bold, italic, links) or plain text.",
         inputs:
           with_account.(
             %{documentId: document, format: %{type: "string", enum: ["markdown", "text"], description: "markdown, the default, or text"}},
             ["documentId"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            id: string.("The document's id"),
+            title: %{type: "string"},
+            url: string.("Its address"),
+            text: string.("Its body, as markdown or plain text, as format asked")
+          },
+          required: ["id", "title", "url", "text"]
+        }
       },
       %{
         name: "create",
@@ -77,18 +112,24 @@ defmodule GoogleDocs do
           with_account.(
             %{title: string.("Its title, like Meeting notes 2026-11-03"), text: string.("Its first text, as plain text: markdown stays as typed")},
             ["title"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{id: string.("The document's id"), title: %{type: "string"}, url: string.("Its address")},
+          required: ["id", "title", "url"]
+        }
       },
       %{
         name: "append",
         description:
           "Adds text at the end of a document, as a new paragraph (a batchUpdate insertText). This changes the person's document: do it only when they asked.",
-        inputs: with_account.(%{documentId: document, text: string.("The text, as plain text: markdown stays as typed")}, ["documentId", "text"])
+        inputs: with_account.(%{documentId: document, text: string.("The text, as plain text: markdown stays as typed")}, ["documentId", "text"]),
+        outputs: %{type: "object", properties: %{id: string.("The document's id"), url: string.("Its address")}, required: ["id", "url"]}
       },
       %{
         name: "replace",
         description:
-          "Replaces every match of some text in a document (a batchUpdate replaceAllText), and says how many changed. Do it only when the person asked.",
+          "Replaces every match of some text in a document (a batchUpdate replaceAllText), and says how many changed: 0 when it found none, which google-docs_read with format text shows the text to match. Do it only when the person asked.",
         inputs:
           with_account.(
             %{
@@ -98,7 +139,15 @@ defmodule GoogleDocs do
               matchCase: %{type: "boolean", description: "Match capitals exactly. False if left out"}
             },
             ["documentId", "find"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            id: string.("The document's id"),
+            occurrencesChanged: %{type: "integer", description: "How many matches were replaced: 0 when none was found"}
+          },
+          required: ["id", "occurrencesChanged"]
+        }
       }
     ]
   end
@@ -114,7 +163,12 @@ defmodule GoogleDocs do
   defp run("read", %{"documentId" => given} = inputs, at) do
     id = id(given)
     document = api(at, "GET", "documents/#{path(at, id)}", missing: no_document(id))
-    "#{document["title"]}\n#{url(document["documentId"])}\n\n#{render(document, inputs["format"] != "text")}"
+    %{
+      id: document["documentId"],
+      title: document["title"],
+      url: url(document["documentId"]),
+      text: render(document, inputs["format"] != "text")
+    }
   end
 
   defp run("create", %{"title" => title} = inputs, at) do
@@ -129,7 +183,7 @@ defmodule GoogleDocs do
   defp run("append", %{"documentId" => given, "text" => text}, at) do
     id = id(given)
     batch(at, id, [%{insertText: %{text: "\n" <> text, endOfSegmentLocation: %{}}}])
-    "Added it at the end of #{url(id)}"
+    %{id: id, url: url(id)}
   end
 
   defp run("replace", %{"documentId" => given, "find" => find} = inputs, at) do
@@ -138,11 +192,7 @@ defmodule GoogleDocs do
         %{replaceAllText: %{containsText: %{text: find, matchCase: inputs["matchCase"] == true}, replaceText: inputs["replace"] || ""}}
       ])
 
-    case get_in(replaced, ["replies", Access.at(0), "replaceAllText", "occurrencesChanged"]) || 0 do
-      0 -> ~s|Found no "#{find}": nothing changed. google-docs_read with format text shows what's there.|
-      1 -> "Replaced 1 match."
-      count -> "Replaced #{count} matches."
-    end
+    %{id: id(given), occurrencesChanged: get_in(replaced, ["replies", Access.at(0), "replaceAllText", "occurrencesChanged"]) || 0}
   end
 
   defp batch(at, id, requests),

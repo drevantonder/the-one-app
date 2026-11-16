@@ -22,9 +22,9 @@ const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => ca
 
 /// Every app there is, and the pages this user sees, each with the plugins it has.
 const store = createMemo(async () => {
-  const groups = await json<{ group: string }[]>("permissions_groups").catch((): { group: string }[] => [])
+  const groups = await json<{ groups: { group: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string }[] => [])
   const whos = [undefined, ...groups.map(({ group }) => group), "network"]
-  const [all, pages] = await Promise.all([json<App[]>("home-screen_store"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, subject: who, name: named(who) }))))])
+  const [all, pages] = await Promise.all([json<{ plugins: App[] }>("home-screen_store").then(({ plugins }) => plugins), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, subject: who, name: named(who) }))))])
   const apps = location.hash === "#accounts" ? all.filter((app) => app.accounts) : all
   return { apps, pages }
 })

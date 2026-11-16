@@ -40,6 +40,20 @@ defmodule GitRepos do
     ref = %{type: "string", description: "A branch, a tag or a commit. Left out, the repo's default branch"}
     path = %{type: "string", description: "A path in the repo, like src/app.js. Left out, the top"}
     pull_request = %{type: "string", description: "The pull_request's name, as `pull_requests` lists them"}
+    clone = %{type: "string", description: "Its address, to clone it by"}
+    ms = &%{type: "integer", description: "#{&1}, in milliseconds since 1970"}
+
+    commit = %{
+      type: "object",
+      properties: %{
+        sha: %{type: "string"},
+        subject: %{type: "string"},
+        author: %{type: "string"},
+        at: %{type: "integer", description: "When, in milliseconds since 1970"}
+      },
+      required: ["sha", "subject", "author", "at"]
+    }
+
     only = fn properties, required -> %{type: "object", properties: properties, required: required} end
 
     [
@@ -48,28 +62,97 @@ defmodule GitRepos do
         description:
           "Creates an empty repo, yours, or a group's or the network's when asked for them, and answers how to clone it",
         inputs:
-          only.(%{name: %{type: "string", description: "Lowercase letters, digits, - and _, like notes"}}, ["name"])
+          only.(%{name: %{type: "string", description: "Lowercase letters, digits, - and _, like notes"}}, ["name"]),
+        outputs: only.(%{repo: repo, clone: clone}, ["repo", "clone"])
       },
       %{
         name: "list",
         read_only: true,
         description:
           "Every repo you may read, the latest pushed first: its name, whose it is, when it was last pushed, and whether you push to it",
-        inputs: only.(%{}, [])
+        inputs: only.(%{}, []),
+        outputs: only.(
+          %{
+            repos: %{
+              type: "array",
+              description: "The latest pushed first",
+              items:
+                only.(
+                  %{
+                    repo: repo,
+                    whose: %{type: "string", description: "users/<name>, groups/<name> or network"},
+                    pushed: ms.("When it was last pushed"),
+                    pushes: %{type: "boolean", description: "Whether you push to it"},
+                    clone: clone
+                  },
+                  ["repo", "whose", "pushed", "pushes", "clone"]
+                )
+            }
+          },
+          ["repos"]
+        )
       },
       %{
         name: "branches",
         read_only: true,
         description:
           "A repo's branches, each with its newest commit, the default first, and its address to clone it by",
-        inputs: only.(%{repo: repo}, ["repo"])
+        inputs: only.(%{repo: repo}, ["repo"]),
+        outputs: only.(
+          %{
+            repo: repo,
+            head: %{type: "string", description: "The default branch"},
+            whose: %{type: "string"},
+            clone: clone,
+            pushes: %{type: "boolean", description: "Whether you push to it"},
+            owns: %{type: "boolean", description: "Whether you own it"},
+            branches: %{
+              type: "array",
+              description: "The default first",
+              items: Map.update!(commit, :properties, &Map.put(&1, :branch, %{type: "string"}))
+            }
+          },
+          ["repo", "head", "whose", "clone", "pushes", "owns", "branches"]
+        )
       },
       %{
         name: "tree",
         read_only: true,
         description:
           "A folder of a repo at a ref: its files and folders, folders first, the newest commit that touched it, and its README's text",
-        inputs: only.(%{repo: repo, ref: ref, path: path}, ["repo"])
+        inputs: only.(%{repo: repo, ref: ref, path: path}, ["repo"]),
+        outputs: only.(
+          %{
+            repo: repo,
+            empty: %{type: "boolean", description: "Only there, and true, for a repo nothing was pushed to"},
+            ref: %{type: "string"},
+            path: %{type: "string"},
+            clone: clone,
+            entries: %{
+              type: "array",
+              description: "Folders first",
+              items:
+                only.(
+                  %{
+                    name: %{type: "string"},
+                    type: %{type: "string", description: "tree for a folder, blob for a file, commit for a submodule"},
+                    mode: %{type: "string"},
+                    sha: %{type: "string"},
+                    size: %{type: ["integer", "null"], description: "A file's, in bytes"}
+                  },
+                  ["name", "type", "mode", "sha", "size"]
+                )
+            },
+            readme: %{
+              type: ["object", "null"],
+              properties: %{name: %{type: "string"}, text: %{type: "string"}},
+              description: "Its README, if it has one"
+            },
+            commit: %{anyOf: [commit, %{type: "null"}], description: "The newest commit that touched it"},
+            commits: %{type: "integer", description: "How many commits the ref has"}
+          },
+          ["repo", "clone", "entries"]
+        )
       },
       %{
         name: "file",
@@ -80,7 +163,17 @@ defmodule GitRepos do
           only.(%{repo: repo, ref: ref, path: %{path | description: "The file's path, like src/app.js"}}, [
             "repo",
             "path"
-          ])
+          ]),
+        outputs: only.(
+          %{
+            path: %{type: "string"},
+            size: %{type: "integer", description: "In bytes"},
+            text: %{type: "string", description: "Its text, where it's text and not too large"},
+            binary: %{type: "boolean", description: "True where it isn't text"},
+            too_large: %{type: "boolean", description: "True where it's too large to show: clone the repo"}
+          },
+          ["path", "size"]
+        )
       },
       %{
         name: "log",
@@ -96,7 +189,14 @@ defmodule GitRepos do
               page: %{type: "integer", description: "0, the default, for the newest, then 1, 2 and on"}
             },
             ["repo"]
-          )
+          ),
+        outputs: only.(
+          %{
+            commits: %{type: "array", items: commit, description: "Newest first"},
+            more: %{type: "boolean", description: "Whether there's another page"}
+          },
+          ["commits", "more"]
+        )
       },
       %{
         name: "commit",
@@ -106,37 +206,84 @@ defmodule GitRepos do
           only.(%{repo: repo, sha: %{type: "string", description: "The commit's sha, or its start"}}, [
             "repo",
             "sha"
-          ])
+          ]),
+        outputs: only.(
+          %{
+            sha: %{type: "string"},
+            parents: %{type: "array", items: %{type: "string"}},
+            author: %{type: "string"},
+            email: %{type: "string"},
+            at: ms.("When"),
+            message: %{type: "string"},
+            diff: %{type: "string", description: "What it changed, cut short where it's long"}
+          },
+          ["sha", "parents", "author", "email", "at", "message", "diff"]
+        )
       },
       %{
         name: "pull_requests",
         read_only: true,
         description:
           "A repo's pull requests, open ones first: each one's name, who opened it, the branch it's for, its title, its commits, and whether it was merged or closed",
-        inputs: only.(%{repo: repo}, ["repo"])
+        inputs: only.(%{repo: repo}, ["repo"]),
+        outputs: only.(
+          %{
+            pull_requests: %{
+              type: "array",
+              description: "Open ones first",
+              items:
+                only.(
+                  %{
+                    name: pull_request,
+                    by: %{type: "string", description: "Who opened it"},
+                    into: %{type: "string", description: "The branch it's for"},
+                    title: %{type: "string"},
+                    at: ms.("When it was opened"),
+                    state: %{type: "string", enum: ~w(open merged closed)},
+                    by_then: %{type: "string", description: "Who merged or closed it"},
+                    then: ms.("When it was merged or closed"),
+                    commits: %{type: "array", items: commit}
+                  },
+                  ["name", "by", "into", "title", "at", "state", "commits"]
+                )
+            }
+          },
+          ["pull_requests"]
+        )
       },
       %{
         name: "merge",
         description:
           "Merges a pull request into the branch it's for: a fast-forward where it can be, or else a merge. Only someone who pushes to the repo merges one",
-        inputs: only.(%{repo: repo, pull_request: pull_request}, ["repo", "pull_request"])
+        inputs: only.(%{repo: repo, pull_request: pull_request}, ["repo", "pull_request"]),
+        outputs: only.(
+          %{
+            pull_request: pull_request,
+            into: %{type: "string", description: "The branch it was merged into"},
+            sha: %{type: "string", description: "The commit that branch is at now"}
+          },
+          ["pull_request", "into", "sha"]
+        )
       },
       %{
         name: "close",
         description:
           "Closes a pull request: it's no longer open, and nothing of it reaches a branch. Whoever pushes to the repo closes one, and so does whoever opened it",
-        inputs: only.(%{repo: repo, pull_request: pull_request}, ["repo", "pull_request"])
+        inputs: only.(%{repo: repo, pull_request: pull_request}, ["repo", "pull_request"]),
+        outputs: only.(%{pull_request: pull_request}, ["pull_request"])
       },
       %{
         name: "remove",
         description:
           "Removes a repo you own: nobody reads, clones or pushes to it, until `restore` brings it back as it was",
-        inputs: only.(%{repo: repo}, ["repo"])
+        inputs: only.(%{repo: repo}, ["repo"]),
+        outputs: only.(%{repo: repo}, ["repo"])
       },
       %{
         name: "restore",
         description: "Brings back a repo you own that was removed in the last 30 days, as it was",
-        inputs: only.(%{repo: repo}, ["repo"])
+        inputs: only.(%{repo: repo}, ["repo"]),
+        outputs: only.(%{repo: repo}, ["repo"])
       },
       %{
         name: "git",
@@ -156,7 +303,11 @@ defmodule GitRepos do
               encoding: %{type: "string", description: "Git's Content-Encoding header"}
             },
             ["repo", "path"]
-          )
+          ),
+        outputs: only.(
+          %{mimeType: %{type: "string", description: "Git's Content-Type"}, size: %{type: "integer"}},
+          ["mimeType"]
+        )
       }
     ]
   end
@@ -192,31 +343,33 @@ defmodule GitRepos do
 
     Artifact.write(index(), "index/" <> Artifact.name(repo), JSON.encode!(%{"pushed" => now}))
 
-    "Created #{Artifact.name(repo)}. Clone it with `git clone #{address(repo)}`, or push to it from a repo you have " <>
-      "with `git remote add origin #{address(repo)}` and `git push -u origin main`."
+    %{repo: Artifact.name(repo), clone: address(repo)}
   end
 
   def call("list", _inputs, call) do
     names = for "index/" <> name <- Artifact.list(index(), "index/"), Call.reaches?(call, name), do: name
 
-    names
-    |> Enum.zip(Artifact.read_all(index(), Enum.map(names, &("index/" <> &1))))
-    |> Enum.flat_map(fn {name, {:ok, data, _tag}} ->
-      stored = JSON.decode!(data)
+    repos =
+      names
+      |> Enum.zip(Artifact.read_all(index(), Enum.map(names, &("index/" <> &1))))
+      |> Enum.flat_map(fn {name, {:ok, data, _tag}} ->
+        stored = JSON.decode!(data)
 
-      if stored["removed"],
-        do: [],
-        else: [
-          %{
-            repo: name,
-            whose: name |> String.split("/made/") |> hd(),
-            pushed: stored["pushed"],
-            pushes: Call.reaches?(call, name, "editor"),
-            clone: address(name)
-          }
-        ]
-    end)
-    |> Enum.sort_by(& &1.pushed, :desc)
+        if stored["removed"],
+          do: [],
+          else: [
+            %{
+              repo: name,
+              whose: name |> String.split("/made/") |> hd(),
+              pushed: stored["pushed"],
+              pushes: Call.reaches?(call, name, "editor"),
+              clone: address(name)
+            }
+          ]
+      end)
+      |> Enum.sort_by(& &1.pushed, :desc)
+
+    %{repos: repos}
   end
 
   def call("branches", %{"repo" => name}, call) do
@@ -336,28 +489,31 @@ defmodule GitRepos do
   def call("pull_requests", %{"repo" => name}, call) do
     {folder, state} = read(call, name)
 
-    for {pull_request, about} <- state["pull_requests"] do
-      tip = about["commit"] || state["refs"]["refs/pull/#{pull_request}"]
-      # Its commits are those the branch it's for didn't have, then or now.
-      into = if about["state"] == "open", do: state["refs"]["refs/heads/#{about["into"]}"], else: about["from"]
-      range = if into, do: ["#{into}..#{tip}"], else: [tip]
+    pull_requests =
+      for {pull_request, about} <- state["pull_requests"] do
+        tip = about["commit"] || state["refs"]["refs/pull/#{pull_request}"]
+        # Its commits are those the branch it's for didn't have, then or now.
+        into = if about["state"] == "open", do: state["refs"]["refs/heads/#{about["into"]}"], else: about["from"]
+        range = if into, do: ["#{into}..#{tip}"], else: [tip]
 
-      Map.merge(about, %{
-        "name" => pull_request,
-        "commits" =>
-          for line <- lines(Mirror.git!(folder, ["log", "--format=%H%x1f%s%x1f%an%x1f%at" | range])) do
-            [sha, subject, author, at] = String.split(line, "\x1f")
-            %{sha: sha, subject: subject, author: author, at: String.to_integer(at) * 1000}
-          end
-      })
-    end
-    |> Enum.sort_by(&{&1["state"] != "open", -&1["at"]})
+        Map.merge(about, %{
+          "name" => pull_request,
+          "commits" =>
+            for line <- lines(Mirror.git!(folder, ["log", "--format=%H%x1f%s%x1f%an%x1f%at" | range])) do
+              [sha, subject, author, at] = String.split(line, "\x1f")
+              %{sha: sha, subject: subject, author: author, at: String.to_integer(at) * 1000}
+            end
+        })
+      end
+      |> Enum.sort_by(&{&1["state"] != "open", -&1["at"]})
+
+    %{pull_requests: pull_requests}
   end
 
   def call("merge", %{"repo" => name, "pull_request" => pull_request}, call) do
     repo = Call.reach(call, name, "editor")
     by = call.actor || call.subject
-    [person] = Call.tool(call, "sign-in", "people", %{"users" => [by]})
+    %{"people" => [person]} = Call.tool(call, "sign-in", "people", %{"users" => [by]})
 
     {result, _state} =
       Mirror.change(Mirror.of(call, repo), repo, nil, fn state, folder ->
@@ -377,7 +533,7 @@ defmodule GitRepos do
           Map.merge(about, %{"state" => "merged", "commit" => tip, "from" => base, "by_then" => by, "then" => now()})
 
         {%{state | "refs" => refs, "pull_requests" => Map.put(state["pull_requests"], pull_request, merged)}, merged_packs,
-         "Merged #{pull_request} into #{about["into"]}, which is at #{String.slice(merged, 0, 7)} now."}
+         %{pull_request: pull_request, into: about["into"], sha: refs[into]}}
       end)
 
     pushed(name)
@@ -405,7 +561,7 @@ defmodule GitRepos do
         refs = Map.delete(state["refs"], "refs/pull/#{pull_request}")
 
         {%{state | "refs" => refs, "pull_requests" => Map.put(state["pull_requests"], pull_request, closed)}, [],
-         "Closed #{pull_request}."}
+         %{pull_request: pull_request}}
       end)
 
     result
@@ -416,9 +572,7 @@ defmodule GitRepos do
     Call.tool(call, "recently-deleted", tool, %{"artifact" => name})
     indexed(name, tool <> "d")
 
-    if tool == "remove",
-      do: "Removed #{name}. `git-repos restore` brings it back as it was, for 30 days.",
-      else: "Restored #{name}. It's as it was."
+    %{repo: name}
   end
 
   def call("git", %{"repo" => name, "path" => path} = inputs, call) do
@@ -436,7 +590,7 @@ defmodule GitRepos do
           receive_pack(call, writable(call, repo), process, body)
 
         [service | _] when service in ["info/refs", "git-upload-pack"] ->
-          {folder, state} = Mirror.sync(process, repo)
+          {folder, _state} = Mirror.sync(process, repo)
           Wire.upload_pack(folder, path, body, inputs["protocol"], inputs["encoding"])
 
         _ ->

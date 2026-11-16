@@ -38,6 +38,11 @@ defmodule OneCore.CodeMode do
         properties: %{code: %{type: "string", description: "The script"}},
         required: ["code"]
       },
+      outputSchema: %{
+        type: "object",
+        properties: %{text: %{type: "string", description: "What it returned, or what went wrong, with what it logged"}},
+        required: ["text"]
+      },
       annotations: %{readOnlyHint: false}
     }
   end
@@ -66,14 +71,34 @@ defmodule OneCore.CodeMode do
         properties: %{calls: %{anyOf: [request, %{type: "array", items: request, minItems: 1}]}},
         required: ["calls"]
       },
+      outputSchema: %{
+        type: "object",
+        properties: %{
+          calls: %{
+            type: "array",
+            description: "Each call's answer, in the order asked",
+            items: %{
+              type: "object",
+              properties: %{
+                path: %{type: "string"},
+                ok: %{type: "boolean"},
+                value: %{description: "What it answered, as its signature says"},
+                error: %{type: "string", description: "Why it failed, where it did"}
+              },
+              required: ["path", "ok"]
+            }
+          }
+        },
+        required: ["calls"]
+      },
       annotations: %{readOnlyHint: false}
     }
   end
 
   @doc """
   `call`'s answer, as MCP's result: each of `calls` run at once by `call`, given a tool's name and inputs as `run/4`'s
-  is, `named` giving the name of the tool at each path a script reaches. Each answers, in order, as JSON with its
-  `path`, `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, after that.
+  is, `named` giving the name of the tool at each path a script reaches. Each answers, in order, with its `path`,
+  `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, comes after.
   """
   def calls(calls, named, call) do
     calls
@@ -92,24 +117,27 @@ defmodule OneCore.CodeMode do
     )
     |> Enum.map(fn {:ok, answer} -> answer end)
     |> then(fn answers ->
-      content =
-        Enum.flat_map(answers, fn
-          {path, {:ok, content}} ->
-            if text?(content),
-              do: [%{type: "text", text: JSON.encode!(%{path: path, ok: true, value: value(content)})}],
-              # What isn't text, as a picture is, stays MCP's content, for whoever called to see.
-              else: [%{type: "text", text: JSON.encode!(%{path: path, ok: true})} | content]
+      calls =
+        for {path, answer} <- answers do
+          case answer do
+            {:ok, result} -> %{path: path, ok: true, value: value(result)}
+            {:error, why} -> %{path: path, ok: false, error: why}
+          end
+        end
 
-          {path, {:error, why}} ->
-            [%{type: "text", text: JSON.encode!(%{path: path, ok: false, error: why})}]
-        end)
+      # What isn't text of an answer, as a picture is, stays MCP's content, for whoever called to see.
+      files = for {_path, {:ok, result}} <- answers, part <- result["content"], part["type"] != "text", do: part
 
-      %{content: content, isError: Enum.all?(answers, &match?({_, {:error, _}}, &1))}
+      %{
+        content: [%{type: "text", text: JSON.encode!(%{calls: calls})} | files],
+        structuredContent: %{calls: calls},
+        isError: Enum.all?(answers, &match?({_, {:error, _}}, &1))
+      }
     end)
   end
 
   @doc """
-  Runs `code` with `tools`, each `%{name, plugin, description, input}`, and `namespaces`, what each plugin is for by
+  Runs `code` with `tools`, each `%{name, plugin, description, input, output}`, and `namespaces`, what each plugin is for by
   its name. `call` runs one: given its name and inputs, it gives MCP's result of calling it. Gives `{:ok, text}` or
   `{:error, text}`: what it returned or what went wrong, with what it logged.
   """
@@ -169,23 +197,29 @@ defmodule OneCore.CodeMode do
     end
   end
 
-  # One call, as MCP answered it: text that's JSON is that, other text is a string, and anything else is MCP's
-  # content as it is. An error is what the script's call throws.
+  # One call, as MCP answered it: what it answered as JSON (`structuredContent`). An error is what the script's call
+  # throws.
   defp called(call, name, input) do
     case answered(call, name, input) do
-      {:ok, content} -> %{ok: if(text?(content), do: value(content), else: content)}
+      {:ok, result} -> %{ok: value(result)}
       {:error, why} -> %{error: why}
     end
   end
 
+  # MCP's result of a call, as JSON has it.
   defp answered(call, name, input) do
     case call.(name, input || %{}) do
-      {:ok, %{isError: true, content: content}} -> {:error, texts(content)}
-      {:ok, %{"isError" => true, "content" => content}} -> {:error, texts(content)}
-      {:ok, %{content: content}} -> {:ok, JSON.decode!(JSON.encode!(content))}
-      {:ok, %{"content" => content}} -> {:ok, content}
-      {:error, _code, why} -> {:error, why}
-      {:error, why} -> {:error, why}
+      {:ok, result} ->
+        case JSON.decode!(JSON.encode!(result)) do
+          %{"isError" => true, "content" => content} -> {:error, texts(content)}
+          result -> {:ok, result}
+        end
+
+      {:error, _code, why} ->
+        {:error, why}
+
+      {:error, why} ->
+        {:error, why}
     end
   rescue
     error -> {:error, Exception.message(error)}
@@ -193,9 +227,11 @@ defmodule OneCore.CodeMode do
     :exit, why -> {:error, Exception.format_exit(why)}
   end
 
-  defp text?(content), do: Enum.all?(content, &(&1["type"] == "text"))
+  # What a call answered as JSON. A tool of a version deployed before tools said what they answer has none, so its
+  # text is read: text that's JSON is that, and other text is a string.
+  defp value(%{"structuredContent" => structured}), do: structured
 
-  defp value(content) do
+  defp value(%{"content" => content}) do
     text = texts(content)
 
     case JSON.decode(text) do
@@ -204,7 +240,7 @@ defmodule OneCore.CodeMode do
     end
   end
 
-  defp texts(content), do: content |> JSON.encode!() |> JSON.decode!() |> Enum.map_join("\n", & &1["text"])
+  defp texts(content), do: content |> Enum.filter(&(&1["type"] == "text")) |> Enum.map_join("\n", & &1["text"])
 
   defp stop(port) do
     case Port.info(port, :os_pid) do

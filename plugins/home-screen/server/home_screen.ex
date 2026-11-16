@@ -60,6 +60,48 @@ defmodule HomeScreen do
       required: ["id"]
     }
 
+    app = %{
+      type: "object",
+      properties: %{
+        app: %{type: "string", description: "Its plugin's name and its page: notes/client/index.html"},
+        plugin: %{type: "string"},
+        name: %{type: "string"},
+        icon: %{type: "string", description: "A data: address"},
+        put: %{type: "boolean", description: "Whether it was put on the page, not installed for it"}
+      },
+      required: ["app", "plugin", "name", "icon", "put"]
+    }
+
+    widget = %{
+      type: "object",
+      properties: %{
+        widget: %{type: "string", description: "Its plugin's name and its tool: notes/glance"},
+        name: %{type: "string"},
+        tool: %{type: "string"},
+        sizes: %{type: "array", items: %{type: "string", enum: ~w(2x2 4x2 4x4)}},
+        size: %{type: "string", enum: ~w(2x2 4x2 4x4), description: "Its size on the page"},
+        opens: %{type: ["string", "null"], description: "The app pressing it opens"}
+      },
+      required: ["widget", "name", "tool", "sizes"]
+    }
+
+    # A request for a plugin to be installed for everyone.
+    asked = %{
+      type: "object",
+      properties: %{
+        id: %{type: "integer"},
+        by: %{type: "string", description: "Who asked"},
+        reason: %{type: ["string", "null"]},
+        at: %{type: "string", description: "When, ISO 8601"},
+        state: %{type: "string", enum: ~w(asked approved declined)},
+        answered_by: %{type: "string"},
+        plugin: %{type: "string", description: "A plugin in the network"},
+        source: %{type: "string", description: "Or the git repo it's in"},
+        name: %{type: "string", description: "And its name there"}
+      },
+      required: ["id", "by", "reason", "at", "state"]
+    }
+
     [
       %{
         name: "page",
@@ -69,7 +111,36 @@ defmodule HomeScreen do
         (`widgets`), the plugins with accounts (`accounts`), which are in the Accounts folder, and whether you may
         arrange it. Asked for a group or for the network, it's theirs.
         """,
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            who: %{type: "string", description: "Whose page"},
+            arranges: %{type: "boolean", description: "Whether you may arrange it"},
+            items: %{
+              type: "array",
+              description: "What's on it, in order: each an app or a widget",
+              items: %{anyOf: [app, Map.put(widget, :required, ["widget", "name", "tool", "sizes", "size"])]}
+            },
+            widgets: %{type: "array", items: widget, description: "The widgets that could be put on it"},
+            accounts: %{
+              type: "array",
+              description: "The plugins with accounts, in the Accounts folder",
+              items: %{
+                type: "object",
+                properties: %{
+                  plugin: %{type: "string"},
+                  name: %{type: "string", description: "What its tools start with"},
+                  title: %{type: "string"},
+                  icon: %{type: "string", description: "A data: address"},
+                  sign_in: %{type: "string", description: "The page its sign-in shows on, if it has one"}
+                },
+                required: ["plugin", "name", "title", "icon"]
+              }
+            }
+          },
+          required: ["who", "arranges", "items", "widgets", "accounts"]
+        }
       },
       %{
         name: "arrange",
@@ -98,20 +169,64 @@ defmodule HomeScreen do
             }
           },
           required: ["items"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{items: %{type: "array", items: %{type: "object"}, description: "What's on the page now, as given"}},
+          required: ["items"]
         }
       },
       %{
         name: "settings",
         read_only: true,
         description: "Lists the parts of Settings: each an app of a plugin that says it's one",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            parts: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  app: %{type: "string", description: "Its plugin's name and its page"},
+                  name: %{type: "string"},
+                  icon: %{type: "string", description: "A data: address"}
+                },
+                required: ["app", "name", "icon"]
+              }
+            }
+          },
+          required: ["parts"]
+        }
       },
       %{
         name: "store",
         read_only: true,
         description:
           "Lists every plugin anyone has deployed that a person could add: one with an icon, and an app on a page if it has apps. Each with what a person reads of it (`subtitle`, `about`) and whether it has accounts (`accounts`)",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            plugins: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  plugin: %{type: "string", description: "Its artifact: users/alice/plugins/notes"},
+                  name: %{type: "string", description: "What a person calls it"},
+                  icon: %{type: "string", description: "A data: address"},
+                  subtitle: %{type: ["string", "null"]},
+                  about: %{type: ["string", "null"]},
+                  accounts: %{type: "boolean", description: "Whether it has accounts"}
+                },
+                required: ["plugin", "name", "icon", "subtitle", "about", "accounts"]
+              }
+            }
+          },
+          required: ["plugins"]
+        }
       },
       %{
         name: "add",
@@ -119,13 +234,26 @@ defmodule HomeScreen do
         Puts the app of a plugin you can already use, one in use for the network, on your Home Screen page. It
         installs nothing. Asked for a group, on theirs. One not in use for the network is asked for with `request`.
         """,
-        inputs: plugin
+        inputs: plugin,
+        outputs: %{
+          type: "object",
+          properties: %{
+            apps: %{type: "array", items: %{type: "string"}, description: "Its apps, on the page now"},
+            installed: %{type: "string", description: "Who the plugin is in use for"}
+          },
+          required: ["apps", "installed"]
+        }
       },
       %{
         name: "remove",
         description:
           "Takes an app put on your page with `add` off it. One installed for you is taken off with `uninstall`.",
-        inputs: plugin
+        inputs: plugin,
+        outputs: %{
+          type: "object",
+          properties: %{plugin: %{type: "string", description: "The plugin whose app is off the page"}},
+          required: ["plugin"]
+        }
       },
       %{
         name: "request",
@@ -142,7 +270,15 @@ defmodule HomeScreen do
             name: %{type: "string", description: "The plugin's name in that repo"},
             reason: %{type: "string", maxLength: 300, description: "Why, in a sentence"}
           }
-        }
+        },
+        outputs: Map.merge(asked, %{
+          properties: Map.put(asked.properties, :told, %{
+            type: "array",
+            items: %{type: "string"},
+            description: "Who was told: whoever may install plugins for everyone"
+          }),
+          required: ["told" | asked.required]
+        })
       },
       %{
         name: "requests",
@@ -151,7 +287,8 @@ defmodule HomeScreen do
         Lists the requests for plugins to be installed for the network, newest first: every one, for whoever may
         install them, and otherwise your own. Each is `asked`, `approved` or `declined`.
         """,
-        inputs: none
+        inputs: none,
+        outputs: %{type: "object", properties: %{requests: %{type: "array", items: asked}}, required: ["requests"]}
       },
       %{
         name: "approve",
@@ -160,12 +297,17 @@ defmodule HomeScreen do
         is installed for everyone now. One from a git repo is installed by your agent, with the command this
         answers, and approving it again once it's installed marks it approved. The asker is told.
         """,
-        inputs: request
+        inputs: request,
+        outputs: Map.put(asked, :properties, Map.put(asked.properties, :install, %{
+          type: "string",
+          description: "For one from a git repo, the command that installs it, after which approve again"
+        }))
       },
       %{
         name: "decline",
         description: "Declines a request, which whoever may install plugins for the network does. The asker is told.",
-        inputs: request
+        inputs: request,
+        outputs: asked
       }
     ]
   end
@@ -245,7 +387,7 @@ defmodule HomeScreen do
       for item <- items, is_binary(item["app"]) or is_binary(item["widget"]), do: Map.take(item, ~w(app widget size))
 
     store(call, JSON.encode!(items))
-    "The page is arranged."
+    %{items: items}
   end
 
   def call("settings", _inputs, call) do
@@ -254,7 +396,7 @@ defmodule HomeScreen do
         %{app: "#{plugin.name}/#{app.page}", name: app.name, icon: app.icon}
       end
 
-    Enum.sort_by(parts, &String.downcase(&1.name))
+    %{parts: Enum.sort_by(parts, &String.downcase(&1.name))}
   end
 
   # Every plugin anyone deployed, whether or not it's on a page now. One that isn't in use for a group someone's in
@@ -273,7 +415,7 @@ defmodule HomeScreen do
                 accounts: accounts?(plugin, plugin.tools)
               }
 
-    Enum.sort_by(plugins, &String.downcase(&1.name))
+    %{plugins: Enum.sort_by(plugins, &String.downcase(&1.name))}
   end
 
   def call("add", %{"plugin" => plugin}, call) do
@@ -284,17 +426,17 @@ defmodule HomeScreen do
         raise "#{plugin} isn't in use for the network, so its app can't go on a page yet. Whoever may install " <>
                 "plugins for everyone can, and home-screen_request asks them."
 
-      %{installed: at} when at == call.subject ->
-        "It's on the page already, installed for #{at}."
-
       found ->
-        apps = for app <- found.apps, app.category == nil, do: %{"app" => "#{found.name}/#{app.page}"}
+        apps = for app <- found.apps, app.category == nil, do: "#{found.name}/#{app.page}"
 
         if apps == [],
           do: raise("#{plugin} has no app to put on a page. Its accounts, if it has any, are in Accounts already.")
 
-        store(call, JSON.encode!(Enum.uniq(stored(call) ++ apps)))
-        "Its app is on #{call.subject}'s page. Nothing was installed: it's the one in use for #{found.installed}."
+        # One installed for whoever's page this is is on it already.
+        if found.installed != call.subject,
+          do: store(call, JSON.encode!(Enum.uniq(stored(call) ++ for(app <- apps, do: %{"app" => app}))))
+
+        %{apps: apps, installed: found.installed}
     end
   end
 
@@ -307,15 +449,12 @@ defmodule HomeScreen do
 
       %{name: name} ->
         store(call, JSON.encode!(Enum.reject(stored(call), &String.starts_with?(&1["app"] || "", name <> "/"))))
-        "It's off the page."
+        %{plugin: plugin}
 
       nil ->
         raise "#{plugin} isn't on the page."
     end
   end
-
-  # A plugin this page's owner finds, by the name it's installed by, as other tools take it, or by its artifact.
-  defp named(call, plugin), do: Enum.find(Call.plugins(call), &(plugin in [&1.name, &1.plugin]))
 
   # A request names a plugin in the network, or a repo and a plugin's name in it, as `one install` takes them.
   def call("request", inputs, call) do
@@ -350,19 +489,19 @@ defmodule HomeScreen do
         {[request | requests], request}
       end)
 
-    installers = Call.tool(call, "permissions", "users", %{"artifact" => "network", "relation" => "installer"})
+    installers = Call.tool(call, "permissions", "users", %{"artifact" => "network", "relation" => "installer"})["users"]
 
     text = Enum.join(List.wrap(inputs["reason"]) ++ ["home-screen_approve or home-screen_decline answers it."], "\n")
 
     for to <- installers,
         do: notify(call, if(to == "everyone", do: "network", else: to), "#{call.actor} asks for #{called(request)}", text)
 
-    "Asked whoever may install plugins for everyone (#{Enum.join(installers, ", ")}), as request #{request["id"]}."
+    Map.put(request, "told", installers)
   end
 
   def call("requests", _inputs, call) do
     requests = requests(call)
-    if installs?(call), do: requests, else: Enum.filter(requests, &(&1["by"] == call.actor))
+    %{requests: if(installs?(call), do: requests, else: Enum.filter(requests, &(&1["by"] == call.actor)))}
   end
 
   def call("approve", %{"id" => id}, call) do
@@ -381,14 +520,16 @@ defmodule HomeScreen do
         decided(call, request, "approved")
 
       true ->
-        "Install it for everyone, then approve it again, which tells #{request["by"]}: " <>
-          "ONE_SUBJECT=network one install #{request["source"]} --plugin #{request["name"]}"
+        Map.put(request, "install", "ONE_SUBJECT=network one install #{request["source"]} --plugin #{request["name"]}")
     end
   end
 
   def call("decline", %{"id" => id}, call), do: decided(call, answering!(call, id), "declined")
 
   # The size a widget is drawn at: the one it was put on the page at, if it still comes in it.
+  # A plugin this page's owner finds, by the name it's installed by, as other tools take it, or by its artifact.
+  defp named(call, plugin), do: Enum.find(Call.plugins(call), &(plugin in [&1.name, &1.plugin]))
+
   defp size(widget, item), do: if(item["size"] in widget.sizes, do: item["size"], else: hd(widget.sizes))
 
   # How a page is arranged is its owner's: an artifact made for them, which holds the one blob.
@@ -433,15 +574,10 @@ defmodule HomeScreen do
   end
 
   defp decided(call, request, state) do
-    noted(call, fn requests ->
-      {for(
-         r <- requests,
-         do: if(r["id"] == request["id"], do: Map.merge(r, %{"state" => state, "answered_by" => call.actor}), else: r)
-       ), nil}
-    end)
-
+    request = Map.merge(request, %{"state" => state, "answered_by" => call.actor})
+    noted(call, fn requests -> {for(r <- requests, do: if(r["id"] == request["id"], do: request, else: r)), nil} end)
     notify(call, request["by"], "Your request for #{called(request)} was #{state}", "#{call.actor} #{state} it.")
-    "Request #{request["id"]} is #{state}, and #{request["by"]} is told."
+    request
   end
 
   defp notify(call, to, title, text),

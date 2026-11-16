@@ -33,6 +33,11 @@ defmodule OneCore.Search do
         },
         required: ["query"]
       },
+      outputSchema: %{
+        type: "object",
+        properties: %{text: %{type: "string", description: "The matches, their skills and what you could install"}},
+        required: ["text"]
+      },
       annotations: %{readOnlyHint: true}
     }
   end
@@ -97,7 +102,13 @@ defmodule OneCore.Search do
       plugin = listed[:_meta][:plugin]
       name = if plugin, do: String.replace_prefix(listed.name, plugin <> "_", ""), else: listed.name
       read_only = listed[:annotations][:readOnlyHint] == true
-      tool = %{name: name, description: listed.description || "", inputs: listed.inputSchema, read_only: read_only}
+      tool = %{
+        name: name,
+        description: listed.description || "",
+        inputs: listed.inputSchema,
+        outputs: listed[:outputSchema],
+        read_only: read_only
+      }
       about = if plugin, do: [described(running[plugin])], else: []
 
       %{
@@ -327,8 +338,8 @@ defmodule OneCore.Search do
   end
 
   @doc """
-  A tool as `mode` calls it, `plugin`'s or One Core's own (`nil`), with its inputs as TypeScript has them, or
-  with `inputs` given.
+  A tool as `mode` calls it, `plugin`'s or One Core's own (`nil`), with its inputs as TypeScript has them, and in a
+  script what it answers, or with `inputs` given.
   """
   def call(plugin, tool, mode, inputs \\ nil) do
     name = if plugin, do: "#{plugin}_#{tool.name}", else: tool.name
@@ -337,7 +348,8 @@ defmodule OneCore.Search do
     case mode do
       :cli when inputs != nil -> "one #{String.replace(name, "_", " ", global: false)} #{typed}"
       :cli -> Enum.join(["one #{String.replace(name, "_", " ", global: false)}" | flags(tool.inputs)], " ")
-      _ -> "#{path(Enum.join(List.wrap(plugin) ++ [tool.name], "."))}(#{typed})"
+      _ when inputs != nil -> "#{path(Enum.join(List.wrap(plugin) ++ [tool.name], "."))}(#{typed})"
+      _ -> "#{path(Enum.join(List.wrap(plugin) ++ [tool.name], "."))}(#{typed}): Promise<#{ts(tool[:outputs])}>"
     end
   end
 
@@ -384,6 +396,9 @@ defmodule OneCore.Search do
 
     case {schema["enum"], schema["type"], schema["properties"]} do
       {[_ | _] = one_of, _, _} -> Enum.map_join(one_of, " | ", &JSON.encode!/1)
+      {_, [_ | _] = types, _} -> Enum.map_join(types, " | ", &ts(Map.put(schema, "type", &1)))
+      {_, "null", _} -> "null"
+      {_, nil, nil} when is_list(:erlang.map_get("anyOf", schema)) -> Enum.map_join(schema["anyOf"], " | ", &ts/1)
       {_, "string", _} -> "string"
       {_, type, _} when type in ["integer", "number"] -> "number"
       {_, "boolean", _} -> "boolean"

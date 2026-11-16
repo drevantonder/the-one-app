@@ -24,7 +24,7 @@ interface App {
 }
 
 const inbox = createMemo(async () => {
-  const [{ notifications }, apps]: [{ notifications: Received[] }, App[]] = await Promise.all([call("notifications_inbox").then(JSON.parse), call("notifications_apps").then(JSON.parse)])
+  const [{ notifications }, apps]: [{ notifications: Received[] }, App[]] = await Promise.all([call("notifications_inbox").then(JSON.parse), call("notifications_apps").then((text) => JSON.parse(text).apps)])
   return { notifications, apps }
 })
 changed(() => refresh(inbox))

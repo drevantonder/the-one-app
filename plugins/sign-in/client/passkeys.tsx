@@ -24,7 +24,7 @@ async function remove(passkey: Passkey) {
 
 async function add() {
   try {
-    await open(await call("sign-in_add_passkey"))
+    await open(JSON.parse(await call("sign-in_add_passkey")).link)
   } catch (error) {
     toast((error as Error).message)
   }

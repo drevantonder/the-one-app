@@ -209,12 +209,30 @@ defmodule Encryption do
   def tools do
     device = %{type: "string", format: "device", description: "The device's key. This device's, if left out"}
 
+    named = %{
+      type: "object",
+      properties: %{device: %{type: "string", description: "The device's key"}, name: %{type: "string"}},
+      required: ["device", "name"]
+    }
+
     [
       %{
         name: "key",
         read_only: true,
         description: "Says which of your devices are trusted, which want to be, and what this device holds of your key",
-        inputs: %{type: "object", properties: %{device: device}}
+        inputs: %{type: "object", properties: %{device: device}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            owner: %{type: "string", description: "Whose key"},
+            device: %{type: ["string", "null"], description: "The device asked about"},
+            check: %{type: ["string", "null"], description: "What tells the key from another, once there's one"},
+            slot: %{type: ["string", "null"], description: "The key, encrypted to the device asked about, if it holds it"},
+            devices: %{type: "array", items: named, description: "The devices that hold it"},
+            asking: %{type: "array", items: named, description: "The devices asking to"}
+          },
+          required: ["owner", "device", "check", "slot", "devices", "asking"]
+        }
       },
       %{
         name: "approve",
@@ -229,7 +247,8 @@ defmodule Encryption do
             name: %{type: "string", format: "device-name", description: "What to call the device"},
             key: %{type: "string", format: "owner-key", description: "Your recovery key, to approve this device with it"}
           }
-        }
+        },
+        outputs: named
       },
       %{
         name: "ask",
@@ -237,12 +256,14 @@ defmodule Encryption do
         inputs: %{
           type: "object",
           properties: %{device: device, name: %{type: "string", format: "device-name", description: "What to call it"}}
-        }
+        },
+        outputs: %{type: "object", properties: %{device: %{type: "string"}}, required: ["device"]}
       },
       %{
         name: "revoke",
         description: "Takes a device's copy of your key away, or its asking for one",
-        inputs: %{type: "object", properties: %{device: device}, required: ["device"]}
+        inputs: %{type: "object", properties: %{device: device}, required: ["device"]},
+        outputs: %{type: "object", properties: %{device: %{type: "string"}}, required: ["device"]}
       }
     ]
   end
@@ -283,7 +304,7 @@ defmodule Encryption do
       Artifact.remove(key, "devices/" <> device)
       :ok = Artifact.write(key, "devices/" <> device, JSON.encode!(%{name: name, slot: slot}))
       Artifact.remove(key, "asking/" <> device)
-      "#{name} is trusted."
+      %{device: device, name: name}
     else
       _ -> raise @on_a_device
     end
@@ -295,7 +316,7 @@ defmodule Encryption do
     key = key(call)
     if not (device =~ ~r/^[0-9a-f]{64}$/), do: raise("A device is named by its key.")
     Artifact.write(key, "asking/" <> device, JSON.encode!(%{name: inputs["name"] || "A device"}))
-    "Asked. A trusted device approves this one."
+    %{device: device}
   end
 
   def call("ask", _inputs, _call), do: raise(@on_a_device)
@@ -304,7 +325,7 @@ defmodule Encryption do
     key = key(call)
     if not (device =~ ~r/^[0-9a-f]{64}$/), do: raise("A device is named by its key.")
     for prefix <- ["devices/", "asking/"], do: Artifact.remove(key, prefix <> device)
-    "That device is no longer trusted."
+    %{device: device}
   end
 
   # Where an owner's key is kept, encrypted to each of their devices. It's theirs alone: nobody asks for a user.

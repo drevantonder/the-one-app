@@ -126,13 +126,13 @@ defmodule Notes do
   @impl true
   def tools do
     text = %{type: "object", properties: %{text: %{type: "string"}}, required: ["text"]}
-    [%{name: "write", description: "Writes a note that nothing encrypts", inputs: text}]
+    [%{name: "write", description: "Writes a note that nothing encrypts", inputs: text, outputs: %{type: "object"}}]
   end
 
   @impl true
   def call("write", %{"text" => text}, call) do
     OneCore.Artifact.write(OneCore.Call.make(call, "plain"), "note", text)
-    "Written."
+    %{}
   end
 end
 EOF
@@ -251,7 +251,7 @@ sed "s/PORT/$service/g" "$root/plugins/vault/test/plugins/fake/server/fake.ex" >
 for plugin in fake nosy; do on desk as owner for network deploy --name $plugin --files-from "$folder/fake" >/dev/null; done
 may on phone as alice vault use --item GitHub --plugin fake
 may on phone as alice fake digest --item GitHub --field token
-[[ $output == "$(sha256sum <"$folder/secrets/github" | cut -d' ' -f1)" ]] && echo "  which is the SHA-256 of the token she typed: the plugin's program was handed the secret itself"
+[[ $output == *"\"$(sha256sum <"$folder/secrets/github" | cut -d' ' -f1)\""* ]] && echo "  which is the SHA-256 of the token she typed: the plugin's program was handed the secret itself"
 refused on phone as alice nosy digest --item GitHub --field token
 refused on phone as alice fake digest --item Pasted --field password
 may on phone as alice vault use --item GitHub --plugin fake --on false
@@ -271,7 +271,7 @@ refused on phone as alice fake digest --item Session --field key
 say "An app signs its person in to an outside service, and its tokens are kept, used and renewed"
 may on phone as alice vault set --item "Fake client" --field client_id --value test-client --secret false --hosts "[\"127.0.0.1:$service\"]"
 may on phone as alice vault set --item "Fake client" --field client_secret --value-from "$folder/secrets/client"
-link=$(on laptop as alice fake sign_in)
+link=$(on laptop as alice fake sign_in | grep -o '"url":"[^"]*"' | cut -d'"' -f4)
 echo "  may      on laptop as alice fake sign_in"
 echo "           -> $(sed -E -e 's/(state|code_challenge)=[^&]*/\1=…/g' <<<"$link")"
 echo "  she opens it in her browser, where the service signs her in and sends her back to the network's address:"

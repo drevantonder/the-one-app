@@ -11,7 +11,7 @@ const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => ca
 
 /// Every page's plugins with accounts, each once, by its title.
 const signs = createMemo(async () => {
-  const groups = await json<{ group: string }[]>("permissions_groups").catch((): { group: string }[] => [])
+  const groups = await json<{ groups: { group: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string }[] => [])
   const pages = await Promise.all([undefined, ...groups.map(({ group }) => group), "network"].map((who) => json<Page>("home-screen_page", {}, who).then((page) => ({ ...page, subject: who }))))
   const all = new Map(pages.flatMap((page) => page.accounts.map((one): [string, Signs] => [one.plugin, { ...one, subject: page.subject }])))
   return [...all.values()].sort((a, b) => a.title.localeCompare(b.title))

@@ -28,23 +28,34 @@ defmodule Fake do
       required: ["item", "field"]
     }
 
+    sha256 = %{type: "object", properties: %{sha256: %{type: "string"}}, required: ["sha256"]}
+
     [
-      %{name: "sign_in", description: "Gives the link you sign in to Fake at", inputs: %{type: "object"}},
-      %{name: "me", description: "Asks Fake who you are there", inputs: %{type: "object"}},
+      # What the Vault's sign_in answers, as its own tool says.
+      %{name: "sign_in", description: "Gives the link you sign in to Fake at", inputs: %{type: "object"}, outputs: %{type: "object"}},
+      %{
+        name: "me",
+        description: "Asks Fake who you are there",
+        inputs: %{type: "object"},
+        outputs: %{type: "object", properties: %{account: %{type: "string"}}, required: ["account"]}
+      },
       %{
         name: "keep",
         description: "Makes a secret of its own and keeps it in an item, and gives its SHA-256",
-        inputs: %{type: "object", properties: %{item: %{type: "string"}}, required: ["item"]}
+        inputs: %{type: "object", properties: %{item: %{type: "string"}}, required: ["item"]},
+        outputs: sha256
       },
       %{
         name: "forget",
         description: "Removes an item it keeps",
-        inputs: %{type: "object", properties: %{item: %{type: "string"}}, required: ["item"]}
+        inputs: %{type: "object", properties: %{item: %{type: "string"}}, required: ["item"]},
+        outputs: %{type: "object"}
       },
       %{
         name: "digest",
         description: "Hands an item's field to a program, and gives the program's answer: its SHA-256",
-        inputs: item
+        inputs: item,
+        outputs: sha256
       }
     ]
   end
@@ -56,18 +67,18 @@ defmodule Fake do
     request = %{"item" => "Fake", "url" => "http://127.0.0.1:PORT/me", "headers" => %{"authorization" => "Bearer {{access_token}}"}}
     response = OneCore.Call.tool(call, "vault", "fetch", request)
     if response["status"] != 200, do: raise("Fake answered #{response["status"]}")
-    "Fake says you're #{JSON.decode!(response["body"])["account"]}."
+    %{account: JSON.decode!(response["body"])["account"]}
   end
 
   def call("keep", %{"item" => item}, call) do
     secret = Base.encode64(:crypto.strong_rand_bytes(32))
     OneCore.Call.plugin(call, "vault").keep(call, item, %{"key" => secret})
-    Base.encode16(:crypto.hash(:sha256, secret), case: :lower)
+    %{sha256: Base.encode16(:crypto.hash(:sha256, secret), case: :lower)}
   end
 
   def call("forget", %{"item" => item}, call) do
     OneCore.Call.plugin(call, "vault").remove(call, item)
-    "Removed."
+    %{}
   end
 
   # The secret goes to the program on its input, which is how a service hands one to a program it brings. The
@@ -78,7 +89,7 @@ defmodule Fake do
     Port.command(program, secret)
 
     receive do
-      {^program, {:data, digest}} -> hd(String.split(digest))
+      {^program, {:data, digest}} -> %{sha256: hd(String.split(digest))}
     after
       5_000 -> raise "The program didn't answer."
     end

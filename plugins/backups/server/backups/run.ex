@@ -81,8 +81,17 @@ defmodule Backups.Run do
 
       gone = prune(call, opened, destination)
 
-      "#{destination["name"]}: backed up #{length(listed)} blobs, #{size(bytes)}, in #{seconds(took)}. Sent #{length(sent)} new, #{size(sent_bytes)}." <>
-        if(gone > 0, do: " #{gone} older backups went, by the rule of what's kept.", else: "")
+      %{
+        destination: destination["name"],
+        name: name,
+        at: began,
+        took: took,
+        blobs: length(listed),
+        bytes: bytes,
+        sent: length(sent),
+        sent_bytes: sent_bytes,
+        gone: gone
+      }
     rescue
       failed ->
         text = Exception.message(failed)
@@ -231,7 +240,9 @@ defmodule Backups.Run do
          )}
       end)
 
-    if backup, do: check(call, destination, opened, began, backup, objects), else: "#{destination["name"]} has no backup yet."
+    if backup,
+      do: check(call, destination, opened, began, backup, objects),
+      else: %{destination: destination["name"], backup: nil}
   end
 
   defp check(call, destination, opened, began, backup, objects) do
@@ -247,12 +258,12 @@ defmodule Backups.Run do
     wrong = for {object, data} <- read, data == nil or digest(data) != objects[object], into: MapSet.new(), do: object
     listed_ok = digest(Destination.get(opened, "backups/" <> name) || "") == listed_digest
     bytes = Enum.sum_by(read, fn {_object, data} -> byte_size(data || "") end)
-    took = seconds(System.os_time(:millisecond) - began)
-    message = "#{destination["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{took}."
+    took = System.os_time(:millisecond) - began
+    message = "#{destination["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{seconds(took)}."
 
     case {listed_ok, for(%{"key" => key, "object" => object} <- blobs, object in wrong, do: key)} do
       {true, []} ->
-        message <> " Every one is as it was sent."
+        %{destination: destination["name"], backup: name, objects: length(held), bytes: bytes, took: took}
 
       {listed_ok, keys} ->
         not_as_sent =
@@ -308,18 +319,13 @@ defmodule Backups.Run do
       Bucket.write(blob["key"], data)
     end
 
-    took = seconds(System.os_time(:millisecond) - began)
-
-    case gone do
-      [] ->
-        "Nothing under #{blobs} is gone since backup #{name}: #{counted(length(there))} there, unchanged."
-
-      gone ->
-        "Brought back #{counted(length(gone))} from backup #{name}, #{size(Enum.sum_by(gone, & &1["size"]))}, in #{took}: " <>
-          Enum.join(Enum.take(Enum.map(gone, & &1["key"]), 10), ", ") <>
-          if(length(gone) > 10, do: " and more", else: "") <>
-          if(there == [], do: ".", else: ". #{counted(length(there))} there already, unchanged.")
-    end
+    %{
+      backup: name,
+      restored: Enum.map(gone, & &1["key"]),
+      bytes: Enum.sum_by(gone, & &1["size"]),
+      there: length(there),
+      took: System.os_time(:millisecond) - began
+    }
   end
 
   # The blobs a backup holds, as they're kept here.
@@ -332,9 +338,6 @@ defmodule Backups.Run do
   def size(bytes) when bytes < 1_000_000, do: "#{Float.round(bytes / 1.0e3, 1)} KB"
   def size(bytes) when bytes < 1_000_000_000, do: "#{Float.round(bytes / 1.0e6, 1)} MB"
   def size(bytes), do: "#{Float.round(bytes / 1.0e9, 2)} GB"
-
-  defp counted(1), do: "1 blob"
-  defp counted(count), do: "#{count} blobs"
 
   defp seconds(ms) when ms < 1000, do: "#{ms} ms"
   defp seconds(ms), do: "#{Float.round(ms / 1000, 1)} s"

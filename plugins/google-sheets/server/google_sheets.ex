@@ -49,31 +49,79 @@ defmodule GoogleSheets do
         read_only: true,
         description:
           "The Google accounts Google Sheets can use, the default first, each with ok, and why when it's false (google-sheets_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            accounts: %{
+              type: "array",
+              description: "The default first",
+              items: %{
+                type: "object",
+                properties: %{
+                  account: string.("Its address"),
+                  ok: %{type: "boolean", description: "Whether it can be used now"},
+                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
+                },
+                required: ["account", "ok"]
+              }
+            }
+          },
+          required: ["accounts"]
+        }
       },
       %{
         name: "sign_in",
         description:
           "Starts signing a Google account in to Google Sheets, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-sheets_accounts lists it")}}
+        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-sheets_accounts lists it")}},
+        outputs: %{
+          type: "object",
+          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
+          required: ["url", "then"]
+        }
       },
       %{
         name: "sign_out",
         description: "Signs a Google account out of Google Sheets. Other Google apps that use it still do, and google-sheets_sign_in signs it in again.",
-        inputs: with_account.(%{}, ["account"])
+        inputs: with_account.(%{}, ["account"]),
+        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "spreadsheet",
         read_only: true,
         description:
-          "A spreadsheet's title, address, time zone and sheets (tabs), each with its size (Sheets' spreadsheets.get, trimmed): {id, title, url, time_zone, sheets: [{title, id, rows, columns}]}. Sheet titles are what ranges start with.",
-        inputs: with_account.(%{spreadsheetId: spreadsheet}, ["spreadsheetId"])
+          "A spreadsheet's title, address, time zone and sheets (tabs), each with its size (Sheets' spreadsheets.get, trimmed): {id, title, url, timeZone, sheets: [{title, id, rows, columns}]}. Sheet titles are what ranges start with.",
+        inputs: with_account.(%{spreadsheetId: spreadsheet}, ["spreadsheetId"]),
+        outputs: %{
+          type: "object",
+          properties: %{
+            id: string.("The spreadsheet's id"),
+            title: %{type: "string"},
+            url: string.("Its address"),
+            timeZone: string.("An IANA time zone"),
+            sheets: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  title: string.("What ranges start with"),
+                  id: %{type: "integer"},
+                  rows: %{type: ["integer", "null"]},
+                  columns: %{type: ["integer", "null"]}
+                },
+                required: ["title", "id", "rows", "columns"]
+              }
+            }
+          },
+          required: ["id", "title", "url", "timeZone", "sheets"]
+        }
       },
       %{
         name: "read",
         read_only: true,
         description:
-          "The values in a range (Sheets' values.get): {range, values}, values a row per array, with the range they came from. Over limit rows, more says how many were left out.",
+          "The values in a range (Sheets' values.get): {range, values, more}, values a row per array, with the range they came from, and more how many rows past limit were left out.",
         inputs:
           with_account.(
             %{
@@ -87,7 +135,16 @@ defmodule GoogleSheets do
               limit: %{type: "integer", description: "At most this many rows. 500 if left out, and more says how many were left out"}
             },
             ["spreadsheetId"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            range: string.("The range they came from, in A1 notation"),
+            values: %{type: "array", items: %{type: "array"}, description: "A row per array, as valueRenderOption asked"},
+            more: %{type: "integer", description: "How many rows were left out past limit: read a smaller range for them"}
+          },
+          required: ["range", "values", "more"]
+        }
       },
       %{
         name: "append",
@@ -101,7 +158,12 @@ defmodule GoogleSheets do
               values: values
             },
             ["spreadsheetId", "values"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{updatedRange: string.("Where they went, in A1 notation"), updatedRows: %{type: "integer"}},
+          required: ["updatedRange", "updatedRows"]
+        }
       },
       %{
         name: "update",
@@ -111,7 +173,12 @@ defmodule GoogleSheets do
           with_account.(
             %{spreadsheetId: spreadsheet, range: string.("Where to write, in A1 notation, like Budget!B2 or Budget!B2:D5"), values: values},
             ["spreadsheetId", "range", "values"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{updatedRange: string.("The cells written, in A1 notation"), updatedCells: %{type: "integer"}},
+          required: ["updatedRange", "updatedCells"]
+        }
       },
       %{
         name: "create",
@@ -125,7 +192,12 @@ defmodule GoogleSheets do
               values: %{values | description: "Rows to put in the first sheet, from A1: #{rows}"}
             },
             ["title"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{id: string.("The spreadsheet's id"), title: %{type: "string"}, url: string.("Its address")},
+          required: ["id", "title", "url"]
+        }
       }
     ]
   end
@@ -149,7 +221,7 @@ defmodule GoogleSheets do
       id: sheet["spreadsheetId"],
       title: sheet["properties"]["title"],
       url: sheet["spreadsheetUrl"],
-      time_zone: sheet["properties"]["timeZone"],
+      timeZone: sheet["properties"]["timeZone"],
       sheets:
         for %{"properties" => properties} <- sheet["sheets"] || [] do
           %{
@@ -174,12 +246,7 @@ defmodule GoogleSheets do
 
     rows = read["values"] || []
     most = inputs["limit"] || 500
-    result = %{range: read["range"], values: Enum.take(rows, most)}
-    left = length(rows) - most
-
-    if left > 0,
-      do: Map.put(result, :more, "#{left} more #{if left == 1, do: "row", else: "rows"}: read a smaller range, like one starting at row #{most + 1}"),
-      else: result
+    %{range: read["range"], values: Enum.take(rows, most), more: max(length(rows) - most, 0)}
   end
 
   defp run("append", %{"spreadsheetId" => given, "values" => rows} = inputs, at) do
@@ -193,8 +260,10 @@ defmodule GoogleSheets do
         hint: @range_hint
       )
 
-    added = get_in(appended, ["updates", "updatedRows"]) || length(rows)
-    "Added #{added} #{if added == 1, do: "row", else: "rows"} at #{get_in(appended, ["updates", "updatedRange"])}."
+    %{
+      updatedRange: get_in(appended, ["updates", "updatedRange"]),
+      updatedRows: get_in(appended, ["updates", "updatedRows"]) || length(rows)
+    }
   end
 
   defp run("update", %{"spreadsheetId" => given, "range" => range, "values" => rows}, at) do
@@ -206,7 +275,7 @@ defmodule GoogleSheets do
         hint: @range_hint
       )
 
-    "Wrote #{updated["updatedCells"]} cells in #{updated["updatedRange"]}."
+    Map.take(updated, ["updatedRange", "updatedCells"])
   end
 
   defp run("create", %{"title" => title} = inputs, at) do

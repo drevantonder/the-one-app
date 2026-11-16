@@ -53,13 +53,77 @@ defmodule Backups do
   def tools do
     destination = %{type: "string", description: "The destination's name, as `destinations` lists it"}
 
+    backup = %{
+      type: "object",
+      properties: %{
+        name: %{type: "string", description: "What restore's backup takes"},
+        at: %{type: "integer", description: "When it began, in milliseconds since 1970"},
+        took: %{type: "integer", description: "In milliseconds"},
+        blobs: %{type: "integer"},
+        bytes: %{type: "integer"},
+        sent: %{type: "integer", description: "How many objects it sent, new"},
+        sent_bytes: %{type: "integer"}
+      },
+      required: ~w(name at took blobs bytes sent sent_bytes)
+    }
+
+    # A backup just made, at a destination, and how many older ones went by the rule of what's kept.
+    made = %{
+      backup
+      | properties: Map.merge(backup.properties, %{destination: destination, gone: %{type: "integer"}}),
+        required: ["destination", "gone" | backup.required]
+    }
+
     [
       %{
         name: "destinations",
         read_only: true,
         description:
           "Where backups go, each with when it last finished, how big it is, how long it took, its backups and what's wrong if anything is; how often they're made; which are kept; and the machines a folder can be on",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            every: %{type: "string", enum: ["hour", "day", "week", "never"], description: "How often backups are made"},
+            retention: %{type: "string", description: "Which backups are kept"},
+            machines: %{
+              type: "array",
+              description: "The machines a folder can be on",
+              items: %{
+                type: "object",
+                properties: %{key: %{type: "string"}, name: %{type: ["string", "null"]}},
+                required: ["key", "name"]
+              }
+            },
+            destinations: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string"},
+                  kind: %{type: "string", enum: ["folder", "s3"]},
+                  where: %{type: "string", description: "Its folder, or its storage and bucket"},
+                  machine: %{type: ["string", "null"], description: "The machine its folder is on"},
+                  item: %{type: ["string", "null"], description: "The Vault item it's reached with"},
+                  size: %{type: "integer", description: "How much it holds, in bytes"},
+                  last: %{anyOf: [backup, %{type: "null"}], description: "The newest backup"},
+                  backups: %{type: "array", items: backup, description: "Newest first"},
+                  problem: %{
+                    type: ["object", "null"],
+                    description: "What's wrong, if anything",
+                    properties: %{
+                      at: %{type: "integer"},
+                      kind: %{type: "string", enum: ["backup", "check"]},
+                      text: %{type: "string"}
+                    }
+                  }
+                },
+                required: ~w(name kind where machine item size last backups problem)
+              }
+            }
+          },
+          required: ["every", "retention", "machines", "destinations"]
+        }
       },
       %{
         name: "add",
@@ -87,17 +151,29 @@ defmodule Backups do
                 "The network's Vault item with its access_key_id and secret_access_key, switched on for backups"
             }
           }
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            name: destination,
+            kind: %{type: "string", enum: ["folder", "s3"]},
+            where: %{type: "string"},
+            every: %{type: "string", description: "How often backups go there: hour, day, week or never"}
+          },
+          required: ["name", "kind", "where", "every"]
         }
       },
       %{
         name: "remove",
         description: "Stops backing up to a destination. What's there stays",
-        inputs: %{type: "object", properties: %{destination: destination}, required: ["destination"]}
+        inputs: %{type: "object", properties: %{destination: destination}, required: ["destination"]},
+        outputs: %{type: "object", properties: %{destination: destination}, required: ["destination"]}
       },
       %{
         name: "now",
         description: "Backs up now, to one destination or to each, and answers when it's done with what was sent",
-        inputs: %{type: "object", properties: %{destination: destination}}
+        inputs: %{type: "object", properties: %{destination: destination}},
+        outputs: %{type: "object", properties: %{backups: %{type: "array", items: made}}, required: ["backups"]}
       },
       %{
         name: "schedule",
@@ -106,13 +182,35 @@ defmodule Backups do
           type: "object",
           properties: %{every: %{type: "string", enum: ["hour", "day", "week", "never"]}},
           required: ["every"]
-        }
+        },
+        outputs: %{type: "object", properties: %{every: %{type: "string"}}, required: ["every"]}
       },
       %{
         name: "check",
         description:
           "Reads the newest backup at a destination, or at each, back whole, and compares every object with what was sent",
-        inputs: %{type: "object", properties: %{destination: destination}}
+        inputs: %{type: "object", properties: %{destination: destination}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            checks: %{
+              type: "array",
+              description: "Each destination's newest backup, read back whole: one that isn't as it was sent fails the call",
+              items: %{
+                type: "object",
+                properties: %{
+                  destination: destination,
+                  backup: %{type: ["string", "null"], description: "The backup read back, or null where there's none yet"},
+                  objects: %{type: "integer"},
+                  bytes: %{type: "integer"},
+                  took: %{type: "integer", description: "In milliseconds"}
+                },
+                required: ["destination", "backup"]
+              }
+            }
+          },
+          required: ["checks"]
+        }
       },
       %{
         name: "restore",
@@ -130,12 +228,31 @@ defmodule Backups do
             }
           },
           required: ["destination", "blobs"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            backup: %{type: "string", description: "The backup it came from"},
+            restored: %{type: "array", items: %{type: "string"}, description: "The blobs brought back"},
+            bytes: %{type: "integer", description: "How much was brought back"},
+            there: %{type: "integer", description: "How many were there already, unchanged"},
+            took: %{type: "integer", description: "In milliseconds"}
+          },
+          required: ["backup", "restored", "bytes", "there", "took"]
         }
       },
       %{
         name: "due",
         description: "Backs up to each destination whose time has come. The clock calls it every hour",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            backups: %{type: "array", items: made},
+            failed: %{type: "array", items: destination, description: "Where it couldn't back up, which destinations says why"}
+          },
+          required: ["backups", "failed"]
+        }
       }
     ]
   end
@@ -154,16 +271,20 @@ defmodule Backups do
 
     if seconds = @schedules[every] do
       # The clock calls every hour on the hour, and a backup that took a while finished after it.
-      for destination <- destinations, now - (last[destination["id"]] || 0) >= seconds * 1000 - 600_000 do
-        try do
-          Run.back_up(call, destination)
-        rescue
-          _failed -> :failed
+      made =
+        for destination <- destinations, now - (last[destination["id"]] || 0) >= seconds * 1000 - 600_000 do
+          try do
+            Run.back_up(call, destination)
+          rescue
+            _failed -> {:failed, destination["name"]}
+          end
         end
-      end
-    end
 
-    "Done."
+      {failed, backups} = Enum.split_with(made, &match?({:failed, _}, &1))
+      %{backups: backups, failed: for({:failed, name} <- failed, do: name)}
+    else
+      %{backups: [], failed: []}
+    end
   end
 
   def call(tool, inputs, call) do
@@ -264,7 +385,12 @@ defmodule Backups do
       )
     end)
 
-    "Added #{destination["name"]}. Backups go there #{every(call)}."
+    %{
+      name: destination["name"],
+      kind: destination["kind"],
+      where: where(destination),
+      every: transaction(call, &setting(&1, "every"))
+    }
   end
 
   defp owned("remove", %{"destination" => name}, call) do
@@ -276,13 +402,13 @@ defmodule Backups do
           do: query(db, "delete from #{table} where destination = ?", [destination["id"]])
     end)
 
-    "No longer backing up to #{name}. What's there stays."
+    %{destination: name}
   end
 
   defp owned("now", inputs, call) do
     destinations = transaction(call, fn db -> if inputs["destination"], do: named(db, inputs["destination"]), else: destinations(db) end)
     if destinations == [], do: raise("There's nowhere to back up to yet: add a destination first.")
-    each(destinations, &Run.back_up(call, &1))
+    %{backups: each(destinations, &Run.back_up(call, &1))}
   end
 
   defp owned("schedule", %{"every" => every}, call) do
@@ -290,12 +416,12 @@ defmodule Backups do
       query(db, "insert or replace into settings (name, value) values ('every', ?)", [every])
     end)
 
-    "Backups are made #{every(call)}."
+    %{every: every}
   end
 
   defp owned("check", inputs, call) do
     destinations = transaction(call, fn db -> if inputs["destination"], do: named(db, inputs["destination"]), else: destinations(db) end)
-    each(destinations, &Run.check(call, &1))
+    %{checks: each(destinations, &Run.check(call, &1))}
   end
 
   defp owned("restore", %{"destination" => name, "blobs" => blobs} = inputs, call) do
@@ -303,8 +429,8 @@ defmodule Backups do
     Run.restore(call, destination, inputs["backup"], blobs)
   end
 
-  # Does `fun` to each destination, and says what each said. One that failed doesn't keep the rest from being done, and
-  # what failed is raised after.
+  # Does `fun` to each destination, and gives what each gave. One that failed doesn't keep the rest from being done,
+  # and what failed is raised after.
   defp each(destinations, fun) do
     results =
       for destination <- destinations do
@@ -315,14 +441,9 @@ defmodule Backups do
         end
       end
 
-    text = Enum.map_join(results, "\n", &elem(&1, 1))
-    if Enum.any?(results, &match?({:failed, _}, &1)), do: raise(text), else: text
-  end
-
-  defp every(call) do
-    case transaction(call, &setting(&1, "every")) do
-      "never" -> "manually"
-      every -> "every #{every}"
+    case for({:failed, why} <- results, do: why) do
+      [] -> for {:ok, result} <- results, do: result
+      failed -> raise Enum.join(failed, "\n")
     end
   end
 

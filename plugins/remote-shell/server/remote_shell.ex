@@ -34,6 +34,15 @@ defmodule RemoteShell do
                 "the device to run it on, by name, as `services` names it; else the one asked if it has Remote Shell, or the first that's up"
             }
           }
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            exit: %{type: "integer", description: "Its exit code: 0 when it worked, -1 when it was stopped"},
+            stdout: %{type: "string", description: "What it printed, its last 64 KB"},
+            stderr: %{type: "string", description: "What it printed as errors, its last 64 KB"}
+          },
+          required: ["exit", "stdout", "stderr"]
         }
       }
     ]

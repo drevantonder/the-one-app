@@ -45,7 +45,38 @@ defmodule ChromeProfiles do
         read_only: true,
         description:
           "Your profiles: each one's name, the sites it was used on with when (ms since 1970), newest first, when it was last saved, and, while your person is updating it, its browser's session and when that ends. Never what's signed in itself.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            profiles: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  profile: %{type: "string"},
+                  sites: %{
+                    type: "array",
+                    description: "The sites it was used on, newest first",
+                    items: %{
+                      type: "object",
+                      properties: %{site: %{type: "string"}, used: %{type: "integer", description: "When, in milliseconds since 1970"}},
+                      required: ["site", "used"]
+                    }
+                  },
+                  saved: %{type: ["integer", "null"], description: "When it was last saved, in milliseconds since 1970"},
+                  updating: %{
+                    type: ["object", "null"],
+                    description: "While your person is updating it: its browser's session, and when that ends",
+                    properties: %{session: %{type: "string"}, until: %{type: "integer"}}
+                  }
+                },
+                required: ["profile", "sites", "saved", "updating"]
+              }
+            }
+          },
+          required: ["profiles"]
+        }
       },
       %{
         name: "create",
@@ -54,17 +85,20 @@ defmodule ChromeProfiles do
           type: "object",
           required: ["name"],
           properties: %{name: %{type: "string", minLength: 1, maxLength: 40, description: "like Personal or Work"}}
-        }
+        },
+        outputs: %{type: "object", properties: %{profile: @profile}, required: ["profile"]}
       },
       %{
         name: "rename",
         description: "Rename a profile.",
-        inputs: %{type: "object", required: ["profile", "name"], properties: %{profile: @profile, name: %{type: "string", minLength: 1, maxLength: 40}}}
+        inputs: %{type: "object", required: ["profile", "name"], properties: %{profile: @profile, name: %{type: "string", minLength: 1, maxLength: 40}}},
+        outputs: %{type: "object", properties: %{profile: @profile, was: %{type: "string"}}, required: ["profile", "was"]}
       },
       %{
         name: "remove",
         description: "Remove a profile and everything signed in on it, for good.",
-        inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}}
+        inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}},
+        outputs: %{type: "object", properties: %{profile: @profile}, required: ["profile"]}
       },
       %{
         name: "open",
@@ -80,6 +114,15 @@ defmodule ChromeProfiles do
             url: %{type: "string", description: "the page to open"},
             save: %{type: "boolean", description: "save it back to the profile on close; default true. false for a throwaway"}
           }
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            profile: @profile,
+            session: %{type: "string", description: "What Chrome's tools take"},
+            text: %{type: "string", description: "What navigating to url said, if it was given"}
+          },
+          required: ["profile", "session"]
         }
       },
       %{
@@ -90,22 +133,39 @@ defmodule ChromeProfiles do
           type: "object",
           required: ["profile"],
           properties: %{profile: @profile, url: %{type: "string", description: "a page to open it at, like a site's sign-in page; default a new tab"}}
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            profile: @profile,
+            session: %{type: "string", description: "Its browser, which you don't use while they do"},
+            until: %{type: "integer", description: "When it's saved by itself, in milliseconds since 1970"},
+            then: %{type: "string", description: "What to tell them"}
+          },
+          required: ["profile", "session", "until", "then"]
         }
       },
       %{
         name: "save",
         description: "Save a profile your person is updating, and close its browser.",
-        inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}}
+        inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}},
+        outputs: %{type: "object", properties: %{profile: @profile}, required: ["profile"]}
       },
       %{
         name: "discard",
         description: "Close the browser your person is updating a profile in, without saving it: the profile stays as it was last saved.",
-        inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}}
+        inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}},
+        outputs: %{type: "object", properties: %{profile: @profile}, required: ["profile"]}
       },
       %{
         name: "save_updates",
         description: "Save and close the updates past their #{@update_minutes} minutes. It's run every minute.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{saved: %{type: "array", items: %{type: "string"}, description: "The browsers saved and closed"}},
+          required: ["saved"]
+        }
       }
     ]
   end
@@ -114,17 +174,20 @@ defmodule ChromeProfiles do
   def call("list", _inputs, call) do
     updating = for {session, %{"update" => until} = note} <- notes(call), until, into: %{}, do: {note["profile"], %{session: session, until: until}}
 
-    for name <- profiles(call) do
-      sites = JSON.decode!(value(call, name, "sites"))
-      saved = value(call, name, "saved")
+    profiles =
+      for name <- profiles(call) do
+        sites = JSON.decode!(value(call, name, "sites"))
+        saved = value(call, name, "saved")
 
-      %{
-        profile: name,
-        sites: sites |> Enum.sort_by(fn {_site, used} -> -used end) |> Enum.map(fn {site, used} -> %{site: site, used: used} end),
-        saved: if(saved == "", do: nil, else: String.to_integer(saved)),
-        updating: updating[name]
-      }
-    end
+        %{
+          profile: name,
+          sites: sites |> Enum.sort_by(fn {_site, used} -> -used end) |> Enum.map(fn {site, used} -> %{site: site, used: used} end),
+          saved: if(saved == "", do: nil, else: String.to_integer(saved)),
+          updating: updating[name]
+        }
+      end
+
+    %{profiles: profiles}
   end
 
   def call("create", %{"name" => name}, call) do
@@ -132,7 +195,7 @@ defmodule ChromeProfiles do
     if name == "", do: raise("A profile has a name")
     if Enum.any?(profiles(call), &(String.downcase(&1) == String.downcase(name))), do: raise("You have a profile called #{name} already")
     vault(call).keep(call, @item <> name, %{"sites" => "{}", "saved" => ""})
-    "Created #{name}. It's signed in to nothing yet: `update` opens it for your person to sign in to sites on."
+    %{profile: name}
   end
 
   def call("rename", %{"profile" => from, "name" => to}, call) do
@@ -144,7 +207,7 @@ defmodule ChromeProfiles do
     vault(call).keep(call, @item <> to, fields)
     vault(call).remove(call, @item <> from)
     for {session, %{"profile" => ^from} = note} <- notes(call), do: note(call, session, %{note | "profile" => to})
-    "Renamed #{from} to #{to}"
+    %{profile: to, was: from}
   end
 
   def call("remove", %{"profile" => name}, call) do
@@ -152,7 +215,7 @@ defmodule ChromeProfiles do
     blob = if value(call, name, "saved") != "", do: value(call, name, "blob")
     vault(call).remove(call, @item <> name)
     if blob, do: Artifact.remove(saved(call), blob)
-    "Removed #{name}"
+    %{profile: name}
   end
 
   def call("open", %{"profile" => name, "session" => session} = inputs, call) do
@@ -160,7 +223,7 @@ defmodule ChromeProfiles do
     open!(call, session, name)
     note(call, session, %{"profile" => name, "save" => Map.get(inputs, "save", true), "update" => nil})
     opened = Call.tool(call, "chrome", "open", Map.take(inputs, ~w(session description url)))
-    "On #{name}. #{opened}"
+    Map.put(opened, "profile", name)
   end
 
   def call("update", %{"profile" => name} = inputs, call) do
@@ -179,15 +242,21 @@ defmodule ChromeProfiles do
         reraise e, __STACKTRACE__
     end
 
-    "#{name} is open for your person, in the Chrome Profiles app on any device of theirs, where the profile says Updating. " <>
-      "Ask them to open it there (notifications_send with app chrome-profiles reaches their devices) and sign in to what they want, in its own address bar and tabs. " <>
-      "It's saved when they tap Save, or in #{@update_minutes} minutes. Don't sign in for them, and don't use the browser #{session} while they do."
+    %{
+      profile: name,
+      session: session,
+      until: until,
+      then:
+        "It's open for your person, in the Chrome Profiles app on any device of theirs, where the profile says Updating. " <>
+          "Ask them to open it there (notifications_send with app chrome-profiles reaches their devices) and sign in to what they want, in its own address bar and tabs. " <>
+          "It's saved when they tap Save, or in #{@update_minutes} minutes. Don't sign in for them, and don't use its browser while they do."
+    }
   end
 
   def call("save", %{"profile" => name}, call) do
     name = profile!(call, name)
     close_update(call, name)
-    "Saved #{name}"
+    %{profile: name}
   end
 
   def call("discard", %{"profile" => name}, call) do
@@ -195,16 +264,19 @@ defmodule ChromeProfiles do
     session = update_session(name)
     with %{} = note <- note(call, session), do: note(call, session, %{note | "save" => false})
     close_update(call, name)
-    "Closed #{name} without saving"
+    %{profile: name}
   end
 
   def call("save_updates", _inputs, call) do
     now = System.system_time(:millisecond)
 
-    for {session, %{"update" => until, "profile" => name}} <- notes(call), until && until < now do
-      close_update(call, name)
-      session
-    end
+    saved =
+      for {session, %{"update" => until, "profile" => name}} <- notes(call), until && until < now do
+        close_update(call, name)
+        session
+      end
+
+    %{saved: saved}
   end
 
   # A browser on a profile is starting: the profile's last save, if it has one, goes into its container.
@@ -310,7 +382,7 @@ defmodule ChromeProfiles do
 
   # A browser that's open already is only carried on with on the same profile: Chrome hands it a profile as it starts.
   defp open!(call, session, name) do
-    running = Enum.find(Call.tool(call, "chrome", "list", %{}), &(&1["session"] == session and &1["state"] == "running"))
+    running = Enum.find(Call.tool(call, "chrome", "list", %{})["browsers"], &(&1["session"] == session and &1["state"] == "running"))
 
     case {running, note(call, session)} do
       {nil, _} -> :ok

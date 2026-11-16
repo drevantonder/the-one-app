@@ -56,10 +56,10 @@ changed(again)
 
 /// Whose Vaults its person can open here: theirs, each group they own, and the network if they own it.
 const owners = createMemo(async () => {
-  const me: string | undefined = (await call("sign-in_people").then(JSON.parse, () => []))[0]?.who
+  const me: string | undefined = (await call("sign-in_people").then((text) => JSON.parse(text).people, () => []))[0]?.who
   if (!me) return []
   const [groups, network] = await Promise.all([
-    call("permissions_groups", {}, { subject: me }).then((text): { group: string; called: string; owners: string[] }[] => JSON.parse(text), () => []),
+    call("permissions_groups", {}, { subject: me }).then((text): { group: string; called: string; owners: string[] }[] => JSON.parse(text).groups, () => []),
     call("permissions_check", { artifact: "network", relation: "owner" }, { subject: me }).then((result): boolean => JSON.parse(result).may, () => false),
   ])
   const theirs = groups.filter((group) => group.owners.includes(me)).map((group) => ({ value: group.group, label: group.called, whose: /s$/i.test(group.called) ? `${group.called}'` : `${group.called}'s` }))

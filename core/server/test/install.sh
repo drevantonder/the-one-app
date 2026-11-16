@@ -238,10 +238,13 @@ defmodule Hello do
   def apps, do: [%{name: "Hello", page: "client/index.html", icon: "client/icon.svg"}]
 
   @impl true
-  def tools, do: [%{name: "hi", read_only: true, description: "Says which server answered", inputs: %{type: "object"}}]
+  def tools do
+    server = %{type: "object", properties: %{server: %{type: "string"}}, required: ["server"]}
+    [%{name: "hi", read_only: true, description: "Says which server answered", inputs: %{type: "object"}, outputs: server}]
+  end
 
   @impl true
-  def call("hi", _inputs, _call), do: "Hello from #{OneCore.Server.key()}"
+  def call("hi", _inputs, _call), do: %{server: OneCore.Server.key()}
 end
 EOF
 echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>' >"$folder/hello/client/icon.svg"

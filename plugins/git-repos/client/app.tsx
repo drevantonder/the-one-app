@@ -36,7 +36,7 @@ interface At {
 }
 
 const json = <T,>(tool: string, inputs?: object, options?: { subject?: string }): Promise<T> => call(tool, inputs, options).then(JSON.parse)
-const repos = createMemo(() => json<{ repo: string; whose: string; pushed?: number }[]>("git-repos_list"))
+const repos = createMemo(() => json<{ repos: { repo: string; whose: string; pushed?: number }[] }>("git-repos_list").then(({ repos }) => repos))
 changed(() => refresh(repos))
 
 /// The repo open beside the list, by its name, and where in it: a view, and a folder, a file or a commit.
@@ -95,7 +95,7 @@ async function does(tool: string, inputs: object, options?: { subject?: string }
 const to = (where: At, back?: boolean) => go(() => setAt(where), { back })
 
 function NewRepo() {
-  const groups = createMemo(() => (adding() ? json<{ group: string; called?: string }[]>("permissions_groups") : []))
+  const groups = createMemo(() => (adding() ? json<{ groups: { group: string; called?: string }[] }>("permissions_groups").then(({ groups }) => groups) : []))
   const whose = createMemo(() => createListCollection({ items: [{ value: "", label: "You" }, ...groups().map((group) => ({ value: group.group, label: group.called ?? short(group.group) }))] }))
   const [forWhom, setFor] = createSignal("")
   const make = async (event: SubmitEvent) => {
@@ -125,7 +125,7 @@ function NewRepo() {
 }
 
 /// Who's asking, for the name of a repo they just made.
-const mine = async () => (await json<{ who: string }[]>("sign-in_people"))[0].who
+const mine = async () => (await json<{ people: { who: string }[] }>("sign-in_people")).people[0].who
 
 function GitRepos() {
   return (
@@ -399,10 +399,10 @@ function CommitScreen(props: { repo: string; sha: string }) {
 }
 
 function PullRequests(props: { repo: string; pushes: boolean }) {
-  const pullRequests = createMemo(() => json<PullRequest[]>("git-repos_pull_requests", { repo: props.repo }))
+  const pullRequests = createMemo(() => json<{ pull_requests: PullRequest[] }>("git-repos_pull_requests", { repo: props.repo }).then(({ pull_requests }) => pull_requests))
   const open = () => pullRequests().filter((one) => one.state === "open")
   const closed = () => pullRequests().filter((one) => one.state !== "open")
-  const merge = (one: PullRequest) => does("git-repos_merge", { repo: props.repo, pull_request: one.name }).then((said): unknown => said && (toast(String(said)), refresh(pullRequests)))
+  const merge = (one: PullRequest) => does("git-repos_merge", { repo: props.repo, pull_request: one.name }).then((said): unknown => said && (toast(`Merged into ${one.into}.`), refresh(pullRequests)))
   const close = async (one: PullRequest) => (await confirm({ heading: `Close ${one.title}?`, text: "It stays listed as closed.", action: "Close" })) && (await does("git-repos_close", { repo: props.repo, pull_request: one.name })) && refresh(pullRequests)
   const line = (one: PullRequest) => `${short(one.by)} · into ${one.into} · ${plural(one.commits.length, "commit")} · ${since(one.at)}`
   return (

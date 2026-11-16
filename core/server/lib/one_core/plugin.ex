@@ -45,6 +45,14 @@ defmodule OneCore.Plugin do
                 type: "object",
                 properties: %{name: %{type: "string", description: "Who to greet"}},
                 required: ["name"]
+              },
+              outputs: %{
+                type: "object",
+                properties: %{
+                  greeting: %{type: "string", description: "What to say to them"},
+                  greeted: %{type: "integer", description: "How many it has greeted, them among them"}
+                },
+                required: ["greeting", "greeted"]
               }
             }
           ]
@@ -53,20 +61,30 @@ defmodule OneCore.Plugin do
         @impl true
         def call("greet", %{"name" => name}, %OneCore.Call{own: own}) do
           OneCore.Artifact.write(own, "greeted/" <> name, "")
-          "Hello, \#{name}! That's \#{length(OneCore.Artifact.list(own, "greeted/"))} greeted."
+          %{greeting: "Hello, \#{name}!", greeted: length(OneCore.Artifact.list(own, "greeted/"))}
         end
       end
 
-  - `tools/0` lists each tool's `name` (lowercase letters, digits and `_`), its `description`, and its `inputs` as a
-    JSON Schema object. A tool of the plugin `hello` named `greet` is the MCP tool `hello_greet` and the command
+  - `tools/0` lists each tool's `name` (lowercase letters, digits and `_`), its `description`, its `inputs` as a
+    JSON Schema object, and its `outputs`: a JSON Schema of the object it answers, which is MCP's `outputSchema`. A tool of the plugin `hello` named `greet` is the MCP tool `hello_greet` and the command
     `one hello greet`, whose inputs are flags as its `type` says: `--name Sam`, `--count 3`, `--loud` for true, a
     list's items one after another (`--tags a b`), and `--no-name` for `null` where the type takes it
     (`["string", "null"]`). `one hello greet --help` says what each takes.
   - `call/3` runs a tool with its inputs, a map with string keys. They're checked against the tool's `inputs`
     first, and a caller that left out what's required, or gave the wrong kind of thing, is told so. It returns the
-    answer: text, or anything JSON can hold. To refuse, raise, and the message is what the caller is told.
+    answer, a map JSON can hold, which is checked against its `outputs`: one that isn't what they say fails the
+    call, saying where. To refuse, raise, and the message is what the caller is told.
+  - Every tool says its `outputs`, and deploying one that doesn't is refused: an agent writing a script reads them as
+    the type its call returns, so it uses the answer without calling first to see it. Say what's there as it is: each
+    field's `type`, with `"null"` among them where it can be nil (`["string", "null"]`), a list's `items`, and a
+    `description` wherever the name alone doesn't say what it is, its unit or its format (`"When it was sent, in
+    milliseconds since 1970"`). Put in `required` what's always there. An answer that's a list is a field of the
+    object (`%{threads: [...]}`), and one that's a sentence is the facts it says (`%{sent: true, id: "..."}`), not
+    the sentence. Where an answer is another service's, give the fields the tool passes on, not every one it might.
   - A tool answers with a file, such as a photo, as `{:blob, "image/jpeg", data}`. An agent sees the picture, an
-    app is given its `data:` address, and the command writes the file out (`one hello photo > photo.jpg`).
+    app is given its `data:` address, and the command writes the file out (`one hello photo > photo.jpg`). Its
+    `outputs` are what's said of the file, `%{mimeType: ..., size: ...}`, its kind and its bytes:
+    `%{type: "object", properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}}, required: ["mimeType"]}`.
   - A tool takes a file as base64 text, in an input that says so: `%{type: "string", contentEncoding: "base64"}`.
     The command reads one into it (`one hello keep --photo-from photo.jpg`).
   - A file that's large, such as a photo from a phone, doesn't go inside a call or its answer. A tool takes one in
@@ -75,7 +93,8 @@ defmodule OneCore.Plugin do
     `--photo-from photo.jpg`), and the input is its name among the plugin's own blobs, `uploads/...`.
     `OneCore.Artifact.size(call.own, name)` says whether it arrived and how big it is. A tool answers with one of
     its blobs as `{:file, "image/jpeg", call.own, name}`: the client is handed a short-lived link, fetches the
-    file from the bucket and keeps it, so a blob answered this way is one that's never replaced.
+    file from the bucket and keeps it, so a blob answered this way is one that's never replaced. What's said of it
+    is its `mimeType` alone.
   - A `SKILL.md` at the root of the folder, if the plugin has one, is its skill: text for agents on when and how
     to use its tools, which an agent reads when it needs it, at `skill://hello/hello/SKILL.md`, and `one hello`
     shows with the plugin's tools. Its address starts with the name the plugin is installed by, which is where an
@@ -152,8 +171,9 @@ defmodule OneCore.Plugin do
     `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`. That's how a plugin uses an
     account without ever being handed its secret (`vault`'s skill).
   - Who someone is, a plugin asks `sign-in`, the plugin that signs people in, by its tool:
-    `OneCore.Call.tool(call, "sign-in", "people", %{"users" => ["users/alice"]})` gives each one's `called`, the
-    name they chose, and their `email` where how the network signs in has one, either `nil` where there's none.
+    `OneCore.Call.tool(call, "sign-in", "people", %{"users" => ["users/alice"]})["people"]` gives each one's
+    `called`, the name they chose, and their `email` where how the network signs in has one, either `nil` where
+    there's none.
     Left out, `users` is whoever asked. It answers about others only to a member of the network, as the plugins
     that validate `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
   - `permissions/0`, if the plugin has one, says what it may do beyond its own, as an Android app's manifest does:
@@ -322,7 +342,8 @@ defmodule OneCore.Plugin do
     the wide one a few rows, and the large one those rows with a detail each, or a chart.
   - The tool is called with the `size` to draw, for whoever's Home Screen page it's on, and answers a layout: one
     part, which holds the rest. A part is a map that says which `part` it is, from this list, and nothing in a
-    layout is ever markup. Every client draws the same layout: the UI library's `Widget` on a Home Screen page, and a phone's
+    layout is ever markup. Its `outputs` say so: `%{type: "object", properties: %{part: %{type: "string"}},
+    required: ["part"]}`. Every client draws the same layout: the UI library's `Widget` on a Home Screen page, and a phone's
     own home screen once it has widgets. A client asks again when something changed, and when the page is
     returned to.
   - `column` and `row` hold `parts`, with a `gap` between them in points if not the usual. Any part can say
@@ -483,7 +504,7 @@ defmodule OneCore.Plugin do
       )
   end
 
-  @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map}]
+  @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map, outputs: map}]
   @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
   @callback apps() :: [%{name: String.t(), page: String.t()}]
   @callback widgets() :: [%{name: String.t(), tool: String.t(), sizes: [String.t()]}]

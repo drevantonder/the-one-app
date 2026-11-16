@@ -85,37 +85,129 @@ defmodule GoogleCalendar do
       sendUpdates: send_updates
     }
 
+    # An event as the tools answer it: Calendar's Event resource, with the fields they pass on.
+    person = %{
+      type: "object",
+      properties: %{email: %{type: "string"}, displayName: %{type: "string"}},
+      required: ["email"]
+    }
+
+    listed = %{
+      type: "object",
+      properties: %{
+        id: string.("The event's id"),
+        status: string.("confirmed, tentative or cancelled"),
+        summary: %{type: ["string", "null"], description: "Its title"},
+        start: %{time.("When it starts", "") | type: ["object", "null"]},
+        end: %{time.("When it ends", ", the day after its last for a whole day") | type: ["object", "null"]},
+        location: %{type: ["string", "null"]},
+        recurringEventId: %{type: ["string", "null"], description: "The repeating event this is one repeat of"},
+        attendees: %{
+          type: "array",
+          items:
+            Map.merge(person, %{
+              properties:
+                Map.merge(person.properties, %{
+                  responseStatus: string.("needsAction, declined, tentative or accepted"),
+                  optional: %{type: "boolean"}
+                })
+            })
+        },
+        htmlLink: string.("Its link in Google Calendar")
+      },
+      required: ["id", "status", "summary", "start", "end", "location", "recurringEventId", "attendees", "htmlLink"]
+    }
+
+    whole = %{
+      listed
+      | properties:
+          Map.merge(listed.properties, %{
+            description: %{type: ["string", "null"], description: "Its notes"},
+            recurrence: %{type: "array", items: %{type: "string"}, description: "How it repeats, as RFC 5545 lines"},
+            organizer: %{person | type: ["object", "null"]},
+            hangoutLink: %{type: ["string", "null"], description: "Its Meet link"}
+          }),
+        required: listed.required ++ ["description", "recurrence", "organizer", "hangoutLink"]
+    }
+
     [
       %{
         name: "accounts",
         read_only: true,
         description:
           "The Google accounts Google Calendar can use, the default first, each with ok, and why when it's false (google-calendar_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            accounts: %{
+              type: "array",
+              description: "The default first",
+              items: %{
+                type: "object",
+                properties: %{
+                  account: string.("Its address"),
+                  ok: %{type: "boolean", description: "Whether it can be used now"},
+                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
+                },
+                required: ["account", "ok"]
+              }
+            }
+          },
+          required: ["accounts"]
+        }
       },
       %{
         name: "sign_in",
         description:
           "Starts signing a Google account in to Google Calendar, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-calendar_accounts lists it")}}
+        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-calendar_accounts lists it")}},
+        outputs: %{
+          type: "object",
+          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
+          required: ["url", "then"]
+        }
       },
       %{
         name: "sign_out",
         description: "Signs a Google account out of Google Calendar. Other Google apps that use it still do, and google-calendar_sign_in signs it in again.",
-        inputs: with_account.(%{}, ["account"])
+        inputs: with_account.(%{}, ["account"]),
+        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "calendars",
         read_only: true,
         description:
-          "The account's calendars (Calendar's calendarList.list), the primary first, as text: each one's id (what calendarId takes elsewhere), name, your access (owner, writer or reader) and time zone.",
-        inputs: with_account.(%{}, nil)
+          "The account's calendars (Calendar's calendarList.list), the primary first: each one's id (what calendarId takes elsewhere), name, your access (owner, writer or reader) and time zone.",
+        inputs: with_account.(%{}, nil),
+        outputs: %{
+          type: "object",
+          properties: %{
+            calendars: %{
+              type: "array",
+              description: "The primary first",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: string.("What calendarId takes elsewhere"),
+                  summary: string.("Its name, as the person sees it"),
+                  primary: %{type: "boolean"},
+                  accessRole: string.("Your access: owner, writer, reader or freeBusyReader"),
+                  timeZone: string.("An IANA time zone"),
+                  hidden: %{type: "boolean", description: "Whether it's hidden in Google Calendar's list"}
+                },
+                required: ["id", "summary", "primary", "accessRole", "timeZone", "hidden"]
+              }
+            }
+          },
+          required: ["calendars"]
+        }
       },
       %{
         name: "events",
         read_only: true,
         description:
-          "Events in a time range (Calendar's events.list, each repeat on its own, soonest first), as text: each event's id, start - end (RFC 3339, or a date for a whole day), summary, and where. The coming week of the primary calendar if left out. google-calendar_event gives one event's guests, link and notes. A long list ends with More: give pageToken <token>.",
+          "Events in a time range, to see what's on today or this week or find a meeting (Calendar's events.list, each repeat on its own, soonest first): each event's id, start and end (a dateTime, or a date for a whole day), summary, where and guests. The coming week of the primary calendar if left out. google-calendar_event gives one event's notes and Meet link too. Where there are more, nextPageToken is the next page's pageToken.",
         inputs:
           with_account.(
             %{
@@ -125,35 +217,55 @@ defmodule GoogleCalendar do
               timeMax: string.("The end of the range, the same way. A week after timeMin if left out"),
               q: string.("Words to find in events' summaries, places, notes and guests, like standup"),
               maxResults: %{type: "integer", description: "At most this many. 50 if left out, and at most 250"},
-              pageToken: string.("The next page: the token the last events ended with (More: give pageToken ...), with the same calendarId, timeMin and timeMax")
+              pageToken: string.("The next page: the nextPageToken the last events gave, with the same calendarId, timeMin and timeMax")
             },
             nil
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            calendar: string.("The calendar's name"),
+            timeZone: string.("The calendar's time zone"),
+            timeMin: string.("The range's start, RFC 3339"),
+            timeMax: string.("The range's end, RFC 3339"),
+            events: %{type: "array", items: listed, description: "Soonest first, each repeat on its own"},
+            nextPageToken: %{type: ["string", "null"], description: "The next page's pageToken, if there are more"}
+          },
+          required: ["calendar", "timeZone", "timeMin", "timeMax", "events", "nextPageToken"]
+        }
       },
       %{
         name: "event",
         read_only: true,
         description:
-          "One event (Calendar's events.get), as text: its summary, when, how it repeats, where, organizer, guests and their answers, its Meet link, its link in Google Calendar and its notes.",
-        inputs: with_account.(%{eventId: event, calendarId: calendar}, ["eventId"])
+          "One event (Calendar's events.get): its summary, when, how it repeats, where, organizer, guests and their answers, its Meet link, its link in Google Calendar and its notes.",
+        inputs: with_account.(%{eventId: event, calendarId: calendar}, ["eventId"]),
+        outputs: whole
       },
       %{
         name: "create_event",
         description:
-          "Adds an event to a calendar (Calendar's events.insert). This changes the person's calendar: do it only when they asked. Guests are told only with sendUpdates. Gives its id and link.",
-        inputs: with_account.(fields, ["summary", "start"])
+          "Adds an event to a calendar (Calendar's events.insert). This changes the person's calendar: do it only when they asked. Guests are told only with sendUpdates. Gives the event, with its id and link.",
+        inputs: with_account.(fields, ["summary", "start"]),
+        outputs: listed
       },
       %{
         name: "update_event",
         description:
           "Changes an event (Calendar's events.patch): only what's given changes, and attendees and recurrence, given, replace the whole list. A repeating event's id changes every repeat, and one repeat's id just that one. This changes the person's calendar: do it only when they asked. Guests are told only with sendUpdates.",
-        inputs: with_account.(Map.put(fields, :eventId, event), ["eventId"])
+        inputs: with_account.(Map.put(fields, :eventId, event), ["eventId"]),
+        outputs: listed
       },
       %{
         name: "delete_event",
         description:
           "Deletes an event for good (Calendar's events.delete): a repeating event's id deletes every repeat, and one repeat's id just that one. Do it only when the person asked. Guests are told only with sendUpdates.",
-        inputs: with_account.(%{eventId: event, calendarId: calendar, sendUpdates: send_updates}, ["eventId"])
+        inputs: with_account.(%{eventId: event, calendarId: calendar, sendUpdates: send_updates}, ["eventId"]),
+        outputs: %{
+          type: "object",
+          properties: %{id: string.("The event deleted"), summary: %{type: ["string", "null"]}, start: %{time.("When it started", "") | type: ["object", "null"]}},
+          required: ["id", "summary", "start"]
+        }
       }
     ]
   end
@@ -169,18 +281,19 @@ defmodule GoogleCalendar do
   defp run("calendars", _inputs, at) do
     calendars = api(at, "GET", "users/me/calendarList", query: [maxResults: 250])["items"] || []
 
-    case Enum.sort_by(calendars, &{&1["primary"] != true, &1["summary"] || ""}) do
-      [] ->
-        "No calendars."
+    calendars =
+      for calendar <- Enum.sort_by(calendars, &{&1["primary"] != true, &1["summary"] || ""}) do
+        %{
+          id: calendar["id"],
+          summary: calendar["summaryOverride"] || calendar["summary"],
+          primary: calendar["primary"] == true,
+          accessRole: calendar["accessRole"],
+          timeZone: calendar["timeZone"],
+          hidden: calendar["selected"] == false
+        }
+      end
 
-      calendars ->
-        Enum.map_join(calendars, "\n", fn calendar ->
-          name = calendar["summaryOverride"] || calendar["summary"]
-          primary = if calendar["primary"], do: " (primary)", else: ""
-          hidden = if calendar["selected"] == false, do: ", hidden", else: ""
-          "#{calendar["id"]}  #{name}#{primary}  #{calendar["accessRole"]}, #{calendar["timeZone"]}#{hidden}"
-        end)
-    end
+    %{calendars: calendars}
   end
 
   defp run("events", inputs, at) do
@@ -202,16 +315,14 @@ defmodule GoogleCalendar do
         missing: no_calendar(inputs["calendarId"])
       )
 
-    head = "#{found["summary"] || inputs["calendarId"] || "primary"} (#{found["timeZone"]}), #{DateTime.to_iso8601(from)} to #{DateTime.to_iso8601(to)}:"
-
-    lines =
-      case found["items"] do
-        events when events in [nil, []] -> ["Nothing."]
-        events -> Enum.map(events, &line/1)
-      end
-
-    more = if token = found["nextPageToken"], do: "\n\nMore: give pageToken #{token}", else: ""
-    Enum.join([head | lines], "\n") <> more
+    %{
+      calendar: found["summary"] || inputs["calendarId"] || "primary",
+      timeZone: found["timeZone"],
+      timeMin: DateTime.to_iso8601(from),
+      timeMax: DateTime.to_iso8601(to),
+      events: Enum.map(found["items"] || [], &listed/1),
+      nextPageToken: found["nextPageToken"]
+    }
   end
 
   defp run("event", %{"eventId" => id} = inputs, at) do
@@ -226,7 +337,7 @@ defmodule GoogleCalendar do
         missing: no_calendar(inputs["calendarId"])
       )
 
-    ~s|Added "#{event["summary"]}" (#{at(event["start"])} - #{at(event["end"])}), id #{event["id"]}: #{event["htmlLink"]}|
+    listed(event)
   end
 
   defp run("update_event", %{"eventId" => id} = inputs, at) do
@@ -237,7 +348,7 @@ defmodule GoogleCalendar do
         missing: no_event(id, inputs["calendarId"])
       )
 
-    ~s|Changed "#{event["summary"]}" (#{at(event["start"])} - #{at(event["end"])}).|
+    listed(event)
   end
 
   defp run("delete_event", %{"eventId" => id} = inputs, at) do
@@ -245,7 +356,7 @@ defmodule GoogleCalendar do
     event = api(at, "GET", where, missing: no_event(id, inputs["calendarId"]))
     if event["status"] == "cancelled", do: raise(no_event(id, inputs["calendarId"]))
     api(at, "DELETE", where, query: [sendUpdates: inputs["sendUpdates"] || "none"], missing: no_event(id, inputs["calendarId"]))
-    ~s<Deleted "#{event["summary"] || "(no title)"}" (#{at(event["start"])}).>
+    %{id: event["id"], summary: event["summary"], start: event["start"]}
   end
 
   # The Event resource events.insert and events.patch take, from what was given: a dateTime with neither an offset
@@ -310,54 +421,22 @@ defmodule GoogleCalendar do
     api(at, "GET", "calendars/#{calendar(at, calendar)}", missing: no_calendar(calendar))["timeZone"]
   end
 
-  defp at(time), do: (time || %{})["dateTime"] || (time || %{})["date"] || ""
+  @listed ~w(id status summary start end location recurringEventId attendees htmlLink)
+  @people ~w(email displayName responseStatus optional)
 
-  defp line(event) do
-    when_ =
-      if event["start"]["date"],
-        do: "#{event["start"]["date"]} (all day)",
-        else: "#{at(event["start"])} - #{at(event["end"])}"
-
-    [
-      "#{event["id"]}  #{when_}  #{event["summary"] || "(no title)"}",
-      event["location"] && "  at #{event["location"]}",
-      event["attendees"] not in [nil, []] && "  with #{length(event["attendees"])} people",
-      event["status"] == "cancelled" && "  cancelled"
-    ]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.join("\n")
+  # An event as the tools answer it, from Calendar's Event resource: what `tools/0` says of it.
+  defp listed(event) do
+    event = Map.merge(Map.new(@listed, &{&1, nil}), Map.take(event, @listed))
+    %{event | "attendees" => for(who <- event["attendees"] || [], do: Map.take(who, @people))}
   end
 
   defp whole(event) do
-    start = event["start"] || %{}
-
-    when_ =
-      if start["date"],
-        do: "#{start["date"]} to #{event["end"]["date"]} (all day)",
-        else: "#{at(start)} - #{at(event["end"])}#{if zone = start["timeZone"], do: " (#{zone})"}"
-
-    person = fn who -> if who["displayName"], do: "#{who["displayName"]} <#{who["email"]}>", else: who["email"] end
-
-    attendees =
-      for who <- event["attendees"] || [],
-          do: "Attendee: #{person.(who)} (#{who["responseStatus"]}#{if who["optional"], do: ", optional"})"
-
-    [
-      event["summary"] || "(no title)",
-      "Id: #{event["id"]}",
-      "When: #{when_}",
-      event["recurrence"] not in [nil, []] && "Repeats: #{Enum.join(event["recurrence"], "; ")}",
-      event["location"] && "Where: #{event["location"]}",
-      event["organizer"]["email"] && "Organizer: #{person.(event["organizer"])}"
-    ]
-    |> Kernel.++(attendees)
-    |> Kernel.++([
-      event["hangoutLink"] && "Meet: #{event["hangoutLink"]}",
-      event["htmlLink"] && "Link: #{event["htmlLink"]}",
-      event["description"] && "\n#{event["description"]}"
-    ])
-    |> Enum.filter(&is_binary/1)
-    |> Enum.join("\n")
+    Map.merge(listed(event), %{
+      "description" => event["description"],
+      "recurrence" => event["recurrence"] || [],
+      "organizer" => event["organizer"] && Map.take(event["organizer"], ["email", "displayName"]),
+      "hangoutLink" => event["hangoutLink"]
+    })
   end
 
   defp api(at, method, path, options), do: request(at, method, @api <> path, options)["body"]

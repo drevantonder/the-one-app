@@ -107,7 +107,10 @@ function Opened(props: { destination: Destination }) {
     if (!(await confirm(question))) return
     if (await doing(() => call("backups_remove", { destination: destination().name }, network))) setOpen()
   }
-  const check = press("check", async () => toast(await call("backups_check", { destination: destination().name }, network)))
+  const check = press("check", async () => {
+    const [checked] = JSON.parse(await call("backups_check", { destination: destination().name }, network)).checks as { backup: string | null; objects?: number }[]
+    toast(checked.backup ? `Read back ${checked.objects} objects. Every one is as it was sent.` : "There's no backup here yet.")
+  })
   return (
     <Screen heading={destination().name} back>
       <Show when={destination().problem}>
@@ -199,11 +202,11 @@ function RestoreSheet() {
   const [what, setWhat] = createSignal("whose")
   const choices = createMemo(async () => {
     if (!destination()) return { whose: createListCollection<{ value: string; label: string }>({ items: [] }), apps: createListCollection<{ value: string; label: string }>({ items: [] }) }
-    const listed = <T,>(tool: string) => call(tool).then((text): T[] => JSON.parse(text), (): T[] => [])
+    const listed = <T,>(tool: string, key: string) => call(tool).then((text): T[] => JSON.parse(text)[key], (): T[] => [])
     const [people, groups, store] = await Promise.all([
-      listed<{ who: string; called?: string; joined?: boolean }>("sign-in_everyone"),
-      listed<{ group: string; called: string }>("permissions_groups"),
-      listed<{ plugin: string; name: string }>("home-screen_store"),
+      listed<{ who: string; called?: string; joined?: boolean }>("sign-in_everyone", "people"),
+      listed<{ group: string; called: string }>("permissions_groups", "groups"),
+      listed<{ plugin: string; name: string }>("home-screen_store", "plugins"),
     ])
     const whose = [
       ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
@@ -220,9 +223,9 @@ function RestoreSheet() {
     const blobs = what() === "file" ? [typed.file.trim()] : what() === "app" ? [`${typed.whose}/own/${typed.app}/`, `${typed.whose}/made/${typed.app}/`] : [`${typed.whose}/`]
     setWorking("restore")
     const result = await doing(async () => {
-      const each: string[] = []
-      for (const one of blobs) each.push(await call("backups_restore", { destination: destination()!.name, backup: typed.backup, blobs: one }, network))
-      return each.join("\n")
+      let restored = 0
+      for (const one of blobs) restored += JSON.parse(await call("backups_restore", { destination: destination()!.name, backup: typed.backup, blobs: one }, network)).restored.length
+      return restored ? `Brought back ${restored === 1 ? "1 file" : `${restored} files`}.` : "Nothing was gone, so nothing changed."
     })
     setWorking()
     if (result) {

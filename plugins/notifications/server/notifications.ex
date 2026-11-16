@@ -16,7 +16,6 @@ defmodule Notifications do
   @impl true
   def essential, do: true
 
-  require Logger
   alias OneCore.{Call, Edge}
 
   @schema [
@@ -93,6 +92,23 @@ defmodule Notifications do
             app: Map.put(app, :description, "The plugin whose app a tap opens, and that its person can silence")
           },
           required: ["title"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            sent: %{type: "array", items: %{type: "string"}, description: "The users notified"},
+            muted: %{type: "array", items: %{type: "string"}, description: "The users who muted its app, and weren't"},
+            unwoken: %{
+              type: "array",
+              description: "The phones and browsers that weren't woken, and why",
+              items: %{
+                type: "object",
+                properties: %{device: %{type: "string"}, why: %{type: "string"}},
+                required: ["device", "why"]
+              }
+            }
+          },
+          required: ["sent", "muted", "unwoken"]
         }
       },
       %{
@@ -102,19 +118,67 @@ defmodule Notifications do
         inputs: %{
           type: "object",
           properties: %{after: %{type: "integer", description: "Only those after this id, to hear what's new"}}
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            unread: %{type: "integer"},
+            notifications: %{
+              type: "array",
+              description: "Newest first",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "integer"},
+                  app: %{type: ["string", "null"], description: "The plugin whose app a tap opens"},
+                  from: %{type: ["string", "null"], description: "What its app is called"},
+                  title: %{type: "string"},
+                  text: %{type: ["string", "null"]},
+                  at: %{type: "string", description: "When, ISO 8601"},
+                  read: %{type: "boolean"}
+                },
+                required: ["id", "app", "from", "title", "text", "at", "read"]
+              }
+            }
+          },
+          required: ["unread", "notifications"]
         }
       },
-      %{name: "read", description: "Marks a notification read", inputs: %{type: "object", properties: %{id: id}}},
+      %{
+        name: "read",
+        description: "Marks a notification read",
+        inputs: %{type: "object", properties: %{id: id}},
+        outputs: %{type: "object", properties: %{read: %{type: "integer", description: "How many were marked read"}}, required: ["read"]}
+      },
       %{
         name: "clear",
         description: "Clears a notification from your inbox",
-        inputs: %{type: "object", properties: %{id: id}}
+        inputs: %{type: "object", properties: %{id: id}},
+        outputs: %{type: "object", properties: %{cleared: %{type: "integer", description: "How many were cleared"}}, required: ["cleared"]}
       },
       %{
         name: "apps",
         read_only: true,
         description: "Lists the apps that have notified you, and whether each is allowed",
-        inputs: none
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            apps: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  app: app,
+                  name: %{type: "string", description: "What its app is called"},
+                  allowed: %{type: "boolean"}
+                },
+                required: ["app", "name", "allowed"]
+              }
+            }
+          },
+          required: ["apps"]
+        }
       },
       %{
         name: "allow",
@@ -123,7 +187,8 @@ defmodule Notifications do
           type: "object",
           properties: %{app: app, allow: %{type: "boolean", description: "true to allow it, false to mute it"}},
           required: ["app", "allow"]
-        }
+        },
+        outputs: %{type: "object", properties: %{app: app, allowed: %{type: "boolean"}}, required: ["app", "allowed"]}
       },
       %{
         name: "register",
@@ -147,7 +212,8 @@ defmodule Notifications do
             }
           },
           required: ["via", "token", "name", "key"]
-        }
+        },
+        outputs: %{type: "object", properties: %{device: %{type: "string", description: "What it's called"}}, required: ["device"]}
       },
       %{
         name: "unregister",
@@ -156,13 +222,36 @@ defmodule Notifications do
           type: "object",
           properties: %{token: %{type: "string", description: "Its token, as `register` was given it"}},
           required: ["token"]
-        }
+        },
+        outputs: %{type: "object", properties: %{device: %{type: "string", description: "What it's called"}}, required: ["device"]}
       },
-      %{name: "devices", read_only: true, description: "Lists your devices that are woken", inputs: none}
+      %{
+        name: "devices",
+        read_only: true,
+        description: "Lists your devices that are woken",
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            devices: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string"},
+                  via: %{type: "string", enum: ~w(apns fcm webpush)},
+                  at: %{type: "string", description: "When it was registered, ISO 8601"}
+                },
+                required: ["name", "via", "at"]
+              }
+            }
+          },
+          required: ["devices"]
+        }
+      }
     ]
   end
 
-  @impl true
   @impl true
   def hooks, do: ["renamed"]
 
@@ -208,13 +297,7 @@ defmodule Notifications do
          ])}
       end)
 
-    pushed = push(call, devices, %{title: title, text: inputs["text"], app: app})
-
-    Enum.join(
-      [if(sent == [], do: "Nobody was notified.", else: "Notified #{listed(sent)}.")] ++
-        if(quiet == [], do: [], else: ["#{listed(quiet)} muted #{app}."]) ++ List.wrap(pushed),
-      " "
-    )
+    %{sent: sent, muted: quiet, unwoken: push(call, devices, %{title: title, text: inputs["text"], app: app})}
   end
 
   def call("inbox", inputs, call) do
@@ -241,13 +324,11 @@ defmodule Notifications do
   end
 
   def call("read", inputs, call) do
-    changed(call, inputs, "update notifications set read = 1", "No notification is read")
-    "Read."
+    %{read: changed(call, inputs, "update notifications set read = 1", "No notification is read")}
   end
 
   def call("clear", inputs, call) do
-    changed(call, inputs, "delete from notifications", "No notification is cleared")
-    "Cleared."
+    %{cleared: changed(call, inputs, "delete from notifications", "No notification is cleared")}
   end
 
   def call("apps", _inputs, call) do
@@ -255,16 +336,18 @@ defmodule Notifications do
     names = names(user)
 
     transaction(call, fn db ->
-      query(
-        db,
-        """
-        select app, not exists (select 1 from quiet where quiet.user = ? and quiet.app = apps.app) as allowed from (
+      apps =
+        query(
+          db,
+          """
+          select app, not exists (select 1 from quiet where quiet.user = ? and quiet.app = apps.app) as allowed from (
           select app from notifications where user = ? and app is not null union select app from quiet where user = ?
         ) as apps order by app
         """,
-        [user, user, user]
-      )
-      |> Enum.map(&Map.merge(&1, %{"allowed" => &1["allowed"] == 1, "name" => names[&1["app"]] || &1["app"]}))
+          [user, user, user]
+        )
+
+      %{apps: Enum.map(apps, &Map.merge(&1, %{"allowed" => &1["allowed"] == 1, "name" => names[&1["app"]] || &1["app"]}))}
     end)
   end
 
@@ -277,7 +360,7 @@ defmodule Notifications do
         else: query(db, "insert or ignore into quiet (user, app) values (?, ?)", [user, app])
     end)
 
-    if allow, do: "#{app} is allowed.", else: "#{app} is muted."
+    %{app: app, allowed: allow}
   end
 
   def call("register", %{"via" => via, "token" => token, "name" => name, "key" => key}, call) do
@@ -295,7 +378,7 @@ defmodule Notifications do
       ])
     end)
 
-    "#{name} is woken when you're notified."
+    %{device: name}
   end
 
   def call("unregister", %{"token" => token}, call) do
@@ -304,14 +387,14 @@ defmodule Notifications do
     removed = "delete from devices where token = ? and user = ? returning name"
 
     case transaction(call, &query(&1, removed, [token, user])) do
-      [%{"name" => name}] -> "#{name} isn't woken any more."
+      [%{"name" => name}] -> %{device: name}
       [] -> raise "No device of yours has that token. `devices` lists them."
     end
   end
 
   def call("devices", _inputs, call) do
     user = person(call)
-    transaction(call, &query(&1, "select name, via, at from devices where user = ? order by at", [user]))
+    %{devices: transaction(call, &query(&1, "select name, via, at from devices where user = ? order by at", [user]))}
   end
 
   # Marks one of a person's notifications, or all of them, with `sql`, which names the table and what it does.
@@ -324,8 +407,10 @@ defmodule Notifications do
           if query(db, sql <> " where user = ? and id = ? returning id", [user, id]) == [],
             do: raise("#{none}: you have none with id #{id}. `inbox` lists them.")
 
+          1
+
         _ ->
-          query(db, sql <> " where user = ?", [user])
+          length(query(db, sql <> " where user = ? returning id", [user]))
       end
     end)
   end
@@ -341,8 +426,8 @@ defmodule Notifications do
   # Who a notification goes to: a user, or the users in a group or the network, whom permissions says.
   defp users(_call, "users/" <> _ = user), do: [user]
 
-  defp users(call, "groups/" <> _ = to), do: Call.tool(call, "permissions", "members", %{"of" => to})
-  defp users(call, "network"), do: Call.tool(call, "permissions", "members", %{"of" => "network"})
+  defp users(call, "groups/" <> _ = to), do: Call.tool(call, "permissions", "members", %{"of" => to})["members"]
+  defp users(call, "network"), do: Call.tool(call, "permissions", "members", %{"of" => "network"})["members"]
 
   defp users(_call, to), do: raise("#{to} isn't a user, a group or the network.")
 
@@ -350,13 +435,10 @@ defmodule Notifications do
   defp person(%Call{actor: "users/" <> _ = by}), do: by
   defp person(_call), do: raise("An inbox is a person's, and nobody is asking.")
 
-  defp listed([one]), do: one
-  defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
-
-  # Has this plugin's edge function wake the phones and browsers it went to, each sent the
-  # notification encrypted to it, and forgets the ones whose push service says they're gone. With no address there's nothing to send through, and that's said only if
-  # some device was to be woken.
-  defp push(_call, [], _notification), do: nil
+  # Has this plugin's edge function wake the phones and browsers it went to, each sent the notification encrypted to
+  # it, and forgets the ones whose push service says they're gone. Gives the ones that weren't woken, and why: with no
+  # address, there's nothing to send through.
+  defp push(_call, [], _notification), do: []
 
   defp push(call, devices, notification) do
     with address when is_binary(address) <- Application.get_env(:one_core, :address),
@@ -369,15 +451,10 @@ defmodule Notifications do
       end
 
       names = Map.new(devices, &{&1["token"], &1["name"]})
-
-      if failed != [],
-        do:
-          Enum.map_join(failed, " ", fn %{"token" => token, "why" => why} ->
-            "#{names[token]} wasn't woken: #{why}."
-          end)
+      for %{"token" => token, "why" => why} <- failed, do: %{device: names[token], why: why}
     else
-      nil -> "Phones and browsers weren't woken: this network has no address."
-      {:error, why} -> "Phones and browsers weren't woken: #{why}"
+      nil -> for device <- devices, do: %{device: device["name"], why: "this network has no address"}
+      {:error, why} -> for device <- devices, do: %{device: device["name"], why: why}
     end
   end
 

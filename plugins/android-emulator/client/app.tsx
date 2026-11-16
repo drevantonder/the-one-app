@@ -70,7 +70,7 @@ function Detail(props: { emulator: Emulator }) {
 }
 
 function App() {
-  const emulators = createMemo(() => call("android-emulator_list").then((text): Emulator[] => JSON.parse(text)))
+  const emulators = createMemo(() => call("android-emulator_list").then((text): Emulator[] => JSON.parse(text).emulators))
   changed(() => refresh(emulators))
   const opened = () => emulators().find((e) => e.name === open())
   return (

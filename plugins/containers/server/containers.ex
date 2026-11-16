@@ -14,6 +14,46 @@ defmodule Containers do
   @idle_hours 4
   @container %{type: "string", description: "the container, by its name"}
 
+  # A container, as `list` answers each.
+  @listed %{
+    type: "object",
+    properties: %{
+      name: %{type: "string"},
+      description: %{type: ["string", "null"], description: "What it's for"},
+      image: %{type: "string"},
+      state: %{type: "string", description: "running, exited, created, ..."},
+      machine: %{type: ["string", "null"]},
+      size: %{type: ["string", "null"], description: "small, medium or large"},
+      by: %{type: ["string", "null"], description: "Who created it"},
+      created: %{type: "integer", description: "In milliseconds since 1970"},
+      last_used: %{type: "integer", description: "In milliseconds since 1970"},
+      ports: %{
+        type: "array",
+        items: %{
+          type: "object",
+          properties: %{
+            port: %{type: "integer", description: "The container's"},
+            host_port: %{type: "integer", description: "Where it's published, on the machine's own loopback"}
+          }
+        }
+      }
+    },
+    required: ~w(name description image state machine size by created last_used ports)
+  }
+
+  @named %{type: "object", properties: %{container: %{type: "string"}}, required: ["container"]}
+
+  # What a command it ran gave.
+  @ran %{
+    type: "object",
+    properties: %{
+      exit: %{type: "integer", description: "0 when it worked, -1 once its timeout passed"},
+      stdout: %{type: "string", description: "Its last 64 KB"},
+      stderr: %{type: "string", description: "Its last 64 KB"}
+    },
+    required: ["exit", "stdout", "stderr"]
+  }
+
   @impl true
   def uses, do: ["database", "webrtc"]
 
@@ -34,25 +74,64 @@ defmodule Containers do
         read_only: true,
         description:
           "The containers you can use, on every machine: each one's name, image, state (running, exited, created), machine, size, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{type: "object", properties: %{containers: %{type: "array", items: @listed}}, required: ["containers"]}
       },
       %{
         name: "machines",
         read_only: true,
         description: "The machines that run containers, each by the name `create` takes, whether it's on now, and if not when it last was (ms since 1970).",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            machines: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  machine: %{type: ["string", "null"], description: "What create's machine takes"},
+                  on: %{type: "boolean"},
+                  last_on: %{type: "integer", description: "When it last was, if it's off, in milliseconds since 1970"}
+                },
+                required: ["machine", "on"]
+              }
+            }
+          },
+          required: ["machines"]
+        }
       },
       %{
         name: "images",
         read_only: true,
         description:
           "The images on each machine to create a container from: the ones you made with `commit`, by their names, and the ones pulled there. Any other image is pulled from its registry when a container is created from it.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            images: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string", description: "What create's image takes"},
+                  tags: %{type: "array", items: %{type: "string"}},
+                  size: %{type: ["integer", "null"], description: "In bytes"},
+                  created: %{type: "integer", description: "In milliseconds since 1970"},
+                  machine: %{type: ["string", "null"]}
+                },
+                required: ["name", "tags", "size", "created", "machine"]
+              }
+            }
+          },
+          required: ["images"]
+        }
       },
       %{
         name: "create",
         description:
-          "Create a container and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. Creating from an image not on the machine pulls it first, and `desktop` is built there the first time (about 2 minutes); after that it's a second. Gives the container as `list` does.",
+          "Create a Linux container, from a Docker image or `desktop`, and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. Creating from an image not on the machine pulls it first, and `desktop` is built there the first time (about 2 minutes); after that it's a second. Gives the container as `list` does.",
         inputs: %{
           type: "object",
           required: ["image", "name", "description"],
@@ -96,15 +175,27 @@ defmodule Containers do
               }
             }
           }
-        }
+        },
+        outputs: @listed
       },
-      %{name: "start", description: "Start a stopped container.", inputs: one()},
+      %{
+        name: "start",
+        description: "Start a stopped container.",
+        inputs: one(),
+        outputs: @named
+      },
       %{
         name: "stop",
         description: "Stop a container. Its files stay, and `start` starts it again.",
-        inputs: one()
+        inputs: one(),
+        outputs: @named
       },
-      %{name: "remove", description: "Remove a container and its files, for good.", inputs: one()},
+      %{
+        name: "remove",
+        description: "Remove a container and its files, for good.",
+        inputs: one(),
+        outputs: @named
+      },
       %{
         name: "exec",
         description:
@@ -114,20 +205,32 @@ defmodule Containers do
             command: %{type: "string", description: ~s(the command line, like "apt-get install -y git"; it reads no input)},
             dir: %{type: "string", description: "the folder to run it in; default the image's"},
             timeout: %{type: "integer", minimum: 1, maximum: 3600, description: "seconds to wait, 1 to 3600; default 60"}
-          }, ["command"])
+          }, ["command"]),
+        outputs: @ran
       },
       %{
         name: "logs",
         read_only: true,
         description: "What the container's own command printed: its last lines.",
-        inputs: one(%{tail: %{type: "integer", minimum: 1, description: "how many lines; default 200"}})
+        inputs: one(%{tail: %{type: "integer", minimum: 1, description: "how many lines; default 200"}}),
+        outputs: @ran
       },
       %{
         name: "read_file",
         read_only: true,
         description:
           "Read a file of a container, running or stopped: text as text, anything else as the file (a picture is seen). Up to 16 MB.",
-        inputs: one(%{path: %{type: "string", description: "its absolute path in the container"}}, ["path"])
+        inputs: one(%{path: %{type: "string", description: "its absolute path in the container"}}, ["path"]),
+        outputs: %{
+          type: "object",
+          description: "Text as text, or anything else as the file, which an agent sees where it's a picture",
+          properties: %{
+            path: %{type: "string"},
+            text: %{type: "string"},
+            mimeType: %{type: "string", description: "The file's kind, where it isn't text"},
+            size: %{type: "integer"}
+          }
+        }
       },
       %{
         name: "write_file",
@@ -140,14 +243,16 @@ defmodule Containers do
               data: %{type: "string", contentEncoding: "base64", description: "or what's in it, as base64"}
             },
             ["path"]
-          )
+          ),
+        outputs: %{type: "object", properties: %{path: %{type: "string"}}, required: ["path"]}
       },
       %{
         name: "commit",
         description:
           "Make an image of a container as it is now: its files, not what's running. `create` makes throwaway copies from it, on the same machine.",
         inputs:
-          one(%{name: %{type: "string", pattern: "^[a-z0-9][a-z0-9_.-]*$", description: "the image's name"}}, ["name"])
+          one(%{name: %{type: "string", pattern: "^[a-z0-9][a-z0-9_.-]*$", description: "the image's name"}}, ["name"]),
+        outputs: %{type: "object", properties: %{image: %{type: "string", description: "What create's image takes"}}, required: ["image"]}
       },
       %{
         name: "remove_image",
@@ -156,7 +261,8 @@ defmodule Containers do
           type: "object",
           required: ["name"],
           properties: %{name: %{type: "string", description: "the image's name"}}
-        }
+        },
+        outputs: %{type: "object", properties: %{image: %{type: "string"}}, required: ["image"]}
       },
       %{
         name: "request",
@@ -172,14 +278,29 @@ defmodule Containers do
               body: %{type: "string"}
             },
             ["port"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            status: %{type: "integer"},
+            headers: %{type: "object", additionalProperties: %{type: "string"}},
+            body: %{type: "string", description: "As text, up to 16 MB"}
+          },
+          required: ["status", "headers", "body"]
+        }
       },
       %{
         name: "screenshot",
         read_only: true,
         description:
           "A picture of a container's screen: the X display its DISPLAY names, as a PNG. A container of the image desktop has one, 1280×800 until `screen` resizes it, with Google Chrome on it; `exec` with xdotool moves, clicks and types there.",
-        inputs: one()
+        inputs: one(),
+        outputs: %{
+          type: "object",
+          description: "The screen, a PNG: an agent sees it",
+          properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}},
+          required: ["mimeType"]
+        }
       },
       %{
         name: "screen",
@@ -202,7 +323,18 @@ defmodule Containers do
               height: %{type: "integer", minimum: 240, maximum: 4320}
             },
             ["action"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          description: "As Computer Use says: a screenshot, what it did, or for stream, the ICE servers or the screen's answer",
+          properties: %{
+            mimeType: %{type: "string"},
+            size: %{type: "integer"},
+            done: %{type: "string", description: "What it did, in a few words"},
+            iceServers: %{type: "array", items: %{type: "object"}},
+            answer: %{type: "string", description: "The screen's SDP answer"}
+          }
+        }
       },
       %{
         name: "settings",
@@ -211,13 +343,32 @@ defmodule Containers do
         inputs: %{
           type: "object",
           properties: %{idle_hours: %{type: "integer", minimum: 1, description: "hours a container may go unused"}}
+        },
+        outputs: %{
+          type: "object",
+          properties: %{idle_hours: %{type: "integer", description: "Hours a container may go unused before it's stopped"}},
+          required: ["idle_hours"]
         }
       },
       %{
         name: "stop_idle",
         description:
           "Stop every running container, anyone's, that has gone unused longer than idle_hours, on each machine. It's run every hour, and gives the ones it stopped.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            stopped: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{machine: %{type: ["string", "null"]}, name: %{type: "string"}},
+                required: ["machine", "name"]
+              }
+            }
+          },
+          required: ["stopped"]
+        }
       }
     ]
   end
@@ -227,18 +378,21 @@ defmodule Containers do
   end
 
   @impl true
-  def call("list", _inputs, call), do: Enum.map(containers(call), &Map.drop(&1, [:server, :artifact, :id]))
+  def call("list", _inputs, call), do: %{containers: listed(call)}
 
   def call("machines", _inputs, call) do
-    for server <- Service.servers(call, Podman) do
-      case Service.seen(server) do
-        at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
-        _ -> %{machine: Service.name(server), on: true}
+    machines =
+      for server <- Service.servers(call, Podman) do
+        case Service.seen(server) do
+          at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
+          _ -> %{machine: Service.name(server), on: true}
+        end
       end
-    end
+
+    %{machines: machines}
   end
 
-  def call("images", _inputs, call), do: Enum.map(images(call), &Map.drop(&1, [:server, :artifact, :id]))
+  def call("images", _inputs, call), do: %{images: Enum.map(images(call), &Map.drop(&1, [:server, :artifact, :id]))}
 
   def call("create", inputs, call) do
     name = inputs["name"]
@@ -269,12 +423,14 @@ defmodule Containers do
     }
 
     Service.call(call, Podman, :create, [spec], server)
-    call("list", %{}, call) |> Enum.find(&(&1.name == name))
+    Enum.find(listed(call), &(&1.name == name))
   end
 
-  def call("start", inputs, call), do: on(call, inputs, :start)
-  def call("stop", inputs, call), do: on(call, inputs, :stop)
-  def call("remove", inputs, call), do: on(call, inputs, :remove)
+  def call(tool, %{"container" => name} = inputs, call) when tool in ~w(start stop remove) do
+    on(call, inputs, String.to_existing_atom(tool))
+    %{container: name}
+  end
+
   def call("logs", inputs, call), do: on(call, inputs, :logs, [Map.get(inputs, "tail", 200)])
 
   def call("exec", inputs, call) do
@@ -286,7 +442,7 @@ defmodule Containers do
     data = Base.decode64!(on(call, inputs, :read_file, [path]))
 
     if String.valid?(data) and not String.contains?(data, <<0>>),
-      do: data,
+      do: %{path: path, text: data},
       else: {:blob, MIME.from_path(path), data}
   end
 
@@ -299,7 +455,7 @@ defmodule Containers do
       end
 
     on(call, inputs, :write_file, [path, data])
-    "Wrote #{path}"
+    %{path: path}
   end
 
   def call("commit", %{"name" => name} = inputs, call) do
@@ -307,13 +463,13 @@ defmodule Containers do
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
     labels = %{"artifact" => Artifact.name(Call.make(call, "image-" <> id)), "name" => name}
     on(call, inputs, :commit, ["localhost/#{name}-#{id}", labels])
-    "Made the image #{name}: `create` with image #{name} makes a copy"
+    %{image: name}
   end
 
   def call("remove_image", %{"name" => name}, call) do
     image = Enum.find(images(call), &(&1.artifact && &1.name == name)) || raise "You have no image called #{name}"
     Service.call(call, Podman, :remove_image, [image.id], image.server)
-    "Removed the image #{name}"
+    %{image: name}
   end
 
   def call("request", inputs, call) do
@@ -334,7 +490,7 @@ defmodule Containers do
 
   def call("screen", %{"action" => "resize", "width" => width, "height" => height} = inputs, call) when is_integer(width) and is_integer(height) do
     on(call, inputs, :resize, [width, height])
-    "Resized to #{width}×#{height}"
+    %{done: "Resized to #{width}×#{height}"}
   end
 
   # A stream's ICE servers, for the app, then, with its offer, the sender in the container (`webrtc-stream`) started
@@ -351,7 +507,7 @@ defmodule Containers do
 
   def call("screen", %{"action" => action} = inputs, call) do
     on(call, inputs, :xdotool, [xdotool(action, inputs)])
-    did(action, inputs)
+    %{done: did(action, inputs)}
   end
 
   def call("settings", inputs, call) do
@@ -378,10 +534,13 @@ defmodule Containers do
   def call("stop_idle", _inputs, call) do
     idle = settings(call)["idle_hours"] * 3_600_000
 
-    for server <- Service.servers(call, Podman),
-        not is_integer(Service.seen(server)),
-        name <- Service.call(call, Podman, :stop_idle, [idle], server),
-        do: %{machine: Service.name(server), name: name}
+    stopped =
+      for server <- Service.servers(call, Podman),
+          not is_integer(Service.seen(server)),
+          name <- Service.call(call, Podman, :stop_idle, [idle], server),
+          do: %{machine: Service.name(server), name: name}
+
+    %{stopped: stopped}
   end
 
   # Computer Use asks for the caller's screens: each running container of theirs with a display is one, called what
@@ -457,9 +616,11 @@ defmodule Containers do
   # Runs a function of the service on the container called `inputs["container"]`, where it is.
   defp on(call, inputs, function, arguments \\ []) do
     c = container!(call, inputs)
-    result = Service.call(call, Podman, function, [c.id | arguments], c.server)
-    if result == "ok", do: "#{String.capitalize(to_string(function))}: #{c.name}", else: result
+    Service.call(call, Podman, function, [c.id | arguments], c.server)
   end
+
+  # The containers this call may use, as `list` answers them.
+  defp listed(call), do: Enum.map(containers(call), &Map.drop(&1, [:server, :artifact, :id]))
 
   defp container!(call, %{"container" => name}),
     do: Enum.find(containers(call), &(&1.name == name)) || raise("You have no container called #{name}")

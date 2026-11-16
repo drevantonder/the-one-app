@@ -85,6 +85,9 @@ defmodule OneCore.Call do
       {:forwarded, %{"content" => [%{"resource" => %{"mimeType" => kind, "blob" => data}}]}} ->
         {:blob, kind, Base.decode64!(data)}
 
+      {:forwarded, %{"structuredContent" => structured}} ->
+        structured
+
       {:forwarded, %{"content" => [%{"text" => text} | _]}} ->
         decoded(text)
 

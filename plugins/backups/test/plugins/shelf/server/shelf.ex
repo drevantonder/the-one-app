@@ -15,9 +15,10 @@ defmodule Shelf do
   def tools do
     text = %{type: "object", properties: %{text: %{type: "string"}}, required: ["text"]}
     file = %{type: "object", properties: %{name: %{type: "string"}}, required: ["name"]}
+    done = %{type: "object"}
 
     [
-      %{name: "add", description: "Adds a note", inputs: text},
+      %{name: "add", description: "Adds a note", inputs: text, outputs: done},
       %{
         name: "change",
         description: "Changes every note that says `text` to say `to`",
@@ -25,7 +26,8 @@ defmodule Shelf do
           type: "object",
           properties: %{text: %{type: "string"}, to: %{type: "string"}},
           required: ["text", "to"]
-        }
+        },
+        outputs: done
       },
       %{
         name: "put",
@@ -34,14 +36,23 @@ defmodule Shelf do
           type: "object",
           properties: %{name: %{type: "string"}, text: %{type: "string"}, size: %{type: "integer"}},
           required: ["name"]
-        }
+        },
+        outputs: file
       },
-      %{name: "delete", description: "Deletes a file", inputs: file},
+      %{name: "delete", description: "Deletes a file", inputs: file, outputs: file},
       %{
         name: "all",
         read_only: true,
         description: "The notes, and each file's SHA-256 by its name",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            notes: %{type: "array", items: %{type: "string"}},
+            files: %{type: "object", additionalProperties: %{type: "string"}}
+          },
+          required: ["notes", "files"]
+        }
       }
     ]
   end
@@ -49,22 +60,22 @@ defmodule Shelf do
   @impl true
   def call("add", %{"text" => text}, call) do
     transaction(call, fn database, db -> database.query(db, "insert into notes (text) values (?)", [text]) end)
-    "Added."
+    %{}
   end
 
   def call("change", %{"text" => text, "to" => to}, call) do
     transaction(call, fn database, db -> database.query(db, "update notes set text = ? where text = ?", [to, text]) end)
-    "Changed."
+    %{}
   end
 
   def call("put", %{"name" => name} = inputs, call) do
     :ok = Artifact.write(files(call), name, inputs["text"] || :crypto.strong_rand_bytes(inputs["size"] || 0))
-    "Kept #{name}."
+    %{name: name}
   end
 
   def call("delete", %{"name" => name}, call) do
     Artifact.remove(files(call), name)
-    "Deleted #{name}."
+    %{name: name}
   end
 
   def call("all", _inputs, call) do

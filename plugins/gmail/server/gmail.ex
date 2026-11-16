@@ -43,7 +43,7 @@ defmodule Gmail do
     ids = &%{type: "array", items: %{type: "string"}, description: &1}
     people = &%{type: "array", items: %{type: "string"}, description: "#{&1}: addresses, each a@example.org or Name <a@example.org>"}
     most = &%{type: "integer", description: "At most this many. #{&1} if left out, and at most 100"}
-    page = &string.("The next page: the token the last #{&1} ended with (More: give pageToken ...), with the same other inputs")
+    page = &string.("The next page: the nextPageToken the last #{&1} gave, with the same other inputs")
     id = string.("The message's id, from gmail_search")
 
     writing = %{
@@ -76,30 +76,64 @@ defmodule Gmail do
         read_only: true,
         description:
           "The Google accounts Gmail can use, the default first, each with ok, and why when it's false (gmail_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            accounts: %{
+              type: "array",
+              description: "The default first",
+              items: %{
+                type: "object",
+                properties: %{
+                  account: string.("Its address"),
+                  ok: %{type: "boolean", description: "Whether it can be used now"},
+                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
+                },
+                required: ["account", "ok"]
+              }
+            }
+          },
+          required: ["accounts"]
+        }
       },
       %{
         name: "sign_in",
         description:
           "Starts signing a Google account in to Gmail, or letting Gmail use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, like someone@gmail.com, to suggest it to Google: for one that needs signing in again, as gmail_accounts lists it")}}
+        inputs: %{type: "object", properties: %{account: string.("The account's address, like someone@gmail.com, to suggest it to Google: for one that needs signing in again, as gmail_accounts lists it")}},
+        outputs: %{
+          type: "object",
+          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
+          required: ["url", "then"]
+        }
       },
       %{
         name: "sign_out",
         description: "Signs a Google account out of Gmail. Other Google apps that use it still do, and gmail_sign_in signs it in again.",
-        inputs: with_account.(%{}, ["account"])
+        inputs: with_account.(%{}, ["account"]),
+        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "profile",
         read_only: true,
         description: "The account's address and how many messages and threads it has.",
-        inputs: with_account.(%{}, nil)
+        inputs: with_account.(%{}, nil),
+        outputs: %{
+          type: "object",
+          properties: %{
+            emailAddress: string.("The account's address"),
+            messagesTotal: %{type: "integer"},
+            threadsTotal: %{type: "integer"}
+          },
+          required: ["emailAddress", "messagesTotal", "threadsTotal"]
+        }
       },
       %{
         name: "search",
         read_only: true,
         description:
-          "Finds messages (Gmail's messages.list), newest first, as text: each message's id, when it came (ISO 8601, UTC), sender, subject, label names and a snippet. With no q, all mail but spam and trash. Read one with gmail_read, its conversation with gmail_thread. A long list ends with More: give pageToken <token>.",
+          "Finds email messages (Gmail's messages.list), newest first, such as unread mail or what's in the inbox: each message's id, when it came, sender, subject, label names and a snippet. With no q, all mail but spam and trash. Read one with gmail_read, its conversation with gmail_thread. Where there are more, nextPageToken is the next page's pageToken.",
         inputs:
           with_account.(
             %{
@@ -109,20 +143,37 @@ defmodule Gmail do
               pageToken: page.("search")
             },
             nil
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            messages: %{type: "array", items: Gmail.Message.found()},
+            nextPageToken: %{type: ["string", "null"], description: "The next page's pageToken, if there are more"}
+          },
+          required: ["messages", "nextPageToken"]
+        }
       },
       %{
         name: "read",
         read_only: true,
         description:
           "One message in full: its headers, when it came, labels, attachments (numbered, for gmail_attachment) and its text. gmail_thread gives the replies around it.",
-        inputs: with_account.(%{id: id}, ["id"])
+        inputs: with_account.(%{id: id}, ["id"]),
+        outputs: Gmail.Message.message()
       },
       %{
         name: "thread",
         read_only: true,
         description: "A whole conversation, oldest first, each message as gmail_read gives it. gmail_read gives just the one.",
-        inputs: with_account.(%{id: string.("The thread's id, or the id of any message in it, from gmail_search")}, ["id"])
+        inputs: with_account.(%{id: string.("The thread's id, or the id of any message in it, from gmail_search")}, ["id"]),
+        outputs: %{
+          type: "object",
+          properties: %{
+            id: string.("The thread's id"),
+            messages: %{type: "array", items: Gmail.Message.message(), description: "Oldest first"}
+          },
+          required: ["id", "messages"]
+        }
       },
       %{
         name: "attachment",
@@ -137,14 +188,39 @@ defmodule Gmail do
               number: %{type: "integer", description: "Which attachment, as gmail_read numbers them, 1 the first. The first when neither is given"}
             },
             ["id"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          description: "The file: an agent sees it, and the command writes it out",
+          properties: %{mimeType: %{type: "string"}, size: %{type: "integer", description: "In bytes"}},
+          required: ["mimeType"]
+        }
       },
       %{
         name: "labels",
         read_only: true,
         description:
           "The account's labels, Gmail's own (INBOX, UNREAD, STARRED, ...) first, then the person's: each its name, and its id where that differs. gmail_label and gmail_search's labelIds take either.",
-        inputs: with_account.(%{}, nil)
+        inputs: with_account.(%{}, nil),
+        outputs: %{
+          type: "object",
+          properties: %{
+            labels: %{
+              type: "array",
+              description: "Gmail's own first, then the person's",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: string.("Its id: INBOX, or Label_12"),
+                  name: string.("Its name"),
+                  type: string.("system for Gmail's own, user for the person's")
+                },
+                required: ["id", "name", "type"]
+              }
+            }
+          },
+          required: ["labels"]
+        }
       },
       %{
         name: "label",
@@ -158,41 +234,88 @@ defmodule Gmail do
               removeLabelIds: ids.("Labels to remove: ids or names, like INBOX or UNREAD")
             },
             ["ids"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            ids: ids.("The messages changed"),
+            added: ids.("The names of the labels added"),
+            removed: ids.("The names of the labels removed")
+          },
+          required: ["ids", "added", "removed"]
+        }
       },
       %{
         name: "trash",
         description: "Moves messages to the trash. They stay there 30 days, where the person can take them out again in Gmail.",
-        inputs: with_account.(%{ids: ids.("The messages' ids, from gmail_search")}, ["ids"])
+        inputs: with_account.(%{ids: ids.("The messages' ids, from gmail_search")}, ["ids"]),
+        outputs: %{type: "object", properties: %{trashed: ids.("The messages moved to the trash")}, required: ["trashed"]}
       },
       %{
         name: "drafts",
         read_only: true,
         description:
-          "The account's drafts (Gmail's drafts.list), newest first, as text: each draft's id, when it was saved (ISO 8601, UTC), who it's to and its subject. A long list ends with More: give pageToken <token>.",
-        inputs: with_account.(%{maxResults: most.(20), pageToken: page.("drafts")}, nil)
+          "The account's drafts (Gmail's drafts.list), newest first: each draft's id, when it was saved, who it's to and its subject. Where there are more, nextPageToken is the next page's pageToken.",
+        inputs: with_account.(%{maxResults: most.(20), pageToken: page.("drafts")}, nil),
+        outputs: %{
+          type: "object",
+          properties: %{
+            drafts: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: string.("The draft's id"),
+                  messageId: string.("Its message's id"),
+                  date: string.("When it was saved: ISO 8601, in UTC"),
+                  to: string.("Who it's to, empty for nobody yet"),
+                  subject: %{type: "string"}
+                },
+                required: ["id", "messageId", "date", "to", "subject"]
+              }
+            },
+            nextPageToken: %{type: ["string", "null"], description: "The next page's pageToken, if there are more"}
+          },
+          required: ["drafts", "nextPageToken"]
+        }
       },
       %{
         name: "draft",
         description:
           "Saves an email as a draft (text, HTML or both, with files if given) for the person to check and send, or replaces a draft. Use it rather than gmail_send unless the person asked you to send. Gives the draft's id.",
-        inputs: with_account.(Map.put(writing, :id, string.("A draft's id, from gmail_drafts, to replace that draft")), nil)
+        inputs: with_account.(Map.put(writing, :id, string.("A draft's id, from gmail_drafts, to replace that draft")), nil),
+        outputs: %{
+          type: "object",
+          properties: %{id: string.("The draft's id"), messageId: string.("Its message's id")},
+          required: ["id", "messageId"]
+        }
       },
       %{
         name: "send_draft",
         description: "Sends a draft as it is. This sends real email to real people: only when the person asked to send this one.",
-        inputs: with_account.(%{id: string.("The draft's id, from gmail_drafts or gmail_draft")}, ["id"])
+        inputs: with_account.(%{id: string.("The draft's id, from gmail_drafts or gmail_draft")}, ["id"]),
+        outputs: %{
+          type: "object",
+          properties: %{id: string.("The sent message's id"), threadId: string.("Its thread's id")},
+          required: ["id", "threadId"]
+        }
       },
       %{
         name: "delete_draft",
         description: "Deletes a draft for good: it doesn't go to the trash.",
-        inputs: with_account.(%{id: string.("The draft's id, from gmail_drafts")}, ["id"])
+        inputs: with_account.(%{id: string.("The draft's id, from gmail_drafts")}, ["id"]),
+        outputs: %{type: "object", properties: %{id: string.("The draft deleted")}, required: ["id"]}
       },
       %{
         name: "send",
         description:
           "Sends an email (text, HTML or both, with files if given), or a reply. This sends real email to real people: only what the person asked to send. Otherwise gmail_draft. Gives the sent message's id.",
-        inputs: with_account.(writing, nil)
+        inputs: with_account.(writing, nil),
+        outputs: %{
+          type: "object",
+          properties: %{id: string.("The sent message's id"), threadId: string.("Its thread's id")},
+          required: ["id", "threadId"]
+        }
       }
     ]
   end
@@ -204,8 +327,7 @@ defmodule Gmail do
   def call(tool, inputs, call), do: run(tool, inputs, %{call: call, account: inputs["account"]})
 
   defp run("profile", _inputs, at) do
-    profile = api(at, "GET", "profile")
-    "#{profile["emailAddress"]}: #{profile["messagesTotal"]} messages in #{profile["threadsTotal"]} threads."
+    Map.take(api(at, "GET", "profile"), ["emailAddress", "messagesTotal", "threadsTotal"])
   end
 
   defp run("search", inputs, at) do
@@ -219,36 +341,20 @@ defmodule Gmail do
         ]
       )
 
-    case found["messages"] do
-      messages when messages in [nil, []] ->
-        if inputs["pageToken"], do: "No more.", else: "Nothing found."
+    messages =
+      case found["messages"] do
+        messages when messages in [nil, []] -> []
+        messages ->
+          names = label_names(at)
+          Enum.map(metadata(at, messages), &Message.found(&1, names))
+      end
 
-      messages ->
-        names = label_names(at)
-
-        lines =
-          for message <- metadata(at, messages) do
-            labels = Message.labels(message, names)
-
-            Enum.join(
-              [
-                "#{message["id"]}  #{Message.time(message)}  #{Message.header(message["payload"], "From")}",
-                "  #{Message.header(message["payload"], "Subject")}",
-                labels != "" && "  [#{labels}]",
-                message["snippet"] not in [nil, ""] && "  #{Message.snippet(message["snippet"])}"
-              ]
-              |> Enum.filter(&is_binary/1),
-              "\n"
-            )
-          end
-
-        Enum.join(lines, "\n") <> more(found["nextPageToken"])
-    end
+    %{messages: messages, nextPageToken: found["nextPageToken"]}
   end
 
   defp run("read", %{"id" => id}, at) do
     message = api(at, "GET", "messages/#{path(at, id)}", query: [format: "full"], missing: no_message(id))
-    Message.show(message, label_names(at))
+    Message.message(message, label_names(at))
   end
 
   defp run("thread", %{"id" => id}, at) do
@@ -264,7 +370,7 @@ defmodule Gmail do
       end
 
     names = label_names(at)
-    Enum.map_join(thread["messages"], "\n\n----------\n\n", &Message.show(&1, names))
+    %{id: thread["id"], messages: Enum.map(thread["messages"], &Message.message(&1, names))}
   end
 
   defp run("attachment", %{"id" => id} = inputs, at) do
@@ -296,11 +402,12 @@ defmodule Gmail do
   defp run("labels", _inputs, at) do
     labels = api(at, "GET", "labels")["labels"] || []
 
-    labels
-    |> Enum.sort_by(&{&1["type"], String.downcase(&1["name"])})
-    |> Enum.map_join("\n", fn label ->
-      if label["id"] != label["name"], do: "#{label["name"]}  (id #{label["id"]})", else: label["name"]
-    end)
+    labels =
+      labels
+      |> Enum.sort_by(&{&1["type"], String.downcase(&1["name"])})
+      |> Enum.map(&Map.take(&1, ["id", "name", "type"]))
+
+    %{labels: labels}
   end
 
   defp run("label", inputs, at) do
@@ -326,15 +433,7 @@ defmodule Gmail do
       missing: "No message among #{Enum.join(which, ", ")}: message ids come from gmail_search."
     )
 
-    did =
-      [
-        adding != [] && "added #{Enum.map_join(adding, ", ", & &1["name"])}",
-        removing != [] && "removed #{Enum.map_join(removing, ", ", & &1["name"])}"
-      ]
-      |> Enum.filter(&is_binary/1)
-      |> Enum.join(" and ")
-
-    String.capitalize(String.first(did)) <> String.slice(did, 1..-1//1) <> " on #{messages(length(which))}."
+    %{ids: which, added: Enum.map(adding, & &1["name"]), removed: Enum.map(removing, & &1["name"])}
   end
 
   defp run("trash", inputs, at) do
@@ -353,27 +452,26 @@ defmodule Gmail do
       end
     end)
 
-    "Moved #{messages(length(which))} to the trash."
+    %{trashed: which}
   end
 
   defp run("drafts", inputs, at) do
     found = api(at, "GET", "drafts", query: [maxResults: most(inputs["maxResults"]), pageToken: inputs["pageToken"]])
 
-    case found["drafts"] do
-      drafts when drafts in [nil, []] ->
-        if inputs["pageToken"], do: "No more.", else: "No drafts."
+    drafts = found["drafts"] || []
 
-      drafts ->
-        lines =
-          for {draft, message} <- Enum.zip(drafts, metadata(at, Enum.map(drafts, & &1["message"]))) do
-            to = Message.header(message["payload"], "To")
-            subject = Message.header(message["payload"], "Subject")
+    drafts =
+      for {draft, message} <- Enum.zip(drafts, metadata(at, Enum.map(drafts, & &1["message"]))) do
+        %{
+          id: draft["id"],
+          messageId: message["id"],
+          date: Message.time(message),
+          to: Message.header(message["payload"], "To"),
+          subject: Message.header(message["payload"], "Subject")
+        }
+      end
 
-            "#{draft["id"]}  #{Message.time(message)}  to #{if to == "", do: "nobody yet", else: to}\n  #{if subject == "", do: "(no subject)", else: subject}"
-          end
-
-        Enum.join(lines, "\n") <> more(found["nextPageToken"])
-    end
+    %{drafts: drafts, nextPageToken: found["nextPageToken"]}
   end
 
   defp run("draft", inputs, at) do
@@ -383,29 +481,29 @@ defmodule Gmail do
     case inputs["id"] do
       id when is_binary(id) and id != "" ->
         saved = upload(at, "PUT", "drafts/#{path(at, id)}", mail, %{id: id, message: message}, "No draft #{id}: draft ids come from gmail_drafts.")
-        "Replaced draft #{saved["id"]} (message #{saved["message"]["id"]})."
+        %{id: saved["id"], messageId: saved["message"]["id"]}
 
       _ ->
         saved = upload(at, "POST", "drafts", mail, %{message: message})
-        "Saved draft #{saved["id"]} (message #{saved["message"]["id"]})."
+        %{id: saved["id"], messageId: saved["message"]["id"]}
     end
   end
 
   defp run("send_draft", %{"id" => id}, at) do
     sent = api(at, "POST", "drafts/send", json: %{id: id}, missing: "No draft #{id}: draft ids come from gmail_drafts.")
-    "Sent, as message #{sent["id"]}."
+    Map.take(sent, ["id", "threadId"])
   end
 
   defp run("delete_draft", %{"id" => id}, at) do
     api(at, "DELETE", "drafts/#{path(at, id)}", missing: "No draft #{id}: draft ids come from gmail_drafts.")
-    "Deleted draft #{id}."
+    %{id: id}
   end
 
   defp run("send", inputs, at) do
     mail = compose(at, inputs)
     if mail.to ++ mail.cc ++ mail.bcc == [], do: raise("Give to: who it's to, or reply_to a message.")
     sent = upload(at, "POST", "messages/send", mail, if(mail.thread, do: %{threadId: mail.thread}, else: %{}))
-    "Sent, as message #{sent["id"]}."
+    Map.take(sent, ["id", "threadId"])
   end
 
   # The email the inputs say: a reply takes its thread, who it goes to and its subject from what it answers.
@@ -543,12 +641,6 @@ defmodule Gmail do
 
   defp list(nil), do: []
   defp list(given), do: given |> List.wrap() |> Enum.flat_map(&String.split(&1, ",")) |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-
-  defp more(nil), do: ""
-  defp more(token), do: "\n\nMore: give pageToken #{token}"
-
-  defp messages(1), do: "1 message"
-  defp messages(count), do: "#{count} messages"
 
   defp no_message(id), do: "No message #{id}: message ids come from gmail_search."
 end

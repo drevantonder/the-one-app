@@ -16,10 +16,10 @@ const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => ca
 
 /// Every page this user sees, and the parts of Settings. A network with nothing that keeps groups has none.
 const home = createMemo(async () => {
-  const groups = await json<{ group: string; called: string }[]>("permissions_groups").catch((): { group: string; called: string }[] => [])
+  const groups = await json<{ groups: { group: string; called: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string; called: string }[] => [])
   // Each page is named for whose it is: a group by what it's called.
   const whos: { subject?: string; name: string }[] = [{ name: "You" }, ...groups.map(({ group, called }) => ({ subject: group, name: called })), { subject: "network", name: "Everyone" }]
-  const [settings, pages] = await Promise.all([json<App[]>("home-screen_settings"), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who.subject).then((page): Page => ({ ...page, ...who }))))])
+  const [settings, pages] = await Promise.all([json<{ parts: App[] }>("home-screen_settings").then(({ parts }) => parts), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who.subject).then((page): Page => ({ ...page, ...who }))))])
   // Every page's plugins with accounts, each once, are in the one Accounts folder.
   const accounts = [...new Map(pages.flatMap((page) => page.accounts.map((signs): [string, Signs] => [signs.plugin, { ...signs, subject: page.subject }]))).values()]
   return { pages, settings, accounts }

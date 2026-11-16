@@ -45,14 +45,49 @@ defmodule GoogleAccount do
         read_only: true,
         description:
           "The Google apps you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Each one's accounts tool lists its accounts.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            apps: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: string.("The name its tools start with: gmail"),
+                  title: string.("Its name, as a person reads it: Gmail")
+                },
+                required: ["name", "title"]
+              }
+            }
+          },
+          required: ["apps"]
+        }
       },
       %{
         name: "accounts",
         read_only: true,
         description:
           "For a Google app's code: the Google accounts signed in for the app that calls this, each with ok, and why when it's false.",
-        inputs: app.(%{}, [])
+        inputs: app.(%{}, []),
+        outputs: %{
+          type: "object",
+          properties: %{
+            accounts: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  account: string.("Its address"),
+                  ok: %{type: "boolean", description: "Whether the app can use it now"},
+                  why: string.("Why it can't, and what fixes it, when ok is false")
+                },
+                required: ["account", "ok"]
+              }
+            }
+          },
+          required: ["accounts"]
+        }
       },
       %{
         name: "sign_in",
@@ -65,12 +100,18 @@ defmodule GoogleAccount do
               account: string.("The account's address, to suggest it to Google")
             },
             ["scopes"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{url: string.("Where its person signs in"), then: string.("What happens next")},
+          required: ["url", "then"]
+        }
       },
       %{
         name: "sign_out",
         description: "For a Google app's code: signs a Google account out of the app that calls this.",
-        inputs: app.(%{account: account}, ["account"])
+        inputs: app.(%{account: account}, ["account"]),
+        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "request",
@@ -97,7 +138,16 @@ defmodule GoogleAccount do
               hint: string.("What to add to what Google says about an input it can't take")
             },
             ["url"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{
+            status: %{type: "integer"},
+            headers: %{type: "object", additionalProperties: %{type: "string"}},
+            body: %{description: "The body: JSON decoded, other text as it is, or null for none"}
+          },
+          required: ["status", "headers", "body"]
+        }
       }
     ]
   end
@@ -109,7 +159,7 @@ defmodule GoogleAccount do
           "google-account" in version.permissions,
           do: %{name: name, title: version.title}
 
-    Enum.sort_by(apps, & &1.title)
+    %{apps: Enum.sort_by(apps, & &1.title)}
   end
 
   def call(_tool, _inputs, %OneCore.Call{caller: nil}),
@@ -119,12 +169,15 @@ defmodule GoogleAccount do
       )
 
   def call("accounts", %{"title" => title}, call) do
-    for email <- emails(call) do
-      case vault(call, "fetch", Map.put(get(@userinfo), "item", item(email))) do
-        %{"status" => 200} -> %{account: email, ok: true}
-        response -> %{account: email, ok: false, why: trouble(call, title, email, response)}
+    accounts =
+      for email <- emails(call) do
+        case vault(call, "fetch", Map.put(get(@userinfo), "item", item(email))) do
+          %{"status" => 200} -> %{account: email, ok: true}
+          response -> %{account: email, ok: false, why: trouble(call, title, email, response)}
+        end
       end
-    end
+
+    %{accounts: accounts}
   end
 
   def call("sign_in", %{"scopes" => scopes} = inputs, call) do
@@ -133,16 +186,16 @@ defmodule GoogleAccount do
     service = Map.merge(@service, %{"scopes" => ["openid", "email" | scopes], "params" => params})
 
     %{
-      url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}"}),
+      url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}"})["url"],
       then:
         "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. #{app(call)}_accounts then lists the account."
     }
   end
 
-  def call("sign_out", %{"account" => name, "title" => title}, call) do
+  def call("sign_out", %{"account" => name}, call) do
     email = account(call, name)
     vault(call, "stop_using", %{"item" => item(email)})
-    "Signed #{email} out of #{title}. Other Google apps that use it still do."
+    %{account: email}
   end
 
   def call("request", %{"url" => url, "title" => title} = inputs, call) do
@@ -264,7 +317,7 @@ defmodule GoogleAccount do
 
   # The addresses of the Google accounts signed in for the app that called, by address.
   defp emails(call) do
-    for %{"name" => "Google " <> email, "sign_in" => "Google"} <- vault(call, "items", %{}), do: email
+    for %{"name" => "Google " <> email, "sign_in" => "Google"} <- vault(call, "items", %{})["items"], do: email
   end
 
   # The app that called, by the name its tools start with.

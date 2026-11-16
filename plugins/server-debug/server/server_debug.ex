@@ -37,6 +37,17 @@ defmodule ServerDebug do
       %{type: "object", properties: Map.merge(common, more), required: ["plugin" | required]}
     end
 
+    # Each answer says which plugin, which server and whose calls, with what it found.
+    gives = fn more, required ->
+      looked = %{
+        plugin: %{type: "string"},
+        server: %{type: "string", description: "The server it looked on, by its machine's name or its key"},
+        for: %{type: "string", description: "Whose calls"}
+      }
+
+      %{type: "object", properties: Map.merge(looked, more), required: ["plugin", "server", "for" | required]}
+    end
+
     [
       %{
         name: "processes",
@@ -53,7 +64,43 @@ defmodule ServerDebug do
               top: %{type: "integer", minimum: 1, maximum: 100, description: "How many: 20 if left out"}
             },
             []
-          )
+          ),
+        outputs: gives.(
+          %{
+            count: %{type: "integer", description: "How many processes it has"},
+            processes: %{
+              type: "array",
+              description: "The top ones",
+              items: %{
+                type: "object",
+                properties: %{
+                  pid: %{type: "string"},
+                  name: %{type: ["string", "null"], description: "Its registered name or initial call"},
+                  memory: %{type: "integer", description: "In bytes"},
+                  reductions: %{type: "integer"},
+                  message_queue_len: %{type: "integer"},
+                  current_function: %{type: ["string", "null"]}
+                },
+                required: ["pid", "memory", "reductions", "message_queue_len"]
+              }
+            },
+            tables: %{
+              type: "array",
+              description: "The ETS tables they own",
+              items: %{
+                type: "object",
+                properties: %{
+                  table: %{type: "string"},
+                  owner: %{type: "string", description: "Its owner's pid"},
+                  size: %{type: "integer", description: "How many objects it holds"},
+                  memory: %{type: "integer", description: "In bytes"}
+                },
+                required: ["table", "owner", "size", "memory"]
+              }
+            }
+          },
+          ["count", "processes", "tables"]
+        )
       },
       %{
         name: "logs",
@@ -78,7 +125,15 @@ defmodule ServerDebug do
               stop: %{type: "boolean", description: "Stops following"}
             },
             []
-          )
+          ),
+        outputs: gives.(
+          %{
+            lines: %{type: "array", items: %{type: "string"}, description: "What was said since the last call"},
+            ended: %{type: ["string", "null"], description: "Why it stopped following, once it has"},
+            until: %{type: ["string", "null"], description: "When it stops following, in ISO 8601, while it follows"}
+          },
+          ["lines", "ended"]
+        )
       },
       %{
         name: "trace",
@@ -94,7 +149,15 @@ defmodule ServerDebug do
               seconds: %{type: "integer", minimum: 1, maximum: 60, description: "How long: 20 if left out"}
             },
             ["module"]
-          )
+          ),
+        outputs: gives.(
+          %{
+            lines: %{type: "array", items: %{type: "string"}, description: "Each call and what it returned or raised"},
+            calls: %{type: "integer", description: "How many of your calls ran it"},
+            ended: %{type: ["string", "null"], description: "Why the trace ended"}
+          },
+          ["lines", "calls", "ended"]
+        )
       }
     ]
   end
@@ -108,7 +171,7 @@ defmodule ServerDebug do
       inputs |> Map.drop(["plugin", "subject", "server"]) |> Map.merge(%{"op" => tool, "follower" => call.actor})
 
     result = probed(target, request, tool == "logs")
-    "#{target.name} on #{Servers.name(Server.key()) || Server.key()}, for #{target.whose}. " <> shown(tool, result)
+    Map.merge(result, %{"plugin" => target.name, "server" => Servers.name(Server.key()) || Server.key(), "for" => target.whose})
   end
 
   # The plugin `plugin` as whoever `subject` is finds it, if whoever asked may look into it.
@@ -208,47 +271,5 @@ defmodule ServerDebug do
       calls: {OneCore.Plugins.Calls, :running, [%{who: artifact, subject: target.whose}, :_]},
       name: &Version.own_names(&1, version)
     })
-  end
-
-  defp shown("processes", %{"count" => count, "processes" => processes, "tables" => tables}) do
-    columns = [
-      {"PID", "pid"},
-      {"NAME OR INITIAL CALL", "name"},
-      {"MEMORY", "memory"},
-      {"REDUCTIONS", "reductions"},
-      {"MSG QUEUE", "message_queue_len"},
-      {"CURRENT FUNCTION", "current_function"}
-    ]
-
-    tables_shown =
-      if tables == [],
-        do: "",
-        else:
-          "\n\nETS tables:\n" <>
-            table([{"TABLE", "table"}, {"SIZE", "size"}, {"MEMORY", "memory"}, {"OWNER", "owner"}], tables)
-
-    "#{count} processes#{if count > length(processes), do: ", the top #{length(processes)}", else: ""}:\n\n" <>
-      table(columns, processes) <> tables_shown
-  end
-
-  defp shown("logs", %{"lines" => lines, "ended" => ended, "until" => until}) do
-    following = if ended, do: ended, else: "Following until #{until}: call again for what's said next."
-    if(lines == [], do: "Nothing was said yet. ", else: Enum.join(lines, "\n") <> "\n\n") <> following
-  end
-
-  defp shown("trace", %{"lines" => lines, "calls" => calls, "ended" => ended}) do
-    if(calls == 0, do: "None of your calls ran it. ", else: Enum.join(lines, "\n") <> "\n\n") <> ended
-  end
-
-  defp table(columns, rows) do
-    cells = [Enum.map(columns, &elem(&1, 0)) | for(row <- rows, do: Enum.map(columns, &to_string(row[elem(&1, 1)])))]
-    widths = Enum.zip_with(cells, fn column -> column |> Enum.map(&String.length/1) |> Enum.max() end)
-
-    Enum.map_join(cells, "\n", fn row ->
-      row
-      |> Enum.zip(widths)
-      |> Enum.map_join("  ", fn {cell, width} -> String.pad_trailing(cell, width) end)
-      |> String.trim_trailing()
-    end)
   end
 end

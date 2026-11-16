@@ -19,6 +19,70 @@ defmodule OneCore.Tools do
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Plugins.{Installed, Calls, Deploy, Rename, Store}
 
+  # What a plugin may do beyond its own, as `permissions/0` says it.
+  @permissions %{
+    type: "array",
+    items: %{type: "string"},
+    description: "What it may do beyond its own: other plugins' tools it uses, and hosts it sends data to"
+  }
+
+  @files %{
+    type: "object",
+    additionalProperties: %{
+      anyOf: [
+        %{type: "string"},
+        %{
+          type: "object",
+          properties: %{base64: %{type: "string", contentEncoding: "base64"}},
+          required: ["base64"],
+          additionalProperties: false
+        }
+      ]
+    }
+  }
+
+  # A short-lived link to the bucket, as `OneCore.Bucket.link/2` gives it: sent by its `method` to its `url` with its
+  # `headers`.
+  @link %{
+    type: "object",
+    properties: %{
+      method: %{type: "string"},
+      url: %{type: "string"},
+      headers: %{type: "object", additionalProperties: %{type: "string"}}
+    },
+    required: ["method", "url", "headers"]
+  }
+
+  @download %{
+    type: "object",
+    properties: %{
+      build: %{type: "string"},
+      sha256: %{type: "string"},
+      size: %{type: "integer"},
+      link: @link
+    },
+    required: ["build", "sha256", "size", "link"]
+  }
+
+  @acts_for %{
+    type: "object",
+    properties: %{
+      server: %{type: "string", description: "The server's key"},
+      for: %{type: "string", description: "Who it acts for, or no longer does"}
+    },
+    required: ["server", "for"]
+  }
+
+  @service %{
+    type: "object",
+    properties: %{
+      plugin: %{type: "string"},
+      service: %{type: "string"},
+      server: %{type: "string", description: "The key of the server it runs on, or no longer does"}
+    },
+    required: ["plugin", "service", "server"]
+  }
+
   @tools [
     %{
       name: "deploy",
@@ -42,22 +106,12 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{
           name: %{type: "string", description: "The plugin's name: lowercase letters, digits and hyphens"},
-          files: %{
-            type: "object",
-            description:
-              "The plugin's files by their paths in it: each one's text, or {\"base64\": ...} for one that isn't text",
-            additionalProperties: %{
-              anyOf: [
-                %{type: "string"},
-                %{
-                  type: "object",
-                  properties: %{base64: %{type: "string", contentEncoding: "base64"}},
-                  required: ["base64"],
-                  additionalProperties: false
-                }
-              ]
-            }
-          },
+          files:
+            Map.put(
+              @files,
+              :description,
+              "The plugin's files by their paths in it: each one's text, or {\"base64\": ...} for one that isn't text"
+            ),
           from: %{
             type: ["object", "null"],
             description:
@@ -83,6 +137,17 @@ defmodule OneCore.Tools do
           }
         },
         required: ["name", "files"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          name: %{type: "string", description: "The plugin's name"},
+          version: %{type: "integer", description: "The version now running"},
+          sandbox: %{type: "boolean", description: "Whether it runs in sandbox mode"},
+          permissions: @permissions,
+          warnings: %{type: ["string", "null"], description: "What the compiler warns of, if anything"}
+        },
+        required: ["name", "version", "sandbox", "permissions", "warnings"]
       }
     },
     %{
@@ -97,6 +162,11 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{name: %{type: "string", description: "The plugin's name"}},
         required: ["name"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{files: Map.put(@files, :description, "Its files by their paths, as `deploy` takes them")},
+        required: ["files"]
       }
     },
     %{
@@ -111,7 +181,41 @@ defmodule OneCore.Tools do
       committed (`dirty`), and the `hash` of the files as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
       have moved on upstream or changed since, and `one plugins update` installs the newer.
       """,
-      inputs: %{type: "object", properties: %{}}
+      inputs: %{type: "object", properties: %{}},
+      outputs: %{
+        type: "object",
+        properties: %{
+          for: %{type: ["string", "null"], description: "Whoever they're listed for"},
+          plugins: %{
+            type: "array",
+            items: %{
+              type: "object",
+              properties: %{
+                name: %{type: "string", description: "The name it's installed by"},
+                for: %{type: "string", description: "Who it's installed for"},
+                plugin: %{type: "string", description: "Its artifact: users/alice/plugins/notes"},
+                version: %{type: ["integer", "null"], description: "Its latest version"},
+                sandbox: %{type: "boolean"},
+                permissions: @permissions,
+                source: %{type: ["string", "null"], description: "The hash of the files its latest version was deployed from"},
+                from: %{
+                  type: ["object", "null"],
+                  description: "The git repo it was installed from, if it was",
+                  properties: %{
+                    source: %{type: "string"},
+                    ref: %{type: ["string", "null"]},
+                    commit: %{type: "string"},
+                    dirty: %{type: "boolean"},
+                    hash: %{type: "string"}
+                  }
+                }
+              },
+              required: ["name", "for", "plugin", "sandbox", "permissions"]
+            }
+          }
+        },
+        required: ["for", "plugins"]
+      }
     },
     %{
       name: "install",
@@ -133,6 +237,16 @@ defmodule OneCore.Tools do
           name: %{type: "string", description: "What to call it. Its own name, if left out"}
         },
         required: ["plugin"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          plugin: %{type: "string", description: "The plugin, by its artifact's name"},
+          for: %{type: "string", description: "Who it's installed for"},
+          name: %{type: "string", description: "The name it's installed by"},
+          permissions: @permissions
+        },
+        required: ["plugin", "for", "name", "permissions"]
       }
     },
     %{
@@ -151,6 +265,11 @@ defmodule OneCore.Tools do
           to: %{type: "string", description: "Its new name: lowercase letters, digits and hyphens"}
         },
         required: ["name", "to"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{from: %{type: "string"}, to: %{type: "string"}},
+        required: ["from", "to"]
       }
     },
     %{
@@ -160,6 +279,11 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{name: %{type: "string", description: "The plugin's name"}},
         required: ["name"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{name: %{type: "string"}, for: %{type: "string", description: "Who it was installed for"}},
+        required: ["name", "for"]
       }
     },
     %{
@@ -173,6 +297,12 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{plugin: %{type: "string", description: "The plugin whose tool the file is for"}},
         required: ["plugin"]
+      },
+      outputs: %{
+        type: "object",
+        properties:
+          Map.put(@link.properties, :upload, %{type: "string", description: "The file's name, which the tool takes"}),
+        required: ["method", "url", "headers", "upload"]
       }
     },
     %{
@@ -187,7 +317,8 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{key: %{type: "string", description: "The server's key, which it says when it's started"}},
         required: ["key"]
-      }
+      },
+      outputs: @acts_for
     },
     %{
       name: "remove_server",
@@ -199,7 +330,8 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{key: %{type: "string", description: "The server's key"}},
         required: ["key"]
-      }
+      },
+      outputs: @acts_for
     },
     %{
       name: "add_member",
@@ -214,6 +346,14 @@ defmodule OneCore.Tools do
           server: %{type: "string", description: "The server's key. The server that answers, if left out"}
         },
         required: ["who"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          server: %{type: "string", description: "The server's key"},
+          member: %{type: "string", description: "Who it acts for too"}
+        },
+        required: ["server", "member"]
       }
     },
     %{
@@ -224,7 +364,34 @@ defmodule OneCore.Tools do
       what each server's machine is called. A service is a part of a plugin that runs on particular machines,
       for what is only there.
       """,
-      inputs: %{type: "object", properties: %{}}
+      inputs: %{type: "object", properties: %{}},
+      outputs: %{
+        type: "object",
+        properties: %{
+          server: %{type: "string", description: "The key of the server that answered"},
+          servers: %{type: "array", items: %{type: "string"}, description: "The keys of the servers acting for you"},
+          names: %{
+            type: "object",
+            additionalProperties: %{type: ["string", "null"]},
+            description: "What each server's machine is called, by its key"
+          },
+          services: %{
+            type: "array",
+            items: %{
+              type: "object",
+              properties: %{
+                plugin: %{type: "string"},
+                service: %{type: "string"},
+                called: %{type: "string", description: "What it's called where a person reads it"},
+                needs: %{type: "string", description: "What it needs of a machine"},
+                servers: %{type: "array", items: %{type: "string"}, description: "The keys of the servers running it"}
+              },
+              required: ["plugin", "service", "called", "needs", "servers"]
+            }
+          }
+        },
+        required: ["server", "servers", "names", "services"]
+      }
     },
     %{
       name: "install_service",
@@ -240,7 +407,8 @@ defmodule OneCore.Tools do
           server: %{type: "string", description: "The server's key. The server that answers, if left out"}
         },
         required: ["plugin", "service"]
-      }
+      },
+      outputs: @service
     },
     %{
       name: "uninstall_service",
@@ -253,7 +421,8 @@ defmodule OneCore.Tools do
           server: %{type: "string", description: "The server's key. The server that answers, if left out"}
         },
         required: ["plugin", "service"]
-      }
+      },
+      outputs: @service
     },
     %{
       name: "builds",
@@ -268,6 +437,44 @@ defmodule OneCore.Tools do
       inputs: %{
         type: "object",
         properties: %{server: %{type: "string", description: "The server's key. The server that answers, if left out"}}
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          server: %{type: "string", description: "The key of the server that answered"},
+          build: %{type: "string", description: "Its build: <count>-<commit>"},
+          latest: %{type: "object", description: "The latest build of each kind of machine, by its name: server/linux-x86_64"},
+          servers: %{
+            type: "array",
+            items: %{
+              type: "object",
+              properties: %{
+                server: %{type: "string", description: "Its key"},
+                name: %{type: ["string", "null"], description: "What its machine is called"},
+                build: %{type: "string"},
+                seen: %{
+                  type: ["string", "integer", "null"],
+                  description: "\"on\", or when it was last, in milliseconds since 1970"
+                }
+              },
+              required: ["server", "name", "seen"]
+            }
+          },
+          devices: %{
+            type: "array",
+            items: %{
+              type: "object",
+              properties: %{device: %{type: "string", description: "The device's key"}, build: %{type: "string"}},
+              required: ["device"]
+            }
+          },
+          bundled: %{
+            type: "object",
+            additionalProperties: %{type: "string"},
+            description: "Each plugin it ships that it's still deploying, by its name: waiting, building, or why it failed"
+          }
+        },
+        required: ["server", "build", "latest", "servers", "devices", "bundled"]
       }
     },
     %{
@@ -284,6 +491,11 @@ defmodule OneCore.Tools do
           target: %{type: "string", description: "The kind of machine: linux-x86_64, linux-aarch64, macos-aarch64"}
         },
         required: ["target"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{server: @download, one: @download},
+        description: "Each of the latest builds there is for that kind of machine"
       }
     },
     %{
@@ -313,6 +525,17 @@ defmodule OneCore.Tools do
           }
         },
         required: ["builds"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          send: %{
+            type: "object",
+            additionalProperties: @link,
+            description: "Where to send each build's file the network lacks, by its name, if it lacks any"
+          },
+          latest: %{type: "object", description: "The latest builds, by their names, once it has them all"}
+        }
       }
     },
     %{
@@ -325,12 +548,18 @@ defmodule OneCore.Tools do
       inputs: %{
         type: "object",
         properties: %{server: %{type: "string", description: "The server's key. The server that answers, if left out"}}
+      },
+      outputs: %{
+        type: "object",
+        properties: %{server: %{type: "string", description: "The key of the server taking them"}},
+        required: ["server"]
       }
     }
   ]
 
-  # What each takes is read once here, as the schema its inputs are checked against on every call.
-  @taking Enum.map(@tools, &Map.put(&1, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(&1.inputs)))))
+  # What each takes and gives is read once here, as the schemas its inputs and answers are checked against on every
+  # call.
+  @taking Enum.map(@tools, &OneCore.Plugins.Version.schemas/1)
 
   @doc "One Core's own tools, each as a plugin says one of its own."
   def tools, do: @taking
@@ -361,19 +590,9 @@ defmodule OneCore.Tools do
     end
   end
 
-  # What a plugin may do beyond its own, as a person reads it: "Uses gmail · Sends data to api.example.com".
-  defp permitted(nil), do: ""
-
-  defp permitted(version) do
-    {hosts, tools} = Enum.split_with(version.permissions, &String.contains?(&1, "://"))
-    uses = for tool <- tools, do: "uses " <> tool
-    sends = for host <- hosts, do: "sends data to " <> URI.parse(host).host
-
-    case uses ++ sends do
-      [] -> "It does nothing beyond its own."
-      phrases -> "It " <> Enum.join(phrases, " · ") <> "."
-    end
-  end
+  # What a plugin may do beyond its own, as `permissions/0` says it.
+  defp permitted(nil), do: []
+  defp permitted(version), do: version.permissions
 
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
@@ -412,9 +631,13 @@ defmodule OneCore.Tools do
 
     case Deploy.deploy(subject, name, Store.received(files), Map.get(inputs, "from", :stored), sandbox) do
       {:ok, number, warnings} ->
-        mode = if sandbox, do: ", in sandbox mode", else: ""
-        warned = if warnings == "", do: "", else: " The compiler warns:\n#{warnings}"
-        "#{name} is running, at version #{number}#{mode}. #{permitted(Plugins.running(subject)[name])}#{warned}"
+        %{
+          name: name,
+          version: number,
+          sandbox: sandbox,
+          permissions: permitted(Plugins.running(subject)[name]),
+          warnings: if(warnings == "", do: nil, else: warnings)
+        }
 
       {:error, why} ->
         raise why
@@ -425,7 +648,7 @@ defmodule OneCore.Tools do
     case Plugins.running(subject) do
       %{^name => version} ->
         opens!(principal, version.artifact)
-        JSON.encode!(Store.sent(Store.source(version.artifact, version.code)))
+        %{files: Store.sent(Store.source(version.artifact, version.code))}
 
       _ ->
         raise "There's no plugin named #{name}"
@@ -454,7 +677,7 @@ defmodule OneCore.Tools do
         }
       end
 
-    JSON.encode!(%{for: User.owner(subject), plugins: plugins})
+    %{for: User.owner(subject), plugins: plugins}
   end
 
   defp run("install", %{"plugin" => plugin} = inputs, {_actor, subject} = principal, forward) do
@@ -463,7 +686,7 @@ defmodule OneCore.Tools do
     opens!(principal, plugin)
     reaches!(principal, subject, "installer")
     with {:error, why} <- Installed.install(subject, name, plugin), do: raise(why)
-    "#{plugin} is installed for #{subject}, as #{name}. #{permitted(Plugins.running(subject)[name])}"
+    %{plugin: plugin, for: subject, name: name, permissions: permitted(Plugins.running(subject)[name])}
   end
 
   # It's renamed where it runs, which is where it's deployed again.
@@ -472,14 +695,14 @@ defmodule OneCore.Tools do
     if Store.about(plugin)["sandbox"] == true, do: at(subject, forward), else: runs(subject, forward)
     reaches!(principal, plugin, "owner")
     with {:error, why} <- Rename.rename(subject, name, to, principal), do: raise(why)
-    "#{name} is #{to} now, for everyone who has it."
+    %{from: name, to: to}
   end
 
   defp run("uninstall", %{"name" => name}, {_actor, subject} = principal, forward) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
     with {:error, why} <- Installed.uninstall(subject, name), do: raise(why)
-    "#{name} is removed from what's installed for #{subject}."
+    %{name: name, for: subject}
   end
 
   # A file sent this way lands in the plugin's own artifact, for whoever it was installed for, under a name nobody
@@ -490,7 +713,7 @@ defmodule OneCore.Tools do
       at(installed, forward)
       name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
       own = %Artifact{prefix: "#{installed}/own/#{plugin}/"}
-      JSON.encode!(Map.put(Artifact.link(own, name, :write), :upload, name))
+      Map.put(Artifact.link(own, name, :write), :upload, name)
     else
       _ -> raise "There's no plugin named #{plugin}"
     end
@@ -511,7 +734,7 @@ defmodule OneCore.Tools do
     with {:error, why} <- Servers.add(key, subject), do: raise(why)
     Hooks.observe("joined", %{"server" => key, "for" => subject, "by" => Server.key()}, principal)
     Server.notify_servers([subject])
-    "That server acts for #{subject} now, once it's started for them or its owner has chosen them."
+    %{server: key, for: subject}
   end
 
   # The server taken off is told too, so that it stops acting for them at once.
@@ -521,7 +744,7 @@ defmodule OneCore.Tools do
     acting = Servers.acting(subject)
     with {:error, why} <- Servers.remove(key, subject), do: raise(why)
     Server.notify(acting, [subject])
-    "That server no longer acts for #{subject}."
+    %{server: key, for: subject}
   end
 
   defp run("add_member", %{"who" => member} = inputs, principal, _pass) do
@@ -532,21 +755,21 @@ defmodule OneCore.Tools do
       reaches!(principal, owner(), "owner")
       Servers.choose(member)
       Server.notify_servers([member, owner()])
-      "The server #{Server.key()} acts for #{member} too, once they add it with add_server."
+      %{server: Server.key(), member: member}
     end)
   end
 
   defp run("services", _inputs, {_actor, subject}, _pass) do
     servers = Servers.acting(User.owner(subject) || "network")
     names = Map.new(servers, &{&1, Servers.name(&1)})
-    JSON.encode!(%{server: Server.key(), servers: servers, names: names, services: Services.list(subject)})
+    %{server: Server.key(), servers: servers, names: names, services: Services.list(subject)}
   end
 
   defp run("install_service", %{"plugin" => name, "service" => service} = inputs, {_, subject} = principal, _pass) do
     on(inputs["server"], "install_service", inputs, principal, fn ->
       reaches!(principal, owner(), "owner")
       with {:error, why} <- Services.install(plugin(subject, name), service), do: raise(why)
-      "#{service} is running on #{here()}."
+      %{plugin: name, service: service, server: Server.key()}
     end)
   end
 
@@ -559,17 +782,17 @@ defmodule OneCore.Tools do
     on(inputs["server"], "uninstall_service", inputs, principal, fn ->
       reaches!(principal, owner(), "owner")
       with {:error, why} <- Services.remove(plugin(subject, name), service), do: raise(why)
-      "#{service} no longer runs on #{here()}."
+      %{plugin: name, service: service, server: Server.key()}
     end)
   end
 
   defp run("builds", inputs, {actor, subject} = principal, _pass) do
     on(inputs["server"], "builds", inputs, principal, fn ->
-      JSON.encode!(Builds.list(actor, User.owner(subject) || "network"))
+      Builds.list(actor, User.owner(subject) || "network")
     end)
   end
 
-  defp run("download", %{"target" => target}, _principal, _pass), do: JSON.encode!(Builds.download(target))
+  defp run("download", %{"target" => target}, _principal, _pass), do: Builds.download(target)
 
   # What the network's servers run is the network's.
   defp run("publish", %{"builds" => builds}, principal, forward) do
@@ -577,8 +800,8 @@ defmodule OneCore.Tools do
     reaches!(principal, "network", "owner")
 
     case Builds.publish(builds) do
-      {:send, links} -> JSON.encode!(%{send: links})
-      {:ok, latest} -> JSON.encode!(%{latest: latest})
+      {:send, links} -> %{send: links}
+      {:ok, latest} -> %{latest: latest}
     end
   end
 
@@ -591,7 +814,7 @@ defmodule OneCore.Tools do
         do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
 
       IO.puts(Release.update_asked())
-      "#{here()} is taking the latest builds, and answers again once it has."
+      %{server: Server.key()}
     end)
   end
 

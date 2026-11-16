@@ -18,6 +18,8 @@ defmodule OneCore.Plugins.Deploy do
   @looks_after :timer.minutes(5)
   # What each owner has deployed, as the network keeps it: `deployed/<owner>/<name>`.
   @deployed "network/deployed/"
+  @outputs "Each tool gives its outputs beside its inputs: a JSON Schema of the object it answers, which the skill " <>
+             "building-plugins says how to write."
 
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
@@ -40,7 +42,8 @@ defmodule OneCore.Plugins.Deploy do
       version = %{version | artifact: artifact}
       install = install?.(version)
 
-      with :ok <- if(install, do: fits(owner, name, version), else: :ok),
+      with :ok <- outputs(version),
+           :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, warnings} <- if(sandbox, do: Sandbox.check(owner, version, built), else: {:ok, warnings}),
            {:ok, number} <- Store.keep(artifact, name, built, files, from, sandbox),
            :ok <- Store.describe(version),
@@ -54,6 +57,21 @@ defmodule OneCore.Plugins.Deploy do
           Version.unload(version)
           {:error, why}
       end
+    end
+  end
+
+  # Every tool of a version deployed now says what it answers, which every answer is checked against: a version
+  # deployed before tools said it keeps running, and the next one deployed says it.
+  defp outputs(version) do
+    case for(tool <- version.tools, tool[:outputs] == nil, do: tool.name) do
+      [] ->
+        :ok
+
+      [one] ->
+        {:error, "#{one} doesn't say what it answers. #{@outputs}"}
+
+      missing ->
+        {:error, "#{Enum.join(missing, ", ")} don't say what they answer. #{@outputs}"}
     end
   end
 

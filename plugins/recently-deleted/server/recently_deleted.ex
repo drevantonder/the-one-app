@@ -67,24 +67,44 @@ defmodule RecentlyDeleted do
         name: "remove",
         description:
           "Removes something you own that an app made, such as a repo, or a plugin you deployed that nobody has installed: it's gone from everywhere, until `restore` brings it back as it was. After 30 days it's erased for good",
-        inputs: only.(%{artifact: artifact}, ["artifact"])
+        inputs: only.(%{artifact: artifact}, ["artifact"]),
+        outputs: only.(%{artifact: artifact}, ["artifact"])
       },
       %{
         name: "list",
         read_only: true,
         description:
           "What you own that was removed in the last 30 days, the latest first: what it was, who removed it, and when",
-        inputs: only.(%{}, [])
+        inputs: only.(%{}, []),
+        outputs: only.(
+          %{
+            removed: %{
+              type: "array",
+              items:
+                only.(
+                  %{
+                    artifact: artifact,
+                    by: %{type: "string", description: "Who removed it"},
+                    at: %{type: "integer", description: "When, in milliseconds since 1970"}
+                  },
+                  ["artifact", "by", "at"]
+                )
+            }
+          },
+          ["removed"]
+        )
       },
       %{
         name: "restore",
         description: "Brings back something you own that was removed in the last 30 days, as it was",
-        inputs: only.(%{artifact: artifact}, ["artifact"])
+        inputs: only.(%{artifact: artifact}, ["artifact"]),
+        outputs: only.(%{artifact: artifact}, ["artifact"])
       },
       %{
         name: "purge",
         description: "Erases for good everything removed more than 30 days ago. The clock calls it each day",
-        inputs: only.(%{}, [])
+        inputs: only.(%{}, []),
+        outputs: only.(%{purged: %{type: "array", items: artifact, description: "What was erased"}}, ["purged"])
       }
     ]
   end
@@ -102,14 +122,16 @@ defmodule RecentlyDeleted do
     :ok = Artifact.write(call.own, "removed/" <> id, JSON.encode!(line))
     relisted(name)
     notify(call, name, "removed")
-    "Removed #{name}. `restore` brings it back as it was, for 30 days."
+    %{artifact: name}
   end
 
   def call("list", _inputs, call) do
-    for {_id, line} <- removed(call), owns?(call, line["artifact"]) do
-      %{artifact: line["artifact"], by: line["by"], at: line["at"]}
-    end
-    |> Enum.sort_by(& &1.at, :desc)
+    removed =
+      for {_id, line} <- removed(call), owns?(call, line["artifact"]) do
+        %{artifact: line["artifact"], by: line["by"], at: line["at"]}
+      end
+
+    %{removed: Enum.sort_by(removed, & &1.at, :desc)}
   end
 
   def call("restore", %{"artifact" => name}, call) do
@@ -130,7 +152,7 @@ defmodule RecentlyDeleted do
     Artifact.remove(call.own, "removed/" <> id)
     relisted(name)
     notify(call, name, "restored")
-    "Restored #{name}. It's as it was."
+    %{artifact: name}
   end
 
   def call("purge", _inputs, call) do
@@ -143,7 +165,7 @@ defmodule RecentlyDeleted do
         line["artifact"]
       end
 
-    if purged == [], do: "Nothing to purge.", else: "Purged #{Enum.join(purged, ", ")}."
+    %{purged: purged}
   end
 
   # Each blob, as it is in the bucket, to where `to` says, written only where there's none, and then removed from

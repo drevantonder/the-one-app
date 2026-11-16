@@ -59,13 +59,28 @@ defmodule Permissions do
     tuple = Map.put(tuple, :required, ["artifact", "relation", "who"])
 
     [
-      %{name: "share", description: "Writes a relation tuple: who has which relation to an artifact", inputs: tuple},
-      %{name: "unshare", description: "Removes a relation tuple", inputs: tuple},
+      %{
+        name: "share",
+        description: "Writes a relation tuple: who has which relation to an artifact",
+        inputs: tuple,
+        outputs: tuple
+      },
+      %{name: "unshare", description: "Removes a relation tuple", inputs: tuple, outputs: tuple},
       %{
         name: "shared",
         read_only: true,
         description: "Lists an artifact's relation tuples: who it's shared with, and as what",
-        inputs: %{type: "object", properties: %{artifact: artifact}, required: ["artifact"]}
+        inputs: %{type: "object", properties: %{artifact: artifact}, required: ["artifact"]},
+        outputs: %{
+          type: "object",
+          properties: %{
+            tuples: %{
+              type: "array",
+              items: %{type: "object", properties: %{relation: relation, who: who}, required: ["relation", "who"]}
+            }
+          },
+          required: ["tuples"]
+        }
       },
       %{
         name: "check",
@@ -79,6 +94,16 @@ defmodule Permissions do
             who: Map.put(who, :description, "Who. You, if left out")
           },
           required: ["artifact"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            who: who,
+            relation: reaching,
+            artifact: artifact,
+            may: %{type: "boolean", description: "Whether they may"}
+          },
+          required: ["who", "relation", "artifact", "may"]
         }
       },
       %{
@@ -91,7 +116,8 @@ defmodule Permissions do
           type: "object",
           properties: %{artifact: artifact, relation: Map.put(relation, :enum, ~w(viewer editor owner installer))},
           required: ["artifact", "relation"]
-        }
+        },
+        outputs: %{type: "object", properties: %{users: %{type: "array", items: %{type: "string"}, description: "users/<name>, or everyone"}}, required: ["users"]}
       },
       %{
         name: "members",
@@ -101,7 +127,8 @@ defmodule Permissions do
           type: "object",
           properties: %{of: %{type: "string", description: "groups/<name>, or network"}},
           required: ["of"]
-        }
+        },
+        outputs: %{type: "object", properties: %{members: %{type: "array", items: %{type: "string"}, description: "users/<name>, or everyone"}}, required: ["members"]}
       },
       %{
         name: "group",
@@ -110,13 +137,40 @@ defmodule Permissions do
           type: "object",
           properties: %{name: %{type: "string", description: "What it's called, as people write it: The Smiths"}},
           required: ["name"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            group: %{type: "string", description: "groups/<name>"},
+            called: %{type: "string", description: "What it's called, as people write it"}
+          },
+          required: ["group", "called"]
         }
       },
       %{
         name: "groups",
         read_only: true,
         description: "Lists the groups you're in, each with what it's called, its members and its owners",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            groups: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  group: %{type: "string", description: "groups/<name>"},
+                  called: %{type: "string", description: "What it's called, as people write it"},
+                  members: %{type: "array", items: %{type: "string"}},
+                  owners: %{type: "array", items: %{type: "string"}}
+                },
+                required: ["group", "called", "members", "owners"]
+              }
+            }
+          },
+          required: ["groups"]
+        }
       },
       %{
         name: "forget",
@@ -127,6 +181,11 @@ defmodule Permissions do
           type: "object",
           properties: %{who: %{type: "string", pattern: "^users/[a-z][a-z0-9-]*$", description: "Who: users/<name>"}},
           required: ["who"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{who: %{type: "string"}, tuples: %{type: "integer", description: "How many tuples named them"}},
+          required: ["who", "tuples"]
         }
       },
       %{
@@ -139,6 +198,16 @@ defmodule Permissions do
             relation: %{type: "string", enum: ~w(viewer editor), description: "What its holder is. viewer if left out"}
           },
           required: ["artifact"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            link: %{type: "string", description: "The link, which its holder shows: keep it as a secret"},
+            who: %{type: "string", description: "Its holder, as tuples name them"},
+            relation: %{type: "string", enum: ~w(viewer editor)},
+            artifact: artifact
+          },
+          required: ["link", "who", "relation", "artifact"]
         }
       }
     ]
@@ -195,7 +264,7 @@ defmodule Permissions do
     transaction(call, fn db ->
       shares!(db, call, artifact, relation)
       query(db, "insert or ignore into tuples (artifact, relation, who) values (?, ?, ?)", [artifact, relation, who])
-      "#{who} is #{a(relation)} of #{artifact}."
+      %{artifact: artifact, relation: relation, who: who}
     end)
   end
 
@@ -205,7 +274,7 @@ defmodule Permissions do
       removed = "delete from tuples where artifact = ? and relation = ? and who = ? returning who"
 
       case query(db, removed, [artifact, relation, who]) do
-        [_] -> "#{who} is no longer #{a(relation)} of #{artifact}."
+        [_] -> %{artifact: artifact, relation: relation, who: who}
         [] -> raise "No tuple says #{who} is #{a(relation)} of #{artifact}. `shared` lists the ones there are."
       end
     end)
@@ -214,7 +283,7 @@ defmodule Permissions do
   def call("shared", %{"artifact" => artifact}, call) do
     transaction(call, fn db ->
       reaches!(db, call.subject, "viewer", artifact)
-      query(db, "select relation, who from tuples where artifact = ? order by relation, who", [artifact])
+      %{tuples: query(db, "select relation, who from tuples where artifact = ? order by relation, who", [artifact])}
     end)
   end
 
@@ -239,7 +308,7 @@ defmodule Permissions do
       up = followed(db, @parents, Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"]), [])
       tuples = "select who as next from tuples where artifact = ? and relation in (?, ?, ?)"
       named = for at <- up, %{"next" => who} <- query(db, tuples, [at | Map.fetch!(@enough, relation)]), do: who
-      Enum.sort(Enum.filter(followed(db, @members, named, []), &(user?(&1) or &1 == "everyone")))
+      %{users: Enum.sort(Enum.filter(followed(db, @members, named, []), &(user?(&1) or &1 == "everyone")))}
     end)
   end
 
@@ -250,9 +319,8 @@ defmodule Permissions do
     transaction(call, fn db ->
       named = query(db, "select distinct who as name from tuples union select distinct artifact from tuples", [])
 
-      Enum.sort(
-        Enum.uniq(for %{"name" => name} <- named, owner <- [OneCore.User.owner(name)], owner, user?(owner), do: owner)
-      )
+      members = for %{"name" => name} <- named, owner <- [OneCore.User.owner(name)], owner, user?(owner), do: owner
+      %{members: Enum.sort(Enum.uniq(members))}
     end)
   end
 
@@ -261,7 +329,7 @@ defmodule Permissions do
       if not (member?(db, call.subject, group) or may?(db, call.subject, "viewer", group)),
         do: raise("#{call.subject} isn't in #{group}, so doesn't see who is.")
 
-      Enum.sort(Enum.filter(followed(db, @members, [group], []), &user?/1))
+      %{members: Enum.sort(Enum.filter(followed(db, @members, [group], []), &user?/1))}
     end)
   end
 
@@ -270,12 +338,12 @@ defmodule Permissions do
   # Someone out of the network is in nothing, so their name is free for someone new to join by and inherits none
   # of it. Who's in the network is the plugin that signs people in's to say, so it's asked: it took them out first.
   def call("forget", %{"who" => who}, call) do
-    if Enum.any?(OneCore.Call.tool(call, "sign-in", "everyone", %{}), &(&1["who"] == who)),
+    if Enum.any?(OneCore.Call.tool(call, "sign-in", "everyone", %{})["people"], &(&1["who"] == who)),
       do: raise("#{who} is in the network. Taking them out with sign-in_remove_person forgets them here too.")
 
     transaction(call, fn db ->
       forgotten = query(db, "delete from tuples where who = ? returning artifact", [who])
-      "#{who} is in nothing now: #{length(forgotten)} tuples named them."
+      %{who: who, tuples: length(forgotten)}
     end)
   end
 
@@ -296,13 +364,14 @@ defmodule Permissions do
           do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, call.subject])
 
       query(db, "insert into names (artifact, called) values (?, ?)", [group, called])
-      group
+      %{group: group, called: called}
     end)
   end
 
   def call("groups", _inputs, call) do
     transaction(call, fn db ->
-      for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.subject], []) -- [call.subject]) do
+      groups =
+        for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.subject], []) -- [call.subject]) do
         having = &for %{"who" => who} <- query(db, @having, [group, &1]), do: who
         # A group that sharing with it made, and not `group`, is called what it's named.
         called =
@@ -310,8 +379,10 @@ defmodule Permissions do
                do: called,
                else: (_ -> String.replace_prefix(group, "groups/", ""))
 
-        %{group: group, called: called, members: having.("member"), owners: having.("owner")}
-      end
+          %{group: group, called: called, members: having.("member"), owners: having.("owner")}
+        end
+
+      %{groups: groups}
     end)
   end
 

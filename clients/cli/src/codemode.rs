@@ -70,7 +70,13 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
         .into_iter()
         .flatten()
         .map(|tool| {
-            json!({"name": tool["name"], "plugin": tool["_meta"]["plugin"], "description": tool["description"], "input": tool["inputSchema"]})
+            json!({
+                "name": tool["name"],
+                "plugin": tool["_meta"]["plugin"],
+                "description": tool["description"],
+                "input": tool["inputSchema"],
+                "output": tool["outputSchema"],
+            })
         })
         .collect();
     // What each plugin is for, which its own skill says (`skill://<plugin>/<its own name>/SKILL.md`), as a server
@@ -117,7 +123,7 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
                     Ok(result) if result["isError"] == true => {
                         json!({"reply": response["call"], "error": texts(&result["content"])})
                     }
-                    Ok(result) => json!({"reply": response["call"], "ok": value(&result["content"])}),
+                    Ok(result) => json!({"reply": response["call"], "ok": value(&result)}),
                     Err(error) => json!({"reply": response["call"], "error": format!("{error:#}")}),
                 };
                 // A script that has stopped listening has finished, or been stopped.
@@ -140,8 +146,8 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
 }
 
 /// `call`'s answer, as MCP's result: each of `calls`, one `{path, input}` or a list of them, asked of the network at
-/// once by its path, as search gives it (`tools.gmail.search`) or without its `tools.`. Each answers, in order, as JSON
-/// with its `path`, `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, after that.
+/// once by its path, as search gives it (`tools.gmail.search`) or without its `tools.`. Each answers, in order, with
+/// its `path`, `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, comes after.
 pub async fn call(client: &Arc<Client>, calls: &Value) -> Result<Value> {
     let listed = client.request("tools/list", json!({})).await?;
     let mut named = HashMap::new();
@@ -174,35 +180,32 @@ pub async fn call(client: &Arc<Client>, calls: &Value) -> Result<Value> {
                 let called = client.request("tools/call", json!({"name": name, "arguments": request["input"]})).await;
                 match called {
                     Ok(result) if result["isError"] == true => (path, Err(texts(&result["content"]))),
-                    Ok(result) => (path, Ok(result["content"].clone())),
+                    Ok(result) => (path, Ok(result)),
                     Err(error) => (path, Err(format!("{error:#}"))),
                 }
             })
         })
         .collect();
-    let (mut content, mut failed) = (Vec::new(), 0);
+    let (mut answers, mut files, mut failed) = (Vec::new(), Vec::new(), 0);
     let count = asked.len();
     for answer in asked {
         match answer.await? {
-            (path, Ok(parts))
-                if parts.as_array().is_some_and(|parts| parts.iter().all(|part| part["type"] == "text")) =>
-            {
-                content.push(json!({"type": "text", "text": json!({"path": path, "ok": true, "value": value(&parts)}).to_string()}));
-            }
-            // What isn't text, as a picture is, stays MCP's content, for whoever called to see.
-            (path, Ok(parts)) => {
-                content.push(json!({"type": "text", "text": json!({"path": path, "ok": true}).to_string()}));
-                content.extend(parts.as_array().into_iter().flatten().cloned());
+            (path, Ok(result)) => {
+                answers.push(json!({"path": path, "ok": true, "value": value(&result)}));
+                // What isn't text of its answer, as a picture is, stays MCP's content, for whoever called to see.
+                let parts = result["content"].as_array().into_iter().flatten();
+                files.extend(parts.filter(|part| part["type"] != "text").cloned());
             }
             (path, Err(why)) => {
                 failed += 1;
-                content.push(
-                    json!({"type": "text", "text": json!({"path": path, "ok": false, "error": why}).to_string()}),
-                );
+                answers.push(json!({"path": path, "ok": false, "error": why}));
             }
         }
     }
-    Ok(json!({"content": content, "isError": failed == count}))
+    let structured = json!({"calls": answers});
+    let content: Vec<Value> =
+        std::iter::once(json!({"type": "text", "text": structured.to_string()})).chain(files).collect();
+    Ok(json!({"content": content, "structuredContent": structured, "isError": failed == count}))
 }
 
 /// A tool's path in a script, from its path there, as OpenCode writes it: `tools.gmail.search`,
@@ -218,13 +221,13 @@ fn path(dotted: &str) -> String {
     })
 }
 
-/// A call's answer as the script gets it: text that's JSON is that, other text is a string, and anything else is
-/// MCP's content as it is.
-fn value(content: &Value) -> Value {
-    let parts = content.as_array().map(Vec::as_slice).unwrap_or_default();
-    if !parts.iter().all(|part| part["type"] == "text") {
-        return content.clone();
+/// A call's answer as JSON (`structuredContent`). A tool of a version deployed before tools said what they answer has
+/// none, so its text is read: text that's JSON is that, and other text is a string.
+fn value(result: &Value) -> Value {
+    if let Some(structured) = result.get("structuredContent") {
+        return structured.clone();
     }
+    let content = &result["content"];
     let text = texts(content);
     serde_json::from_str(&text).unwrap_or(Value::String(text))
 }

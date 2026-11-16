@@ -50,6 +50,22 @@ defmodule GoogleDrive do
 
     fields = &string.("Which fields to give back, in Drive's field syntax, like id,name,parents,appProperties. #{&1} if left out")
 
+    # A file as Drive's File resource gives it, with the fields asked for: those it gives if none are, here.
+    file = %{
+      type: "object",
+      description: "Drive's File resource, with the fields asked for",
+      properties: %{
+        id: %{type: "string"},
+        name: %{type: "string"},
+        mimeType: string.("application/vnd.google-apps.folder for a folder"),
+        parents: %{type: "array", items: %{type: "string"}, description: "Its folders' ids"},
+        modifiedTime: string.("ISO 8601"),
+        size: string.("In bytes, as Drive gives it: a string"),
+        webViewLink: string.("Opens it"),
+        trashed: %{type: "boolean"}
+      }
+    }
+
     metadata = fn what ->
       %{
         type: "object",
@@ -64,31 +80,57 @@ defmodule GoogleDrive do
         read_only: true,
         description:
           "The Google accounts Google Drive can use, the default first, each with ok, and why when it's false (google-drive_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            accounts: %{
+              type: "array",
+              description: "The default first",
+              items: %{
+                type: "object",
+                properties: %{
+                  account: string.("Its address"),
+                  ok: %{type: "boolean", description: "Whether it can be used now"},
+                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
+                },
+                required: ["account", "ok"]
+              }
+            }
+          },
+          required: ["accounts"]
+        }
       },
       %{
         name: "sign_in",
         description:
           "Starts signing a Google account in to Google Drive, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-drive_accounts lists it")}}
+        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-drive_accounts lists it")}},
+        outputs: %{
+          type: "object",
+          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
+          required: ["url", "then"]
+        }
       },
       %{
         name: "sign_out",
         description: "Signs a Google account out of Google Drive. Other Google apps that use it still do, and google-drive_sign_in signs it in again.",
-        inputs: with_account.(%{}, ["account"])
+        inputs: with_account.(%{}, ["account"]),
+        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "files_get",
         read_only: true,
         description:
           "One file's or folder's metadata, as Drive's files.get gives it: #{@one_file} if fields is left out (webViewLink opens it, size is in bytes, times are ISO 8601). Google Docs and Sheets read their contents; other files' contents aren't read here.",
-        inputs: with_account.(%{fileId: file_id, fields: fields.(@one_file)}, ["fileId"])
+        inputs: with_account.(%{fileId: file_id, fields: fields.(@one_file)}, ["fileId"]),
+        outputs: file
       },
       %{
         name: "files_list",
         read_only: true,
         description:
-          "Finds files and folders with Drive's search (files.list): {files: [id, name, mimeType, parents, modifiedTime, webViewLink], nextPageToken} if fields is left out. When nextPageToken is there, give it as pageToken, with the same q, for the rest.",
+          "Finds and searches files and folders with Drive's search (files.list): each one's id, name, mimeType, parents, modifiedTime and webViewLink if fields is left out. When nextPageToken is there, give it as pageToken, with the same q, for the rest.",
         inputs:
           with_account.(
             %{
@@ -105,7 +147,15 @@ defmodule GoogleDrive do
               pageToken: string.("The nextPageToken the last files_list gave, with the same q, for the next page")
             },
             nil
-          )
+          ),
+        outputs: %{
+          type: "object",
+          description: "As Drive's files.list gives it, with the fields asked for",
+          properties: %{
+            files: %{type: "array", items: file},
+            nextPageToken: string.("Where there are more, the next page's pageToken")
+          }
+        }
       },
       %{
         name: "files_create",
@@ -118,7 +168,8 @@ defmodule GoogleDrive do
               fields: fields.(@file_fields)
             },
             ["body"]
-          )
+          ),
+        outputs: file
       },
       %{
         name: "files_upload",
@@ -134,7 +185,8 @@ defmodule GoogleDrive do
               fields: fields.(@file_fields)
             },
             ["metadata"]
-          )
+          ),
+        outputs: file
       },
       %{
         name: "files_update",
@@ -154,14 +206,16 @@ defmodule GoogleDrive do
               fields: fields.(@file_fields)
             },
             ["fileId"]
-          )
+          ),
+        outputs: file
       },
       %{
         name: "generate_ids",
         read_only: true,
         description:
           "Ids for files not made yet ({ids}), to give files_create or files_upload as metadata's id: making one twice with the same id, as a retry does, never makes two.",
-        inputs: with_account.(%{count: %{type: "integer", description: "How many, 1 to 1000"}}, ["count"])
+        inputs: with_account.(%{count: %{type: "integer", description: "How many, 1 to 1000"}}, ["count"]),
+        outputs: %{type: "object", properties: %{ids: %{type: "array", items: %{type: "string"}}}, required: ["ids"]}
       }
     ]
   end

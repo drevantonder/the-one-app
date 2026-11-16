@@ -89,7 +89,57 @@ defmodule Vault do
         sent to, the plugins switched on for it and whether agents may use it. With them, the requests still
         waiting for their person, and the plugins that use the Vault.
         """,
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            items: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string"},
+                  fields: %{
+                    type: "array",
+                    items: %{
+                      type: "object",
+                      properties: %{
+                        name: %{type: "string"},
+                        secret: %{type: "boolean"},
+                        value: %{type: ["string", "null"], description: "Only a field that isn't secret's"}
+                      },
+                      required: ["name", "secret"]
+                    }
+                  },
+                  hosts: %{type: "array", items: %{type: "string"}, description: "The sites its secrets are sent to"},
+                  plugins: %{type: "array", items: %{type: "string"}, description: "The plugins switched on for it"},
+                  agents: %{type: "boolean", description: "Whether agents may use it, with fetch"},
+                  sign_in: %{type: "boolean", description: "Whether a sign-in made it"},
+                  changed: %{type: ["integer", "null"], description: "When it last changed, in milliseconds since 1970"}
+                },
+                required: ["name", "fields", "hosts", "plugins", "agents", "sign_in"]
+              }
+            },
+            requests: %{
+              type: "array",
+              description: "The requests still waiting for their person",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "string"},
+                  title: %{type: "string"},
+                  fields: %{type: "array", items: %{type: "object"}},
+                  hosts: %{type: "array", items: %{type: "string"}},
+                  plugin: %{type: ["string", "null"]},
+                  why: %{type: ["string", "null"]}
+                },
+                required: ["id", "title", "fields", "hosts", "plugin", "why"]
+              }
+            },
+            plugins: %{type: "array", items: %{type: "string"}, description: "The plugins that use the Vault"}
+          },
+          required: ["items", "requests", "plugins"]
+        }
       },
       %{
         name: "set",
@@ -108,7 +158,8 @@ defmodule Vault do
             hosts: hosts
           },
           required: ["item", "field", "value"]
-        }
+        },
+        outputs: %{type: "object", properties: %{item: item, field: %{type: "string"}}, required: ["item", "field"]}
       },
       %{
         name: "remove",
@@ -120,6 +171,11 @@ defmodule Vault do
             field: %{type: "string", description: "Only this field. The whole item, if left out"}
           },
           required: ["item"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{item: item, field: %{type: ["string", "null"], description: "The field deleted, or null for the item"}},
+          required: ["item", "field"]
         }
       },
       %{
@@ -136,6 +192,11 @@ defmodule Vault do
             on: %{type: "boolean", description: "False switches it off"}
           },
           required: ["item", "plugin"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{item: item, plugin: %{type: "string"}, on: %{type: "boolean"}},
+          required: ["item", "plugin", "on"]
         }
       },
       %{
@@ -148,7 +209,8 @@ defmodule Vault do
           type: "object",
           properties: %{item: item, on: %{type: "boolean", description: "False stops it"}},
           required: ["item"]
-        }
+        },
+        outputs: %{type: "object", properties: %{item: item, on: %{type: "boolean"}}, required: ["item", "on"]}
       },
       %{
         name: "request",
@@ -171,6 +233,15 @@ defmodule Vault do
             why: %{type: "string", description: "One line the person sees: what it's for, and where they find it"}
           },
           required: ["title", "fields"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            id: %{type: "string", description: "The request's id, for status"},
+            link: %{type: ["string", "null"], description: "The link to give the person, where the network has an address"},
+            message: %{type: "string", description: "What to tell them"}
+          },
+          required: ["id", "link", "message"]
         }
       },
       %{
@@ -181,6 +252,11 @@ defmodule Vault do
           type: "object",
           properties: %{id: %{type: "string", description: "The request's id"}},
           required: ["id"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{title: %{type: "string"}, state: %{type: "string", enum: ~w(waiting set declined expired)}},
+          required: ["title", "state"]
         }
       },
       %{
@@ -198,7 +274,8 @@ defmodule Vault do
             decline: %{type: "boolean", description: "True declines it"}
           },
           required: ["id"]
-        }
+        },
+        outputs: %{type: "object", properties: %{state: %{type: "string", enum: ~w(set declined)}}, required: ["state"]}
       },
       %{
         name: "fetch",
@@ -223,6 +300,17 @@ defmodule Vault do
             timeout: %{type: "integer", description: "How many seconds it may take to answer. 15 if left out"}
           },
           required: ["item", "url"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            status: %{type: "integer"},
+            headers: %{type: "object", additionalProperties: %{type: "string"}},
+            body: %{type: "string", description: "The body, where it's text"},
+            body_base64: %{type: "string", description: "Or the body in base64, where it isn't"},
+            cut: %{type: ["string", "null"], description: "How much an agent's answer was cut short by, if it was"}
+          },
+          required: ["status", "headers", "cut"]
         }
       },
       %{
@@ -232,7 +320,24 @@ defmodule Vault do
         For a plugin's code: the items switched on for the plugin that calls this, each with the service whose
         sign-in made it, if one did: [{"name": "Google a@example.com", "sign_in": "Google"}].
         """,
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            items: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string"},
+                  sign_in: %{type: ["string", "null"], description: "The service whose sign-in made it, if one did"}
+                },
+                required: ["name", "sign_in"]
+              }
+            }
+          },
+          required: ["items"]
+        }
       },
       %{
         name: "sign_in",
@@ -269,6 +374,11 @@ defmodule Vault do
             }
           },
           required: ["service"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{url: %{type: "string", description: "The link its person opens in their browser"}},
+          required: ["url"]
         }
       },
       %{
@@ -277,7 +387,8 @@ defmodule Vault do
         For a plugin's code: switches an item off for the plugin that calls this, as signing out of it does.
         Whatever else it's switched on for still uses it.
         """,
-        inputs: %{type: "object", properties: %{item: item}, required: ["item"]}
+        inputs: %{type: "object", properties: %{item: item}, required: ["item"]},
+        outputs: %{type: "object", properties: %{item: item}, required: ["item"]}
       },
       %{
         name: "grant",
@@ -302,13 +413,36 @@ defmodule Vault do
             }
           },
           required: ["servers"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{servers: %{type: "array", items: %{type: "string"}, description: "The servers that open it now"}},
+          required: ["servers"]
         }
       },
       %{
         name: "unlocked_on",
         read_only: true,
         description: "Says which servers open your Vault, and which may be chosen to.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            artifact: %{type: "string"},
+            epoch: %{type: "integer"},
+            servers: %{type: "array", items: %{type: "string"}, description: "The servers that open it"},
+            may: %{
+              type: "array",
+              description: "The servers that may be chosen to",
+              items: %{
+                type: "object",
+                properties: %{key: %{type: "string"}, name: %{type: ["string", "null"]}},
+                required: ["key", "name"]
+              }
+            }
+          },
+          required: ["artifact", "epoch", "servers", "may"]
+        }
       },
       %{
         name: "oauth_callback",
@@ -319,6 +453,11 @@ defmodule Vault do
           type: "object",
           properties: %{state: %{type: "string"}, code: %{type: "string"}, error: %{type: "string"}},
           required: ["state"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{service: %{type: "string"}, item: %{type: "string", description: "What it's kept as in the Vault"}},
+          required: ["service", "item"]
         }
       }
     ]
@@ -432,14 +571,14 @@ defmodule Vault do
   def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(items sign_in stop_using),
     do: raise("vault_#{tool} is for a plugin's code, and acts for the plugin that calls it.")
 
-  def call("items", _inputs, call), do: transaction(call, own(call), &used_by(&1, call.caller))
+  def call("items", _inputs, call), do: %{items: transaction(call, own(call), &used_by(&1, call.caller))}
 
   def call("stop_using", %{"item" => name}, call) do
     transaction(call, own(call), fn db ->
       query(db, "delete from uses where item = ? and plugin = ?", [item!(db, name)["id"], call.caller])
     end)
 
-    "#{Path.basename(call.caller)} no longer uses #{name}."
+    %{item: name}
   end
 
   def call("sign_in", %{"service" => given} = inputs, call) do
@@ -489,7 +628,7 @@ defmodule Vault do
           client
         end)
 
-      OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)
+      %{url: OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)}
     end)
   end
 
@@ -500,11 +639,7 @@ defmodule Vault do
       inputs["keys"] ||
         raise "Which servers open your Vault is chosen from a trusted device: in the Vault's app there, or with `one vault grant` on it."
 
-    chosen = encryption(call).choose(call, items_artifact(call), keys)
-
-    if chosen == [],
-      do: "No server opens your Vault now.",
-      else: "#{length(chosen)} of your servers open your Vault now."
+    %{servers: encryption(call).choose(call, items_artifact(call), keys)}
   end
 
   def call("list", _inputs, call) do
@@ -579,7 +714,7 @@ defmodule Vault do
           do: query(db, "update items set hosts = ? where id = ?", [JSON.encode!(hosts!(hosts)), item["id"]])
 
         keep(db, item, field, value, Map.get(inputs, "secret", true))
-        "#{field} of #{name} is kept. Nobody reads it back."
+        %{item: name, field: field}
       end)
     end)
   end
@@ -596,19 +731,19 @@ defmodule Vault do
 
             for table <- ~w(fields uses), do: query(db, "delete from #{table} where item = ?", [item["id"]])
             query(db, "delete from items where id = ?", [item["id"]])
-            {name, Enum.reject(plugins, &used?(db, &1))}
+            {nil, Enum.reject(plugins, &used?(db, &1))}
 
           field ->
             removed = query(db, "delete from fields where item = ? and name = ? returning name", [item["id"], field])
             if removed == [], do: raise("#{name} has no field named #{field}.")
             touch(db, item)
-            {"#{field} of #{name}", []}
+            {field, []}
         end
       end)
 
-    {what, unused} = removed
+    {field, unused} = removed
     for plugin <- unused, do: share(call, "unshare", Artifact.name(items_artifact(call)), plugin)
-    "#{what} is deleted."
+    %{item: name, field: field}
   end
 
   # A plugin switched on for an item is an editor of the Vault's artifact too, which is what lets its code reach it
@@ -626,7 +761,7 @@ defmodule Vault do
       end)
 
       share(call, "share", Artifact.name(artifact), who)
-      "#{plugin} may use #{name} now."
+      %{item: name, plugin: plugin, on: true}
     else
       unused =
         transaction(call, artifact, fn db ->
@@ -635,7 +770,7 @@ defmodule Vault do
         end)
 
       if unused, do: share(call, "unshare", Artifact.name(artifact), who)
-      "#{plugin} no longer uses #{name}."
+      %{item: name, plugin: plugin, on: false}
     end
   end
 
@@ -646,7 +781,7 @@ defmodule Vault do
       query(db, "update items set agents = ? where id = ?", [on, item!(db, name)["id"]])
     end)
 
-    if on, do: "Agents may use #{name} now, with fetch.", else: "Agents no longer use #{name}."
+    %{item: name, on: on}
   end
 
   def call("request", %{"title" => title, "fields" => fields} = inputs, call) do
@@ -723,7 +858,7 @@ defmodule Vault do
           cond do
             inputs["decline"] == true ->
               query(db, "update requests set state = 'declined' where id = ?", [id])
-              {"Declined.", nil}
+              {%{state: "declined"}, nil}
 
             name = inputs["item"] ->
               {allow(db, request, item!(db, name)), request["plugin"]}
@@ -804,7 +939,7 @@ defmodule Vault do
           end
         end)
 
-        "Signed in to #{service["name"]}. It's kept in your Vault as #{name}."
+        %{service: service["name"], item: name}
       end)
     else
       _ -> raise "This sign-in isn't one this network began."
@@ -898,7 +1033,7 @@ defmodule Vault do
       else: query(db, "update items set agents = 1 where id = ?", [item["id"]])
 
     query(db, "update requests set state = 'set' where id = ?", [request["id"]])
-    "Allowed."
+    %{state: "set"}
   end
 
   # The item named `name`, if `by` may use it: a plugin switched on for it, or agents its person let.

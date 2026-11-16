@@ -3,7 +3,7 @@
 // started this, the CLI (`clients/cli/src/codemode.rs`) or a server (`OneCore.CodeMode`), which runs it as the person,
 // as any MCP call; this side only asks. Its limits and how its result reads are here, so both say the same.
 //
-// stdin: first { code, tools: [{ name, plugin, description, input }], namespaces: { <plugin>: what it's for } }, then
+// stdin: first { code, tools: [{ name, plugin, description, input, output }], namespaces: { <plugin>: what it's for } }, then
 // { reply, ok | error } for each call. stdout: { call, name, input } for each call, then { done: { ok, text } }.
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
@@ -53,7 +53,8 @@ for (const t of list) {
   const tool = Tool.make({
     description: t.description ?? "",
     input: t.input ?? { type: "object" },
-    output: {},
+    // What it answers, so a signature says its type. A tool from before tools said it answers unknown.
+    output: t.output ?? {},
     execute: (input) => Effect.tryPromise({ try: () => call(t.name, input), catch: (e) => toolError(String(e)) }),
   })
   if (t.plugin) (plugins[t.plugin] ??= {})[t.name.slice(t.plugin.length + 1)] = tool

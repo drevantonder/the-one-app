@@ -76,12 +76,40 @@ defmodule OneCore.Plugins.Calls do
     with :ok <- open_to(tool, about, principal),
          :ok <- given(tool.takes, about["inputs"]),
          {:ok, about} <- hooked(about, tool.takes, principal, apart) do
-      observed(about, principal, fn -> Plugins.held(nil, List.wrap(version), fn -> {:ok, fun.(about["inputs"])} end) end)
+      observed(about, principal, fn ->
+        Plugins.held(nil, List.wrap(version), fn -> answered(tool, about, fun.(about["inputs"])) end)
+      end)
     else
       # A call refused is observed as one that failed, with why.
       {:error, why} -> observed(about, principal, fn -> {:error, why} end)
     end
   end
+
+  # What a tool answers is what its outputs say, so an answer that isn't fails here, loudly, rather than reaching
+  # whoever asked in a shape nothing told them of. A tool of a version from before tools said it isn't checked.
+  defp answered(%{gives: gives} = tool, about, answer) do
+    case ExJsonSchema.Validator.validate(gives, structured(answer), error_formatter: false) do
+      :ok ->
+        {:ok, answer}
+
+      {:error, wrong} ->
+        name = Enum.join(List.wrap(about["plugin"]) ++ [tool.name], "_")
+        wrong = Enum.map_join(wrong, "\n", &wrong(&1.error, input(&1.path), gives.schema))
+        why = "#{name} answered what its outputs don't say, which is its plugin's to fix:\n#{wrong}"
+        Logger.error(why)
+        {:error, why}
+    end
+  end
+
+  defp answered(_tool, _about, answer), do: {:ok, answer}
+
+  @doc """
+  An answer as JSON holds it, MCP's `structuredContent`: what a tool answered, or for a file, what kind it is
+  (`mimeType`), and for one inside the answer its `size` in bytes.
+  """
+  def structured({:blob, kind, data}), do: %{"mimeType" => kind, "size" => byte_size(data)}
+  def structured({:file, kind, %Artifact{}, _name}), do: %{"mimeType" => kind}
+  def structured(answer), do: JSON.decode!(JSON.encode!(answer))
 
   # A plugin is installed for users and groups. A sharing link's holder is neither, and calls only a tool that says
   # they may, of the plugins installed for whoever the link leads to: one that keeps to what the link reaches.

@@ -174,13 +174,33 @@ defmodule OneCore.Skills do
         },
         dependentRequired: %{file: ["name"]}
       },
+      outputSchema: %{
+        type: "object",
+        properties: %{
+          skills: %{
+            type: "array",
+            description: "With no name: the skills, each with its plugin, name, what it's for and its other files",
+            items: %{
+              type: "object",
+              properties: %{
+                plugin: %{type: "string", description: "The plugin it's in, or none for One Core's own"},
+                name: %{type: "string"},
+                description: %{type: "string"},
+                files: %{type: "array", items: %{type: "string"}, description: "Its other files, by their paths"}
+              },
+              required: ["name", "description"]
+            }
+          },
+          text: %{type: "string", description: "With a name: the skill's SKILL.md, or the file asked for"}
+        }
+      },
       annotations: %{readOnlyHint: true}
     }
   end
 
   @doc """
-  The answer to `skills` for `who`: the skills they have, or one plugin's, as JSON, or a skill's file. Gives
-  `{:ok, text}` or `{:error, why}`.
+  The answer to `skills` for `who`: the skills they have, or one plugin's (`%{skills: ...}`), or a skill's file
+  (`%{text: ...}`). Gives `{:ok, answer}` or `{:error, why}`.
   """
   def run(inputs, who) do
     skills =
@@ -208,7 +228,7 @@ defmodule OneCore.Skills do
         listed =
           for skill <- skills, do: skill |> Map.delete(:path) |> Map.reject(fn {_, value} -> value in [nil, []] end)
 
-        {:ok, JSON.encode!(%{skills: listed})}
+        {:ok, %{skills: listed}}
 
       {name, []} ->
         {:error,
@@ -216,7 +236,7 @@ defmodule OneCore.Skills do
 
       {_name, [skill]} ->
         case text(who, "skill://#{skill.path}/#{inputs["file"] || "SKILL.md"}") do
-          {:ok, text} -> {:ok, text}
+          {:ok, text} -> {:ok, %{text: text}}
           :absent -> {:error, "#{skill.name} has no file #{inputs["file"]}. Its files: #{Enum.join(skill.files, ", ")}"}
         end
 

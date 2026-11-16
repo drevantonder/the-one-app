@@ -25,7 +25,7 @@ let called = new Map<string, string>()
 /// The groups, and everyone in the network by who they are, with the name each goes by. A network where nobody
 /// signs in has nobody to say who they are, and each is their name in it.
 const groups = createMemo(async () => {
-  const [list, people] = await Promise.all([call("permissions_groups").then((text): Group[] => JSON.parse(text)), call("sign-in_everyone").then((text): Person[] => JSON.parse(text), (): Person[] => [])])
+  const [list, people] = await Promise.all([call("permissions_groups").then((text): Group[] => JSON.parse(text).groups), call("sign-in_everyone").then((text): Person[] => JSON.parse(text).people, (): Person[] => [])])
   called = new Map(people.filter((person) => person.called).map((person) => [person.who, person.called!]))
   return Object.assign(list, { people: people.filter((person) => person.joined) })
 })

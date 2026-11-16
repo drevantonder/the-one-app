@@ -39,8 +39,8 @@ defmodule Prober do
   @impl true
   def tools do
     [
-      %{name: "found", description: "Keeps what the app found", inputs: %{type: "object"}},
-      %{name: "wait", description: "Gives what the app found, once it has", inputs: %{type: "object"}}
+      %{name: "found", description: "Keeps what the app found", inputs: %{type: "object"}, outputs: %{type: "object"}},
+      %{name: "wait", description: "Gives what the app found, once it has", inputs: %{type: "object"}, outputs: %{type: "object"}}
     ]
   end
 
@@ -60,7 +60,7 @@ defmodule Prober.Held do
   @impl true
   def handle_call({:found, found}, _from, held) do
     for waiting <- held.waiting, do: GenServer.reply(waiting, found)
-    {:reply, "Kept.", %{found: found, waiting: []}}
+    {:reply, %{}, %{found: found, waiting: []}}
   end
 
   def handle_call(:wait, from, %{found: nil} = held), do: {:noreply, %{held | waiting: [from | held.waiting]}}

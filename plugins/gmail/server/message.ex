@@ -1,7 +1,7 @@
 defmodule Gmail.Message do
   @moduledoc """
-  A message as Gmail's API gives it (its Message resource, with its payload of MessageParts), said as text: its
-  headers, when it came, its labels, its attachments and its body, plain text first, else its HTML made plain.
+  A message as Gmail's API gives it (its Message resource, with its payload of MessageParts), as Gmail's tools answer
+  it: its headers, when it came, its labels, its attachments and its body, plain text first, else its HTML made plain.
   """
 
   # Text it would be cut at, in characters.
@@ -10,25 +10,91 @@ defmodule Gmail.Message do
   @filler ~r/[\x{200b}-\x{200d}\x{2060}\x{feff}\x{034f}\x{00ad}]/u
   @entities %{"amp" => "&", "lt" => "<", "gt" => ">", "quot" => "\"", "apos" => "'", "nbsp" => " "}
 
-  @doc "A message in full, as text."
-  def show(message, names) do
+  @doc "A message in full: what `message/0` says."
+  def message(message, names) do
     payload = message["payload"]
-
-    head =
-      for name <- ["Subject", "From", "To", "Cc", "Reply-To"], (value = header(payload, name)) != "", do: "#{name}: #{value}"
-
-    labels = labels(message, names)
+    text = body(payload)
+    cut = String.length(text) > @longest
 
     files =
-      for {file, at} <- Enum.with_index(attachments(payload), 1),
-          do: "Attachment #{at}: #{file.name} (#{file.type}, #{size(file.size)})"
+      for {file, number} <- Enum.with_index(attachments(payload), 1),
+          do: %{number: number, name: file.name, type: file.type, size: file.size}
 
-    text = body(payload)
-    text = if String.length(text) > @longest, do: String.slice(text, 0, @longest) <> "\n\n[cut: the message goes on]", else: text
+    %{
+      id: message["id"],
+      threadId: message["threadId"],
+      date: time(message),
+      subject: header(payload, "Subject"),
+      from: header(payload, "From"),
+      to: header(payload, "To"),
+      cc: header(payload, "Cc"),
+      replyTo: header(payload, "Reply-To"),
+      labels: labels(message, names),
+      attachments: files,
+      text: if(cut, do: String.slice(text, 0, @longest), else: text),
+      cut: cut
+    }
+  end
 
-    lines = head ++ ["Date: #{time(message)}", "Id: #{message["id"]} (thread #{message["threadId"]})"]
-    lines = if labels != "", do: lines ++ ["Labels: #{labels}"], else: lines
-    Enum.join(lines ++ files, "\n") <> "\n\n" <> text
+  @doc "A message as a search finds it: what `found/0` says."
+  def found(message, names) do
+    %{
+      id: message["id"],
+      threadId: message["threadId"],
+      date: time(message),
+      from: header(message["payload"], "From"),
+      to: header(message["payload"], "To"),
+      subject: header(message["payload"], "Subject"),
+      labels: labels(message, names),
+      snippet: snippet(message["snippet"] || "")
+    }
+  end
+
+  @fields %{
+    id: %{type: "string", description: "The message's id"},
+    threadId: %{type: "string", description: "Its thread's id"},
+    date: %{type: "string", description: "When it came, to the minute: ISO 8601, in UTC"},
+    from: %{type: "string"},
+    to: %{type: "string"},
+    subject: %{type: "string"},
+    labels: %{type: "array", items: %{type: "string"}, description: "Its labels' names, but Gmail's categories"}
+  }
+
+  @doc "What `message/2` gives, as JSON Schema: a tool's outputs."
+  def message do
+    %{
+      type: "object",
+      properties:
+        Map.merge(@fields, %{
+          cc: %{type: "string"},
+          replyTo: %{type: "string"},
+          attachments: %{
+            type: "array",
+            items: %{
+              type: "object",
+              properties: %{
+                number: %{type: "integer", description: "Which it is, for gmail_attachment: 1 the first"},
+                name: %{type: "string"},
+                type: %{type: "string", description: "Its MIME type"},
+                size: %{type: "integer", description: "In bytes"}
+              },
+              required: ["number", "name", "type", "size"]
+            }
+          },
+          text: %{type: "string", description: "Its text: its plain text, or its HTML made plain"},
+          cut: %{type: "boolean", description: "Whether text was cut short, at 20,000 characters"}
+        }),
+      required: ~w(id threadId date subject from to cc replyTo labels attachments text cut)
+    }
+  end
+
+  @doc "What `found/2` gives, as JSON Schema."
+  def found do
+    %{
+      type: "object",
+      properties: Map.put(@fields, :snippet, %{type: "string", description: "The start of its text"}),
+      required: ~w(id threadId date from to subject labels snippet)
+    }
   end
 
   @doc "A header's value, or empty."
@@ -47,7 +113,7 @@ defmodule Gmail.Message do
   def labels(message, names) do
     (message["labelIds"] || [])
     |> Enum.reject(&String.starts_with?(&1, "CATEGORY_"))
-    |> Enum.map_join(", ", &Map.get(names, &1, &1))
+    |> Enum.map(&Map.get(names, &1, &1))
   end
 
   @doc "A snippet, as text."
@@ -137,8 +203,4 @@ defmodule Gmail.Message do
   rescue
     _ -> all
   end
-
-  defp size(bytes) when bytes >= 1_048_576, do: "#{Float.round(bytes / 1_048_576, 1)} MB"
-  defp size(bytes) when bytes >= 1024, do: "#{div(bytes, 1024)} KB"
-  defp size(bytes), do: "#{bytes} bytes"
 end

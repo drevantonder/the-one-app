@@ -70,7 +70,7 @@ function Detail(props: { simulator: Simulator }) {
 }
 
 function App() {
-  const simulators = createMemo(() => call("iphone-simulator_list").then((text): Simulator[] => JSON.parse(text)))
+  const simulators = createMemo(() => call("iphone-simulator_list").then((text): Simulator[] => JSON.parse(text).simulators))
   changed(() => refresh(simulators))
   const opened = () => simulators().find((e) => e.name === open())
   return (

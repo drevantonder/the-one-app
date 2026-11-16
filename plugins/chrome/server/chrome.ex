@@ -52,6 +52,12 @@ defmodule Chrome do
   @session %{type: "string", pattern: "^[a-z0-9][a-z0-9_.-]*$", description: "the browser, by the name `open` gave it"}
   @target %{type: "string", description: "the element: its ref from the snapshot, like e12, or a unique selector"}
   @element %{type: "string", description: "the element in a few words, as a person would name it"}
+  # What Playwright's MCP server answered, as its text.
+  @said %{
+    type: "object",
+    properties: %{text: %{type: "string", description: "What Playwright said, the page's state and the result among it"}},
+    required: ["text"]
+  }
 
   @impl true
   def uses, do: ["containers"]
@@ -94,17 +100,58 @@ defmodule Chrome do
         inputs:
           object(%{description: %{type: "string", description: "what it's for, in a few words"}, url: %{type: "string", description: "the page to open"}}, [
             "description"
-          ])
+          ]),
+        outputs: %{
+          type: "object",
+          properties: %{session: @session, text: %{type: "string", description: "What navigating to url said, if it was given"}},
+          required: ["session"]
+        }
       },
       %{
         name: "list",
         read_only: true,
         description: "Your browsers: each one's session, what it's for, its state (running or exited), its machine, and when it was created and last used (ms since 1970).",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            browsers: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  session: @session,
+                  description: %{type: ["string", "null"], description: "What it's for"},
+                  state: %{type: "string", description: "running or exited"},
+                  machine: %{type: ["string", "null"]},
+                  created: %{type: "integer", description: "In milliseconds since 1970"},
+                  last_used: %{type: "integer", description: "In milliseconds since 1970"}
+                },
+                required: ["session", "description", "state", "machine", "created", "last_used"]
+              }
+            }
+          },
+          required: ["browsers"]
+        }
       },
-      %{name: "close", description: "Close a browser and remove its container, for good. One that's gone already is closed.", inputs: object()},
-      %{name: "navigate", description: "Navigate to a URL.", inputs: object(%{url: %{type: "string"}}, ["url"])},
-      %{name: "navigate_back", description: "Go back to the previous page in the history.", inputs: object()},
+      %{
+        name: "close",
+        description: "Close a browser and remove its container, for good. One that's gone already is closed.",
+        inputs: object(),
+        outputs: %{type: "object", properties: %{session: @session}, required: ["session"]}
+      },
+      %{
+        name: "navigate",
+        description: "Navigate to a URL.",
+        inputs: object(%{url: %{type: "string"}}, ["url"]),
+        outputs: @said
+      },
+      %{
+        name: "navigate_back",
+        description: "Go back to the previous page in the history.",
+        inputs: object(),
+        outputs: @said
+      },
       %{
         name: "snapshot",
         read_only: true,
@@ -115,7 +162,8 @@ defmodule Chrome do
             target: %{type: "string", description: "only this element's part of the page"},
             depth: %{type: "number", description: "how deep to go"},
             boxes: %{type: "boolean", description: "with each element's box as [box=x,y,width,height], in CSS pixels"}
-          })
+          }),
+        outputs: @said
       },
       %{
         name: "click",
@@ -130,12 +178,14 @@ defmodule Chrome do
               modifiers: %{type: "array", items: %{type: "string", enum: ~w(Alt Control ControlOrMeta Meta Shift)}}
             },
             ["target"]
-          )
+          ),
+        outputs: @said
       },
       %{
         name: "hover",
         description: "Hover over an element.",
-        inputs: object(%{target: @target, element: @element}, ["target"])
+        inputs: object(%{target: @target, element: @element}, ["target"]),
+        outputs: @said
       },
       %{
         name: "type",
@@ -150,7 +200,8 @@ defmodule Chrome do
               slowly: %{type: "boolean", description: "one character at a time, for pages that listen to keys"}
             },
             ["target", "text"]
-          )
+          ),
+        outputs: @said
       },
       %{
         name: "fill_form",
@@ -173,22 +224,26 @@ defmodule Chrome do
               }
             },
             ["fields"]
-          )
+          ),
+        outputs: @said
       },
       %{
         name: "select_option",
         description: "Select options in a dropdown.",
-        inputs: object(%{target: @target, element: @element, values: %{type: "array", items: %{type: "string"}}}, ["target", "values"])
+        inputs: object(%{target: @target, element: @element, values: %{type: "array", items: %{type: "string"}}}, ["target", "values"]),
+        outputs: @said
       },
       %{
         name: "press_key",
         description: "Press a key, like ArrowLeft, Enter or a.",
-        inputs: object(%{key: %{type: "string"}}, ["key"])
+        inputs: object(%{key: %{type: "string"}}, ["key"]),
+        outputs: @said
       },
       %{
         name: "wait_for",
         description: "Wait for text to appear or to go, or for some seconds to pass (at most 30), whichever is given.",
-        inputs: object(%{text: %{type: "string"}, textGone: %{type: "string"}, time: %{type: "number"}})
+        inputs: object(%{text: %{type: "string"}, textGone: %{type: "string"}, time: %{type: "number"}}),
+        outputs: @said
       },
       %{
         name: "evaluate",
@@ -201,7 +256,8 @@ defmodule Chrome do
               element: @element
             },
             ["function"]
-          )
+          ),
+        outputs: @said
       },
       %{
         name: "take_screenshot",
@@ -213,7 +269,13 @@ defmodule Chrome do
             fullPage: %{type: "boolean", description: "the whole page, not only what's in view"},
             target: @target,
             element: @element
-          })
+          }),
+        outputs: %{
+          type: "object",
+          description: "The picture, which an agent sees",
+          properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}},
+          required: ["mimeType"]
+        }
       },
       %{
         name: "tabs",
@@ -221,12 +283,14 @@ defmodule Chrome do
         inputs:
           object(%{action: %{type: "string", enum: ~w(list new close select)}, index: %{type: "number"}, url: %{type: "string"}}, [
             "action"
-          ])
+          ]),
+        outputs: @said
       },
       %{
         name: "handle_dialog",
         description: "Accept or dismiss the alert, confirm or prompt the page opened.",
-        inputs: object(%{accept: %{type: "boolean"}, promptText: %{type: "string"}}, ["accept"])
+        inputs: object(%{accept: %{type: "boolean"}, promptText: %{type: "string"}}, ["accept"]),
+        outputs: @said
       },
       %{
         name: "screen",
@@ -249,7 +313,18 @@ defmodule Chrome do
               height: %{type: "integer", minimum: 240, maximum: 4320}
             },
             ["action"]
-          )
+          ),
+        outputs: %{
+          type: "object",
+          description: "As Computer Use says: a screenshot, what it did, or for stream, the ICE servers or the screen's answer",
+          properties: %{
+            mimeType: %{type: "string"},
+            size: %{type: "integer"},
+            done: %{type: "string", description: "What it did, in a few words"},
+            iceServers: %{type: "array", items: %{type: "object"}},
+            answer: %{type: "string", description: "The screen's SDP answer"}
+          }
+        }
       }
     ]
   end
@@ -259,15 +334,20 @@ defmodule Chrome do
 
   @impl true
   def call("list", _inputs, call) do
-    for c <- containers(call) do
-      %{session: session(c), description: c["description"], state: c["state"], machine: c["machine"], created: c["created"], last_used: c["last_used"]}
-    end
+    browsers =
+      for c <- containers(call) do
+        %{session: session(c), description: c["description"], state: c["state"], machine: c["machine"], created: c["created"], last_used: c["last_used"]}
+      end
+
+    %{browsers: browsers}
   end
 
   def call("open", %{"session" => session} = inputs, call) do
     case Enum.find(containers(call), &(session(&1) == session)) do
       %{"state" => "running"} ->
-        if inputs["url"], do: mcp(call, session, "browser_navigate", %{"url" => inputs["url"]}), else: "Opened #{session}"
+        if inputs["url"],
+          do: Map.put(mcp(call, session, "browser_navigate", %{"url" => inputs["url"]}), :session, session),
+          else: %{session: session}
 
       # A browser that was stopped carries on in a new container, so on the image as it is now: with the user data
       # dir it stopped with, and a new MCP server, which knows none of the sessions kept from before.
@@ -289,7 +369,7 @@ defmodule Chrome do
     case Enum.find(containers(call), &(session(&1) == session)) do
       # Containers lists only the machines that are on, so a browser it doesn't list is gone only if none is off.
       nil ->
-        off = for %{"on" => false, "machine" => machine} <- Call.tool(call, "containers", "machines", %{}), do: machine
+        off = for %{"on" => false, "machine" => machine} <- Call.tool(call, "containers", "machines", %{})["machines"], do: machine
         if off != [], do: raise("#{session} isn't on a machine that's on: #{Enum.join(off, ", ")} is off. Close it once that's back")
 
       %{"state" => "running"} = c ->
@@ -303,7 +383,7 @@ defmodule Chrome do
     end
 
     forget(call, session)
-    "Closed #{session}"
+    %{session: session}
   end
 
   def call("screen", %{"session" => session} = inputs, call), do: containers(call, "screen", session, Map.delete(inputs, "session"))
@@ -356,7 +436,7 @@ defmodule Chrome do
 
   defp launch(call, session, url) do
     containers(call, "exec", session, %{"command" => "sh -c #{shell(@launch)} sh #{if url, do: shell(url)}"})
-    "Opened #{session}" <> if(url, do: " at #{url}", else: "")
+    %{session: session}
   end
 
   defp shell(word), do: "'" <> String.replace(word, "'", ~S('\'')) <> "'"
@@ -376,7 +456,7 @@ defmodule Chrome do
   end
 
   # Calls a tool of the MCP server in the session's container, in the MCP session kept for it, and gives its answer:
-  # its text, or its picture.
+  # its picture, or else its text, as `@said`.
   defp mcp(call, session, tool, arguments, again? \\ true) do
     id = session_id(call, session) || initialize(call, session)
     # Each request has an id of its own: the server answers two at once in one session by their ids.
@@ -407,7 +487,7 @@ defmodule Chrome do
     case for(%{"type" => "image"} = image <- content, do: image) do
       _ when error? == true -> raise text
       [%{"data" => data, "mimeType" => type} | _] -> {:blob, type, Base.decode64!(data)}
-      [] -> text
+      [] -> %{text: text}
     end
   end
 
@@ -471,7 +551,7 @@ defmodule Chrome do
 
   # The browsers whoever this call is for may use: their containers called chrome-<session>, of the image desktop.
   defp containers(call),
-    do: Enum.filter(Call.tool(call, "containers", "list", %{}), &(String.starts_with?(&1["name"], "chrome-") and &1["image"] =~ "containers-desktop"))
+    do: Enum.filter(Call.tool(call, "containers", "list", %{})["containers"], &(String.starts_with?(&1["name"], "chrome-") and &1["image"] =~ "containers-desktop"))
 
   defp session(%{"name" => "chrome-" <> session}), do: session
 end

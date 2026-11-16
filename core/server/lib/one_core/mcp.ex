@@ -224,7 +224,7 @@ defmodule OneCore.Mcp do
     caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
 
     case call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller) do
-      {:ok, result} -> changed(name, %{content: content(name, result)}, principal)
+      {:ok, result} -> changed(name, answer(name, result), principal)
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
       # Another server ran it, and told its own clients.
       {:forwarded, %{"isError" => true} = result} -> {:ok, result}
@@ -401,12 +401,13 @@ defmodule OneCore.Mcp do
     tools = scripted(subject)
     deployed = Task.await(deployed, 30_000)
     text = Search.run(query, Map.get(inputs, "limit", 8), tools, Plugins.running(subject), deployed, mode(params))
-    {:ok, %{content: [%{type: "text", text: text}]}}
+    {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}}}
   end
 
   defp own("skills", inputs, _params, _from, {_actor, subject}, _forwarded) do
     case Skills.run(inputs, subject) do
-      {:ok, text} -> {:ok, %{content: [%{type: "text", text: text}]}}
+      {:ok, %{text: text} = read} -> {:ok, %{content: [%{type: "text", text: text}], structuredContent: read}}
+      {:ok, listed} -> {:ok, %{content: [%{type: "text", text: JSON.encode!(listed)}], structuredContent: listed}}
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
     end
   end
@@ -416,11 +417,17 @@ defmodule OneCore.Mcp do
   defp own("execute", %{"code" => code}, _params, from, {_actor, subject} = principal, forwarded) do
     tools =
       for tool <- scripted(subject),
-          do: %{name: tool.name, plugin: tool[:_meta][:plugin], description: tool.description, input: tool.inputSchema}
+          do: %{
+            name: tool.name,
+            plugin: tool[:_meta][:plugin],
+            description: tool.description,
+            input: tool.inputSchema,
+            output: tool[:outputSchema]
+          }
 
     namespaces = Map.new(Plugins.running(subject), fn {name, version} -> {name, Search.described(version)} end)
     {done, text} = CodeMode.run(code, tools, namespaces, called(from, principal, forwarded))
-    {:ok, %{content: [%{type: "text", text: text}], isError: done == :error}}
+    {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}, isError: done == :error}}
   end
 
   defp own("call", %{"calls" => calls}, _params, from, {_actor, subject} = principal, forwarded) do
@@ -463,12 +470,14 @@ defmodule OneCore.Mcp do
     open = fn tools -> if holder, do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
 
     listed = fn name, tool ->
-      %{
+      listed = %{
         name: name,
         description: tool.description,
         inputSchema: tool.inputs,
         annotations: %{readOnlyHint: tool[:read_only] == true}
       }
+
+      if tool[:outputs], do: Map.put(listed, :outputSchema, tool.outputs), else: listed
     end
 
     own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
@@ -487,32 +496,38 @@ defmodule OneCore.Mcp do
     with :none <- Tools.call(name, inputs, principal, forwarded),
          [plugin, tool] <- String.split(name, "_", parts: 2),
          {:ok, result} <- Calls.call(plugin, tool, inputs, principal, forwarded, caller) do
-      case result do
-        text when is_binary(text) -> {:ok, text}
-        {:blob, _kind, _data} -> {:ok, result}
-        {:file, _kind, %Artifact{}, _name} -> {:ok, result}
-        _ -> {:ok, JSON.encode!(result)}
-      end
+      {:ok, result}
     else
       [_] -> {:error, "#{name} isn't a tool. tools/list says what there is."}
       other -> other
     end
   end
 
-  # An answer as MCP's content. A picture is an image, which an agent that sees pictures sees, and any other file
-  # is a resource inside the answer, unless it's large.
-  defp content(_name, {:blob, "image/" <> _ = kind, data}),
+  # An answer as MCP's result: what it is as JSON, `structuredContent`, with the same as text for a client from before
+  # that, as MCP says. A file is content of its kind, and its `structuredContent` says what kind of file it is. A
+  # tool of a version from before tools said what they answer may answer text, which is only text.
+  defp answer(_name, text) when is_binary(text), do: %{content: [%{type: "text", text: text}]}
+
+  defp answer(name, file) when is_tuple(file), do: %{content: file(name, file), structuredContent: Calls.structured(file)}
+
+  defp answer(_name, answer) do
+    structured = Calls.structured(answer)
+    result = %{content: [%{type: "text", text: JSON.encode!(structured)}]}
+    if is_map(structured), do: Map.put(result, :structuredContent, structured), else: result
+  end
+
+  # A picture is an image, which an agent that sees pictures sees, and any other file is a resource inside the answer,
+  # unless it's large.
+  defp file(_name, {:blob, "image/" <> _ = kind, data}),
     do: [%{type: "image", mimeType: kind, data: Base.encode64(data)}]
 
-  defp content(name, {:blob, kind, data}),
+  defp file(name, {:blob, kind, data}),
     do: [%{type: "resource", resource: %{uri: "one://#{name}", mimeType: kind, blob: Base.encode64(data)}}]
 
   # A large file is a short-lived link to its blob in the bucket, under the blob's key, which never names another.
-  defp content(_name, {:file, kind, %Artifact{prefix: prefix} = artifact, blob}) do
+  defp file(_name, {:file, kind, %Artifact{prefix: prefix} = artifact, blob}) do
     [%{type: "resource_link", uri: Artifact.link(artifact, blob, :read).url, name: prefix <> blob, mimeType: kind}]
   end
-
-  defp content(_name, text), do: [%{type: "text", text: text}]
 
   # After a tool that doesn't only read, every client connected here is told that something changed.
   defp changed(name, result, {_actor, subject}) do

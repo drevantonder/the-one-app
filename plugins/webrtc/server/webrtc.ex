@@ -28,7 +28,26 @@ defmodule WebRTC do
         name: "ice_servers",
         description:
           "For a plugin's code that streams to a person's app over WebRTC: ICE servers for one stream, TURN only, as RTCPeerConnection takes them (`iceServers`), good for #{div(@ttl, 3600)} hours. Both ends take them, with iceTransportPolicy relay. Not for a person or an agent.",
-        inputs: %{type: "object", properties: %{}}
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            iceServers: %{
+              type: "array",
+              description: "As RTCPeerConnection takes them",
+              items: %{
+                type: "object",
+                properties: %{
+                  urls: %{type: "array", items: %{type: "string"}},
+                  username: %{type: "string"},
+                  credential: %{type: "string"}
+                },
+                required: ["urls"]
+              }
+            }
+          },
+          required: ["iceServers"]
+        }
       }
     ]
   end

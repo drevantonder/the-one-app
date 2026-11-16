@@ -68,7 +68,9 @@ async fn here(client: &Arc<Client>, request: &Value) -> Vec<u8> {
         let code = arguments["code"].as_str().unwrap_or_default();
         crate::codemode::run(client, code)
             .await
-            .map(|(ok, text)| json!({"content": [{"type": "text", "text": text}], "isError": !ok}))
+            .map(|(ok, text)| {
+                json!({"content": [{"type": "text", "text": text}], "structuredContent": {"text": text}, "isError": !ok})
+            })
     };
     let mut result = result
         .unwrap_or_else(|error| json!({"content": [{"type": "text", "text": format!("{error:#}")}], "isError": true}));
