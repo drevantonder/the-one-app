@@ -50,17 +50,17 @@ defmodule Database do
     end
   end
 
-  # The server holding the lease didn't run a call passed on to it. Not reaching it just now isn't its being gone:
-  # a network loses a connection now and then, and what this server knew of it may be from before it came back.
-  # So one given up on at once is asked once more, and this server takes the lease only if it doesn't answer then
-  # either. One that was waited for has had what it was sent sent again (`@waited`), so it's gone. One that answered
-  # is there, and runs whatever's passed to it once it knows the log names it: it may have learnt that another holds
-  # the lease now.
+  # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
+  # that needs what only another server has can't be passed on again (a Vault item only some servers open, say).
+  # Either way this server takes the lease, if the log still names that one, and runs the call itself. But not
+  # reaching it just now isn't its being gone: a network loses a connection now and then, and what this server knew
+  # of it may be from before it came back. So one given up on at once is asked once more first. One that was waited
+  # for has had what it was sent sent again by then (`@waited`).
   defp taken_over(call, lease, server) do
-    gone = gone?(call, server, System.monotonic_time(:millisecond))
-
-    with :there <- GenServer.call(lease, {:take_over, server, gone}, :infinity),
-         do: raise("#{OneCore.Servers.name(server) || server} holds this database and wouldn't run this call")
+    began = System.monotonic_time(:millisecond)
+    Call.forward_to(call, server)
+    if System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server)
+    :ok = GenServer.call(lease, {:take_over, server}, :infinity)
   end
 
   @doc """
@@ -89,13 +89,6 @@ defmodule Database do
   # How long, in milliseconds, a server that's there takes at most to answer a new connection: QUIC has sent what
   # it sends again by then (`client::THERE`).
   @waited 1_000
-
-  defp gone?(call, server, began) do
-    case Call.forward_to(call, server) do
-      :forwarding_loop -> false
-      :no_answer -> System.monotonic_time(:millisecond) - began >= @waited or Call.forward_to(call, server) == :no_answer
-    end
-  end
 
   # A database that was open under its artifact's codec before has closed, for the next call to open it.
   defp opened_again(lease) do
