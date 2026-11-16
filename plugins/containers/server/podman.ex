@@ -5,6 +5,10 @@ defmodule Containers.Podman do
   what it's called (`one.name`), what it's for (`one.description`), its size and who asked for it, and each image
   made with `commit` its own `one.artifact` and `one.name`. When a container was last used is a file's time in the
   service's folder, `used/<its name in Podman>`.
+
+  Another network's server on the same machine shares its Podman, so each container and image carries the key of
+  the server that made it too (`one.server`), as Compose labels a container with its project, and a server lists,
+  stops and creates from only its own.
   """
   use GenServer
   @behaviour OneCore.Service
@@ -35,7 +39,7 @@ defmodule Containers.Podman do
   def list(service) do
     used = used(service)
 
-    for c <- podman_json!(service, ["ps", "--all", "--filter", "label=one.artifact", "--format", "json"]) do
+    for c <- podman_json!(service, ["ps", "--all", "--filter", "label=one.artifact", "--filter", "label=#{made_here()}", "--format", "json"]) do
       [podman_name | _] = c["Names"]
       labels = c["Labels"] || %{}
 
@@ -55,7 +59,10 @@ defmodule Containers.Podman do
     end
   end
 
-  @doc "The images on this machine: what `commit` made, with whose each is, and the rest as Podman names them."
+  @doc """
+  The images on this machine: what `commit` made, with whose each is and whether this server made it (`ours`), and
+  the rest as Podman names them.
+  """
   def images(service) do
     for i <- podman_json!(service, ["images", "--format", "json"]) do
       labels = i["Labels"] || %{}
@@ -64,6 +71,7 @@ defmodule Containers.Podman do
         id: i["Id"],
         name: labels["one.name"] || List.first(i["Names"] || []) || i["Id"],
         artifact: labels["one.artifact"],
+        ours: labels["one.server"] == OneCore.Service.server(),
         tags: i["Names"] || [],
         size: i["Size"],
         created: i["Created"] * 1000
@@ -83,6 +91,8 @@ defmodule Containers.Podman do
 
     labels =
       for {key, value} <- spec["labels"], value != nil, do: ["--label", "one.#{key}=#{value}"]
+
+    labels = [["--label", made_here()] | labels]
 
     args =
       ["create", "--name", spec["id"], "--init", "--tty", "--interactive", "--cpus", cpus, "--memory", memory] ++
@@ -159,6 +169,7 @@ defmodule Containers.Podman do
   @doc "Makes an image of the container as it is now, labelled whose it is and what it's called."
   def commit(service, id, image, labels) do
     changes = Enum.flat_map(labels, fn {key, value} -> ["--change", "LABEL one.#{key}=#{value}"] end)
+    changes = ["--change", "LABEL #{made_here()}" | changes]
     podman!(service, ["commit", "--quiet"] ++ changes ++ [id, image])
     :ok
   end
@@ -265,16 +276,17 @@ defmodule Containers.Podman do
 
   # The image to create from: the plugin's own `desktop`, built here from its Containerfile when it changed, and
   # again each week from scratch, for Google Chrome's security fixes, which it downloads as it's built; or as it's
-  # named, which Podman pulls if it isn't here. A desktop's build removes the ones before it, but those a container
-  # still uses, which Podman refuses to remove: a later build does.
+  # named, which Podman pulls if it isn't here. A desktop's build removes the ones this server built before it, but
+  # those a container still uses, which Podman refuses to remove: a later build does.
   defp image(service, "desktop") do
     folder = OneCore.Service.folder(service, "server/desktop")
     {year, week} = :calendar.iso_week_number()
     image = "localhost/containers-desktop:#{Path.basename(folder)}-#{year}-#{week}"
 
     if run(service, ["image", "exists", image], 10).exit != 0 do
-      podman!(service, ["build", "--pull=newer", "--no-cache", "-t", image, folder], 900)
-      built = podman!(service, ["images", "--format", "{{.Repository}}:{{.Tag}}", "localhost/containers-desktop"])
+      podman!(service, ["build", "--pull=newer", "--no-cache", "--label", made_here(), "-t", image, folder], 900)
+      filters = ["--filter", "reference=localhost/containers-desktop", "--filter", "label=#{made_here()}"]
+      built = podman!(service, ["images", "--format", "{{.Repository}}:{{.Tag}}" | filters])
       for before <- String.split(built, "\n", trim: true), before != image, do: run(service, ["rmi", before], 60)
     end
 
@@ -282,6 +294,9 @@ defmodule Containers.Podman do
   end
 
   defp image(_service, image), do: image
+
+  # The label of what this server made.
+  defp made_here, do: "one.server=#{OneCore.Service.server()}"
 
   defp mount(%{"source" => source, "target" => target} = mount),
     do: "#{source}:#{target}" <> if(mount["read_only"], do: ":ro", else: "")

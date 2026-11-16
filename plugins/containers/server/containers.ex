@@ -6,6 +6,9 @@ defmodule Containers do
   container, so who sees and uses one is what `reach` says: its creator, whoever they share it with, and the
   network's owner. An image made with `commit` is one too. A job stops any left running and unused for longer than
   the setting `idle_hours`, whoever's they are: what it saves is the machine's.
+
+  A machine may run another network's server too, sharing its Podman: each server's service gives only what that
+  server made, so a network sees and uses only its own.
   """
   @behaviour OneCore.Plugin
   alias Containers.Podman
@@ -392,7 +395,7 @@ defmodule Containers do
     %{machines: machines}
   end
 
-  def call("images", _inputs, call), do: %{images: Enum.map(images(call), &Map.drop(&1, [:server, :artifact, :id]))}
+  def call("images", _inputs, call), do: %{images: Enum.map(images(call), &Map.drop(&1, [:server, :artifact, :id, :ours]))}
 
   def call("create", inputs, call) do
     name = inputs["name"]
@@ -595,12 +598,12 @@ defmodule Containers do
   end
 
   # The image to create from, and the machine it's on: one of the caller's own made with `commit`, by its name or
-  # Podman's, or any other, which Podman pulls, but never another's made with `commit`.
+  # Podman's, or any other, which Podman pulls, but never another's made with `commit`, nor another network's.
   defp image(call, image, server) do
     all = images(call, :all)
     named? = &(image in [&1.name | &1.tags] or image =~ ~r/^(sha256:)?[0-9a-f]{3,}$/ and String.contains?(&1.id, image))
 
-    case Enum.find(all, &(&1.artifact && named?.(&1) && reaches?(call, &1))) do
+    case Enum.find(all, &(&1.artifact && &1.ours && named?.(&1) && reaches?(call, &1))) do
       %{server: at} = mine when server in [nil, at] ->
         {mine.id, at}
 
@@ -637,7 +640,7 @@ defmodule Containers do
   defp images(call, which \\ :reached) do
     for server <- Service.servers(call, Podman),
         i <- each(call, server, :images),
-        which == :all or i["artifact"] == nil or reaches?(call, i),
+        which == :all or i["artifact"] == nil or (i["ours"] and reaches?(call, i)),
         do: Map.merge(Map.new(i, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})
   end
 
