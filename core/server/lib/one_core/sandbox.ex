@@ -444,10 +444,10 @@ defmodule OneCore.Sandbox do
   def init({key, name, sets, version}) do
     handles = :ets.new(__MODULE__, [:public, read_concurrency: true])
 
-    # What a version's VM compiled is kept on this machine for its next VM, which loads it instead.
-    cache =
-      if version,
-        do: Path.join([Server.home(), "sandbox", Version.code(key)])
+    # What a version's VM compiled is kept on this machine for its next VM, which loads it instead: its own code
+    # and the child's side of One Core, as this server has it.
+    runtime = File.read!(Application.app_dir(:one_core, "priv/sandbox/child.ex"))
+    cache = if version, do: Path.join([Server.home(), "sandbox", Version.code({key, runtime})])
 
     context = %{
       cache: cache,

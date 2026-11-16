@@ -310,7 +310,7 @@ defmodule OneCore.Sandbox.Child do
       [plugin] ->
         for {name, module} <- plugins, do: :persistent_term.put({__MODULE__, :plugin, name}, module)
         :persistent_term.put({__MODULE__, :main}, plugin)
-        described = described(plugin, modules[main], Map.keys(modules) -- [main])
+        described = described(plugin, main, modules[main], Map.keys(modules) -- [main])
         {:answered, if(cache, do: described, else: Map.put(described, "beams", beams(modules)))}
 
       found ->
@@ -375,11 +375,7 @@ defmodule OneCore.Sandbox.Child do
   defp compiled(sources, name, out, files, folder) do
     case Kernel.ParallelCompiler.compile_to_path(sources, out, return_diagnostics: true) do
       {:ok, modules, warnings} ->
-        Process.put(
-          {__MODULE__, :warnings},
-          Process.get({__MODULE__, :warnings}, []) ++
-            said(warnings.compile_warnings ++ warnings.runtime_warnings, folder)
-        )
+        Process.put({__MODULE__, :warnings, name}, said(warnings.compile_warnings ++ warnings.runtime_warnings, folder))
 
         for module <- modules, do: :persistent_term.put({__MODULE__, :files, module}, {name, out, files})
         Enum.each(modules, &Code.ensure_loaded!/1)
@@ -400,7 +396,7 @@ defmodule OneCore.Sandbox.Child do
   defp behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what sandbox mode doesn't offer it.
-  defp described(plugin, modules, uses) do
+  defp described(plugin, main, modules, uses) do
     said = fn function, none ->
       if function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none
     end
@@ -420,7 +416,7 @@ defmodule OneCore.Sandbox.Child do
       "hooks" => hooks,
       "jobs" => said.(:jobs, []),
       "permissions" => said.(:permissions, []),
-      "warnings" => Process.get({__MODULE__, :warnings}, []) |> Enum.join("\n"),
+      "warnings" => Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
       "problems" => OneCore.Sandbox.Check.problems(plugin, modules, uses, hooks, offers, services)
     }
     |> JSON.encode!()
@@ -472,16 +468,18 @@ defmodule OneCore.Sandbox.Check do
   # Core's hooks that change or decide what happens, which only a plugin on a server of its owner's may.
   @deciding ~w(inputs call reach device owner)
 
+  # The plugins it uses run in its VM as it, so they're checked too: one that can't run there, as most of the
+  # network's own can't, is used by its tools instead.
   def problems(plugin, modules, uses, hooks, offers, services) do
-    used = for name <- uses, module <- modules_of(name), into: MapSet.new(), do: module
-    own = MapSet.new(modules)
+    loaded = MapSet.new(modules ++ Enum.flat_map(uses, &modules_of/1))
+    calls = calls(modules, loaded)
 
-    calls =
-      for module <- modules,
-          {file, line, m, f, a} <- remote(module),
-          problem = problem(m, f, a, own, used),
-          uniq: true,
-          do: "#{file}:#{line}: #{problem}"
+    using =
+      for name <- uses, said = calls(modules_of(name), loaded), said != [] do
+        "#{where(plugin)}: it uses #{name}, whose code would run in its VM in sandbox mode, and can't there " <>
+          "(#{hd(said)}#{if length(said) > 1, do: " And #{length(said) - 1} more."}) Call its tools instead, which " <>
+          "permissions/0 names, and leave what can't run out of uses/0."
+      end
 
     hooking =
       for hook <- hooks,
@@ -503,7 +501,15 @@ defmodule OneCore.Sandbox.Check do
             "#{service} is a service, which runs on particular machines: sandbox mode has none. A plugin with one " <>
               "runs on a server of its owner's."
 
-    calls ++ hooking ++ offering ++ serving
+    calls ++ using ++ hooking ++ offering ++ serving
+  end
+
+  defp calls(modules, loaded) do
+    for module <- modules,
+        {file, line, m, f, a} <- remote(module),
+        problem = problem(m, f, a, loaded),
+        uniq: true,
+        do: "#{file}:#{line}: #{problem}"
   end
 
   defp modules_of(name) do
@@ -554,11 +560,11 @@ defmodule OneCore.Sandbox.Check do
   defp walk(forms, file, found) when is_list(forms), do: Enum.reduce(forms, found, &walk(&1, file, &2))
   defp walk(_other, _file, found), do: found
 
-  defp problem(m, f, a, own, used) do
+  defp problem(m, f, a, loaded) do
     name = "#{inspect(m)}.#{f}/#{a}"
 
     cond do
-      m in own or m in used ->
+      m in loaded ->
         nil
 
       Map.has_key?(@offered, m) ->
