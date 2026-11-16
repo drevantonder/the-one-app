@@ -67,7 +67,7 @@ let tooOld = false
 /// nobody's (`signIn`). `unreached` is why the client couldn't open, if it couldn't: its network's address didn't
 /// answer. Then that's all the window says, until trying again opens it.
 const { signIn, unreached = null, taps } = await invoke("start")
-/// A phone's app comes from its store, and a computer's updates itself.
+/// A phone's app is its network's, which its owner builds and updates, and a computer's updates itself.
 const phone = Boolean(taps)
 if (signIn) location.replace(signIn)
 
@@ -92,7 +92,7 @@ function problem() {
   byId("problem").hidden = !nothing || Boolean(history.state)
   byId("what").textContent = tooOld ? "This app needs updating" : unreached !== null ? "Can't reach your network" : "Can't show your Home Screen pages"
   byId("why").textContent = tooOld
-    ? phone ? `Get the latest version from the ${/iPhone|iPad/.test(navigator.userAgent) ? "App Store" : "Play Store"}.` : "Your network is on a newer version."
+    ? `Your network is on a newer version.${phone ? " Its owner updates this app." : ""}`
     : unreached !== null ? `${unreached}. Check this device is online.` : (unlisted ?? "")
   const action = byId("retry")
   action.textContent = tooOld ? "Update" : "Try Again"

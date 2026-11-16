@@ -15,7 +15,7 @@ A release is part of your change: it isn't done until it's live.
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |
 | The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
-| A phone's app | Not from here: a phone takes a build from its store, built from the network's repo (`app/`). Say one is needed |
+| A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, tests, `tooling/`, `.agents/` | Nothing |
 
 A plugin change that uses something new in `core/server/` (often in the same commit) waits for the server release:
