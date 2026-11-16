@@ -5,37 +5,48 @@ import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Field, Input, leave, List, Menu, Problem, Row, Screen, Section, Sheet, Skeleton, Split, toast } from "ui"
 import "./app.css"
 
+/** A profile, as `chrome-profiles_list` answers it. */
+interface Profile {
+  profile: string
+  sites: { site: string; used: number }[]
+  saved?: number
+  signing_in?: { site: string; session: string }
+}
+
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 /// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
-function since(at) {
+function since(at: number) {
   const minutes = Math.round((at - Date.now()) / 60_000)
   if (minutes > -60) return ago.format(Math.min(minutes, -1), "minute")
   if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
   return ago.format(Math.round(minutes / (24 * 60)), "day")
 }
-const summary = (p) =>
+const summary = (p: Profile) =>
   p.signing_in
     ? `Signing in to ${p.signing_in.site}`
     : [p.sites.length ? p.sites.map((s) => s.site).join(", ") : "No sites yet", p.saved && `Saved ${since(p.saved)}`].filter(Boolean).join(" · ")
 
-const [open, setOpen] = createSignal()
-const [asking, setAsking] = createSignal() // "add", "rename" or "sign-in"
+const [open, setOpen] = createSignal<string>()
+const [asking, setAsking] = createSignal<"add" | "rename" | "sign-in">()
 
 // Keys as the browser names them, as xdotool does, which is how a screen is told them.
-const KEYS = { Enter: "Return", Backspace: "BackSpace", Tab: "Tab", Escape: "Escape", Delete: "Delete", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", Home: "Home", End: "End", PageUp: "Prior", PageDown: "Next" }
+const KEYS: Record<string, string> = { Enter: "Return", Backspace: "BackSpace", Tab: "Tab", Escape: "Escape", Delete: "Delete", ArrowLeft: "Left", ArrowRight: "Right", ArrowUp: "Up", ArrowDown: "Down", Home: "Home", End: "End", PageUp: "Prior", PageDown: "Next" }
 const WIDTH = 1280
 const HEIGHT = 800
 
 /// A browser's page, as it is now, which you click, scroll and type on: what you do is sent to it in order, and
 /// what you type while one is on its way goes with the next.
-function Page(props) {
+/** What's sent to a page, and how it's sent on: a click, a scroll, a key or what's typed. */
+type Inputs = Record<string, any>
+
+function Page(props: { session: string }) {
   // The browser it's of, for good: what's still on its way once the page has gone goes to it.
   const session = props.session
-  const [picture, setPicture] = createSignal()
-  let field
-  let queue = Promise.resolve()
-  let last
-  let timer
+  const [picture, setPicture] = createSignal<string>()
+  let field!: HTMLInputElement
+  let queue: Promise<unknown> = Promise.resolve()
+  let last: { action: string; inputs: Inputs } | undefined
+  let timer: ReturnType<typeof setTimeout>
   const look = () =>
     call("chrome_screen", { session, action: "screenshot" })
       .then(setPicture)
@@ -49,7 +60,7 @@ function Page(props) {
     again()
     return () => ((stopped = true), clearTimeout(timer))
   })
-  const act = (action, inputs, merge) => {
+  const act = (action: string, inputs: Inputs, merge?: (was: Inputs, now: Inputs) => boolean) => {
     if (merge && last?.action === action && merge(last.inputs, inputs)) return
     const job = (last = { action, inputs: { ...inputs } })
     queue = queue
@@ -60,12 +71,12 @@ function Page(props) {
       .then(look)
       .catch((error) => toast(error.message))
   }
-  const at = (event) => {
+  const at = (event: MouseEvent & { currentTarget: HTMLElement }) => {
     const box = event.currentTarget.getBoundingClientRect()
     return { x: Math.round(((event.clientX - box.left) * WIDTH) / box.width), y: Math.round(((event.clientY - box.top) * HEIGHT) / box.height) }
   }
-  const type = (text) => text && act("type", { text }, (was, now) => ((was.text += now.text), true))
-  const key = (event) => {
+  const type = (text: string) => text && act("type", { text }, (was, now) => ((was.text += now.text), true))
+  const key = (event: KeyboardEvent) => {
     const named = KEYS[event.key] ?? (event.key.length === 1 ? event.key.toLowerCase() : undefined)
     const modified = event.ctrlKey || event.metaKey || event.altKey
     // Pasting is the field's own, and comes as what's typed.
@@ -101,8 +112,8 @@ function Page(props) {
   )
 }
 
-function SigningIn(props) {
-  const p = () => props.profile
+function SigningIn(props: { profile: Profile & { signing_in: {} } }) {
+  const p = () => props.profile as Required<Profile>
   const done = () => {
     const { profile, signing_in } = p()
     return call("chrome_close", { session: signing_in.session })
@@ -118,9 +129,9 @@ function SigningIn(props) {
   )
 }
 
-function Detail(props) {
+function Detail(props: { profile: Profile }) {
   const p = () => props.profile
-  const act = async ({ value }) => {
+  const act = async ({ value }: { value: string }) => {
     if (value === "rename") return setAsking("rename")
     const yes = await confirm({ heading: `Delete ${p().profile}?`, text: "Every site signed in on it is signed out, for good.", action: "Delete", destructive: true })
     if (yes) await call("chrome-profiles_remove", { profile: p().profile }).then(() => setOpen()).catch((error) => toast(error.message))
@@ -144,7 +155,7 @@ function Detail(props) {
       }
     >
       <Show when={p().signing_in} fallback={<Button onClick={() => setAsking("sign-in")}>Sign In to a Site</Button>}>
-        <SigningIn profile={p()} />
+        <SigningIn profile={p() as Required<Profile>} />
       </Show>
       <Section heading="Sites">
         <Show when={p().sites.length} fallback={<Empty>Not signed in to any sites yet.</Empty>}>
@@ -160,17 +171,17 @@ function Detail(props) {
 }
 
 /// What the person's asked for: a name for a new profile or a renamed one, or the site to sign in to.
-function Ask(props) {
+function Ask() {
   const [busy, setBusy] = createSignal(false)
-  const heading = () => ({ add: "Add Profile", rename: "Rename Profile", "sign-in": "Sign In to a Site" })[asking()]
-  const send = async (event) => {
+  const heading = () => ({ add: "Add Profile", rename: "Rename Profile", "sign-in": "Sign In to a Site" })[asking()!]
+  const send = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
     event.preventDefault()
-    const typed = new FormData(event.currentTarget).get("value").trim()
-    const [tool, inputs] = {
+    const typed = String(new FormData(event.currentTarget).get("value")).trim()
+    const [tool, inputs] = ({
       add: ["create", { name: typed }],
       rename: ["rename", { profile: open(), name: typed }],
       "sign-in": ["sign_in", { profile: open(), url: /^https?:\/\//.test(typed) ? typed : `https://${typed}` }],
-    }[asking()]
+    } as const)[asking()!]
     setBusy(true)
     await call(`chrome-profiles_${tool}`, inputs)
       .then(() => {
@@ -202,13 +213,13 @@ function Ask(props) {
 }
 
 function App() {
-  const profiles = createMemo(() => call("chrome-profiles_list").then(JSON.parse))
+  const profiles = createMemo(() => call("chrome-profiles_list").then((text): Profile[] => JSON.parse(text)))
   changed(() => refresh(profiles))
   const opened = () => profiles().find((p) => p.profile === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your profiles" text={error().message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your profiles" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
-        <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail profile={opened()} /></Show>}>
+        <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail profile={opened()!} /></Show>}>
           <Screen heading="Chrome Profiles" back onBack={leave} action={<Button variant="outline" onClick={() => setAsking("add")}>Add Profile</Button>}>
             <Show when={profiles().length} fallback={<Empty>No profiles. Add one, like Personal or Work, to sign in to sites on.</Empty>}>
               <List>
