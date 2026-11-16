@@ -12,6 +12,8 @@ is named by where it is, like `users/alice/made/repos/notes`, and its owner remo
   so: that has to be removed first.
 - `remove --artifact <name>` removes one. An app's own way of removing, such as `repos remove`, does the same and
   keeps its own list true, so use the app's when it has one. Remove only when asked.
+- A plugin someone deployed is removed the same way, by its artifact (`users/alice/plugins/notes`), once nobody has
+  it installed: `uninstall` it for everyone first. It's gone from the App Store until it's restored.
 - `purge` is the clock's, each day: don't call it yourself.
 
 A plugin removes what someone asked it to delete with `OneCore.Call.tool(call, "recently-deleted", "remove", %{"artifact" =>
