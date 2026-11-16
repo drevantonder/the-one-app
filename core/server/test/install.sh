@@ -212,8 +212,8 @@ say "A build that can't start, which it goes back from by itself"
 c=$(release broken "perl -pi -e 's/  def serve do/  def serve do\n    raise \"this build can'\''t start\"/' core/server/lib/one_core/release.ex")
 mark
 owner update --server "$server"
-heard "didn't start and answer"
-said | grep -E "can't start|didn't start and answer" | sed 's/^/  /'
+heard "Went back to"
+said | grep -E "can't start|Went back to" | sed 's/^/  /'
 heard "A server is running"
 echo "it answers as $(build_of "$server"), not $c"
 
