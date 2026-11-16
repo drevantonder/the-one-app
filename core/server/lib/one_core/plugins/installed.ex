@@ -51,7 +51,11 @@ defmodule OneCore.Plugins.Installed do
 
   @doc "Removes a plugin from what's installed for `owner`. It stays whoever's it is, and what it kept stays."
   def uninstall(owner, name) do
-    used_by = for {other, version} <- Plugins.versions([owner]), name in version.uses, do: other
+    # What uses it still finds it where it's installed for the network too.
+    after_it = Map.new(Plugins.versions(Plugins.chain(owner) -- [owner]))
+
+    used_by =
+      for {other, version} <- Plugins.versions([owner]), name in version.uses, not is_map_key(after_it, name), do: other
 
     removed = fn
       %{^name => _artifact} = installed -> {:ok, Map.delete(installed, name)}
