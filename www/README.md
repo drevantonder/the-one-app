@@ -26,5 +26,6 @@ Deploy, with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set, each from i
 The plugin directory's database is made once (`bunx wrangler d1 create one-www-plugin-directory`, its id in
 `plugin-directory/wrangler.jsonc`), and its schema and seed run with `--remote` in place of `--local`.
 
-The social card, `marketing/public/social-card.png`, is `marketing/social-card.html` rendered once at 1200×630:
-`chrome --headless --window-size=1200,630 --hide-scrollbars --screenshot=public/social-card.png file://$PWD/social-card.html`.
+The social card, `marketing/public/social-card.png`, is `marketing/social-card.html` rendered once at 1200×630, with
+the fonts in `marketing/fonts/` (EB Garamond, SIL Open Font License, `fonts/OFL.txt`):
+`chrome --headless --window-size=1200,630 --hide-scrollbars --force-device-scale-factor=1 --virtual-time-budget=3000 --screenshot=public/social-card.png file://$PWD/social-card.html`.
