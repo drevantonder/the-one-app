@@ -472,12 +472,34 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
     own || start
 }
 
+/// What of the window is kept for the next time the app opens.
+#[cfg(desktop)]
+const KEPT: tauri_plugin_window_state::StateFlags = tauri_plugin_window_state::StateFlags::SIZE
+    .union(tauri_plugin_window_state::StateFlags::POSITION)
+    .union(tauri_plugin_window_state::StateFlags::MAXIMIZED)
+    .union(tauri_plugin_window_state::StateFlags::FULLSCREEN);
+
+/// Opens the window as it was when the app last quit, on the display it was on. If where it was is on no display now
+/// (one that's been unplugged), it opens in the middle of one, at the size it was: the plugin leaves a position it
+/// can't show where it is, so the window is centred at its own size between the two.
+#[cfg(desktop)]
+fn opens_as_it_was(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use tauri_plugin_window_state::{StateFlags, WindowExt};
+    window.restore_state(StateFlags::SIZE | StateFlags::POSITION)?;
+    window.center()?;
+    window.restore_state(KEPT)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let started = Instant::now();
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(notifications::plugin())
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init()).plugin(notifications::plugin());
+    // The window keeps where it is, how large, and whether it's maximized or full screen, for the next time the app
+    // opens (`opens_as_it_was`).
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(KEPT).skip_initial_state("main").build());
+    builder
         .setup(move |app| {
             app.manage(Start(tokio::sync::watch::Sender::new(None)));
             app.manage(started);
@@ -496,7 +518,10 @@ pub fn run() {
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page))
                 .on_navigation(move |to| stays(&goes, to));
             #[cfg(desktop)]
-            let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0);
+            let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center();
+            #[cfg(desktop)]
+            opens_as_it_was(&window.build()?)?;
+            #[cfg(mobile)]
             window.build()?;
             eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
             Ok(())
