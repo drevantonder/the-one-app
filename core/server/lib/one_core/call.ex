@@ -45,15 +45,19 @@ defmodule OneCore.Call do
   @doc """
   Calls a tool of another plugin, installed for whoever this call runs for or for the network, as they would call it
   themselves: the same inputs are checked, the same hooks asked, and it runs as that plugin, with its own artifact.
-  Gives its answer as it would reach a client over JSON, or raises with what that plugin said.
+  Gives its answer as it would reach a client over JSON, a file it answers as the file (`{:blob, kind, data}`), or
+  raises with what that plugin said.
 
       OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})
   """
   def tool(%__MODULE__{actor: by, subject: who}, plugin, tool, inputs) do
     case Calls.call(plugin, tool, inputs, {by, who}) do
       {:ok, answer} when is_binary(answer) -> answer
+      {:ok, {:blob, _kind, _data} = file} -> file
       {:ok, answer} -> JSON.decode!(JSON.encode!(answer))
       {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise why
+      {:forwarded, %{"content" => [%{"type" => "image", "mimeType" => kind, "data" => data}]}} -> {:blob, kind, Base.decode64!(data)}
+      {:forwarded, %{"content" => [%{"resource" => %{"mimeType" => kind, "blob" => data}}]}} -> {:blob, kind, Base.decode64!(data)}
       {:forwarded, %{"content" => [%{"text" => text} | _]}} -> decoded(text)
       {:error, why} -> raise why
     end
