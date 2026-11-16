@@ -256,6 +256,14 @@ defmodule OneCore.Call do
   def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()
 
   @doc """
+  Tells every app watching that something changed, so it asks again, as each call that changes something does once
+  it's over: for a call that takes a while, as it moves from one state to the next, so its apps show each one.
+
+      OneCore.Call.changed(call)
+  """
+  def changed(%__MODULE__{}), do: OneCore.Server.changed()
+
+  @doc """
   Makes a web request from the server running this call: its `url`, and its `method`, `headers` and `body` if it
   has them, by atoms or by text. Gives the answer's `status`, `headers` and `body`, as it came, without following a
   redirect. In sandbox mode, only to a host the plugin's `permissions/0` names (`OneCore.Sandbox`).
