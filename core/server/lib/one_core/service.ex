@@ -161,12 +161,19 @@ defmodule OneCore.Service do
   # What arrives after going through JSON, which is how it reaches another server.
   defp json(term), do: JSON.decode!(JSON.encode!(term))
 
-  # Asks each server in turn until one is up. A server that couldn't be reached was asked nothing.
+  # Asks each server in turn until one is up, and then the first that's back of those that were restarting. A
+  # server that couldn't be reached was asked nothing.
   defp ask(servers, here, ask, down \\ [])
 
-  defp ask([], _here, %{plugin: plugin, service: service}, down) do
-    {:error,
-     "No server that runs #{plugin}'s #{service} is up: " <> Enum.map_join(down, ", ", &Server.error_message(:unreachable, &1))}
+  defp ask([], here, %{plugin: plugin, service: service} = ask, down) do
+    case Servers.back(down) do
+      nil ->
+        why = Enum.map_join(down, ", ", &Server.error_message(:unreachable, &1))
+        {:error, "No server that runs #{plugin}'s #{service} is up: " <> why}
+
+      back ->
+        ask([back], here, ask, down -- [back])
+    end
   end
 
   defp ask([here | _], here, %{plugin: plugin, service: service, function: function, arguments: arguments}, _down) do

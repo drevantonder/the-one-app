@@ -16,6 +16,7 @@
 // And it knows who's on: a server or a device is on while it's connected here, through any run of its client, and
 // otherwise was last seen when its last connection ended, which the Durable Object keeps. A connection that says
 // nothing for longer than iroh's pings allow has ended, as a machine that sleeps or loses its network says nothing.
+// A server that stops to start again, as it does to update, says so first, and is restarting until it's back.
 // Servers are told when one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
@@ -49,8 +50,14 @@ const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
 /** A W3C `traceparent`: its trace and span. */
 const TRACE = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
 
-/** Who's on: `"on"` for one connected now, when the last one that was left (ms since 1970), or `null` for one never seen. */
-type Seen = "on" | number | null;
+/** The longest a server says it may take to be back once it's restarting: a build it tries has three minutes to start. */
+const RESTART = 600;
+
+/**
+ * Who's on: `"on"` for one connected now, `"restarting"` for a server that said it's stopping to start again and
+ * isn't back yet, when the last one that was left (ms since 1970), or `null` for one never seen.
+ */
+type Seen = "on" | "restarting" | number | null;
 
 /** An endpoint joined to the relay: the connection its datagrams are passed over, and when its token expires. */
 interface Joined {
@@ -192,17 +199,32 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   }
 
   /**
-   * Who's on, of `keys`, servers' and devices': `"on"` for one connected here now, when the last one that was left
-   * (milliseconds since 1970), or `null` for one never seen.
+   * Who's on, of `keys`, servers' and devices': `"on"` for one connected here now, `"restarting"` for a server
+   * that's stopping to start again, when the last one that was left (milliseconds since 1970), or `null` for one
+   * never seen.
    */
   seen(keys: string[]): Promise<Record<string, Seen>> {
     return this.relay().seen(keys);
   }
 
-  /** A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. */
+  /**
+   * A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. A server says
+   * it's stopping to start again with a POST of `{"restarting": <seconds>}`, the most it may take to be back.
+   */
   async handleSeen(request: Request, url: URL) {
-    const key = await verifiedKey(request, "");
-    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
+    const body = request.method === "POST" ? await request.text() : "";
+    const key = await verifiedKey(request, body);
+    const admitted = key && (await this.env.NETWORK.admits(key, request.headers.get("one-token")));
+    if (!admitted) return refuse(403, "This network doesn't know you");
+    if (request.method === "POST") {
+      const restarting = (JSON.parse(body || "{}") as { restarting?: unknown }).restarting;
+      if (admitted.until !== undefined) return refuse(403, "Only a server says it's restarting");
+      if (!(typeof restarting === "number" && restarting > 0 && restarting <= RESTART)) {
+        return refuse(400, `A server says it's restarting with {"restarting": <seconds>}, up to ${RESTART}`);
+      }
+      await this.relay().restarting(key, restarting);
+      return new Response(null, { status: 204 });
+    }
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
     return Response.json(await this.seen(keys.slice(0, 1000)));
   }
@@ -245,7 +267,7 @@ export class Relay extends DurableObject<RelayEnv> {
 
   async fetch(request: Request) {
     const url = new URL(request.url);
-    if (url.pathname === "/endpoint") return this.endpoint(url.searchParams);
+    if (url.pathname === "/endpoint") return await this.endpoint(url.searchParams);
     if (url.pathname === "/relay/outside") return this.server(request);
     if (url.pathname === "/notify") return this.notify(await request.text());
     return this.call(url.searchParams.get("to") ?? "");
@@ -254,22 +276,39 @@ export class Relay extends DurableObject<RelayEnv> {
   /**
    * An endpoint that proved its key is joined: what it sends another comes over this connection, and what another
    * sends it goes back over it. One that connects again has left its old connection behind. It's on for its
-   * `device`, and a `server` that comes is told to the others.
+   * `device`, and a `server` that comes is told to the others: one that was restarting is back.
    */
-  endpoint(params: URLSearchParams) {
+  async endpoint(params: URLSearchParams) {
     const [key, device, server] = [params.get("key"), params.get("device"), params.has("server")];
     for (const before of this.ctx.getWebSockets(`endpoint ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`endpoint ${key}`, `on ${device}`]);
     ours.serializeAttachment({ key, device, server });
-    if (server) this.notify(SEEN);
+    if (server) {
+      await this.ctx.storage.delete(`restarting ${key}`);
+      this.notify(SEEN);
+    }
     return new Response(null, { status: 101, webSocket: theirs });
+  }
+
+  /**
+   * A server says it's stopping to start again, and may take up to `seconds` to be back: until it connects again,
+   * or that's passed, it's restarting, while it finishes what it took too. The other servers are told.
+   */
+  async restarting(key: string, seconds: number) {
+    await this.ctx.storage.put(`restarting ${key}`, Date.now() + seconds * 1000);
+    this.notify(SEEN);
   }
 
   /** Who's on, of `keys`, as the relay's `seen` says. */
   async seen(keys: string[]): Promise<Record<string, Seen>> {
-    const left = await this.ctx.storage.get<number>(keys.map((key) => `seen ${key}`));
-    return Object.fromEntries(keys.map((key) => [key, this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null)]));
+    const [left, restarting] = await Promise.all([
+      this.ctx.storage.get<number>(keys.map((key) => `seen ${key}`)),
+      this.ctx.storage.get<number>(keys.map((key) => `restarting ${key}`)),
+    ]);
+    const seen = (key: string): Seen =>
+      (restarting.get(`restarting ${key}`) ?? 0) > Date.now() ? "restarting" : this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null);
+    return Object.fromEntries(keys.map((key) => [key, seen(key)]));
   }
 
   /** Whether `device` has a connection here, other than `leaving`. */

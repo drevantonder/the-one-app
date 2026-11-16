@@ -337,7 +337,7 @@ defmodule OneCore.Call do
   def run_elsewhere(ask, principal, forwarded, owner, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
     servers = Servers.running(owner)
-    for server <- servers -- [Server.key()], do: asks(ask, principal, server, "to")
+    elsewhere(ask, principal, servers -- [Server.key()])
     raise Servers.off(what, owner, servers)
   end
 
@@ -347,8 +347,16 @@ defmodule OneCore.Call do
   """
   def forward(ask, principal, forwarded, owner) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    for server <- Servers.acting(owner) -- [Server.key()], do: asks(ask, principal, server, "to")
-    raise "No server acting for #{owner} answered"
+    servers = Servers.acting(owner) -- [Server.key()]
+    elsewhere(ask, principal, servers)
+    why = Enum.map_join(servers, "; ", &Server.error_message(:unreachable, &1))
+    raise "No server acting for #{owner} answered" <> if(why == "", do: "", else: ": " <> why)
+  end
+
+  # Asks each of `servers` in turn to run it, and, if none did, the first that's back of those that were restarting.
+  defp elsewhere(ask, principal, servers) do
+    for server <- servers, do: asks(ask, principal, server, "to")
+    if back = Servers.back(servers), do: asks(ask, principal, back, "to")
   end
 
   @doc """

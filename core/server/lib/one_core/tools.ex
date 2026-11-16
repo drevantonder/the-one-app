@@ -64,6 +64,14 @@ defmodule OneCore.Tools do
     required: ["build", "sha256", "size", "link"]
   }
 
+  @update %{
+    type: ["string", "null"],
+    enum: ["downloading", "restarting", "starting", nil],
+    description:
+      "Where an update of it is: downloading the latest build, restarting to run it, or starting it, which is " <>
+        "kept once it answers and otherwise left for the one before. Nothing while none is under way"
+  }
+
   @acts_for %{
     type: "object",
     properties: %{
@@ -454,8 +462,15 @@ defmodule OneCore.Tools do
                 build: %{type: "string"},
                 seen: %{
                   type: ["string", "integer", "null"],
-                  description: "\"on\", or when it was last, in milliseconds since 1970"
-                }
+                  description:
+                    "\"on\", \"restarting\" while it stops to start again, or when it was last on, in milliseconds since 1970"
+                },
+                protocol: %{
+                  type: "integer",
+                  description: "The version of what it asks other servers, which those it asks share"
+                },
+                update: @update,
+                went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
               },
               required: ["server", "name", "seen"]
             }
@@ -543,7 +558,9 @@ defmodule OneCore.Tools do
       description: """
       Has a server's machine take the latest builds, its server's and its program's, if it isn't on them already.
       It checks each before it runs it, hands its work to another server meanwhile, and goes back to the build it
-      had if the new one doesn't start and answer. `builds` then says which it's on, and if it went back, why.
+      had if the new one doesn't start and answer. It answers once the update has begun, with its stage; one under
+      way already is left to finish. `builds` then says each stage as it moves on, which build it's on once it's
+      done, and if it went back, why.
       """,
       inputs: %{
         type: "object",
@@ -551,7 +568,10 @@ defmodule OneCore.Tools do
       },
       outputs: %{
         type: "object",
-        properties: %{server: %{type: "string", description: "The key of the server taking them"}},
+        properties: %{
+          server: %{type: "string", description: "The key of the server taking them"},
+          update: @update
+        },
         required: ["server"]
       }
     }
@@ -813,8 +833,7 @@ defmodule OneCore.Tools do
       if not Application.get_env(:one_core, :installed, false),
         do: raise("#{here()} wasn't installed with `one serve on`, so it doesn't update itself.")
 
-      IO.puts(Release.update_asked())
-      %{server: Server.key()}
+      %{server: Server.key(), update: Release.update()}
     end)
   end
 
@@ -883,16 +902,22 @@ defmodule OneCore.Tools do
   end
 
   # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked, which
-  # ends the call here with its answer.
+  # ends the call here with its answer. One that's restarting is waited for.
   defp on(server, tool, inputs, {actor, subject}, here) do
     if server in [nil, Server.key()] do
       here.()
     else
-      case Server.request(server, "tools/call", %{
-             name: tool,
-             arguments: inputs,
-             _meta: %{actor: actor, subject: subject}
-           }) do
+      ask = fn ->
+        Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{actor: actor, subject: subject}})
+      end
+
+      answered =
+        case ask.() do
+          :unreachable -> if Servers.back([server]), do: ask.(), else: :unreachable
+          answered -> answered
+        end
+
+      case answered do
         {:ok, result} -> throw({Call, {:forwarded, result}})
         {:error, _code, why} -> raise why
         down -> raise Server.error_message(down, server)

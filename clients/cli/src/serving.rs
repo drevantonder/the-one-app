@@ -12,11 +12,13 @@
 //!   `current`. One that doesn't, within `START`, is stopped and `current` is started again.
 //! - `home`: the server's own folder, its key among it, whichever build runs.
 //! - `went-back`: why the last update didn't take, with the last lines the new build said, which the server says
-//!   in `builds` (`OneCore.Builds.started/1`) until an update takes.
+//!   in `builds` (`OneCore.Builds.say/1`) until an update takes.
 //!
 //! The server says on its output when it's running and when it's asked to update (`OneCore.Release`): asked, this
 //! takes the latest builds, the program's too, then stops the server and starts itself again in its place. While
 //! it's stopped, the network's other servers take its work over, and it takes its share back once it's running.
+//! As an update moves on, this tells the server on its input (`Stage`), for it to say to the network, and it stops
+//! the server by closing that input.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -42,6 +44,47 @@ const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// How long a build being tried has to start and answer before the one before it is started again: a server
 /// acting for the network deploys what it ships with that the network has never had before it's running.
 const START: Duration = Duration::from_secs(180);
+
+/// Where an update of this device's server is, which this program tells the server on its input as it moves on,
+/// for the server to say to the network (`OneCore.Release`): a line of JSON, `{"update": <stage>}`, with none once
+/// none is under way, and `went_back` where one didn't take.
+#[derive(Clone, Copy, PartialEq)]
+enum Stage {
+    /// Taking the latest builds: each is downloaded, unpacked and checked to start, while the server answers on.
+    Downloading,
+    /// Stopping the server, to start the build it took. It says so at the network's edge, so the other servers wait
+    /// for it rather than take it for off, for as long as stopping it and trying a build may take.
+    Restarting,
+    /// Starting a build to try, which it's told as it starts (`ONE_UPDATE`): it's kept once it's running and answers
+    /// by its key, within `START`, and otherwise the one before it is started again.
+    Starting,
+}
+
+impl Stage {
+    fn name(self) -> &'static str {
+        match self {
+            Stage::Downloading => "downloading",
+            Stage::Restarting => "restarting",
+            Stage::Starting => "starting",
+        }
+    }
+}
+
+/// Tells the server where an update of it is, or with no `stage`, that none is under way, and why the last one
+/// didn't take where it didn't (`Stage`). A server that has stopped is told nothing, and needs telling nothing.
+async fn tell(server: &mut tokio::process::Child, stage: Option<Stage>, went_back: Option<&str>) {
+    let mut said = json!({"update": stage.map(Stage::name)});
+    if let Some(why) = went_back {
+        said["went_back"] = why.into();
+    }
+    if stage == Some(Stage::Restarting) {
+        said["within"] = (STOP + START).as_secs().into();
+    }
+    if let Some(input) = server.stdin.as_mut() {
+        let _ = input.write_all(format!("{said}\n").as_bytes()).await;
+        let _ = input.flush().await;
+    }
+}
 
 /// Makes this device a server of whoever it's for: its person, or the group or network `ONE_SUBJECT` names. It's put
 /// on their list, its build is downloaded and checked, and the system starts it now and whenever it starts.
@@ -136,6 +179,19 @@ pub async fn update(client: &Client) -> Result<String> {
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
 }
 
+/// Whether this program's file is now another build than the one running, as the program keeping this device's
+/// server running takes the latest of it too: what runs must never stay behind what's there.
+pub fn replaced() -> bool {
+    let Ok(program) = env::current_exe() else { return false };
+    // Linux names a running program's file that was replaced as it was, with " (deleted)" after.
+    let program = program.to_string_lossy();
+    let program = program.strip_suffix(" (deleted)").unwrap_or(&program);
+    let output = command(program).arg("--version").output();
+    output.is_ok_and(|output| {
+        String::from_utf8_lossy(&output.stdout).split_whitespace().nth(1).is_some_and(|build| build != BUILD)
+    })
+}
+
 /// This device's server's key, if it's a server.
 pub fn server() -> Option<String> {
     let here = Here::of(&client::home().ok()?);
@@ -178,7 +234,9 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        if let (None, Ok(went_back)) = (&trying, fs::read_to_string(here.folder.join("went-back"))) {
+        if trying.is_some() {
+            server.env("ONE_UPDATE", Stage::Starting.name());
+        } else if let Ok(went_back) = fs::read_to_string(here.folder.join("went-back")) {
             server.env("ONE_WENT_BACK", went_back);
         }
         let mut server = server.spawn().with_context(|| format!("couldn't start the build {build}"))?;
@@ -235,6 +293,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                     here.prune()?;
                     let _ = fs::remove_file(here.folder.join("went-back"));
                     println!("The server is on the build {build} now, from {was}.");
+                    tell(&mut server, None, None).await;
                 }
                 Some(why) => {
                     server.kill().await?;
@@ -251,6 +310,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         while let Some(line) = lines.next_line().await? {
             say(&line)?;
             if line == UPDATE_ASKED {
+                tell(&mut server, Some(Stage::Downloading), None).await;
                 // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops
                 // where it was told the device is nobody's, and its timer doesn't count while the machine sleeps.
                 let updated = match Client::open(client::home()?, Vec::new()).await {
@@ -263,15 +323,17 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                 };
                 match updated {
                     Ok(true) => {
+                        tell(&mut server, Some(Stage::Restarting), None).await;
                         stop(&mut server).await?;
                         return Err(system::again_here(&program));
                     }
-                    Ok(false) => println!("This device is on the latest builds already."),
+                    Ok(false) => {
+                        println!("This device is on the latest builds already.");
+                        tell(&mut server, None, None).await;
+                    }
                     Err(error) => {
-                        // It's said in `builds`, which the server says as it starts: it's started again to say it.
-                        went_back(&here, &format!("Stayed on {}: {error:#}.", here.current()?), &[])?;
-                        stop(&mut server).await?;
-                        return Err(system::again_here(&program));
+                        let why = went_back(&here, &format!("Stayed on {}: {error:#}.", here.current()?), &[])?;
+                        tell(&mut server, None, Some(&why)).await;
                     }
                 }
             }
@@ -280,14 +342,10 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     }
 }
 
-/// Stops a server that's running as a system stops a program, with SIGTERM, or on Windows, which has none, by closing
-/// its input (`OneCore.Release`): it takes nothing new and answers what it took already (`OneCore.Application`), and
-/// is killed if it hasn't stopped within `STOP`.
+/// Stops a server that's running by closing its input, once it has read what it was told last (`OneCore.Release`):
+/// it takes nothing new and answers what it took already (`OneCore.Application`), and is killed if it hasn't stopped
+/// within `STOP`.
 async fn stop(server: &mut tokio::process::Child) -> Result<()> {
-    #[cfg(unix)]
-    if let Some(id) = server.id() {
-        unsafe { libc::kill(id as libc::pid_t, libc::SIGTERM) };
-    }
     drop(server.stdin.take());
     if timeout(STOP, server.wait()).await.is_ok() {
         return Ok(());
@@ -324,14 +382,16 @@ enum Started {
 /// How many of the last lines a build said are kept to say why it didn't take.
 const LAST: usize = 5;
 
-/// Keeps why an update didn't take, with the last lines the build said, in `went-back`, for the server to say.
-fn went_back(here: &Here, why: &str, lines: &[String]) -> Result<()> {
+/// Keeps why an update didn't take, with the last lines the build said, in `went-back`, for the server to say from
+/// when it next starts, until an update takes. Gives it as it's kept.
+fn went_back(here: &Here, why: &str, lines: &[String]) -> Result<String> {
     let message = match lines {
         [] => why.to_owned(),
         lines => format!("{why} Its last lines: {}", lines.join(" | ")),
     };
     println!("{message}");
-    Ok(fs::write(here.folder.join("went-back"), message)?)
+    fs::write(here.folder.join("went-back"), &message)?;
+    Ok(message)
 }
 
 /// Takes the latest builds this device isn't on: the server's, to try next, and the program's. Gives whether it

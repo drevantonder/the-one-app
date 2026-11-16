@@ -24,9 +24,8 @@ write them into a commit.
 
 ## Mid-update or broken?
 
-`one builds` lists each server with its `build` and `seen` (`"on"`, or when it was last seen). During
-`one update --server <key>` the server hands its work to another, stops and starts on the new build: for a minute
-or so it isn't `on`, and then shows the new `build`. If the new build doesn't start and answer, it goes back to the
-old one by itself, so a server back `on` with its old build after an update was a failed update: read its log, not
-the network's. A server neither `on` nor coming back after a few minutes is broken; say so, and don't release over
-it.
+`one builds` lists each server with its `build`, `seen` (`"on"`, `"restarting"`, or when it was last seen) and,
+while an update is under way, its `update` stage: `downloading`, `restarting` (it hands its work to another and
+stops), then `starting` on the new build, and none once it's kept. If the new build doesn't start and answer, it goes
+back to the old one by itself and says why in `went_back`: read its log, not the network's. A server neither `on`
+nor coming back after a few minutes is broken; say so, and don't release over it.

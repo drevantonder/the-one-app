@@ -11,8 +11,8 @@ defmodule OneCore.Builds do
   (`clients/cli/src/serving.rs`).
 
   What each machine runs is under whoever's it is: a server's in its own blobs, `servers/<key>/build`, which it
-  writes as it starts, and a device's under its user's prefix, `devices/<key>`, which it says as it renews its
-  pass (`seen/3`).
+  writes as it starts and as an update of it moves on (`say/1`), and a device's under its user's prefix,
+  `devices/<key>`, which it says as it renews its pass (`seen/3`).
   """
   alias OneCore.{Bucket, Server, Servers}
   alias OneCore.Plugins.Store
@@ -37,20 +37,67 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  What this server says of itself as it starts: its build, its kind of machine, the device it's on, if any, and
-  whether it was installed with `one serve on`, which is what takes the latest builds when it's asked to update,
-  and, if the last update didn't take, why, as that program said it.
+  What this server says of itself, as it starts and as an update of it moves on: its build, its kind of machine,
+  the device it's on, if any, the protocol it speaks with other servers (`OneCore.Server.protocol/0`), whether it was
+  installed with `one serve on`, which is what takes the latest builds when it's asked to update, where an update
+  of it is, if one is under way (`OneCore.Release`), and, if the last one didn't take, why, as that program said it.
   """
-  def started(key) do
+  def say(key) do
     info = %{
       build: build(),
       target: target(),
       device: Application.get_env(:one_core, :device),
+      protocol: Server.protocol(),
       installed: Application.get_env(:one_core, :installed, false),
+      update: update(),
       went_back: Application.get_env(:one_core, :went_back)
     }
 
     Servers.say("servers/#{key}/build", JSON.encode!(info))
+  end
+
+  @doc """
+  Where an update of this server is: `"downloading"`, `"restarting"` or `"starting"`, or `nil` with none under way
+  (`OneCore.Release`).
+  """
+  def update, do: Application.get_env(:one_core, :update)
+
+  @doc """
+  Keeps where an update of this server is, as the program keeping it running says it (`OneCore.Release`):
+  `"update"`, its stage, and `"went_back"`, why the last one didn't take, where `said` has them. It's said in
+  `builds`, and the clients watching are told. A server that's restarting says so at the network's edge first, for
+  as long as it may take to be back, `"within"` seconds, as it's about to stop.
+  """
+  def updating(said) do
+    for {name, setting} <- [{"update", :update}, {"went_back", :went_back}], Map.has_key?(said, name),
+        do: Application.put_env(:one_core, setting, said[name])
+
+    if update() == "restarting", do: Servers.restarting(said["within"])
+    say(Server.key())
+    told = fn waiting -> for {process, _} <- waiting, do: send(process, {:update, update()}) end
+    Registry.dispatch(OneCore.Waiting, :update, told)
+    Server.changed()
+  end
+
+  # How long the program keeping a server running takes to say it has begun an update, in milliseconds: it reads the
+  # server's output as it comes, so this is only for a machine that's very busy.
+  @begun 5_000
+
+  @doc """
+  Has `ask` ask the program keeping this server running to update it, and waits for that program to say the update's
+  stage, `@begun` at most. Gives the stage, or `nil` if it said none: one from before it said stages.
+  """
+  def await_update(ask) do
+    Registry.register(OneCore.Waiting, :update, nil)
+    ask.()
+
+    receive do
+      {:update, stage} -> stage
+    after
+      @begun -> update()
+    end
+  after
+    Registry.unregister(OneCore.Waiting, :update)
   end
 
   @doc "The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\"}}`."
@@ -129,10 +176,10 @@ defmodule OneCore.Builds do
   def seen(_by, _device, _said), do: :ok
 
   @doc """
-  Which build each of `owner`'s servers runs, with what its machine is called and whether it's on, and which each
-  of `by`'s devices last said it is, and the latest for each kind of machine: what shows whether everything is on
-  the same build. `bundled` says which of the plugins it ships the server asked is still deploying for the
-  network, or failed to, and why (`OneCore.Plugins.Deploy.deploying_bundled/0`).
+  Which build each of `owner`'s servers runs, with what its machine is called, whether it's on and where an update
+  of it is (`say/1`), and which each of `by`'s devices last said it is, and the latest for each kind of machine: what
+  shows whether everything is on the same build. `bundled` says which of the plugins it ships the server asked is
+  still deploying for the network, or failed to, and why (`OneCore.Plugins.Deploy.deploying_bundled/0`).
   """
   def list(by, owner) do
     keys = Servers.acting(owner)
@@ -161,6 +208,13 @@ defmodule OneCore.Builds do
     }
   end
 
-  # Whether a server is on, as `"on"`, or when it was last, in milliseconds since 1970, or `nil` if that isn't known.
-  defp seen(key), do: with(:on <- Servers.seen(key), do: "on")
+  # Whether a server is on, as `"on"`, stopping to start again, as `"restarting"`, or when it was last, in
+  # milliseconds since 1970, or `nil` if that isn't known.
+  defp seen(key) do
+    case Servers.seen(key) do
+      :on -> "on"
+      :restarting -> "restarting"
+      at -> at
+    end
+  end
 end

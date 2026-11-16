@@ -56,12 +56,14 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 - Releasing from a worktree behind `origin/main`, which `tooling/release` refuses once a newer build is published.
 - Releasing a server from a tree with changes not committed: the build is `-dirty`, and every server refuses it
   ("says it's …-dirty, not what was published").
-- Releasing a server whose calls to other servers (`hooks/call`, `plugins/call`) take new required params. Once one
-  server is on it, the old ones can't decide anything that asks permissions there, their own update among them
-  (`permissions couldn't decide it: This server has no method hooks/call`). Take each left behind by hand, as its
-  program would: download the build `one download --target <kind>` links, unpack it in its `server/builds/<build>`
-  past `bin/one_core eval "OneCore.Release.check()"` saying that build, write the build to `server/next`, and
-  restart its unit (`systemctl --user restart one-server-<key's first 12>`, or on a Mac `launchctl kickstart -k
+- Changing what servers ask each other (`hooks/call`, `plugins/call`, what a call passed on says in `_meta`)
+  without adding one to `OneCore.Server.protocol/0`: the servers on the build before read it wrongly while the
+  release reaches them (`This device isn't signed in here`, 240 times in three minutes). Added, they refuse it
+  instead, and are asked nothing until they're updated, so update every server back to back. One that can't take
+  its update for that (`permissions couldn't decide it`) is taken by hand, as its program would: download the
+  build `one download --target <kind>` links, unpack it in its `server/builds/<build>` past `bin/one_core eval
+  "OneCore.Release.check()"` saying that build, write the build to `server/next`, and restart its unit
+  (`systemctl --user restart one-server-<key's first 12>`, or on a Mac `launchctl kickstart -k
   gui/$(id -u)/app.theone.server.<key's first 12>`); it goes back by itself if it doesn't answer.
 
 ## Report

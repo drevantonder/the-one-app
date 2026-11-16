@@ -4,7 +4,21 @@ defmodule OneCore.Release do
   `clients/cli/src/serving.rs`): `bin/one_core eval 'OneCore.Release.serve()'`. It says on its output when it's
   running, and when it's asked to update, and that program does the rest: it takes the latest build, starts it,
   and goes back to this one if that doesn't start and answer.
+
+  That program tells it where an update is as it moves on, a line of JSON on its input each time, which it says in
+  `builds` (`OneCore.Builds.updating/1`): `{"update": <stage>}`, and `{"went_back": <why>}` where one didn't take.
+  An update's stages, in order:
+
+  - `downloading`: the latest build is downloaded, unpacked and checked to start, while this one answers on.
+  - `restarting`: this one is stopping, to start that one. It says so at the network's edge first, so the other
+    servers wait for it rather than take it for off, and its input closes.
+  - `starting`: the new build is starting, which it's told as it starts (`ONE_UPDATE`). It's taken once it's running
+    and answers by its key, and then there's no stage. One that doesn't, within three minutes, is stopped and the one
+    before starts again, saying why in `went_back`.
+
+  With no stage, no update is under way: none was asked, the server was on the latest builds already, or one took.
   """
+  require Logger
   alias OneCore.{Builds, Server}
 
   @doc "What it says when it's running, with its key after."
@@ -14,20 +28,16 @@ defmodule OneCore.Release do
   def update_asked, do: "Update asked"
 
   @doc """
-  Starts the server, says so, and runs until it's stopped, as a system stops a program, with SIGTERM, or on Windows,
-  which has none, by its input's closing, as the program that started it stops it there. Either way it takes nothing
-  new and answers what it took already (`OneCore.Application`).
+  Starts the server, says so, and runs until it's stopped: until its input closes, as the program that started it
+  stops it, or as a system stops a program, with SIGTERM. Either way it takes nothing new and answers what it took
+  already (`OneCore.Application`). Until then, each line on its input says where an update is.
   """
   def serve do
     case Application.ensure_all_started(:one_core) do
       {:ok, _started} ->
         IO.puts(running() <> Server.key())
-
-        if match?({:win32, _}, :os.type()) do
-          IO.read(:eof)
-          System.stop()
-        end
-
+        told()
+        System.stop()
         Process.sleep(:infinity)
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->
@@ -37,6 +47,38 @@ defmodule OneCore.Release do
       {:error, why} ->
         IO.puts(:stderr, "The server didn't start: #{inspect(why)}")
         System.halt(1)
+    end
+  end
+
+  # Reads what the program that started it tells it, until its input closes.
+  defp told do
+    with line when is_binary(line) <- IO.read(:line) do
+      case JSON.decode(line) do
+        {:ok, %{} = said} -> say(said)
+        _ -> Logger.warning("The program keeping this server running said what it doesn't read: #{String.trim(line)}")
+      end
+
+      told()
+    end
+  end
+
+  # Where an update is is said, even where the edge or the bucket can't be reached just now: what this program says
+  # next carries on.
+  defp say(said) do
+    Builds.updating(said)
+  rescue
+    error -> Logger.warning("Couldn't say where its update is: #{Exception.message(error)}")
+  end
+
+  @doc """
+  Has the program keeping this server running take the latest builds, unless an update is under way already. Gives
+  the update's stage once that program has said it, or `nil` where it says none: one from before it said stages.
+  """
+  def update do
+    if Builds.update() == nil do
+      Builds.await_update(fn -> IO.puts(update_asked()) end)
+    else
+      Builds.update()
     end
   end
 

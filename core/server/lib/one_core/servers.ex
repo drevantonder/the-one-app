@@ -21,6 +21,7 @@ defmodule OneCore.Servers do
   What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
   (`look/1`) or forgets it all (`forget/0`).
   """
+  require Logger
   alias OneCore.{Bucket, Builds, Edge, Hooks, Server}
 
   @network "network"
@@ -106,10 +107,12 @@ defmodule OneCore.Servers do
   def name(key), do: cached({:name, key}, fn -> read("servers/#{key}/name", nil) end)
 
   @doc """
-  Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge, the time its
-  machine was last on there, in milliseconds since 1970, if it isn't, or `nil` where that isn't known: a network
-  with no address, or a server never seen. The relay at the address keeps it, and tells servers when one comes or
-  goes (`seen_again/0`), so a server that's known to be off isn't waited for.
+  Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge, `:restarting`
+  while it's stopping to start again and isn't back yet (`restarting/1`), the time its machine was last on there,
+  in milliseconds since 1970, if it isn't, or `nil` where that isn't known: a network with no address, or a server
+  never seen. The relay at the address keeps it, and tells servers when one comes or goes (`seen_again/0`), so a
+  server that's known to be off isn't waited for, and one that's restarting is waited for only where it's the one
+  to ask (`back/1`).
   """
   def seen(key) do
     if at = Application.get_env(:one_core, :address) do
@@ -122,15 +125,88 @@ defmodule OneCore.Servers do
   end
 
   defp on("on"), do: :on
+  defp on("restarting"), do: :restarting
   defp on(at), do: at
 
-  @doc "What was kept of who's on is read again, once one of the network's servers came or went."
+  @doc """
+  What was kept of who's on is read again, once one of the network's servers came or went, and whoever waits for one
+  to be back (`back/1`) looks again.
+  """
   def seen_again do
     if :ets.whereis(__MODULE__) != :undefined,
       do: Enum.each(:ets.match(__MODULE__, {{:seen, :"$1"}, :_, :_}), fn [key] -> again({:seen, key}) end)
 
+    Registry.dispatch(OneCore.Waiting, :seen, fn waiting -> for {process, _} <- waiting, do: send(process, :seen) end)
     :ok
   end
+
+  @doc """
+  Says at the network's edge that this server is stopping to start again, and is back within `seconds`: until it
+  is, the relay there says it's restarting, not off, and the other servers wait for it where it's the one to ask.
+  Where the edge can't be reached it's only taken for off meanwhile, so that's no reason not to restart.
+  """
+  def restarting(seconds) do
+    if at = Application.get_env(:one_core, :address) do
+      path = "/relay/seen"
+      body = JSON.encode!(%{restarting: seconds})
+      response = Edge.send!(method: :post, url: at <> path, body: body, headers: Edge.signed(path, body))
+      if response.status != 204,
+        do: Logger.warning("The edge didn't take that this server is restarting: #{inspect(response.body)}")
+    end
+
+    :ok
+  rescue
+    error in Edge.Unreachable -> Logger.warning("Couldn't say this server is restarting: #{Exception.message(error)}")
+  end
+
+  # How long a server that's stopping to start again, to update, takes to be back, in milliseconds: it finishes what
+  # it took, then starts again, and connects to the edge as it does. Well within what an MCP client waits for an
+  # answer, 30 seconds. One that isn't back by then may be trying a build that doesn't start, which takes minutes.
+  @back 20_000
+
+  @doc """
+  Waits for one of the servers whose keys are `keys` that's restarting to be back, for up to `@back`: where none of
+  the others answered, and what was asked is that one's to answer, as a service only it runs. Gives its key, or
+  `nil` if none is back by then, or none of them was restarting.
+  """
+  def back(keys) do
+    restarting = Enum.filter(keys, &(seen(&1) == :restarting))
+
+    if restarting != [] do
+      Registry.register(OneCore.Waiting, :seen, nil)
+
+      try do
+        await(restarting, System.monotonic_time(:millisecond) + @back)
+      after
+        Registry.unregister(OneCore.Waiting, :seen)
+      end
+    end
+  end
+
+  # Looks after each time a server came or went, until one of `keys` is on, or `until`, and then once more at the
+  # edge: one that said it may take less than it did is back without having come or gone.
+  defp await(keys, until) do
+    case Enum.find(keys, &(seen(&1) == :on)) do
+      nil ->
+        receive do
+          :seen -> await(keys, until)
+        after
+          max(until - System.monotonic_time(:millisecond), 0) -> Enum.find(keys, &(seen_again(&1) == :on))
+        end
+
+      key ->
+        key
+    end
+  end
+
+  @doc """
+  The protocol the server whose key is `key` speaks with other servers (`OneCore.Server.protocol/0`), as it said
+  when it last started: the first, for one from before servers said it.
+  """
+  def protocol(key), do: cached({:protocol, key}, fn -> read("servers/#{key}/build", %{})["protocol"] || 1 end)
+
+  @doc "Which protocol the server whose key is `key` speaks is read again: it refused what it was asked in this server's."
+  def protocol_again(key), do: again({:protocol, key})
 
   @doc """
   Whether the server whose key is `key` is on, as `seen/1` says, read again now. What was kept may be from before
@@ -178,7 +254,7 @@ defmodule OneCore.Servers do
   def started(key, address, name, owner) do
     say("servers/#{key}/address", address)
     say("servers/#{key}/name", JSON.encode!(name))
-    Builds.started(key)
+    Builds.say(key)
     Bucket.write("servers/#{key}/members", JSON.encode!([owner]))
     forget()
   end

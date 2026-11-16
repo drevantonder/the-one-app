@@ -4,3 +4,12 @@
   gap: var(--gap);
   max-width: var(--readable);
 }
+
+/* The steps of an update under way, in a box of their own where the update's row was. */
+.updating {
+  max-width: var(--readable);
+  padding: 1rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+}

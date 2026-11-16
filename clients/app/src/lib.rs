@@ -197,11 +197,13 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
 }
 
 /// Takes the latest builds for this device, as `one update` does, and starts again on them, as an app does once
-/// it has updated. Gives what it says, which a device that's also a server says before its program has taken them.
+/// it has updated. Gives what it says. On a device that's also a server, the program keeping its server running
+/// takes them, this program's among them, and says where that is in `builds`: this starts again once its file is a
+/// newer build than it runs.
 #[tauri::command]
 async fn update(app: AppHandle, views: State<'_, Views>) -> Result<String, String> {
     let message = cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))?;
-    if cli::serving::server().is_none() {
+    if cli::serving::server().is_none() || cli::serving::replaced() {
         app.restart()
     }
     Ok(message)

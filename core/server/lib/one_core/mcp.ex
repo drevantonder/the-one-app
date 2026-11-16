@@ -80,6 +80,7 @@ defmodule OneCore.Mcp do
           Trace.follow(meta(params)["traceparent"])
 
           with :ok <- speaks(version),
+               :ok <- protocol(meta(params)),
                {:ok, principal, forwarded} <- User.asking(from, meta(params), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
@@ -156,6 +157,18 @@ defmodule OneCore.Mcp do
 
   defp speaks(version),
     do: {:error, -32022, "Unsupported protocol version", %{supported: @versions, requested: version}}
+
+  # What a server asks is of the protocol it says (`OneCore.Server.protocol/0`), and one that says none, from before
+  # servers said it, speaks the first: a server says who asks, its `actor`. A client asks nothing of it.
+  defp protocol(%{"protocol" => theirs}), do: speaks_protocol(theirs)
+  defp protocol(%{"actor" => _actor}), do: speaks_protocol(1)
+  defp protocol(%{}), do: :ok
+
+  defp speaks_protocol(theirs) do
+    if theirs == Server.protocol(),
+      do: :ok,
+      else: {:error, -32022, "Unsupported protocol version", %{supported: [Server.protocol()], requested: theirs}}
+  end
 
   # A result to a client of a version that says what kind of result it is, and how long it may keep it.
   defp complete(result, _method, nil), do: result

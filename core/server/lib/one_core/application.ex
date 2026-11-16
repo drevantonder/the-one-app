@@ -20,7 +20,17 @@ defmodule OneCore.Application do
     {:ok, key} = Iroh.key(Server.key_file())
 
     if Servers.joined?(key, Application.get_env(:one_core, :owner, "network")) do
-      children = [{Task.Supervisor, name: OneCore.Asks}, Deploy, Plugins, Server, Services, Jobs]
+      # `OneCore.Waiting` is who waits for something to happen, by what: `:seen`, another server coming or going
+      # (`OneCore.Servers.back/1`), and `:update`, this one's update moving on (`OneCore.Builds.await_update/1`).
+      children = [
+        {Registry, keys: :duplicate, name: OneCore.Waiting},
+        {Task.Supervisor, name: OneCore.Asks},
+        Deploy,
+        Plugins,
+        Server,
+        Services,
+        Jobs
+      ]
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do

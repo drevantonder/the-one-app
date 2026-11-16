@@ -40,14 +40,27 @@ defmodule OneCore.Server do
   def forwarding_loop, do: -32001
 
   @doc """
+  The version of what servers ask each other: the methods only a server may ask (`OneCore.Mcp`), what a call passed
+  on says of itself (`_meta`) and the answers each gives. Every request a server sends another says it, as
+  `_meta.protocol`, and one that isn't of this version is refused before anything of it is read, as MCP refuses a
+  protocol version it doesn't speak (`-32022`, with the versions it does). So a change that a server on the build
+  before would read wrongly, such as a renamed field, adds one here, and while a release puts it on each server in
+  turn, a server asks only those on its own version: one on the version before is skipped, as if it were off, and
+  one that's on the next refuses what this one asks. A notification only has another server look again at what's in
+  the bucket, which no version reads wrongly.
+  """
+  def protocol, do: 1
+
+  @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
-  `:unreachable` if it couldn't be reached, or is known to be off, so it was asked nothing; or `:stopped` if it
-  stopped answering after it was asked, so it may have done what was asked.
+  `:unreachable` if it couldn't be reached, is known to be off or restarting, or is on the protocol before this
+  server's (`protocol/0`), so it was asked nothing; or `:stopped` if it stopped answering after it was asked, so it
+  may have done what was asked. One on a newer protocol than this server refuses, saying this one is behind.
   """
   def request(server, method, params) do
     # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
     # this one knows the other is still running it, however long it takes (`client::Reached::ask`).
-    meta = %{progressToken: System.unique_integer([:positive])}
+    meta = %{progressToken: System.unique_integer([:positive]), protocol: protocol()}
     meta = if parent = Trace.traceparent(), do: Map.put(meta, :traceparent, parent), else: meta
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
 
@@ -55,10 +68,24 @@ defmodule OneCore.Server do
          {:ok, response} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
       case JSON.decode(response) do
         {:ok, %{"result" => result}} -> {:ok, result}
+        {:ok, %{"error" => %{"code" => -32022, "data" => %{"supported" => [theirs]}}}} -> refused(server, theirs)
         {:ok, %{"error" => %{"code" => code, "message" => why}}} -> {:error, code, why}
         # An answer cut short, or none, is from a server that went away after it was asked.
         _ -> :stopped
       end
+    end
+  end
+
+  # A server on another protocol asked nothing. One that's behind is updated in its turn, which a release does
+  # next: it's as if it were off, so whoever asked asks another. One that's ahead was updated first, and this one
+  # is the one behind.
+  defp refused(server, theirs) do
+    Servers.protocol_again(server)
+
+    if theirs < protocol() do
+      :unreachable
+    else
+      {:error, -32022, "#{named(key())} is on an older build than #{named(server)}, so it asks it nothing until it's updated"}
     end
   end
 
@@ -75,9 +102,13 @@ defmodule OneCore.Server do
 
   @doc "What whoever asked is told of the server `server` that didn't answer `request/3`, by its machine's name."
   def error_message(:unreachable, server) do
-    case Servers.seen(server) do
-      at when is_integer(at) -> "#{named(server)} was last seen #{Servers.ago(at)}"
-      _ -> "#{named(server)} isn't answering"
+    seen = Servers.seen(server)
+
+    cond do
+      seen == :restarting -> "#{named(server)} is restarting"
+      is_integer(seen) -> "#{named(server)} was last seen #{Servers.ago(seen)}"
+      Servers.protocol(server) < protocol() -> "#{named(server)} is on an older build until it's updated"
+      true -> "#{named(server)} isn't answering"
     end
   end
 
