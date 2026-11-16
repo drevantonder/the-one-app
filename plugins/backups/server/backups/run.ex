@@ -20,8 +20,6 @@ defmodule Backups.Run do
 
   # How many blobs are read from the bucket at once.
   @together 32
-  # How many objects are sent at once: more fill a home connection's upload, and each is slower.
-  @sending 8
 
   @doc "Backs up to `destination` now, and says what was sent and how long it took. A failure is kept as its problem."
   def back_up(call, destination) do
@@ -111,8 +109,8 @@ defmodule Backups.Run do
     end
   end
 
-  # Reads `keys` from the bucket, a few at once, and sends what the destination doesn't have, a few at once too: the
-  # blobs listed, and the objects sent. A blob removed since it was listed isn't there to back up.
+  # Reads `keys` from the bucket, a few at once, and sends what the destination doesn't have: the blobs listed, and the
+  # objects sent. A blob removed since it was listed isn't there to back up.
   defp copy(opened, keys, known, {listed, sent}) do
     keys
     |> Enum.chunk_every(@together)
@@ -135,23 +133,7 @@ defmodule Backups.Run do
             {[%{key: key, object: object, size: byte_size(data), sha256: sha256} | listed], new, known}
         end
 
-      # A failure is raised here, where it's kept as the backup's problem, not in the task that met it.
-      new
-      |> Task.async_stream(
-        fn {object, data} ->
-          try do
-            Destination.put(opened, "objects/" <> object, data)
-          rescue
-            failed -> {:failed, failed}
-          end
-        end,
-        max_concurrency: @sending,
-        timeout: :infinity
-      )
-      |> Enum.each(fn
-        {:ok, {:failed, failed}} -> raise failed
-        {:ok, _put} -> :ok
-      end)
+      for {object, data} <- Enum.reverse(new), do: Destination.put(opened, "objects/" <> object, data)
 
       sent = for {object, data} <- new, into: sent, do: %{object: object, sha256: digest(data), stored: byte_size(data), digest: digest(data)}
       {listed, sent, known}

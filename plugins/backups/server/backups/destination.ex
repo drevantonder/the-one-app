@@ -100,10 +100,8 @@ defmodule Backups.Destination do
         do: "/" <> Enum.map_join(String.split(folder(opened) <> name, "/"), "/", &URI.encode_www_form/1),
         else: ""
 
-    # A big object over a home connection's upload takes longer than Req's 15 s to be answered.
     Req.request!(
-      [method: method, url: "#{destination["endpoint"]}/#{bucket}#{path}", aws_sigv4: sign, decode_body: false, receive_timeout: 120_000] ++
-        options
+      [method: method, url: "#{destination["endpoint"]}/#{bucket}#{path}", aws_sigv4: sign, decode_body: false] ++ options
     )
   end
 
