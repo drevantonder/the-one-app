@@ -1717,6 +1717,10 @@ html:has(.ui-sign-in) {
 .ui-widget .bold {
   font-weight: 700;
 }
+/* A figure is never cut: in a row, a stat keeps at least its own width and the others give way. */
+.ui-widget .stat {
+  min-width: auto;
+}
 .ui-widget .stat > div {
   display: flex;
   align-items: baseline;
