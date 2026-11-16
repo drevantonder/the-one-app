@@ -51,7 +51,7 @@ defmodule OneCore.Server do
     said = if parent = Trace.traceparent(), do: Map.put(said, :traceparent, parent), else: said
     params = Map.update(params, :_meta, said, &Map.merge(&1, said))
 
-    with true <- Servers.seen(server) in [:on, nil] or :unreachable,
+    with true <- Servers.seen(server) in [:on, nil] or Servers.seen_again(server) in [:on, nil] or :unreachable,
          {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
       case JSON.decode(answer) do
         {:ok, %{"result" => result}} -> {:ok, result}
@@ -130,21 +130,22 @@ defmodule OneCore.Server do
     Enum.each(Plugins.refresh(), &reload/1)
   end
 
-  # A connection is opened when there's none, to where the server says it is now. A server whose connection no
-  # longer answers has gone, unless it says it's somewhere else now: one that starts again listens somewhere new.
+  # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
+  # answered may only have lost what it was sent, as a network now and then does, so it's connected to again, which
+  # one that's there answers at once (`Iroh.connect/4`); one that started again is somewhere new.
   defp ask(server, message) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
     asked = fn -> told(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
 
     case asked.() do
-      :closed -> connect(endpoint, server, nil, asked)
-      {:gone, was} -> connect(endpoint, server, was, asked)
+      :closed -> connect(endpoint, server, asked)
+      {:gone, _address} -> connect(endpoint, server, asked)
       answered -> answered
     end
   end
 
-  defp connect(endpoint, server, was, asked) do
-    with {:ok, address} when address != was <- Servers.address(server),
+  defp connect(endpoint, server, asked) do
+    with {:ok, address} <- Servers.address(server),
          :ok <- told(&Iroh.connect(endpoint, address, self(), &1)) do
       case asked.() do
         :closed -> :unreachable

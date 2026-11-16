@@ -132,6 +132,16 @@ defmodule OneCore.Servers do
     :ok
   end
 
+  @doc """
+  Whether the server whose key is `key` is on, as `seen/1` says, read again now. What was kept may be from before
+  it came back: what the relay told this server of it while this one wasn't listening, or what it read of it while
+  being told, is missed.
+  """
+  def seen_again(key) do
+    again({:seen, key})
+    seen(key)
+  end
+
   @doc "How long ago `at`, in milliseconds since 1970, was, as a person would say it short: `2 min ago`."
   def ago(at) do
     case div(System.system_time(:millisecond) - at, 60_000) do

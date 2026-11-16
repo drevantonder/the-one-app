@@ -62,17 +62,25 @@ defmodule Database.Lease do
     {:ok, look(Map.put(lease, :firing, %{}))}
   end
 
-  # The server this one took to hold the lease didn't run a call passed on to it. If the log still names it, this
-  # server takes the lease, and otherwise it has learnt who holds it now.
+  # The server this one took to hold the lease didn't run a call passed on to it, and is `gone` or answered. If the
+  # log still names it, this server takes the lease from one that's gone, and says one that answered is `:there`.
+  # Otherwise it has learnt who holds it now.
   @impl true
-  def handle_call({:take_over, server}, _from, %{db: nil} = lease) do
+  def handle_call({:take_over, server, gone}, _from, %{db: nil} = lease) do
     case look(lease) do
-      %{db: nil, held_by: ^server} = lease -> {:reply, :ok, take(lease)}
-      lease -> {:reply, :ok, lease}
+      %{db: nil, held_by: ^server} = lease when gone ->
+        Logger.info("#{lease.artifact.prefix}: #{server}, which holds its lease, didn't answer twice")
+        {:reply, :ok, take(lease)}
+
+      %{db: nil, held_by: ^server} = lease ->
+        {:reply, :there, lease}
+
+      lease ->
+        {:reply, :ok, lease}
     end
   end
 
-  def handle_call({:take_over, _server}, _from, lease), do: {:reply, :ok, lease}
+  def handle_call({:take_over, _server, _gone}, _from, lease), do: {:reply, :ok, lease}
 
   # Anything else is asked with what wraps the artifact of the call that asks.
   def handle_call({codec, _ask}, _from, %{artifact: %{codec: was}} = lease) when codec != was,

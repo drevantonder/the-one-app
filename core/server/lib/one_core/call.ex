@@ -306,9 +306,7 @@ defmodule OneCore.Call do
   ones that hold a key, say. `:no_answer` then means none of them ran it.
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
-    for server <- servers -- [Server.key()],
-        do: :no_answer = asks(call.request, {call.actor, call.subject}, server, "to")
-
+    for server <- servers -- [Server.key()], do: asks(call.request, {call.actor, call.subject}, server, "to")
     :no_answer
   end
 
@@ -327,7 +325,7 @@ defmodule OneCore.Call do
   def run_elsewhere(ask, asked, forwarded, owner, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
     servers = Servers.running(owner)
-    for server <- servers -- [Server.key()], do: :no_answer = asks(ask, asked, server, "to")
+    for server <- servers -- [Server.key()], do: asks(ask, asked, server, "to")
     raise Servers.off(what, owner, servers)
   end
 
@@ -337,7 +335,7 @@ defmodule OneCore.Call do
   """
   def forward(ask, asked, forwarded, owner) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    for server <- Servers.acting(owner) -- [Server.key()], do: :no_answer = asks(ask, asked, server, "to")
+    for server <- Servers.acting(owner) -- [Server.key()], do: asks(ask, asked, server, "to")
     raise "No server acting for #{owner} answered"
   end
 
@@ -345,8 +343,9 @@ defmodule OneCore.Call do
   Asks another server to run this call instead, for when what it needs is there. If that server runs it, the call
   ends here with its answer, and nothing after `forward_to` runs.
 
-  `:no_answer` means it didn't run there: that server couldn't be reached, or would have passed it on in turn. A
-  server that stops answering after it was asked raises, since it may have run.
+  If it didn't run there, `:no_answer` means that server couldn't be reached just now, or went away after it was
+  asked something that's safe to ask again; and `:forwarding_loop` that it answered, saying it would pass it on in
+  turn. A server that stops answering after it was asked anything else raises, since it may have run.
   """
   def forward_to(%__MODULE__{forwarded: true}, _server), do: throw({__MODULE__, :forwarding_loop})
 
@@ -361,7 +360,7 @@ defmodule OneCore.Call do
 
     case Server.request(server, method, Map.update(params, :_meta, meta, &Map.merge(&1, meta))) do
       {:ok, result} -> throw({__MODULE__, {:forwarded, result}})
-      {:error, ^forwarding_loop, _why} -> :no_answer
+      {:error, ^forwarding_loop, _why} -> :forwarding_loop
       {:error, _code, why} -> raise why
       :unreachable -> :no_answer
       :stopped -> if again?(method, params, who), do: :no_answer, else: raise(Server.said(:stopped, server))
