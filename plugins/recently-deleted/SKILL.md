@@ -1,6 +1,9 @@
 ---
 name: recently-deleted
 description: Read when someone wants back something they deleted, asks what they removed, or before a plugin deletes something a person made.
+metadata:
+  subtitle: "Bring back what you deleted"
+  about: "Keeps what's deleted for 30 days, then erases it for good. Bring anything back before then."
 ---
 
 Recently Deleted keeps what's removed for 30 days, as it was, and then erases it for good. Anything an app made for someone

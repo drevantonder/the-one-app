@@ -1,6 +1,9 @@
 ---
 name: encryption
 description: Read before a plugin keeps something that whoever stores the network's data mustn't read, and when a call says something is encrypted and no server may open it, or that a device doesn't hold someone's key.
+metadata:
+  subtitle: "Data only you can read"
+  about: "Encrypts what your apps keep, so whoever stores your network's data can't read it. Your Vault is kept this way."
 ---
 
 Encryption keeps an artifact's blobs encrypted in the bucket, so whoever runs the bucket can't read them, and nor

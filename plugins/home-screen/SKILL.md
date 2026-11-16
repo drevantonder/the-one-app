@@ -1,6 +1,9 @@
 ---
 name: home-screen
 description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, asking for a plugin to be installed for everyone, or giving a plugin accounts or a part of Settings.
+metadata:
+  subtitle: "Your pages of apps"
+  about: "Your Home Screen, your groups' and everyone's: pages of apps and widgets, arranged your way. Add apps from the App Store, and ask for one to be installed for everyone."
 ---
 
 Home Screen is the network's launcher: the app every client opens first, which draws the rest. It keeps how each

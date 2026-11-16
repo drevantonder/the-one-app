@@ -49,7 +49,7 @@ defmodule HomeScreen do
 
     plugin = %{
       type: "object",
-      properties: %{plugin: %{type: "string", description: "The plugin, as `store` lists it"}},
+      properties: %{plugin: %{type: "string", description: "The plugin: its name (gmail), or as `store` lists it"}},
       required: ["plugin"]
     }
 
@@ -109,7 +109,7 @@ defmodule HomeScreen do
         name: "store",
         read_only: true,
         description:
-          "Lists every plugin anyone has deployed that a person could add: one with an icon, and an app on a page if it has apps. Each says whether it has accounts (`accounts`)",
+          "Lists every plugin anyone has deployed that a person could add: one with an icon, and an app on a page if it has apps. Each with what a person reads of it (`subtitle`, `about`) and whether it has accounts (`accounts`)",
         inputs: none
       },
       %{
@@ -263,7 +263,14 @@ defmodule HomeScreen do
     plugins =
       for plugin <- Call.deployed(call),
           plugin.icon != nil and (plugin.apps == [] or Enum.any?(plugin.apps, &(&1.category == nil))),
-          do: %{plugin: plugin.plugin, name: plugin.title, icon: plugin.icon, accounts: accounts?(plugin.tools)}
+          do: %{
+                plugin: plugin.plugin,
+                name: plugin.title,
+                icon: plugin.icon,
+                subtitle: plugin.subtitle,
+                about: plugin.about,
+                accounts: accounts?(plugin.tools)
+              }
 
     Enum.sort_by(plugins, &String.downcase(&1.name))
   end
@@ -271,7 +278,7 @@ defmodule HomeScreen do
   def call("add", %{"plugin" => plugin}, call) do
     if not Call.owns?(call), do: raise("#{call.subject}'s Home Screen page is arranged by their owners.")
 
-    case Enum.find(Call.plugins(call), &(&1.plugin == plugin)) do
+    case named(call, plugin) do
       nil ->
         raise "#{plugin} isn't in use for the network, so its app can't go on a page yet. Whoever may install " <>
                 "plugins for everyone can, and home-screen_request asks them."
@@ -293,7 +300,7 @@ defmodule HomeScreen do
   def call("remove", %{"plugin" => plugin}, call) do
     if not Call.owns?(call), do: raise("#{call.subject}'s Home Screen page is arranged by their owners.")
 
-    case Enum.find(Call.plugins(call), &(&1.plugin == plugin)) do
+    case named(call, plugin) do
       %{installed: at, name: name} when at == call.subject ->
         raise "#{plugin} is installed for #{at}: uninstall --name #{name} takes it off."
 
@@ -305,6 +312,9 @@ defmodule HomeScreen do
         raise "#{plugin} isn't on the page."
     end
   end
+
+  # A plugin this page's owner finds, by the name it's installed by, as other tools take it, or by its artifact.
+  defp named(call, plugin), do: Enum.find(Call.plugins(call), &(plugin in [&1.name, &1.plugin]))
 
   # A request names a plugin in the network, or a repo and a plugin's name in it, as `one install` takes them.
   def call("request", inputs, call) do

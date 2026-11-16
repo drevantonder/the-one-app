@@ -1,6 +1,9 @@
 ---
 name: chrome
 description: Read before opening, reading or acting on a web page in a browser of your own, to open a page, read it, click, fill in a form or run JavaScript.
+metadata:
+  subtitle: "A browser for your AI"
+  about: "Gives your AI a Chrome of its own on your machine, signed in to nothing, to open pages, click and fill in forms. You can watch it as it goes."
 ---
 
 Chrome is a Chromium of your own, in a container on the user's machine, signed in to nothing, on a screen of its

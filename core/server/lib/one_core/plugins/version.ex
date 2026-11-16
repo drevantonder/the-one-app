@@ -124,6 +124,22 @@ defmodule OneCore.Plugins.Version do
   def skills(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).skills
 
   @doc """
+  What a person reads of a version where it's listed (the App Store, the plugin directory), from its skill's
+  `metadata` (`OneCore.Plugin`): its `subtitle` and its `about`, each `nil` where it has none.
+  """
+  def listing(version) do
+    metadata =
+      case Enum.find(skills(version), &(&1.at == "")) do
+        %{frontmatter: %{"metadata" => %{} = metadata}} -> metadata
+        _ -> %{}
+      end
+
+    for key <- [:subtitle, :about], into: %{} do
+      {key, with(text when is_binary(text) <- metadata[Atom.to_string(key)], do: text, else: (_ -> nil))}
+    end
+  end
+
+  @doc """
   What a loaded version says of itself, as the bucket keeps it: what it provides, and its files and skills, but
   none of its code.
   """

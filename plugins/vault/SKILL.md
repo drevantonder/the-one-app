@@ -1,6 +1,9 @@
 ---
 name: vault
 description: Read whenever someone mentions or pastes a key, token or password, before asking for one or using one, and before a plugin signs in to an outside service or uses an account there.
+metadata:
+  subtitle: "Passwords and keys, kept safe"
+  about: "Keeps your passwords, keys and sign-ins, and lets your apps and your AI use them without ever seeing them. You choose who may use each one."
 ---
 
 The Vault keeps keys, sign-ins and accounts as items, used without being seen. An item has fields (a secret one is

@@ -1,6 +1,9 @@
 ---
 name: telemetry
 description: Read when someone asks what's failing, slow or broken in their network, how long something took, what AI cost, or to read a trace; and before looking into a bug or a slow tool.
+metadata:
+  subtitle: "What's slow, failing or costly"
+  about: "Shows what's failing or slow in your network, and what AI costs, for the last 14 days. It keeps names and timings, never what anyone wrote."
 ---
 
 Telemetry keeps what the network's servers, clients and plugins did: a span for each tool call, numbers such as how

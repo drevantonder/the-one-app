@@ -81,11 +81,18 @@ defmodule OneCore.Plugin do
     shows with the plugin's tools. Its address starts with the name the plugin is installed by, which is where an
     agent finds it: installed as `greeter`, it's `skill://greeter/hello/SKILL.md`. It's an Agent Skill (agentskills.io):
     it starts with the skill's `name`, which is the plugin's, and its `description`, one line saying when an agent
-    should read it, as YAML between two lines of `---`:
+    should read it, as YAML between two lines of `---`. Its `metadata`, which Agent Skills leaves to whoever reads
+    it, is what a person reads where the plugin's listed (the App Store, the plugin directory): its `subtitle`, a
+    few words under its name, as an App Store app's is, and `about`, a few plain sentences on its page, as Google
+    Play's "About this app" is. Both say what it does for a person, with no word of an agent's; each is one line, as
+    the directory reads it:
 
         ---
         name: hello
         description: Read when someone arrives, to greet them.
+        metadata:
+          subtitle: Hello to whoever arrives
+          about: Says hello to each person who arrives, by name, and counts how many it has greeted.
         ---
 
         Use `greet` when someone arrives, once for each of them.

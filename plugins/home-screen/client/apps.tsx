@@ -1,4 +1,5 @@
-// Apps: every plugin with an app or accounts that could be on a page, and which of your pages each is on. Adding one
+// Apps: every plugin with an app or accounts that could be on a page, each with its subtitle, and on its sheet what
+// it's about and which of your pages it's on. Adding one
 // to a page puts it on the clients of everyone who sees that page. Taking one off keeps what it kept, and adding it
 // back brings that back. Opened as `#accounts` (Accounts' Add Account for Another App), it lists those that sign in.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
@@ -11,6 +12,8 @@ interface App {
   plugin: string
   name: string
   icon: string
+  subtitle?: string
+  about?: string
   accounts: boolean
 }
 
@@ -62,7 +65,7 @@ function Apps(props: { store: { apps: App[]; pages: Page[] } }) {
             {(app) => (
               <Row
                 heading={app().name}
-                text={pages(app()).length ? `On ${new Intl.ListFormat("en").format(pages(app()).map((page) => page.name))}` : undefined}
+                text={app().subtitle}
                 start={<img class="icon" src={app().icon} alt="" />}
                 end={<Button variant={pages(app()).length ? "outline" : "secondary"} onClick={() => setManaging(app().plugin)}>{pages(app()).length ? "Manage" : "Add to"}</Button>}
               />
@@ -72,6 +75,9 @@ function Apps(props: { store: { apps: App[]; pages: Page[] } }) {
       </Show>
       <Sheet heading={app()?.name} open={!!app()} onClose={() => setManaging()}>
         <Show when={app()}>
+          <Show when={app()!.about}>
+            <p class="about">{app()!.about}</p>
+          </Show>
           <form>
             <For each={props.store.pages} keyed={(page) => page.who}>
               {(page) => <Switch label={page().name} checked={!!on(page(), app()!)} disabled={!page().arranges} onChange={(event) => put(page(), app()!, event.currentTarget.checked)} />}
@@ -86,7 +92,7 @@ function Apps(props: { store: { apps: App[]; pages: Page[] } }) {
 render(
   () => (
     <Screen heading="Apps" back onBack={leave}>
-      <style>{".icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; }"}</style>
+      <style>{".icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; } .about { margin: 0 0 1rem; }"}</style>
       <Errored fallback={(error) => <Problem heading="Can't show the apps" text={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <Apps store={store()} />

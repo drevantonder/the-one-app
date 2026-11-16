@@ -216,32 +216,36 @@ defmodule OneCore.Call do
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
-  `plugin` it is, as its artifact's name, who it was `installed` for, its `title` and `icon`, its `apps`, its `widgets`
-  and its `tools`' names and pages (`ui`). A Home Screen page is drawn from these.
+  `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle` and `about`, its
+  `apps`, its `widgets` and its `tools`' names and pages (`ui`). A Home Screen page is drawn from these.
   """
   def plugins(%__MODULE__{subject: who}) do
     for at <- Enum.reverse(Plugins.chain(who)), {name, version} <- Plugins.versions([at]), into: %{} do
       tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui])
 
       {name,
-       %{
-         name: name,
-         plugin: version.artifact,
-         installed: at,
-         title: version.title,
-         icon: version.icon,
-         apps: version.apps,
-         widgets: version.widgets,
-         tools: tools
-       }}
+       Map.merge(
+         %{
+           name: name,
+           plugin: version.artifact,
+           installed: at,
+           title: version.title,
+           icon: version.icon,
+           apps: version.apps,
+           widgets: version.widgets,
+           tools: tools
+         },
+         OneCore.Plugins.Version.listing(version)
+       )}
     end
     |> Map.values()
   end
 
   @doc """
   Every plugin anyone in the network has deployed, whether or not it's installed for anyone now: each one's `plugin`,
-  as its artifact's name, and its `apps` as its latest version has them. An app store is drawn from it. Whoever
-  may see one reads and installs it, and so does everyone in a group or the network it's in use for (`OneCore.Tools`).
+  as its artifact's name, its `title`, `icon`, `subtitle` and `about`, and its `apps` as its latest version has
+  them. An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
+  the network it's in use for (`OneCore.Tools`).
   """
   def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()
 

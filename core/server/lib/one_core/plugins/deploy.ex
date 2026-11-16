@@ -65,7 +65,8 @@ defmodule OneCore.Plugins.Deploy do
 
   @doc """
   Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., description:
-  its skill's, icon: ..., apps: [...], tools: [names], permissions: [...], sandbox: ...}]`, its permissions as
+  its skill's, subtitle: ..., about: ..., icon: ..., apps: [...], tools: [names], permissions: [...], sandbox:
+  ...}]`, what a person reads of it as `Version.listing/1` gives it, its permissions as
   `permissions/0` gives them
   and whether it runs in sandbox mode. It's what lists every app there is, whether or not it's on anyone's page
   now. One that was removed, by the plugin that keeps what's deleted, has no latest version, and isn't listed.
@@ -87,6 +88,8 @@ defmodule OneCore.Plugins.Deploy do
         plugin: "#{owner}/plugins/#{name}",
         title: said["title"] || name,
         description: said["description"] || "",
+        subtitle: said["subtitle"],
+        about: said["about"],
         icon: said["icon"],
         apps: apps,
         tools: said["tools"] || [],
@@ -101,7 +104,7 @@ defmodule OneCore.Plugins.Deploy do
     blob = "#{@deployed}#{owner}/#{name}"
 
     said =
-      JSON.encode!(%{
+      %{
         apps: version.apps,
         title: version.title,
         description: OneCore.Search.described(version),
@@ -109,7 +112,9 @@ defmodule OneCore.Plugins.Deploy do
         tools: Enum.map(version.tools, & &1.name),
         permissions: version.permissions,
         sandbox: version.sandbox
-      })
+      }
+      |> Map.merge(Version.listing(version))
+      |> JSON.encode!()
 
     case Bucket.read(blob) do
       {:ok, ^said, _tag} -> :ok
