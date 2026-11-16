@@ -1,5 +1,7 @@
 // The presigner: the only holder of the bucket's credentials. A server asks it to sign one request to the bucket, and
-// it does if that server is on the list of whoever the blob belongs to. It never signs a write without a condition
+// it does if that server is on the list of whoever the blob belongs to. A read or a list it sends to the bucket
+// itself, and answers with what the bucket answered: one trip for the server rather than two, to the presigner and
+// then to the bucket, and no signed request to keep for later. It never signs a write without a condition
 // (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
 // signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
 // are, for the other pieces here and for a client (`Network`), and keeps the blobs a plugin's edge function
@@ -82,14 +84,17 @@ export default {
     const body = await request.text();
     const by = await verifiedKey(request, body);
     if (!by) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    if (pathname === "/presigner/sign" && request.method === "POST") return sign(env, by, request.headers.get("one-token"), body);
+    const token = request.headers.get("one-token");
+    if (pathname === "/presigner/sign" && request.method === "POST") return sign(env, by, token, body);
+    if (pathname === "/presigner/read" && request.method === "POST") return read(env, by, token, body);
     if (pathname === "/presigner/servers" && request.method === "GET") {
-      if (!(await admits(env, by, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
+      const lists = reader(env);
+      if (!(await admits(lists, by, token))) return refuse(403, "This network doesn't know you");
       // Whoever's servers are asked for, the ones acting for the network act for them too.
-      const acting = [...(await servers(env, searchParams.get("of"))), ...(await servers(env, NETWORK))];
-      return Response.json({ servers: [...new Set(acting)] });
+      const acting = await Promise.all([servers(lists, searchParams.get("of")), servers(lists, NETWORK)]);
+      return Response.json({ servers: [...new Set(acting.flat())] });
     }
-    return refuse(404, "The presigner signs at /presigner/sign and lists servers at /presigner/servers");
+    return refuse(404, "The presigner signs at /presigner/sign, reads at /presigner/read and lists servers at /presigner/servers");
   },
 } satisfies ExportedHandler<PresignerEnv>;
 
@@ -97,12 +102,12 @@ export default {
 export class Network extends WorkerEntrypoint<PresignerEnv> {
   /** The keys of the servers that act for a user or group, or for the network, by its prefix. */
   servers(of: string | null): Promise<string[]> {
-    return servers(this.env, of);
+    return servers(reader(this.env), of);
   }
 
   /** Whether `key` is one of the network's own, by the token it shows: `null`, or `{until}` for a token that ends. */
   admits(key: string, token: string | null): Promise<Admitted | null> {
-    return admits(this.env, key, token);
+    return admits(reader(this.env), key, token);
   }
 
   /** The key that signed what was asked at `url` with `body`, by the `one-` headers it came with, or null. */
@@ -174,25 +179,59 @@ function asked(body: string): Ask | null {
 async function sign(env: PresignerEnv, by: string, token: string | null, body: string) {
   const ask = asked(body);
   if (!ask) return refuse(400, "An ask is JSON that names one blob's key, to read, write, replace, list or remove");
-  const { operation, key } = ask;
-
-  const [network, owners] = await Promise.all([list(env, NETWORK), list(env, owner(key))]);
-  const listed = network?.includes(by) || owners?.includes(by);
-  // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
-  // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
-  // list. The secret opens nothing after that, since the bucket lets only the first write land.
-  const first = operation === "write" && key === NETWORK + "servers" && same(said(token ?? "").first, env.FIRST_SERVER);
-  const server = SERVER.exec(key)?.[1];
-  const reads = operation === "read" || operation === "list";
-  const open = (server === by || (server && operation === "read") || (OPEN.test(key) && reads)) && (await admits(env, by, token));
-  const installer = ((operation === "write" || operation === "remove") && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
-  const installed = installer && (await list(env, installer + "/"))?.includes(by);
-  if (!listed && !first && !open && !installed) return refuse(403, "You aren't on its list of servers");
-
+  if (!(await allowed(env, by, token, ask))) return refuse(403, "You aren't on its list of servers");
   const { method, url, headers } = request(env, ask);
   url.searchParams.set("X-Amz-Expires", String(SIGNED_FOR));
   const signed = await bucket(env).sign(url, { method, headers, aws: { signQuery: true } });
   return Response.json({ method, url: signed.url, headers });
+}
+
+/**
+ * Sends a read or a list to the bucket for the server `by`, which shows `token`, if it may send it. Answers with
+ * what the bucket answered: its status, the blob's tag, and the blob or the list. The bucket is asked while the
+ * lists of servers are, so this takes as long as the slower of the two, and an answer the server may not have is
+ * dropped unread: a refusal comes as soon as the lists say so, however large or absent the blob.
+ */
+async function read(env: PresignerEnv, by: string, token: string | null, body: string) {
+  const ask = asked(body);
+  if (!ask || (ask.operation !== "read" && ask.operation !== "list")) {
+    return refuse(400, "An ask to read is JSON that names one blob's key to read, or the start of the keys to list");
+  }
+  const { method, url, headers } = request(env, ask);
+  const stop = new AbortController();
+  const answer = bucket(env).fetch(url, { method, headers, signal: stop.signal });
+  // One dropped for a server that may not have it isn't an error; awaited below, one that failed still throws.
+  answer.catch(() => {});
+  if (!(await allowed(env, by, token, ask))) {
+    stop.abort();
+    return refuse(403, "You aren't on its list of servers");
+  }
+  const got = await answer;
+  const tag = got.headers.get("etag");
+  // Only what the presigner says itself is JSON, so a server tells it from the bucket's answer by its type. A blob's
+  // own type isn't passed on, so nothing between here and the server takes it for a page to change.
+  return new Response(got.body, { status: got.status, headers: { "content-type": "application/octet-stream", ...(tag && { etag: tag }) } });
+}
+
+/** Whether the server `by`, which shows `token`, may send the request to the bucket that `ask` is. */
+async function allowed(env: PresignerEnv, by: string, token: string | null, { operation, key }: Ask) {
+  const server = SERVER.exec(key)?.[1];
+  const reads = operation === "read" || operation === "list";
+  const opens = server === by || (server !== undefined && operation === "read") || (OPEN.test(key) && reads);
+  const installer = ((operation === "write" || operation === "remove") && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
+  // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
+  // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
+  // list. The secret opens nothing after that, since the bucket lets only the first write land.
+  const first = operation === "write" && key === NETWORK + "servers" && same(said(token ?? "").first, env.FIRST_SERVER);
+  // Every list that could let it is read at once, each once: one trip to the bucket.
+  const lists = reader(env);
+  const [network, owners, open, installed] = await Promise.all([
+    lists(NETWORK),
+    lists(owner(key)),
+    opens ? admits(lists, by, token) : null,
+    installer ? lists(installer + "/") : null,
+  ]);
+  return Boolean(network?.includes(by) || owners?.includes(by) || first || open || installed?.includes(by));
 }
 
 /** The request to the bucket that `ask` is, unsigned: its method, URL and headers. */
@@ -209,6 +248,9 @@ function request(env: PresignerEnv, { operation, key, tag, after }: Ask) {
 /** A blob's address in the bucket, each part of its key as it is, so the bucket reads no `%2F` in one as a `/`. */
 const blob = (env: PresignerEnv, key: string) => `${env.BUCKET}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
+/** What a token admits: a server's, for as long as it's on its list (`{}`), and a device's, until a time. */
+type Admitted = { until?: number }
+
 /**
  * Whether `key` is one of the network's own, by the token it shows: `null`, or `{until}` for a token that ends. A
  * server's token names a list it's on (`{list}`). A device's is signed by a server on a list, for that device's
@@ -216,23 +258,32 @@ const blob = (env: PresignerEnv, key: string) => `${env.BUCKET}/${key.split("/")
  * client on a device has a key of its own, and shows the device's token, the device's key and the device's word for
  * the run's key, joined by dots (`core/client/src/lib.rs`).
  */
-/** What a token admits: a server's, for as long as it's on its list (`{}`), and a device's, until a time. */
-type Admitted = { until?: number }
-
-async function admits(env: PresignerEnv, key: string, shown: string | null): Promise<Admitted | null> {
+async function admits(lists: Lists, key: string, shown: string | null): Promise<Admitted | null> {
   const [token, device = key, attestation] = (shown ?? "").split(".");
   const { list, by, until, signature } = said(token);
   if (!isKey(key) || owner(list) !== list) return null;
-  if (by === undefined) return (await servers(env, list)).includes(key) ? {} : null;
+  if (by === undefined) return (await servers(lists, list)).includes(key) ? {} : null;
   if (!(until !== undefined && until > Date.now())) return null;
   if (device !== key && !(await signedBy(device, attestation, `one/run/1\n${key}`))) return null;
   if (!(await signedBy(by, signature, `one/token/1\n${device}\n${list}\n${until}`))) return null;
-  return (await servers(env, list)).includes(by) ? { until } : null;
+  return (await servers(lists, list)).includes(by) ? { until } : null;
 }
 
 /** The keys of the servers that act for a user or group, or for the network, by its prefix. */
-async function servers(env: PresignerEnv, of: unknown): Promise<string[]> {
-  return (owner(of) === of && (await list(env, of as string))) || [];
+async function servers(lists: Lists, of: unknown): Promise<string[]> {
+  return (owner(of) === of && (await lists(of as string))) || [];
+}
+
+/** The lists of servers, by their prefixes, as one request reads them. */
+type Lists = (prefix: string | undefined) => Promise<string[] | null>;
+
+/**
+ * Reads the lists of servers for one request: each from the bucket once, however often it's asked for, and never
+ * kept past the request, so a server taken off a list is refused from the next request on.
+ */
+function reader(env: PresignerEnv): Lists {
+  const read = new Map<string | undefined, Promise<string[] | null>>();
+  return (prefix) => read.get(prefix) ?? read.set(prefix, list(env, prefix)).get(prefix)!;
 }
 
 /** The list of servers kept under `prefix`, `null` if there's none yet, and nobody's for no prefix. */
