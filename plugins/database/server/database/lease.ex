@@ -9,6 +9,12 @@ defmodule Database.Lease do
   another server wrote that entry first, this one lost the lease without knowing: it throws its copy away, and
   what it had committed there with it.
 
+  A server that can't reach the one holding the lease takes it, even while that one is up and answering others, and
+  that one learns so only by looking at the log. So a server answers from its copy only for a few seconds after it
+  last saw the log's next entry free, and looks again before it answers after that; and a server that has just
+  opened the database writes nothing to it for a little longer. One that lost the lease without knowing has stopped
+  answering from what it had before the database changes.
+
   One transaction runs at a time, and the next begins after the last is in the bucket, so none sees what could
   still be lost.
 
@@ -30,6 +36,12 @@ defmodule Database.Lease do
   # other write.
   @least 64
 
+  # How long, in milliseconds, a server answers from its copy after it last saw the log's next entry free, and how
+  # long one that has just opened the database waits before it writes to it. The second is longer by far more than
+  # two machines' clocks drift apart in that time.
+  @answers_for 4_000
+  @writes_after 5_000
+
   @doc """
   The process for the database that is the calling plugin's own artifact, on the server running the call. It
   outlives the call that started it, and carries on through this plugin's updates with the database open.
@@ -42,6 +54,9 @@ defmodule Database.Lease do
   @impl true
   def init({artifact, server, folder}) do
     lease = %{artifact: artifact, server: server, folder: folder, db: nil, number: 0, held_by: nil, logged: 0, pages: 0}
+    # While it's open, when this server opened it, and when it last saw the log's next entry free (`waited/1`,
+    # `proved/1`).
+    lease = Map.merge(lease, %{opened: nil, proved: nil})
     # The scheduled jobs being called here: each one's `job` and the time it was due `at`, by its call's process,
     # and whether it's `marked` as run yet.
     {:ok, look(Map.put(lease, :firing, %{}))}
@@ -137,7 +152,8 @@ defmodule Database.Lease do
   # Runs `fun` with the database in a transaction, and writes what it changed as the log's next entry. Gives
   # `{:ok, result, lease}` once that's written, `{:lost, lease}` if another server wrote that entry first, so
   # the lease has gone and what `fun` wrote with it, or `{{:raised, kind, reason, stacktrace}, lease}` if `fun`
-  # raised, with nothing written.
+  # raised, with nothing written. What wrote nothing, raised or not, is answered from this server's copy, so it's
+  # `{:lost, lease}` too if the lease has gone.
   defp transact(%{db: db} = lease, fun) do
     {:ok, _} = Sqlite.query(db, "begin", [])
 
@@ -150,17 +166,15 @@ defmodule Database.Lease do
         kind, reason -> {:raised, kind, reason, __STACKTRACE__}
       end
 
-    case ran do
-      {:ok, result} ->
-        case log(lease) do
-          {:ok, lease} -> {:ok, result, snapshot(lease)}
-          {:lost, lease} -> {:lost, lease}
-        end
+    with {:raised, _kind, _reason, _stacktrace} <- ran do
+      {:ok, _} = Sqlite.query(db, "rollback", [])
+      checkpoint(db)
+    end
 
-      raised ->
-        {:ok, _} = Sqlite.query(db, "rollback", [])
-        checkpoint(db)
-        {raised, lease}
+    case {ran, log(lease)} do
+      {{:ok, result}, {:ok, lease}} -> {:ok, result, snapshot(lease)}
+      {raised, {:ok, lease}} -> {raised, lease}
+      {_ran, {:lost, lease}} -> {:lost, lease}
     end
   end
 
@@ -199,8 +213,10 @@ defmodule Database.Lease do
     if Database.query(db, marked, [at, job, at]) == [], do: raise("Another server made this scheduled call")
   end
 
-  # Reads the log, and opens the database if this server holds its lease.
+  # Reads the log, and opens the database if this server holds its lease. The entry after the last it read was free
+  # when it read it, which is after it began.
   defp look(lease) do
+    began = clocks()
     snapshot = Log.snapshot(lease.artifact)
     entries = Log.since(lease.artifact, snapshot)
     lease = %{lease | number: snapshot + length(entries)}
@@ -214,7 +230,7 @@ defmodule Database.Lease do
           "#{lease.artifact.prefix}: holds its lease, from snapshot #{snapshot} and the log to #{lease.number}"
         )
 
-        open(lease, snapshot, entries)
+        open(%{lease | proved: began}, snapshot, entries)
 
       %{server: server} ->
         Logger.info("#{lease.artifact.prefix}: its lease is held by #{server}")
@@ -250,27 +266,62 @@ defmodule Database.Lease do
     end
 
     logged = Enum.sum_by(entries, &length(Map.get(&1, :pages, [])))
-    %{lease | db: db, held_by: lease.server, logged: logged}
+    %{lease | db: db, held_by: lease.server, logged: logged, opened: System.monotonic_time(:millisecond)}
   end
 
-  # Writes what the transaction changed as the log's next entry.
+  # Writes what the transaction changed as the log's next entry. A transaction that changed nothing is answered from
+  # this server's copy, so it's answered only while the copy is the database.
   defp log(lease) do
     case Log.changed(file(lease)) do
       nil ->
-        {:ok, lease}
+        proved(lease)
 
       {size, pages} ->
+        waited(lease)
+        began = clocks()
+
         case Log.write(lease.artifact, lease.number + 1, %{server: lease.server, size: size, pages: pages}) do
           :ok ->
             checkpoint(lease.db)
-            {:ok, %{lease | number: lease.number + 1, logged: lease.logged + length(pages), pages: size}}
+            {:ok, %{lease | number: lease.number + 1, logged: lease.logged + length(pages), pages: size, proved: began}}
 
           :exists ->
-            Logger.info("#{lease.artifact.prefix}: lost its lease, and the write it hadn't answered with it")
-            {:lost, look(close(lease))}
+            lost(lease, "and the write it hadn't answered with it")
         end
     end
   end
+
+  # A server that couldn't reach this one may have taken the lease by writing the log's next entry, and this one
+  # only finds out by looking. So it answers from its copy for `@answers_for` after it last saw that entry free, by
+  # both its clocks, the monotonic one, which never goes back, and the system's, which goes on while the machine
+  # sleeps; and then looks again. A server that took the lease meanwhile writes nothing until that's passed.
+  defp proved(%{proved: {monotonic, system}} = lease) do
+    {now_monotonic, now_system} = now = clocks()
+
+    if now_monotonic < monotonic + @answers_for and now_system >= system and now_system < system + @answers_for do
+      {:ok, lease}
+    else
+      case Log.entry(lease.artifact, lease.number + 1) do
+        nil -> {:ok, %{lease | proved: now}}
+        _taken -> lost(lease, "so it didn't answer from its copy")
+      end
+    end
+  end
+
+  # A server that has just opened the database writes nothing to it for `@writes_after`, by when one that held the
+  # lease before and doesn't know it lost it has stopped answering from its copy (`proved/1`). The monotonic clock
+  # stops while the machine sleeps, which only makes it wait longer.
+  defp waited(%{opened: opened}) do
+    wait = opened + @writes_after - System.monotonic_time(:millisecond)
+    if wait > 0, do: Process.sleep(wait)
+  end
+
+  defp lost(lease, what) do
+    Logger.info("#{lease.artifact.prefix}: lost its lease, #{what}")
+    {:lost, look(close(lease))}
+  end
+
+  defp clocks, do: {System.monotonic_time(:millisecond), System.os_time(:millisecond)}
 
   # A snapshot is kept once the log since the last one holds as many pages as the database, and at least `@least`.
   # The next transaction waits for it, so the write that brought it on may as well.

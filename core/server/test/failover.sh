@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests, with real servers on this machine and a folder as their bucket, that a database outlives the server
 # writing it. Writes go through a test plugin's database while servers are stopped with `kill -9`, frozen and started again, and
-# after each of those every write that was answered must be there, once.
+# after each of those every write that was answered must be there, once, read through whichever server, one that
+# lost the lease while frozen too.
 #
 #     cargo build --release && mise exec -- core/server/test/failover.sh
 #
@@ -97,12 +98,17 @@ for _ in $(seq 5); do write only-a; done
 said a
 check only-a
 
-say "A server that still thinks it holds the lease: b is frozen, a takes over, b wakes and is written to"
+say "A server that still thinks it holds the lease: b is frozen, a takes over, b wakes and is read from, then written to"
 kill -STOP -- "-${group[b]}"
 frozen=$(now)
+# a reads first, so what it passed on to b before taking over, which b runs when it wakes, only reads too.
+until ONE_HOME=$folder/only-a "$one" tally list >/dev/null 2>&1; do :; done
 until write only-a; do :; done
 echo "a answered a write $(since "$frozen") after b froze"
 kill -CONT -- "-${group[b]}"
+said a b
+# Nothing has written to b since it froze, so only the lease can tell it that what it has is old.
+check only-b
 for _ in $(seq 5); do write only-b; done
 said a b
 check only-b
