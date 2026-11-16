@@ -226,15 +226,32 @@ defmodule OneCore.Plugins do
   def handle_continue(:start, state) do
     {:ok, key} = Iroh.key(Server.key_file())
 
+    # What couldn't be read or started is left out and said in the log, as when the bucket didn't give or refused it:
+    # someone's plugins, or everyone's, if it couldn't say whose plugins run here. A bucket that didn't answer has
+    # this server look again once it does (`OneCore.Bucket`).
     state =
-      for owner <- here(key), reduce: state do
-        state ->
-          {installed, _tag} = Installed.read(owner)
-          newer = Store.newer(Enum.uniq(Map.values(installed)), state.latest)
-          {state, _changed, _any} = took_over(state, owner, installed, newer)
-          state
+      try do
+        for owner <- here(key), reduce: state do
+          state ->
+            try do
+              {installed, _tag} = Installed.read(owner)
+              newer = Store.newer(Enum.uniq(Map.values(installed)), state.latest)
+              {state, _changed, _any} = took_over(state, owner, installed, newer)
+              state
+            rescue
+              unanswered -> unstarted(state, owner, unanswered)
+            end
+        end
+      rescue
+        unanswered -> unstarted(state, "everyone", unanswered)
       end
+
     {:noreply, state}
+  end
+
+  defp unstarted(state, whose, unanswered) do
+    Logger.error("#{whose}'s plugins aren't started here: #{Exception.message(unanswered)}")
+    state
   end
 
   @impl true

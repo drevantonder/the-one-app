@@ -182,7 +182,12 @@ defmodule OneCore.Bucket.S3 do
 
   defp refused_by(address, _status, why), do: %RuntimeError{message: "The presigner at #{address} refused: #{why}"}
 
-  defp sent(request), do: Edge.send!(request)
+  # At most this many requests to the presigner, and as many to the bucket, are sent at once, and the rest wait their
+  # turn, however long. A server that starts asks for hundreds at once, and an uplink at home that's sent them all
+  # stalls every one of them past its timeout. Each one's timeout runs from when it's sent.
+  @at_once 16
+
+  defp sent(request), do: Edge.send!(request ++ [finch: [size: @at_once, pool_timeout: :infinity]])
 
   defp tag(got), do: got |> Req.Response.get_header("etag") |> hd()
 

@@ -42,9 +42,13 @@ defmodule OneCore.Servers do
 
   @doc """
   Whether this server acts for `owner`: it's a member of this server that has it on their list, or the network
-  is, which is everyone.
+  is, which is everyone. It's asked while the server starts its plugins too, before it's reached, whose key is
+  then only in its file.
   """
-  def here?(owner), do: Enum.any?(acts_for(Server.key()), &(&1 in [owner, @network]))
+  def here?(owner) do
+    key = Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1)
+    Enum.any?(acts_for(key), &(&1 in [owner, @network]))
+  end
 
   @doc """
   Whether this server runs the plugins installed for `owner`: it acts for them as one of their own servers, not

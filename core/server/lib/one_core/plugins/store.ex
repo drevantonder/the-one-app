@@ -152,18 +152,31 @@ defmodule OneCore.Plugins.Store do
   plugin, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
   false the version described (`described/2`), leaving out one not described yet. One in sandbox mode is never
   loaded here, only described. Read at once: a bucket at an address is asked for each over the internet.
+
+  One that couldn't be read or loaded, as when the bucket didn't give its blobs or refused them, is left out, as one
+  that isn't newer is, and said in the log: one plugin never stops the others. The first answer a bucket that didn't
+  answer gives after has this server look again (`OneCore.Bucket`), which finds it newer then.
   """
   def newer(artifacts, latest, load \\ true) do
     artifacts
-    |> Task.async_stream(&{&1, about(&1)}, max_concurrency: 16, timeout: :infinity)
+    |> Task.async_stream(&{&1, unanswered(&1, fn -> about(&1) end)}, max_concurrency: 16, timeout: :infinity)
     |> Enum.flat_map(fn {:ok, {artifact, in_bucket}} ->
       with %{"number" => number, "code" => code} <- in_bucket,
            true <- number > Map.get(latest, artifact, 0),
-           version = version(artifact, code, load, in_bucket["sandbox"] == true),
+           version when version != nil <-
+             unanswered(artifact, fn -> version(artifact, code, load, in_bucket["sandbox"] == true) end),
            true <- load or version != :error,
            do: [{artifact, number, version}],
            else: (_ -> [])
     end)
+  end
+
+  defp unanswered(artifact, read) do
+    read.()
+  rescue
+    unanswered ->
+      Logger.error("#{artifact} isn't updated here: #{Exception.message(unanswered)}")
+      nil
   end
 
   @doc """
@@ -189,16 +202,20 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  Keeps what a loaded version says of itself, for the servers that don't load it, as this server says it.
+  Keeps what a loaded version says of itself, for the servers that don't load it, as this server says it. Only a
+  server acting for whoever the plugin is says it, since only those may write the plugin's blobs: a user's own
+  server loads the network's plugins it uses too, and the network's servers say what those are.
   """
   def describe(%Version{artifact: artifact, code: code} = version) do
-    blob = "#{artifact}/described/#{code}"
-    said = Version.description(version)
+    if OneCore.Servers.here?(OneCore.User.owner(artifact)) do
+      blob = "#{artifact}/described/#{code}"
+      said = Version.description(version)
 
-    # One said otherwise, as a server from before descriptions named only what any server knows said it, is said again.
-    with :exists <- Bucket.write(blob, said),
-         {:ok, was, tag} when was != said <- Bucket.read(blob),
-         do: Bucket.replace(blob, said, tag)
+      # One said otherwise, as a server from before descriptions named only what any server knows said it, is said again.
+      with :exists <- Bucket.write(blob, said),
+           {:ok, was, tag} when was != said <- Bucket.read(blob),
+           do: Bucket.replace(blob, said, tag)
+    end
 
     :ok
   end

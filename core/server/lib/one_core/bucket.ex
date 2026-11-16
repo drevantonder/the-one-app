@@ -36,16 +36,16 @@ defmodule OneCore.Bucket do
   def read_all(keys), do: bucket(:read_all, [keys])
 
   @doc "Writes a blob only if there's none at `key`."
-  def write(key, data), do: bucket(:write, [key, data])
+  def write(key, data), do: sent(&conditionally(:write, [key, data], &1))
 
   @doc "Replaces a blob only if it's still the one `tag` was read with."
-  def replace(key, data, tag), do: bucket(:replace, [key, data, tag])
+  def replace(key, data, tag), do: sent(&conditionally(:replace, [key, data, tag], &1))
 
   @doc "The keys starting with `prefix`, in order."
   def list(prefix), do: bucket(:list, [prefix])
 
   @doc "Removes a blob. Nothing brings it back, so only what nothing reads any more is removed."
-  def remove(key), do: bucket(:remove, [key])
+  def remove(key), do: sent(fn _tried -> bucket(:remove, [key]) end)
 
   @doc "How many bytes a blob is, or `:absent`."
   def size(key), do: bucket(:size, [key])
@@ -55,6 +55,25 @@ defmodule OneCore.Bucket do
   A server hands it to a client, which reads or writes the bucket with it and nothing else.
   """
   def link(key, mode) when mode in [:read, :write], do: bucket(:link, [key, mode])
+
+  # A bucket that didn't answer a write may still have made it: R2 says so of a conditional write whose answer was
+  # lost. Sending one again is safe, since the bucket refuses it if anything got there first, its own earlier try
+  # too. So a write is sent again, and one refused after a try that wasn't answered is read back: it was made if
+  # what's there is what it wrote. A removal is the same however often it's sent. Each is sent at most this often.
+  @tries 3
+
+  defp sent(tried \\ 1, send) do
+    send.(tried)
+  rescue
+    unreachable in Edge.Unreachable ->
+      if tried == @tries, do: reraise(unreachable, __STACKTRACE__), else: sent(tried + 1, send)
+  end
+
+  defp conditionally(function, [key, data | _] = arguments, tried) do
+    with refused when refused != :ok <- bucket(function, arguments) do
+      if tried > 1 and match?({:ok, ^data, _tag}, read(key)), do: :ok, else: refused
+    end
+  end
 
   # A server that couldn't reach the bucket may have missed being told something meanwhile, so the first answer
   # after has it look again (`OneCore.Server.reconnected/0`). A bucket that couldn't be reached raises
