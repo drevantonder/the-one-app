@@ -25,7 +25,7 @@ use data_encoding::BASE64URL_NOPAD;
 use futures_util::StreamExt;
 use futures_util::future::join_all;
 use futures_util::stream::FuturesUnordered;
-use iroh::endpoint::{Connection, QuicTransportConfig, RecvStream, RelayMode, presets};
+use iroh::endpoint::{Connection, QuicTransportConfig, ReadError, ReadToEndError, RecvStream, RelayMode, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -62,6 +62,11 @@ pub const CONNECT: Duration = Duration::from_secs(3);
 /// so a server that has gone is found out by asking it, and this soon. A server taken for gone that wasn't is only
 /// asked again over a new connection, or has its lease taken by a standby, and neither loses anything.
 pub const THERE: Duration = Duration::from_secs(1);
+/// What a server ends a stream with when it doesn't answer what was asked on it: `REFUSED` where it took nothing of
+/// it, as one that's stopping takes nothing new, and `STOPPED` where it went away after it took it, so it may have
+/// done it.
+pub const REFUSED: VarInt = VarInt::from_u32(1);
+pub const STOPPED: VarInt = VarInt::from_u32(2);
 /// How long a connection that's asked nothing stays open. To keep one open, something has to be said over it every
 /// few seconds, and through a relay each of those wakes the relay. So a connection is let go once it's idle, and
 /// made again when there's something to ask.
@@ -502,7 +507,8 @@ pub enum RequestError {
 }
 
 /// An open connection to a server, and when the server last answered on it. A client asks a server over one, and a
-/// server asks another the same way. `gone` is whether the server was found not to be there.
+/// server asks another the same way. `gone` is whether the server was found not to be there, or to be going: it
+/// stopped answering, or refused what it was asked, so nothing more is asked over it.
 pub struct Reached {
     connection: Connection,
     heard: Arc<std::sync::Mutex<Instant>>,
@@ -542,7 +548,7 @@ impl Reached {
 
     /// Whether the connection is still one to ask over: it hasn't closed, and its server hasn't been found gone.
     pub fn open(&self) -> bool {
-        self.connection.close_reason().is_none()
+        self.connection.close_reason().is_none() && !self.gone()
     }
 
     /// Whether the server didn't say it was there when it was asked over this connection.
@@ -551,7 +557,9 @@ impl Reached {
     }
 
     /// Asks the server one message, and gives its answer. A server that hasn't answered anything lately is first
-    /// asked whether it's there, and so is one that's taking its time over this.
+    /// asked whether it's there, and so is one that's taking its time over this. One that ends the stream without
+    /// an answer is going: what's asked over this connection from now on is asked elsewhere, while what was asked
+    /// already is still answered.
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>, RequestError> {
         if !self.open() || (self.heard.lock().expect("no ask panics").elapsed() > THERE && !self.there().await) {
             return Err(RequestError::Unreachable);
@@ -563,7 +571,13 @@ impl Reached {
             tokio::select! {
                 answer = &mut answer => {
                     *self.heard.lock().expect("no ask panics") = Instant::now();
-                    return answer.map_err(|_| RequestError::Stopped);
+                    return answer.map_err(|unanswered| {
+                        self.gone.store(true, Ordering::Relaxed);
+                        match unanswered {
+                            ReadToEndError::Read(ReadError::Reset(REFUSED)) => RequestError::Unreachable,
+                            _ => RequestError::Stopped,
+                        }
+                    });
                 }
                 _ = sleep(THERE) => if !self.there().await {
                     return Err(RequestError::Stopped);
@@ -620,8 +634,8 @@ pub struct Client {
     connected: watch::Sender<bool>,
     /// What the native code of the plugins the program ships with fills in of a tool's inputs (`resolve`).
     resolvers: Vec<Arc<dyn InputResolver>>,
-    /// The inputs this device fills in of each tool, as a server last listed them (`resolve`).
-    resolvable: std::sync::Mutex<Option<Arc<resolve::Resolvable>>>,
+    /// What this client knows of each tool, as a server last listed them (`resolve`).
+    listed: std::sync::Mutex<Option<Arc<resolve::Listed>>>,
     /// What this client says of itself in each record it reports (`report`), as OpenTelemetry's resource attributes
     /// say a service: which client it is (`service.name`), its build, its device's name and its operating system.
     resource: Arc<std::sync::RwLock<serde_json::Map<String, Value>>>,
@@ -715,12 +729,12 @@ impl Client {
         let renews = link.network.is_some();
         let link = std::sync::RwLock::new(link);
         let (watching, connected) = (AtomicBool::new(false), watch::Sender::new(true));
-        let resolvable = std::sync::Mutex::default();
+        let listed = std::sync::Mutex::default();
         let reach = Mutex::default();
         let resource = Arc::new(std::sync::RwLock::new(resource()));
         let reporting = AtomicBool::new(home.join(REPORTS).exists());
         let client = Arc::new_cyclic(|me| Self {
-            home, key, link, reach, notifications, says, watching, connected, resolvers, resolvable, resource,
+            home, key, link, reach, notifications, says, watching, connected, resolvers, listed, resource,
             reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(), me: me.clone(),
             runtime: tokio::runtime::Handle::current(),
         });
@@ -859,32 +873,40 @@ impl Client {
     pub async fn ask(&self, message: &[u8]) -> Result<Vec<u8>> {
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
-        let (message, lists, span): (std::borrow::Cow<[u8]>, bool, Option<Value>) =
+        let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<Value>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
                     self.resolve(&mut request).await?;
+                    let reads = self.reads(&request).await?;
                     self.say(&mut request);
                     let span = request.get("id").is_some().then(|| self.span(&mut request));
-                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", span)
+                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", reads, span)
                 }
-                _ => (message.into(), false, None),
+                _ => (message.into(), false, false, None),
             };
         let started = Instant::now();
         let reached = std::sync::Mutex::new("none");
+        // A server that went away after it was asked is asked again elsewhere only for what only reads: anything
+        // else it may have done.
         let asked = async {
+            let mut stopped = false;
             for _ in 0..2 {
                 let open = self.reached().await?;
                 *reached.lock().expect("no ask panics") = open.path();
                 match open.ask(&message).await {
                     Ok(answer) => return Ok(answer),
-                    Err(RequestError::Unreachable) => continue,
+                    Err(RequestError::Unreachable) => {}
+                    Err(RequestError::Stopped) if reads => stopped = true,
                     Err(RequestError::Stopped) => bail!(
-                        "The server stopped answering partway, so this may or may not have been done. Look before \
-                         trying again."
+                        "The server went away before it answered, as one does while it restarts, so this may or may \
+                         not have been done. Look before trying again."
                     ),
                 }
             }
-            bail!(UNANSWERED)
+            match stopped {
+                true => bail!("The server went away before it answered, as one does while it restarts. Try again in a moment."),
+                false => bail!(UNANSWERED),
+            }
         };
         let answer = asked.await;
         self.answered(answer.is_ok());
@@ -913,8 +935,8 @@ impl Client {
                     && let Ok(listed) = serde_json::from_slice::<Value>(&answer)
                     && listed["result"]["tools"].is_array()
                 {
-                    let fills = resolve::resolvable(&listed["result"], &self.formats());
-                    *self.resolvable.lock().expect("no ask panics") = Some(Arc::new(fills));
+                    let known = resolve::listed(&listed["result"], &self.formats());
+                    *self.listed.lock().expect("no ask panics") = Some(Arc::new(known));
                 }
                 Ok(self.taken_out(answer).await)
             }

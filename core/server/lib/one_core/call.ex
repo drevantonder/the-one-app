@@ -21,7 +21,7 @@ defmodule OneCore.Call do
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
   what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
-  alias OneCore.{Artifact, Hooks, Plugins, Server, Servers, User}
+  alias OneCore.{Artifact, Hooks, Mcp, Plugins, Server, Servers, User}
   alias OneCore.Plugins.{Calls, Version}
 
   @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
@@ -295,9 +295,13 @@ defmodule OneCore.Call do
       {:error, ^forwarding_loop, _why} -> :no_answer
       {:error, _code, why} -> raise why
       :unreachable -> :no_answer
-      # A hook may be asked more than once for one moment, so one a server stopped answering is asked again.
-      :stopped when method == "hooks/call" -> :no_answer
-      :stopped -> raise Server.said(:stopped, server)
+      :stopped -> if again?(method, params, who), do: :no_answer, else: raise(Server.said(:stopped, server))
     end
   end
+
+  # What a server went away from after it was asked is asked of the next one only where asking twice does no harm:
+  # a hook, which may be asked more than once for one moment, and a tool that only reads.
+  defp again?("hooks/call", _params, _who), do: true
+  defp again?("tools/call", %{name: name}, who), do: Mcp.reads?(name, who)
+  defp again?(_method, _params, _who), do: false
 end

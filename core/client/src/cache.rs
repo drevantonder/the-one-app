@@ -183,7 +183,7 @@ impl Subscription {
     /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
     async fn reads(self: &Arc<Self>, method: &str, params: &Value) -> bool {
         match method {
-            "tools/list" | "resources/list" | "resources/read" => true,
+            method if crate::resolve::READS.contains(&method) => true,
             "tools/call" => {
                 let Ok(listed) = self.read("tools/list", json!({})).await else { return false };
                 let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();

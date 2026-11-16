@@ -30,6 +30,12 @@ defmodule OneCore.Iroh do
   """
   def tell(_endpoint, _message), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc """
+  Stops taking what's asked: whoever asks or connects from now on is refused, so they ask another server. Once
+  every message taken is answered, or `within` milliseconds have passed, the endpoint closes.
+  """
+  def close(_endpoint, _within), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc "Sends `answer` back to whoever asked `ask`."
   def answer(_ask, _answer), do: :erlang.nif_error(:nif_not_loaded)
 

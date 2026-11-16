@@ -47,6 +47,12 @@ defmodule OneCore.Mcp do
           error ->
             Logger.error(Exception.format(:error, error, __STACKTRACE__))
             JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.message(error)}})
+        catch
+          # What exits, as a call that took too long does, is answered too: only a server that went away answers
+          # nothing.
+          :exit, why ->
+            Logger.error(Exception.format(:exit, why, __STACKTRACE__))
+            JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: Exception.format_exit(why)}})
         end
 
       # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.
@@ -314,8 +320,8 @@ defmodule OneCore.Mcp do
     {:ok, result}
   end
 
-  # Whether calling a tool only reads: one of One Core's own that says so, or a plugin's.
-  defp reads?(name, who) do
+  @doc "Whether calling the tool `name` for `who` only reads: one of One Core's own that says so, or a plugin's."
+  def reads?(name, who) do
     with [plugin, tool] <- String.split(name, "_", parts: 2),
          %{^plugin => version} <- Plugins.running(who) do
       Enum.any?(version.tools, &(&1.name == tool and &1[:read_only] == true))

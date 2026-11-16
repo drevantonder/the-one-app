@@ -53,10 +53,23 @@ defmodule OneCore.Server do
 
     with true <- Servers.seen(server) in [:on, nil] or :unreachable,
          {:ok, answer} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
-      case JSON.decode!(answer) do
-        %{"result" => result} -> {:ok, result}
-        %{"error" => %{"code" => code, "message" => why}} -> {:error, code, why}
+      case JSON.decode(answer) do
+        {:ok, %{"result" => result}} -> {:ok, result}
+        {:ok, %{"error" => %{"code" => code, "message" => why}}} -> {:error, code, why}
+        # An answer cut short, or none, is from a server that went away after it was asked.
+        _ -> :stopped
       end
+    end
+  end
+
+  @doc """
+  Stops taking what's asked, as a server does while it stops: whoever asks it or connects to it is refused, so they
+  ask another, and what it took already is answered, for up to `within` milliseconds. Then its endpoint closes.
+  """
+  def close(within) do
+    case :persistent_term.get(__MODULE__, nil) do
+      {_key, endpoint} -> Iroh.close(endpoint, within)
+      nil -> :ok
     end
   end
 
@@ -69,7 +82,7 @@ defmodule OneCore.Server do
   end
 
   def said(:stopped, server),
-    do: "#{named(server)} stopped answering after it was asked, so this may or may not have been done"
+    do: "#{named(server)} went away before it answered, as a server does while it restarts, so this may or may not have been done. Look before trying again"
 
   defp named(server), do: Servers.name(server) || "That server"
 

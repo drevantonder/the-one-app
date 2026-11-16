@@ -33,4 +33,13 @@ defmodule OneCore.Application do
       {:error, {:not_joined, key}}
     end
   end
+
+  # A server that's stopping, as a system stops one with SIGTERM, first takes nothing new, so whoever asks it asks
+  # another, and answers what it took already, before anything of it stops. That's within the time a system gives
+  # a program to stop: launchd gives 20 s.
+  @impl true
+  def prep_stop(state) do
+    Server.close(:timer.seconds(15))
+    state
+  end
 end

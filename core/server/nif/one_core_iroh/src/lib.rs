@@ -8,14 +8,15 @@ use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::Duration;
 
 use client::{Network, RequestError};
 use data_encoding::HEXLOWER;
-use iroh::endpoint::Connection;
+use iroh::endpoint::{Connection, VarInt};
 use iroh::{Endpoint, EndpointAddr};
 use rustler::{Atom, Binary, Encoder, Env, LocalPid, NewBinary, OwnedEnv, Resource, ResourceArc, Term};
 use tokio::runtime::Runtime;
-use tokio::sync::oneshot;
+use tokio::sync::{RwLock, oneshot};
 
 mod outside;
 
@@ -28,16 +29,21 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("toki
 /// A server's endpoint, open for as long as the server holds this, with the clients that have a connection open to
 /// it and the ones watching, by their keys, and its connections to other servers by theirs, each with the address
 /// it was made to. Where the ones watching are is kept in the file `watching` beside its key too, so a server that
-/// starts again still tells them what changes. A server found gone leaves that address with no connection, and a connection that closed for
-/// want of anything to ask leaves nothing. Nothing looks inside it after a panic, which is what Rustler needs to
-/// hear before it hands one to Elixir.
+/// starts again still tells them what changes. A server found gone leaves that address with no connection, and a
+/// connection that closed for want of anything to ask leaves nothing. `asks` is what's being answered (`Asks`).
+/// Nothing looks inside it after a panic, which is what Rustler needs to hear before it hands one to Elixir.
 struct Reached {
     endpoint: AssertUnwindSafe<Endpoint>,
     clients: AssertUnwindSafe<Clients>,
     watchers: AssertUnwindSafe<Mutex<HashMap<String, Watcher>>>,
     watching: AssertUnwindSafe<PathBuf>,
     servers: AssertUnwindSafe<Servers>,
+    asks: AssertUnwindSafe<Asks>,
 }
+
+/// What's being answered: each message holds it for reading while it is, and a server that's stopping holds it for
+/// writing, so it takes nothing new.
+type Asks = Arc<RwLock<()>>;
 
 impl Reached {
     /// Keeps where the clients that are watching are, as `watchers` has them now.
@@ -117,7 +123,8 @@ fn start(
         }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
         let clients = Clients::default();
-        tokio::spawn(accept(endpoint.clone(), asked, clients.clone()));
+        let asks = Asks::default();
+        tokio::spawn(accept(endpoint.clone(), asked, clients.clone(), asks.clone()));
         let watching = Path::new(&key_file).with_file_name("watching");
         let kept = std::fs::read(&watching).ok();
         let kept: HashMap<String, EndpointAddr> =
@@ -130,14 +137,16 @@ fn start(
             watchers: AssertUnwindSafe(Mutex::new(watchers)),
             watching: AssertUnwindSafe(watching),
             servers: AssertUnwindSafe(Mutex::default()),
+            asks: AssertUnwindSafe(asks),
         };
         Ok((ResourceArc::new(reached), address))
     })
 }
 
 /// Hands `message` to the server's Elixir, with the key of whoever asked it if they have one, and waits for its
-/// answer. There's none if the Elixir is gone.
-async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Option<Vec<u8>> {
+/// answer. There's none if the Elixir is gone: `REFUSED` if it was before it took the message, and `STOPPED` if it
+/// went after, so it may have done what was asked.
+async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Result<Vec<u8>, VarInt> {
     let (answer, answered) = oneshot::channel();
     let ask = ResourceArc::new(Ask(Mutex::new(Some(answer))));
     let sent = OwnedEnv::new().send_and_clear(asked, |env| {
@@ -145,28 +154,39 @@ async fn ask(asked: &LocalPid, from: Option<&str>, message: &[u8]) -> Option<Vec
         binary.as_mut_slice().copy_from_slice(message);
         (atoms::ask(), ask, from, Binary::from(binary))
     });
-    sent.ok()?;
-    answered.await.ok()
+    sent.map_err(|_| client::REFUSED)?;
+    answered.await.map_err(|_| client::STOPPED)
 }
 
-async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients) {
+async fn accept(endpoint: Endpoint, asked: LocalPid, clients: Clients, asks: Asks) {
     while let Some(incoming) = endpoint.accept().await {
-        let clients = clients.clone();
+        // A server that's stopping takes no new connection, so whoever connects reaches another.
+        if asks.try_read().is_err() {
+            incoming.refuse();
+            continue;
+        }
+        let (clients, asks) = (clients.clone(), asks.clone());
         tokio::spawn(async move {
             let Ok(connection) = incoming.await else { return };
             let from = connection.remote_id().to_string();
             clients.lock().expect("no connection panics").insert(from.clone(), connection.clone());
             while let Ok((mut send, mut receive)) = connection.accept_bi().await {
-                let from = from.clone();
+                let (from, asks) = (from.clone(), asks.clone());
                 tokio::spawn(async move {
                     let Ok(message) = receive.read_to_end(client::LIMIT).await else { return };
-                    // Whoever asks nothing only asks whether this server is there, which this says.
+                    // Whoever asks nothing only asks whether this server is there, which this says, while it's
+                    // stopping too, as it answers what it took already.
                     if message.is_empty() {
                         let _ = send.finish();
-                    } else if let Some(answer) = ask(&asked, Some(&from), &message).await
-                        && send.write_all(&answer).await.is_ok()
-                    {
-                        let _ = send.finish();
+                        return;
+                    }
+                    // A stream ended unanswered is reset, so whoever asked knows it wasn't answered, and whether it
+                    // was taken.
+                    let Ok(_answering) = asks.try_read_owned() else { return drop(send.reset(client::REFUSED)) };
+                    match ask(&asked, Some(&from), &message).await {
+                        Ok(answer) if send.write_all(&answer).await.is_ok() => drop(send.finish()),
+                        Ok(_) => {}
+                        Err(unanswered) => drop(send.reset(unanswered)),
                     }
                 });
             }
@@ -235,6 +255,18 @@ fn tell(reached: ResourceArc<Reached>, message: Binary) -> Atom {
             }
         });
     }
+    atoms::ok()
+}
+
+/// Stops taking what's asked: whoever asks or connects from now on is refused, so they ask another server. Once
+/// every message taken is answered, or `within` milliseconds have passed, the endpoint closes, which whoever is
+/// connected hears at once.
+#[rustler::nif(schedule = "DirtyIo")]
+fn close(reached: ResourceArc<Reached>, within: u64) -> Atom {
+    RUNTIME.block_on(async {
+        let _answered = tokio::time::timeout(Duration::from_millis(within), reached.asks.write()).await;
+        reached.endpoint.close().await;
+    });
     atoms::ok()
 }
 

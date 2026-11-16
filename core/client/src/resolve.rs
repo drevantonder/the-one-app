@@ -4,7 +4,7 @@
 //! name, where none is given. Every other format is filled in by the native code of a plugin the program ships
 //! with, an `InputResolver` it hands `Client::open`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -36,11 +36,20 @@ pub struct Input<'a> {
 /// What One Core fills in itself, first: an input that's for a device, as a key for one is, is filled in after it.
 const OWN: [&str; 2] = ["device", "device-name"];
 
-/// The inputs a device fills in, by their tool's name: each one's name, and what its schema says of it.
-pub(crate) type Resolvable = HashMap<String, Vec<(String, Value)>>;
+/// What a client knows of the tools a server listed: the inputs a device fills in, by their tool's name, each with
+/// its name and what its schema says of it, and the tools that only read.
+#[derive(Default)]
+pub(crate) struct Listed {
+    fills: HashMap<String, Vec<(String, Value)>>,
+    reads: HashSet<String>,
+}
 
-/// The inputs a device fills in of each tool a server listed, of the `formats` it fills in, in their order.
-pub(crate) fn resolvable(listed: &Value, formats: &[&str]) -> Resolvable {
+/// The methods that only read, besides a tool that says it does.
+pub(crate) const READS: [&str; 3] = ["tools/list", "resources/list", "resources/read"];
+
+/// What a client knows of the tools a server listed, as it fills in their inputs of the `formats` it does, in their
+/// order.
+pub(crate) fn listed(listed: &Value, formats: &[&str]) -> Listed {
     let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();
     let filled = |tool: &Value| {
         let inputs = tool["inputSchema"]["properties"].as_object()?;
@@ -52,7 +61,11 @@ pub(crate) fn resolvable(listed: &Value, formats: &[&str]) -> Resolvable {
         fills.sort_by_key(|(_, input)| formats.iter().position(|format| input["format"] == *format));
         (!fills.is_empty()).then(|| Some((tool["name"].as_str()?.to_owned(), fills)))?
     };
-    tools.iter().filter_map(filled).collect()
+    let reads = tools.iter().filter(|tool| tool["annotations"]["readOnlyHint"] == true);
+    Listed {
+        fills: tools.iter().filter_map(filled).collect(),
+        reads: reads.filter_map(|tool| Some(tool["name"].as_str()?.to_owned())).collect(),
+    }
 }
 
 impl Client {
@@ -61,22 +74,34 @@ impl Client {
         OWN.into_iter().chain(self.resolvers.iter().flat_map(|resolver| resolver.formats().iter().copied())).collect()
     }
 
-    /// The inputs a device fills in, as a server last listed its tools: asked for, if this client hasn't seen a list.
-    async fn resolvable(&self) -> Result<Arc<Resolvable>> {
-        if let Some(fills) = self.resolvable.lock().expect("no ask panics").clone() {
-            return Ok(fills);
+    /// What this client knows of the tools, as a server last listed them: asked for, if it hasn't seen a list.
+    async fn listed(&self) -> Result<Arc<Listed>> {
+        if let Some(listed) = self.listed.lock().expect("no ask panics").clone() {
+            return Ok(listed);
         }
         Box::pin(self.request("tools/list", json!({}))).await?;
-        Ok(self.resolvable.lock().expect("no ask panics").clone().unwrap_or_default())
+        Ok(self.listed.lock().expect("no ask panics").clone().unwrap_or_default())
     }
 
-    /// Resolvable in what this device does of a tool's inputs, if `request` calls a tool that has any.
+    /// Whether `request` only reads: one of `READS`, or a call of a tool that says it does.
+    pub(crate) async fn reads(&self, request: &Value) -> Result<bool> {
+        Ok(match request["method"].as_str() {
+            Some("tools/call") => {
+                let tool = request["params"]["name"].as_str().unwrap_or_default();
+                self.listed().await?.reads.contains(tool)
+            }
+            Some(method) => READS.contains(&method),
+            None => false,
+        })
+    }
+
+    /// Fills in what this device does of a tool's inputs, if `request` calls a tool that has any.
     pub(crate) async fn resolve(&self, request: &mut Value) -> Result<()> {
         let Some(tool) = request["params"]["name"].as_str().filter(|_| request["method"] == "tools/call") else {
             return Ok(());
         };
-        let (tool, fills) = (tool.to_owned(), self.resolvable().await?);
-        let Some(fills) = fills.get(&tool) else { return Ok(()) };
+        let (tool, listed) = (tool.to_owned(), self.listed().await?);
+        let Some(fills) = listed.fills.get(&tool) else { return Ok(()) };
         let plugin = tool.split('_').next().unwrap_or_default();
         // What the device asks to fill these in is for whoever the call is.
         let who = request["params"]["_meta"]["for"].as_str().map(str::to_owned);

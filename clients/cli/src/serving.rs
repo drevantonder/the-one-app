@@ -258,14 +258,14 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                 };
                 match took {
                     Ok(true) => {
-                        server.kill().await?;
+                        stop(&mut server).await?;
                         return Err(again(&program));
                     }
                     Ok(false) => println!("This device is on the latest builds already."),
                     Err(error) => {
                         // It's said in `builds`, which the server says as it starts: it's started again to say it.
                         went_back(&here, &format!("Stayed on {}: {error:#}.", here.current()?), &[])?;
-                        server.kill().await?;
+                        stop(&mut server).await?;
                         return Err(again(&program));
                     }
                 }
@@ -274,6 +274,21 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         bail!("The server stopped: {}", server.wait().await?)
     }
 }
+
+/// Stops a server that's running as a system stops a program, with SIGTERM: it takes nothing new and answers what
+/// it took already (`OneCore.Application`), and is killed if it hasn't stopped within `STOP`.
+async fn stop(server: &mut tokio::process::Child) -> Result<()> {
+    if let Some(id) = server.id() {
+        unsafe { libc::kill(id as libc::pid_t, libc::SIGTERM) };
+        if timeout(STOP, server.wait()).await.is_ok() {
+            return Ok(());
+        }
+    }
+    Ok(server.kill().await?)
+}
+
+/// How long a server is given to stop: longer than it takes to answer what it took (`OneCore.Application`).
+const STOP: Duration = Duration::from_secs(20);
 
 /// How a build that was started went.
 #[derive(PartialEq)]
