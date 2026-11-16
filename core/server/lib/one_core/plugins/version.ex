@@ -28,13 +28,14 @@ defmodule OneCore.Plugins.Version do
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
   `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
   `description`, and `jobs` lists its scheduled jobs: each one's
-  `tool`, the `inputs` it's called with, and `every` how many seconds. `artifact` is the plugin it's a version of,
-  which whatever loaded it says.
+  `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
+  without it (`OneCore.Plugins.Deploy`). `artifact` is the plugin it's a version of, which whatever loaded it says.
   """
   alias OneCore.{App, Builds, Hooks, Server, Skills}
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code]
-  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :artifact]
+  defstruct [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :artifact,
+             essential: false]
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
   @sizes ~w(2x2 4x2 4x4)
@@ -245,6 +246,7 @@ defmodule OneCore.Plugins.Version do
         hooks = if function_exported?(plugin, :hooks, 0), do: plugin.hooks(), else: []
         offers = if function_exported?(plugin, :offers, 0), do: plugin.offers(), else: []
         jobs = if function_exported?(plugin, :jobs, 0), do: plugin.jobs(), else: []
+        essential = function_exported?(plugin, :essential, 0) and plugin.essential() == true
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
 
         cond do
@@ -292,7 +294,7 @@ defmodule OneCore.Plugins.Version do
             version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest)
 
             with {:ok, jobs} <- jobs(jobs, tools),
-                 do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), offers: offers, jobs: jobs}}
+                 do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), offers: offers, jobs: jobs, essential: essential}}
         end
 
       found ->
@@ -301,7 +303,8 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0 or a service's needs/0 or called/0 raised: " <>
+       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0, essential/0 or a service's needs/0 or " <>
+         "called/0 raised: " <>
          Exception.message(error)}
   end
 

@@ -11,6 +11,11 @@ defmodule SignIn do
   the server's log says where, each time it's told who they are. A new link ends the one before.
   """
   @behaviour OneCore.Plugin
+
+  # One Core asks it whose a device is, and every client signs in through it.
+  @impl true
+  def essential, do: true
+
   require Logger
   alias OneCore.{Artifact, Call, Edge}
 

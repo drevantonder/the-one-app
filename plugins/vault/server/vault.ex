@@ -16,6 +16,11 @@ defmodule Vault do
   `items/1` lists what it may use, and `stop_using/2` switches one off for it.
   """
   @behaviour OneCore.Plugin
+
+  # A network has one Vault, where every plugin keeps its keys and outside accounts.
+  @impl true
+  def essential, do: true
+
   alias OneCore.{Artifact, Call, Plugins, Server, User}
   alias OneCore.Plugins.Calls
   alias Vault.OAuth

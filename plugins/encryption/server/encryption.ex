@@ -13,6 +13,11 @@ defmodule Encryption do
   `plugins/encryption/client/native/src/cipher.rs`, which a server runs too (`Cipher`).
   """
   @behaviour OneCore.Plugin
+
+  # Every device's key is kept with it, and the Vault and notifications use it.
+  @impl true
+  def essential, do: true
+
   alias Encryption.Keys
   alias OneCore.{Artifact, Call, Hooks, Server, User}
   alias OneCore.Plugins.Calls

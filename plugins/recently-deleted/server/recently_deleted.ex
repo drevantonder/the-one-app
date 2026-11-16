@@ -18,6 +18,11 @@ defmodule RecentlyDeleted do
   keeps it true.
   """
   @behaviour OneCore.Plugin
+
+  # Any plugin deletes what it made through it, by its tool, without naming it among what it uses.
+  @impl true
+  def essential, do: true
+
   alias OneCore.{Artifact, Bucket, Hooks, User}
 
   # How long what's removed can be restored, after which it's erased.

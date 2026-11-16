@@ -108,6 +108,10 @@ defmodule OneCore.Plugin do
     runs for. A plugin that keeps more than a few blobs uses `database`, whose skill says how. What whoever
     runs the bucket mustn't read it keeps with `encryption`, and an account at an outside service it uses through
     `vault`: their skills say how, and which of a tool's inputs a device encrypts before it's sent.
+  - `essential/0`, if a plugin The One App ships with gives `true`, says a network can't work without it: every
+    server installs it for the network. One that doesn't is only available: deployed for the network, so it's in
+    the App Store, and installed for whoever adds it. Either way, the plugins it uses that the server ships with
+    are installed for whoever it's installed for, if they aren't there.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them. One that only provides functions leaves out `tools/0` and `call/3`.
   - Those functions run as the plugin that calls them, with its own artifact and database. What has to be kept in a
@@ -427,5 +431,7 @@ defmodule OneCore.Plugin do
   @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate, description: String.t()}]
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-  @optional_callbacks tools: 0, call: 3, apps: 0, widgets: 0, uses: 0, hooks: 0, hook: 3, offers: 0, jobs: 0, schedule: 3
+  @callback essential() :: boolean
+  @optional_callbacks tools: 0, call: 3, apps: 0, widgets: 0, uses: 0, hooks: 0, hook: 3, offers: 0, jobs: 0, schedule: 3,
+                      essential: 0
 end

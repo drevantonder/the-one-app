@@ -4,8 +4,10 @@ defmodule OneCore.Plugins.Deploy do
   its Elixir is compiled and loaded (`OneCore.Plugins.Version`), and it's kept in the bucket
   (`OneCore.Plugins.Store`) and runs at once.
 
-  Deploying or adding a plugin brings along the ones it uses that the server ships with: its `:bundled` setting,
-  each one's folder by its name. Those are installed for the network.
+  A server deploys each plugin it ships with for the network: its `:bundled` setting, each one's folder by its name.
+  One that says it's essential (`OneCore.Plugin`) is installed for the network; the rest are only available, in the
+  App Store for anyone to add, until someone does. Deploying or adding a plugin installs the ones it uses that the
+  server ships with for whoever it's installed for, where they aren't there.
   """
   require Logger
   alias OneCore.{App, Bucket, Folder, Server, Servers}
@@ -21,19 +23,23 @@ defmodule OneCore.Plugins.Deploy do
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
   (`OneCore.App`). Gives its version's number and the compiler's warnings.
   """
-  def deploy(owner, name, files) do
+  def deploy(owner, name, files), do: deploy(owner, name, files, fn _version -> true end)
+
+  # Deploys as `deploy/3` does, installing it for `owner` only where `install?` says so of the version.
+  defp deploy(owner, name, files, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
 
     with :ok <- check(name, files),
          {:ok, kept} <- built(owner, name, files),
          {:ok, version, warnings} <- Version.load(Path.basename(artifact), kept) do
       version = %{version | artifact: artifact}
+      install = install?.(version)
 
-      with :ok <- fits(owner, name, version),
+      with :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, number} <- Store.keep(artifact, name, kept, files),
-           :ok <- Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}) do
+           :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
         listed(owner, name, version)
-        Plugins.reload(owner, [{artifact, number, {:ok, version}}])
+        if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}]), else: Version.unload(version)
         Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
         {:ok, number, warnings}
       else
@@ -125,7 +131,8 @@ defmodule OneCore.Plugins.Deploy do
   defp deploying(name, nil), do: Agent.update(__MODULE__, &Map.delete(&1, name))
   defp deploying(name, said), do: Agent.update(__MODULE__, &Map.put(&1, name, said))
 
-  # Deploys one plugin this server ships for the network, and notes its files among what servers have shipped.
+  # Deploys one plugin this server ships for the network, and notes its files among what servers have shipped. It's
+  # installed for the network if it's essential or the network has it already.
   defp deploy_bundled(name) do
     files = bundled(name)
     source = Version.code(files)
@@ -134,7 +141,9 @@ defmodule OneCore.Plugins.Deploy do
     deploying(name, "building")
 
     with true <- files != %{} || {:error, "There are no files to deploy it from"},
-         {:ok, number, _warnings} = deployed <- deploy(@network, name, files),
+         {installed, _tag} = Installed.read(@network),
+         install? = &(&1.essential or is_map_key(installed, name)),
+         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, install?),
          :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")
       deploying(name, nil)
@@ -258,15 +267,20 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # The plugins a plugin uses are installed before it is: the ones missing, and the ones running from files a server
-  # shipped before this one's, come from what the server ships with, and are installed for the network, by a server
-  # acting for it. Bundled plugins go by name, so a plugin can come before one it uses that's still to be shipped.
+  # The plugins a plugin uses are there before it is. One this server ships that's running from files a server
+  # shipped before this one's is deployed again, by a server acting for the network, and one that's missing is
+  # installed for `owner` from what the network has of it. Bundled plugins go by name, so a plugin can come before
+  # one it uses that's still to be shipped.
   defp bring(owner, name, uses) do
-    deployable =
-      &(Servers.here?(@network) and bundled(&1) != %{} and deploy_bundled?(&1, Version.code(bundled(&1))) and
-          match?({:ok, _, _}, deploy_bundled(&1)))
+    for used <- uses,
+        Servers.here?(@network) and bundled(used) != %{} and deploy_bundled?(used, Version.code(bundled(used))),
+        do: deploy_bundled(used)
 
-    case Enum.reject(uses, &(deployable.(&1) or is_map_key(Plugins.running(owner), &1))) do
+    there =
+      &(is_map_key(Plugins.running(owner), &1) or
+          (bundled(&1) != %{} and Installed.install(owner, &1, "#{@network}/plugins/#{&1}") == :ok))
+
+    case Enum.reject(uses, there) do
       [] ->
         :ok
 

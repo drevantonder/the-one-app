@@ -11,6 +11,11 @@ defmodule Notifications do
   neither it nor the push service reads it: the device opens it before it shows.
   """
   @behaviour OneCore.Plugin
+
+  # Every client registers with it, and it's how a person's devices are told anything.
+  @impl true
+  def essential, do: true
+
   require Logger
   alias OneCore.{Call, Edge}
 

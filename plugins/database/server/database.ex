@@ -4,6 +4,11 @@ defmodule Database do
   artifact holds it as a log and snapshots (`Database.Log`), which one server at a time writes (`Database.Lease`).
   """
   @behaviour OneCore.Plugin
+
+  # Most plugins keep what they keep in it, the essential ones among them.
+  @impl true
+  def essential, do: true
+
   alias Database.Lease
   alias OneCore.Call
 

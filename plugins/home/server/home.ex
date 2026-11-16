@@ -15,6 +15,11 @@ defmodule Home do
   this plugin's `client/`, which a client shows first.
   """
   @behaviour OneCore.Plugin
+
+  # Every client opens on its Home Screen, and apps are added from its App Store.
+  @impl true
+  def essential, do: true
+
   alias OneCore.{Artifact, Call}
 
   @impl true
