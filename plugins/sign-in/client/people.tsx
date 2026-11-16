@@ -5,23 +5,33 @@ import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Field, Input, leave, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, toast } from "ui"
 
-const json = (tool, inputs) => call(tool, inputs).then(JSON.parse)
+/** Someone in the network, or invited to it, as `sign-in_everyone` answers it. */
+interface Person {
+  who: string
+  called?: string
+  joined?: boolean
+}
+
+const json = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs).then(JSON.parse)
 
 const people = createMemo(async () => {
   const [everyone, [me], owners] = await Promise.all([
-    json("sign-in_everyone"),
-    json("sign-in_people"),
+    json<Person[]>("sign-in_everyone"),
+    json<Person[]>("sign-in_people"),
     // The network's owners invite and take out, and are said to be its owners.
-    json("permissions_shared", { artifact: "network" }).then((tuples) => tuples.filter(({ relation }) => relation === "owner").map(({ who }) => who), () => []),
+    json<{ relation: string; who: string }[]>("permissions_shared", { artifact: "network" }).then((tuples): string[] => tuples.filter(({ relation }) => relation === "owner").map(({ who }) => who), (): string[] => []),
   ])
-  const named = (person) => person.called ?? person.who.replace("users/", "")
-  const sorted = everyone.toSorted((a, b) => (b.who === me.who) - (a.who === me.who) || named(a).localeCompare(named(b)))
+  const named = (person: Person) => person.called ?? person.who.replace("users/", "")
+  const sorted = everyone.toSorted((a, b) => Number(b.who === me.who) - Number(a.who === me.who) || named(a).localeCompare(named(b)))
   return { me: me.who, owners, invites: owners.includes(me.who), joined: sorted.filter((person) => person.joined), invited: sorted.filter((person) => !person.joined), named }
 })
 changed(() => refresh(people))
 
 /// What someone's grey line says: their name in the network, and that they own it, or that this is them.
-function about(person, all) {
+/** Everyone People shows. */
+type All = Awaited<ReturnType<typeof people>>
+
+function about(person: Person, all: All) {
   const name = person.who.replace("users/", "")
   return [person.called && person.called !== name ? name : undefined, all.owners.includes(person.who) ? "Owner" : undefined, person.who === all.me ? "You" : undefined]
     .filter(Boolean)
@@ -29,7 +39,7 @@ function about(person, all) {
 }
 
 /// Takes someone out, or ends an invitation, once whoever's looking has said so.
-async function remove(person, all) {
+async function remove(person: Person, all: All) {
   const joined = person.joined
   const question = joined
     ? { heading: `Remove ${all.named(person)}?`, text: "Their devices stop working at once. What they made stays.", action: "Remove" }
@@ -43,19 +53,19 @@ const [inviting, setInviting] = createSignal(false)
 const [naming, setNaming] = createSignal(false)
 
 /// The name whoever's looking goes by, to change.
-function Name(props) {
-  const [error, setError] = createSignal()
+function Name(props: { open: boolean; onClose: () => void; called?: string }) {
+  const [error, setError] = createSignal<string>()
   const [working, setWorking] = createSignal(false)
-  const save = async (event) => {
+  const save = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
     event.preventDefault()
     setWorking(true)
     setError()
     try {
-      await call("sign-in_name", { called: new FormData(event.currentTarget).get("called").trim() })
+      await call("sign-in_name", { called: String(new FormData(event.currentTarget).get("called")).trim() })
       refresh(people)
       props.onClose()
     } catch (thrown) {
-      setError(thrown.message)
+      setError((thrown as Error).message)
     } finally {
       setWorking(false)
     }
@@ -73,31 +83,31 @@ function Name(props) {
 }
 
 /// Someone new: their name in the network, then the link they join by, to send them.
-function Invite(props) {
-  const [link, setLink] = createSignal()
-  const [error, setError] = createSignal()
+function Invite(props: { open: boolean; onClose: () => void }) {
+  const [link, setLink] = createSignal<string>()
+  const [error, setError] = createSignal<string>()
   const [working, setWorking] = createSignal(false)
   const close = () => (props.onClose(), setLink(), setError())
-  const make = async (event) => {
+  const make = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
     event.preventDefault()
-    const name = new FormData(event.currentTarget).get("name").trim().toLowerCase()
+    const name = String(new FormData(event.currentTarget).get("name")).trim().toLowerCase()
     setWorking(true)
     setError()
     try {
       // The tool says who joins where, and the link is its last word.
-      setLink((await call("sign-in_invite", { name })).match(/https?:\/\/\S+/)[0])
+      setLink((await call("sign-in_invite", { name })).match(/https?:\/\/\S+/)![0])
       refresh(people)
     } catch (thrown) {
-      setError(thrown.message)
+      setError((thrown as Error).message)
     } finally {
       setWorking(false)
     }
   }
   const send = async () => {
     try {
-      if ((await share(link())) === "copied") toast("Link copied")
+      if ((await share(link()!)) === "copied") toast("Link copied")
     } catch (thrown) {
-      toast(thrown.message)
+      toast((thrown as Error).message)
     }
   }
   return (
@@ -114,7 +124,7 @@ function Invite(props) {
         }
       >
         <Field label="Link" hint="It works once, for a week.">
-          <Input readonly value={link()} onFocus={(event) => event.target.select()} />
+          <Input readonly value={link()} onFocus={(event) => event.currentTarget.select()} />
         </Field>
         <Button onClick={send}>Share Link</Button>
       </Show>
@@ -123,7 +133,7 @@ function Invite(props) {
 }
 
 /// Someone's row: what they go by, and for whoever may, what can be done to them.
-function Person(props) {
+function PersonRow(props: { person: Person; all: All }) {
   const mayRemove = () => props.all.invites && props.person.who !== props.all.me
   return (
     <Row
@@ -148,20 +158,20 @@ function Person(props) {
   )
 }
 
-function People(props) {
+function People(props: { all: All }) {
   return (
     <>
       <Screen heading="People" back onBack={leave} action={props.all.invites ? <Button onClick={() => setInviting(true)}>Invite</Button> : undefined}>
         <List>
           <For each={props.all.joined} keyed={(person) => person.who}>
-            {(person) => <Person person={person()} all={props.all} />}
+            {(person) => <PersonRow person={person()} all={props.all} />}
           </For>
         </List>
         <Show when={props.all.invited.length}>
           <Section heading="Invited">
             <List>
               <For each={props.all.invited} keyed={(person) => person.who}>
-                {(person) => <Person person={person()} all={props.all} />}
+                {(person) => <PersonRow person={person()} all={props.all} />}
               </For>
             </List>
           </Section>
@@ -175,7 +185,7 @@ function People(props) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="People" back onBack={leave}><Problem heading="Can't show who's in your network" text={String(error().message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="People" back onBack={leave}><Problem heading="Can't show who's in your network" text={String((error() as Error).message ?? error())} /></Screen>}>
       <Loading fallback={<Screen heading="People" back onBack={leave}><Skeleton rows={3} /></Screen>}>
         <People all={people()} />
       </Loading>
