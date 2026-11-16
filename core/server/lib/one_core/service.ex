@@ -87,7 +87,7 @@ defmodule OneCore.Service do
 
   @doc """
   Who the service that asks runs for on its server, each as `plugin/4` takes it: everyone its plugin was installed
-  for, a user, a group or the network, that its server acts for. Whoever the server is for comes first, as its
+  for, a user, a group or the network, whose plugins its server runs (`OneCore.Servers.runs?/1`). Whoever the server is for comes first, as its
   owner chose them, so a service that's for one of them at a time, its machine's person, takes the first.
   """
   def acts_for do
@@ -95,7 +95,7 @@ defmodule OneCore.Service do
     members = Servers.members(Server.key())
 
     Enum.sort_by(
-      Enum.filter(Plugins.installed_for(plugin), &Servers.here?/1),
+      Enum.filter(Plugins.installed_for(plugin), &Servers.runs?/1),
       &(Enum.find_index(members, fn member -> member == &1 end) || length(members))
     )
   end

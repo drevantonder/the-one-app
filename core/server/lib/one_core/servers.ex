@@ -13,10 +13,15 @@ defmodule OneCore.Servers do
   So a server acts for someone once both said so: they put it on their list, which is what gives it their blobs,
   and its owner chose them as a member, which is what has it run their plugins on its machine.
 
+  A plugin's code runs with all of its machine's access, so a plugin runs only on servers of whoever it's installed
+  for (`runs?/1`): the network's on the network's servers, and a user's or a group's on servers acting for them
+  alone, never on the network's merely because those act for everyone. The network's owners own the network's
+  servers, so what they install for themselves runs there too.
+
   What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
   (`look/1`) or forgets it all (`forget/0`).
   """
-  alias OneCore.{Bucket, Builds, Edge, Server}
+  alias OneCore.{Bucket, Builds, Edge, Hooks, Server}
 
   @network "network"
 
@@ -40,6 +45,46 @@ defmodule OneCore.Servers do
   is, which is everyone.
   """
   def here?(owner), do: Enum.any?(acts_for(Server.key()), &(&1 in [owner, @network]))
+
+  @doc """
+  Whether this server runs the plugins installed for `owner`: it acts for them as one of their own servers, not
+  only as one of the network's, or it's the network's and they are, or own, the network. Who owns the network is
+  what the plugins that decide `reach` say.
+  """
+  def runs?(owner) do
+    cond do
+      owner == @network -> here?(@network)
+      owner in acts_for(Server.key()) -> true
+      true -> here?(@network) and owns_network?(owner)
+    end
+  end
+
+  @doc "The keys of the servers that run the plugins installed for `owner`, as `runs?/1` says of each, the first first."
+  def running(@network), do: listed(@network)
+
+  def running(owner) do
+    own = Enum.filter(listed(owner), &(owner in members(&1)))
+    Enum.uniq(own ++ if(owns_network?(owner), do: listed(@network), else: []))
+  end
+
+  # Asked of the network's plugins, as everything about the network is.
+  defp owns_network?(owner) do
+    about = %{"who" => owner, "relation" => "owner", "artifact" => @network}
+    Hooks.validate("reach", about, {owner, @network}) == :ok
+  end
+
+  @doc """
+  What whoever asked for `what`, a plugin installed for `owner`, is told when none of `servers`, the ones that run
+  it, answered.
+  """
+  def off(what, owner, []),
+    do:
+      "#{what} runs on #{owner}'s own servers, and there are none. Set one up in Devices, or ask an owner to install it for everyone."
+
+  def off(what, owner, servers),
+    do:
+      "#{what} runs on #{owner}'s own servers, and none is on: " <>
+        Enum.map_join(servers, "; ", &Server.said(:unreachable, &1)) <> "."
 
   @doc "The services the server whose key is `key` has installed: each one's plugin and its name."
   def installed(key) do

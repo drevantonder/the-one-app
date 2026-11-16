@@ -38,6 +38,7 @@ defmodule OneCore.Plugins.Deploy do
 
       with :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, number} <- Store.keep(artifact, name, kept, files, from),
+           :ok <- Store.describe(version),
            :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
         listed(owner, name, version)
         if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}]), else: Version.unload(version)
@@ -263,7 +264,7 @@ defmodule OneCore.Plugins.Deploy do
         ui = Plugins.running(owner)["ui"],
         ui != nil and ui.code != built_with,
         whose = Store.whose(artifact),
-        Servers.here?(whose) and Plugins.plugin(whose, Path.basename(artifact)) == artifact,
+        Servers.runs?(whose) and Plugins.plugin(whose, Path.basename(artifact)) == artifact,
         uniq: true do
       with {:error, why} <- deploy(whose, Path.basename(artifact), Store.source(artifact, version.code)),
            do: Logger.error("#{name}'s app wasn't built again against the UI library that changed: #{why}")

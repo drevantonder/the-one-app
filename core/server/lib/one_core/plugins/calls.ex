@@ -2,8 +2,8 @@ defmodule OneCore.Plugins.Calls do
   @moduledoc """
   Calling a plugin: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having
   its scheduled jobs called. A call runs on the version of the plugin that was latest when it began, and the ones
-  it uses, which stay loaded until it ends (`OneCore.Plugins.run/3`). It runs on a server acting for whoever the
-  plugin was installed for: this one, or one it's passed on to.
+  it uses, which stay loaded until it ends (`OneCore.Plugins.run/3`). It runs on a server that runs the plugins of
+  whoever the plugin was installed for (`OneCore.Servers.runs?/1`): this one, or one it's passed on to.
   """
   require Logger
   alias ExJsonSchema.Validator.Error
@@ -215,15 +215,13 @@ defmodule OneCore.Plugins.Calls do
     asked = asked(asked)
 
     Plugins.run([at], name, fn at, versions ->
+      ask = {"plugins/call", %{installed: at, plugin: name, function: function, arguments: arguments}}
+      call = called(at, name, versions, ask, asked, forwarded)
       plugin = versions[name].plugin
 
       case plugin && exported(plugin, function, length(arguments) + 1) do
-        nil ->
-          {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
-
-        function ->
-          ask = {"plugins/call", %{installed: at, plugin: name, function: function, arguments: arguments}}
-          {:ok, apply(plugin, function, [called(at, name, versions, ask, asked, forwarded) | arguments])}
+        nil -> {:error, "#{name} has no function #{function} that takes a call and #{length(arguments)} more"}
+        function -> {:ok, apply(plugin, function, [call | arguments])}
       end
     end)
   end
@@ -252,8 +250,8 @@ defmodule OneCore.Plugins.Calls do
   Tells the plugin that `name` is for `at` what it heard, each a hook, what it's about and who asked, in turn and
   under one hold of its version, as `hook/6` would. It's told here, where it happened: a plugin that needs a server
   acting for whoever it was installed for passes it there itself (`OneCore.Call.forward/2`), and one that keeps what
-  it heard on this server for a while needn't. It has ten seconds for all of it; what it answers or raises is
-  ignored.
+  it heard on this server for a while needn't. One that only runs elsewhere is told there. It has ten seconds for all
+  of it; what it answers or raises is ignored.
   """
   def hear(at, name, heard) do
     Plugins.run([at], name, fn at, versions ->
@@ -262,7 +260,11 @@ defmodule OneCore.Plugins.Calls do
       Hooks.within(name, "what it heard", fn ->
         for {hook, about, asked} <- heard, hook in version.hooks do
           ask = {"hooks/call", %{installed: at, plugin: name, kind: :observe, hook: hook, about: about}}
-          call = call(at, name, versions, ask, asked, false)
+
+          call =
+            if Version.described?(version),
+              do: called(at, name, versions, ask, asked, false),
+              else: call(at, name, versions, ask, asked, false)
 
           try do
             if hears?(call, about), do: version.plugin.hook(hook, about, call)
@@ -321,12 +323,11 @@ defmodule OneCore.Plugins.Calls do
     end)
   end
 
-  # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. The
-  # plugin's own artifact is the one for whoever it was installed for, so the call is run by a server acting for them:
-  # this one, or one that it's passed on to.
+  # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. It's run
+  # by a server that runs the plugins of whoever it was installed for: this one, or one that it's passed on to.
   defp called(at, name, versions, ask, asked, forwarded) do
     call = call(at, name, versions, ask, asked, forwarded)
-    if Servers.here?(at), do: call, else: Call.forward(call, at)
+    if Servers.runs?(at), do: call, else: Call.run_elsewhere(call, at)
   end
 
   # The call as this server would run it.

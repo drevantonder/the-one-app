@@ -34,7 +34,9 @@ defmodule OneCore.Jobs do
   defp asked(%{at: at, timer: timer}) do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
-    scheduled = for {installed, _name, _jobs} = scheduled <- Plugins.scheduled(), Servers.here?(installed), do: scheduled
+
+    scheduled =
+      for {installed, _name, _jobs} = scheduled <- Plugins.scheduled(), Servers.runs?(installed), do: scheduled
 
     for {installed, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(installed, name) end)

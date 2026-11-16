@@ -4,7 +4,9 @@
 # tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
-# whoever it's in use for, and what it keeps isn't. One Core's own tools are whoever's may. Anyone brings a server,
+# whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
+# someone with none adds none for themselves, and an installer of the network adds them for it and does nothing else
+# an owner does. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
 # a tuple, and a job that's being called when the server calling it is killed is called once by the standby. It says
@@ -325,6 +327,28 @@ refused as alice reader read --note "$note"
 may as alice permissions share --artifact "$note" --relation viewer --who network/plugins/reader
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
+
+say "A plugin's code runs on a server of whoever it's for: with none, nobody adds one for them, and an installer adds them for the network"
+refused as alice deploy --name diary --files-from "$folder/diary"
+refused as bob install --plugin network/plugins/reader --name mine
+refused as carol for network install --plugin network/plugins/reader --name everyones
+may as owner permissions share --artifact network --relation installer --who users/carol
+may as bob permissions users --artifact network --relation installer
+may as carol for network install --plugin network/plugins/reader --name everyones
+refused as carol for network uninstall --name everyones
+refused as carol permissions share --artifact network --relation installer --who users/bob
+may as owner for network uninstall --name everyones
+may as owner permissions unshare --artifact network --relation installer --who users/carol
+# One server of carol's acts for the users and the group below, as a colleague's would, once each has it.
+start_for ours users/carol
+may as carol add_server --key "${key[ours]}"
+start_for ours users/carol
+for user in alice bob dave; do
+  may as carol add_member --server "${key[ours]}" --who users/$user
+  may as $user add_server --key "${key[ours]}"
+done
+may as carol add_member --server "${key[ours]}" --who groups/family
+may as alice for groups/family add_server --key "${key[ours]}"
 
 say "A plugin's skill is listed for whoever the plugin is installed for, with One Core's own, and a link's holder sees none"
 may as alice deploy --name diary --files-from "$folder/diary"

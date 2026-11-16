@@ -34,6 +34,11 @@ defmodule OneCore.Skills do
   Nothing sandboxes it. So you check it for them, as a colleague would before running a stranger's script, and
   install it only once they say yes.
 
+  It runs on servers of whoever it's installed for: for the person, a server of their own (set up in Devices),
+  and for the network, the network's, where only its owners and installers install it. Someone who has neither
+  asks them instead: `home-screen_request --source <owner>/<repo> --name <name> --reason <why>`. An owner who
+  approves such a request is answered the command to install it, after reading it as below.
+
   1. `one install <owner>/<repo> --list` fetches the repo and lists its plugins, and says the folder it's in on this
      device. Pin what you read: `<owner>/<repo>@<commit>`, which `--list` says, so what you install is what you read.
   2. Read the plugin's folder there: every file of `server/` (its tools, what each does with its inputs, what it

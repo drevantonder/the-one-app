@@ -30,6 +30,11 @@ defmodule OneCore.Plugins.Version do
   `description`, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
   without it (`OneCore.Plugins.Deploy`). `artifact` is the plugin it's a version of, which whatever loaded it says.
+
+  A server that doesn't run a plugin for whoever it's installed for never loads its code, which runs with all of
+  its machine's access: it knows the version by what the version says of itself (`description/1`), which a server
+  that loaded it kept in the bucket, and is `described/2` from that. A described version has no modules, so it's
+  only listed here, and every call to it is run where it's loaded (`OneCore.Plugins.Calls`).
   """
   alias OneCore.{App, Builds, Hooks, Server, Skills}
 
@@ -97,8 +102,47 @@ defmodule OneCore.Plugins.Version do
   @doc "A version's skills, as `OneCore.Skills.found/2` gives them."
   def skills(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).skills
 
+  @doc """
+  What a loaded version says of itself, as the bucket keeps it: what it provides, and its files and skills, but
+  none of its code.
+  """
+  def description(%__MODULE__{under: under} = version) do
+    kept = :persistent_term.get({__MODULE__, under})
+
+    said =
+      Map.take(version, [:tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential])
+
+    tools = for tool <- said.tools, do: Map.delete(tool, :takes)
+    :erlang.term_to_binary(%{said | tools: tools} |> Map.merge(%{files: kept.files, skills: kept.skills}))
+  end
+
+  @doc """
+  A version of the plugin `artifact` from what it said of itself (`description/1`): `{:ok, version}`, or `:error`
+  where that isn't one. It was written by a server that runs the plugin, whoever's that is, so only what's
+  listed of it is taken, and what each tool takes is read from its inputs again.
+  """
+  def described(artifact, description) do
+    said = :erlang.binary_to_term(description, [:safe])
+    under = {:described, artifact, said.code}
+
+    tools =
+      for tool <- said.tools,
+          do: Map.put(tool, :takes, ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputs))))
+
+    :persistent_term.put({__MODULE__, under}, %{files: said.files, hashes: %{}, skills: said.skills, own: %{}})
+    fields = Map.take(said, [:apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code, :ui, :essential])
+    {:ok, struct!(__MODULE__, Map.merge(fields, %{under: under, plugin: nil, tools: tools, artifact: artifact}))}
+  rescue
+    _ -> :error
+  end
+
+  @doc "Whether a version is only described here, not loaded (`described/2`)."
+  def described?(%__MODULE__{under: under}), do: is_tuple(under)
+
   @doc "Removes a version's modules from the VM."
   def unload(%__MODULE__{under: under}), do: unload(under)
+
+  def unload({:described, _artifact, _code} = under), do: :persistent_term.erase({__MODULE__, under})
 
   def unload(under) do
     :persistent_term.erase({__MODULE__, under})
@@ -294,7 +338,9 @@ defmodule OneCore.Plugins.Version do
             version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest)
 
             with {:ok, jobs} <- jobs(jobs, tools),
-                 do: {:ok, %{version | uses: uses, hooks: Enum.uniq(hooks), offers: offers, jobs: jobs, essential: essential}}
+                 do:
+                   {:ok,
+                    %{version | uses: uses, hooks: Enum.uniq(hooks), offers: offers, jobs: jobs, essential: essential}}
         end
 
       found ->
@@ -309,7 +355,9 @@ defmodule OneCore.Plugins.Version do
   end
 
   defp offer?(%{name: name, kind: kind, description: description}),
-    do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate] and is_binary(description)
+    do:
+      is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate] and
+        is_binary(description)
 
   defp offer?(_offer), do: false
 

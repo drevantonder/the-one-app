@@ -6,7 +6,13 @@ defmodule OneCore.Plugin do
   Elixir, says what's wrong if it doesn't compile, and otherwise runs it at once, with no restart. The plugin is
   whoever's deployed it, and is installed for them: a user, or the group or the network they asked for. Someone else
   has it too once it's installed for them (the `install` tool), and what's installed for the network is everyone's. A plugin is
-  updated by deploying it again. Calls already running finish on the version they started on, and the next call
+  updated by deploying it again.
+
+  Its server code runs with all of its machine's access, so it runs only on servers of whoever it's installed for:
+  the network's servers for the network, and for a user or a group a server of their own, set up in Devices to act
+  for them alone (or the network's, for the network's owners). So deploying or installing one for yourself takes a
+  server of your own, and for the network its owners or an `installer` of it (`permissions`); anyone else asks them
+  with `home-screen_request`. While none of the servers it runs on is on, a call to it says so. Calls already running finish on the version they started on, and the next call
   gets the new one. A plugin a program ships with can have native code that the clients are built with, in
   `client/native/`, which is never deployed, and nor is its `test/`.
 

@@ -8,7 +8,8 @@ defmodule OneCore.Plugins.Store do
   `versions/<number>`, so a plugin keeps its history. `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
-  version after keeps its `from`, so one whose `source` isn't that hash was changed since.
+  version after keeps its `from`, so one whose `source` isn't that hash was changed since. What a set of files says of
+  itself once loaded is kept at `described/<its hash>`, for the servers that don't load it (`described/2`).
   """
   require Logger
   alias OneCore.Bucket
@@ -114,18 +115,37 @@ defmodule OneCore.Plugins.Store do
 
   @doc """
   The versions in the bucket of the plugins `artifacts` that are newer than the ones in `latest`: each one's
-  plugin, its number, and the version loaded, which is `:error` for one this server can't compile. Read at once:
-  a bucket at an address is asked for each over the internet.
+  plugin, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
+  false the version described (`described/2`), leaving out one not described yet. Read at once: a bucket at an
+  address is asked for each over the internet.
   """
-  def newer(artifacts, latest) do
+  def newer(artifacts, latest, load \\ true) do
     artifacts
     |> Task.async_stream(&{&1, latest(&1)}, max_concurrency: 16, timeout: :infinity)
     |> Enum.flat_map(fn {:ok, {artifact, in_bucket}} ->
       with {number, code, _tag} <- in_bucket,
            true <- number > Map.get(latest, artifact, 0),
-           do: [{artifact, number, loaded(artifact, code)}],
+           version = if(load, do: loaded(artifact, code), else: described(artifact, code)),
+           true <- load or version != :error,
+           do: [{artifact, number, version}],
            else: (_ -> [])
     end)
+  end
+
+  @doc """
+  The set of the plugin `artifact`'s files named `code` as it described itself where it was loaded, without its
+  code: `{:ok, version}`, or `:error` while no server that loads it has said.
+  """
+  def described(artifact, code) do
+    with {:ok, said, _tag} <- Bucket.read("#{artifact}/described/#{code}"),
+         do: Version.described(artifact, said),
+         else: (:absent -> :error)
+  end
+
+  @doc "Keeps what a loaded version says of itself, for the servers that don't load it. The first to say it is kept."
+  def describe(%Version{artifact: artifact, code: code} = version) do
+    Bucket.write("#{artifact}/described/#{code}", Version.description(version))
+    :ok
   end
 
   @doc """
@@ -147,7 +167,9 @@ defmodule OneCore.Plugins.Store do
   def loaded(artifact, code) do
     case Version.load(Path.basename(artifact), files(artifact, code)) do
       {:ok, version, _warnings} ->
-        {:ok, %{version | artifact: artifact}}
+        version = %{version | artifact: artifact}
+        describe(version)
+        {:ok, version}
 
       {:error, why} ->
         Logger.error("#{artifact} isn't updated here, because its latest version doesn't compile:\n#{why}")

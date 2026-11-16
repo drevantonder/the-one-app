@@ -7,8 +7,9 @@ defmodule OneCore.Tools do
   told. What each changes it reaches as a plugin reaches an artifact, so the plugins that decide `reach` say
   whether whoever asked may: an `editor` of a plugin deploys over it, a `viewer` reads its code and installs it, and
   so does a `member` of the group or the network it's whoever's or installed for, since what's in use is open to
-  everyone it's in use for, and only an `owner` of a user, a group or the network changes what's installed for them
-  and which servers act for them. A server is its owner's: who it was started for, and only their `owner` says
+  everyone it's in use for. An `installer` of a user, a group or the network adds plugins for them, which an `owner`
+  is, and only an `owner` removes them and says which servers act for them. A plugin is added only where a server
+  would run it (`OneCore.Servers.runs?/1`): for a user or a group, one of their own. A server is its owner's: who it was started for, and only their `owner` says
   who else it acts for and what it runs. Nothing is asked about what's whoever's asked, which is what their name
   starts. With no plugin deciding, they're the network's first owner's alone.
 
@@ -27,7 +28,8 @@ defmodule OneCore.Tools do
       once, with its tools listed and called as <name>_<tool>. If either fails, it says why, and the version already
       running stays.
       The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
-      or for the network, it's theirs. `recently-deleted remove --artifact <it>` removes one nobody has installed.
+      or for the network, it's theirs. Its code runs on a server of yours, so you need one: set one up in Devices, or
+      ask an owner to install it for everyone (home-screen_request). `recently-deleted remove --artifact <it>` removes one nobody has installed.
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       """,
       inputs: %{
@@ -97,6 +99,9 @@ defmodule OneCore.Tools do
       name: "install",
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them.
+      Its code runs on a server of yours, so you need one; for the network, its owners and installers add plugins,
+      and anyone may ask them to (home-screen_request). An app of a plugin in use for the network goes on your page
+      with home-screen_add, which installs nothing.
       `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
       It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
@@ -304,7 +309,13 @@ defmodule OneCore.Tools do
 
       tool ->
         # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
-        forward = &Call.forward({"tools/call", %{name: name, arguments: inputs}}, asked, forwarded, &1)
+        ask = {"tools/call", %{name: name, arguments: inputs}}
+        # To a server acting for someone, or with `{:running, owner}` to one that runs their plugins.
+        forward = fn
+          {:running, owner} -> Call.run_elsewhere(ask, asked, forwarded, owner, "A plugin for #{owner}")
+          owner -> Call.forward(ask, asked, forwarded, owner)
+        end
+
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in ["deploy", "uninstall"], do: {User.owner(elem(asked, 1)), inputs["name"]}
@@ -316,12 +327,30 @@ defmodule OneCore.Tools do
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
 
+  # Has a server that runs the plugins installed for `owner` run this call, if this one doesn't, since what it
+  # deploys or installs runs there.
+  defp runs(owner, forward) do
+    cond do
+      Servers.runs?(owner) ->
+        true
+
+      Servers.running(owner) == [] ->
+        raise "A plugin for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
+                "Set one up in Devices, or ask an owner to install it for everyone, with home-screen_request."
+
+      true ->
+        forward.({:running, owner})
+    end
+  end
+
   # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
-  # deployed for.
+  # deployed for. Either way it's loaded where it will run.
   defp run("deploy", %{"name" => name, "files" => files} = inputs, {_by, who} = asked, forward) do
+    runs(who, forward)
+
     case Plugins.plugin(who, name) do
-      nil -> at(who, forward) && reaches!(asked, who, "owner")
-      plugin -> at(User.owner(plugin), forward) && reaches!(asked, plugin, "editor")
+      nil -> reaches!(asked, who, "installer")
+      plugin -> reaches!(asked, plugin, "editor")
     end
 
     case Deploy.deploy(who, name, Store.received(files), Map.get(inputs, "from", :kept)) do
@@ -367,9 +396,9 @@ defmodule OneCore.Tools do
 
   defp run("install", %{"plugin" => plugin} = inputs, {_by, who} = asked, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
-    at(who, forward)
+    runs(who, forward)
     opens!(asked, plugin)
-    reaches!(asked, who, "owner")
+    reaches!(asked, who, "installer")
     with {:error, why} <- Installed.install(who, name, plugin), do: raise(why)
     "#{plugin} is installed for #{who}, as #{name}."
   end

@@ -229,11 +229,28 @@ defmodule OneCore.Call do
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
     for server <- servers -- [Server.key()], do: :no_answer = asks(call.request, {call.actor, call.subject}, server, "to")
+
     :no_answer
   end
 
   def forward(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :forwarding_loop})
   def forward(%__MODULE__{} = call, owner), do: forward(call.request, {call.actor, call.subject}, call.forwarded, owner)
+
+  @doc """
+  Has a server that runs the plugins installed for `owner` run this call, since this one doesn't
+  (`OneCore.Servers.runs?/1`). It ends here with that server's answer, or raises saying whose servers run it and
+  that none is on.
+  """
+  def run_elsewhere(%__MODULE__{} = call, owner),
+    do: run_elsewhere(call.request, {call.actor, call.subject}, call.forwarded, owner, call.plugin)
+
+  @doc "Has a server that runs the plugins installed for `owner` run what was asked of this one, `what`, as `run_elsewhere/2` does."
+  def run_elsewhere(ask, asked, forwarded, owner, what) do
+    if forwarded, do: throw({__MODULE__, :forwarding_loop})
+    servers = Servers.running(owner)
+    for server <- servers -- [Server.key()], do: :no_answer = asks(ask, asked, server, "to")
+    raise Servers.off(what, owner, servers)
+  end
 
   @doc """
   Has a server acting for `owner` run what was asked of this one instead, as `forward/2` does for a call: `ask` is
