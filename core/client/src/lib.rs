@@ -26,7 +26,7 @@ use futures_util::StreamExt;
 use futures_util::future::join_all;
 use futures_util::stream::FuturesUnordered;
 use iroh::endpoint::{Connection, QuicTransportConfig, ReadError, ReadToEndError, RecvStream, RelayMode, VarInt, presets};
-use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey};
+use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, broadcast, watch};
@@ -917,6 +917,7 @@ impl Client {
         let link = self.link();
         let open = Reached::connect(&link.endpoint, server, CONNECT).await?;
         tokio::spawn(hear(open.connection().clone(), self.notifications.clone()));
+        tokio::spawn(straight(self.me.clone(), open.connection().clone()));
         if self.watching.load(Ordering::Relaxed) {
             let here = address(&link.endpoint, link.network.as_ref()).ok()?;
             let watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
@@ -1242,26 +1243,74 @@ impl Client {
                 .with_context(|| format!("{} isn't servers' addresses", file.display()));
             return servers.map(Some);
         };
-        // This client's user is whoever its device signed in as, or in a network being built, who it says it acts
-        // as. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
-        let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
-        let of = match (said("link").map(|link| link.split('/').collect::<Vec<_>>()), said("as"), &self.link().who) {
-            (Some(leads), ..) if leads[0] == "network" => "network/".to_owned(),
-            (Some(leads), ..) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
-            (_, Some(acts_as), _) => format!("users/{acts_as}/"),
-            (_, _, Some(who)) => format!("{who}/"),
-            _ => bail!("This device isn't signed in here. In a network being built, ONE_AS says who it acts as."),
-        };
-        let asked = (SERVERS, json!({"of": of}));
+        let of = self.of()?;
+        let kept = self.kept_servers(&of);
         if !now {
-            return Ok(self.cached(asked.0, &asked.1).and_then(|kept| serde_json::from_value(kept).ok()));
+            return Ok(kept);
         }
         let servers = network
             .servers(&self.key, &of)
             .await
             .with_context(|| format!("Couldn't ask {} which servers to reach", network.address))?;
-        self.keep(asked.0, &asked.1, &serde_json::to_value(&servers)?)?;
+        // One that was reached straight before is tried there again, beside the relay.
+        let servers: Vec<EndpointAddr> = servers
+            .into_iter()
+            .map(|server| match kept.iter().flatten().find(|was| was.id == server.id) {
+                Some(was) => server.with_addrs(was.addrs.iter().filter(|addr| addr.is_ip()).cloned()),
+                None => server,
+            })
+            .collect();
+        self.keep(SERVERS, &json!({"of": of}), &serde_json::to_value(&servers)?)?;
         Ok(Some(servers))
+    }
+
+    /// Whose servers this client asks: whoever its device signed in as, or in a network being built, who it says it
+    /// acts as. A sharing link's holder asks the servers of whoever the link leads to, which it starts with.
+    fn of(&self) -> Result<String> {
+        let said = |what| self.says.iter().find(|(says, _)| *says == what).map(|(_, said)| said.as_str());
+        Ok(match (said("link").map(|link| link.split('/').collect::<Vec<_>>()), said("as"), &self.link().who) {
+            (Some(leads), ..) if leads[0] == "network" => "network/".to_owned(),
+            (Some(leads), ..) if leads.len() > 2 => format!("{}/{}/", leads[0], leads[1]),
+            (_, Some(acts_as), _) => format!("users/{acts_as}/"),
+            (_, _, Some(who)) => format!("{who}/"),
+            _ => bail!("This device isn't signed in here. In a network being built, ONE_AS says who it acts as."),
+        })
+    }
+
+    /// The servers acting for `of` as this client last kept them, each with where it was last reached straight.
+    fn kept_servers(&self, of: &str) -> Option<Vec<EndpointAddr>> {
+        self.cached(SERVERS, &json!({"of": of})).and_then(|kept| serde_json::from_value(kept).ok())
+    }
+
+    /// Keeps `addr` as where `server` is reached straight, as a connection to it found it, so the next run of this
+    /// device's clients tries it from the start, beside the relay, rather than waiting for the relay to find it again.
+    fn reached_straight(&self, server: EndpointId, addr: SocketAddr) {
+        let (Some(_), Ok(of)) = (self.link().network, self.of()) else { return };
+        let Some(mut servers) = self.kept_servers(&of) else { return };
+        let Some(kept) = servers.iter_mut().find(|kept| kept.id == server) else { return };
+        let relay = kept.addrs.iter().filter(|addr| !addr.is_ip()).cloned();
+        let now: std::collections::BTreeSet<_> = relay.chain([TransportAddr::Ip(addr)]).collect();
+        if now != kept.addrs {
+            kept.addrs = now;
+            let kept = serde_json::to_value(&servers).map_err(anyhow::Error::from);
+            if let Err(error) = kept.and_then(|servers| self.keep(SERVERS, &json!({"of": of}), &servers)) {
+                self.report(json!({"name": "one.client.kept", "error": format!("{error:#}")}));
+            }
+        }
+    }
+}
+
+/// Keeps where the server at the other end of `connection` is reached straight, each time that's the path taken.
+async fn straight(client: std::sync::Weak<Client>, connection: Connection) {
+    let server = connection.remote_id();
+    let mut paths = connection.paths_stream();
+    while let Some(paths) = paths.next().await {
+        let selected = paths.iter().find(|path| path.is_selected()).map(|path| path.remote_addr().clone());
+        match (client.upgrade(), selected) {
+            (Some(client), Some(TransportAddr::Ip(addr))) => client.reached_straight(server, addr),
+            (Some(_), _) => {}
+            (None, _) => return,
+        }
     }
 }
 
