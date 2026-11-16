@@ -1,5 +1,6 @@
 //! MCP over stdio. Servers speak MCP themselves, so each message read is passed to the server and its answer
-//! written back.
+//! written back. With `--code`, each says it's for code mode (`OneCore.Mcp`), and a script `execute` runs is run here,
+//! on this device (`codemode`).
 
 use std::sync::Arc;
 
@@ -11,17 +12,26 @@ use tokio::task::JoinSet;
 
 use client::Client;
 
-/// Serves MCP until stdin closes and every answer is written.
-pub async fn serve(client: Arc<Client>) -> Result<()> {
+/// Serves MCP until stdin closes and every answer is written, in code mode with `code`.
+pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
     let mut messages = BufReader::new(tokio::io::stdin()).lines();
     let out = Arc::new(Mutex::new(tokio::io::stdout()));
     let mut asks = JoinSet::new();
     while let Some(message) = messages.next_line().await? {
         let (client, out) = (client.clone(), out.clone());
         asks.spawn(async move {
-            let mut answer = match client.ask(message.as_bytes()).await {
-                Ok(answer) => answer,
-                Err(error) => refusal(&message, &error),
+            let mut asked: Value = serde_json::from_str(&message).unwrap_or_default();
+            if code && asked["method"].is_string() {
+                asked["params"]["_meta"]["mode"] = json!("code");
+            }
+            let message = if asked.is_object() { asked.to_string() } else { message };
+            let mut answer = if asked["method"] == "tools/call" && asked["params"]["name"] == "execute" {
+                execute(&client, &asked).await
+            } else {
+                match client.ask(message.as_bytes()).await {
+                    Ok(answer) => answer,
+                    Err(error) => refusal(&message, &error),
+                }
             };
             if !answer.is_empty() {
                 answer.push(b'\n');
@@ -36,6 +46,14 @@ pub async fn serve(client: Arc<Client>) -> Result<()> {
         asked??;
     }
     Ok(())
+}
+
+/// The answer to a call of `execute`: its script, run here.
+async fn execute(client: &Arc<Client>, asked: &Value) -> Vec<u8> {
+    let code = asked["params"]["arguments"]["code"].as_str().unwrap_or_default();
+    let (ok, text) = crate::codemode::run(client, code).await.unwrap_or_else(|error| (false, format!("{error:#}")));
+    let result = json!({"content": [{"type": "text", "text": text}], "isError": !ok});
+    json!({"jsonrpc": "2.0", "id": asked["id"], "result": result}).to_string().into_bytes()
 }
 
 /// What a request that reached no server is answered with. A notification is answered with nothing.

@@ -1,8 +1,10 @@
 //! The CLI, a client on One Core in a client (`core/client`) and the native code of the plugins it ships with. Every
 //! tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
 //! `one notes add --text milk` calls `notes_add`. `one notes` shows the plugin's skill and its tools, and
-//! `one mcp` serves MCP over stdio instead. A few words are about this device instead (`THIS_DEVICE`).
+//! `one mcp` serves MCP over stdio instead, or with `--code`, in code mode. `one search <words>` finds the tools for
+//! a task, and `one run <file>` runs a script that calls them (`codemode`). What isn't a tool is in `COMMANDS`.
 
+mod codemode;
 mod install;
 mod mcp;
 #[cfg(unix)]
@@ -42,11 +44,15 @@ pub fn main() -> ExitCode {
     })
 }
 
-/// What's about this device rather than a tool: its build, making it a server (`serving`), and updating it.
-const THIS_DEVICE: &str = "This device:\n\n\
+/// What isn't a tool: finding tools and running scripts with them, MCP, and what's about this device: its build,
+/// making it a server (`serving`), and updating it.
+const COMMANDS: &str = "Besides the tools:\n\n\
                            one serve on       makes it a server of yours, which starts whenever it does\n\
                            one serve off      stops it being one, and removes it\n\
                            one update         takes the latest builds\n\
+                           one search <words> finds the tools for a task, each with its command\n\
+                           one run <file>     runs a script that calls tools, as MCP's execute does\n\
+                           one mcp [--code]   serves MCP to an agent here: every tool, or code mode's few\n\
                            one restore        restores a whole network from a backup, with none running\n\
                            one --version      says which build it is";
 
@@ -71,9 +77,22 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     };
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let code = match words.as_slice() {
-        ["mcp"] => {
-            mcp::serve(client.clone()).await?;
+        ["mcp"] | ["mcp", "--code"] => {
+            mcp::serve(client.clone(), words.len() == 2).await?;
             ExitCode::SUCCESS
+        }
+        ["run", file] => {
+            let code = fs::read_to_string(file).with_context(|| format!("couldn't read {file}"))?;
+            let (ok, text) = codemode::run(&client, &code).await?;
+            println!("{text}");
+            if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+        }
+        ["search", query @ ..] if !query.is_empty() && !query[0].starts_with("--") => {
+            let asked = json!({"name": "search", "arguments": {"query": query.join(" ")}, "_meta": {"mode": "cli"}});
+            let result = client.request("tools/call", asked).await?;
+            let text: Vec<&str> =
+                result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
+            printed(text.join("\n"))
         }
         #[cfg(unix)]
         ["serve", "on"] => printed(serving::on(&client).await?),
@@ -192,7 +211,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
             }
             println!("\n`one <tool> --help` shows a tool's inputs.");
             if name.is_empty() {
-                println!("\n{THIS_DEVICE}");
+                println!("\n{COMMANDS}");
                 println!("\nA skill says when and how to use a plugin's tools, and `one <skill>` shows one:\n");
                 for skill in skills {
                     let words = said(skill["uri"].as_str().unwrap_or_default()).join(" ");
