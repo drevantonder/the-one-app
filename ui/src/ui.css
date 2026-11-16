@@ -1434,7 +1434,7 @@ button.ui-box {
 .ui-sign-in .code .shown {
   margin-top: 0.25rem;
   color: var(--foreground);
-  font: 650 var(--text-title) / 1.15 ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+  font: 650 var(--text-title) / 1.15 var(--font-mono);
   letter-spacing: 0.08em;
 }
 .ui-sign-in .ui-field {

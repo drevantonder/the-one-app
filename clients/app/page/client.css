@@ -136,7 +136,7 @@ iframe[inert] {
 }
 #recovery .key,
 #recovery .entry {
-  font: 500 var(--text-base) / 1.6 var(--font-mono, ui-monospace, monospace);
+  font: 500 var(--text-base) / 1.6 var(--font-mono);
   letter-spacing: 0.04em;
   overflow-wrap: anywhere;
   -webkit-user-select: text;

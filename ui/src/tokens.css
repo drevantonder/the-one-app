@@ -1,6 +1,23 @@
 /* Every colour, size, radius and pace the UI library draws with: shadcn's neutral, light and dark. A colour is
    light-dark(light, dark), so it follows `color-scheme` wherever it's used: the user's own by default, which a shell
    sets from Settings › Appearance, and any part of a page can set its own. */
+
+/* The typeface is Geist (vercel.com/font, the npm package geist 1.9.2, SIL Open Font License: Geist-LICENSE.txt),
+   with Geist Mono for code, served beside this file so nothing comes from a font host. A script Geist lacks is drawn
+   in the device's own font. */
+@font-face {
+  font-family: "Geist";
+  src: url("Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Geist Mono";
+  src: url("GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light dark;
 
@@ -57,7 +74,8 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Mono", monospace;
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;
   --text-lg: 1.0625rem;
