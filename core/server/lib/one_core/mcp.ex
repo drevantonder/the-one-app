@@ -124,7 +124,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("initialize", params, _from, {by, _who}, _passed_on) do
+  defp result("initialize", params, _from, {by, _who}, _forwarded) do
     asked = params["protocolVersion"]
 
     {:ok,
@@ -136,12 +136,12 @@ defmodule OneCore.Mcp do
      }}
   end
 
-  defp result("ping", _params, _from, _asked, _passed_on), do: {:ok, %{}}
+  defp result("ping", _params, _from, _asked, _forwarded), do: {:ok, %{}}
 
   # A user's device asks for its token to the relay at the network's address, and for the next before that one
   # ends, and is told whose it is: the device a run of it proved here, or the edge did there. It says which
   # build it is as it asks.
-  defp result("one/token", params, from, {"users/" <> _ = by, _for}, _passed_on) do
+  defp result("one/token", params, from, {"users/" <> _ = by, _for}, _forwarded) do
     device = User.device(from, said(params))
 
     if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
@@ -153,7 +153,7 @@ defmodule OneCore.Mcp do
   end
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
-  defp result("tools/list", _params, _from, {by, who}, _passed_on) do
+  defp result("tools/list", _params, _from, {by, who}, _forwarded) do
     open = fn tools -> if holder?(by), do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
 
     listed = fn name, tool ->
@@ -175,23 +175,23 @@ defmodule OneCore.Mcp do
     {:ok, %{tools: own ++ plugins}}
   end
 
-  defp result("skills/list", _params, _from, asked, _passed_on),
+  defp result("skills/list", _params, _from, asked, _forwarded),
     do: {:ok, %{resultType: "complete", skills: skills(asked)}}
 
-  defp result("skills/get", params, _from, asked, _passed_on) do
+  defp result("skills/get", params, _from, asked, _forwarded) do
     case Enum.find(skills(asked), &(&1.uri == params["uri"])) do
       nil -> {:error, -32602, "There's no skill at #{params["uri"]}. skills/list says what there is."}
       skill -> {:ok, %{resultType: "complete", skill: skill}}
     end
   end
 
-  defp result("resources/" <> _ = method, params, _from, {by, who}, _passed_on) do
+  defp result("resources/" <> _ = method, params, _from, {by, who}, _forwarded) do
     if holder?(by),
       do: {:error, -32002, "A sharing link's holder reads nothing of a network but what a tool gives them"},
       else: resources(method, params, who)
   end
 
-  defp result(method, _params, _from, _asked, _passed_on),
+  defp result(method, _params, _from, _asked, _forwarded),
     do: {:error, -32601, "This server has no method #{method}"}
 
   # A skill is listed here too, for an agent whose client lists resources and not yet skills.
@@ -253,7 +253,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp between(_passed_on, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
+  defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
   defp call(name, inputs, asked, forwarded) do

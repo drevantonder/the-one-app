@@ -54,7 +54,7 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   client plus a little. Version 1 plugins all broke at once.
 - **DeepSeek Harness** (`dsh`, developer preview, built on Cordis): "no privileged core"; the agent loop and tool
   registry are plugins. A plugin provides a service under a key and others ask for the key, never the plugin, so one
-  can be swapped. Each hook's contract says how it's called: heard only, wrapped, or decided by the first to answer.
+  can be swapped. Each hook's contract says how it's called: observed, mutated, or validated by the first to answer.
   Its most reported trap is a wrapping hook that forgets to pass the call on and so blocks it silently.
 
 ## Not checked yet
