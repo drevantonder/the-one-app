@@ -10,10 +10,7 @@ defmodule Sqlite do
 
   A value is a number, text, `nil`, a boolean (kept as 1 or 0) or `{:blob, binary}` for bytes that aren't text.
   """
-  @on_load :load
-
-  @doc false
-  def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))
+  use OneCore.Nif
 
   @doc "Opens the database file at `path`, making it if there's none. It closes when nothing holds it."
   def open(_path), do: :erlang.nif_error(:nif_not_loaded)

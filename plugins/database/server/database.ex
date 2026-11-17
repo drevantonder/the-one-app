@@ -77,7 +77,9 @@ defmodule Database do
     if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
 
     with :not_up <- :gen_statem.call(lease, {:take_over, server}) do
-      held = if server, do: "#{OneCore.Servers.name(server) || server} holds it and didn't answer", else: "nobody holds it"
+      held =
+        if server, do: "#{OneCore.Servers.name(server) || server} holds it and didn't answer", else: "nobody holds it"
+
       raise "This server is starting or stopping, so it doesn't take a database over, and #{held}. Try again in a moment."
     end
   end
@@ -118,8 +120,8 @@ defmodule Database do
   end
 
   @doc "Runs one SQL statement in a transaction, with a `?` for each value, and gives its rows."
-  def query(db, sql, values \\ []) do
-    case Sqlite.query(db, sql, values) do
+  def query({sqlite, db}, sql, values \\ []) do
+    case sqlite.query(db, sql, values) do
       {:ok, rows} -> rows
       {:error, why} -> raise "#{why}, in: #{sql}"
     end

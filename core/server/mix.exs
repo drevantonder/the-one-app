@@ -42,21 +42,22 @@ defmodule OneCore.MixProject do
 
   # The program is One Core. On a developer's machine it's also `mix network`, which `tooling/network` runs, at the repo's
   # root.
-  # `OneCore.Redact` is compiled by an untrusted plugin's VM too, which has none of the server's code, so it's where
-  # that VM finds it, in `priv/sandbox`.
-  defp elixirc_paths(:dev), do: ["lib", "priv/sandbox/redact.ex", Path.expand("../../tooling/network.ex", __DIR__)]
-  defp elixirc_paths(_env), do: ["lib", "priv/sandbox/redact.ex"]
+  # `OneCore.Redact` and `OneCore.Nif` are compiled by an untrusted plugin's VM too, which has none of the server's
+  # code, so it's where that VM finds them, in `priv/sandbox`.
+  defp elixirc_paths(:dev), do: elixirc_paths(:prod) ++ [Path.expand("../../tooling/network.ex", __DIR__)]
+  defp elixirc_paths(_env), do: ["lib", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
 
   # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` runs it: built as one, it
-  # has one set of features, so nothing in it is built twice or again for nothing. One Core's go where the server
-  # loads them (`priv/native`), and those of the plugins The One App ships with beside their source, where a plugin
-  # brings them (`OneCore.Plugin`): here, its folder is what's deployed. `tooling/release` and `tooling/nifs` build
-  # them for every kind of machine, as a server built for one is. A crash in a Rust NIF ends the VM: Rust panics are
-  # caught, and what's left is rare. Each is removed before it's put there again, since a
-  # server running from this checkout has it loaded.
+  # has one set of features, so nothing in it is built twice or again for nothing. Each is named for its build, as
+  # `tooling/nifs` names it (`OneCore.Nif`). One Core's go where the server loads them (`priv/native`), and those of the
+  # plugins The One App ships with beside their source, where a plugin brings them (`OneCore.Plugin`): here, its
+  # folder is what's deployed. `tooling/release` and `tooling/nifs` build them for every kind of machine, as a server
+  # built for one is. A crash in a Rust NIF ends the VM: Rust panics are caught, and what's left is rare. Each is
+  # removed before it's put there again, since a server running from this checkout has it loaded.
   defp nifs(_args) do
     root = Path.expand("../..", __DIR__)
-    {_, 0} = System.cmd("cargo", ["build", "--release"], cd: root)
+    {rustc, 0} = System.cmd("rustc", ["-vV"])
+    [host] = Regex.run(~r/^host: (.+)$/m, rustc, capture: :all_but_first)
     target = System.get_env("CARGO_TARGET_DIR", "#{root}/target")
     # The kind of machine this is, as builds are named (`OneCore.Builds.target/0`).
     [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
@@ -64,16 +65,26 @@ defmodule OneCore.MixProject do
     File.mkdir_p!(Path.join(__DIR__, "priv/native"))
 
     built =
-      for toml <- Path.wildcard("#{__DIR__}/nif/*/Cargo.toml"), crate = Path.basename(Path.dirname(toml)),
-          do: {crate, Path.join(__DIR__, "priv/native/#{crate}.so")}
+      for toml <- Path.wildcard("#{__DIR__}/nif/*/Cargo.toml"),
+          crate = Path.dirname(toml),
+          do: {crate, Path.join(__DIR__, "priv/native/#{Path.basename(crate)}.so")}
 
     bundled =
-      for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"), crate = Path.dirname(toml),
-          do: {Path.basename(crate), "#{crate}/#{os}-#{arch}.so"}
+      for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"),
+          crate = Path.dirname(toml),
+          do: {crate, "#{crate}/#{os}-#{arch}.so"}
+
+    builds =
+      for {crate, _put} <- built ++ bundled do
+        {hash, 0} = System.cmd("#{root}/tooling/input-hash", [crate, host])
+        {"NIF_BUILD_" <> String.upcase(Path.basename(crate)), String.trim(hash)}
+      end
+
+    {_, 0} = System.cmd("cargo", ["build", "--release"], cd: root, env: builds)
 
     for {crate, put} <- built ++ bundled do
       File.rm(put)
-      File.cp!("#{target}/release/lib#{crate}.#{extension}", put)
+      File.cp!("#{target}/release/lib#{Path.basename(crate)}.#{extension}", put)
     end
   end
 

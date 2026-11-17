@@ -11,10 +11,7 @@ defmodule Cipher do
 
   What each of these is made of is in `plugins/encryption/client/native/src/cipher.rs`, which a device runs too.
   """
-  @on_load :load
-
-  @doc false
-  def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))
+  use OneCore.Nif
 
   @doc "The key kept in the file `file`, as a server keeps its own (`OneCore.Server.key_file/0`): `{:ok, keys}`."
   def key(_file), do: :erlang.nif_error(:nif_not_loaded)

@@ -7,7 +7,9 @@ defmodule Encryption.Keys do
   takes them. One that wasn't reached then looks every few seconds while the artifact is in use. A server that
   holds none looks each time it's asked: it's about to ask another server anyway.
 
-  Keys handed over anew are a new reference, and the one before opens nothing more. So whatever held the
+  They're kept with the build of `Cipher` that opened them, `{cipher, keys}`, which is the codec an artifact opened
+  with them has, since what a build opens works only with that build (`OneCore.Nif`). Keys handed over anew are a
+  new reference, and the one before opens nothing more. So whatever held the
   artifact open with the old one finds out, as a database does (`Database.Lease`): what a server had open before
   it was taken off isn't what it carries on with when it's chosen again.
   """
@@ -43,7 +45,7 @@ defmodule Encryption.Keys do
 
         with {:ok, own} <- Cipher.key(OneCore.Server.key_file()),
              {:ok, keys} <- Cipher.open_keys(own, "one/encryption/1/keys\n#{name}\n#{state.server}", slot) do
-          %{state | keys: keys, slot: slot}
+          %{state | keys: {Cipher, keys}, slot: slot}
         else
           {:error, _why} -> state
         end
@@ -53,8 +55,18 @@ defmodule Encryption.Keys do
     end
   end
 
-  defp forgotten(state) do
-    if state.keys, do: Cipher.forget(state.keys)
+  defp forgotten(%{keys: {cipher, keys}} = state) do
+    cipher.forget(keys)
     %{state | keys: nil, slot: nil}
   end
+
+  defp forgotten(state), do: %{state | keys: nil, slot: nil}
+
+  # Keys opened by another build of `Cipher` are opened again by this version's the next time they're asked for. Calls
+  # that hold them still open with them, with the version they run, so they're let go of, not forgotten.
+  @impl true
+  def code_change(_vsn, %{keys: {cipher, _keys}} = state, _extra) when cipher != Cipher,
+    do: {:ok, %{state | keys: nil, slot: nil}}
+
+  def code_change(_vsn, state, _extra), do: {:ok, state}
 end

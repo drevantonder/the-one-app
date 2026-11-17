@@ -39,8 +39,8 @@ defmodule Encryption do
     keys = Call.process(call, Keys, name, {%{artifact | reached: nil}, call.server})
 
     with :ok <- chosen(call, name, call.server),
-         {:ok, keys} <- GenServer.call(keys, :keys) do
-      %{artifact | codec: {Cipher, keys}}
+         {:ok, codec} <- GenServer.call(keys, :keys) do
+      %{artifact | codec: codec}
     else
       refused ->
         # A server that's no longer chosen lets go of the keys it held, whatever still holds them.
@@ -230,7 +230,10 @@ defmodule Encryption do
             owner: %{type: "string", description: "Whose key"},
             device: %{type: ["string", "null"], description: "The device asked about"},
             check: %{type: ["string", "null"], description: "What tells the key from another, once there's one"},
-            slot: %{type: ["string", "null"], description: "The key, encrypted to the device asked about, if it holds it"},
+            slot: %{
+              type: ["string", "null"],
+              description: "The key, encrypted to the device asked about, if it holds it"
+            },
             devices: %{type: "array", items: named, description: "The devices that hold it"},
             asking: %{type: "array", items: named, description: "The devices asking to"}
           },
@@ -248,7 +251,11 @@ defmodule Encryption do
           properties: %{
             device: device,
             name: %{type: "string", format: "device-name", description: "What to call the device"},
-            key: %{type: "string", format: "owner-key", description: "Your recovery key, to approve this device with it"}
+            key: %{
+              type: "string",
+              format: "owner-key",
+              description: "Your recovery key, to approve this device with it"
+            }
           }
         },
         outputs: named

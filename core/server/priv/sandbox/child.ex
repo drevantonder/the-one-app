@@ -112,14 +112,6 @@ defmodule OneCore.Plugin do
       else: files[path] || raise("#{name}'s plugin has no file #{path} outside client/")
   end
 
-  def nif(module, load) do
-    library =
-      :persistent_term.get({OneCore.Sandbox.Child, :nif, module}, nil) ||
-        raise "#{inspect(module)} has no NIF built for this machine"
-
-    load.(String.to_charlist(library))
-  end
-
   @callback tools() :: [map]
   @callback call(String.t(), map, struct) :: term
   @callback apps() :: [map]
@@ -401,26 +393,24 @@ defmodule OneCore.Sandbox.Child do
     out = if cache, do: cache["ebin"], else: Path.join(folder, "ebin")
     File.mkdir_p!(folder)
 
+    # A NIF loads as its build, which the plugin's code reaches under its name (`OneCore.Nif`).
+    for {path, text} <- files, Path.dirname(path) == "server/nif", Path.extname(path) == ".ex" do
+      library = files[Path.rootname(path) <> "/#{target}.so"] || raise "#{path} has no build for this kind of machine"
+
+      with {:error, why} <- OneCore.Nif.load(text, library, name, Path.join([System.tmp_dir!(), "nif", name])),
+           do: raise("#{path} didn't load on this machine, #{target}: #{why}")
+    end
+
     sources =
-      for {path, text} <- files, String.starts_with?(path, "server/"), Path.extname(path) == ".ex" do
+      for {path, text} <- files,
+          String.starts_with?(path, "server/"),
+          Path.extname(path) == ".ex",
+          Path.dirname(path) != "server/nif" do
         file = Path.join(folder, path)
         File.mkdir_p!(Path.dirname(file))
         File.write!(file, text)
         file
       end
-
-    # A NIF's module loads its library for this kind of machine as it's loaded.
-    for {path, text} <- files,
-        Path.dirname(path) == "server/nif",
-        Path.extname(path) == ".ex",
-        library = files[Path.rootname(path) <> "/#{target}.so"],
-        {:ok, {:defmodule, _, [{:__aliases__, _, parts} | _]}} <- [Code.string_to_quoted(text)] do
-      # Erlang adds the library's extension itself.
-      file = Path.join([System.tmp_dir!(), "nif", name, Path.basename(path, ".ex")])
-      File.mkdir_p!(Path.dirname(file))
-      File.write!(file <> ".so", library)
-      :persistent_term.put({__MODULE__, :nif, Module.concat(parts)}, file)
-    end
 
     if cache do
       modules = Enum.map(cache["modules"][name], &String.to_atom/1)
@@ -437,7 +427,10 @@ defmodule OneCore.Sandbox.Child do
   defp compiled(sources, name, out, files, folder) do
     case Kernel.ParallelCompiler.compile_to_path(sources, out, return_diagnostics: true) do
       {:ok, modules, warnings} ->
-        Process.put({__MODULE__, :warnings, name}, messages(warnings.compile_warnings ++ warnings.runtime_warnings, folder))
+        Process.put(
+          {__MODULE__, :warnings, name},
+          messages(warnings.compile_warnings ++ warnings.runtime_warnings, folder)
+        )
 
         for module <- modules, do: :persistent_term.put({__MODULE__, :files, module}, {name, out, files})
         Enum.each(modules, &Code.ensure_loaded!/1)
@@ -518,7 +511,7 @@ defmodule OneCore.Sandbox.Check do
     OneCore.Call =>
       ~w(plugin tool make reach reaches? member? owns? plugins deployed process forward_to stage ask __struct__)a,
     OneCore.Artifact => ~w(name read read_all write replace remove size list __struct__)a,
-    OneCore.Plugin => ~w(file nif behaviour_info)a
+    OneCore.Plugin => ~w(file behaviour_info)a
   }
 
   @programs [{System, :cmd}, {System, :shell}, {Port, :open}, {:os, :cmd}, {:erlang, :open_port}]
@@ -663,6 +656,7 @@ defmodule OneCore.Sandbox.Check do
 
   defp instead(OneCore.Call, :fetch),
     do: "An untrusted plugin reaches no website: run it trusted, on a server of its owner's."
+
   defp instead(OneCore.Call, f) when f in [:forward, :run_elsewhere, :refused], do: "One Core does that itself."
   defp instead(OneCore.Artifact, :link), do: "Answer a blob as `{:file, kind, artifact, name}` instead."
   defp instead(_m, _f), do: ""

@@ -94,4 +94,4 @@ fn decode<'a>(env: Env<'a>, keys: ResourceArc<Keys>, name: &str, blob: Binary) -
     Ok(binary(env, &cipher::decrypt(&keys, name, blob.as_slice()).map_err(error_string)?))
 }
 
-rustler::init!("Elixir.Cipher");
+include!(concat!(env!("OUT_DIR"), "/init.rs"));

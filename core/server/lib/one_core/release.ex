@@ -87,6 +87,11 @@ defmodule OneCore.Release do
   def check do
     Application.load(:one_core)
     for module <- Application.spec(:one_core, :modules), do: Code.ensure_loaded!(module)
+
+    for module <- Application.spec(:one_core, :modules),
+        function_exported?(module, :__nif__, 0),
+        do: OneCore.Nif.build(module)
+
     IO.puts(Builds.build())
   end
 end

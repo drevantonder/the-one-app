@@ -8,4 +8,4 @@ fn files(folder: String) -> Result<Vec<String>, String> {
     client::files(Path::new(&folder)).map_err(|error| format!("{error:#}"))
 }
 
-rustler::init!("Elixir.OneCore.Folder");
+include!(concat!(env!("OUT_DIR"), "/init.rs"));

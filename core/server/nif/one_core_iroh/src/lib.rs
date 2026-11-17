@@ -438,4 +438,4 @@ impl Reference {
     }
 }
 
-rustler::init!("Elixir.OneCore.Iroh");
+include!(concat!(env!("OUT_DIR"), "/init.rs"));

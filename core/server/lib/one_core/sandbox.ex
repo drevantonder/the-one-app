@@ -483,7 +483,9 @@ defmodule OneCore.Sandbox do
 
     # What a version's VM compiled is kept on this machine for its next VM, whoever's it is, which loads it instead:
     # its own code and the child's side of One Core, as this server has it.
-    runtime = for file <- ~w(child.ex redact.ex), do: File.read!(Application.app_dir(:one_core, "priv/sandbox/#{file}"))
+    runtime =
+      for file <- ~w(child.ex redact.ex nif.ex), do: File.read!(Application.app_dir(:one_core, "priv/sandbox/#{file}"))
+
     cache = if version, do: Path.join([Server.home(), "sandbox", Version.code({key, runtime})])
 
     context = %{
@@ -611,7 +613,7 @@ defmodule OneCore.Sandbox do
         do: "",
         else:
           "{ok, _, _} = 'Elixir.Kernel.ParallelCompiler':compile_to_path([<<\"#{child}/child.ex\"/utf8>>, " <>
-            "<<\"#{child}/redact.ex\"/utf8>>], " <>
+            "<<\"#{child}/redact.ex\"/utf8>>, <<\"#{child}/nif.ex\"/utf8>>], " <>
             "unicode:characters_to_binary(filename:join(os:getenv(\"TMPDIR\"), \"runtime\")), " <>
             "[{return_diagnostics, true}]), "
 

@@ -25,7 +25,7 @@ defmodule OneCore.Plugin do
   to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `uses/0`, `jobs/0` and
   `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
-  `forward_to`, `stage` and `ask`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
+  `forward_to`, `stage` and `ask`; `OneCore.Plugin.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The plugins it uses
   run in its VM too, as it, `database` among them. It has no services, no hooks it mutates or validates, no other
   plugins' functions (it calls the tools of the plugins it requires), no programs, no network and no website, and no files but its `folder`,
   which goes when the VM stops, a minute after its last call. Deploying an untrusted one that uses what isn't
@@ -256,11 +256,14 @@ defmodule OneCore.Plugin do
   - A plugin brings native code as a NIF, which its Elixir calls: its source in a folder of `server/nif/`, say
     `server/nif/sqlite/`, which is never deployed, and beside it the library built from it for each kind of machine
     a server runs on, `linux-x86_64.so`, `linux-aarch64.so`, `macos-aarch64.so` and `windows-x86_64.so` (a DLL),
-    which are. The module the
-    library was built for is `server/nif/sqlite.ex`, which keeps its name rather than taking its version's, and
-    loads it with `@on_load :load` and `def load, do: OneCore.Plugin.nif(__MODULE__, &:erlang.load_nif(&1, 0))`.
-    A deploy whose NIF doesn't load on the server fails, saying why. A name holds the first build loaded until the
-    server restarts: a deploy with another build is kept, says so in its warnings, and runs from the next start.
+    which are. Each build is a module of its own, named for what it's built from, which its `build.rs` gives Rustler
+    as the database plugin's does (`server/nif/sqlite/build.rs`), and `tooling/nifs` builds. Its Elixir is
+    `server/nif/sqlite.ex`, one module named in one word, which says `use OneCore.Nif` and has each function
+    `:erlang.nif_error(:nif_not_loaded)`. A changed NIF deploys as any change does, with no restart: its build loads
+    beside the one before, this version's code calls its own build by that name, and another plugin's code the
+    newest. A deploy whose NIF doesn't load on the server fails, saying why, and the version before runs on. What a
+    build opens, a database or keys, works only with that build, so it's kept with the module that opened it, and a
+    process that keeps one into a new version opens it again in `code_change/3`, as `Database.Lease` does.
     The plugin `database` brings `Sqlite`.
   - A plugin brings a program the same way, from its source in a folder of `server/bin/`, built for each kind of
     machine as `<kind>` beside it, which its code reads with `file/2` and writes out to run: the plugin `sandbox`
@@ -568,12 +571,6 @@ defmodule OneCore.Plugin do
     OneCore.Plugins.Version.own(module, path) ||
       raise "#{OneCore.Plugins.Version.own_name(module)}'s plugin has no file #{path} outside client/"
   end
-
-  @doc """
-  Loads a plugin's NIF into its module, from `@on_load`, which is `module` and hands `load`, as
-  `&:erlang.load_nif(&1, 0)`: its library for this machine, written out to load. Gives what loading said.
-  """
-  defdelegate nif(module, load), to: OneCore.Plugins.Version
 
   @doc """
   One Core's own skill, `building-plugins`, as its `SKILL.md`: how to write a plugin, which is this module's, and the

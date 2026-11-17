@@ -98,4 +98,4 @@ fn read<'a>(env: Env<'a>, value: ValueRef) -> Term<'a> {
     }
 }
 
-rustler::init!("Elixir.Sqlite");
+include!(concat!(env!("OUT_DIR"), "/init.rs"));

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# What a crate's NIF or program for a target is built from, as a SHA-256: the Rust that builds it, the workspace's
+# settings, and the crate and every package it uses, with their features: one of the workspace's by its files, and
+# one from a registry by its version, which Cargo.lock pins to one checksum. A NIF is named for it
+# (`OneCore.Nif`), and `tooling/nifs` keeps a build by it.
+#
+#     tooling/input-hash <crate's folder> <target triple>
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+{
+  echo "$2" && rustc -V && sha256sum Cargo.toml .cargo/config.toml
+  cargo tree --locked -q -p "$(basename "$1")" --target "$2" -e normal,build --prefix none -f '{p} {f}' | sed 's/ (\*)$//' | sort -u |
+    while read -r package; do
+      echo "${package/"$root/"/}"
+      [[ $package != *"($root/"* ]] || { dir=${package#*"($root/"} && git ls-files -co --exclude-standard -z -- "${dir%%)*}" | xargs -0r sha256sum; }
+    done
+} | sha256sum | cut -d' ' -f1

@@ -43,7 +43,7 @@ defmodule OneCore.Plugins.Version do
   that loaded it kept in the bucket, and is `described/2` from that. A described version has no modules, so it's
   only listed here, and every call to it is run where it's loaded (`OneCore.Plugins.Calls`).
   """
-  alias OneCore.{App, Builds, Hooks, Server, Skills}
+  alias OneCore.{App, Builds, Hooks, Nif, Server, Skills}
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code]
   defstruct [
@@ -99,10 +99,9 @@ defmodule OneCore.Plugins.Version do
       Map.split_with(Map.new(rest), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
 
     with {:ok, skills} <- Skills.found(name, skills),
-         {:ok, nif_warnings} <- nifs(nifs, rest),
-         {:ok, modules, warnings} <- compile(under, sources),
+         {:ok, builds} <- nifs(under, nifs, rest),
+         {:ok, modules, warnings} <- compile(under, sources, builds),
          {:ok, version} <- describe(under, modules, rest) do
-      warnings = Enum.join(Enum.reject([warnings | nif_warnings], &(&1 == "")), "\n")
       hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
       served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
       own = Map.reject(rest, fn {path, _} -> client?(path) end)
@@ -310,6 +309,7 @@ defmodule OneCore.Plugins.Version do
 
   def unload(under) do
     :persistent_term.erase({__MODULE__, under})
+    Nif.release(under)
 
     for {module, _} <- :code.all_loaded(), under?(module, under) do
       :code.delete(module)
@@ -322,75 +322,32 @@ defmodule OneCore.Plugins.Version do
 
   defp under?(module, under), do: String.starts_with?(Atom.to_string(module), Atom.to_string(under) <> ".")
 
-  # A NIF's module, `server/nif/<name>.ex`, is compiled under the name it gives it, which its library was built for,
-  # with that library as it's built for this kind of machine, `server/nif/<name>/<kind>.so`, written to a folder named
-  # by the build. The VM loads a library into a module once, and Rustler can't swap it for another while the module's
-  # in use (it has no `upgrade`), so a name holds the first build loaded until the server restarts: the same build
-  # again is that one, and another is kept for the next start, which loads the latest version's, and is said in the
-  # warnings. Gives `{:ok, warnings}`, or what's wrong.
-  defp nifs(nifs, rest) do
-    Enum.reduce_while(nifs, {:ok, []}, fn nif, {:ok, warnings} ->
-      case compile_nif(nif, rest) do
-        :ok -> {:cont, {:ok, warnings}}
-        {:warning, warning} -> {:cont, {:ok, [warning | warnings]}}
-        {:error, _why} = error -> {:halt, error}
+  # A NIF, `server/nif/<name>.ex` and its library as it's built for this kind of machine, `server/nif/<name>/<kind>.so`,
+  # loaded as its build (`OneCore.Nif`), which this version's code reaches by its name. Gives each build by that name,
+  # or what's wrong.
+  defp nifs(under, nifs, rest) do
+    Enum.reduce_while(nifs, {:ok, %{}}, fn {path, source}, {:ok, builds} ->
+      library = Path.rootname(path) <> "/#{Builds.target()}.so"
+
+      with {:built, true} <- {:built, is_map_key(rest, library)},
+           {:ok, name, build} <- Nif.load(source, rest[library], under, Path.join(Server.home(), "nif")),
+           [_one_word] <- Module.split(name) do
+        {:cont, {:ok, Map.put(builds, inspect(name), build)}}
+      else
+        {:built, false} -> {:halt, {:error, "#{path} has no build for this kind of machine, #{library}"}}
+        {:error, why} -> {:halt, {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{why}"}}
+        _ -> {:halt, {:error, "#{path}'s module is named in one word, which this plugin's code reaches it by"}}
       end
     end)
   end
 
-  defp compile_nif({path, source}, rest) do
-    library = Path.rootname(path) <> "/#{Builds.target()}.so"
-    build = code({source, rest[library]})
-
-    with [name] <- defined(source),
-         module = Module.concat([name]),
-         {:built, true} <- {:built, is_map_key(rest, library)},
-         nil <- :persistent_term.get({__MODULE__, module}, nil),
-         :non_existing <- :code.which(module) do
-      file = Path.join([Server.home(), "nif", build, Path.basename(path, ".ex")])
-      File.mkdir_p!(Path.dirname(file))
-      # Renamed into place, as another VM on this home may have the same library loaded from it.
-      File.write!(file <> ".part", rest[library])
-      File.rename!(file <> ".part", file <> library_extension())
-      :persistent_term.put({__MODULE__, module}, {build, file})
-      # What doesn't compile says why in its diagnostics.
-      compile = fn -> Code.compile_string(source, path) end
-      {_, diagnostics} = Code.with_diagnostics(fn -> try(do: compile.(), rescue: (_ in CompileError -> nil)) end)
-      {_, message} = :persistent_term.get({__MODULE__, module})
-
-      if :code.is_loaded(module) == false do
-        :persistent_term.erase({__MODULE__, module})
-        message = if message == file, do: Enum.map_join(diagnostics, "\n", & &1.message), else: message
-        {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{message}"}
-      else
-        :ok
-      end
-    else
-      {:built, false} -> {:error, "#{path} has no build for this kind of machine, #{library}"}
-      {^build, _} -> :ok
-      {_other, _} -> {:warning, "#{path}: this server runs the NIF it loaded until it restarts, and this one after"}
-      names when is_list(names) -> {:error, "#{path} defines one module, which its library was built for"}
-      _ -> {:error, "#{path}'s module is one of the server's own"}
-    end
-  end
-
-  # What the VM loads a library by, which it finds by the name without it: a DLL on Windows.
-  defp library_extension, do: if(match?({:win32, _}, :os.type()), do: ".dll", else: ".so")
-
-  @doc false
-  def nif(module, load) do
-    {build, file} = :persistent_term.get({__MODULE__, module})
-    loaded = load.(String.to_charlist(file))
-    with {:error, {_, why}} <- loaded, do: :persistent_term.put({__MODULE__, module}, {build, to_string(why)})
-    loaded
-  end
-
   # The files go to a folder of their own to be compiled together, so they can use each other's structs and macros
   # in any order. The aliases share each file's first line, which keeps its line numbers.
-  defp compile(under, sources) do
+  defp compile(under, sources, builds) do
     folder = Path.join([Server.home(), "compiling", List.last(Module.split(under))])
     names = Enum.uniq(for {_, source} <- sources, name <- defined(source), do: name)
-    aliases = Enum.map_join(names, &"alias #{inspect(Module.concat(under, &1))}, as: #{&1}, warn: false; ")
+    names = Map.merge(builds, Map.new(names, &{Atom.to_string(&1), Module.concat(under, &1)}))
+    aliases = Enum.map_join(names, fn {name, module} -> "alias #{inspect(module)}, as: #{name}, warn: false; " end)
 
     paths =
       for {path, source} <- sources do

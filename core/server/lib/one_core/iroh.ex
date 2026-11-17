@@ -1,9 +1,6 @@
 defmodule OneCore.Iroh do
   @moduledoc "The server's Rust NIF for being reached by key (`nif/one_core_iroh`)."
-  @on_load :load
-
-  @doc false
-  def load, do: :erlang.load_nif(~c"#{:code.priv_dir(:one_core)}/native/one_core_iroh", 0)
+  use OneCore.Nif, library: "one_core_iroh"
 
   @doc "The key kept in `key_file`, made on first use, as others know it."
   def key(_key_file), do: :erlang.nif_error(:nif_not_loaded)

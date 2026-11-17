@@ -65,7 +65,8 @@ defmodule Database.Lease do
   @lease_ttl 4_000
   @writes_after 5_000
 
-  # What it keeps besides its state. `db` is the copy while it's open, `number` the log's last entry it read or
+  # What it keeps besides its state. `db` is the copy while it's open, with the build of `Sqlite` that opened it,
+  # `{sqlite, db}`, which is the build it's used with (`OneCore.Nif`), `number` the log's last entry it read or
   # wrote, `logged` the pages logged since the last snapshot and `pages` the copy's size, `proved` its clocks when it
   # last saw the log's next entry free, `settled` when by its monotonic clock it may write, and `firing` the
   # scheduled jobs being called here: each one's `job` and the time it was due `at`, by its call's process, and
@@ -168,9 +169,21 @@ defmodule Database.Lease do
   def terminate(_why, _state, data), do: close(data)
 
   # A database open under an earlier version of this module carries on open under this one, in the state it was in,
-  # with what this one keeps that that one didn't at its default.
+  # with what this one keeps that that one didn't at its default. One opened by another build of `Sqlite` is opened
+  # with this version's, and closed with that one's, which is still loaded now.
   @impl true
-  def code_change(_vsn, state, data, _extra), do: {:ok, state, struct(__MODULE__, Map.from_struct(data))}
+  def code_change(_vsn, state, data, _extra) do
+    data = struct(__MODULE__, Map.from_struct(data))
+    {:ok, state, if(match?({sqlite, _db} when sqlite != Sqlite, data.db), do: reopened(data), else: data)}
+  end
+
+  # Opened before it's closed, so SQLite keeps its write-ahead log, which holds what a write made while settling
+  # committed and hasn't logged yet: the last connection to close empties it into the file.
+  defp reopened(%{db: {sqlite, db}} = data) do
+    opened = connected(file(data))
+    sqlite.close(db)
+    %{data | db: opened}
+  end
 
   # Runs `work` with the database in a transaction, for `event`, which is answered once what it changed is in the
   # bucket (`done/3`): at once while holding, and once the settle time has passed while settling. One that changed
@@ -244,16 +257,16 @@ defmodule Database.Lease do
   # Runs `work` with the database in a transaction: `{:ok, result}` once it's committed to the copy, or
   # `{:raised, kind, reason, stacktrace}` if it raised, with nothing kept.
   defp run(db, work) do
-    {:ok, _} = Sqlite.query(db, "begin", [])
+    {:ok, _} = sqlite(db, "begin")
 
     try do
       result = work.(db)
-      with {:error, why} <- Sqlite.query(db, "commit", []), do: raise(why)
+      with {:error, why} <- sqlite(db, "commit"), do: raise(why)
       {:ok, result}
     catch
       kind, reason ->
         raised = {:raised, kind, reason, __STACKTRACE__}
-        {:ok, _} = Sqlite.query(db, "rollback", [])
+        {:ok, _} = sqlite(db, "rollback")
         checkpoint(db)
         raised
     end
@@ -338,17 +351,23 @@ defmodule Database.Lease do
   # stopped answering from its copy (`proved/1`). The monotonic clock stops while the machine sleeps, which only
   # makes it wait longer.
   defp opened(data, entries) do
-    {:ok, db} = Sqlite.open(file(data))
-
-    # The bucket is what keeps a write, so SQLite needn't wait for the disk. Its write-ahead log is emptied here
-    # after each transaction, never by SQLite itself.
-    for pragma <- ["journal_mode = wal", "synchronous = off", "wal_autocheckpoint = 0"] do
-      {:ok, _} = Sqlite.query(db, "pragma " <> pragma, [])
-    end
-
     logged = Enum.sum_by(entries, &length(Map.get(&1, :pages, [])))
-    %{data | db: db, logged: logged, settled: System.monotonic_time(:millisecond) + @writes_after}
+    %{data | db: connected(file(data)), logged: logged, settled: System.monotonic_time(:millisecond) + @writes_after}
   end
+
+  # The bucket is what keeps a write, so SQLite needn't wait for the disk. Its write-ahead log is emptied here
+  # after each transaction, never by SQLite itself.
+  defp connected(file) do
+    {:ok, db} = Sqlite.open(file)
+    db = {Sqlite, db}
+
+    for pragma <- ["journal_mode = wal", "synchronous = off", "wal_autocheckpoint = 0"],
+        do: {:ok, _} = sqlite(db, "pragma " <> pragma)
+
+    db
+  end
+
+  defp sqlite({sqlite, db}, sql), do: sqlite.query(db, sql, [])
 
   # Writes what the transaction changed, which SQLite's write-ahead log holds, as the log's next entry: `{:ok, data}`,
   # or `:lost` if another server wrote that entry first.
@@ -402,13 +421,13 @@ defmodule Database.Lease do
 
   # Moves the write-ahead log's pages into the database file, and empties it for the next transaction.
   defp checkpoint(db) do
-    {:ok, [%{"busy" => 0}]} = Sqlite.query(db, "pragma wal_checkpoint(truncate)", [])
+    {:ok, [%{"busy" => 0}]} = sqlite(db, "pragma wal_checkpoint(truncate)")
   end
 
   defp close(%{db: nil} = data), do: data
 
-  defp close(data) do
-    Sqlite.close(data.db)
+  defp close(%{db: {sqlite, db}} = data) do
+    sqlite.close(db)
     File.rm_rf!(data.folder)
     %{data | db: nil}
   end
