@@ -36,7 +36,7 @@ defmodule GoogleAccount do
   def title, do: "Google"
 
   @impl true
-  def icon, do: "icon.svg"
+  def icon, do: "icon.png"
 
   # A Google account is an item of the person's Vault, listed under Accounts, and added by signing in.
   @impl true

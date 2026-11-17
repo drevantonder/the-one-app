@@ -28,6 +28,9 @@ defmodule Vault do
 
   # A network has one Vault, where every plugin keeps its keys and outside accounts.
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def essential, do: true
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are people's keys and sign-ins.
@@ -101,7 +104,7 @@ defmodule Vault do
   end
 
   @impl true
-  def apps, do: [%{name: "Vault", page: "client/index.html", icon: "client/icon.svg", category: "access", subject: "user"}]
+  def apps, do: [%{name: "Vault", page: "client/index.html", category: "access", subject: "user"}]
 
   @impl true
   def tools do

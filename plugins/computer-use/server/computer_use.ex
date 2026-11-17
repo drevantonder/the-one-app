@@ -41,6 +41,9 @@ defmodule ComputerUse do
   }
 
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def offers do
     [
       %{
@@ -58,7 +61,6 @@ defmodule ComputerUse do
       %{
         name: "Computer Use",
         page: "client/index.html",
-        icon: "client/icon.svg",
         category: "device-automation",
         subject: "user"
       }

@@ -32,6 +32,9 @@ defmodule AndroidEmulator do
   }
 
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def uses, do: ["database", "webrtc"]
 
   @impl true
@@ -46,7 +49,6 @@ defmodule AndroidEmulator do
       %{
         name: "Android Emulator",
         page: "client/index.html",
-        icon: "client/icon.svg",
         category: "device-automation",
         subject: "user"
       }

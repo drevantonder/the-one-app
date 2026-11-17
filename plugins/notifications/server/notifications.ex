@@ -14,6 +14,9 @@ defmodule Notifications do
 
   # Every client registers with it, and it's how a person's devices are told anything.
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def essential, do: true
 
   alias OneCore.{Call, Edge}
@@ -54,7 +57,7 @@ defmodule Notifications do
   @impl true
   def apps do
     [
-      %{name: "Notifications", page: "client/index.html", icon: "client/icon.svg", category: "devices", subject: "user"}
+      %{name: "Notifications", page: "client/index.html", category: "devices", subject: "user"}
     ]
   end
 

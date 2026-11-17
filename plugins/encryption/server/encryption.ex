@@ -16,6 +16,9 @@ defmodule Encryption do
 
   # Every device's key is kept with it, and the Vault and notifications use it.
   @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
   def essential, do: true
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are keys, and what they decrypt.

@@ -18,6 +18,9 @@ defmodule HomeScreen do
 
   # Every client opens on its Home Screen.
   @impl true
+  def icon, do: "client/home.svg"
+
+  @impl true
   def essential, do: true
 
   alias OneCore.{Artifact, Call}
@@ -37,7 +40,7 @@ defmodule HomeScreen do
   @impl true
   def apps do
     [
-      %{name: "Home Screen", page: "client/index.html", icon: "client/home.svg", category: "launcher"},
+      %{name: "Home Screen", page: "client/index.html", category: "launcher"},
       %{name: "App Store", page: "client/store.html", icon: "client/store.svg", category: "admin", subject: "user"},
       %{
         name: "Colour Mode",

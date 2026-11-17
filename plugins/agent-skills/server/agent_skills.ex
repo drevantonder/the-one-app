@@ -6,5 +6,8 @@ defmodule AgentSkills do
   @behaviour OneCore.Plugin
 
   @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
   def title, do: "Agent Skills"
 end

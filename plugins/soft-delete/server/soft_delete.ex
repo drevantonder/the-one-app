@@ -34,6 +34,9 @@ defmodule SoftDelete do
 
   # Any plugin deletes what it made through it, by its tool, without naming it among what it uses.
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def essential, do: true
 
   require Logger
@@ -62,7 +65,6 @@ defmodule SoftDelete do
       %{
         name: "Recently Deleted",
         page: "client/index.html",
-        icon: "client/icon.svg",
         category: "admin",
         subject: "user"
       }

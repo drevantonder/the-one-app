@@ -15,6 +15,9 @@ defmodule Telemetry do
   alias OneCore.Call
 
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def uses, do: ["database"]
 
   @impl true
@@ -24,7 +27,7 @@ defmodule Telemetry do
   def jobs, do: [%{tool: "prune", every: 3600}]
 
   @impl true
-  def apps, do: [%{name: "Telemetry", page: "client/index.html", icon: "client/icon.svg", category: "coding"}]
+  def apps, do: [%{name: "Telemetry", page: "client/index.html", category: "coding"}]
 
   @impl true
   def tools do

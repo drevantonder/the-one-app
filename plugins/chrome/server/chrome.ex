@@ -68,6 +68,9 @@ defmodule Chrome do
   }
 
   @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
   def uses, do: ["containers"]
 
   @impl true

@@ -67,6 +67,9 @@ defmodule Containers do
   }
 
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def uses, do: ["database", "webrtc"]
 
   @impl true
@@ -76,7 +79,7 @@ defmodule Containers do
   def hooks, do: ["computer-use.screens"]
 
   @impl true
-  def apps, do: [%{name: "Containers", page: "client/index.html", icon: "client/icon.svg", category: "devices"}]
+  def apps, do: [%{name: "Containers", page: "client/index.html", category: "devices"}]
 
   @impl true
   def tools do

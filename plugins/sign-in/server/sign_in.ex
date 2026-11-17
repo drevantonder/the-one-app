@@ -14,6 +14,9 @@ defmodule SignIn do
 
   # One Core asks it whose a device is, and every client signs in through it.
   @impl true
+  def icon, do: "client/security.svg"
+
+  @impl true
   def essential, do: true
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are what people sign in with.
@@ -31,7 +34,6 @@ defmodule SignIn do
       %{
         name: "Sign-In & Security",
         page: "client/security.html",
-        icon: "client/security.svg",
         category: "access",
         subject: "user"
       },

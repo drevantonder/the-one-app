@@ -29,10 +29,13 @@ defmodule GitRepos do
   # A repo that's removed goes to Recently Deleted, which keeps it for 30 days (`SoftDelete`), and tells this plugin what became
   # of it, so `list` leaves out what's in Recently Deleted.
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def hooks, do: ["soft-delete.moved"]
 
   @impl true
-  def apps, do: [%{name: "Git Repos", page: "client/index.html", icon: "client/icon.svg", category: "coding"}]
+  def apps, do: [%{name: "Git Repos", page: "client/index.html", category: "coding"}]
 
   @impl true
   def tools do

@@ -17,6 +17,9 @@ defmodule ServerDebug do
   alias ServerDebug.Probe
 
   @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
   def title, do: "Server Debug"
 
   @impl true

@@ -7,6 +7,9 @@ defmodule Database do
 
   # Most plugins keep what they keep in it, the essential ones among them.
   @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
   def essential, do: true
 
   alias Database.Lease

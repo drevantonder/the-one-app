@@ -31,6 +31,9 @@ defmodule IphoneSimulator do
   }
 
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def uses, do: ["database", "webrtc"]
 
   @impl true
@@ -45,7 +48,6 @@ defmodule IphoneSimulator do
       %{
         name: "iPhone Simulator",
         page: "client/index.html",
-        icon: "client/icon.svg",
         category: "device-automation",
         subject: "user"
       }

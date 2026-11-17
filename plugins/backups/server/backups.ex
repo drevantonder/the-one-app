@@ -42,10 +42,13 @@ defmodule Backups do
   @retention "Every backup is kept for a day, then one a day for a week, one a week for a month and one a month for a year."
 
   @impl true
+  def icon, do: "client/icon.svg"
+
+  @impl true
   def uses, do: ["database", "vault"]
 
   @impl true
-  def apps, do: [%{name: "Backups", page: "client/index.html", icon: "client/icon.svg", category: "admin"}]
+  def apps, do: [%{name: "Backups", page: "client/index.html", category: "admin"}]
 
   @impl true
   def jobs, do: [%{tool: "due", every: 3600}]
