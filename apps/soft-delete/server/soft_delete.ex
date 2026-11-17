@@ -4,7 +4,10 @@ defmodule SoftDelete do
   was, before it's purged for good. Anything an app made for someone (`OneCore.Call.make/2`) is deleted with this
   app's `delete`, which an app calls for its person as Git Repos does for a repo, and which an agent calls too. So
   is an app someone deployed (`<owner>/apps/<name>`), once nobody has it installed. An app uninstalled for
-  someone (One Core's hook `uninstalled`) takes what it kept and made for them along, as one item.
+  someone (One Core's hook `uninstalled`) takes what it kept and made for them along, as one item, and this app's
+  clock and Restore are the only ones it has: restoring the item installs the app again before what it kept is back
+  (`OneCore.Apps.Lifecycle.restore/2`), and purging it removes the app for good once what it kept is erased
+  (`OneCore.Apps.Lifecycle.purge/2`). So neither ever comes back without the other.
 
   Each item is a record in this app's own artifact, `items/<id>`, and it moves through states by the transition
   table `move/2`:
@@ -55,10 +58,10 @@ defmodule SoftDelete do
   @own ~r{^(users/[^/]+|groups/[^/]+|network)/own/([a-z][a-z0-9-]*)$}
 
   @impl true
-  def requires, do: %{"core" => ">= 0.20.0", "database" => "to keep what you deleted for 30 days"}
+  def requires, do: %{"core" => ">= 0.21.0", "database" => "to keep what you deleted for 30 days"}
 
   @impl true
-  def hooks, do: ["uninstalled", "restored"]
+  def hooks, do: ["uninstalled"]
 
   @impl true
   def entrypoints,
@@ -270,16 +273,6 @@ defmodule SoftDelete do
     :ok
   end
 
-  # An app restored from Recently Deleted another way (`apps_restore`) brings back what it kept and made too.
-  def hook("restored", %{"for" => owner, "name" => name}, call) do
-    if not Servers.here?(call.installed), do: Call.forward(call, call.installed)
-
-    for {id, %{"state" => "deleted", "app" => %{"name" => ^name}, "owner" => ^owner} = record} <- records(call),
-        do: restored(call, id, record)
-
-    :ok
-  end
-
   # What an app kept and made for `owner`: its own artifact, if it kept anything, and each it made.
   defp kept(owner, name) do
     made =
@@ -292,7 +285,8 @@ defmodule SoftDelete do
     made ++ if(Bucket.list(own <> "/") != [], do: [own], else: [])
   end
 
-  # Restores an item: each artifact at its name, or beside something new there since. Gives its record as it was moved.
+  # Restores an item: each artifact at its name, or beside something new there since, and an uninstalled app before
+  # what it kept. Gives its record as it was moved.
   defp restored(call, id, record) do
     # Something new at an artifact's name since is left as it is, and this one goes beside it.
     as =
@@ -302,11 +296,17 @@ defmodule SoftDelete do
 
     # Restored while it's still moving aside, whoever is moving it puts it back once its own removing is done (`aside/2`),
     # so the two never move it at once.
-    case change(call, id, {:restore, as}) do
-      {:ok, %{"moved" => true}} -> back(call, id)
-      {:ok, record} -> record
-      {:error, why} -> raise why
-    end
+    moved =
+      case change(call, id, {:restore, as}) do
+        {:ok, moved} -> moved
+        {:error, why} -> raise why
+      end
+
+    with %{"name" => name} <- record["app"],
+         {:error, why} <- Lifecycle.restore(record["owner"], name),
+         do: raise("#{record["title"]} wasn't installed again for #{record["owner"]}: #{why}")
+
+    if moved["moved"], do: back(call, id), else: moved
   end
 
   @impl true
@@ -362,14 +362,13 @@ defmodule SoftDelete do
            raise(
              "#{record["title"]} was installed again since it was deleted. Uninstall it first to restore the one that was."
            )
+
+      # What an app kept comes back only with it.
+      if not match?(%{"state" => "recently_deleted"}, OneCore.Apps.Installed.read(record["owner"])[app["name"]]),
+        do: raise("#{record["title"]} isn't uninstalled for #{record["owner"]} any more, so what it kept can't come back with it.")
     end
 
     record = restored(call, id, record)
-
-    # An uninstalled app comes back with it.
-    with %{"name" => name} <- record["app"],
-         {:error, why} <- Lifecycle.restore(record["owner"], name, {call.actor, call.subject}),
-         do: Logger.warning("#{record["title"]} wasn't installed again for #{record["owner"]}: #{why}")
 
     %{
       restored: for(name <- record["artifacts"], do: %{artifact: name, as: record["as"][name]}),

@@ -24,7 +24,8 @@ restored one is **active** again.
 - An app someone deployed is deleted the same way, by its artifact (`users/alice/apps/notes`), once nobody has
   it installed: `uninstall` it for everyone first. It's gone from the App Store's Marketplace until it's restored.
 - Uninstalling an app deletes what it kept and made for whoever it was installed for, as one item. Restoring that
-  item installs the app again with all of it. What was deleted before the uninstall stays its own item.
+  item installs the app again with all of it, and is the only way an uninstalled app comes back. Purging it removes
+  the app for good with all of it. What was deleted before the uninstall stays its own item.
 - `purge --item <id>` deletes one for good now, and `purge_all` everything you own. Only when asked: neither can be
   undone.
 - `expire` is the clock's, each day: don't call it yourself.
