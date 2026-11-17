@@ -19,7 +19,7 @@ defmodule WebRTC do
   @ttl 4 * 3600
 
   @impl true
-  def permissions, do: ~w(vault_fetch)
+  def requires, do: %{"vault" => "to use your Cloudflare TURN key"}
 
   @impl true
   def tools do

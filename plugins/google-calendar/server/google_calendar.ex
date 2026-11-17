@@ -24,7 +24,7 @@ defmodule GoogleCalendar do
   end
 
   @impl true
-  def permissions, do: ["google-account"]
+  def requires, do: %{"google-account" => "to reach your calendars"}
 
   # Its person's Google accounts are google-account's, which signs one in with what each Google plugin asks of Google.
   @impl true

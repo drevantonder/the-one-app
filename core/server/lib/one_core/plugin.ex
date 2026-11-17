@@ -23,11 +23,11 @@ defmodule OneCore.Plugin do
   Any of the network's servers runs it for anyone, so it needs no server of yours, and whatever its code tries, it
   reaches only what's offered it, as whoever it runs for. What's offered is this interface, each function a message
   to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `uses/0`, `jobs/0` and
-  `permissions/0`; `OneCore.Artifact`'s functions but `link`;
+  `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
-  `forward_to`, `fetch`, `stage` and `ask`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
+  `forward_to`, `stage` and `ask`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
   run in its VM too, as it, `database` among them. It has no services, no hooks it mutates or validates, no other
-  plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
+  plugins' functions (it calls the tools of the plugins it requires), no programs, no network and no website, and no files but its `folder`,
   which goes when the VM stops, a minute after its last call. Deploying an untrusted one that uses what isn't
   offered says each, with its file and line, and what to do instead.
 
@@ -222,13 +222,15 @@ defmodule OneCore.Plugin do
     there's none.
     Left out, `users` is whoever asked. It answers about others only to a member of the network, as the plugins
     that validate `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
-  - `permissions/0`, if the plugin has one, says what it may do beyond its own, as an Android app's manifest does:
-    the other plugins' tools it calls, by the plugin's name for all its tools or a tool's (`gmail`,
-    `notifications_send`), and the hosts it sends data to (`https://api.example.com`, `https://*.googleapis.com`).
-    `deploy`, `install` and `plugins` say them, and the App Store shows them: "Uses gmail · Sends data to
-    api.example.com". For an untrusted plugin they're enforced: a tool call or a fetch outside them is refused.
+  - `requires/0`, if the plugin has one, names the other plugins it needs, whose tools it calls, which are its
+    requirements, each with why, as a person reads it after "Gmail uses Google Account":
+    `def requires, do: %{"google-account" => "to reach your mail"}`. A requirement is there for whoever it's installed
+    for where it's installed for them or for the network (`OneCore.Plugins.Requires`). `deploy`, `install` and
+    `plugins` say them, and `plugins` says the other way, what each plugin is required by. An untrusted plugin calls
+    the tools of only the plugins it requires.
   - `OneCore.Call.fetch(call, %{url: "https://api.example.com/x", method: "POST", headers: %{...}, body: "..."})`
-    makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`.
+    makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`. An
+    untrusted plugin reaches no website.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on
     the server running this one: a GenServer or a `:gen_statem` of the plugin's, one for each `key`, started with
     `argument` when first asked for. It's for what is slow to open and belongs to no machine in particular, as a
@@ -599,7 +601,7 @@ defmodule OneCore.Plugin do
   @callback essential() :: boolean
   @callback title() :: String.t()
   @callback icon() :: String.t()
-  @callback permissions() :: [String.t()]
+  @callback requires() :: %{String.t() => String.t()}
   @callback sensitive() :: boolean
   @optional_callbacks tools: 0,
                       call: 3,
@@ -614,6 +616,6 @@ defmodule OneCore.Plugin do
                       essential: 0,
                       title: 0,
                       icon: 0,
-                      permissions: 0,
+                      requires: 0,
                       sensitive: 0
 end

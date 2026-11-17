@@ -54,17 +54,6 @@ defmodule OneCore.Call do
   def forward_to(%__MODULE__{id: id}, server), do: Child.request("forward_to", %{"server" => server}, id)
 
   @doc """
-  Makes a web request, from the server, to a host the plugin's `permissions/0` names: `url`, and `method`,
-  `headers` and `body` if it has them. Gives the answer's `status`, `headers` and `body`.
-  """
-  def fetch(%__MODULE__{id: id}, request) do
-    request = Map.new(request, fn {key, value} -> {to_string(key), value} end)
-    body = request["body"]
-    request = if is_binary(body), do: Map.put(request, "body", Base.encode64(body)), else: request
-    Child.request("fetch", %{"web" => request}, id)
-  end
-
-  @doc """
   A process of this VM's that keeps running between calls: one for each `module` and `key`, a GenServer or a
   `:gen_statem`.
   """
@@ -142,7 +131,7 @@ defmodule OneCore.Plugin do
   @callback jobs() :: [map]
   @callback schedule(struct, [map], (map -> term)) :: term
   @callback essential() :: boolean
-  @callback permissions() :: [String.t()]
+  @callback requires() :: %{String.t() => String.t()}
   @callback sensitive() :: boolean
   @optional_callbacks tools: 0,
                       call: 3,
@@ -155,7 +144,7 @@ defmodule OneCore.Plugin do
                       jobs: 0,
                       schedule: 3,
                       essential: 0,
-                      permissions: 0,
+                      requires: 0,
                       sensitive: 0
 end
 
@@ -489,7 +478,7 @@ defmodule OneCore.Sandbox.Child do
       "uses" => value.(:uses, []),
       "hooks" => hooks,
       "jobs" => value.(:jobs, []),
-      "permissions" => value.(:permissions, []),
+      "requires" => value.(:requires, %{}),
       "warnings" => Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
       "problems" => OneCore.Sandbox.Check.problems(plugin, modules, uses, hooks, offers, services)
     }
@@ -527,7 +516,7 @@ defmodule OneCore.Sandbox.Check do
 
   @offered %{
     OneCore.Call =>
-      ~w(plugin tool make reach reaches? member? owns? plugins deployed process forward_to fetch stage ask __struct__)a,
+      ~w(plugin tool make reach reaches? member? owns? plugins deployed process forward_to stage ask __struct__)a,
     OneCore.Artifact => ~w(name read read_all write replace remove size list __struct__)a,
     OneCore.Plugin => ~w(file nif behaviour_info)a
   }
@@ -547,8 +536,8 @@ defmodule OneCore.Sandbox.Check do
     using =
       for name <- uses, calls = calls(modules_of(name), loaded), calls != [] do
         "#{where(plugin)}: it uses #{name}, whose code would run in its sandbox, and can't there " <>
-          "(#{hd(calls)}#{if length(calls) > 1, do: " And #{length(calls) - 1} more."}) Call its tools instead, which " <>
-          "permissions/0 names, and leave what can't run out of uses/0."
+          "(#{hd(calls)}#{if length(calls) > 1, do: " And #{length(calls) - 1} more."}) Call its tools instead, naming " <>
+          "it in requires/0, and leave what can't run out of uses/0."
       end
 
     hooking =
@@ -652,8 +641,8 @@ defmodule OneCore.Sandbox.Check do
         "#{name} starts a program, which an untrusted plugin doesn't: it has none to start."
 
       m in @network ->
-        "#{name} reaches the network, which an untrusted plugin doesn't. Fetch from the web with " <>
-          "`OneCore.Call.fetch(call, %{url: ...})`, from a host the plugin's permissions/0 names."
+        "#{name} reaches the network, which an untrusted plugin doesn't, nor any website: run it trusted, on a " <>
+          "server of its owner's."
 
       m == Jason ->
         "#{name} is a package that isn't here. Elixir's own `JSON` encodes and decodes."
@@ -663,7 +652,7 @@ defmodule OneCore.Sandbox.Check do
 
         "#{name} is another plugin's function, or a package that isn't here. An untrusted plugin calls " <>
           "another by its tool, as whoever the call runs for: `OneCore.Call.tool(call, \"#{plugin}\", \"#{f}\", " <>
-          "%{...})`, which permissions/0 names."
+          "%{...})`, naming #{plugin} in requires/0."
 
       true ->
         nil
@@ -671,6 +660,9 @@ defmodule OneCore.Sandbox.Check do
   end
 
   defp instead(OneCore.Call, :run_hook), do: "An untrusted plugin offers no hooks."
+
+  defp instead(OneCore.Call, :fetch),
+    do: "An untrusted plugin reaches no website: run it trusted, on a server of its owner's."
   defp instead(OneCore.Call, f) when f in [:forward, :run_elsewhere, :refused], do: "One Core does that itself."
   defp instead(OneCore.Artifact, :link), do: "Answer a blob as `{:file, kind, artifact, name}` instead."
   defp instead(_m, _f), do: ""

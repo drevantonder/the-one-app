@@ -27,14 +27,14 @@ defmodule OneCore.Sandbox do
 
   What it's offered is what the plugin interface offers, as messages: `OneCore.Artifact`'s read, read_all, write,
   replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, plugins,
-  deployed, process (its own VM's), forward_to, stage and ask; `OneCore.Plugin.file/2` and `nif/2`; Logger; and `fetch`, a
-  web request this server makes for it. An artifact it's given is a handle this server looks up, never a prefix
+  deployed, process (its own VM's), forward_to, stage and ask; `OneCore.Plugin.file/2` and `nif/2`; and Logger. An
+  artifact it's given is a handle this server looks up, never a prefix
   it could rewrite, and a call is one this server is running, never a subject, actor or caller it could name. It hooks
   only into what it observes: a mutate, validate or collect hook asks it nothing. It has no services, no other plugins'
-  functions, no network, no programs, and no files but a folder of its own that goes when it stops.
+  functions, no network, no website it reaches, no programs, and no files but a folder of its own that goes when it
+  stops.
 
-  What it may call of other plugins, and where it may send data, are its permissions (`OneCore.Plugin`): a tool
-  call or a fetch outside them is refused.
+  It calls the tools of only the plugins it requires (`OneCore.Plugin`): a call to any other's is refused.
   """
   @behaviour :gen_statem
   require Logger
@@ -278,17 +278,16 @@ defmodule OneCore.Sandbox do
   defp op("list", %{"handle" => handle, "starting" => starting}, _call, context),
     do: Artifact.list(artifact!(context, handle), listed!(starting))
 
-  defp op("fetch", %{"web" => request}, _call, context), do: fetch(request, context)
   defp op("fire", request, _call, context), do: fire(request, context)
   defp op(op, _request, nil, _context), do: raise("#{op} is asked within a call, and that call has ended")
 
   defp op("tool", %{"plugin" => plugin, "tool" => tool, "inputs" => inputs} = request, call, context)
        when is_binary(plugin) and is_binary(tool) and is_map(inputs) do
-    if not permitted?(context.permissions, plugin, tool),
+    if not is_map_key(context.requires, plugin),
       do:
         raise(
-          "#{context.name} may not call #{plugin}_#{tool}: its permissions/0 doesn't name it. An untrusted plugin " <>
-            "calls only the tools it says it uses."
+          "#{context.name} may not call #{plugin}_#{tool}: its requires/0 doesn't name #{plugin}. An untrusted " <>
+            "plugin calls the tools of only the plugins it requires."
         )
 
     options = if is_map_key(request, "on_behalf_of"), do: [on_behalf_of: request["on_behalf_of"]], else: []
@@ -334,39 +333,6 @@ defmodule OneCore.Sandbox do
   defp artifact_name!(name) when is_binary(name), do: name
   defp relation!(relation) when relation in ["viewer", "editor", "owner"], do: relation
   defp relation!(_), do: raise(ArgumentError, "a relation is viewer, editor or owner")
-
-  @doc """
-  Whether a plugin's `permissions` let it call `plugin`'s `tool`: they name the tool (`gmail_search`) or the
-  plugin, all its tools.
-  """
-  def permitted?(permissions, plugin, tool), do: plugin in permissions or "#{plugin}_#{tool}" in permissions
-
-  @doc "Whether a plugin's `permissions` let it send data to `url`: they name its host (`https://api.example.com`)."
-  def sends_to?(permissions, url) do
-    %URI{scheme: scheme, host: host} = URI.parse(url)
-
-    scheme in ["https", "http"] and is_binary(host) and
-      Enum.any?(permissions, fn permission ->
-        case URI.parse(permission) do
-          %URI{scheme: ^scheme, host: "*." <> domain, path: nil} -> String.ends_with?(host, "." <> domain)
-          %URI{scheme: ^scheme, host: ^host, path: nil} -> true
-          _ -> false
-        end
-      end)
-  end
-
-  # A redirect isn't followed, so one host can't send it on to another.
-  defp fetch(%{"url" => url} = request, context) when is_binary(url) do
-    if not sends_to?(context.permissions, url),
-      do:
-        raise(
-          "#{context.name} may not send data to #{url}: its permissions/0 doesn't name its host. An untrusted " <>
-            "plugin fetches only from the hosts it says it sends data to."
-        )
-
-    body = with body when is_binary(body) <- request["body"], do: Base.decode64!(body)
-    Call.fetch(nil, Map.put(request, "body", body))
-  end
 
   # A scheduled job's call, which the plugin's schedule keeper in the child makes as the clock, for whoever it's
   # installed for, as One Core would: only one of the plugin's own jobs, for the owner whose child it is.
@@ -526,7 +492,7 @@ defmodule OneCore.Sandbox do
       name: name,
       handles: handles,
       artifact: version && version.artifact,
-      permissions: (version && version.permissions) || [],
+      requires: (version && version.requires) || %{},
       jobs: (version && version.jobs) || [],
       description: nil
     }

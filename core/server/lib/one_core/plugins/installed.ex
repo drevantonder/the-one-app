@@ -14,7 +14,7 @@ defmodule OneCore.Plugins.Installed do
   with a `stage` inside installing and updating: `fetching` its code, `building` it, then `starting` it. Whether
   it's `trusted`, or untrusted and runs in a sandbox: switching it is an update to the same version, the other way.
   And, while it's installed, its `update`: none while it's up to date, then `available` with the newer version, or
-  `needs_approval` where that version asks for more permissions. A failed update leaves its version running.
+  `needs_approval` where that version requires plugins the one running doesn't. A failed update leaves its version running.
 
   Each owner's are one blob, `<owner>/installs`: whether its `automatic` updates are on (they are unless it says),
   and each plugin's record by the name it's installed by. A record lives for years and every server and client reads
@@ -239,13 +239,13 @@ defmodule OneCore.Plugins.Installed do
     cond do
       not newer?(update, record) -> {:ok, record}
       record["update"] != nil and not newer?(update, record["update"]) -> {:ok, record}
-      update["permissions"] not in [nil, []] -> {:ok, Map.put(record, "update", Map.put(update, "state", "needs_approval"))}
+      update["requires"] not in [nil, []] -> {:ok, Map.put(record, "update", Map.put(update, "state", "needs_approval"))}
       true -> {:ok, Map.put(record, "update", Map.put(update, "state", "available"))}
     end
   end
 
   def move(%{"state" => "installed", "update" => %{"state" => "available"} = update} = record, {:update, approve}, _at) do
-    if update["permissions"] not in [nil, []] and approve != true,
+    if update["requires"] not in [nil, []] and approve != true,
       do: {:ok, %{record | "update" => %{update | "state" => "needs_approval"}}},
       else: {:ok, updating(record, update, approve == true)}
   end

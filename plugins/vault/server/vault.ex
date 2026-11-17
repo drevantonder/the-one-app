@@ -843,7 +843,7 @@ defmodule Vault do
     use_it =
       Enum.sort(
         for {name, version} <- Plugins.running(call.subject),
-            "vault" in version.uses or Enum.any?(version.permissions, &(&1 == "vault" or &1 =~ ~r/^vault_/)),
+            "vault" in version.uses or is_map_key(version.requires, "vault"),
             do: name
       )
 

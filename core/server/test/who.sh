@@ -5,7 +5,7 @@
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
-# someone with none adds none for themselves but an untrusted one, which runs in a sandbox, where it calls only the tools it's permitted and a
+# someone with none adds none for themselves but an untrusted one, which runs in a sandbox, where it calls only the tools of the plugins it requires and a
 # stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does, renaming one among them. A stranger's
 # plugin is untrusted until someone who may install for them says it's trusted, and one uninstalled waits in Recently
 # Deleted until it's restored. One Core's own tools are whoever's may. Anyone brings a server,
@@ -92,7 +92,7 @@ refused() { ! output=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was an
 
 # The plugins this tests with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
-# due and which server made it. `boxed` is untrusted and may call only `notes`' `read`. `spy` is untrusted
+# due and which server made it. `boxed` is untrusted and requires only `notes`, so it calls only its tools. `spy` is untrusted
 # and hostile: it keeps what it's given, and its own artifact, in its VM, for a later call to use.
 mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed,spy,chores}/server
 # `chores` has a tool that's an MCP task, which takes a while.
@@ -150,7 +150,7 @@ defmodule Boxed do
   @behaviour OneCore.Plugin
 
   @impl true
-  def permissions, do: ["notes_read"]
+  def requires, do: %{"notes" => "to read your notes"}
 
   @impl true
   def tools do

@@ -134,8 +134,8 @@ defmodule OneCore.Plugins.Rename do
           artifact != was,
           version = Plugins.version(artifact),
           version != nil,
-          name in version.uses or
-            Enum.any?(version.hooks ++ version.permissions, &String.starts_with?(&1, [name <> ".", name <> "_"])),
+          name in version.uses or is_map_key(version.requires, name) or
+            Enum.any?(version.hooks, &String.starts_with?(&1, name <> ".")),
           uniq: true,
           do: other
 

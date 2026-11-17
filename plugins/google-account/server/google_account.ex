@@ -29,7 +29,7 @@ defmodule GoogleAccount do
   @userinfo "https://openidconnect.googleapis.com/v1/userinfo"
 
   @impl true
-  def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_state)
+  def requires, do: %{"vault" => "to keep your Google sign-ins"}
 
   # It has no app, and its Google accounts are listed in the Vault, so it names and draws itself.
   @impl true
@@ -177,7 +177,7 @@ defmodule GoogleAccount do
   def call("plugins", _inputs, call) do
     plugins =
       for {name, version} <- OneCore.Plugins.running(call.subject),
-          "google-account" in version.permissions,
+          is_map_key(version.requires, "google-account"),
           do: %{name: name, title: version.title}
 
     %{plugins: Enum.sort_by(plugins, & &1.title)}

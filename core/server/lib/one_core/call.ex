@@ -298,7 +298,7 @@ defmodule OneCore.Call do
   @doc """
   Makes a web request from the server running this call: its `url`, and its `method`, `headers` and `body` if it
   has them, by atoms or by text. Gives the answer's `status`, `headers` and `body`, as it came, without following a
-  redirect. For an untrusted plugin, only to a host the plugin's `permissions/0` names (`OneCore.Sandbox`).
+  redirect. An untrusted plugin reaches no website (`OneCore.Sandbox`).
 
       OneCore.Call.fetch(call, %{url: "https://api.example.com/notes", method: "POST", body: JSON.encode!(note)})
   """

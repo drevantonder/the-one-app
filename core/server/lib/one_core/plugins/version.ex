@@ -31,7 +31,7 @@ defmodule OneCore.Plugins.Version do
   `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
   `description`, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
-  without it (`OneCore.Plugins.Deploy`). `artifact` is the plugin it's a version of, and `number` which version, which whatever loaded it says.
+  without it (`OneCore.Plugins.Deploy`), and `requires` the other plugins it needs, each by its name with why (`OneCore.Plugin`). `artifact` is the plugin it's a version of, and `number` which version, which whatever loaded it says.
 
   A server that doesn't run a plugin for whoever it's installed for never loads its code, which runs with all of
   its machine's access: it knows the version by what the version says of itself (`description/1`), which a server
@@ -59,7 +59,7 @@ defmodule OneCore.Plugins.Version do
     :title,
     :icon,
     essential: false,
-    permissions: [],
+    requires: %{},
     trusted: true
   ]
 
@@ -171,7 +171,7 @@ defmodule OneCore.Plugins.Version do
         :essential,
         :title,
         :icon,
-        :permissions
+        :requires
       ])
 
     # It holds only names any server knows: a tool's inputs as JSON has them, not the atoms its plugin wrote them
@@ -216,7 +216,7 @@ defmodule OneCore.Plugins.Version do
         :essential,
         :title,
         :icon,
-        :permissions
+        :requires
       ])
 
     {:ok, struct!(__MODULE__, Map.merge(fields, %{under: under, plugin: nil, tools: tools, artifact: artifact}))}
@@ -262,7 +262,7 @@ defmodule OneCore.Plugins.Version do
       offers: offers,
       jobs: taken.(description["jobs"], ~w(tool every inputs)),
       essential: false,
-      permissions: description["permissions"]
+      requires: description["requires"]
     }
 
     with {:ok, skills} <- Skills.found(name, skills),
@@ -458,7 +458,7 @@ defmodule OneCore.Plugins.Version do
     offers: [],
     jobs: [],
     essential: false,
-    permissions: []
+    requires: %{}
   ]
 
   # `rest` is the files that aren't Elixir or skills. A plugin with no Elixir provides no tools and names no apps.
@@ -494,7 +494,7 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0, essential/0, permissions/0 or a service's " <>
+       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0, essential/0, requires/0 or a service's " <>
          "needs/0 or called/0 raised: " <>
          Exception.message(error)}
   end
@@ -503,7 +503,7 @@ defmodule OneCore.Plugins.Version do
   # an untrusted one, whose module is in its sandbox's VM.
   defp checked(under, plugin, description, services, rest) do
     %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, uses: uses, hooks: hooks} = description
-    %{offers: offers, jobs: jobs, permissions: permissions} = description
+    %{offers: offers, jobs: jobs, requires: requires} = description
 
     cond do
       not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
@@ -540,11 +540,10 @@ defmodule OneCore.Plugins.Version do
          "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
            "digits and _, and a kind of :observe, :mutate, :validate or :collect"}
 
-      not (is_list(permissions) and Enum.all?(permissions, &permission?/1)) ->
+      not (is_map(requires) and Enum.all?(requires, &requirement?/1)) ->
         {:error,
-         "permissions/0 gives a list of what the plugin may do beyond its own: another plugin's tools, by the " <>
-           "plugin's name or a tool's (`gmail`, `notifications_send`), and the hosts it sends data to " <>
-           "(`https://api.example.com`, `https://*.googleapis.com`)"}
+         "requires/0 gives the other plugins it needs, each by its name with why, as a person reads it after " <>
+           "\"Gmail uses Google Account\": %{\"google-account\" => \"to reach your mail\"}"}
 
       true ->
         tools = Enum.map(tools, &schemas/1)
@@ -562,23 +561,16 @@ defmodule OneCore.Plugins.Version do
                     offers: offers,
                     jobs: jobs,
                     essential: description.essential == true,
-                    permissions: Enum.uniq(permissions)
+                    requires: requires
                 }}
     end
   end
 
-  # What a plugin may do beyond its own: call another plugin's tools, all of them or one, or send data to a host.
-  defp permission?(permission) when is_binary(permission) do
-    case URI.parse(permission) do
-      %URI{scheme: scheme, host: host, path: nil, query: nil, userinfo: nil} when scheme in ["https", "http"] ->
-        is_binary(host) and host =~ ~r/^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*$/
+  # Another plugin it requires, by its name, and why, which isn't left out.
+  defp requirement?({name, why}),
+    do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/ and is_binary(why) and String.trim(why) != ""
 
-      _ ->
-        permission =~ ~r/^[a-z0-9][a-z0-9-]*(_[a-z][a-z0-9_]*)?$/
-    end
-  end
-
-  defp permission?(_permission), do: false
+  defp requirement?(_requirement), do: false
 
   defp offer?(%{name: name, kind: kind, description: description}),
     do:

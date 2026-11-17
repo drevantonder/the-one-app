@@ -230,11 +230,11 @@ defmodule OneCore.Plugins.Deploy do
 
   @doc """
   Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, description: its skill's,
-  tools: [names], permissions: [...], trusted: ..., essential: ..., title: ..., icon: ..., subtitle: ..., about:
-  ..., category: ..., apps: [...], widgets: [...]}]`, what a person reads of it as `Version.listing/1` gives it, its
-  permissions as `permissions/0` gives them, whether it's trusted and whether every network has it (`essential`).
-  It's what lists every app there is, whether or not anyone has it now. One that was removed, by the plugin that
-  keeps what's deleted, has no latest version, and isn't listed.
+  tools: [names], requires: %{name => why}, trusted: ..., essential: ..., title: ..., icon: ..., subtitle: ...,
+  about: ..., category: ..., apps: [...], widgets: [...]}]`, what a person reads of it as `Version.listing/1` gives
+  it, its requirements as `requires/0` gives them, whether it's trusted and whether every network has it
+  (`essential`). It's what lists every app there is, whether or not anyone has it now. One that was removed, by the
+  plugin that keeps what's deleted, has no latest version, and isn't listed.
 
   It's two trips to the bucket with a request for each plugin, and changes only when someone deploys, so it's kept:
   read again behind a request once it's five minutes old, as `OneCore.Plugins` looks at what's installed, and
@@ -279,7 +279,7 @@ defmodule OneCore.Plugins.Deploy do
           apps: for(app <- description["apps"], do: %{name: app["name"], icon: app["icon"], category: app["category"]}),
           widgets: for(widget <- description["widgets"] || [], do: %{name: widget["name"], sizes: widget["sizes"]}),
           tools: description["tools"] || [],
-          permissions: description["permissions"] || [],
+          requires: description["requires"] || %{},
           trusted: description["trusted"] != false,
           essential: description["essential"] == true
         }
@@ -298,7 +298,7 @@ defmodule OneCore.Plugins.Deploy do
       %{
         description: OneCore.Search.described(version),
         tools: Enum.map(version.tools, & &1.name),
-        permissions: version.permissions,
+        requires: version.requires,
         trusted: version.trusted,
         essential: version.essential
       }

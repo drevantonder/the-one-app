@@ -18,13 +18,13 @@ defmodule OneCore.Tools do
   """
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Call.State
-  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Store, Version}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Requires, Store, Version}
 
-  # What a plugin may do beyond its own, as `permissions/0` says it.
-  @permissions %{
-    type: "array",
-    items: %{type: "string"},
-    description: "What it may do beyond its own: other plugins' tools it uses, and hosts it sends data to"
+  # The other plugins a plugin needs, as `requires/0` says them.
+  @requires %{
+    type: "object",
+    additionalProperties: %{type: "string"},
+    description: "The other plugins it requires, by name, each with why: {\"google-account\": \"to reach your mail\"}"
   }
 
   @files %{
@@ -110,12 +110,12 @@ defmodule OneCore.Tools do
     update: %{
       type: ["object", "null"],
       description:
-        "A newer version to take, while it's installed, or null while it's up to date: `available`, or `needs_approval` where it asks for more permissions",
+        "A newer version to take, while it's installed, or null while it's up to date: `available`, or `needs_approval` where it requires plugins the version running doesn't",
       properties: %{
         state: %{type: "string", enum: ["available", "needs_approval"]},
         version: %{type: ["integer", "null"], description: "The newer version deployed, if it's one"},
         commit: %{type: ["string", "null"], description: "The newer commit at its git source, if it's one"},
-        permissions: %{type: "array", items: %{type: "string"}, description: "What it asks for that the version running doesn't"},
+        requires: %{type: "array", items: %{type: "string"}, description: "The plugins it requires that the version running doesn't"},
         commits: %{
           type: "array",
           description: "The commits since the version running, newest first: read what changed before taking a stranger's",
@@ -140,9 +140,9 @@ defmodule OneCore.Tools do
         plugin: %{type: ["string", "null"], description: "Its artifact, or null once it's not installed any more"},
         version: %{type: ["integer", "null"], description: "The version that runs, if one does"},
         trusted: %{type: ["boolean", "null"]},
-        permissions: @permissions
+        requires: @requires
       }),
-    required: ["name", "for", "plugin", "state", "permissions"]
+    required: ["name", "for", "plugin", "state", "requires"]
   }
 
   # A tool that takes only the name a plugin is installed by.
@@ -165,8 +165,8 @@ defmodule OneCore.Tools do
       or for the network, it's theirs. Its code runs on a server of yours, so you need one: set one up in Devices, or
       ask whoever may install plugins for everyone to install it for everyone. An untrusted plugin
       (`trusted: false`) runs in a sandbox, a VM of its own on any of the network's servers, so it needs no server of
-      yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0 names. It answers
-      with them. One nobody has installed is removed as anything deleted is, by the plugin that keeps what's deleted,
+      yours: it then reaches only what One Core hands it, and the tools of the plugins its requires/0 names, and no
+      website. It answers with those plugins. One nobody has installed is removed as anything deleted is, by the plugin that keeps what's deleted,
       where there is one (soft-delete).
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
@@ -214,7 +214,7 @@ defmodule OneCore.Tools do
           name: %{type: "string", description: "The plugin's name"},
           version: %{type: "integer", description: "The version now running"},
           trusted: %{type: "boolean", description: "Whether it's trusted, or runs in a sandbox"},
-          permissions: @permissions,
+          requires: @requires,
           warnings: %{type: ["string", "null"], description: "What the compiler warns of, if anything"},
           listing: %{
             type: "object",
@@ -222,7 +222,7 @@ defmodule OneCore.Tools do
               "What a person reads of it where it's listed, as the plugin directory takes it: its title, icon, subtitle, about, category, apps and widgets"
           }
         },
-        required: ["name", "version", "trusted", "permissions", "warnings", "listing"]
+        required: ["name", "version", "trusted", "requires", "warnings", "listing"]
       }
     },
     %{
@@ -251,8 +251,8 @@ defmodule OneCore.Tools do
       Lists the plugins installed for you and for the network, as `npm ls` does packages: asked for a group, for it
       and the network, and those of yours in Recently Deleted. Each with the name it's installed by, who it's
       installed `for`, its artifact (`plugin`), the version that runs for them, where it is in its life (`state`, and
-      its `stage` while installing or updating, `why` it failed), whether it's `trusted` or runs in a sandbox, what it
-      may do beyond its own (`permissions`), and a newer version to take (`update`). Each owner's install updates on
+      its `stage` while installing or updating, `why` it failed), whether it's `trusted` or runs in a sandbox, the other
+      plugins it `requires` and the ones it's `required_by`, and a newer version to take (`update`). Each owner's install updates on
       its own. With the latest version's `source`, the hash of the files it was deployed from, and, if it was installed
       from a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, whether it had changes not
       committed (`dirty`), and the `hash` of the files as installed, which differs from `source` once it's changed since.
@@ -281,7 +281,12 @@ defmodule OneCore.Tools do
                 why: @state.why,
                 deleted: @state.deleted,
                 update: @state.update,
-                permissions: @permissions,
+                requires: @requires,
+                required_by: %{
+                  type: "array",
+                  items: %{type: "string"},
+                  description: "The plugins installed for the same owner that require it, directly or through another"
+                },
                 source: %{type: ["string", "null"], description: "The hash of the files its latest version was deployed from"},
                 from: %{
                   type: ["object", "null"],
@@ -295,7 +300,7 @@ defmodule OneCore.Tools do
                   }
                 }
               },
-              required: ["name", "for", "plugin", "trusted", "state", "permissions"]
+              required: ["name", "for", "plugin", "trusted", "state", "requires", "required_by"]
             }
           }
         },
@@ -308,7 +313,7 @@ defmodule OneCore.Tools do
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them. Also tries
       again one that failed to install. It's installing, a stage at a time, until it answers where it is: installed,
-      with what it may do beyond its own (its permissions), or failed, saying why.
+      with the other plugins it requires, or failed, saying why.
       Anyone installs for themselves; for the network or a group, its owners and installers do, and anyone else asks
       one of them to, themselves. Its code runs on a server of whoever it's for, unless it's untrusted.
       It's trusted where it's the network's or your own, and a stranger's (another user's or group's) is untrusted
@@ -372,8 +377,8 @@ defmodule OneCore.Tools do
     %{
       name: "plugins_update",
       description: """
-      Updates a plugin of yours to the newer version `plugins` offers (Update), or with `approve` takes one that asks
-      for more permissions than it has (Approve), which otherwise waits for that. It's updating, a stage at a time,
+      Updates a plugin of yours to the newer version `plugins` offers (Update), or with `approve` takes one that requires
+      plugins the version running doesn't (Approve), which otherwise waits for that. It's updating, a stage at a time,
       while the version before keeps running, until it answers where it is: installed at the new version, or failed,
       saying why, with the version before still running. It stays trusted, or untrusted, as it was. A stranger's
       plugin is never updated without asking: read the commits it brings first (the skill installing-plugins).
@@ -382,7 +387,7 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{
           name: %{type: "string", description: "The name it's installed by"},
-          approve: %{type: "boolean", description: "Whether it may ask for more permissions than it has"}
+          approve: %{type: "boolean", description: "Whether it may require plugins the version running doesn't"}
         },
         required: ["name"]
       },
@@ -390,7 +395,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "plugins_decline",
-      description: "Leaves an update that asks for more permissions for now (Not now): it stays there to take.",
+      description: "Leaves an update that requires more plugins for now (Not now): it stays there to take.",
       inputs: @named,
       outputs: @moved
     },
@@ -447,7 +452,7 @@ defmodule OneCore.Tools do
       name: "plugins_automatic_updates",
       description: """
       Turns on or off taking updates without asking, for you, a group or the network. It's on unless turned off, and
-      takes only an update of a trusted plugin that asks for no more permissions, from the network's own plugins or
+      takes only an update of a trusted plugin that requires no more plugins, from the network's own plugins or
       your own repos.
       """,
       inputs: %{
@@ -781,9 +786,8 @@ defmodule OneCore.Tools do
     end
   end
 
-  # What a plugin may do beyond its own, as `permissions/0` says it.
-  defp permitted(nil), do: []
-  defp permitted(version), do: version.permissions
+  defp requires(nil), do: %{}
+  defp requires(version), do: version.requires
 
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
@@ -831,7 +835,7 @@ defmodule OneCore.Tools do
           name: name,
           version: number,
           trusted: trusted,
-          permissions: permitted(Plugins.running(subject)[name]),
+          requires: requires(Plugins.running(subject)[name]),
           warnings: if(warnings == "", do: nil, else: warnings),
           listing: Version.listing(Plugins.running(subject)[name])
         }
@@ -870,7 +874,7 @@ defmodule OneCore.Tools do
 
         at
         |> moved(name, record)
-        |> Map.merge(%{latest: about["number"], source: about["source"], from: about["from"]})
+        |> Map.merge(%{latest: about["number"], source: about["source"], from: about["from"], required_by: Requires.required_by(at, name)})
       end
 
     %{for: owner, automatic: elem(Installed.read(owner || "network"), 1), plugins: plugins}
@@ -1093,11 +1097,11 @@ defmodule OneCore.Tools do
             state: update["state"],
             version: update["version"],
             commit: update["commit"],
-            permissions: update["permissions"] || [],
+            requires: update["requires"] || [],
             commits: update["commits"] || [],
             why: update["why"]
           },
-      permissions: permitted(version)
+      requires: requires(version)
     }
   end
 

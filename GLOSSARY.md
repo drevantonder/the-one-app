@@ -17,7 +17,7 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
 - **Artifact**: a couple of blobs together in the bucket, with who may do what to them. Everything a network keeps is
   built on top of one: files, a database, a git repo. Avoid: space.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services, an
-  edge function and kinds of artifact. It uses other artifacts, and is a subject. A git repo can be where its code comes from, but needn't be.
+  edge function and kinds of artifact. It `requires` other plugins, its requirements, and is a subject. A git repo can be where its code comes from, but needn't be.
   Avoid: module.
 - **Owner**: whoever something belongs to: a user, a group or the network, as an artifact's name says. A plugin is
   installed for an owner (`for`), and each owner has a Home Screen. Not the relation `owner`, which says who may share

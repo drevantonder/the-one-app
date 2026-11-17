@@ -10,7 +10,7 @@ defmodule OneCore.Plugins.Lifecycle do
   asks (the tool `plugins_check`). A plugin the server ships updates with the server, and never shows an update.
 
   An update is taken without asking only where all of these hold: the owner's automatic updates are on, the plugin is
-  trusted, the newer version asks for no more permissions, and it comes from the network's own plugins or the owner's
+  trusted, the newer version requires no plugin the one running doesn't, and it comes from the network's own plugins or the owner's
   own repos. Any other waits for someone who may install for them. Each is decided again when it runs, and a failed
   update leaves the version that ran running.
 
@@ -85,7 +85,7 @@ defmodule OneCore.Plugins.Lifecycle do
 
   @doc """
   Updates a plugin for `owner` to the version its update offers (Update), or `approve`s one that asks for more
-  permissions (Approve). One that does and isn't approved waits for approval. Gives the record it's at.
+  plugins (Approve). One that does and isn't approved waits for approval. Gives the record it's at.
   """
   def update(owner, name, approve) do
     with %{} = record <- move(owner, name, {:update, approve}) do
@@ -221,7 +221,7 @@ defmodule OneCore.Plugins.Lifecycle do
         move(owner, name, {:follow, latest})
         ran(owner)
       else
-        offered = %{"version" => latest, "permissions" => added(record, artifact, latest), "commits" => commits(artifact, record, latest)}
+        offered = %{"version" => latest, "requires" => added(record, artifact, latest), "commits" => commits(artifact, record, latest)}
 
         with %{"update" => %{"state" => "available"} = update} = record <- move(owner, name, {:available, offered}),
              true <- record["state"] == "installed" and runs?(owner, record) and automatic?(owner, record, update, automatic) do
@@ -279,7 +279,7 @@ defmodule OneCore.Plugins.Lifecycle do
         {:ok, nil}
       else
         with {:ok, commits} <- Git.commits(copy, commit, newest, path),
-             do: {:ok, %{"commit" => newest, "source" => source, "ref" => ref, "commits" => commits, "permissions" => []}}
+             do: {:ok, %{"commit" => newest, "source" => source, "ref" => ref, "commits" => commits, "requires" => []}}
       end
     end
   end
@@ -289,9 +289,9 @@ defmodule OneCore.Plugins.Lifecycle do
   defp runs?(owner, record), do: Servers.runs?(owner) or record["trusted"] == false
 
   # Whether an update may be taken without asking: the owner's automatic updates are on, it's trusted, it asks for
-  # no more permissions, and it comes from the network's own plugins or the owner's own repos.
+  # no plugin the one running doesn't, and it comes from the network's own plugins or the owner's own repos.
   defp automatic?(owner, record, update, automatic) do
-    automatic and record["trusted"] != false and update["permissions"] in [nil, []] and
+    automatic and record["trusted"] != false and update["requires"] in [nil, []] and
       ours?(owner, record["plugin"], update)
   end
 
@@ -314,12 +314,12 @@ defmodule OneCore.Plugins.Lifecycle do
   defp bundled?(@network <> "/plugins/" <> name), do: is_map_key(Application.get_env(:one_core, :bundled, %{}), name)
   defp bundled?(_artifact), do: false
 
-  # The permissions version `latest` asks for that the version `record` runs doesn't.
+  # The plugins version `latest` requires that the version `record` runs doesn't.
   defp added(%{"version" => number}, artifact, latest) do
     asks = fn number ->
       with code when is_binary(code) <- Store.code(artifact, number),
            {:ok, version} <- Store.described(artifact, code),
-           do: version.permissions,
+           do: Map.keys(version.requires),
            else: (_ -> [])
     end
 
@@ -386,7 +386,7 @@ defmodule OneCore.Plugins.Lifecycle do
   defp from_git(owner, name, record, commit) do
     %{"source" => source} = update = record["update"] || %{}
     trusted = record["target"]["trusted"]
-    install? = fn version -> record["target"]["approved"] == true or (version.permissions -- current_permissions(owner, name)) == [] end
+    install? = fn version -> record["target"]["approved"] == true or (Map.keys(version.requires) -- current_requires(owner, name)) == [] end
 
     with {:ok, copy} <- Git.fetch(source),
          {:ok, files} <- Git.files(copy, commit, "plugins/#{name}"),
@@ -397,16 +397,16 @@ defmodule OneCore.Plugins.Lifecycle do
         {:ok, version}
       else
         Version.unload(version)
-        added = version.permissions -- current_permissions(owner, name)
-        offered = %{"version" => number, "permissions" => added, "commits" => update["commits"], "source" => source, "ref" => update["ref"]}
-        {:asks, "It asks for more permissions than it has: #{Enum.join(offered["permissions"], ", ")}.", offered}
+        added = Map.keys(version.requires) -- current_requires(owner, name)
+        offered = %{"version" => number, "requires" => added, "commits" => update["commits"], "source" => source, "ref" => update["ref"]}
+        {:asks, "It requires more than the version running: #{Enum.join(offered["requires"], ", ")}.", offered}
       end
     end
   end
 
-  defp current_permissions(owner, name) do
+  defp current_requires(owner, name) do
     case Plugins.versions([owner]) do
-      %{^name => version} -> version.permissions
+      %{^name => version} -> Map.keys(version.requires)
       _ -> []
     end
   end
