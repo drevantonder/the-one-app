@@ -8,6 +8,9 @@ defmodule Fake do
   """
   @behaviour OneCore.Plugin
 
+  @impl true
+  def icon, do: "icon.svg"
+
   @service %{
     "name" => "Fake",
     "authorize" => "http://127.0.0.1:PORT/authorize",

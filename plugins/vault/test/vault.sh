@@ -70,7 +70,7 @@ on() {
   shift 2
   [[ $1 == for ]] && subject=$2 && shift 2
   if [[ -n $only ]]; then printf '[%s]' "$(reached "$only")" >"$home/servers"; else printf '[%s,%s]' "$(reached server)" "$(reached standby)" >"$home/servers"; fi
-  ${subject:+env ONE_SUBJECT=$subject} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/said"
+  ${subject:+env ONE_SUBJECT=$subject} env ONE_AS="$who" ONE_HOME="$home" "$one" "${@}" 2>&1 | tee -a "$folder/output"
 }
 shown() {
   echo "  $1  $(echo "${*:2}" | sed -e "s|$folder|<folder>|g" | named)"
@@ -90,7 +90,7 @@ browser() {
     const at = new URL(page.url());
     console.log(`    ${at.origin}${at.pathname} says: "${(await page.locator(".ui-sign-in :is(h1, .done, .problem)").allTextContents()).join(" / ")}"`);
     await browser.close();
-  ' "$1") | tee -a "$folder/said"
+  ' "$1") | tee -a "$folder/output"
 }
 
 # A server is stopped by its own process, and started again as `tooling/network` started it.
@@ -124,6 +124,9 @@ defmodule Notes do
   @behaviour OneCore.Plugin
 
   @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
   def tools do
     text = %{type: "object", properties: %{text: %{type: "string"}}, required: ["text"]}
     [%{name: "write", description: "Writes a note that nothing encrypts", inputs: text, outputs: %{type: "object"}}]
@@ -138,6 +141,7 @@ end
 EOF
 on desk as owner for network deploy --name locker --files-from "$root/plugins/vault/test/plugins/locker" >/dev/null
 printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' notes notes >"$folder/notes/SKILL.md"
+cp "$root/plugins/vault/test/plugins/locker/icon.svg" "$folder/notes/"
 on desk as owner for network deploy --name notes --files-from "$folder/notes" >/dev/null
 
 say "Alice's key is made on her phone, which then chooses the server to open her Vault and her locker"
@@ -249,6 +253,7 @@ refused on laptop as alice vault fetch --item Pasted --url "http://127.0.0.1:$se
 say "A plugin uses an item that's switched on for it, and another is refused"
 mkdir -p "$folder/fake/server"
 sed "s/PORT/$service/g" "$root/plugins/vault/test/plugins/fake/server/fake.ex" >"$folder/fake/server/fake.ex"
+cp "$root/plugins/vault/test/plugins/fake/icon.svg" "$folder/fake/"
 for plugin in fake nosy; do
   printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' $plugin $plugin >"$folder/fake/SKILL.md"
   on desk as owner for network deploy --name $plugin --files-from "$folder/fake" >/dev/null

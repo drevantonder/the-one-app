@@ -4,6 +4,10 @@ defmodule Locker do
   (`plugins/vault/test/vault.sh`): the least a plugin does to keep something that whoever runs the bucket can't read.
   """
   @behaviour OneCore.Plugin
+
+  @impl true
+  def icon, do: "icon.svg"
+
   alias OneCore.{Artifact, Call}
 
   @schema ["create table notes (text text not null)"]
