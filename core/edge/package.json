@@ -17,7 +17,7 @@
   "scripts": {
     "dev": "bun edge.js dev",
     "deploy": "bun edge.js deploy",
-    "types": "wrangler types -c relay/wrangler.jsonc -c presigner/wrangler.jsonc relay/worker-configuration.d.ts --include-runtime=false --env-interface RelayEnv && wrangler types -c presigner/wrangler.jsonc presigner/worker-configuration.d.ts --include-runtime=false --env-interface PresignerEnv && wrangler types -c mcp/wrangler.jsonc -c relay/wrangler.jsonc -c presigner/wrangler.jsonc mcp/worker-configuration.d.ts --include-runtime=false --env-interface McpEnv",
+    "types": "wrangler types -c updater/wrangler.jsonc updater/worker-configuration.d.ts --include-runtime=false --env-interface UpdaterEnv && wrangler types -c relay/wrangler.jsonc -c presigner/wrangler.jsonc -c updater/wrangler.jsonc relay/worker-configuration.d.ts --include-runtime=false --env-interface RelayEnv && wrangler types -c presigner/wrangler.jsonc presigner/worker-configuration.d.ts --include-runtime=false --env-interface PresignerEnv && wrangler types -c mcp/wrangler.jsonc -c relay/wrangler.jsonc -c presigner/wrangler.jsonc mcp/worker-configuration.d.ts --include-runtime=false --env-interface McpEnv",
     "typecheck": "tsc"
   }
 }

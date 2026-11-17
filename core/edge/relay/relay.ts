@@ -21,12 +21,17 @@
 // ready once it's active and running, and connected, and only a ready server is sent calls. Servers are told when
 // one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 //
+// It's how the network's updater (`updater/updater.ts`) hears and speaks: it tells it what each server says of itself
+// and as one comes or goes, and a build published and Update Now (`/relay/update`), and tells every server what the
+// updater answers it's to do.
+//
 // Parts of the platform talk across one 0.minor and no more (`OneCore.Builds.talk?/2`): a server says its build as it
 // says what it is. A call from outside goes only to a server that talks with the edge, and says the edge's build: a
 // rule apart from being ready.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
+import type { Input, Reported } from "../updater/updater.ts";
 
 declare global {
   interface RelayEnv {
@@ -106,6 +111,9 @@ const SAID: ServerDaemonStatus[] = ["starting", "running", "stopping"];
 const STARTING = 60_000;
 const STOPPING = 60_000;
 
+/** What a server says of its update, which the relay passes to the network's updater. */
+const UPDATE: (keyof Reported)[] = ["name", "installed", "server_update_status", "update_method", "update_method_reason", "next_build", "went_back"];
+
 /** What a server last said it is (`/relay/seen`), and when. */
 interface ServerStatus {
   server_membership: ServerMembership;
@@ -152,6 +160,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     // iroh times this to learn how far away the relay is. An endpoint with no answer has no relay.
     if (url.pathname === "/ping") return new Response(null, { status: 200 });
     if (url.pathname === "/relay/seen") return this.handleSeen(request, url);
+    if (url.pathname === "/relay/update") return this.handleUpdate(request);
     if (request.headers.get("upgrade") !== "websocket") return refuse(url.pathname.startsWith("/relay") ? 426 : 404, "The relay is a WebSocket at /relay");
     if (url.pathname === "/relay") return this.endpoint(request, url);
     if (url.pathname === "/relay/outside") return this.relay((relay) => relay.fetch(request));
@@ -299,12 +308,16 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     if (!admitted) return refuse(403, "This network doesn't know you");
     if (request.method === "POST") {
       if (admitted.until !== undefined) return refuse(403, "Only a server says what it is");
-      const said = JSON.parse(body || "{}") as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown };
+      const said = JSON.parse(body || "{}") as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown } & Reported;
       const version = typeof said.version === "string" ? said.version : undefined;
       const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
         ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
         : undefined;
-      const now = await this.relay((relay) => relay.report(key, version, status));
+      const update: Reported = {
+        version,
+        ...Object.fromEntries(Object.entries(said).filter(([name]) => UPDATE.includes(name as keyof Reported))),
+      };
+      const now = await this.relay((relay) => relay.report(key, version, status, update));
       const behind = !talk(version, this.env.VERSION) && before(version, this.env.VERSION);
       const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, more than one breaking release before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
       const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
@@ -314,6 +327,27 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     }
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
     return Response.json({ presence: await this.presence(keys.slice(0, 1000)) }, { headers: { "one-version": this.env.VERSION } });
+  }
+
+  /**
+   * A server says a build was published to the network, `{"published": <its server build>}`, or asks for Update Now,
+   * `{"now": true}`, with a POST, and the network's updater's status is given; a GET, from any of the network's own,
+   * gives it.
+   */
+  async handleUpdate(request: Request) {
+    const body = request.method === "POST" ? await request.text() : "";
+    const key = await verifiedKey(request, body);
+    const admitted = key && (await this.env.NETWORK.admits(key, request.headers.get("one-token")));
+    if (!admitted) return refuse(403, "This network doesn't know you");
+    let input: Input = { status: true };
+    if (request.method === "POST") {
+      if (admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
+      const said = JSON.parse(body || "{}");
+      if (typeof said.published === "string") input = { published: said.published };
+      else if (said.now === true) input = { now: true };
+      else return refuse(400, 'A server says {"published": <build>} or {"now": true}');
+    }
+    return Response.json(await this.relay((relay) => relay.updated(input)), { headers: { "one-version": this.env.VERSION } });
   }
 
   /** Gives what `call` gives of the network's one relay, tried again for up to `SWITCH` where it fails. */
@@ -386,6 +420,7 @@ export class Relay extends DurableObject<RelayEnv> {
       if (!(await this.ctx.storage.get(`presence ${key}`)))
         await this.ctx.storage.put(`presence ${key}`, { server_membership: "active", server_daemon_status: "running", at: Date.now() } satisfies ServerStatus);
       this.notify(SEEN);
+      await this.updated({ seen: key! });
     }
     return new Response(null, { status: 101, webSocket: theirs });
   }
@@ -394,10 +429,30 @@ export class Relay extends DurableObject<RelayEnv> {
    * A server says what it is, `status`, and its build, `version`, or none from before builds had them. The other
    * servers are told. Gives its presence now.
    */
-  async report(key: string, version = "0.15.0", status?: ServerStatus) {
+  async report(key: string, version = "0.15.0", status?: ServerStatus, update?: Reported) {
     await this.ctx.storage.put({ [`version ${key}`]: version, ...(status && { [`presence ${key}`]: status }) });
     if (status) this.notify(SEEN);
+    if (update) await this.updated({ reported: { key, ...update } });
     return (await this.presence([key]))[key];
+  }
+
+  /**
+   * Tells the network's updater `input`, with every server's presence and build, tells every server what it answers
+   * they're to do, and gives its status. The relay goes on where the updater can't be reached, as one not deployed yet,
+   * and says so: what the updater missed it's told again as each server next says what it is.
+   */
+  async updated(input: Input): Promise<object | null> {
+    const keys = [...(await this.ctx.storage.list({ prefix: "version " })).keys()].map((at) => at.slice("version ".length));
+    const [presence, versions] = await Promise.all([this.presence(keys), this.versions(keys)]);
+    const servers = Object.fromEntries(keys.map((key) => [key, presence[key] && { ...presence[key], version: versions[key] }]));
+    try {
+      const { status, broadcast } = await this.env.UPDATER.update(input, servers);
+      if (broadcast) this.notify(broadcast);
+      return status;
+    } catch (error) {
+      console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes: { "one.updater": Object.keys(input)[0] }, error: `The network's updater wasn't told: ${error}` } }));
+      return null;
+    }
   }
 
   /** The build each of `keys` that's a server said it is, by its key, leaving out one that never said. */
@@ -495,7 +550,10 @@ export class Relay extends DurableObject<RelayEnv> {
     // The last connection a device or server had here ends, so it was last seen now.
     if (device && !this.on(device, ws)) {
       await this.ctx.storage.put(`seen ${device}`, Date.now());
-      if (server) this.notify(SEEN);
+      if (server) {
+        this.notify(SEEN);
+        await this.updated({ seen: device });
+      }
     }
     // A server that left answers nothing, so the calls waiting on it are told.
     if (!outside || this.ctx.getWebSockets(`outside ${outside}`).some((other) => other !== ws)) return;

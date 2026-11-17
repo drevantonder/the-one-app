@@ -70,6 +70,12 @@ An app's own words are defined in that app's `SKILL.md`.
 - **Gateway**: sends each request at the network's address where its path says.
 - **Relay**: passes traffic between a network's servers and clients when they can't reach each other directly. It
   can't read it.
+- **Network update**: how a network takes each build published to it, by itself, which its edge's updater runs, one
+  per network (`core/edge/updater/updater.ts`): every awake server prepares the build and says how it takes it, then
+  those that load it in place take it at once, and those that restart take it one at a time, never the last ready
+  one. A newer build takes the place of one under way, a server that goes back holds it, and one asleep or gone is
+  caught up once it's back. Its state is `network_update_status`, beside each server's `server_update_status`.
+  People see it as Software Update. Avoid: rollout, release (for what servers do; a release is what's published).
 - **Scheduled job**: a tool call made by the clock.
 - **Skill**: text for agents on when and how to use an app's tools, which an agent reads when it needs it. An app
   provides one as a file, and One Core has some of its own: building apps,

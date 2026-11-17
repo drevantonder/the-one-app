@@ -129,6 +129,12 @@ const config = {
   web: "web/wrangler.jsonc",
   presigner: "presigner/wrangler.jsonc",
 };
+// The network's updater, which the relay is bound to, and which is told its tail parts as the relay is.
+{
+  const worker = (await import(`${here}/updater/wrangler.jsonc`)).default;
+  await Bun.write(`${built}/updater.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/updater/${worker.main}`) }), null, 2));
+  config.updater = relative(here, `${built}/updater.jsonc`);
+}
 // The relay is told the edge's build, by which it knows which servers talk with it (`relay/relay.ts`).
 const version = (await $`sh ${root}/tooling/version`.text()).trim();
 for (const piece of ["relay", "mcp"]) {
@@ -146,7 +152,7 @@ if (what === "dev") {
 // its `wrangler.jsonc`, which only it holds, such as the presigner's and an app's part's keys to an outside service.
 // The tail parts come first among the parts, before whatever names them.
 const [tailParts, otherParts] = [parts.slice(0, tails.length), parts.slice(tails.length)];
-for (const deployed of [config.web, config.presigner, ...tailParts, config.relay, ...otherParts, config.mcp, gatewayConfig]) {
+for (const deployed of [config.web, config.presigner, ...tailParts, config.updater, config.relay, ...otherParts, config.mcp, gatewayConfig]) {
   const file = `${dirname(deployed)}/secrets`;
   const secrets = existsSync(`${here}/${file}`) ? ["--secrets-file", file] : [];
   const failed = await wrangler("deploy", "-c", deployed, ...secrets);
