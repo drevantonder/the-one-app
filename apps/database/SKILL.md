@@ -4,7 +4,7 @@ description: Read before writing an app that keeps data or has scheduled jobs, w
 metadata:
   subtitle: "Where apps keep their data"
   about: "Gives every app here a database of its own, so what it keeps for you is yours, and what it keeps for a group is the group's."
-  category: Data
+  category: Admin
 ---
 
 An app keeps its data in a database by requiring this app. The database is SQLite, kept in the app's own

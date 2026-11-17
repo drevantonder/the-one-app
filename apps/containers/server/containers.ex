@@ -89,7 +89,7 @@ defmodule Containers do
   def hooks, do: ["computer-use.screens"]
 
   @impl true
-  def entrypoints, do: [%{name: "Containers", page: "client/index.html", category: "devices"}]
+  def entrypoints, do: [%{name: "Containers", page: "client/index.html"}]
 
   @impl true
   def tools do

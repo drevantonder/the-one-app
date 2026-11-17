@@ -27,7 +27,7 @@ defmodule Telemetry do
   def jobs, do: [%{tool: "prune", every: 3600}]
 
   @impl true
-  def entrypoints, do: [%{name: "Telemetry", page: "client/index.html", category: "coding"}]
+  def entrypoints, do: [%{name: "Telemetry", page: "client/index.html"}]
 
   @impl true
   def tools do

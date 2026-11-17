@@ -4,7 +4,7 @@ description: Read when an untrusted app can't reach something, or before decidin
 metadata:
   subtitle: "Apps you don't know, kept apart"
   about: "Runs apps you don't fully trust walled off from your machines, with only what you let them have, so anyone can try one without a server of their own."
-  category: "Privacy & Security"
+  category: Admin
 ---
 
 An untrusted app runs behind this machine's own sandbox (bubblewrap on Linux, Seatbelt on a Mac, an AppContainer

@@ -289,27 +289,27 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
 /// with their names, or its first three and the rest smaller in the fourth's place. Tapping an icon opens its app; tapping anywhere
 /// else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
 function Library(props: { owner: Owner; index: number; places: Map<string, HTMLElement> }) {
-  const opening = (category: Category) => () => state().matches("nothing") && home.send({ type: "open", category: { owner: props.index, name: category.name } })
+  const opening = (category: Category) => () => state().matches("nothing") && home.send({ type: "open", category: { owner: props.index, name: category.category } })
   return (
     <section class="page library scrolls" aria-label={`${props.owner.name}'s App Library`}>
       <Show when={props.owner.library.length} fallback={<Empty>No apps yet.</Empty>}>
         <div class="categories">
-          <For each={props.owner.library} keyed={(category) => category.name}>
+          <For each={props.owner.library} keyed={(category) => category.category}>
             {(category) => (
               <div class="category">
-                <div class="place" ref={(place) => props.places.set(`${props.index}:${category().name}`, place)} onClick={opening(category())}>
+                <div class="place" ref={(place) => props.places.set(`${props.index}:${category().category}`, place)} onClick={opening(category())}>
                   <For each={category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints} keyed={(entrypoint) => entrypoint.entrypoint}>
                     {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} index={props.index} />}
                   </For>
                   <Show when={category().entrypoints.length > 4}>
-                    <button type="button" class="more" aria-label={`All of ${category().name}`}>
+                    <button type="button" class="more" aria-label={`All of ${category().category}`}>
                       <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint}>
                         {(entrypoint) => <img src={entrypoint().icon} alt="" />}
                       </For>
                     </button>
                   </Show>
                 </div>
-                <button type="button" class="name" onClick={opening(category())}>{category().name}</button>
+                <button type="button" class="name" onClick={opening(category())}>{category().category}</button>
               </div>
             )}
           </For>
@@ -343,7 +343,7 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
   let panel!: HTMLDivElement
   let title!: HTMLHeadingElement
   let grid!: HTMLDivElement
-  const category = () => props.owner.library.find((category) => category.name === props.opened.name)
+  const category = () => props.owner.library.find((category) => category.category === props.opened.name)
   const phase = () => (state().matches({ category: "opening" }) ? "opening" : state().matches({ category: "open" }) ? "open" : "closing")
   const close = () => state().matches({ category: "open" }) && home.send({ type: "close" })
   // From its place to the middle, or back, in the time the machine gives it.

@@ -65,7 +65,6 @@ defmodule SoftDelete do
       %{
         name: "Recently Deleted",
         page: "client/index.html",
-        category: "admin",
         subject: "user"
       }
     ]

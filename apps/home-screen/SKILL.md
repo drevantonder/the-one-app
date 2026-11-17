@@ -32,19 +32,10 @@ Its words:
 
 ## Categories
 
-An app says its `category`, one of these, as a desktop's menu entry does:
-
-| `category` | Shown as |
-|---|---|
-| `coding` | Coding |
-| `device-automation` | Device Automation |
-| `admin` | Admin |
-| `appearance` | Appearance |
-| `agents` | Agents |
-| `devices` | Devices |
-| `access` | Access |
-
-An App Library shows them in that order. An app that says none of these is in Other, last. `launcher` is this one's.
+An App Library groups apps by the categories the App Store does, an app's `metadata.category` (the skill
+building-apps), in that order. An entrypoint that's for something else than its app says one of them as its own
+`category`, as Sign-In's Devices says `Devices`. Admin, what other apps stand on, shows only to the network's owners.
+`launcher` is this one's.
 
 ## Who an app is for
 

@@ -54,7 +54,6 @@ defmodule IphoneSimulator do
       %{
         name: "iPhone Simulator",
         page: "client/index.html",
-        category: "device-automation",
         subject: "user"
       }
     ]

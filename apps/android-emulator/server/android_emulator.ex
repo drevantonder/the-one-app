@@ -55,7 +55,6 @@ defmodule AndroidEmulator do
       %{
         name: "Android Emulator",
         page: "client/index.html",
-        category: "device-automation",
         subject: "user"
       }
     ]

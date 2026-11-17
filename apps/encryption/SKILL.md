@@ -4,7 +4,7 @@ description: Read before an app keeps something that whoever stores the network'
 metadata:
   subtitle: "Data only you can read"
   about: "Encrypts what your apps keep, so whoever stores your network's data can't read it. Your Vault is kept this way."
-  category: "Privacy & Security"
+  category: Admin
 ---
 
 Encryption keeps an artifact's blobs encrypted in the bucket, so whoever runs the bucket can't read them, and nor

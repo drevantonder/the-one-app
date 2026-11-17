@@ -60,7 +60,7 @@ defmodule Notifications do
   @impl true
   def entrypoints do
     [
-      %{name: "Notifications", page: "client/index.html", category: "devices", subject: "user"}
+      %{name: "Notifications", page: "client/index.html", subject: "user"}
     ]
   end
 

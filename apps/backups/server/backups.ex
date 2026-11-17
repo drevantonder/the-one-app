@@ -54,7 +54,7 @@ defmodule Backups do
   end
 
   @impl true
-  def entrypoints, do: [%{name: "Backups", page: "client/index.html", category: "admin"}]
+  def entrypoints, do: [%{name: "Backups", page: "client/index.html"}]
 
   @impl true
   def jobs, do: [%{tool: "due", every: 3600}]

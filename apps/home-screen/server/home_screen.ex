@@ -21,18 +21,6 @@ defmodule HomeScreen do
 
   alias OneCore.{Artifact, Call}
 
-  # The categories an app says it's in, as freedesktop's menus have theirs, in the order an App Library shows them.
-  # An app that says none of these is in Other, last, as such a menu puts what's left (SKILL.md).
-  @categories [
-    {"coding", "Coding"},
-    {"device-automation", "Device Automation"},
-    {"admin", "Admin"},
-    {"appearance", "Appearance"},
-    {"agents", "Agents"},
-    {"devices", "Devices"},
-    {"access", "Access"}
-  ]
-
   @impl true
   def entrypoints do
     [
@@ -41,7 +29,6 @@ defmodule HomeScreen do
         name: "Colour Mode",
         page: "client/colour-mode.html",
         icon: "client/colour-mode.svg",
-        category: "appearance",
         subject: "user"
       }
     ]
@@ -58,7 +45,7 @@ defmodule HomeScreen do
         app: %{type: "string"},
         name: %{type: "string"},
         icon: %{type: "string", description: "A data: address"},
-        category: %{type: ["string", "null"], description: "Its category, as the App Library has them"},
+        category: %{type: "string", description: "Its category in the App Library: its own, or else its app's"},
         subject: %{type: "string", description: "`user` for an app opened for whoever opens it"}
       },
       required: ["entrypoint", "app", "name", "icon", "category"]
@@ -137,11 +124,10 @@ defmodule HomeScreen do
               items: %{
                 type: "object",
                 properties: %{
-                  category: %{type: ["string", "null"], description: "As an app says it, or null for Other"},
-                  name: %{type: "string", description: "As a person reads it"},
+                  category: %{type: "string", description: "One of an app's categories (the skill building-apps)"},
                   entrypoints: %{type: "array", items: entrypoint}
                 },
-                required: ["category", "name", "entrypoints"]
+                required: ["category", "entrypoints"]
               }
             },
             widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"}
@@ -327,10 +313,12 @@ defmodule HomeScreen do
     end
   end
 
-  # An app as `pages` gives it, on a page or in the App Library: what it's opened as, and who it's opened for, if not whoever's
-  # Home Screen it's on.
+  # An app as `pages` gives it, on a page or in the App Library: what it's opened as, its category, and who it's opened
+  # for, if not whoever's Home Screen it's on. It's in its own category where it says one of an app's, and else in its
+  # app's.
   defp entry(app, entrypoint) do
     about = if entrypoint[:subject], do: %{subject: entrypoint[:subject]}, else: %{}
+    category = if entrypoint.category in OneCore.Apps.Deploy.categories(), do: entrypoint.category, else: app.category
 
     Map.merge(
       %{
@@ -338,16 +326,17 @@ defmodule HomeScreen do
         app: app.app,
         name: entrypoint.name,
         icon: entrypoint.icon,
-        category: entrypoint.category
+        category: category
       },
       about
     )
   end
 
-  # The App Library: every app that runs for whoever it's for, by category, in the order of `@categories`, then Other.
-  # That's what's installed for them and for each broader owner they're within: a user's has theirs, their groups'
-  # and the network's, a group's its own and the network's. An app installed for more than one of them is there
-  # once, as the narrowest's. An app about whoever opens it is only in a user's.
+  # The App Library: every app that runs for whoever it's for, by category, in the order an app's categories are
+  # listed (`OneCore.Apps.Deploy.categories/0`), Admin only for the network's owners. That's what's installed for them
+  # and for each broader owner they're within: a user's has theirs, their groups' and the network's, a group's its own
+  # and the network's. An app installed for more than one of them is there once, as the narrowest's. An app about
+  # whoever opens it is only in a user's.
   defp library(call) do
     entrypoints =
       for scope <- scopes(call),
@@ -361,12 +350,13 @@ defmodule HomeScreen do
       |> Enum.uniq_by(&elem(&1, 0))
       |> Enum.map(&elem(&1, 1))
 
-    known = for {category, name} <- @categories, do: {category, name, Enum.filter(entrypoints, &(&1.category == category))}
-    other = {nil, "Other", Enum.reject(entrypoints, &List.keymember?(@categories, &1.category, 0))}
+    admins = Call.owns?(%{call | subject: "network"})
 
-    for {category, name, entrypoints} <- known ++ [other],
-        entrypoints != [],
-        do: %{category: category, name: name, entrypoints: Enum.sort_by(entrypoints, &String.downcase(&1.name))}
+    for category <- OneCore.Apps.Deploy.categories(),
+        category != "Admin" or admins,
+        theirs = Enum.filter(entrypoints, &(&1.category == category)),
+        theirs != [],
+        do: %{category: category, entrypoints: Enum.sort_by(theirs, &String.downcase(&1.name))}
   end
 
   # Whoever an App Library is for, then each broader owner they're within, narrowest first.

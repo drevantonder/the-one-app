@@ -7,7 +7,7 @@ export interface Entrypoint {
   name: string
   icon: string
   app: string
-  category: string | null
+  category: string
   subject?: "user" | `groups/${string}`
 }
 
@@ -25,10 +25,9 @@ export type Size = "2x2" | "4x2" | "4x4"
 /** Something on a page: an app or a widget. */
 export type Item = (Entrypoint & { widget?: undefined; size?: undefined }) | (Widget & { entrypoint?: undefined })
 
-/** A category of an App Library, as it shows it: its apps by name. Other's `category` is null. */
+/** A category of an App Library, as it shows it: its apps by name. */
 export interface Category {
-  category: string | null
-  name: string
+  category: string
   entrypoints: Entrypoint[]
 }
 

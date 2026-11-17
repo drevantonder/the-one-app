@@ -61,7 +61,6 @@ defmodule ComputerUse do
       %{
         name: "Computer Use",
         page: "client/index.html",
-        category: "device-automation",
         subject: "user"
       }
     ]

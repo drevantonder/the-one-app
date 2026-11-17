@@ -26,15 +26,14 @@ defmodule SignIn do
   @impl true
   def entrypoints do
     [
-      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "admin"},
-      %{name: "Devices", page: "client/index.html", icon: "client/icon.svg", category: "devices", subject: "user"},
+      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg"},
+      %{name: "Devices", page: "client/index.html", icon: "client/icon.svg", category: "Devices", subject: "user"},
       %{
         name: "Sign-In & Security",
         page: "client/security.html",
-        category: "access",
         subject: "user"
       },
-      %{name: "Connect Your AI", page: "client/connect.html", icon: "client/connect.svg", category: "agents", subject: "user"}
+      %{name: "Connect Your AI", page: "client/connect.html", icon: "client/connect.svg", category: "AI", subject: "user"}
     ]
   end
 

@@ -111,7 +111,7 @@ defmodule Vault do
   end
 
   @impl true
-  def entrypoints, do: [%{name: "Vault", page: "client/index.html", category: "access", subject: "user"}]
+  def entrypoints, do: [%{name: "Vault", page: "client/index.html", subject: "user"}]
 
   @impl true
   def tools do
