@@ -17,16 +17,17 @@ let moving: ViewTransition | undefined
 /// `go(() => setOpen(note))`: changes which screen shows, as a move. `change` puts the new screen in place, and the
 /// browser slides to it from what was there (its View Transitions): in over it, or with `back`, back out from over
 /// it. Ask the server first: the page holds still until `change` is done. `part` is what moves, when it isn't the
-/// whole page. Where the browser can't, or the user asked for no motion, it's a plain swap. From one page to
+/// whole page. For whoever asked for less motion one fades into the other, and where the browser can't, it's a plain
+/// swap. From one page to
 /// another the browser does this by itself (ui.css).
 export function go(change: () => void, { back = false, part }: { back?: boolean; part?: HTMLElement } = {}): void {
-  if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || reduced.matches || shown) return void change()
+  if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || shown) return void change()
   part?.style.setProperty("view-transition-name", "ui-screen")
   // What's still fading in what moves (a row let go of a moment ago) is finished first, so the move takes the screen
   // as it settles. Chromium's page crashed taking it mid-fade. What never ends, a spinner, keeps going.
   const fading = part ? part.getAnimations({ subtree: true }) : document.getAnimations()
   for (const fade of fading) if (fade.effect?.getComputedTiming().endTime !== Infinity) fade.finish()
-  const move = (moving = document.startViewTransition({ update: change, types: [back ? "ui-back" : "ui-forward", part ? "ui-part" : "ui-page"] }))
+  const move = (moving = document.startViewTransition({ update: change, types: reduced.matches ? [] : [back ? "ui-back" : "ui-forward", part ? "ui-part" : "ui-page"] }))
   move.finished.finally(() => moving === move && part?.style.removeProperty("view-transition-name"))
 }
 

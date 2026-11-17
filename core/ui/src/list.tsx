@@ -27,15 +27,16 @@ function moves(list: HTMLElement) {
   const seen = new MutationObserver(() => {
     const before = rows
     const after = (rows = ([...list.children] as HTMLElement[]).filter((row) => !row.inert))
-    if (reduced.matches || !before.length) return
+    if (!before.length) return
     const left = Map.groupBy(after, says)
     const stayed = new Map(before.map((row) => [row, left.get(says(row))?.shift()]))
     const gone = before.filter((row) => !stayed.get(row))
     const come = [...left.values()].flat()
     // Some gone and some new is a row that changed, or another list's rows: a plain swap.
     if (gone.length && come.length) return
-    for (const row of come) row.animate({ height: ["0px", `${row.offsetHeight}px`], opacity: [0, 1] }, pace(list, "settle"))
-    for (const row of gone) leave(list, row, before.slice(before.indexOf(row) + 1).map((later) => stayed.get(later)).find(Boolean))
+    // For whoever asked for less motion, a new row fades in where it is, and one taken out just goes.
+    for (const row of come) row.animate(reduced.matches ? { opacity: [0, 1] } : { height: ["0px", `${row.offsetHeight}px`], opacity: [0, 1] }, pace(list, "settle"))
+    if (!reduced.matches) for (const row of gone) leave(list, row, before.slice(before.indexOf(row) + 1).map((later) => stayed.get(later)).find(Boolean))
     seen.takeRecords()
   })
   queueMicrotask(() => {

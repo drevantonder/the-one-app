@@ -126,6 +126,13 @@
   --move-travel: 300ms;
   --ease-travel: cubic-bezier(0.32, 0.72, 0, 1);
 }
+/* For whoever asked for less motion, what would cross the screen fades instead (ui.css), as briefly as what settles. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --move-travel: var(--move-settle);
+    --ease-travel: var(--ease-settle);
+  }
+}
 
 /* Dark, as the page's `light` or `dark` class says (a client sets it from Colour Mode), or the device's own
    where nothing says. Weight can't follow `color-scheme` as a colour does. */

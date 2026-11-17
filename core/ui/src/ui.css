@@ -60,12 +60,22 @@ html:has(.ui-dialog[open]) {
 }
 
 /* From one screen to the next, as the browser's View Transitions: the new one slides in over the old from the end
-   of the line, and going back it slides out again. Between pages the browser starts it; inside one, `go` does
+   of the line, and going back it slides out again; for whoever asked for less motion, one fades into the other.
+   Between pages the browser starts it; inside one, `go` does
    (screen.jsx), and says which way and whether the whole page moves or a part of it. */
 @media (prefers-reduced-motion: no-preference) {
   @view-transition {
     navigation: auto;
     types: ui-forward ui-page;
+  }
+}
+/* For whoever asked for less motion, the browser's own cross-fade instead, as briefly as what settles. */
+@media (prefers-reduced-motion: reduce) {
+  @view-transition {
+    navigation: auto;
+  }
+  ::view-transition-group(*) {
+    animation-duration: var(--move-settle);
   }
 }
 :root {
@@ -1740,9 +1750,30 @@ button.ui-box {
 }
 
 /* Asked for no motion: a plain swap everywhere. */
+/* For whoever asked for less motion, as Apple does it: nothing slides in, grows or zooms, and what would have moved
+   fades briefly instead. What a finger moves still follows it. */
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after, ::backdrop {
-    transition-duration: 0s !important;
+  .ui-dialog.sheet, .ui-dialog.sheet[open] {
+    translate: none;
+  }
+  .ui-dialog.sheet {
+    opacity: 0;
+  }
+  .ui-dialog.sheet[open] {
+    opacity: 1;
+  }
+  @starting-style {
+    .ui-dialog.sheet[open] {
+      opacity: 0;
+      translate: none;
+    }
+  }
+  .ui-dialog, :is([data-menu-content], [data-select-content], [data-date-picker-content]), .ui-choice input::before {
+    scale: none !important;
+  }
+  /* A toast fades in and out where it is, and moves to its place in the stack at once. */
+  .ui-toast {
+    transition-duration: 0s, 0s, var(--move-settle), 0s;
   }
 }
 
