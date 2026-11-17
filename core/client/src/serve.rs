@@ -106,27 +106,7 @@ pub enum Said {
 impl Said {
     /// The message a line the server said is, or `None` for anything else it says, as what it logs.
     pub fn read(line: &str) -> Option<Self> {
-        serde_json::from_str(line).ok().or_else(|| Self::read_text(line.trim()))
-    }
-
-    /// The message a line is in the text a server said before these were JSON, which one still says to a program
-    /// that doesn't say all of what the server is (`Told::Status`).
-    fn read_text(line: &str) -> Option<Self> {
-        if let Some(key) = line.strip_prefix("A server is running: ") {
-            Some(Self::Running { key: key.to_owned() })
-        } else if line == "Update asked" {
-            Some(Self::UpdateAsked)
-        } else if let Some(build) = line.strip_prefix("Loaded ") {
-            Some(Self::Loaded { build: build.to_owned() })
-        } else if let Some(not) = line.strip_prefix("Didn't load ") {
-            let (build, why) = not.split_once(": ").unwrap_or((not, ""));
-            Some(Self::NotLoaded { build: build.to_owned(), why: why.to_owned() })
-        } else if line == "hot_load" {
-            Some(Self::Compared { update_method: UpdateMethod::HotLoad, why: None })
-        } else {
-            let why = line.strip_prefix("restart: ")?;
-            Some(Self::Compared { update_method: UpdateMethod::Restart, why: Some(why.to_owned()) })
-        }
+        serde_json::from_str(line).ok()
     }
 }
 

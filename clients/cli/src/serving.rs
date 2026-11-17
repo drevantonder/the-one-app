@@ -996,10 +996,9 @@ impl Here {
             .env("ONE_SERVER_STATUS", told.to_string())
             .output()?;
         let (out, errors) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
-        // A build from before says which it is as the whole of its output.
         let out = match out.lines().rev().find_map(Said::read) {
             Some(Said::Checked { build }) => build,
-            _ => out.trim().to_owned(),
+            _ => String::new(),
         };
         if out != name {
             fs::remove_dir_all(&unpacking)?;

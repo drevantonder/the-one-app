@@ -70,21 +70,14 @@ defmodule OneCore.Release do
   end
 
   # Says `message`, the terms of one of the `client` crate's `Said` as JSON has them, to the program keeping this
-  # server running, or to the program checking this build: a line of JSON, where that program says all of what this
-  # server is in `ONE_SERVER_STATUS`, and otherwise the text a server said before, which a program from before reads.
+  # server running, or to the program checking this build: a line of JSON.
   defp say(message) do
     {:ok, line} = Iroh.said(JSON.encode!(message))
-    IO.puts(if match?({:ok, _}, Iroh.told(System.get_env("ONE_SERVER_STATUS", ""))), do: line, else: text(message))
+    IO.puts(line)
   end
 
-  defp text(%{"running" => %{"key" => key}}), do: "A server is running: " <> key
-  defp text("update_asked"), do: "Update asked"
-  defp text(%{"loaded" => %{"build" => build}}), do: "Loaded " <> build
-  defp text(%{"not_loaded" => %{"build" => build, "why" => why}}), do: "Didn't load #{build}: #{why}"
-  defp text(%{"checked" => %{"build" => build}}), do: build
-  defp text(%{"compared" => %{"update_method" => "hot_load"}}), do: "hot_load"
-  defp text(%{"compared" => %{"why" => why}}), do: "restart: " <> why
-
+  # What a server is as it starts, where nothing says otherwise: one nothing keeps running, as a network being built
+  # runs one. The program keeping an installed one says all of it, in `ONE_SERVER_STATUS`.
   @status %{
     "server_membership" => "active",
     "server_daemon_status" => "starting",
@@ -94,19 +87,9 @@ defmodule OneCore.Release do
     "went_back" => nil
   }
 
-  # What a line the program keeping it running said is: a `Told`, or some of what this server is, as a program from
-  # before says it.
+  # What a line the program keeping it running said is, a `Told`.
   defp told_in(line) do
-    case Iroh.told(line) do
-      {:ok, json} ->
-        {:ok, JSON.decode!(json)}
-
-      {:error, why} ->
-        case JSON.decode(line) do
-          {:ok, %{} = said} -> {:ok, Map.take(said, Map.keys(@status))}
-          _ -> {:error, why}
-        end
-    end
+    with {:ok, json} <- Iroh.told(line), do: {:ok, JSON.decode!(json)}
   end
 
   @doc """
