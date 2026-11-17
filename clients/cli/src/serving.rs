@@ -20,9 +20,10 @@
 //! (`Here::assemble`), so it's a whole Erlang release that any start starts. The server is told on its input what changes of it (`OneCore.Release`), and says it to the network, where
 //! it's ready once it's active and running.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use std::{env, fs};
 
@@ -32,6 +33,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{sleep, timeout};
 
 use client::{BUILD, Client, target};
@@ -134,15 +136,31 @@ struct Record {
 }
 
 impl Record {
-    /// What's told the server of itself, on its input and as it starts.
-    fn told(&self) -> Value {
-        json!({
+    /// What's told the server of itself, on its input and as it starts, with its daemon's status where that changed.
+    fn told(&self, daemon: Option<ServerDaemonStatus>) -> Value {
+        let mut told = json!({
             "server_membership": self.server_membership,
             "server_update_status": self.server_update_status,
             "server_update_stage": self.server_update_stage,
             "update_method": self.update_method,
             "went_back": self.went_back,
-        })
+        });
+        if let Some(daemon) = daemon {
+            told["server_daemon_status"] = json!(daemon);
+        }
+        told
+    }
+
+    /// Where an update that didn't take went back to, and from.
+    fn back(&self) -> String {
+        let build = |pair: &Option<Pair>| pair.as_ref().map(|pair| pair.build.clone()).unwrap_or_default();
+        format!("Went back to {} from {}", build(&self.current), build(&self.next))
+    }
+
+    /// Says why the last update didn't take, which the server says until one does.
+    fn went(&mut self, why: String) {
+        println!("{why}");
+        self.went_back = Some(why);
     }
 }
 
@@ -389,22 +407,16 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     // A build being checked or loaded when this program or the server stopped wasn't kept, and the server starts on
     // the one it was on.
     if record.server_update_status == ServerUpdateStatus::Verifying
-        && matches!(record.server_update_stage, Some(ServerUpdateStage::Checking | ServerUpdateStage::Loading))
+        && let Some(stage @ (ServerUpdateStage::Checking | ServerUpdateStage::Loading)) = record.server_update_stage
     {
-        let (current, next) = (record.current.clone(), record.next.clone());
-        record.went_back = Some(format!(
-            "Went back to {} from {}: it stopped while {}",
-            current.map(|pair| pair.build).unwrap_or_default(),
-            next.map(|pair| pair.build).unwrap_or_default(),
-            if record.server_update_stage == Some(ServerUpdateStage::Checking) { "checking it" } else { "loading it" }
-        ));
-        println!("{}", record.went_back.as_deref().unwrap_or_default());
+        let doing = if stage == ServerUpdateStage::Checking { "checking it" } else { "loading it" };
+        record.went(format!("{}: it stopped while {doing}", record.back()));
         here.went_back(&mut record, &program)?;
     }
     let verifying = record.server_update_status == ServerUpdateStatus::Verifying;
     let pair = if verifying { record.next.clone() } else { record.current.clone() };
     let pair = pair.context("The record names no build to run")?;
-    let mut server = Command::from(command(release(&here.folder.join("builds").join(&pair.build))));
+    let mut server = Command::from(command(release(&here.build(&pair.build))));
     server
         .args(["eval", "OneCore.Release.serve()"])
         .env("ONE_SERVER_HOME", here.folder.join("home"))
@@ -412,7 +424,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         .env("ONE_SUBJECT", &who)
         .env("ONE_DEVICE", client.key())
         .env("ONE_NAME", client::name())
-        .env("ONE_SERVER_STATUS", record.told().to_string())
+        .env("ONE_SERVER_STATUS", record.told(None).to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -421,30 +433,26 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     // Everything it starts goes when it does, or when this does.
     #[cfg(windows)]
     let _contained = system::contain(&server)?;
-    let (last, mut said) = listen(&mut server, log)?;
+    let mut said = listen(&mut server, log)?;
 
-    let started = timeout(START, async {
+    let mut last = VecDeque::with_capacity(LAST);
+    let started = within("start and answer by its key", async {
         while let Some(line) = said.recv().await {
+            if last.len() == LAST {
+                last.pop_front();
+            }
+            last.push_back(line.clone());
             if line.starts_with(RUNNING) {
                 return answers(&client, &key, &pair.build).await;
             }
         }
-        Err(anyhow::anyhow!("it stopped before it was running"))
+        bail!("it stopped before it was running")
     });
-    let started = match started.await {
-        Ok(started) => started,
-        Err(_) => Err(anyhow::anyhow!("it didn't start and answer by its key within {} s", START.as_secs())),
-    };
-    if let Err(why) = started {
+    if let Err(why) = started.await {
         let _ = server.kill().await;
-        let lines = last.lock().unwrap().iter().cloned().collect::<Vec<_>>().join(" | ");
-        let why = format!("{why:#}. Its last lines: {lines}");
-        if !verifying {
-            bail!("The server on {} didn't start: {why}", pair.build)
-        }
-        let current = record.current.clone().context("a build it was on")?;
-        record.went_back = Some(format!("Went back to {} from {}: {why}", current.build, pair.build));
-        println!("{}", record.went_back.as_deref().unwrap_or_default());
+        let why = format!("{why:#}. Its last lines: {}", Vec::from(last).join(" | "));
+        ensure!(verifying, "The server on {} didn't start: {why}", pair.build);
+        record.went(format!("{}: {why}", record.back()));
         here.went_back(&mut record, &program)?;
         return Err(again(&program));
     }
@@ -467,9 +475,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     }
     here.write(&record)?;
     here.prune(&record)?;
-    let mut told = record.told();
-    told["server_daemon_status"] = json!(ServerDaemonStatus::Running);
-    tell(&mut server, told).await;
+    tell(&mut server, record.told(Some(ServerDaemonStatus::Running))).await;
     system::ready(&key)?;
 
     let stopping = stopped();
@@ -483,46 +489,26 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                 Some(_) => {}
                 None => bail!("The server stopped: {}", server.wait().await?),
             },
-            _ = &mut stopping => {
-                // `one serve off` says it's leaving before it has the system stop this, and the server drains.
-                let mut told = here.read()?.told();
-                told["server_daemon_status"] = json!(ServerDaemonStatus::Stopping);
-                tell(&mut server, told).await;
-                return stop(&mut server).await;
-            }
+            // `one serve off` says it's leaving before it has the system stop this, and the server drains.
+            _ = &mut stopping => return stop(&mut server, here.read()?.told(Some(ServerDaemonStatus::Stopping))).await,
         }
     }
 }
 
 /// Reads what the server says, on its output and its errors, as it comes, whatever this is doing meanwhile: a
 /// server whose output isn't read is held up once the pipe it writes to is full, 16 KB on a Mac, so each line it
-/// logs holds up whatever logged it. Gives its last lines, which say why a build didn't start, and what this acts
-/// on: that it's running, and that it's asked to update.
-#[allow(clippy::type_complexity)]
-fn listen(
-    server: &mut Child,
-    log: PathBuf,
-) -> Result<(Arc<Mutex<Vec<String>>>, tokio::sync::mpsc::UnboundedReceiver<String>)> {
-    let last = Arc::new(Mutex::new(Vec::new()));
-    let keep = {
-        let last = last.clone();
-        move |line: &str| {
-            let mut last = last.lock().unwrap();
-            if last.len() == LAST {
-                last.remove(0);
-            }
-            last.push(line.to_owned());
-        }
-    };
+/// logs holds up whatever logged it. Gives every line, to act on (that it's running, that it's asked to update, that
+/// it loaded a build) and to say why a build didn't start.
+fn listen(server: &mut Child, log: PathBuf) -> Result<UnboundedReceiver<String>> {
+    let (heard, said) = tokio::sync::mpsc::unbounded_channel();
     let mut errors = BufReader::new(server.stderr.take().context("the server's errors")?).lines();
-    let keep_error = keep.clone();
+    let heard_error = heard.clone();
     tokio::spawn(async move {
         while let Ok(Some(line)) = errors.next_line().await {
             eprintln!("{line}");
-            keep_error(&line);
+            let _ = heard_error.send(line);
         }
     });
-    let (heard, said) = tokio::sync::mpsc::unbounded_channel();
     let mut lines = BufReader::new(server.stdout.take().context("the server's output")?).lines();
     tokio::spawn(async move {
         while let Ok(Some(line)) = lines.next_line().await {
@@ -530,17 +516,10 @@ fn listen(
             if let Err(error) = system::bound(&log) {
                 eprintln!("Couldn't keep {} small: {error:#}", log.display());
             }
-            keep(&line);
-            if line.starts_with(RUNNING)
-                || line == UPDATE_ASKED
-                || line.starts_with(LOADED)
-                || line.starts_with(NOT_LOADED)
-            {
-                let _ = heard.send(line);
-            }
+            let _ = heard.send(line);
         }
     });
-    Ok((last, said))
+    Ok(said)
 }
 
 /// Whether the server whose key is `key` answers by it, saying it's `build`. It's asked again until it does: the
@@ -554,6 +533,11 @@ async fn answers(client: &Client, key: &str, build: &str) -> Result<()> {
         }
         sleep(Duration::from_secs(2)).await;
     }
+}
+
+/// What the server does `doing`, given `START` to do it in.
+async fn within(doing: &str, done: impl Future<Output = Result<()>>) -> Result<()> {
+    timeout(START, done).await.unwrap_or_else(|_| bail!("it didn't {doing} within {} s", START.as_secs()))
 }
 
 /// Once the system asks this program to stop: SIGTERM, as systemd and launchd stop a program. Task Scheduler ends a
@@ -576,9 +560,10 @@ async fn tell(server: &mut Child, said: Value) {
     }
 }
 
-/// Stops a server that's running by closing its input, once it has read what it was told last: it takes nothing new
-/// and answers what it took already (`OneCore.Application`), and is killed if it hasn't stopped within `STOP`.
-async fn stop(server: &mut Child) -> Result<()> {
+/// Stops a server that's running, once it's told `told`, by closing its input: it takes nothing new and answers what
+/// it took already (`OneCore.Application`), and is killed if it hasn't stopped within `STOP`.
+async fn stop(server: &mut Child, told: Value) -> Result<()> {
+    tell(server, told).await;
     drop(server.stdin.take());
     if timeout(STOP, server.wait()).await.is_err() {
         server.kill().await?;
@@ -603,15 +588,14 @@ async fn update_server(
     here: &Here,
     record: &mut Record,
     server: &mut Child,
-    said: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    said: &mut UnboundedReceiver<String>,
     key: &str,
     program: &Path,
 ) -> Result<()> {
     record.server_update_status = ServerUpdateStatus::Downloading;
     record.server_update_stage = None;
     record.update_method = None;
-    here.write(record)?;
-    tell(server, record.told()).await;
+    here.save(record, server).await?;
     // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops where it was
     // told the device is nobody's, and its timer doesn't count while the machine sleeps.
     let now = Client::open(client::home()?, Vec::new()).await;
@@ -625,74 +609,53 @@ async fn update_server(
             record.next = Some(next.clone());
             record.server_update_status = ServerUpdateStatus::Verifying;
             record.server_update_stage = Some(ServerUpdateStage::Checking);
-            here.write(record)?;
-            tell(server, record.told()).await;
+            here.save(record, server).await?;
             let current = record.current.clone().context("a build it's on")?;
             let method = method(here, &current, &next);
             println!("Taking {} by {}", next.build, method.as_ref().err().map_or("a hot load", |why| why.as_str()));
-            if method.is_ok()
-                && let Ok(now) = &now
-            {
-                record.update_method = Some(UpdateMethod::HotLoad);
-                record.server_update_stage = Some(ServerUpdateStage::Loading);
-                here.write(record)?;
-                tell(server, record.told()).await;
-                let loaded = load(server, said, &here.build(&next.build)).await;
-                let loaded = match loaded {
-                    Ok(()) => timeout(START, answers(now, key, &next.build)).await.unwrap_or_else(|_| {
-                        Err(anyhow::anyhow!("it didn't answer by its key within {} s", START.as_secs()))
-                    }),
-                    Err(why) => Err(why),
-                };
-                match loaded {
-                    Ok(()) => {
-                        record.previous = record.current.replace(next.clone());
-                        println!(
-                            "The server is on the build {} now, from {}, loaded while it ran.",
-                            next.build, current.build
-                        );
-                    }
-                    Err(why) => {
-                        record.went_back = Some(format!("Went back to {} from {}: {why:#}", current.build, next.build));
-                        println!("{}", record.went_back.as_deref().unwrap_or_default());
-                        let back = match server.try_wait()? {
-                            None => load(server, said, &here.build(&current.build)).await,
-                            Some(_) => Err(anyhow::anyhow!("it stopped")),
-                        };
-                        if let Err(why) = back {
-                            here.went_back(record, program)?;
-                            let _ = server.kill().await;
-                            bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
-                        }
-                    }
-                }
-                record.next = None;
-                record.server_update_status = ServerUpdateStatus::UpToDate;
-                record.server_update_stage = None;
-            } else {
+            let (Ok(()), Ok(now)) = (&method, &now) else {
                 record.update_method = Some(UpdateMethod::Restart);
                 record.server_update_stage = Some(ServerUpdateStage::Starting);
                 here.write(record)?;
-                let mut told = record.told();
-                told["server_daemon_status"] = json!(ServerDaemonStatus::Stopping);
-                tell(server, told).await;
-                stop(server).await?;
+                stop(server, record.told(Some(ServerDaemonStatus::Stopping))).await?;
                 return Err(again(program));
+            };
+            record.update_method = Some(UpdateMethod::HotLoad);
+            record.server_update_stage = Some(ServerUpdateStage::Loading);
+            here.save(record, server).await?;
+            let loaded = match load(server, said, &here.build(&next.build)).await {
+                Ok(()) => within("answer by its key", answers(now, key, &next.build)).await,
+                Err(why) => Err(why),
+            };
+            if let Err(why) = loaded {
+                record.went(format!("{}: {why:#}", record.back()));
+                let back = match server.try_wait()? {
+                    None => load(server, said, &here.build(&current.build)).await,
+                    Some(_) => Err(anyhow::anyhow!("it stopped")),
+                };
+                if let Err(why) = back {
+                    here.went_back(record, program)?;
+                    let _ = server.kill().await;
+                    bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
+                }
+            } else {
+                record.previous = record.current.replace(next.clone());
+                println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
             }
+            record.next = None;
+            record.server_update_status = ServerUpdateStatus::UpToDate;
+            record.server_update_stage = None;
         }
         Ok(None) => println!("This device is on the latest builds already."),
         Err(error) => {
             let on = record.current.as_ref().map(|current| current.build.clone()).unwrap_or_default();
-            record.went_back = Some(format!("Stayed on {on}: {error:#}"));
-            println!("{}", record.went_back.as_deref().unwrap_or_default());
+            record.went(format!("Stayed on {on}: {error:#}"));
         }
     }
     if let Ok(now) = now {
         now.close().await;
     }
-    here.write(record)?;
-    tell(server, record.told()).await;
-    Ok(())
+    here.save(record, server).await
 }
 
 /// How the build `next` is taken from `current`: `Ok` to load it into the server while it runs, or why it restarts.
@@ -717,26 +680,18 @@ fn method(here: &Here, current: &Pair, next: &Pair) -> Result<(), String> {
 }
 
 /// Has the server load the build in `folder` while it runs, and waits for it to say it has, within `START`.
-async fn load(
-    server: &mut Child,
-    said: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
-    folder: &Path,
-) -> Result<()> {
+async fn load(server: &mut Child, said: &mut UnboundedReceiver<String>, folder: &Path) -> Result<()> {
     tell(server, json!({"load": folder})).await;
-    let loaded = timeout(START, async {
+    within("load", async {
         while let Some(line) = said.recv().await {
-            if line.starts_with(LOADED) || line.starts_with(NOT_LOADED) {
-                return Some(line);
+            if line.starts_with(LOADED) {
+                return Ok(());
             }
+            ensure!(!line.starts_with(NOT_LOADED), "{line}");
         }
-        None
-    });
-    match loaded.await {
-        Ok(Some(line)) if line.starts_with(LOADED) => Ok(()),
-        Ok(Some(line)) => bail!("{line}"),
-        Ok(None) => bail!("it stopped while loading"),
-        Err(_) => bail!("it didn't load within {} s", START.as_secs()),
-    }
+        bail!("it stopped while loading")
+    })
+    .await
 }
 
 /// Takes the latest server build and `one` there's a newer one of: the build put together and checked, and the
@@ -892,6 +847,13 @@ impl Here {
         let writing = self.folder.join("state.json.new");
         fs::write(&writing, serde_json::to_vec_pretty(record)?)?;
         Ok(fs::rename(writing, self.folder.join("state.json"))?)
+    }
+
+    /// Writes the record, and tells the server what it says of it.
+    async fn save(&self, record: &Record, server: &mut Child) -> Result<()> {
+        self.write(record)?;
+        tell(server, record.told(None)).await;
+        Ok(())
     }
 
     /// Writes that joining or leaving is at `stage`.
