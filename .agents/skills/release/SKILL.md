@@ -37,16 +37,15 @@ One release at a time: `tooling/release` refuses while another is under way, and
 and stop. A server the network hasn't seen for 10 minutes (`asleep` in it), or one not ready with no update
 under way, holds up none: it's named, and takes the latest by itself as it starts or reconnects. A build it went
 back from it tries once more, 10 minutes on, and after that only when asked (`one update --server`). `tooling/release` updates each server itself once it has
-published: one first, then the rest at once, saying what each took. If the first goes back, no other takes it; any that fails says
-why and stays on the old build, safe. Run no
-`one update --server` by hand for a release. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
+published, in turn, saying what each took; the first that goes back stops the rest, which stay on the old build, safe.
+Run it again to take on the servers still behind. Run no `one update --server` by hand for a release. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
 found later is fixed forward.
 
 A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
 is split only for minutes:
 
-1. The servers (`tooling/release server`, which updates one first and then the rest at once). A first server that
-   goes back stops the release: read its log.
+1. The servers (`tooling/release server`, which updates them in turn). A server that goes back stops the release:
+   read its log.
 2. The apps that require the new platform, once every server is on it.
 3. The edge, from the commit the servers run.
 4. The clients (`tooling/release client`, `one update` on each device).
