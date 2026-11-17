@@ -7,8 +7,9 @@ description: Use to run a whole network of your own on this machine, to try a ch
 
 Its header says what each flag does. It builds what isn't built (the UI library, then the server's `mix compile` as it
 starts, which builds the Rust workspace's debug build with `cargo build`), starts the server, and prints how to use it once it's
-running. A fresh worktree's first build takes a few minutes; after that, a new network starts in about 15 s. Run it in the background and let your
-harness tell you when it ends; put the folder in your scratch folder.
+running. A new worktree starts from a copy of the build of the worktree beside it that built last (`.githooks/post-checkout`), so
+its first network builds only the workspace's own crates and One Core, and starts in about 20 s; after that, in about 12 s.
+Run it in the background and let your harness tell you when it ends; put the folder in your scratch folder.
 
 ## The fastest loop
 
@@ -52,7 +53,6 @@ so a server installed with `one serve on` there reconnects by itself.
 - Running `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
   (`tooling/network` does it itself).
 - Restarting the network to try a change to an app, rather than deploying it into the running one.
-- Rebuilding from scratch in a new worktree each time. Keep one worktree built and rebase it, rather than making a
-  new one for every check.
 - Starting the app where there's no desktop without `dbus-run-session` (see `qa`'s Screens).
-- Setting `CARGO_TARGET_DIR`: `tooling/network` runs `target/debug/one` from the repo.
+- Setting `CARGO_TARGET_DIR`: `tooling/network` runs `target/debug/one` from the repo, and worktrees sharing one run
+  each other's builds.
