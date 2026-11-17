@@ -78,6 +78,18 @@ defmodule OneCore.Mcp do
   # what's installed for them changes what's there.
   @cacheable ~w(server/discover tools/list resources/list resources/read)
 
+  # A local network's code reloader (`mix network.reload`, in `tooling/`), its `:reloader` setting, loads what a
+  # developer changed before a client's request is answered, as Phoenix's code reloader does before a request in
+  # development. A server's request, which names who it acts for, came from a client's that was.
+  defp reloaded(%{"actor" => _}), do: :ok
+
+  defp reloaded(_meta) do
+    case Application.get_env(:one_core, :reloader) do
+      nil -> :ok
+      {module, function, arguments} -> apply(module, function, arguments)
+    end
+  end
+
   @doc """
   The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty. `ask` is the
   message as this server took it, which says what a call it asks for is doing while it runs (`OneCore.Iroh`).
@@ -97,6 +109,7 @@ defmodule OneCore.Mcp do
           with :ok <- speaks(version),
                :ok <- talks(method, params),
                {:ok, principal, forwarded} <- User.asking(from, asking(method, meta(params)), method == "hooks/call"),
+               :ok <- reloaded(meta(params)),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
           else
