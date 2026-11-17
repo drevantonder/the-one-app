@@ -68,6 +68,7 @@ defmodule OneCore.Service do
   `service` is the
   service's process: `self()` in its callbacks, and what its functions are called with. The function is called
   with an `OneCore.Call` for `who` and then `arguments`, on a server acting for whoever the app was installed for.
+  Nobody is told it ran: a function that changes what a screen shows says so itself (`OneCore.Call.changed/1`).
   """
   def app(service, who, function, arguments \\ []) when is_pid(service) and is_list(arguments) do
     {app, _name, _version} = which(service)
@@ -82,7 +83,6 @@ defmodule OneCore.Service do
         {:error, why} -> raise why
       end
 
-    Server.changed()
     response
   end
 

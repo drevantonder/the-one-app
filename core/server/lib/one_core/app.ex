@@ -532,7 +532,8 @@ defmodule OneCore.App do
   - A service calls the app's functions with `OneCore.Service.app(self(), who, :rang, [4])`, which runs
     `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the app was installed for that
     this server acts for, or one the app passed it, as `call.installed` or `call.subject`. That function has the call, so
-    it's where a service keeps anything in the app's artifact or its database. In a function of the service,
+    it's where a service keeps anything in the app's artifact or its database, and says so with
+    `OneCore.Call.changed/1` where that changes what a screen shows: nobody else is told it ran. In a function of the service,
     `service` goes where `self()` does. Whoever its server is for comes first in `acts_for()`, so a service
     that's for one person at a time, whoever's machine it's on, takes the first.
   - What a service keeps on its machine goes in `OneCore.Service.folder(self())`, a folder of its own there,

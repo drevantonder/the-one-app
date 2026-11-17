@@ -258,10 +258,7 @@ defmodule OneCore.Mcp do
   defp result("apps/call", %{"installed" => at, "app" => app} = params, _from, principal, forwarded) do
     function = fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end
 
-    with {:ok, result} <- between(forwarded, function) do
-      Server.changed()
-      {:ok, result}
-    end
+    between(forwarded, function)
   end
 
   defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, _principal, forwarded) do
