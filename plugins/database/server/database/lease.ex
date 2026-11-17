@@ -342,17 +342,19 @@ defmodule Database.Lease do
     File.mkdir_p!(data.folder)
 
     case Log.restore(data.artifact, snapshot, entries, file(data)) do
-      :ok -> {:settling, opened(data, entries)}
+      :ok -> {:settling, opened(data, snapshot, entries)}
       :gone -> look(data)
     end
   end
 
   # It writes nothing for `@writes_after`, by when one that held the lease before and doesn't know it lost it has
   # stopped answering from its copy (`proved/1`). The monotonic clock stops while the machine sleeps, which only
-  # makes it wait longer.
-  defp opened(data, entries) do
+  # makes it wait longer. A new database, whose log is only this server taking its lease, has nothing anyone could
+  # answer from, so it writes at once.
+  defp opened(data, snapshot, entries) do
     logged = Enum.sum_by(entries, &length(Map.get(&1, :pages, [])))
-    %{data | db: connected(file(data)), logged: logged, settled: System.monotonic_time(:millisecond) + @writes_after}
+    wait = if snapshot == 0 and entries == [%{server: data.server}], do: 0, else: @writes_after
+    %{data | db: connected(file(data)), logged: logged, settled: System.monotonic_time(:millisecond) + wait}
   end
 
   # The bucket is what keeps a write, so SQLite needn't wait for the disk. Its write-ahead log is emptied here
