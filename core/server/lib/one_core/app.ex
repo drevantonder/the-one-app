@@ -449,7 +449,8 @@ defmodule OneCore.App do
     returned to.
   - `column` and `row` hold `parts`, with a `gap` between them in points if not the usual. Any part can say
     `grow: true` to take the room that's left, and a `width` in points. `align: "center"` centres what a column
-    or row holds, and `dim: true` fades it, for what's off.
+    or row holds, and `dim: true` fades it, for what's off. A column or row with `from: "sm"` or `"md"` is
+    dropped when the widget is narrower than 15 or 18 rem, so what doesn't fit goes whole, never cut off.
   - `text` says `text`, in a `size` (`xl`, `lg`, `sm`, `xs`) and `weight` (`medium`, `bold`) if not the usual,
     cut to `lines`. `time` says when `at` was, in milliseconds since 1970, as `style`: `relative` (the
     usual), `clock` or `date`.

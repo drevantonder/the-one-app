@@ -1767,8 +1767,21 @@ html:has(.ui-sign-in) {
   font-variant-numeric: tabular-nums;
   line-height: 1.3;
   overflow: hidden;
+  container-type: inline-size;
   -webkit-user-select: none;
   user-select: none;
+}
+/* A column or row that says `from` is dropped where the widget is narrower than that, by the widget's own width, never
+   the window's: what doesn't fit goes whole, rather than being cut off. */
+@container (max-width: 18rem) {
+  .ui-widget :is(.column, .row)[data-from="md"] {
+    display: none;
+  }
+}
+@container (max-width: 15rem) {
+  .ui-widget :is(.column, .row)[data-from="sm"] {
+    display: none;
+  }
 }
 .ui-widget.opens {
   cursor: pointer;

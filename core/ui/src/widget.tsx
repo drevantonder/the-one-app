@@ -9,6 +9,7 @@ export interface Layout {
   title?: string | false
   tone?: string
   grow?: boolean
+  from?: string
   dim?: boolean
   width?: unknown
   height?: unknown
@@ -162,7 +163,7 @@ function Part(props: { part: Layout; onCall?: OnCall }) {
   return (
     <Which>
       <Match when={part().part === "column" || part().part === "row"}>
-        <div class={[part().part, room(part())]} data-tone={part().tone} style={{ ...sized(part()), gap: points(part().gap), "align-items": part().align === "center" ? "center" : undefined }}>{held()}</div>
+        <div class={[part().part, room(part())]} data-tone={part().tone} data-from={part().from} style={{ ...sized(part()), gap: points(part().gap), "align-items": part().align === "center" ? "center" : undefined }}>{held()}</div>
       </Match>
       <Match when={part().part === "text"}>
         <span class={["text", part().size, part().weight, room(part()), { clamp: !!number(part().lines) }]} data-tone={part().tone} style={{ ...sized(part()), "-webkit-line-clamp": number(part().lines) }}>{part().text ?? ""}</span>
