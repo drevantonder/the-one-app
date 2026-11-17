@@ -140,6 +140,8 @@ export type Event =
   | { type: "step"; owner: 1 | -1 }
   /** A screenful of this owner's, by its section's icon or dot. */
   | { type: "go"; screen: number }
+  /** A link to one of the screenfuls (`one:home-screen#library`): there at once, whatever was open. */
+  | { type: "link"; screen: number }
   /** The owner switcher's list opened, an owner was picked from it, or it was dismissed. */
   | { type: "list" }
   | { type: "pick"; owner: number }
@@ -234,7 +236,7 @@ export const machine = setup({
       return { at, last: context.last.with(at.owner, at.screen) }
     }),
     go: assign(({ context: { at, last, screens }, event }) => {
-      const screen = within((event as Extract<Event, { type: "go" }>).screen, screens[at.owner]?.length ?? 1)
+      const screen = within((event as Extract<Event, { type: "go" | "link" }>).screen, screens[at.owner]?.length ?? 1)
       return { at: { ...at, screen }, last: last.with(at.owner, screen) }
     }),
     pick: assign(({ context: { at, last, screens }, event }) => {
@@ -319,6 +321,7 @@ export const machine = setup({
     pick: { target: ".nothing", actions: ["pick", "glide"] },
     // An app shown over the Home Screen, as by a notification, closes what was open, and keeps what was edited.
     launch: ".app",
+    link: { target: ".nothing", actions: ["go", "jump"] },
   },
   states: {
     nothing: {

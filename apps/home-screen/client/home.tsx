@@ -1041,6 +1041,20 @@ function HomeScreen(props: { owners: Owner[] }) {
     { defer: true },
   )
   createEffect(laid, ({ screens, fit }) => home.send({ type: "laid", screens, fit }))
+  /// A link to the App Library, `one:home-screen#library`, shows the first of it, as its mark in the dots does, once
+  /// there is one. It's followed once, and the address forgets it, so the same link is followed again.
+  const linked = ({ screens }: { screens: Kind[][] }) => {
+    const library = screens[home.getSnapshot().context.at.owner]?.indexOf("library") ?? -1
+    if (location.hash !== "#library" || library < 0) return
+    history.replaceState(history.state, "", location.pathname + location.search)
+    home.send({ type: "link", screen: library })
+  }
+  createEffect(laid, linked)
+  onSettled(() => {
+    const follow = () => linked(untrack(laid))
+    addEventListener("hashchange", follow)
+    return () => removeEventListener("hashchange", follow)
+  })
   /// The cells of the Home pages, which glide to their new places while they're edited, and not as editing begins.
   const cells = () => root.querySelectorAll<HTMLElement>(".strip .page .cell")
   let wasEditing = false
