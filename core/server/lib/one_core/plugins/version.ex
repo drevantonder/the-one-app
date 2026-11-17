@@ -86,9 +86,31 @@ defmodule OneCore.Plugins.Version do
   `apps` (each one's `name`, `icon` and `category`) and `widgets` (each one's `name` and `sizes`), and from its
   skill's `metadata` (`OneCore.Plugin`) its `subtitle`, `about` and `category`, each `nil` where it has none.
   """
-  def listing(version) do
+  def listing(version), do: listing(version, skills(version))
+
+  @doc """
+  What a version of the plugin `name` described (`OneCore.Plugins.Version.Description.description/1`) lists, as
+  `listing/1` with what the App Store says besides: its skill's `description`, its `tools`' names and its
+  `requires`. `{:ok, listing}`, or `:error` where that isn't a description. Nothing is loaded.
+  """
+  def listed(name, description) do
+    Code.ensure_loaded!(OneCore.Skills)
+    description = :erlang.binary_to_term(description, [:safe])
+    skill = Enum.find(description.skills, &(&1.at == "")) || %{frontmatter: %{}}
+
+    {:ok,
+     Map.merge(listing(%{description | title: description.title || name}, description.skills), %{
+       description: skill.frontmatter["description"] || "",
+       tools: Enum.map(description.tools, & &1.name),
+       requires: description.requires || %{}
+     })}
+  rescue
+    _ -> :error
+  end
+
+  defp listing(version, skills) do
     metadata =
-      case Enum.find(skills(version), &(&1.at == "")) do
+      case Enum.find(skills, &(&1.at == "")) do
         %{frontmatter: %{"metadata" => %{} = metadata}} -> metadata
         _ -> %{}
       end

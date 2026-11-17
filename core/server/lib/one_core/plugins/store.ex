@@ -10,7 +10,9 @@ defmodule OneCore.Plugins.Store do
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
   version after keeps its `from`, so one whose `source` isn't that hash was changed since. `trusted` says whether it's
   trusted: an untrusted plugin runs in a sandbox (`OneCore.Sandbox`). What a set of files says of itself once loaded is
-  kept at `described/<its hash>`, for the servers that don't load it (`described/2`).
+  kept at `described/<its hash>`, for the servers that don't load it (`described/2`). A deploy writes a set, and
+  what it describes, before it swaps `latest`, which is what commits it: one that stops before leaves a set no
+  version names, which `prune/1` sweeps.
   """
   require Logger
   alias OneCore.Bucket
@@ -127,6 +129,10 @@ defmodule OneCore.Plugins.Store do
   it was deployed from and what it said of itself, and its entry in `versions/`. Nothing runs them, and nothing
   goes back to one: a plugin goes back by being deployed again from its git repo. A set a kept version runs too
   stays. Gives how many blobs went.
+
+  So are the sets no version names, as `git gc` removes what no ref reaches: what a deploy that failed or stopped
+  before swapping `latest` wrote. A deploy writes its set before it swaps `latest`, so a set no version names may be
+  one still deploying: it's noted in `unused`, and removed only if the next prune finds it unused still.
   """
   def prune(artifact) do
     with {number, latest, _tag} <- latest(artifact) do
@@ -134,18 +140,32 @@ defmodule OneCore.Plugins.Store do
       codes = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, code, _tag} -> {blob, code} end)
       {old, retained} = Enum.split_with(codes, fn {blob, _code} -> String.to_integer(Path.basename(blob)) <= number - @versions_kept end)
       retained = MapSet.new([latest | Enum.map(retained, &elem(&1, 1))])
+      named = MapSet.union(retained, MapSet.new(old, &elem(&1, 1)))
 
-      files =
-        for code <- Enum.uniq(Enum.map(old, &elem(&1, 1))), code not in retained, prefix <- ~w(code source described) do
-          Bucket.list("#{artifact}/#{prefix}/#{code}")
-        end
+      sets = for prefix <- ~w(code source described), blob <- Bucket.list("#{artifact}/#{prefix}/"), do: {set(artifact, prefix, blob), blob}
+      unused = for {code, _blob} <- sets, code not in named, uniq: true, do: code
+      noted = with {:ok, json, _tag} <- Bucket.read("#{artifact}/unused"), do: JSON.decode!(json), else: (:absent -> [])
+      swept = for code <- unused, code in noted, do: code
+      gone_sets = MapSet.new(swept ++ for({_blob, code} <- old, code not in retained, do: code))
 
-      gone = List.flatten(files) ++ Enum.map(old, &elem(&1, 0))
+      gone = for({code, blob} <- sets, code in gone_sets, do: blob) ++ Enum.map(old, &elem(&1, 0))
       Stream.run(Task.async_stream(gone, &Bucket.remove/1, max_concurrency: 16, timeout: :infinity))
+      unused(artifact, unused -- swept)
       length(gone)
     else
       nil -> 0
     end
+  end
+
+  # The hash of the set a blob of `prefix` is in: `code/<hash>/<path>`, `source/<hash>/<path>`, `described/<hash>`.
+  defp set(artifact, prefix, blob), do: blob |> String.replace_prefix("#{artifact}/#{prefix}/", "") |> String.split("/") |> hd()
+
+  defp unused(artifact, []), do: Bucket.remove("#{artifact}/unused")
+
+  defp unused(artifact, codes) do
+    with {:ok, _was, tag} <- Bucket.read("#{artifact}/unused"),
+         do: Bucket.replace("#{artifact}/unused", JSON.encode!(codes), tag),
+         else: (:absent -> Bucket.write("#{artifact}/unused", JSON.encode!(codes)))
   end
 
   @doc """

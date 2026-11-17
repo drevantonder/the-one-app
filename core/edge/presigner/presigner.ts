@@ -34,9 +34,9 @@ const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|installs
  */
 const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)plugins\/[^/]+\/installed\/((?:users|groups)\/[^/]+|network)$/;
 /**
- * That a user, a group or the network deployed a plugin is a blob of the network's, `deployed/<who>/<name>`, with
- * the plugin's apps, which a server acting for them writes as it deploys: so every app there is is listed in one
- * place, whichever pages it's on.
+ * That a user, a group or the network deployed a plugin is a blob of the network's, `deployed/<who>/<name>`, naming
+ * the plugin, which a server acting for them writes as it deploys: so every app there is is listed in one place,
+ * whichever pages it's on, as the plugin's `latest` describes it.
  */
 const DEPLOYED = /^network\/deployed\/((?:users|groups)\/[^/]+|network)\/[^/]+$/;
 /** A blob's key says whose it is by how it starts: a user's or a group's prefix, or the network's. */

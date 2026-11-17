@@ -39,6 +39,10 @@ defmodule OneCore.Plugins.Deploy do
   built first (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/6` takes
   it, and `trusted` whether it's trusted, where an untrusted plugin runs in a sandbox (`OneCore.Sandbox`), each as the
   version before had it if `:stored`. Gives its version's number and the compiler's warnings.
+
+  It's committed when its `latest` is swapped, as a git ref is: one that fails or stops before changes nothing anyone
+  reads, and what it wrote is swept by `OneCore.Plugins.Store.prune/1`. Everything after is derived from `latest` by
+  whoever looks (`OneCore.Plugins.sync/2`, `deployed/0`), so one that stops after is deployed all the same.
   """
   def deploy(owner, name, files, from \\ :stored, trusted \\ :stored),
     do: deploy(owner, name, files, from, trusted, fn _version -> true end)
@@ -65,18 +69,32 @@ defmodule OneCore.Plugins.Deploy do
              :ok <- if(install, do: fits(owner, name, version), else: :ok),
              {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
              _ = stage.("Keeping it in the bucket"),
-             {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
+             # Its files, what it describes and that it's listed are written first, and none is read until `latest`
+             # names them.
              :ok <- Store.describe(version),
-             %{} <- if(install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{}) do
-          listed(artifact, version)
-          if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}])
-          Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
+             :ok <- listed(artifact),
+             {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
+             :ok <- committed(owner, name, number, version, install) do
           warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}
         end
       after
         LoadedVersion.release([version])
       end
+    end
+  end
+
+  # After `latest`: its author has it installed by the installation machine's own move for a plugin they deployed, and
+  # the servers of whoever has it take it, this one at once, with the version the deploy loaded.
+  defp committed(owner, name, number, %Version{artifact: artifact} = version, install) do
+    forget()
+    moved = if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{}
+    if install, do: Plugins.sync(owner, [{artifact, number, {:ok, version}}])
+    Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
+
+    case moved do
+      {:error, why} -> {:error, "#{name} is deployed as version #{number}, and isn't installed for #{owner}: #{why}"}
+      _ -> :ok
     end
   end
 
@@ -200,12 +218,15 @@ defmodule OneCore.Plugins.Deploy do
   Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, description: its skill's,
   tools: [names], requires: %{name => why}, trusted: ..., title: ..., icon: ..., subtitle: ..., about: ...,
   category: ..., apps: [...], widgets: [...]}]`, what a person reads of it as `Version.listing/1` gives it, its
-  requirements as `requires/0` gives them, and whether it's trusted. It's what lists every app there is, whether or not anyone has it now. One that was removed, by the
-  plugin that keeps what's deleted, has no latest version, and isn't listed.
+  requirements as `requires/0` gives them, and whether it's trusted. It's what lists every app there is, whether or
+  not anyone has it now. One that was removed, by the plugin that keeps what's deleted, has no latest version, and
+  isn't listed.
 
-  It's two trips to the bucket with a request for each plugin, and changes only when someone deploys, so it's kept:
-  read again behind a request once it's five minutes old, as `OneCore.Plugins` looks at what's installed, and
-  forgotten when this server deploys or is told to look again (`forget/0`).
+  Which plugins are listed is the network's blobs `deployed/<whose>/<name>`, and what each says is read from its
+  `latest`, as that version described itself (`OneCore.Plugins.Store.described/2`): so it's never older than what
+  runs. It's three trips to the bucket with a request for each plugin, and changes only when someone deploys, so
+  it's kept: read again behind a request once it's five minutes old, as `OneCore.Plugins` looks at what's installed,
+  and forgotten when this server deploys or is told to look again (`forget/0`).
   """
   def deployed do
     now = System.monotonic_time(:millisecond)
@@ -226,57 +247,31 @@ defmodule OneCore.Plugins.Deploy do
   def forget, do: :ets.delete(__MODULE__, :deployed)
 
   defp read_deployed do
-    blobs = Bucket.list(@deployed)
-    named = for blob <- blobs, do: Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob, capture: :all_but_first)
-    latest = for [owner, name] <- named, do: "#{owner}/plugins/#{name}/latest"
-    {descriptions, latest} = Enum.split(Bucket.read_all(blobs ++ latest), length(blobs))
+    named =
+      for blob <- Bucket.list(@deployed),
+          [owner, name] <- [Regex.run(~r{^#{@deployed}(.+)/([^/]+)$}, blob, capture: :all_but_first)],
+          do: "#{owner}/plugins/#{name}"
+
+    abouts =
+      for {artifact, {:ok, about, _tag}} <- Enum.zip(named, Bucket.read_all(Enum.map(named, &"#{&1}/latest"))),
+          do: {artifact, JSON.decode!(about)}
+
+    described = Bucket.read_all(for {artifact, about} <- abouts, do: "#{artifact}/described/#{about["code"]}")
 
     deployed =
-      for {[owner, name], {:ok, description, _tag}, {:ok, _latest, _}} <- Enum.zip([named, descriptions, latest]) do
-        description = JSON.decode!(description)
-
-        %{
-          plugin: "#{owner}/plugins/#{name}",
-          title: description["title"] || name,
-          description: description["description"] || "",
-          subtitle: description["subtitle"],
-          about: description["about"],
-          category: description["category"],
-          icon: description["icon"],
-          apps: for(app <- description["apps"], do: %{name: app["name"], icon: app["icon"], category: app["category"]}),
-          widgets: for(widget <- description["widgets"] || [], do: %{name: widget["name"], sizes: widget["sizes"]}),
-          tools: description["tools"] || [],
-          requires: description["requires"] || %{},
-          trusted: description["trusted"] != false
-        }
-      end
+      for {{artifact, about}, {:ok, description, _tag}} <- Enum.zip(abouts, described),
+          {:ok, listing} <- [Version.listed(Path.basename(artifact), description)],
+          do: Map.merge(listing, %{plugin: artifact, trusted: about["trusted"] != false})
 
     :ets.insert(__MODULE__, {:deployed, deployed, System.monotonic_time(:millisecond)})
     deployed
   end
 
-  # The plugin `artifact`, with the apps this version has, among what everyone has deployed, under whose it is: a
-  # person who deploys the network's plugin updates the network's.
-  defp listed(artifact, version) do
+  # The plugin `artifact` is among what everyone has deployed, under whose it is: a person who deploys the network's
+  # plugin lists the network's. Written before its version is kept, it lists nothing until one is.
+  defp listed(artifact) do
     blob = "#{@deployed}#{Store.whose(artifact)}/#{Path.basename(artifact)}"
-
-    listing =
-      %{
-        description: OneCore.Search.described(version),
-        tools: Enum.map(version.tools, & &1.name),
-        requires: version.requires,
-        trusted: version.trusted
-      }
-      |> Map.merge(Version.listing(version))
-      |> JSON.encode!()
-
-    case Bucket.read(blob) do
-      {:ok, ^listing, _tag} -> :ok
-      {:ok, _was, tag} -> Bucket.replace(blob, listing, tag)
-      :absent -> Bucket.write(blob, listing)
-    end
-
-    forget()
+    with :exists <- Bucket.write(blob, artifact), do: :ok
   end
 
   @doc "Makes the table that keeps what everyone has deployed (`deployed/0`), which the process calling it holds."
