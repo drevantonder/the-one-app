@@ -1,4 +1,5 @@
-import { createEffect, createSignal, onSettled, Show } from "solid-js"
+import { createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
+import { covers } from "./bridge.ts"
 import { Icon } from "./button.tsx"
 import { reduced, messages } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
@@ -34,16 +35,27 @@ addEventListener("pageswap", ({ activation, viewTransition }) => {
   if (activation?.navigationType === "traverse" && activation.from && activation.entry.index < activation.from.index) viewTransition?.skipTransition()
 })
 
+/// What closes what a split has open beside its list, for the list's Back button, while something is.
+const Opened = createContext<() => (() => void) | undefined>(() => undefined)
+
 /// `<Screen heading="Notes" action={<Button>Add</Button>}>...</Screen>`: a whole view of an app: a bar across its
 /// top that stays as it scrolls, with its `heading` and what it does (`action`: its one main button, or a menu),
 /// then what's in it, one part under another. With `back` the bar starts with a Back button, which calls `onBack`,
-/// or goes back in the browser's history as the device's own back gesture does.
+/// or goes back in the browser's history as the device's own back gesture does. A split's list closes what's open
+/// beside it first.
 export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; class?: JSX.ClassValue; children?: JSX.Element }) {
+  const opened = useContext(Opened)
+  const back = () => {
+    const close = opened()
+    if (close) close()
+    else if (props.onBack) props.onBack()
+    else history.back()
+  }
   return (
     <div class={["ui-screen", props.class]}>
       <header>
         <Show when={props.back}>
-          <button class="back press ring" aria-label={messages.back} onClick={() => (props.onBack ? props.onBack() : history.back())}>
+          <button class="back press ring" aria-label={messages.back} onClick={back}>
             <Icon name="caret-left" along />
           </button>
         </Show>
@@ -70,14 +82,17 @@ export function Section(props: { heading?: JSX.Element; children?: JSX.Element }
 /// `<Split open={!!note()} onClose={() => setNote()} detail={<Screen heading={note().text} back>...</Screen>}><Screen heading="Notes">...</Screen></Split>`:
 /// a list and what it opens (`detail`): beside it where there's room, pushed over it where there isn't, while
 /// `open`. Each side scrolls by itself, and the split is as tall as the window unless the page says. While it's
-/// open the device's own back, and the detail's Back button, close it: it calls `onClose`, and the app sets
-/// `open` false. Beside its list a detail has no Back button.
+/// open the device's own back, Escape, and the detail's Back button close it, or beside its list, where a detail has
+/// none, the list's: it calls `onClose`, and the app sets `open` false.
 export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; class?: JSX.ClassValue; children?: JSX.Element }) {
   let split!: HTMLDivElement
   let panes!: HTMLDivElement
   // What's drawn as open, which follows `open` as a move.
   const [open, setOpen] = createSignal(false)
+  // Whether the detail is beside the list, which the room it has says (ui.css).
+  const [beside, setBeside] = createSignal(false)
   let byDevice = false
+  const close = () => props.onClose?.()
 
   // The device's back, or forward: what's open is what the history says.
   const travelled = (event: PopStateEvent) => {
@@ -88,8 +103,19 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
     addEventListener("popstate", travelled)
     // The page was loaded again with the detail open: what was in it is gone, so it starts shut.
     if (history.state?.uiSplit && !props.open) history.replaceState({ ...history.state, uiSplit: false }, "")
-    return () => removeEventListener("popstate", travelled)
+    const resized = new ResizeObserver(() => setBeside(!!getComputedStyle(panes).getPropertyValue("--beside")))
+    resized.observe(split)
+    // Escape closes it, unless it's for a sheet or a menu over it, which closes that.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented && props.open && !document.querySelector("dialog[open], :popover-open")) close()
+    }
+    addEventListener("keydown", escape)
+    return () => (removeEventListener("popstate", travelled), removeEventListener("keydown", escape), resized.disconnect())
   })
+
+  // Beside its list the device's back closes it as it does a sheet, not as a step back through the history, which a
+  // device's gesture shows as the whole page going back. Pushed over the list, it's that step.
+  createEffect(() => !!props.open && beside(), (now) => (now ? covers(close) : undefined))
 
   createEffect(() => !!props.open, (now, was) => {
     // It starts as it's written, and the device has already shown its own back gesture's move.
@@ -105,7 +131,9 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
   return (
     <div class={["ui-split", props.class]} ref={split}>
       <div class="panes" ref={panes} data-open={open() ? "" : undefined}>
-        <div class="list">{props.children}</div>
+        <div class="list">
+          <Opened value={() => (props.open ? close : undefined)}>{props.children}</Opened>
+        </div>
         <div class="detail">{props.detail}</div>
       </div>
     </div>
