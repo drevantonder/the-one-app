@@ -52,6 +52,7 @@ export type Paged =
   | { type: "errored" }
   | { type: "stale" }
   | { type: "away" }
+  | { type: "seen" }
   | { type: "opened" }
   | { type: "reload" }
   | { type: "retry" }

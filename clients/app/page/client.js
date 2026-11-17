@@ -218,13 +218,32 @@ const on = (event) => shown.send(event)
 /// navigation: once it's off screen (another app over it, the window hidden), or as it's opened again. On screen,
 /// it says so quietly, "Updated · Reload", and loads again only once its person presses Reload: nothing is reloaded
 /// under them. One that's showing an error loads again at once, as its old version meeting what's new is likely why,
-/// and there's nothing of theirs under it. A page that doesn't draw has failed, with Try Again, until it draws after
-/// all, as a page loaded again behind another app may only once it's shown, when it's current. The launcher's page is
-/// one too.
+/// and there's nothing of theirs under it. A page that doesn't draw in 15 s on screen has failed, with Try Again,
+/// until it draws after all, as a page loaded again behind another app may only once it's shown, when it's current.
+/// Only time it's on screen counts: while it's behind another app or the window is hidden, the 15 s wait (`away`),
+/// and go on from where they were once it's in front again (`seen`). The launcher's page is one too.
+/// While a page is loading, as its parts: on screen, where the 15 s it has to draw in run, or not, where they wait.
+/** @type {any} */
+const waiting = {
+  initial: "looking",
+  states: {
+    looking: { always: [{ guard: "away", target: "away" }, { target: "seen" }] },
+    seen: {
+      entry: "counts",
+      exit: "stops",
+      on: { away: "away" },
+      after: { never: { target: "#page.failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
+    },
+    away: { on: { seen: { guard: "front", target: "seen" }, opened: "seen" } },
+  },
+}
 const pageMachine = setup({
-  types: /** @type {{ context: { view: View, why?: string, errored?: boolean }, input: View, events: Paged }} */ ({}),
+  types: /** @type {{ context: { view: View, why?: string, errored?: boolean, waited: number, since: number }, input: View, events: Paged }} */ ({}),
+  // What's left of the 15 s a page has to draw in, on screen.
+  delays: { never: ({ context }) => Math.max(0, NEVER - context.waited) },
   guards: {
     away: ({ context }) => !onScreen(context.view),
+    front: ({ context }) => onScreen(context.view),
     errored: ({ context }) => context.errored === true,
   },
   actions: {
@@ -241,11 +260,15 @@ const pageMachine = setup({
       notes()
     },
     notes: () => notes(),
+    // The wait for it to draw starts afresh as it's loaded, counts while it's on screen, and stops while it isn't.
+    unwaited: assign({ waited: 0 }),
+    counts: assign({ since: () => performance.now() }),
+    stops: assign({ waited: ({ context }) => context.waited + performance.now() - context.since }),
   },
 }).createMachine({
   id: "page",
   initial: "loading",
-  context: ({ input }) => ({ view: input }),
+  context: ({ input }) => ({ view: input, waited: 0, since: 0 }),
   // What its page logs as an error, as an `<Errored>` boundary that's drawn its problem does, is what it shows: there's
   // nothing of its person's to keep there.
   on: { errored: { actions: assign({ errored: true }) } },
@@ -253,8 +276,9 @@ const pageMachine = setup({
     // Loaded against what's gone before it's even drawn, as a kept launcher is when the list that's come since
     // names a newer one, it loads again at once: there's nothing of its person's on it yet.
     loading: {
+      entry: "unwaited",
       on: { drawn: "current", stale: "reloading" },
-      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
+      ...waiting,
     },
     current: {
       on: { stale: "stale" },
@@ -269,9 +293,9 @@ const pageMachine = setup({
       on: { away: "reloading", opened: "reloading", reload: "reloading", errored: "reloading" },
     },
     reloading: {
-      entry: ["clear", "load"],
+      entry: ["clear", "load", "unwaited"],
       on: { drawn: "current", stale: { target: "reloading", reenter: true } },
-      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
+      ...waiting,
     },
     failed: {
       entry: "failed",
@@ -282,6 +306,10 @@ const pageMachine = setup({
 })
 /** @param {View} view @param {Paged} event */
 const page = (view, event) => view.page.send(event)
+// The window hidden, every page is off screen; shown again, the one in front is on screen.
+document.addEventListener("visibilitychange", () => {
+  for (const view of open.values()) page(view, { type: document.hidden ? "away" : "seen" })
+})
 /// Whether an app's page is in front of its person: the one showing, in a window that's on screen.
 /** @param {View} view */
 const onScreen = (view) => !document.hidden && view === showing(history.state)
