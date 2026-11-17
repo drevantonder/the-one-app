@@ -24,6 +24,9 @@ defmodule SignIn do
   alias OneCore.{Artifact, Call, Edge}
 
   @impl true
+  def title, do: "Sign-In"
+
+  @impl true
   def entrypoints do
     [
       %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg"},
