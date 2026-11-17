@@ -490,12 +490,20 @@ async function only() {
   }
 }
 
+/// Where an app's page is, with the Colour Mode chosen on this device (`theme`), which the UI library puts the page in
+/// before it draws (its `colour-mode.js`), so a dark choice on a light device never shows white while it loads.
+/** @param {Pick<View, "host" | "entrypoint">} view */
+const located = (view) => {
+  const theme = chosen()
+  return theme ? `${address(view)}?theme=${theme}` : address(view)
+}
+
 /// Loads an app's page again, in place, so the way back still leads out of the app: told first, as an MCP App is
 /// before its host takes it down, and what it was answered forgotten.
 /** @param {View} view */
 function reloadPage(view) {
   post(view, { id: "teardown", method: "ui/resource-teardown", params: { reason: "A new version" } })
-  invoke("close", { view: view.key }).finally(() => /** @type {Window} */ (view.frame.contentWindow).location.replace(address(view)))
+  invoke("close", { view: view.key }).finally(() => /** @type {Window} */ (view.frame.contentWindow).location.replace(located(view)))
 }
 
 /// Says over the app that's showing what its page needs of its person, if anything: that it's been updated, with
@@ -529,7 +537,7 @@ function load(entrypoint, subject) {
   if (opened) return opened
   if (!listed.has(subject)) list(subject)
   const place = { key: at, entrypoint, subject, host: host(entrypoint, subject) }
-  const frame = Object.assign(document.createElement("iframe"), { src: address(place), inert: true })
+  const frame = Object.assign(document.createElement("iframe"), { src: located(place), inert: true })
   /** @type {View} */
   const view = Object.assign({ ...place, frame }, { page: /** @type {View["page"]} */ (/** @type {unknown} */ (undefined)) })
   view.page = createActor(pageMachine, { input: view })

@@ -34,8 +34,9 @@ await build({
 
 const css = text("src/tokens.css") + text("src/ui.css")
 writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
-// The typeface, beside the stylesheet that names it (tokens.css).
-for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt"]) cpSync(here(`src/${file}`), here(`dist/client/${file}`))
+// The typeface, beside the stylesheet that names it (tokens.css), and what puts a page in its Colour Mode before it
+// draws, which every page loads first (app.js).
+for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt", "colour-mode.js"]) cpSync(here(`src/${file}`), here(`dist/client/${file}`))
 
 /// The UI library's skill: every `///` comment that starts with an example, from index.ts and then from each file it
 /// exports from, in its order.

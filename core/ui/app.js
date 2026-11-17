@@ -31,8 +31,14 @@ try {
     logLevel: "silent",
     plugins: [
       solid(),
-      // Every page has the UI library's look before any of it has run.
-      { name: "ui", transformIndexHtml: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" }] },
+      // Every page has the UI library's look before any of it has run, in the Colour Mode its client chose.
+      {
+        name: "ui",
+        transformIndexHtml: () => [
+          { tag: "script", attrs: { src: "/ui/client/colour-mode.js" }, injectTo: "head-prepend" },
+          { tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" },
+        ],
+      },
     ],
     build: {
       outDir: out,
