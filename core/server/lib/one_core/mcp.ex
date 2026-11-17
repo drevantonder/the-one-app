@@ -716,15 +716,8 @@ defmodule OneCore.Mcp do
     {:ok, result}
   end
 
-  @doc "Whether calling the tool `name` for `who` only reads: one of One Core's own that says so, or an app's."
-  def reads?(name, who) do
-    with [app, tool] <- String.split(name, "_", parts: 2),
-         %{^app => version} <- Apps.running(who) do
-      Enum.any?(version.tools, &(&1.name == tool and &1[:read_only] == true))
-    else
-      _ -> Enum.any?(Tools.tools(), &(&1.name == name and &1[:read_only] == true))
-    end
-  end
+  @doc "Whether calling the tool `name` for `who`, the one a call runs (`tool/2`), only reads: it says so."
+  def reads?(name, who), do: tool(name, who)[:read_only] == true
 
   defp holder?(by), do: by != nil and User.link?(by)
 
