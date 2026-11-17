@@ -1,9 +1,11 @@
-// Devices: everything that acts as whoever's looking, and the servers that run their apps, each saying whether an
-// update is ready for it: the build itself is for agents, in `builds`. One that's behind the latest is updated here, and all of them at once; this device becomes a server and
-// stops being one; a server's services are switched on and off; and a device is taken out, or this one signs out.
-// Each server says whether it's ready, active and running, or why not, and an update it's taking as it moves on
-// (`OneCore.Release`); one that didn't take is a problem on it, until one does. This device becoming a server, or
-// stopping being one, says each stage.
+// Devices: everything that acts as whoever's looking, and the servers that run their apps. This device says whether an
+// update is ready for it, and is updated here; the build itself is for agents, in `builds`. The servers take each
+// build by themselves, as the network's update says (`core/edge/updater/updater.ts`), which Software Update heads
+// them with, in Apple's words: up to date, updating, waiting for a quiet moment (Update Now), or failed (Try Again).
+// This device becomes a server and stops being one; a server's services are switched on and off; and a device is
+// taken out, or this one signs out. Each server says whether it's ready, active and running, or why not, and an
+// update it's taking as it moves on (`OneCore.Release`). This device becoming a server, or stopping being one, says
+// each stage.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, client, confirm, Empty, leave, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
@@ -17,7 +19,7 @@ interface Built {
 }
 
 /** Where an update of a server is, as the server says it. */
-type ServerUpdateStatus = "up_to_date" | "downloading" | "verifying"
+type ServerUpdateStatus = "up_to_date" | "downloading" | "checked" | "verifying"
 
 /** What a server is, as `builds` answers it: whether it's one of the network's, its program, and whether it's ready. */
 interface ServerStatus {
@@ -29,8 +31,19 @@ interface ServerStatus {
   went_back?: string | null
 }
 
+/** The network's update, as its updater says it (`builds`' `network`). */
+interface NetworkUpdate {
+  network_update_status: "up_to_date" | "preparing" | "updating_edge" | "loading" | "restarting" | "held"
+  build: string | null
+  done: number
+  of: number
+  waiting_for: "quiet" | null
+  held: { name?: string; why: string } | null
+}
+
 /** What `builds` answers. */
 interface Builds {
+  network?: NetworkUpdate | null
   devices: (Built & { device: string })[]
   latest: Record<string, { build: string }>
   servers: (Built & ServerStatus & { server: string; name?: string; installed?: boolean; last_seen?: number })[]
@@ -63,8 +76,6 @@ interface Thing extends ServerStatus {
   last_seen?: number | string
   build?: string
   behind?: boolean
-  /** Whether its last update didn't take, and it's still behind. */
-  failed?: boolean
   subject?: string
   services?: (Service & { on: boolean })[]
 }
@@ -99,18 +110,16 @@ const mine = createMemo(async () => {
     for (const server of list?.servers ?? []) {
       if (servers.has(server.server)) continue
       const runs = (theirs?.services ?? []).map((service) => ({ ...service, on: service.servers.includes(server.server) }))
-      // Only a server that was installed takes the latest build when it's asked.
-      const updates = server.installed ? behind("server", server) : undefined
-      const failed = !!(updates && !updating(server) && server.went_back)
-      servers.set(server.server, { ...server, id: server.server, subject: who, here: server.server === here.server?.key, behind: updates, failed, services: runs })
+      servers.set(server.server, { ...server, id: server.server, subject: who, here: server.server === here.server?.key, services: runs })
     }
   }
-  return { devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here }
+  const update = network?.network ?? builds.network ?? undefined
+  return { devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here, update, who: network ? "network" : undefined }
 })
 changed(() => refresh(mine))
 
 /// Whether an update of a server is under way.
-const updating = (server: ServerStatus) => server.server_update_status === "downloading" || server.server_update_status === "verifying"
+const updating = (server: ServerStatus) => !!server.server_update_status && server.server_update_status !== "up_to_date"
 
 /// Whether something is connected, or when it was last: nothing for one never seen. A server says whether it's
 /// ready, and why not. This device says only that it's this one.
@@ -123,10 +132,20 @@ function presence(thing: Thing) {
 
 const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
 
-/// Each stage of an update, as a step and on its row.
-const updates: Record<"downloading" | "verifying", { step: string; row: string }> = {
+/// Each stage of a server's update, as a step and on its row.
+const updates: Record<Exclude<ServerUpdateStatus, "up_to_date">, { step: string; row: string }> = {
   downloading: { step: "Downloading the update", row: "Downloading update…" },
-  verifying: { step: "Starting the new version", row: "Starting the new version…" },
+  checked: { step: "Ready to install", row: "Ready to install" },
+  verifying: { step: "Installing", row: "Installing…" },
+}
+
+/// The network's update, as Software Update says it: its line, and whether it's under way.
+function softwareUpdate(update: NetworkUpdate) {
+  const version = update.build?.split("+")[0] ?? ""
+  if (update.network_update_status === "up_to_date") return { text: `Up to date · ${version}` }
+  if (update.network_update_status === "held") return { text: `Update failed · ${update.held?.name ?? "A server"}: ${update.held?.why}`, action: "Try Again" }
+  if (update.waiting_for === "quiet") return { text: `Waiting for a quiet moment · ${version}`, action: "Update Now" }
+  return { text: `Updating… ${update.done} of ${update.of}`, busy: true }
 }
 
 /// Each stage of this device becoming a server, and of stopping being one, as a step.
@@ -153,7 +172,8 @@ function about(thing: Thing) {
     browser: () => (thing.here ? "This device" : `A browser, signed in ${on(thing.added!)}`),
     server: () => presence(thing),
   }[thing.kind ?? "server"]()
-  return [what, thing.failed ? "Couldn't update" : thing.behind && "Update ready"].filter(Boolean).join(" · ")
+  const checked = thing.server_update_status === "checked" && updates.checked.row
+  return [what, checked || (thing.behind && "Update ready")].filter(Boolean).join(" · ")
 }
 
 /// Does something, says why if it couldn't be done, and shows everything as it is after. → whether it was done.
@@ -168,8 +188,11 @@ async function doing(does: () => Promise<unknown>) {
   }
 }
 
-/// Has a server take the latest builds, or this device: `one update`.
-const update = (thing: Thing) => (thing.kind ? client({ update: true }).then(({ message }) => toast(message)) : call("update", { server: thing.id }, { subject: thing.subject }))
+/// Has this device take the latest build: `one update`.
+const update = () => client({ update: true }).then(({ message }) => toast(message))
+
+/// Update Now, or Try Again: the network's update takes every server to the latest build now (`update`).
+const updateNow = (who?: string) => call("update", {}, { subject: who })
 
 /// Takes a device out once its person has said so. Taking this one out is signing out: what it kept of theirs goes,
 /// and the client opens again where a device that isn't in does. Another that's taken out shows its person where to
@@ -225,7 +248,7 @@ function Detail(props: { thing: Thing; all: All }) {
             <Steps
               steps={Object.values(updates).map(({ step }) => step)}
               at={Object.keys(updates).indexOf(stage()!)}
-              text={stage() === "verifying" ? "If it doesn't start, it goes back to the version it had." : undefined}
+              text={stage() === "verifying" ? "If it doesn't start, it goes back to the version it had." : stage() === "checked" ? "It installs when Software Update gets to it." : undefined}
             />
           </div>
         </Section>
@@ -237,23 +260,9 @@ function Detail(props: { thing: Thing; all: All }) {
           </div>
         </Section>
       </Show>
-      <Show when={thing().failed}>
-        <Problem
-          heading="Couldn't update"
-          text="It's still on the version it had."
-          action={<Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Try Again</Button>}
-        />
-      </Show>
       <List>
-        <Show when={thing().behind && !stage() && !thing().failed}>
-          <Row
-            heading="Update ready"
-            end={
-              <Show when={!thing().kind || thing().here}>
-                <Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>
-              </Show>
-            }
-          />
+        <Show when={thing().behind && thing().here}>
+          <Row heading="Update ready" end={<Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>} />
         </Show>
         <Show when={thing().here && thing().kind === "app"}>
           <Row
@@ -303,17 +312,11 @@ function Detail(props: { thing: Thing; all: All }) {
 
 function Devices(props: { all: All }) {
   const opened = () => [...props.all.devices, ...props.all.servers].find((thing) => thing.id === open())
-  // What's behind and can be updated from here, with no update under way already: every server, and this device, last.
-  const behind = () => [...props.all.servers, ...props.all.devices.filter((device) => device.here)].filter((thing) => thing.behind && !updating(thing))
-  const all = async () => {
-    setWorking("all")
-    for (const thing of behind()) await doing(() => update(thing))
-    setWorking()
-  }
   const row = (thing: () => Thing) => <Row heading={thing().name ?? "Server"} text={about(thing())} current={open() === thing().id} onClick={() => setOpen(thing().id)} />
+  const said = () => props.all.update && softwareUpdate(props.all.update)
   return (
     <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} /></Show>}>
-      <Screen heading="Devices" back onBack={leave} action={behind().length ? <Button loading={working() === "all"} onClick={all}>Update All</Button> : undefined}>
+      <Screen heading="Devices" back onBack={leave}>
         <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
           <List>
             <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
@@ -322,6 +325,19 @@ function Devices(props: { all: All }) {
         <Show when={props.all.servers.length}>
           <Section heading="Servers">
             <List>
+              <Show when={said()}>
+                <Row
+                  heading="Software Update"
+                  text={said()!.busy ? <><Spinner /> {said()!.text}</> : said()!.text}
+                  end={
+                    <Show when={said()!.action}>
+                      <Button variant="outline" loading={working() === "network"} onClick={press({ id: "network", here: false }, () => updateNow(props.all.who))}>
+                        {said()!.action}
+                      </Button>
+                    </Show>
+                  }
+                />
+              </Show>
               <For each={props.all.servers} keyed={(server) => server.id}>{row}</For>
             </List>
           </Section>
