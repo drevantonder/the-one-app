@@ -46,3 +46,9 @@ On the Mac (the `iphone` skill for ssh), build with `--target aarch64-sim --debu
     xcrun simctl io booted screenshot <file>.png
 
 `scp mac:<file>.png` brings the picture back. Shut the simulator down after (`xcrun simctl shutdown booted`).
+
+The app keeps its client in its App Group, which the simulator gives it, so `main.mm` sets `ONE_HOME` to that and
+`SIMCTL_CHILD_ONE_HOME` changes nothing. To open it on a network of your own, set aside what's in
+`xcrun simctl get_app_container booted app.theone.client group.app.theone.client`, put your client's `key` and
+`network` there, make the network's address the Mac's too (`ssh -N -R <port>:localhost:<port> mac`), launch with
+`SIMCTL_CHILD_ONE_AS=owner`, and put back what was there after. `axe tap -x <x> -y <y> --udid <udid>` taps, in points.
