@@ -66,6 +66,14 @@
       <button id="reload" class="press ring">Reload</button>
     </div>
   </div>
+  <!-- A server refuses this client for being behind it: an alert, as iOS's Update Required, the UI library's (ui.css). -->
+  <dialog id="update-required" class="ui-dialog alert" role="alertdialog" aria-labelledby="update-required-heading" aria-describedby="update-required-text">
+    <div class="panel">
+      <h2 id="update-required-heading">Update Required</h2>
+      <p id="update-required-text">This version of The One App no longer works with your network.</p>
+      <footer><button id="update-button" class="ui-button press ring" data-variant="default" autofocus>Update</button></footer>
+    </div>
+  </dialog>
   <dialog id="recovery" class="ui-dialog sheet" aria-labelledby="recovery-heading">
     <div class="panel">
       <header><h2 id="recovery-heading">Recovery Key</h2></header>

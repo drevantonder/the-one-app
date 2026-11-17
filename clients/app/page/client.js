@@ -330,7 +330,6 @@ function steps({ connection, lost, starting }) {
 /** @param {import("xstate").SnapshotFrom<typeof machine>} now @returns {[string, string, string | undefined, string | undefined] | undefined} */
 function problemOf(now) {
   if (now.matches("launcher_failed")) return ["Home Screen didn't open.", "Try again in a moment.", now.context.why, "Try Again"]
-  if (now.matches("needs_updating")) return phone ? ["This app needs updating", "Its owner updates this app.", undefined, undefined] : ["This app needs updating", "An update is ready.", undefined, "Update"]
   if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]
 }
 
@@ -366,6 +365,12 @@ function draw() {
   byId("empty-text").textContent = context.only ?? (appStore ? "" : "Ask your AI to install a Home Screen")
   byId("empty-text").hidden = !byId("empty-text").textContent
   byId("open-app-store").hidden = Boolean(context.only) || !appStore
+  // Being behind isn't a problem: it's an alert, as iOS's Update Required. A phone's app is updated by its owner, so there it has no button.
+  const required = /** @type {HTMLDialogElement} */ (byId("update-required"))
+  const behind = now.matches("needs_updating")
+  byId("update-button").hidden = phone
+  if (behind && !required.open) required.showModal()
+  if (!behind && required.open) required.close()
   const problem = problemOf(now)
   byId("problem").hidden = !problem
   if (problem) {
@@ -376,10 +381,9 @@ function draw() {
     byId("problem-details-text").textContent = details ?? ""
     byId("problem-action").hidden = !action
     byId("problem-button").textContent = action ?? ""
-    byId("problem-button").dataset.variant = action === "Update" ? "default" : "outline"
   }
   // What's shown is reported once, as it's shown.
-  const said = problem && `${problem[0]}: ${problem[1]}`
+  const said = behind ? "Update Required: This version of The One App no longer works with your network." : problem && `${problem[0]}: ${problem[1]}`
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
   // Over the launcher: its network not answering, and trying again once it has lost it. Answering, nothing.
@@ -908,7 +912,10 @@ addEventListener("popstate", (event) => {
 listen("connection", ({ payload }) => on({ type: "connection", connection: payload }))
 // Its network is tried again now, rather than when it next would be.
 for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry"))
-byId("problem-button").addEventListener("click", () => on({ type: shown.getSnapshot().matches("needs_updating") ? "update" : "retry" }))
+byId("problem-button").addEventListener("click", () => on({ type: "retry" }))
+byId("update-button").addEventListener("click", () => on({ type: "update" }))
+// Nothing dismisses it: the window works again once it's updated.
+byId("update-required").addEventListener("cancel", (event) => event.preventDefault())
 byId("open-app-store").addEventListener("click", () => on({ type: "openAppStore" }))
 
 /// The user returned to the window, so what's showing asks again, and its apps' files are listed again, for a new
