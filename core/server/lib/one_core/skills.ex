@@ -7,7 +7,8 @@ defmodule OneCore.Skills do
   An app's skill is the `SKILL.md` at the root of its folder, named as the app is. An app offers more as
   folders of `skills/`, each a skill named as its folder: its `SKILL.md`, and any other files in the folder, which
   the skill points to. One Core has its own: `building-apps`, which is `OneCore.App.skill/1`,
-  `installing-apps`, which is here, and the UI library's, `ui`, with Solid's beneath it (`OneCore.Entrypoint`).
+  `installing-apps`, which is here, and the UI library's, `ui`, with beneath it Solid's, Emil Kowalski's,
+  pstack's, Modern Web Guidance and `design`, the Everywhere of DESIGN.md (`core/ui/build.js`, `OneCore.Entrypoint`).
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
@@ -19,7 +20,7 @@ defmodule OneCore.Skills do
   `skill://<installed by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
   `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own are `skill://building-apps/SKILL.md`,
   `skill://installing-apps/SKILL.md` and `skill://ui/SKILL.md`, the only skills whose paths are their names alone,
-  and Solid's beneath the UI library's, `skill://ui/skills/<name>/SKILL.md`. No two apps are installed by one name, so no skill's address is
+  and those beneath the UI library's, `skill://ui/skills/<name>/SKILL.md`. No two apps are installed by one name, so no skill's address is
   another's.
   """
   alias OneCore.{Entrypoint, App, Apps}

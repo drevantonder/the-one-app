@@ -385,9 +385,9 @@ defmodule OneCore.App do
     app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more
     than this:
 
-        client/index.html    <!doctype html><title>Hello</title><script type="module" src="./app.jsx"></script>
-        client/app.jsx       import { render } from "@solidjs/web"; import { Screen } from "ui"; ...
-        client/app.css       the app's own look, if it has any, imported by app.jsx
+        client/index.html    <!doctype html><title>Hello</title><script type="module" src="./app.tsx"></script>
+        client/app.tsx       import { render } from "@solidjs/web"; import { Screen } from "ui"; ...
+        client/app.css       the app's own look, if it has any, imported by app.tsx
         client/package.json  packages of its own, if it needs any, under "dependencies"
 
   - An app's client may export modules for another app's page to import, as a package does, in
@@ -401,7 +401,7 @@ defmodule OneCore.App do
   - The source is what's deployed, and the server builds it (`OneCore.Entrypoint`): what a client is served at `client/` is
     what it built. A client keeps what a page loads, and reads a sourcemap only when something asks for it. The
     `code` tool gives the source back, to change and deploy again. A build that fails fails the deploy, which
-    answers with the compiler's words, a problem to a line: `app.jsx:3:30: Unexpected token`, then the lines
+    answers with the compiler's words, a problem to a line: `app.tsx:3:30: Unexpected token`, then the lines
     around it with a `^` under the place.
   - Solid and the UI library are in every client already, so an app leaves them out and is small; an app that needs
     nothing more installs nothing. Packages of its own are installed as it's built. It's built with the UI library's own
@@ -414,6 +414,15 @@ defmodule OneCore.App do
   - The UI library, One Core's own, is what an app's UI is written with, so every app looks and moves the same. Its
     skill, `ui`, has every component with an example. It speaks to the client for the app: its `call` and `changed` are
     how an app asks and hears, done.
+  - How an app looks, reads and behaves follows `design` (skill://ui/skills/design/SKILL.md), the network's own
+    rules. Beside it are Emil Kowalski's: `gestures` for drags, swipes and sheets, `apple-design` for fluid motion,
+    `mobile-native` for what makes it feel at home on a phone, and `review-animations` to review its motion.
+  - Before writing its HTML, CSS or client JavaScript, search `modern-web-guidance` for the web platform's current
+    way to do it.
+  - Its screens are TypeScript (`.tsx`): `typescript-best-practices` says how to write it. Beside it are pstack's
+    principles: `principle-experience-first` for what to build, `principle-model-the-domain` for the state it keeps,
+    `principle-make-operations-idempotent` for tools and jobs that may run twice, `principle-fix-root-causes` when
+    something's wrong, and `principle-prove-it-works` before calling it done.
   - The UI library's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
     For something the UI library lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
     https://ark-ui.com/llms-solid.txt: an app installs `@zag-js/<component>` to its package.json, at the version of
@@ -569,6 +578,16 @@ defmodule OneCore.App do
   did outside the network isn't ours to undo.
 
   Tools to check an app before it's deployed are recommended, not needed.
+
+  Check your app before the people it's for get it:
+
+  - Deploy it to a test install first: for yourself alone, under a name of its own (`tracker-test`), not for the
+    group or the network it's for.
+  - Try it as the people who'll use it: do what they'll do, on the devices they'll use, a phone first.
+  - Take real pictures of its screens (the `chrome`, `iphone-simulator`, `android-emulator` and `computer-use`
+    apps' skills say how), look at each, and show them to the person.
+  - Try it with worst-case data: long names, nothing at all, huge counts, other scripts. The skill `break-ui`
+    (skill://ui/skills/break-ui/SKILL.md) says how.
   """
   @moduledoc "The interface an app's server-side code is written against.\n\n" <> @text
 
