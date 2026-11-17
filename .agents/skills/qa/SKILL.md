@@ -7,7 +7,8 @@ Check your work with a throwaway check and never commit it. Use the cheapest thi
 tool on a local network (`local-network`), open the screen (Screens, below), or run the function in `iex -S mix`
 in `core/server/`.
 
-Work out what your change touches, or could touch, including things that look unrelated, and check those too. If
+Work out what your change touches, or could touch, including things that look unrelated, and check those too. The skill
+`blast-radius` finds what it could break beyond the diff. If
 that includes secrets, who may do what, an app's entrypoint reaching another's, or data kept and restored, try to break
 it yourself on a local network. You decide the attacks; there is no fixed list.
 
