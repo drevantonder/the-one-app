@@ -213,6 +213,9 @@ iframe[inert] {
   -webkit-user-select: text;
   user-select: text;
 }
+#recovery .entry {
+  font-size: var(--text-field);
+}
 #recovery .key {
   padding: 0.75rem;
   border: 1px solid var(--input);

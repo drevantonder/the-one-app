@@ -1,6 +1,8 @@
 package app.theone.client
 
 import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.HapticFeedbackConstants
@@ -8,6 +10,7 @@ import android.webkit.WebView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -19,9 +22,11 @@ class MainActivity : TauriActivity() {
   /** Whether back has anything to go back from: an app over the launcher, or something open over the app that's showing, as the page says (`androidBack` in client.js). */
   private var behind = false
   private var gate: Gate? = null
+  /** Light or dark, as Colour Mode has it on this device, or "" as the system is (`setTheme` in host.js). */
+  private var theme = ""
 
   override fun onCreate(savedInstanceState: Bundle?) {
-    enableEdgeToEdge()
+    dress()
     super.onCreate(savedInstanceState)
     ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { view, insets ->
       val kept = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
@@ -31,14 +36,22 @@ class MainActivity : TauriActivity() {
     }
   }
 
-  /**
-   * The system's bars follow light and dark as the page does. The window isn't made again when that changes, so
-   * what shows behind the bars, and whether their icons are dark or light, is set again.
-   */
+  /** The window isn't made again when the system's light or dark changes, so its bars follow it here. */
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
-    window.setBackgroundDrawableResource(R.color.background)
-    enableEdgeToEdge()
+    dress()
+  }
+
+  /**
+   * The system's bars follow light and dark as the page does, Colour Mode's or the system's: what shows behind them,
+   * the page's background (`colors.xml`), and whether their icons are dark or light.
+   */
+  private fun dress() {
+    val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    val dark = if (theme.isEmpty()) night else theme == "dark"
+    window.setBackgroundDrawable(ColorDrawable(getColor(if (dark) R.color.dark else R.color.light)))
+    val style = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT) { dark }
+    enableEdgeToEdge(style, style)
   }
 
   /**
@@ -48,6 +61,10 @@ class MainActivity : TauriActivity() {
    */
   override fun onWebViewCreate(webView: WebView) {
     if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+      WebViewCompat.addWebMessageListener(webView, "androidTheme", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
+        theme = message.data ?: ""
+        dress()
+      }
       WebViewCompat.addWebMessageListener(webView, "androidBack", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
         behind = message.data == "true"
         gate?.pass()

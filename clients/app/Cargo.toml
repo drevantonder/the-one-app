@@ -90,4 +90,4 @@ tauri-plugin-notifications = { version = "0.4", default-features = false, featur
 libc = "=0.2.189"
 # A tap on the status bar scrolls the app that's showing to its top (`status_bar`).
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"], optional = true }
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIResponder", "UIScrollView", "UIView"], optional = true }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIInterface", "UIResponder", "UIScrollView", "UIView", "UIWindow"], optional = true }

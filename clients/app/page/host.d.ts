@@ -14,6 +14,8 @@ export declare const sandbox: string
 export declare const openLink: (url: string) => void
 /** Plays a haptic an app asked for (`one/haptic`), where the device has them on. */
 export declare const haptic: (kind: Haptic) => Promise<unknown> | void
+/** Has what's the window's own and not its page (its bars) follow light or dark, or with `null`, the device. */
+export declare const setTheme: (theme: "light" | "dark" | null) => Promise<unknown> | void
 
 /** A haptic, by iOS's name: an impact, a selection, or a notification's outcome. */
 export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"
@@ -125,6 +127,8 @@ export interface Commands {
   report(args: { record: Record<string, unknown> }): void
   /** Turns the device's own back and forward gestures on or off. */
   navigation_gestures(args: { on: boolean }): void
+  /** Light or dark for the window's own bars, or with `null`, as the device is. */
+  theme(args: { theme: "light" | "dark" | null }): void
   listen(): void
   tapped(args: { tapped: unknown }): void
   "plugin:notifications|set_click_listener_active"(args: { active: boolean }): void

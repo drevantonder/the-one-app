@@ -17,6 +17,14 @@ export const sandbox = "allow-scripts allow-same-origin allow-forms"
 /** @type {typeof import("./host.js").openLink} */
 export const openLink = (url) => location.assign(url)
 
+/// Light or dark for what's the window's own, not its page: a computer's title bar, an iPhone's status bar (`theme`
+/// in lib.rs), and Android's system bars, which are `MainActivity`'s.
+/** @type {typeof import("./host.js").setTheme} */
+export const setTheme = (theme) => {
+  if (globalThis.androidTheme) return globalThis.androidTheme.postMessage(theme ?? "")
+  return invoke("theme", { theme })
+}
+
 /// A haptic: Android's app plays it as Android's own (`MainActivity`), and elsewhere Tauri's haptics plugin, as
 /// UIKit's feedback on an iPhone, and as nothing on a computer. Each follows the system's own setting.
 /** @type {typeof import("./host.js").haptic} */

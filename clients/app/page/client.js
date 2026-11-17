@@ -8,7 +8,7 @@
 // The launcher is an app too, which reaches this client from a server as every app's does: the app in the category
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
-import { address, haptic, invoke, listen, openLink, sandbox } from "./host.js"
+import { address, haptic, invoke, listen, openLink, sandbox, setTheme } from "./host.js"
 /** @import { Context, Moved, Paged, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
@@ -65,10 +65,13 @@ const chosen = () => localStorage.getItem("theme")
 const theme = () => chosen() ?? (scheme.matches ? "dark" : "light")
 function dress() {
   document.documentElement.style.colorScheme = chosen() ?? ""
+  setTheme(chosen())
   for (const name of ["light", "dark"]) document.documentElement.classList.toggle(name, theme() === name)
   for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { theme: theme() } })
 }
 scheme.addEventListener("change", dress)
+// Where the window goes from here, a sign-in page, isn't told Colour Mode: the bars follow the device there, as it does.
+addEventListener("pagehide", () => setTheme(null))
 
 /// How far in from each edge of the window what the device keeps for itself reaches (an iPhone's status bar, home
 /// indicator and notch), which only this page is told: Android's window is already clear of its own.

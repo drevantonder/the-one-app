@@ -405,6 +405,36 @@ fn navigation_gestures(window: tauri::WebviewWindow, on: bool) -> Result<(), Str
         .map_err(|error| error.to_string())
 }
 
+/// Light or dark, as Colour Mode has it on this device, or as the device is with neither: what's the window's own and
+/// not its page follows it too, a computer's title bar and an iPhone's status bar, which would otherwise follow the
+/// device and show dark on dark. Android's bars are `MainActivity`'s (`androidTheme` in host.js).
+#[tauri::command]
+fn theme(window: tauri::WebviewWindow, theme: Option<tauri::Theme>) -> Result<(), String> {
+    #[cfg(desktop)]
+    return window.set_theme(theme).map_err(|error| error.to_string());
+    #[cfg(target_os = "ios")]
+    return window
+        .with_webview(move |webview| {
+            use objc2_ui_kit::{UIUserInterfaceStyle, UIView};
+            // Tauri hands over the window's WKWebView on the main thread.
+            let web = unsafe { &*webview.inner().cast::<UIView>() };
+            let style = match theme {
+                Some(tauri::Theme::Light) => UIUserInterfaceStyle::Light,
+                Some(tauri::Theme::Dark) => UIUserInterfaceStyle::Dark,
+                _ => UIUserInterfaceStyle::Unspecified,
+            };
+            if let Some(window) = web.window() {
+                window.setOverrideUserInterfaceStyle(style);
+            }
+        })
+        .map_err(|error| error.to_string());
+    #[cfg(target_os = "android")]
+    {
+        let _ = (window, theme);
+        Ok(())
+    }
+}
+
 /// A tap on an iPhone's status bar scrolls the app that's showing to its top, as it does in every iPhone app. iOS
 /// scrolls the one scroll view that asks to be (`scrollsToTop`), which in the web view is its page, and that doesn't
 /// scroll: its apps' frames do. So the page's says no, and an unseen scroll view a point high along the window's top
@@ -751,6 +781,7 @@ pub fn run() {
             tapped,
             opened,
             navigation_gestures,
+            theme,
             report
         ])
         .run(tauri::generate_context!())
