@@ -761,3 +761,11 @@ body {
     animation: none;
   }
 }
+
+/* The Home Screen that didn't open: its one problem, in the middle of the window. */
+.broken {
+  display: grid;
+  place-content: center;
+  height: 100%;
+  padding: 1.25rem;
+}

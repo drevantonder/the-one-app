@@ -1153,9 +1153,20 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
 }
 
+/// The Home Screen didn't draw: what DESIGN.md says of a launcher that doesn't, with Try Again, which loads this page
+/// again, its newest version among it, and what went wrong under Show Details. Its client loads it again by itself
+/// once a newer version is out, as the older one meeting what's new is the likeliest cause.
+function Broken(props: { error: Error }) {
+  return (
+    <div class="broken">
+      <Problem heading="Home Screen didn't open." text={new Error(`Try again in a moment.\n\n${typeof props.error?.cause === "string" ? props.error.cause : (props.error?.message ?? props.error)}`)} action={<Button variant="outline" onClick={() => location.reload()}>Try Again</Button>} />
+    </div>
+  )
+}
+
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your Home Screen" text={error() as Error} />}>
+    <Errored fallback={(error) => <Broken error={error() as Error} />}>
       <Loading>
         <HomeScreen owners={owners()} />
       </Loading>
