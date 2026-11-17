@@ -285,16 +285,25 @@ defmodule OneCore.Release do
   defp consolidated(build), do: build |> Path.join("releases/*/consolidated") |> Path.wildcard() |> hd()
 
   # One Core's modules that differ from `old` to `new`, with its consolidated protocols: those only `old` has, those
-  # only `new` has, and those both have whose code differs.
+  # only `new` has, and those both have whose code differs, by its MD5 (`:beam_lib.md5/1`), which leaves out the
+  # attributes a build in another folder says otherwise, as `@external_resource`'s path.
   defp changes(old, new) do
     [{removed, added, changed}, {gone, new_protocols, protocols}] =
       for dir <- [&ebin/1, &consolidated/1] do
-        {only_old, only_new, different} = :beam_lib.cmp_dirs(to_charlist(dir.(old)), to_charlist(dir.(new)))
-        module = &(&1 |> to_string() |> Path.basename(".beam") |> String.to_atom())
-        {Enum.map(only_old, module), Enum.map(only_new, module), Enum.map(different, &module.(elem(&1, 0)))}
+        [was, now] = for build <- [old, new], do: md5s(dir.(build))
+
+        {Map.keys(Map.drop(was, Map.keys(now))), Map.keys(Map.drop(now, Map.keys(was))),
+         for({module, md5} <- now, Map.has_key?(was, module), was[module] != md5, do: module)}
       end
 
     {removed ++ gone, added ++ new_protocols, changed ++ protocols}
+  end
+
+  defp md5s(dir) do
+    for file <- Path.wildcard(Path.join(dir, "*.beam")), into: %{} do
+      {:ok, {module, md5}} = :beam_lib.md5(to_charlist(file))
+      {module, md5}
+    end
   end
 
   # The beam file of each of `modules` in the build `build`, as `{module, file, binary}`, where it has one.

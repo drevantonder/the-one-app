@@ -689,7 +689,7 @@ defmodule OneCore.Tools do
             type: "array",
             description:
               "Each build: its name (server/<target>, server-runtime/<target>, server-code, one/<target> or " <>
-                "one-cli/<target>), build, sha256 and size, and a runtime's files, the SHA-256 that tells it",
+                "one-cli/<target>), build, sha256 and size, and a runtime's inputs, the SHA-256 of what it's built from",
             items: %{
               type: "object",
               properties: %{
@@ -698,7 +698,7 @@ defmodule OneCore.Tools do
                   pattern: "^((server|server-runtime|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+|server-code)$"
                 },
                 build: %{type: "string"},
-                files: %{type: "string", pattern: "^[0-9a-f]{64}$"},
+                inputs: %{type: "string", pattern: "^[0-9a-f]{64}$"},
                 sha256: %{type: "string", pattern: "^[0-9a-f]{64}$"},
                 size: %{type: "integer"}
               },
