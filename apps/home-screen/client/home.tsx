@@ -1,9 +1,11 @@
-// The Home Screen: yours, everyone's, then each of your groups', one owner above another, each a row of pages and then
-// their App Library's pages, then the App Store. Left and right moves between an owner's pages, as a phone's do, and up and down between
-// owners, unless a page scrolls itself. The pages move by hand, as a phone's do (pager.ts). The
-// owner's name, in the bar at the bottom beside their page dots, opens a list of every owner. A page never scrolls:
-// it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole pages of an owner's
-// side by side as fit, each a phone's page drawn larger to suit the window's height. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
+// The Home Screen: yours, everyone's, then each of your groups', one owner above another, each a row of three
+// sections: Home, their pages; their App Library; and the App Store. Each section is a screenful or more, never less:
+// as many of its pages side by side as fit, each a phone's page drawn larger to suit the window's height on a wide
+// one, and centred where there are fewer. Left and right moves a screenful, as a phone's pages do, through Home's
+// screenfuls and on to the App Library and the App Store, and up and down between owners, unless a page scrolls
+// itself. The pages move by hand, as a phone's do (pager.ts). The owner's name, in the bar at the bottom beside the
+// sections' icons, opens a list of every owner. A page never scrolls: it's a fixed grid, and what doesn't fit goes on
+// to the next. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
 // touch and hold an app or a widget (press and hold it, or right-click it, with a mouse), then Edit Home Screen, or
 // hold it a while longer, or touch and hold a page's empty space. Where it is, what's open over it and the editing are
 // one state machine (machine.ts), whose snapshot is one signal here.
@@ -48,14 +50,14 @@ addEventListener("message", ({ source, data }) => {
   if (source === parent && data?.method === "notifications/one/showing") home.send({ type: data.params?.entrypoint === HOME ? "home" : "launch" })
 })
 
-/// The owner and page nearest where the pages are as they move, which the dots follow during a swipe, as a phone's do,
-/// rather than once it ends.
-const [seen, setSeen] = createSignal<At>({ owner: 0, page: 0 }, { equals: (a, b) => a.owner === b.owner && a.page === b.page })
+/// The owner and screenful nearest where the pages are as they move, which the dots follow during a swipe, as a
+/// phone's do, rather than once it ends.
+const [seen, setSeen] = createSignal<At>({ owner: 0, screen: 0 }, { equals: (a, b) => a.owner === b.owner && a.screen === b.screen })
 /// How much a wide window draws the Home Screen larger than a phone does: a phone's pages, scaled to the window's
 /// height, twice at most, so a bigger screen shows more pages rather than larger icons. Set by `measure`.
 let scale = 1
 
-/// The owner switcher's names and the owners' page dots, which roll together as the owners move: each a window onto a
+/// The owner switcher's names and the owners' sections, which roll together as the owners move: each a window onto a
 /// strip with a row for every owner. `at` is where the owners are, in owners. Each window is as wide as the row it
 /// shows, or between two rows' widths as the owners pass, so the bar fits whoever's shown, and a row fades as it
 /// rolls away, as a picker's do.
@@ -842,18 +844,35 @@ function Overview(props: { owner: Owner; index: number }) {
   )
 }
 
-/// Phosphor's squares-four, the App Library's mark, and storefront, the App Store's.
-const SQUARES =
-  "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z"
-const STOREFRONT =
-  "M232,96a7.89,7.89,0,0,0-.3-2.2L217.35,43.6A16.07,16.07,0,0,0,202,32H54A16.07,16.07,0,0,0,38.65,43.6L24.31,93.8A7.89,7.89,0,0,0,24,96h0v16a40,40,0,0,0,16,32v72a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V144a40,40,0,0,0,16-32V96ZM54,48H202l11.42,40H42.61Zm50,56h48v8a24,24,0,0,1-48,0Zm-16,0v8a24,24,0,0,1-35.12,21.26,7.88,7.88,0,0,0-1.82-1.06A24,24,0,0,1,40,112v-8ZM200,208H56V151.2a40.57,40.57,0,0,0,8,.8,40,40,0,0,0,32-16,40,40,0,0,0,64,0,40,40,0,0,0,32,16,40.57,40.57,0,0,0,8-.8Zm4.93-75.8a8.08,8.08,0,0,0-1.8,1.05A24,24,0,0,1,168,112v-8h48v8A24,24,0,0,1,204.93,132.2Z"
+/// Each section's mark, Phosphor's house, squares-four and storefront, and the name a person hears for it.
+const SECTIONS: Record<Kind, { name: string; path: string }> = {
+  home: {
+    name: "Home",
+    path: "M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z",
+  },
+  library: {
+    name: "App Library",
+    path: "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z",
+  },
+  store: {
+    name: "App Store",
+    path: "M232,96a7.89,7.89,0,0,0-.3-2.2L217.35,43.6A16.07,16.07,0,0,0,202,32H54A16.07,16.07,0,0,0,38.65,43.6L24.31,93.8A7.89,7.89,0,0,0,24,96h0v16a40,40,0,0,0,16,32v72a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V144a40,40,0,0,0,16-32V96ZM54,48H202l11.42,40H42.61Zm50,56h48v8a24,24,0,0,1-48,0Zm-16,0v8a24,24,0,0,1-35.12,21.26,7.88,7.88,0,0,0-1.82-1.06A24,24,0,0,1,40,112v-8ZM200,208H56V151.2a40.57,40.57,0,0,0,8,.8,40,40,0,0,0,32-16,40,40,0,0,0,64,0,40,40,0,0,0,32,16,40.57,40.57,0,0,0,8-.8Zm4.93-75.8a8.08,8.08,0,0,0-1.8,1.05A24,24,0,0,1,168,112v-8h48v8A24,24,0,0,1,204.93,132.2Z",
+  },
+}
 
-/// An owner's page dots: one for each Home page, then the App Library's mark for its first page and a dot for each
-/// of the rest, and the App Store's mark last, the one shown current. Tapping one
-/// goes there, and so does sliding a finger along them, a page for every 28 points with a tick at each, as a phone's do. While the owner's
-/// pages are edited, they open the page overview.
+/** A section as the bar shows it: its kind, its first screenful, and how many it has. */
+type Run = { kind: Kind; from: number; count: number }
+const runs = (kinds: Kind[]): Run[] =>
+  kinds.reduce<Run[]>((all, kind, screen) => (all.at(-1)?.kind === kind ? (all.at(-1)!.count++, all) : [...all, { kind, from: screen, count: 1 }]), [])
+
+/// An owner's sections in the bar: each its icon, which stands for its first screenful, as iOS's Spotlight glyph stands
+/// for a page dot, then a dot for each screenful after it, only while that section is the one shown; its dots open
+/// out of the icon as it's reached and fold back into it as it's left. The screenful shown is lit. Tapping an icon
+/// goes to the start of its section and a dot to its screenful, and sliding a finger along them moves a screenful for
+/// every 28 points with a tick at each, as a phone's dots do. While the owner's pages are edited, it's Home alone,
+/// which opens the page overview.
 function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
-  const current = () => (seen().owner === props.index ? seen().page : (state().context.last[props.index] ?? 0))
+  const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
   let quiet = 0
   const slide = (down: PointerEvent & { currentTarget: HTMLElement }) => {
     if (editingOwner(props.index)) return
@@ -864,9 +883,9 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
       if (!sliding && Math.abs(across) < 10) return
       sliding = true
       dots.setPointerCapture(down.pointerId)
-      const page = Math.max(0, Math.min(props.kinds.length - 1, from + Math.trunc(across / 28)))
-      if (page === current()) return
-      home.send({ type: "go", page })
+      const screen = Math.max(0, Math.min(props.kinds.length - 1, from + Math.trunc(across / 28)))
+      if (screen === current()) return
+      home.send({ type: "go", screen })
       haptic("selection")
     }
     const up = () => {
@@ -877,40 +896,49 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
     dots.addEventListener("pointerup", up, { once: true })
     dots.addEventListener("pointercancel", up, { once: true })
   }
-  // The App Library's first page has its mark, and the rest of its pages are dots; the App Store has its own.
-  const glyph = (page: number) => (props.kinds[page] === "store" ? STOREFRONT : props.kinds[page] === "library" && props.kinds.indexOf("library") === page ? SQUARES : undefined)
-  const label = (page: number) =>
-    props.kinds[page] === "store" ? "App Store" : props.kinds[page] === "library" ? `App Library, page ${page - props.kinds.indexOf("library") + 1}` : `Page ${page + 1}`
-  const press = (page: number) => () => {
+  const press = (screen: number) => () => {
     if (editingOwner(props.index)) return home.send({ type: "overview" })
-    if (Date.now() > quiet) home.send({ type: "go", page })
+    if (Date.now() > quiet) home.send({ type: "go", screen })
   }
+  const sections = createMemo(() => runs(editingOwner(props.index) ? props.kinds.filter((kind) => kind === "home") : props.kinds), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
   return (
-    <nav class="dots" ref={(nav) => sized.observe(nav)} aria-label={`${props.owner.name}'s pages`} inert={seen().owner !== props.index || undefined} onPointerDown={slide}>
-      <For each={props.kinds}>
-        {(kind, page) => (
-          <Show when={!(editingOwner(props.index) && kind !== "home")}>
-            <button type="button" class={glyph(page()) ? "library" : "dot"} aria-label={label(page())} aria-current={current() === page() ? "page" : undefined} onClick={press(page())}>
-              <Show when={glyph(page())} fallback={<i />}>
-                {(path) => (
-                  <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
-                    <path d={path()} />
-                  </svg>
-                )}
+    <nav class="dots" ref={(nav) => sized.observe(nav)} aria-label={`${props.owner.name}'s Home Screen`} inert={seen().owner !== props.index || undefined} onPointerDown={slide}>
+      <For each={sections()} keyed={false}>
+        {(section) => {
+          const focused = () => current() >= section().from && current() < section().from + section().count
+          const name = () => SECTIONS[section().kind].name
+          return (
+            <>
+              <button type="button" class="section" aria-label={name()} aria-current={current() === section().from ? "page" : undefined} onClick={press(section().from)}>
+                <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
+                  <path d={SECTIONS[section().kind].path} />
+                </svg>
+              </button>
+              <Show when={section().count > 1}>
+                <span class={["more", { open: focused() }]} inert={!focused() || undefined}>
+                  <span>
+                    <For each={Array.from({ length: section().count - 1 }, (_, at) => section().from + at + 1)}>
+                      {(screen) => (
+                        <button type="button" class="dot" aria-label={`${name()}, ${screen - section().from + 1} of ${section().count}`} aria-current={current() === screen ? "page" : undefined} onClick={press(screen)}>
+                          <i />
+                        </button>
+                      )}
+                    </For>
+                  </span>
+                </span>
               </Show>
-            </button>
-          </Show>
-        )}
+            </>
+          )
+        }}
       </For>
     </nav>
   )
 }
 
-/// The owner switcher and the page dots, one capsule floating at the bottom in the middle, as iOS 26's floating bars
-/// are: the owner's name on the left, which opens the list of every owner, the current one ticked, and their dots on
-/// the right. Both roll as the owners move. While pages are edited it's their dots alone. Its dots are only there for
-/// an owner whose pages don't all show at once.
-function Toolbar(props: { owners: Owner[]; laid: Kind[][]; fit: number }) {
+/// The owner switcher and the sections, one capsule floating at the bottom in the middle, as iOS 26's floating bars
+/// are: the owner's name on the left, which opens the list of every owner, the current one ticked, and their sections'
+/// icons and dots on the right. Both roll as the owners move. While pages are edited it's Home's alone.
+function Toolbar(props: { owners: Owner[]; laid: Kind[][] }) {
   const at = () => state().context.at.owner
   let button!: HTMLButtonElement
   return (
@@ -940,7 +968,7 @@ function Toolbar(props: { owners: Owner[]; laid: Kind[][]; fit: number }) {
       <div class="roll" ref={rolling}>
         <div class="rows">
           <For each={props.owners} keyed={(owner) => owner.key}>
-            {(owner, index) => <Dots owner={owner()} index={index()} kinds={(props.laid[index()]?.length ?? 0) > props.fit || editingOwner(index()) ? (props.laid[index()] ?? []) : []} />}
+            {(owner, index) => <Dots owner={owner()} index={index()} kinds={props.laid[index()] ?? []} />}
           </For>
         </div>
       </div>
@@ -998,14 +1026,21 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
   /// Each owner's App Library, in its pages.
   const shelves = createMemo(() => props.owners.map((owner) => shelve(owner.library)))
-  const laid = createMemo(() => pages().map((homes, owner) => [...homes.map((): Kind => "home"), ...shelves()[owner].map((): Kind => "library"), ...(props.owners[owner].store ? ["store" as Kind] : [])]), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
+  /// Each owner's screenfuls: its sections in order, each as many of its pages side by side as fit, from which page
+  /// of it, and how many. The App Store is one screenful, the whole of it.
+  const screens = createMemo(() => {
+    const fit = room().fit
+    const across = (kind: Kind, length: number) => Array.from({ length: Math.ceil(length / fit) }, (_, at) => ({ kind, from: at * fit, count: Math.min(fit, length - at * fit) }))
+    return pages().map((homes, owner) => [...across("home", homes.length), ...across("library", shelves()[owner].length), ...(props.owners[owner].store ? [{ kind: "store" as Kind, from: 0, count: 1 }] : [])])
+  })
+  const laid = createMemo(() => ({ screens: screens().map((owner) => owner.map(({ kind }) => kind)), fit: room().fit }), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
   // What was just kept shows until the Home Screen has been asked again.
   createEffect(
     () => props.owners,
     () => setKept(),
     { defer: true },
   )
-  createEffect(laid, (pages) => home.send({ type: "laid", pages }))
+  createEffect(laid, ({ screens, fit }) => home.send({ type: "laid", screens, fit }))
   /// The cells of the Home pages, which glide to their new places while they're edited, and not as editing begins.
   const cells = () => root.querySelectorAll<HTMLElement>(".strip .page .cell")
   let wasEditing = false
@@ -1016,26 +1051,19 @@ function HomeScreen(props: { owners: Owner[] }) {
   })
   pending = () => (owned()[state().context.at.owner]?.arranges ? draft(owned()[state().context.at.owner], state().context.at.owner) : undefined)
 
-  /// The kind of the page an owner is on: the one shown, for whoever's shown.
+  /// The section of the screenful an owner is on: the one shown, for whoever's shown.
   const kindOf = (owner: number) => {
-    const { last, pages } = state().context
-    return pages[owner]?.[owner === seen().owner ? seen().page : (last[owner] ?? 0)] ?? "home"
+    const { last, screens } = state().context
+    return screens[owner]?.[owner === seen().owner ? seen().screen : (last[owner] ?? 0)] ?? "home"
   }
-  /// Each owner's pages, across: `strips` are the windows onto them, and `tracks` the rows that move in them.
+  /// Each owner's screenfuls, across: `strips` are the windows onto them, each a screen wide, and `tracks` the rows
+  /// that move in them.
   const tracks: Record<number, HTMLElement> = {}
   const height = () => main.clientHeight || root.clientHeight
-  /// How far apart an owner's pages are, and how far along their row can go before its last page's end shows.
-  const pitch = (owner: number) => {
-    const [first, second] = tracks[owner]?.children ?? []
-    return Math.abs((second as HTMLElement)?.offsetLeft - (first as HTMLElement)?.offsetLeft) || strips[owner]?.clientWidth || root.clientWidth
-  }
-  const furthest = (owner: number) => {
-    const track = tracks[owner]
-    if (!track) return 0
-    return Math.max(0, (track.children.length - 1) * pitch(owner) - (strips[owner].clientWidth - track.firstElementChild!.getBoundingClientRect().width))
-  }
-  /// How many places an owner's row of pages stops at: one fewer for each page beyond the first a wide window shows.
-  const stops = (owner: number) => Math.round(furthest(owner) / pitch(owner)) + 1
+  /// How far apart an owner's screenfuls are, a screen's width, and how many their row stops at.
+  const pitch = (owner: number) => strips[owner]?.clientWidth || root.clientWidth
+  const stops = (owner: number) => tracks[owner]?.children.length || 1
+  const furthest = (owner: number) => (stops(owner) - 1) * pitch(owner)
   /// The owners, up and down, and each owner's pages, across: where they are, as the pager moves them.
   const down = spring((y) => {
     main.style.translate = `0 ${-y}px`
@@ -1051,14 +1079,14 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// The owner and page nearest where they are, which the dots and the owner's name follow.
   const look = () => {
     const owner = Math.max(0, Math.min(owned().length - 1, Math.round(down.value / height())))
-    setSeen({ owner, page: Math.round(sideways(owner).value / pitch(owner)) })
+    setSeen({ owner, screen: Math.round(sideways(owner).value / pitch(owner)) })
   }
 
   /// Moves the pages to `at`, as the machine says: gliding, or at once where they're only laid out again.
   const slide = (at: At, smooth: boolean) => {
     const move = smooth ? glide : jump
     move(down, at.owner * height())
-    move(sideways(at.owner), Math.min(furthest(at.owner), at.page * pitch(at.owner)))
+    move(sideways(at.owner), at.screen * pitch(at.owner))
   }
 
   /// A finger on the pages swipes them: across between an owner's pages, and up and down between owners, unless the
@@ -1112,13 +1140,13 @@ function HomeScreen(props: { owners: Owner[] }) {
     const velocity = event.type === "pointercancel" ? 0 : speed(done.moves, event.timeStamp)
     if (done.axis === "x") {
       const moving = sideways(done.owner)
-      const page = settle(done.from, moving.value / pitch(done.owner), velocity, stops(done.owner))
-      glide(moving, Math.min(furthest(done.owner), page * pitch(done.owner)), velocity)
-      home.send({ type: "settled", at: { owner: done.owner, page } })
+      const screen = settle(done.from, moving.value / pitch(done.owner), velocity, stops(done.owner))
+      glide(moving, screen * pitch(done.owner), velocity)
+      home.send({ type: "settled", at: { owner: done.owner, screen } })
     } else {
       const owner = settle(done.from, down.value / height(), velocity, owned().length)
       glide(down, owner * height(), velocity)
-      home.send({ type: "settled", at: { owner, page: Math.round(sideways(owner).value / pitch(owner)) } })
+      home.send({ type: "settled", at: { owner, screen: Math.round(sideways(owner).value / pitch(owner)) } })
     }
   }
   /// The pages have the finger, not the web view the Home Screen is in: an iPhone's scrolls it up and down, bouncing,
@@ -1160,9 +1188,9 @@ function HomeScreen(props: { owners: Owner[] }) {
       let side = 0
       // A page turns after a moment at its edge, and again while it stays there, as an iPhone's does.
       const turn = () => {
-        const page = home.getSnapshot().context.at.page
+        const screen = home.getSnapshot().context.at.screen
         home.send({ type: "flip", by: side as 1 | -1 })
-        if (home.getSnapshot().context.at.page !== page) haptic("selection")
+        if (home.getSnapshot().context.at.screen !== screen) haptic("selection")
         edge = setTimeout(turn, 900)
       }
       const move = (event: PointerEvent) => {
@@ -1255,7 +1283,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       // Once it's drawn again for the new size, where each cell is is where it is.
       requestAnimationFrame(() => reflow(cells(), false))
       const { at, last } = home.getSnapshot().context
-      owned().forEach((_, owner) => jump(sideways(owner), Math.min(furthest(owner), (owner === at.owner ? at.page : (last[owner] ?? 0)) * pitch(owner))))
+      owned().forEach((_, owner) => jump(sideways(owner), (owner === at.owner ? at.screen : (last[owner] ?? 0)) * pitch(owner)))
       jump(down, at.owner * height())
     }
     const watched = new ResizeObserver(resized)
@@ -1287,7 +1315,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (Math.abs(total) < 30) return
       done = true
       const by = Math.sign(total) as 1 | -1
-      home.send(axis === "y" ? { type: "step", owner: by } : { type: "step", page: (by * rtl()) as 1 | -1 })
+      home.send(axis === "y" ? { type: "step", owner: by } : { type: "step", screen: (by * rtl()) as 1 | -1 })
     }
     root.addEventListener("wheel", wheel, { passive: false })
     root.addEventListener("pointerdown", press)
@@ -1306,7 +1334,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (event.key === "Escape" && home.getSnapshot().matches({ editing: "overview" })) return home.send({ type: "dismiss" })
       if (event.key === "Escape" && (home.getSnapshot().matches({ editing: "still" }) || home.getSnapshot().matches({ editing: "dragging" }))) return home.send({ type: "done" })
       if (!home.getSnapshot().matches("nothing")) return
-      const to = ({ ArrowRight: { page: rtl() }, ArrowLeft: { page: -rtl() }, ArrowDown: { owner: 1 }, ArrowUp: { owner: -1 } } as Record<string, { page: 1 | -1 } | { owner: 1 | -1 }>)[event.key]
+      const to = ({ ArrowRight: { screen: rtl() }, ArrowLeft: { screen: -rtl() }, ArrowDown: { owner: 1 }, ArrowUp: { owner: -1 } } as Record<string, { screen: 1 | -1 } | { owner: 1 | -1 }>)[event.key]
       if (!to || ("owner" in to && kinds[kindOf(home.getSnapshot().context.at.owner)].scrolls)) return
       event.preventDefault()
       home.send({ type: "step", ...to })
@@ -1335,27 +1363,37 @@ function HomeScreen(props: { owners: Owner[] }) {
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages-shown": Math.min(room().fit, laid()[state().context.at.owner]?.length ?? 1), "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <main class="owners" ref={main}>
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (
             <section class="owner" aria-label={owner().name}>
-              <div class="strip" ref={registered(strips, index)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }}>
+              <div class="strip" ref={registered(strips, index)}>
                 <div class="track" ref={registered(tracks, index)}>
-                  <For each={pages()[index()] ?? [[]]} keyed={false}>
-                    {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
+                  <For each={screens()[index()] ?? []} keyed={false}>
+                    {(screen) => (
+                      <div class={["screen", screen().kind]}>
+                        <Show when={screen().kind === "home"}>
+                          <For each={(pages()[index()] ?? []).slice(screen().from, screen().from + screen().count)} keyed={false}>
+                            {(placed, at) => <HomePage owner={owner()} index={index()} page={screen().from + at} placed={placed()} />}
+                          </For>
+                        </Show>
+                        <Show when={screen().kind === "library"}>
+                          <For each={shelves()[index()].slice(screen().from, screen().from + screen().count)} keyed={false}>
+                            {(folders) => <Library owner={owner()} index={index()} folders={folders()} places={places} />}
+                          </For>
+                        </Show>
+                        <Show when={screen().kind === "store" && owner().store}>{(name) => <StorePage name={name()} shown={seen().owner === index()} />}</Show>
+                      </div>
+                    )}
                   </For>
-                  <For each={shelves()[index()]} keyed={false}>
-                    {(folders) => <Library owner={owner()} index={index()} folders={folders()} places={places} />}
-                  </For>
-                  <Show when={owner().store}>{(name) => <StorePage name={name()} shown={seen().owner === index()} />}</Show>
                 </div>
               </div>
             </section>
           )}
         </For>
       </main>
-      <Toolbar owners={props.owners} laid={laid()} fit={room().fit} />
+      <Toolbar owners={props.owners} laid={laid().screens} />
       <Show when={state().matches("editing")}>
         <EditBar />
       </Show>

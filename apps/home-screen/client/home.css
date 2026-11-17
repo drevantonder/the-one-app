@@ -1,9 +1,10 @@
-/* The Home Screen: owners one above another, and in each, its pages and then its App Library's side by side, moved by
-   hand as a finger swipes them (pager.ts), not scrolled: the browser has every touch on them but the up and down of a
-   page that scrolls. The owner switcher and the page dots float at the bottom in the middle, in one bar.
-   A wide window (`.wide`) shows a phone's pages, each drawn `--pages-scale` times larger to suit the window's
-   height, side by side, as many whole ones as fit, up to as many as the owner has (`--pages`), with `--pages-side`
-   beside them and `--pages-gap` between: home.tsx's `measure`. */
+/* The Home Screen: owners one above another, and in each, its sections' screenfuls side by side (Home's, the App
+   Library's, the App Store), each a screen wide, moved by hand as a finger swipes them (pager.ts), not scrolled: the
+   browser has every touch on them but the up and down of a page that scrolls. The owner switcher and the sections'
+   icons and dots float at the bottom in the middle, in one bar.
+   On a wide window (`.wide`) a screenful shows a phone's pages, each drawn `--pages-scale` times larger to suit the
+   window's height, side by side, as many whole ones as fit (`--pages`), with `--pages-side` beside them and
+   `--pages-gap` between: home.tsx's `measure`; a screenful with fewer has them in its middle. */
 html,
 body {
   height: 100%;
@@ -35,7 +36,7 @@ body {
   height: 100%;
   container-type: inline-size;
 }
-/* An owner's window onto their pages, and the row of them that moves in it. */
+/* An owner's window onto their screenfuls, and the row of them that moves in it. */
 .strip {
   height: 100%;
   overflow: hidden;
@@ -77,27 +78,35 @@ body {
 .page.scrolls > * {
   min-height: calc(100% + 1px);
 }
+/* A screenful is a screen wide, its pages in its middle. */
+.screen {
+  display: flex;
+  justify-content: center;
+  flex: 0 0 100%;
+  height: 100%;
+  min-width: 0;
+}
 /* Each page takes an equal share of the room, as wide as a phone or wider, and is a phone's page laid out in that share
    made `--pages-scale` times smaller, then drawn that much larger, so everything on it is where the owner put it, only
-   bigger: its layout box is the share, and the page inside it is scaled from its corner. */
-.home.wide :is(.strip, .edit-bar) {
+   bigger: its layout box is the share, and the page inside it is scaled from its corner. The App Store isn't a phone's
+   page: it's the whole screen. */
+.home.wide :is(.screen, .edit-bar) {
   --page-width: min((100cqi - 2 * var(--pages-side) - (var(--pages) - 1) * var(--pages-gap)) / var(--pages), 35rem * var(--pages-scale));
-  width: calc(var(--pages) * (var(--page-width) + var(--pages-gap)) - var(--pages-gap));
 }
-.home.wide .strip {
-  margin-inline: auto;
+.home.wide .edit-bar {
+  width: calc(var(--pages-shown) * (var(--page-width) + var(--pages-gap)) - var(--pages-gap));
 }
-.home.wide .track {
+.home.wide .screen {
   gap: var(--pages-gap);
 }
-.home.wide .track > .page {
+.home.wide .screen > .page:not(.store) {
   flex: 0 0 calc(var(--page-width) / var(--pages-scale));
   height: calc(100% / var(--pages-scale));
   margin-inline-end: calc(var(--page-width) - var(--page-width) / var(--pages-scale));
   scale: var(--pages-scale);
   transform-origin: 0 0;
 }
-.home.wide .track > .page:dir(rtl) {
+.home.wide .screen > .page:dir(rtl) {
   transform-origin: 100% 0;
 }
 /* What's over the pages is as much larger as they are, scaled as they are: `zoom` would size a page's container
@@ -437,8 +446,30 @@ body {
   font-size: 1rem;
   cursor: pointer;
 }
-.dots .library {
+.dots .section {
   padding: 0 0.5rem;
+}
+.dots .section .ui-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+/* A section's dots after its icon, there only while it's the one shown: they open out of it and fold back. */
+.dots .more {
+  display: grid;
+  grid-template-columns: 0fr;
+  height: 100%;
+  opacity: 0;
+  transition: grid-template-columns var(--move-settle) var(--ease-settle), opacity var(--move-settle) var(--ease-settle);
+}
+.dots .more.open {
+  grid-template-columns: 1fr;
+  opacity: 1;
+}
+.dots .more > span {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  margin-inline-start: -0.25rem;
 }
 .dots button[aria-current] {
   color: var(--foreground);
@@ -469,7 +500,7 @@ body {
   .dots button {
     padding: 0 0.125rem;
   }
-  .dots .library {
+  .dots .section {
     padding: 0 0.625rem;
   }
 }
@@ -611,7 +642,6 @@ body {
   pointer-events: auto;
 }
 .home.wide .top .edit-bar {
-  --pages: var(--pages-shown);
   max-width: none;
   padding-inline: calc(0.75rem * var(--pages-scale));
 }

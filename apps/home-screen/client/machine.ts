@@ -1,20 +1,21 @@
-// The Home Screen's one state machine: where it is, `{ owner, page }`, what's open on top of it, one thing at a time,
+// The Home Screen's one state machine: where it is, `{ owner, screen }`, what's open on top of it, one thing at a time,
 // and editing an owner's Home pages, as a phone's Home Screen is edited. home.tsx keeps its snapshot as one signal and
 // draws from it, tells it what happened, and does what it says: moves the pages (`slide`), and keeps what was edited
 // (`arrange`).
 import { assign, emit, setup } from "xstate"
 import type { Item, Listed } from "./types.ts"
 
-/// What a page is. Every owner (you, everyone, each of your groups) has a list of pages, each of a kind, and each kind
-/// says how it behaves: whether it scrolls up and down itself, which keeps a vertical swipe on it rather than moving
-/// between owners; and whether picking another owner from it lands on that owner's first of its kind rather than on
-/// the page they were last on. The owner switcher and the page dots show over every kind.
+/// The sections of a Home Screen, in order. Every owner (you, everyone, each of your groups) has Home, their pages, then
+/// their App Library, then the App Store. Each is a screenful or more, never less: as many of its pages side by side as
+/// fit on the screen it's on (one on a phone), and a swipe moves one screenful. Each section says how it behaves:
+/// whether it scrolls up and down itself, which keeps a vertical swipe on it rather than moving between owners; and
+/// whether picking another owner from it lands on that owner's first screenful of it rather than where they were last.
 export const kinds = {
-  /** A fixed grid of apps and widgets, as a phone's Home Screen page. */
+  /** Home: fixed grids of apps and widgets, as a phone's Home Screen pages. */
   home: { scrolls: false, one: false },
-  /** A page of the App Library, after the Home pages: every app installed for them, by category. */
+  /** The App Library: every app installed for them, by category. */
   library: { scrolls: false, one: true },
-  /** The App Store, the last page: its screen, which scrolls. */
+  /** The App Store: its screen, which scrolls. */
   store: { scrolls: true, one: true },
 } as const
 
@@ -86,10 +87,10 @@ export const shown = (pages: Page[]) => pages.flatMap((page, index) => (page.hid
 
 const same = (a: Item, b: Item) => (a.widget ?? a.entrypoint) === (b.widget ?? b.entrypoint) && a.size === b.size
 
-/** Where the Home Screen is: an owner, and a page of their list. */
+/** Where the Home Screen is: an owner, and a screenful of theirs. */
 export interface At {
   owner: number
-  page: number
+  screen: number
 }
 
 /** A category of an owner's App Library, opened: whose, and its name there. */
@@ -116,10 +117,12 @@ export interface Editing {
 }
 
 interface Context {
-  /** Each owner's pages, by kind, in order. */
-  pages: Kind[][]
+  /** Each owner's screenfuls, each by its section, in order. */
+  screens: Kind[][]
+  /** How many Home pages a screenful has side by side. */
+  fit: number
   at: At
-  /** The page each owner was last on, which moving to them lands on. */
+  /** The screenful each owner was last on, which moving to them lands on. */
   last: number[]
   category?: Opened
   held?: Held
@@ -127,15 +130,16 @@ interface Context {
 }
 
 export type Event =
-  /** The owners and their pages, each by its kind, as they're laid out now. */
-  | { type: "laid"; pages: Kind[][] }
+  /** The owners and their screenfuls, each by its section, as they're laid out now, and how many Home pages each
+   * screenful has. */
+  | { type: "laid"; screens: Kind[][]; fit: number }
   /** The Home Screen came to rest here, as a finger or a scroll left it. */
   | { type: "settled"; at: At }
-  /** One page along, or one owner: a key, a wheel or a trackpad. */
-  | { type: "step"; page: 1 | -1 }
+  /** One screenful along, or one owner: a key, a wheel or a trackpad. */
+  | { type: "step"; screen: 1 | -1 }
   | { type: "step"; owner: 1 | -1 }
-  /** A page of this owner's, by its dot. */
-  | { type: "go"; page: number }
+  /** A screenful of this owner's, by its section's icon or dot. */
+  | { type: "go"; screen: number }
   /** The owner switcher's list opened, an owner was picked from it, or it was dismissed. */
   | { type: "list" }
   | { type: "pick"; owner: number }
@@ -156,12 +160,13 @@ export type Event =
   | { type: "lift"; held: Held; editing?: Editing }
   /** What's lifted is over a place: on the page shown, before the item at `index`, or last. */
   | { type: "over"; page: number; index: number }
-  /** What's lifted was held at the edge of the page: it goes to the next or the previous, a new one past the last. */
+  /** What's lifted was held at the edge of the screen: it goes to the page past it, on the next screenful or the
+   * previous, a new one past the last. */
   | { type: "flip"; by: 1 | -1 }
   | { type: "drop" }
   /** An item's ⊖: off the page, still in the App Library. */
   | { type: "remove"; page: number; index: number }
-  /** + opens the widget gallery; a widget picked in a size goes first on the page shown. */
+  /** + opens the widget gallery; a widget picked in a size goes first on the screenful shown. */
   | { type: "gallery" }
   | { type: "place"; item: Item }
   /** The page dots open the page overview, where pages are put in order, hidden and deleted. */
@@ -178,11 +183,11 @@ export type Emitted = { type: "slide"; at: At; smooth: boolean } | { type: "arra
 
 const within = (number: number, length: number) => Math.max(0, Math.min(length - 1, number))
 
-/** Where a step leads from `at`: the next or previous page, or the page the next or previous owner was last on. */
-function stepped({ pages, at, last }: Context, event: Extract<Event, { type: "step" }>): At {
-  if ("page" in event) return { ...at, page: within(at.page + event.page, pages[at.owner]?.length ?? 1) }
-  const owner = within(at.owner + event.owner, pages.length)
-  return { owner, page: last[owner] ?? 0 }
+/** Where a step leads from `at`: the next or previous screenful, or the one the next or previous owner was last on. */
+function stepped({ screens, at, last }: Context, event: Extract<Event, { type: "step" }>): At {
+  if ("screen" in event) return { ...at, screen: within(at.screen + event.screen, screens[at.owner]?.length ?? 1) }
+  const owner = within(at.owner + event.owner, screens.length)
+  return { owner, screen: last[owner] ?? 0 }
 }
 
 /// The pages being edited with what's held put at `index` of the page shown at `page`, from wherever it was.
@@ -205,38 +210,38 @@ export const machine = setup({
     moves: ({ context, event }) => {
       const step = event as Extract<Event, { type: "step" }>
       const to = stepped(context, step)
-      const here = context.pages[context.at.owner]?.[context.at.page] ?? "home"
-      return (to.owner !== context.at.owner || to.page !== context.at.page) && ("page" in step || !kinds[here].scrolls)
+      const here = context.screens[context.at.owner]?.[context.at.screen] ?? "home"
+      return (to.owner !== context.at.owner || to.screen !== context.at.screen) && ("screen" in step || !kinds[here].scrolls)
     },
     // A page is deleted only once it's hidden, as a phone's is.
     hidden: ({ context, event }) => !!context.editing?.pages[(event as Extract<Event, { type: "delete" }>).page]?.hidden,
   },
   actions: {
-    // Every owner keeps the page they were on, as far as they still have it.
+    // Every owner keeps the screenful they were on, as far as they still have it.
     lay: assign(({ context, event }) => {
-      const { pages } = event as Extract<Event, { type: "laid" }>
-      const last = pages.map((kinds, owner) => within(context.last[owner] ?? 0, kinds.length))
-      const owner = within(context.at.owner, pages.length)
-      return { pages, last, at: { owner, page: last[owner] ?? 0 } }
+      const { screens, fit } = event as Extract<Event, { type: "laid" }>
+      const last = screens.map((kinds, owner) => within(context.last[owner] ?? 0, kinds.length))
+      const owner = within(context.at.owner, screens.length)
+      return { screens, fit, last, at: { owner, screen: last[owner] ?? 0 } }
     }),
     // Where it is now, which its owner's pages remember.
     be: assign(({ context, event }) => {
       const { at } = event as Extract<Event, { type: "settled" }>
-      return { at, last: context.last.with(at.owner, at.page) }
+      return { at, last: context.last.with(at.owner, at.screen) }
     }),
     step: assign(({ context, event }) => {
       const at = stepped(context, event as Extract<Event, { type: "step" }>)
-      return { at, last: context.last.with(at.owner, at.page) }
+      return { at, last: context.last.with(at.owner, at.screen) }
     }),
-    go: assign(({ context: { at, last, pages }, event }) => {
-      const page = within((event as Extract<Event, { type: "go" }>).page, pages[at.owner]?.length ?? 1)
-      return { at: { ...at, page }, last: last.with(at.owner, page) }
+    go: assign(({ context: { at, last, screens }, event }) => {
+      const screen = within((event as Extract<Event, { type: "go" }>).screen, screens[at.owner]?.length ?? 1)
+      return { at: { ...at, screen }, last: last.with(at.owner, screen) }
     }),
-    pick: assign(({ context: { at, last, pages }, event }) => {
-      const owner = within((event as Extract<Event, { type: "pick" }>).owner, pages.length)
-      const here = pages[at.owner]?.[at.page] ?? "home"
-      const theirs = kinds[here].one ? pages[owner]?.indexOf(here) ?? -1 : -1
-      return { at: { owner, page: theirs >= 0 ? theirs : (last[owner] ?? 0) } }
+    pick: assign(({ context: { at, last, screens }, event }) => {
+      const owner = within((event as Extract<Event, { type: "pick" }>).owner, screens.length)
+      const here = screens[at.owner]?.[at.screen] ?? "home"
+      const theirs = kinds[here].one ? screens[owner]?.indexOf(here) ?? -1 : -1
+      return { at: { owner, screen: theirs >= 0 ? theirs : (last[owner] ?? 0) } }
     }),
     glide: emit(({ context: { at } }) => ({ type: "slide" as const, at, smooth: true })),
     jump: emit(({ context: { at } }) => ({ type: "slide" as const, at, smooth: false })),
@@ -245,23 +250,27 @@ export const machine = setup({
     hold: assign({ held: ({ event }) => (event as Extract<Event, { type: "hold" }>).held }),
     let: assign({ held: undefined }),
     edit: assign({ editing: ({ event }) => (event as Extract<Event, { type: "edit" }>).editing }),
-    // Lifted from the App Library, it's on the owner's last Home page to start with, which is shown.
+    // Lifted from the App Library, it's on the owner's last Home page to start with, whose screenful is shown.
     lift: assign(({ context, event }) => {
       const { held, editing = context.editing! } = event as Extract<Event, { type: "lift" }>
       if (held.from === "page") return { held, editing }
       const page = Math.max(0, shown(editing.pages).length - 1)
       const moved = put(editing, held, page, Infinity)
-      return { ...moved, at: { owner: editing.owner, page: moved.held.page }, last: context.last.with(editing.owner, moved.held.page) }
+      const screen = Math.floor(moved.held.page / context.fit)
+      return { ...moved, at: { owner: editing.owner, screen }, last: context.last.with(editing.owner, screen) }
     }),
     over: assign(({ context, event }) => {
       const { page, index } = event as Extract<Event, { type: "over" }>
       return put(context.editing!, context.held!, page, index)
     }),
+    // To the page just past the screen's edge it was held at: the next screenful's first, or the previous one's last.
     flip: assign(({ context, event }) => {
       const { by } = event as Extract<Event, { type: "flip" }>
-      const page = Math.max(0, context.held!.page + by)
+      const { fit, at } = context
+      const page = Math.max(0, by > 0 ? (at.screen + 1) * fit : at.screen * fit - 1)
       const moved = put(context.editing!, context.held!, page, Infinity)
-      return { ...moved, at: { ...context.at, page: moved.held.page }, last: context.last.with(context.at.owner, moved.held.page) }
+      const screen = Math.floor(moved.held.page / fit)
+      return { ...moved, at: { ...at, screen }, last: context.last.with(at.owner, screen) }
     }),
     remove: assign(({ context, event }) => {
       const { page, index } = event as Extract<Event, { type: "remove" }>
@@ -271,7 +280,7 @@ export const machine = setup({
     place: assign(({ context, event }) => {
       const { item } = event as Extract<Event, { type: "place" }>
       const editing = context.editing!
-      const at = shown(editing.pages)[context.at.page] ?? editing.pages.length
+      const at = shown(editing.pages)[context.at.screen * context.fit] ?? editing.pages.length
       const pages = editing.pages.map((one) => ({ ...one }))
       if (at === pages.length) pages.push({ items: [] })
       pages[at] = { ...pages[at], items: [item, ...pages[at].items] }
@@ -300,7 +309,7 @@ export const machine = setup({
   },
 }).createMachine({
   id: "home",
-  context: { pages: [], at: { owner: 0, page: 0 }, last: [] },
+  context: { screens: [], fit: 1, at: { owner: 0, screen: 0 }, last: [] },
   initial: "nothing",
   on: {
     // Where it is follows the pages, whatever's open.
