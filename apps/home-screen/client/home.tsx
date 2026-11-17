@@ -3,7 +3,7 @@
 // owners, unless a page scrolls itself. The pages move by hand, as a phone's do (pager.ts). The
 // owner's name, in the bar at the bottom beside their page dots, opens a list of every owner. A page never scrolls:
 // it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole pages of an owner's
-// side by side as fit, one to three. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
+// side by side as fit, each a phone's page drawn larger to suit the window's height. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
 // touch and hold an app or a widget (press and hold it, or right-click it, with a mouse), then Edit Home Screen, or
 // hold it a while longer, or touch and hold a page's empty space. Where it is, what's open over it and the editing are
 // one state machine (machine.ts), whose snapshot is one signal here.
@@ -51,6 +51,10 @@ addEventListener("message", ({ source, data }) => {
 /// The owner and page nearest where the pages are as they move, which the dots follow during a swipe, as a phone's do,
 /// rather than once it ends.
 const [seen, setSeen] = createSignal<At>({ owner: 0, page: 0 }, { equals: (a, b) => a.owner === b.owner && a.page === b.page })
+/// How much a wide window draws the Home Screen larger than a phone does: a phone's pages, scaled to the window's
+/// height, twice at most, so a bigger screen shows more pages rather than larger icons. Set by `measure`.
+let scale = 1
+
 /// The owner switcher's names and the owners' page dots, which roll together as the owners move: each a window onto a
 /// strip with a row for every owner. `at` is where the owners are, in owners. Each window is as wide as the row it
 /// shows, or between two rows' widths as the owners pass, so the bar fits whoever's shown, and a row fades as it
@@ -71,9 +75,14 @@ function roll(at = rolled) {
     window.style.width = `${sizes[low] + (sizes[high] - sizes[low]) * (near - low)}px`
   }
 }
-/// Each row's own width, measured whenever one changes.
+/// Each row's own width, measured whenever one changes, in the bar's own points: it's drawn larger on a wide window,
+/// perhaps still on its way there.
 const sized = new ResizeObserver(() => {
-  for (const window of rolls) widths.set(window, [...window.firstElementChild!.children].map((row) => row.getBoundingClientRect().width))
+  for (const window of rolls) {
+    const bar = window.closest<HTMLElement>(".toolbar")!
+    const drawn = bar.getBoundingClientRect().height / bar.offsetHeight || 1
+    widths.set(window, [...window.firstElementChild!.children].map((row) => row.getBoundingClientRect().width / drawn))
+  }
   roll()
 })
 const rolling = (window: HTMLElement) => rolls.add(window)
@@ -432,7 +441,8 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
     const place = props.places.get(`${props.opened.owner}:${props.opened.name}`)
     if (!place || !panel.isConnected) return
     const [from, to] = [place.getBoundingClientRect(), panel.getBoundingClientRect()]
-    const moved = `translate(${from.x + from.width / 2 - (to.x + to.width / 2)}px, ${from.y + from.height / 2 - (to.y + to.height / 2)}px) scale(${from.width / to.width}, ${from.height / to.height})`
+    // It's drawn `scale` times larger, its own points with it, so the way across the window is that many fewer of them.
+    const moved = `translate(${(from.x + from.width / 2 - (to.x + to.width / 2)) / scale}px, ${(from.y + from.height / 2 - (to.y + to.height / 2)) / scale}px) scale(${from.width / to.width}, ${from.height / to.height})`
     const timing: KeyframeAnimationOptions = { duration: still.matches ? 0 : 320, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "both" }
     const way = <T,>(frames: T[]) => (opening ? frames : frames.toReversed())
     veil.animate(way([{ opacity: 0 }, { opacity: 1 }]), timing)
@@ -574,9 +584,12 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
     ghostMenu.animate([{ opacity: menuNow?.opacity ?? 1, scale: menuNow?.scale ?? "1" }, { opacity: 0, scale: still.matches ? "1" : "0.25" }], settling)
     if (!still.matches) ghostCopy?.animate([{ scale: copyNow?.scale ?? "1.06" }, { scale: "1" }], settling)
   }
-  const rect = props.held.rect ?? { x: innerWidth / 2, y: innerHeight / 2, width: 0, height: 0 }
-  const below = rect.y + rect.height < innerHeight * 0.6
-  const left = Math.max(12, Math.min(innerWidth - 252, rect.x))
+  // Where it is, in the points of the layer it's lifted onto, which is drawn as much larger as the pages are.
+  const [width, height] = [innerWidth / scale, innerHeight / scale]
+  const held = props.held.rect
+  const rect = held ? { x: held.x / scale, y: held.y / scale, width: held.width / scale, height: held.height / scale } : { x: width / 2, y: height / 2, width: 0, height: 0 }
+  const below = rect.y + rect.height < height * 0.6
+  const left = Math.max(12, Math.min(width - 252, rect.x))
   const item = props.held.item
   // An app of the App Library that's on a page already has no Add to Home Screen.
   const added = !!item && props.owner.pages.some((page) => page.items.some((other) => other.entrypoint === item.entrypoint))
@@ -596,7 +609,7 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
         class="hold-menu"
         role="menu"
         ref={menu}
-        style={{ left: `${left}px`, "transform-origin": `${rect.x + rect.width / 2 - left}px ${below ? "0" : "100%"}`, ...(below ? { top: `${rect.y + rect.height + 12}px` } : { bottom: `${innerHeight - rect.y + 12}px` }) }}
+        style={{ left: `${left}px`, "transform-origin": `${rect.x + rect.width / 2 - left}px ${below ? "0" : "100%"}`, ...(below ? { top: `${rect.y + rect.height + 12}px` } : { bottom: `${height - rect.y + 12}px` }) }}
       >
         <Show when={!library}>
           <button type="button" role="menuitem" onClick={edit}>
@@ -853,12 +866,15 @@ function EditBar() {
   )
 }
 
-/// Room for its pages side by side, and whether the window is wide: the window's, as it changes.
+/// Whether the window is wide, how much larger its pages are drawn (`scale`), the gaps beside and between them, and
+/// how many whole pages fit side by side at a phone's width: the window's, as it changes.
 function measure() {
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
   const wide = innerWidth >= 34 * rem
-  const fit = wide ? Math.max(1, Math.min(3, Math.floor((innerWidth - 4 * rem + 3 * rem) / (26 * rem)))) : 1
-  return { wide, fit }
+  scale = wide ? Math.max(1, Math.min(2, innerHeight / 900)) : 1
+  const [side, gap] = [2 * rem * scale, 3 * rem * Math.min(scale, 1.6)]
+  const fit = wide ? Math.max(1, Math.floor((innerWidth - 2 * side + gap) / (390 * scale + gap))) : 1
+  return { wide, fit, scale, side, gap }
 }
 
 function HomeScreen(props: { owners: Owner[] }) {
@@ -916,7 +932,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const furthest = (owner: number) => {
     const track = tracks[owner]
     if (!track) return 0
-    return Math.max(0, (track.children.length - 1) * pitch(owner) - (strips[owner].clientWidth - (track.firstElementChild as HTMLElement).offsetWidth))
+    return Math.max(0, (track.children.length - 1) * pitch(owner) - (strips[owner].clientWidth - track.firstElementChild!.getBoundingClientRect().width))
   }
   /// How many places an owner's row of pages stops at: one fewer for each page beyond the first a wide window shows.
   const stops = (owner: number) => Math.round(furthest(owner) / pitch(owner)) + 1
@@ -1027,13 +1043,16 @@ function HomeScreen(props: { owners: Owner[] }) {
       const rect = held.rect ?? { x: pointer.x - 30, y: pointer.y - 40, width: 60, height: 80 }
       const copy = document.createElement("div")
       copy.className = "carried"
-      Object.assign(copy.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` })
+      // It's laid out at a phone's size and drawn as much larger as the pages are, from its middle, which is where
+      // what it was had its middle.
+      const [width, height] = [rect.width / scale, rect.height / scale]
+      Object.assign(copy.style, { left: `${rect.x + (rect.width - width) / 2}px`, top: `${rect.y + (rect.height - height) / 2}px`, width: `${width}px`, height: `${height}px` })
       const item = held.item!
       const follow = (x: number, y: number) => (copy.style.translate = `${x - grab.x}px ${y - grab.y}px`)
       follow(pointer.x, pointer.y)
       copy.innerHTML = item.widget ? `<div class="ui-widget" data-size="${item.size}"></div>` : `<span class="tile"><span class="icon"><img src="${(item as Entrypoint).icon}" alt=""></span><span>${(item as Entrypoint).name}</span></span>`
       root.append(copy)
-      if (!still.matches) copy.animate([{ scale: "1", filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" })
+      if (!still.matches) copy.animate([{ scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" })
       haptic("medium")
       const moves: { time: number; x: number; y: number }[] = []
       let edge: ReturnType<typeof setTimeout> | undefined
@@ -1063,7 +1082,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         if (!page) return
         // Over where each cell sits, not where it's drawn while it glides there, or one gliding past takes the place.
         const cell = [...page.querySelectorAll<HTMLElement>(".cell[data-index]:not(.lifted)")].find((one) => {
-          const [box, by] = [one.getBoundingClientRect(), offset(one)]
+          const [box, by] = [one.getBoundingClientRect(), offset(one, scale)]
           return event.clientX >= box.left - by.x && event.clientX < box.right - by.x && event.clientY >= box.top - by.y && event.clientY < box.bottom - by.y
         })
         const { held } = home.getSnapshot().context
@@ -1101,7 +1120,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         place.style.visibility = "hidden"
         const target = () => {
           const to = place.getBoundingClientRect()
-          const glided = offset(place)
+          const glided = offset(place, scale)
           return { x: to.x - glided.x + to.width / 2 - (rect.x + rect.width / 2), y: to.y - glided.y + to.height / 2 - (rect.y + rect.height / 2) }
         }
         const draw = () => {
@@ -1119,7 +1138,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         Object.assign(y, { value: fromY, target: to.y })
         glide(x, to.x, thrown.x)
         glide(y, to.y, thrown.y)
-        copy.animate([{}, { scale: "1", filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
+        copy.animate([{}, { scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
       }
     },
   )
@@ -1210,7 +1229,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <main class="owners" ref={main}>
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (

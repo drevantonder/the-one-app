@@ -1,8 +1,9 @@
 /* The Home Screen: owners one above another, and in each, its pages and then its App Library's side by side, moved by
    hand as a finger swipes them (pager.ts), not scrolled: the browser has every touch on them but the up and down of a
    page that scrolls. The owner switcher and the page dots float at the bottom in the middle, in one bar.
-   A wide window (`.wide`) shows whole pages of 23rem side by side, as many as fit, up to as many as
-   the owner has (`--pages`). */
+   A wide window (`.wide`) shows a phone's pages, each drawn `--pages-scale` times larger to suit the window's
+   height, side by side, as many whole ones as fit, up to as many as the owner has (`--pages`), with `--pages-side`
+   beside them and `--pages-gap` between: home.tsx's `measure`. */
 html,
 body {
   height: 100%;
@@ -32,6 +33,7 @@ body {
 .owner {
   position: relative;
   height: 100%;
+  container-type: inline-size;
 }
 /* An owner's window onto their pages, and the row of them that moves in it. */
 .strip {
@@ -74,19 +76,49 @@ body {
 .page.scrolls > * {
   min-height: calc(100% + 1px);
 }
+/* Each page takes an equal share of the room, as wide as a phone or wider, and is a phone's page laid out in that share
+   made `--pages-scale` times smaller, then drawn that much larger, so everything on it is where the owner put it, only
+   bigger: its layout box is the share, and the page inside it is scaled from its corner. */
 .home.wide .strip {
-  width: calc(var(--pages) * 26rem - 3rem);
+  --page-width: min((100cqi - 2 * var(--pages-side) - (var(--pages) - 1) * var(--pages-gap)) / var(--pages), 35rem * var(--pages-scale));
+  width: calc(var(--pages) * (var(--page-width) + var(--pages-gap)) - var(--pages-gap));
   margin-inline: auto;
 }
 .home.wide .track {
-  gap: 3rem;
+  gap: var(--pages-gap);
 }
-.home.wide .page {
-  flex: 0 0 23rem;
+.home.wide .track > .page {
+  flex: 0 0 calc(var(--page-width) / var(--pages-scale));
+  height: calc(100% / var(--pages-scale));
+  margin-inline-end: calc(var(--page-width) - var(--page-width) / var(--pages-scale));
   padding-top: 2rem;
+  scale: var(--pages-scale);
+  transform-origin: 0 0;
 }
-.home.wide.editing .page {
+.home.wide .track > .page:dir(rtl) {
+  transform-origin: 100% 0;
+}
+.home.wide.editing .track > .page {
   padding-top: 4.5rem;
+}
+/* What's over the pages is as much larger as they are, scaled as they are: `zoom` would size a page's container
+   units, and anything in rem, differently in WebKit and Chromium. The bar grows from its foot, + and Done from their
+   top, an opened category from the middle, and what's held from the window's corner, where it's placed in the
+   points it's drawn in (home.tsx's `Holding`). */
+.home.wide .toolbar {
+  scale: var(--pages-scale);
+  transform-origin: 50% 100%;
+}
+.home.wide .top {
+  scale: var(--pages-scale);
+  transform-origin: 50% 0;
+}
+.home.wide .opened {
+  scale: var(--pages-scale);
+}
+.home.wide .holding {
+  scale: var(--pages-scale);
+  transform-origin: 0 0;
 }
 /* A Home page is a fixed grid: four across and as many rows as its height has room for. An app takes one cell, and a
    widget a phone's own sizes, 2×2, 4×2 and 4×4, each where it was placed. */
@@ -526,8 +558,9 @@ body {
   z-index: 30;
   display: grid;
   pointer-events: none;
-  /* Lifted, as an iPhone's: a little larger, with a soft shadow under it. */
-  scale: 1.12;
+  /* Lifted, as an iPhone's: a little larger, with a soft shadow under it. It's drawn as much larger again as the
+     pages are, from its middle, so it's placed by its middle (home.tsx). */
+  scale: calc(1.12 * var(--pages-scale));
   filter: drop-shadow(0 10px 18px oklch(0 0 0 / 0.22));
 }
 .carried .ui-widget {

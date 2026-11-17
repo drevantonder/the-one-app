@@ -41,8 +41,9 @@ export function reflow(cells: Iterable<HTMLElement>, glides: boolean) {
   }
 }
 
-/// How far from its place `cell` is drawn, as it glides there.
-export function offset(cell: HTMLElement) {
+/// How far from its place `cell` is drawn, as it glides there, in the window's points where its page is drawn `scale`
+/// times larger.
+export function offset(cell: HTMLElement, scale = 1) {
   const one = placed.get(cell)
-  return { x: one?.x.value ?? 0, y: one?.y.value ?? 0 }
+  return { x: (one?.x.value ?? 0) * scale, y: (one?.y.value ?? 0) * scale }
 }
