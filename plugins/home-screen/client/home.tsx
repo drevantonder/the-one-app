@@ -209,8 +209,8 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
   )
 }
 
-/// An owner's App Library: a category for each kind of app they have, two across, each its first four icons small,
-/// or its first three and the rest smaller in the fourth's place. Tapping an icon opens its app; tapping anywhere
+/// An owner's App Library: a category for each kind of app they have, two across, each its first four apps' icons
+/// with their names, or its first three and the rest smaller in the fourth's place. Tapping an icon opens its app; tapping anywhere
 /// else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
 function Library(props: { owner: Owner; index: number; places: Map<string, HTMLElement> }) {
   const opening = (category: Category) => () => state().matches("nothing") && home.send({ type: "open", category: { owner: props.index, name: category.name } })
@@ -249,12 +249,12 @@ function LibraryApp(props: { app: App; owner: Owner; index: number }) {
     <button
       type="button"
       class="app"
-      aria-label={props.app.name}
       ref={holds(() => ({ item: props.app, page: 0, index: -1, from: "library" }), () => props.owner.arranges)}
       onPointerDown={() => state().matches("nothing") && launch(props.app, props.owner, true)}
       onClick={(event) => (event.stopPropagation(), state().matches("nothing") && launch(props.app, props.owner))}
     >
       <img src={props.app.icon} alt="" />
+      <span>{props.app.name}</span>
     </button>
   )
 }

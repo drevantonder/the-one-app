@@ -139,7 +139,9 @@ body {
   text-align: center;
 }
 
-/* The App Library: its categories two across, each its icons in a rounded square with its name under it. */
+/* The App Library: its categories two across, each its icons in a square with its name under it. An icon has its
+   app's name under it, and is as big as the square leaves room for once the name is in; the square's padding and gaps
+   follow its width. */
 .categories {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -151,15 +153,18 @@ body {
   gap: 0.375rem;
   justify-items: center;
   min-width: 0;
+  container-type: inline-size;
 }
 .category .place {
   box-sizing: border-box;
   display: grid;
-  grid-template: 1fr 1fr / 1fr 1fr;
-  gap: 0.75rem;
+  grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr));
+  gap: 3.6cqi 6cqi;
   width: 100%;
   aspect-ratio: 1;
-  padding: 0.875rem;
+  padding: 7.2cqi 6.6cqi 5.4cqi;
+  /* A row's height, less the name and its gap. */
+  --icon: calc((100cqi - 16.2cqi) / 2 - 0.6875rem * 1.2 - 0.25rem);
   border-radius: 1.5rem;
   background: color-mix(in oklab, var(--muted-foreground) 14%, transparent);
   cursor: pointer;
@@ -173,24 +178,46 @@ body {
   cursor: pointer;
   touch-action: manipulation;
 }
-.category :is(.app, .more) img {
+.category .app {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.category .app img {
   display: block;
-  width: 100%;
-  aspect-ratio: 1;
+  width: var(--icon);
+  height: var(--icon);
   border-radius: 22.5%;
+}
+.category .app span {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .category .app:active img {
   scale: 0.94;
   opacity: 0.85;
 }
-/* More than four: the fourth's place holds the rest, smaller. */
+/* More than four: the fourth's place, an icon and its name, holds the rest, smaller. */
 .category .more {
   box-sizing: border-box;
   display: grid;
-  grid-template: 1fr 1fr / 1fr 1fr;
-  gap: 0.25rem;
-  padding: 0.25rem;
+  grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr));
+  gap: 0.3125rem;
+  place-self: center;
+  width: min(var(--icon) + 0.875rem, 100%);
   aspect-ratio: 1;
+}
+.category .more img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 22.5%;
 }
 .category .name {
   max-width: 100%;
