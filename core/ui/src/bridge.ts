@@ -60,7 +60,7 @@ const ask = <Result>(method: string, params: object = {}) => new Promise<Result>
   parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
 })
 
-/// Light or dark, where the client says which (Settings › Appearance), and otherwise the device's own: as
+/// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
 /// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css).
 function dress(context: HostContext | undefined) {
   if (!context || !("theme" in context)) return
@@ -82,7 +82,9 @@ const greet = () => greeted ??= ask<{ hostContext?: HostContext }>("ui/initializ
 const over: (() => void)[] = []
 const overNow = () => greet().then(() => notify("notifications/one/over", { over: over.length > 0 }))
 
-/// Says something has opened over the page, which `shut` shuts. → the function that says it has shut.
+/// `const shut = covers(close)`: says something of the app's own has opened over its page, as a sheet or a menu
+/// does, which `close` closes: the device's own back (an iPhone's swipe in from the edge, Android's Back) calls
+/// `close` before it goes anywhere else. → the function to call once it has closed, however it was.
 export function covers(shut: () => void): () => void {
   over.push(shut)
   if (over.length === 1) overNow()
@@ -110,7 +112,7 @@ interface Content {
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
 /// `const notes = createMemo(() => call("notes_list").then(JSON.parse))`, under `<Loading>`.
 /// An app opened from a group's Home Screen page is answered for the group, with nothing said. A page that shows more
-/// than one of them says who each call is for: `call("home-screen_page", {}, { subject: "groups/family" })`, or `network`.
+/// than one of them says who each call is for: `call("home-screen_pages", {}, { subject: "groups/family" })`, or `network`.
 export async function call(tool: string, inputs: object = {}, { subject }: Subject = {}): Promise<string> {
   await greet()
   const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })

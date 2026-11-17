@@ -13,7 +13,7 @@
 /// (ark-ui.com/llms-solid.txt); the rest are the UI library's own. An app may be TypeScript (`.tsx`, `.ts`) as well as
 /// JavaScript: the UI library's types are its `types/` (`one code --name ui`), which the app's `tsconfig.json` names
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them.
-export { call, changed, client, leave, open, showRecoveryKey, upload, useRecoveryKey } from "./bridge.ts"
+export { call, changed, client, covers, leave, open, showRecoveryKey, upload, useRecoveryKey } from "./bridge.ts"
 export { seen, share, words } from "./shared.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
 export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"

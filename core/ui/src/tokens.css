@@ -1,6 +1,6 @@
 /* Every colour, size, radius and pace the UI library draws with: shadcn's neutral, light and dark. A colour is
    light-dark(light, dark), so it follows `color-scheme` wherever it's used: the user's own by default, which a shell
-   sets from Settings › Appearance, and any part of a page can set its own. */
+   sets from Colour Mode, and any part of a page can set its own. */
 
 /* The typeface is Allo (allo.joshpuckett.me, github.com/joshpuckett/allo v1.0, SIL Open Font License with no Reserved
    Font Name: Allo-LICENSE.txt), served beside this file so nothing comes from a font host. Code is in the device's own
@@ -116,7 +116,7 @@
   --ease-travel: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* Dark, as the page's `light` or `dark` class says (a client sets it from Settings › Appearance), or the device's own
+/* Dark, as the page's `light` or `dark` class says (a client sets it from Colour Mode), or the device's own
    where nothing says. Weight can't follow `color-scheme` as a colour does. */
 :root.dark {
   --lighter: 25;
