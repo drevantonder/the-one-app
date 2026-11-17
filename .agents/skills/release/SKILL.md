@@ -34,7 +34,8 @@ Exactly two rules hold at runtime:
 ## Order
 
 One release at a time: `tooling/release` refuses while another is under way, and says which; then say whose it is
-and stop. A server the network hasn't seen for 10 minutes (`asleep` in it) holds up none: it's named, with the
+and stop. A server the network hasn't seen for 10 minutes (`asleep` in it), or one not ready with no update
+under way, holds up none: it's named, with the
 `one update --server` that brings it up to date once it's back. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
 found later is fixed forward.
 
