@@ -114,6 +114,7 @@ defmodule Backups.Run do
       end)
 
       gone = prune(call, opened, destination)
+      OneCore.Call.changed(call)
 
       %{
         destination: destination["name"],
