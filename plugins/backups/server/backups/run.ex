@@ -58,6 +58,7 @@ defmodule Backups.Run do
     beat = spawn_link(fn -> beat(call, id) end)
 
     try do
+      OneCore.Call.stage(call, "Opening #{destination["name"]}")
       opened = Destination.open(call, destination)
 
       known =
@@ -165,6 +166,8 @@ defmodule Backups.Run do
     keys
     |> Enum.chunk_every(@together)
     |> Enum.reduce({listed, sent, known}, fn keys, {listed, sent, known} ->
+      OneCore.Call.stage(opened.call, "Backing up to #{opened.destination["name"]}: #{length(listed)} blobs read")
+
       {listed, new, known} =
         for {key, {:ok, data, _tag}} <- Enum.zip(keys, Bucket.read_all(keys)), reduce: {listed, [], known} do
           {listed, new, known} ->

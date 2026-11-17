@@ -142,6 +142,7 @@ defmodule Containers do
       },
       %{
         name: "create",
+        task_support: :optional,
         description:
           "Create a Linux container, from a Docker image or `desktop`, and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. Creating from an image not on the machine pulls it first, and `desktop` is built there the first time (about 2 minutes); after that it's a second. Gives the container as `list` does.",
         inputs: %{
@@ -460,6 +461,8 @@ defmodule Containers do
       }
     }
 
+    building = if image == "desktop", do: ", building its desktop image if it's the first", else: ""
+    Call.stage(call, "Creating #{name} on #{Service.name(server)}#{building}")
     Service.call(call, Podman, :create, [spec], server)
     Enum.find(listed(call), &(&1.name == name))
   end

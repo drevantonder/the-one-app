@@ -101,6 +101,7 @@ defmodule Chrome do
     [
       %{
         name: "open",
+        task_support: :optional,
         description:
           "Open a browser: a Google Chrome of yours in a container, signed in to nothing. Opening one that's open " <>
             "already, or that was stopped after going unused, carries on with it. The first on a machine builds its " <>
@@ -430,6 +431,7 @@ defmodule Chrome do
   # The container the record names, made: the image `desktop`, with its display and no Chrome yet.
   defp make(call, session, inputs) do
     name = container(record(call, session), session)
+    Call.stage(call, "Creating its container")
 
     Call.tool(call, "containers", "create", %{
       "image" => "desktop",
@@ -447,6 +449,7 @@ defmodule Chrome do
   # before it's taken (the moduledoc).
   defp carry(call, %{"session" => session} = inputs, %{"state" => "packing", "from" => from} = record) do
     record(call, session, fn _ -> record end)
+    Call.stage(call, "Packing what it kept")
 
     if not match?(%{"state" => "running"}, Enum.find(containers(call), &(&1["name"] == from))),
       do: on(call, "start", from)
@@ -458,6 +461,7 @@ defmodule Chrome do
 
   defp carry(call, %{"session" => session} = inputs, %{"state" => "moving", "from" => from, "container" => to} = record) do
     record(call, session, fn _ -> record end)
+    Call.stage(call, "Moving what it kept to a new container")
     # One a try before this made holds nothing the old one doesn't.
     if Enum.any?(containers(call), &(&1["name"] == to)), do: on(call, "remove", to)
     make(call, session, inputs)
@@ -498,6 +502,7 @@ defmodule Chrome do
   end
 
   defp launch(call, session, url) do
+    Call.stage(call, "Starting Chrome")
     containers(call, "exec", session, %{"command" => "sh -c #{shell(@launch)} sh #{if url, do: shell(url)}"})
     %{session: session}
   end

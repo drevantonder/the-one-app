@@ -183,6 +183,7 @@ defmodule Backups do
       },
       %{
         name: "now",
+        task_support: :optional,
         description: "Backs up now, to one destination or to each, and answers when it's done with what was sent",
         inputs: %{type: "object", properties: %{destination: destination}},
         outputs: %{type: "object", properties: %{backups: %{type: "array", items: made}}, required: ["backups"]}
