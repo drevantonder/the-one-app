@@ -29,8 +29,10 @@ defmodule OneCore.Apps.Lifecycle do
   @network "network"
   @day :timer.hours(24)
   @kept :timer.hours(24 * 30)
-  # How long installing or updating may take before it's taken as cut short, as by its server stopping.
+  # How long updating may take before it's taken as cut short, as by its server stopping.
   @partway :timer.minutes(15)
+  # What an install cut short says.
+  @stopped "It stopped partway, as the server installing it did. Try again."
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -58,14 +60,16 @@ defmodule OneCore.Apps.Lifecycle do
   or `{:error, why}` for a move that isn't in the machine.
   """
   def install(owner, name, artifact, by) do
-    with :ok <- Installed.named(name),
-         {_number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no app #{artifact}"},
-         %{} <- move(owner, name, {:install, artifact, by}) do
-      case requirements(owner, name, artifact, by) do
-        {:ok, also} -> with %{} = record <- installing(owner, name, artifact), do: Map.put(record, "also", also)
-        {:error, why} -> failed(owner, name, why)
+    doing({:install, owner, name}, fn ->
+      with :ok <- Installed.named(name),
+           {_number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no app #{artifact}"},
+           %{} <- move(owner, name, {:install, artifact, by, Server.key()}) do
+        case requirements(owner, name, artifact, by) do
+          {:ok, also} -> with %{} = record <- installing(owner, name, artifact), do: Map.put(record, "also", also)
+          {:error, why} -> failed(owner, name, why)
+        end
       end
-    end
+    end)
   end
 
   # Installs each of the app's requirements that isn't there for `owner`, deepest first, as its own install, or
@@ -144,6 +148,11 @@ defmodule OneCore.Apps.Lifecycle do
     error ->
       Logger.error(Exception.format(:error, error, __STACKTRACE__))
       failed(owner, name, Exception.message(error))
+  catch
+    # What it waits on exiting (`Apps.sync/2` does), which would otherwise end it with its record left installing.
+    :exit, why ->
+      Logger.error(Exception.format(:exit, why, __STACKTRACE__))
+      failed(owner, name, Exception.format_exit(why))
   end
 
   # A step a person reads while a tool runs as an MCP task: "Installing Google Account", "Getting Gmail's code".
@@ -191,12 +200,54 @@ defmodule OneCore.Apps.Lifecycle do
       %{"state" => "not_installed", "app" => artifact} = record ->
         install(owner, name, artifact, record["by"])
 
+      # One that nothing installs any more has failed, as the daily check would find, and is tried again; one that's
+      # still installing is refused, saying so.
+      %{"state" => "installing", "app" => artifact} = record ->
+        if partway?({:install, owner, name}, record["server"]) do
+          failed(owner, name, @stopped)
+          install(owner, name, artifact, record["by"])
+        else
+          move(owner, name, {:install, artifact, record["by"], Server.key()})
+        end
+
       %{"app" => artifact} = record ->
-        with nil <- update(artifact), do: Installed.read(owner)[name] || record
+        case Update.read(artifact) do
+          %{"state" => "failed"} -> with nil <- update(artifact), do: Installed.read(owner)[name] || record
+          _ -> {:error, "Nothing of #{name} failed for #{owner}, so there's nothing to try again."}
+        end
 
       nil ->
         {:error, "#{name} isn't installed for #{owner}."}
     end
+  end
+
+  # Whether an install or update its record says is under way stopped partway: nothing does it any more on the
+  # server its record names. That server knows by its lock (`doing/2`); another, by the network's edge saying that
+  # server has stopped, or is starting again, which loses what it was doing. A record from before records named
+  # their server stopped partway once that server stopped, which it has for every server since.
+  defp partway?(_what, nil), do: true
+
+  defp partway?(what, server) do
+    if server == Server.key(),
+      do: stopped?(what),
+      else: Servers.presence(server)["server_daemon_status"] in ["starting", "stopped"]
+  end
+
+  # Installing or updating holds a lock on what it does, on this server, while it does it: it goes with its
+  # process, however that ends. `{:error, why}` where a process here holds it already.
+  defp doing(what, fun) do
+    case :global.trans({{__MODULE__, what}, self()}, fun, [node()], 0) do
+      :aborted -> {:error, "It's being installed or updated here already. Wait until it's done."}
+      done -> done
+    end
+  end
+
+  # Whether nothing on this server does `what` any more: its lock is free.
+  defp stopped?(what) do
+    lock = {{__MODULE__, what}, self()}
+    free = :global.set_lock(lock, [node()], 0)
+    if free, do: :global.del_lock(lock, [node()])
+    free
   end
 
   @doc """
@@ -310,8 +361,8 @@ defmodule OneCore.Apps.Lifecycle do
           with nil <- purge(owner, name),
                do: Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
 
-        %{"state" => "installing", "at" => at} when at <= now - @partway ->
-          failed(owner, name, "It stopped partway, as the server installing it did. Try again.")
+        %{"state" => "installing"} ->
+          if partway?({:install, owner, name}, record["server"]), do: failed(owner, name, @stopped)
 
         # Its server may have stopped between its failing and saying so in its artifact.
         %{"state" => "not_installed", "app" => artifact} ->

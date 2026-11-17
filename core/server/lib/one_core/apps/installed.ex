@@ -12,8 +12,8 @@ defmodule OneCore.Apps.Installed do
   and whether it's trusted are the app's (`OneCore.Apps.Update`).
 
   Each owner's are one blob, `<owner>/installs`, with each app's record by the name it's installed by: the
-  `app` it is, its `state`, its `stage`, `why` it isn't installed where it failed to be, when it was `deleted`, and
-  who installed it (`by`). A record lives for years and every server and client reads it, while no one process lives
+  `app` it is, its `state`, its `stage`, `why` it isn't installed where it failed to be, when it was `deleted`, who
+  installed it (`by`), and the `server` installing it. A record lives for years and every server and client reads it, while no one process lives
   that long, so the machine is the transition table `move/3` over records, each move made with
   `OneCore.Artifact.update/3`: two servers moving one record at once each see the other's move first, and a move the
   table doesn't have is refused, saying why. A record keeps what it held that this doesn't read.
@@ -115,7 +115,7 @@ defmodule OneCore.Apps.Installed do
   `{:ok, nil}` for not installed any more, or `{:error, why}` for a move that isn't in it. `at` is whose and which
   app, for what it says.
 
-  Events, as the machine names them: `{:install, app, by}` (Install, and Try Again on one that failed to),
+  Events, as the machine names them: `{:install, app, by, server}` (Install, and Try Again on one that failed to),
   `{:stage, stage}`, `:done`, `{:fail, why}`, `{:uninstall, group}`, `:restore` and `:purge` (30 days on), where
   `group` says what went to Recently Deleted together, as one: `%{"with" => names}` on the one uninstalled, and
   `%{"deleted_with" => name}` on each app that required it; and
@@ -123,8 +123,9 @@ defmodule OneCore.Apps.Installed do
   """
   def move(record, event, at)
 
-  def move(record, {:install, app, by}, _at) when record == nil or :erlang.map_get("state", record) == "not_installed",
-    do: {:ok, (record || %{}) |> Map.merge(%{"app" => app, "by" => by}) |> moved("installing", "requirements")}
+  def move(record, {:install, app, by, server}, _at)
+      when record == nil or :erlang.map_get("state", record) == "not_installed",
+      do: {:ok, (record || %{}) |> Map.merge(%{"app" => app, "by" => by, "server" => server}) |> moved("installing", "requirements")}
 
   def move(%{"state" => "installing"} = record, {:stage, stage}, _at) when stage in ~w(requirements fetching building starting),
     do: {:ok, moved(record, "installing", stage)}
@@ -171,7 +172,7 @@ defmodule OneCore.Apps.Installed do
   defp refused(%{"state" => "installing", "stage" => stage}, _event, name, _owner),
     do: "#{name} is installing (#{stage}). Wait until it's done."
 
-  defp refused(%{"state" => "installed"}, {:install, _, _}, name, owner), do: "#{name} is installed for #{owner} already."
+  defp refused(%{"state" => "installed"}, {:install, _, _, _}, name, owner), do: "#{name} is installed for #{owner} already."
   defp refused(_record, _event, name, owner), do: "That doesn't apply to #{name} for #{owner} as it is."
 
   defp now, do: System.system_time(:millisecond)
