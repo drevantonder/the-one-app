@@ -1067,8 +1067,11 @@ button.ui-box {
 .ui-row .end {
   display: flex;
   flex: none;
+  /* What it ends with leaves the row's words half of it at least: a long one wraps, never cut short. */
+  max-width: 50%;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
+  text-align: end;
 }
 
 /* A whole view of an app: a bar that stays as it scrolls, then what's in it, which passes under the bar and under
