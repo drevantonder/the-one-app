@@ -402,13 +402,22 @@ defmodule OneCore.Release do
       end
 
     case {loaded, started(OneCore.Supervisor)} do
-      {:ok, []} -> :ok
-      {:ok, failed} -> {:error, "#{Enum.map_join(failed, ", ", &inspect/1)} didn't start again"}
-      {error, _failed} -> error
+      {:ok, []} ->
+        :ok
+
+      {:ok, failed} ->
+        {:error, Enum.map_join(failed, ", ", fn {id, why} -> "#{inspect(id)} didn't start again: #{said(why)}" end)}
+
+      {error, _failed} ->
+        error
     end
   rescue
     error -> {:error, Exception.message(error)}
   end
+
+  # Why a process didn't start, as what it raised says it, or as OTP gives it.
+  defp said({%{__exception__: true} = error, _stacktrace}), do: Exception.message(error)
+  defp said(why), do: inspect(why)
 
   # Stops each process in the supervision tree whose module, as it was started, is one of `modules`, as its
   # supervisor stops it. One that a dynamic supervisor runs is started by whoever asks for it next, and the rest
