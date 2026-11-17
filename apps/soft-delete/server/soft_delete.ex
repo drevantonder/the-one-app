@@ -292,6 +292,23 @@ defmodule SoftDelete do
     made ++ if(Bucket.list(own <> "/") != [], do: [own], else: [])
   end
 
+  # Restores an item: each artifact at its name, or beside something new there since. Gives its record as it was moved.
+  defp restored(call, id, record) do
+    # Something new at an artifact's name since is left as it is, and this one goes beside it.
+    as =
+      Map.new(record["artifacts"], fn name ->
+        {name, if(record["moved"] and taken?(name), do: free(name), else: name)}
+      end)
+
+    # Restored while it's still moving aside, whoever is moving it puts it back once its own removing is done (`aside/2`),
+    # so the two never move it at once.
+    case change(call, id, {:restore, as}) do
+      {:ok, %{"moved" => true}} -> back(call, id)
+      {:ok, record} -> record
+      {:error, why} -> raise why
+    end
+  end
+
   @impl true
   def call("delete", %{"artifact" => name}, call) do
     owns!(call, name)
@@ -359,23 +376,6 @@ defmodule SoftDelete do
       installed: installed?(record),
       title: record["title"]
     }
-  end
-
-  # Restores an item: each artifact at its name, or beside something new there since. Gives its record as it was moved.
-  defp restored(call, id, record) do
-    # Something new at an artifact's name since is left as it is, and this one goes beside it.
-    as =
-      Map.new(record["artifacts"], fn name ->
-        {name, if(record["moved"] and taken?(name), do: free(name), else: name)}
-      end)
-
-    # Restored while it's still moving aside, whoever is moving it puts it back once its own removing is done (`aside/2`),
-    # so the two never move it at once.
-    case change(call, id, {:restore, as}) do
-      {:ok, %{"moved" => true}} -> back(call, id)
-      {:ok, record} -> record
-      {:error, why} -> raise why
-    end
   end
 
   def call("purge", %{"item" => id}, call) do
