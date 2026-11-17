@@ -400,8 +400,12 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     let log = here.folder.join("server.log");
     system::bound(&log)?;
 
-    // A build being checked or loaded when this program or the server stopped wasn't kept, and the server starts on
-    // the one it was on.
+    // A download cut short, as this program or the server stopped, is one that failed: it's up to date again on what
+    // it was on. A build being checked or loaded when they stopped wasn't kept, and the server starts on the one it
+    // was on.
+    if record.server_update_status == ServerUpdateStatus::Downloading {
+        record.server_update_status = ServerUpdateStatus::UpToDate;
+    }
     if record.server_update_status == ServerUpdateStatus::Verifying
         && let Some(stage @ (ServerUpdateStage::Checking | ServerUpdateStage::Loading)) = record.server_update_stage
     {
