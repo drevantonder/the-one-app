@@ -428,24 +428,68 @@ defmodule OneCore.Plugins.Deploy do
 
   @doc """
   Builds again, from its source, the app of each plugin anyone has deployed that was built against another UI library
-  than this server's, installed or not, as a server acting for whoever the plugin is, as they would deploy it again. A server does it as it starts, on a build no published server
-  build is newer than: so a server release rebuilds every app once, on the first server to take it, the others finding
-  it done, and a server left on an older build never builds them back. One another server built meanwhile against the
-  same UI library is done, not a failure.
+  than this server's, installed or not, as a server acting for whoever the plugin is, as they would deploy it again.
+  A server does it once it's up, on a build no published server build is newer than: so a server release rebuilds
+  every app once, and a server left on an older build never builds them back. For each whose plugins they are, one
+  server does it (`rebuilds?/2`), and the others run what it built as each version reaches them. One another server
+  built meanwhile against the same UI library is done, not a failure.
   """
   def rebuild do
     code = App.library().code
 
-    for %{plugin: artifact} <- if(newest?(), do: deployed(), else: []),
-        {whose, name} = {Store.whose(artifact), Path.basename(artifact)},
-        Servers.runs?(whose) or (Store.about(artifact)["sandbox"] == true and Servers.here?(whose)),
-        built_with(artifact) not in [nil, code],
+    stale =
+      for %{plugin: artifact} <- if(newest?(), do: deployed(), else: []),
+          whose = Store.whose(artifact),
+          Servers.runs?(whose) or (Store.about(artifact)["sandbox"] == true and Servers.here?(whose)),
+          built_with(artifact) not in [nil, code],
+          do: {whose, artifact}
+
+    ours = for whose <- Enum.uniq(for {whose, _} <- stale, do: whose), rebuilds?(whose, code), do: whose
+
+    for {whose, artifact} <- stale,
+        whose in ours,
+        name = Path.basename(artifact),
         {_number, hash, _tag} <- [Store.latest(artifact)],
         # It stays as installed, or not, as it was.
         install? = fn _version -> Plugins.plugin(whose, name) == artifact end,
-        {:error, why} <- [deploy(whose, name, Store.source(artifact, hash), :stored, :stored, install?)],
+        {:error, why} <- [rebuilt(whose, name, Store.source(artifact, hash), install?)],
         built_with(artifact) != code,
         do: Logger.error("#{artifact}'s app wasn't built again against this server's UI library: #{why}")
+  end
+
+  # One app that couldn't be built again is said, and the rest are still built.
+  defp rebuilt(whose, name, files, install?) do
+    deploy(whose, name, files, :stored, :stored, install?)
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
+  # Whether this server builds the apps of `whose` plugins again against the UI library `code`. The first to ask
+  # writes that it does, `<whose>/rebuild`, and the others leave it to that one while it's on: four servers building
+  # the same apps at once wrote the same blobs at once, which R2 refuses ("Reduce your concurrent request rate for the
+  # same object"), and lost to each other. One that's not on any more left it unfinished, and the next to ask carries
+  # on from what's left.
+  defp rebuilds?(whose, code) do
+    {blob, me} = {"#{whose}/rebuild", Server.key()}
+    claim = JSON.encode!(%{ui: code, server: me})
+
+    case Bucket.read(blob) do
+      :absent ->
+        Bucket.write(blob, claim) == :ok or rebuilds?(whose, code)
+
+      {:ok, was, tag} ->
+        case JSON.decode!(was) do
+          %{"ui" => ^code, "server" => ^me} ->
+            true
+
+          %{"ui" => ^code, "server" => server} ->
+            Servers.seen(server) not in [:on, nil] and
+              (Bucket.replace(blob, claim, tag) == :ok or rebuilds?(whose, code))
+
+          _another ->
+            Bucket.replace(blob, claim, tag) == :ok or rebuilds?(whose, code)
+        end
+    end
   end
 
   # The code of the UI library the latest version of a plugin's app was built against, as the bucket has it, or `nil`
