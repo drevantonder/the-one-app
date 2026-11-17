@@ -52,7 +52,7 @@ defmodule OneCore.Apps.Deploy do
   @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
   def deploy(owner, name, files, from, trusted, install?) do
     artifact = Apps.app(owner, name) || "#{owner}/apps/#{name}"
-    trusted = if trusted == :stored, do: Store.about(artifact)["trusted"] != false, else: trusted != false
+    trusted = if trusted == :stored, do: Store.trusted?(artifact), else: trusted != false
 
     stage = &State.stage(State.id(), &1)
 
@@ -266,7 +266,7 @@ defmodule OneCore.Apps.Deploy do
     deployed =
       for {{artifact, about}, {:ok, description, _tag}} <- Enum.zip(abouts, described),
           {:ok, listing} <- [Version.listed(artifact, description)],
-          do: Map.merge(listing, %{app: artifact, trusted: about["trusted"] != false})
+          do: Map.merge(listing, %{app: artifact, trusted: Store.trusted?(about)})
 
     :ets.insert(__MODULE__, {:deployed, deployed, System.monotonic_time(:millisecond)})
     deployed
@@ -371,7 +371,7 @@ defmodule OneCore.Apps.Deploy do
     stale =
       for %{app: artifact} <- if(newest?(), do: deployed(), else: []),
           whose = Store.whose(artifact),
-          Servers.runs?(whose) or (Store.about(artifact)["trusted"] == false and Servers.here?(whose)),
+          Servers.runs?(whose, Store.trusted?(artifact)),
           built_with(artifact) not in [nil, code],
           do: {whose, artifact}
 

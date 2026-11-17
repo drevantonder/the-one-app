@@ -214,9 +214,11 @@ defmodule OneCore.Apps do
     end
 
     for {artifact, number, {:ok, version}} <- loaded ++ newer, artifact in changed do
-      if Version.described?(version) and version.trusted,
-        do: Logger.info("#{artifact}: version #{number} is listed here, and runs on #{owner}'s own servers"),
-        else: Logger.info("#{artifact}: version #{number} runs here#{if not version.trusted, do: ", in a sandbox"}")
+      case Version.runs(version) do
+        :here -> Logger.info("#{artifact}: version #{number} runs here")
+        :sandbox -> Logger.info("#{artifact}: version #{number} runs here, in a sandbox")
+        :elsewhere -> Logger.info("#{artifact}: version #{number} is listed here, and runs on #{owner}'s own servers")
+      end
     end
 
     if any do
@@ -326,7 +328,9 @@ defmodule OneCore.Apps do
   def handle_call({:latest, true}, _from, state), do: {:reply, {state.latest, []}, state}
   # An untrusted app runs here for anyone, so it's compared as one described is.
   def handle_call({:latest, false}, _from, state) do
-    {untrusted, loaded} = Map.split_with(state.latest, fn {artifact, _} -> untrusted?(state.running[artifact]) end)
+    {untrusted, loaded} =
+      Map.split_with(state.latest, fn {artifact, _} -> runs(state.running[artifact]) == :sandbox end)
+
     {:reply, {Map.merge(state.described, untrusted), Map.keys(loaded)}, state}
   end
 
@@ -448,9 +452,7 @@ defmodule OneCore.Apps do
         # A version described is kept apart from the ones loaded, which it never takes over from. An untrusted
         # one runs here as one loaded does.
         numbers =
-          if match?(%Version{}, version) and Version.described?(version) and not untrusted?(version),
-            do: :described,
-            else: :latest
+          if runs(version) == :elsewhere, do: :described, else: :latest
 
         cond do
           numbers == :described and is_map_key(state.latest, artifact) ->
@@ -516,12 +518,11 @@ defmodule OneCore.Apps do
   end
 
   # A version that runs here, or `nil` for one only described.
-  defp loaded(%Version{} = version),
-    do: if(Version.described?(version) and not untrusted?(version), do: nil, else: version)
+  defp loaded(version), do: if(runs(version) == :elsewhere, do: nil, else: version)
 
-  defp loaded(nil), do: nil
-
-  defp untrusted?(version), do: match?(%Version{trusted: false}, version)
+  # Where a version runs (`OneCore.Apps.Version.runs/1`), or `nil` for none.
+  defp runs(%Version{} = version), do: Version.runs(version)
+  defp runs(_none), do: nil
 
   # The versions running of the apps `installed`, by their names there.
   defp running(state, installed) do

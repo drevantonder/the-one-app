@@ -35,10 +35,9 @@ defmodule OneCore.Jobs do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
 
-    # An untrusted app runs on any server acting for whoever it's installed for.
     scheduled =
       for {installed, name, jobs, trusted} <- Apps.scheduled(),
-          Servers.runs?(installed) or (not trusted and Servers.here?(installed)),
+          Servers.runs?(installed, trusted),
           do: {installed, name, jobs}
 
     for {installed, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do

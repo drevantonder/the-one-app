@@ -318,9 +318,9 @@ defmodule OneCore.Apps.Calls do
           ask = {"hooks/call", %{installed: at, app: name, kind: :observe, hook: hook, about: about}}
 
           call =
-            if Version.described?(version),
-              do: called(at, name, versions, ask, principal, false),
-              else: new_call(at, name, versions, ask, principal, false)
+            if Version.runs(version) == :here,
+              do: new_call(at, name, versions, ask, principal, false),
+              else: called(at, name, versions, ask, principal, false)
 
           try do
             if observes?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
@@ -352,12 +352,7 @@ defmodule OneCore.Apps.Calls do
     Apps.run([at], name, fn at, versions ->
       scheduled = called(at, name, versions, {"apps/schedule", %{installed: at, app: name}}, clock, forwarded)
 
-      fire = fn job ->
-        with {:error, why} <- call(name, job.tool, job.inputs, clock, true),
-             do: Logger.error("#{name}'s scheduled #{job.tool} for #{at} failed: #{why}")
-
-        Server.changed()
-      end
+      fire = &fire(at, name, &1)
 
       # An untrusted app has its jobs kept in its sandbox, by the app it requires there.
       if versions[name].trusted,
@@ -366,6 +361,18 @@ defmodule OneCore.Apps.Calls do
 
       {:ok, :ok}
     end)
+  end
+
+  @doc """
+  Makes a scheduled job's call, the `tool` of the app that `name` is for `at` with its `inputs`, as the clock: for
+  whoever it was installed for, asked by nobody, and never passed on. What went wrong is logged, and apps watching
+  are told something changed.
+  """
+  def fire(at, name, job) do
+    with {:error, why} <- call(name, job.tool, job.inputs, {nil, at}, true),
+         do: Logger.error("#{name}'s scheduled #{job.tool} for #{at} failed: #{why}")
+
+    Server.changed()
   end
 
   @doc "The apps among `versions`, by their names, that keep other apps' schedules."
@@ -386,10 +393,10 @@ defmodule OneCore.Apps.Calls do
   # An app's tool or hook, run by its module here or, for an untrusted app, in its sandbox.
   defp invoked(versions, name, what, call) do
     running(call, fn ->
-      case {versions[name], what} do
-        {%Version{trusted: false}, what} -> Sandbox.call(versions, name, what, call)
-        {version, {:tool, tool, inputs}} -> version.app.call(tool, inputs, call)
-        {version, {:hook, hook, about}} -> version.app.hook(hook, about, call)
+      case {Version.runs(versions[name]), what} do
+        {:sandbox, what} -> Sandbox.call(versions, name, what, call)
+        {:here, {:tool, tool, inputs}} -> versions[name].app.call(tool, inputs, call)
+        {:here, {:hook, hook, about}} -> versions[name].app.hook(hook, about, call)
       end
     end)
   end
@@ -417,7 +424,7 @@ defmodule OneCore.Apps.Calls do
   defp called(at, name, versions, ask, principal, forwarded) do
     call = new_call(at, name, versions, ask, principal, forwarded)
 
-    if Servers.runs?(at) or (not versions[name].trusted and Servers.here?(at)),
+    if Servers.runs?(at, versions[name].trusted),
       do: call,
       else: Call.run_elsewhere(call, at)
   end

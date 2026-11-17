@@ -330,10 +330,7 @@ defmodule OneCore.Sandbox do
          %{^name => %Version{artifact: artifact}} <- Apps.versions([at]),
          true <- artifact == context.artifact,
          %{} <- Enum.find(context.jobs, &(&1.tool == tool and &1.inputs == inputs)) do
-      with {:error, why} <- Calls.call(name, tool, inputs, {nil, at}, true),
-           do: Logger.error("#{name}'s scheduled #{tool} for #{at} failed: #{why}")
-
-      OneCore.Server.changed()
+      Calls.fire(at, name, %{tool: tool, inputs: inputs})
       nil
     else
       _ -> raise "That isn't one of #{context.name}'s scheduled jobs for #{at}"

@@ -112,7 +112,7 @@ defmodule OneCore.Apps.Lifecycle do
   # Fetches, builds and starts what's being installed, whose record is at its first stage. Gives the record it's at.
   defp installing(owner, name, artifact) do
     {number, code, _tag} = Store.latest(artifact)
-    trusted = Store.about(artifact)["trusted"] != false
+    trusted = Store.trusted?(artifact)
     title = title(artifact, name)
     move(owner, name, {:stage, "fetching"})
     stage("Getting #{title}'s code")
@@ -179,7 +179,7 @@ defmodule OneCore.Apps.Lifecycle do
   def required(owner) do
     for {name, version} <- Apps.versions([owner]),
         Requires.missing(owner, version.artifact, version.requires) != [],
-        Servers.runs?(owner) or (not version.trusted and Servers.here?(owner)),
+        Servers.runs?(owner, version.trusted),
         reduce: {:ok, []} do
       {:ok, also} ->
         with {:ok, more} <- requirements(owner, name, version.artifact, nil), do: {:ok, also ++ more}
@@ -391,7 +391,7 @@ defmodule OneCore.Apps.Lifecycle do
              {:ok, offer} when offer != nil <- newer(source, from["ref"], commit, Path.basename(artifact)),
              %{} = record <-
                doing({:update, artifact}, fn ->
-                 with %{} = record <- Update.change(artifact, {:newer, offer, about["trusted"] != false, Server.key()}) do
+                 with %{} = record <- Update.change(artifact, {:newer, offer, Store.trusted?(about), Server.key()}) do
                    told(artifact)
                    if mine?(record), do: updating(artifact, record), else: record
                  end
@@ -552,8 +552,7 @@ defmodule OneCore.Apps.Lifecycle do
   it's trusted.
   """
   def takes?(artifact) do
-    whose = Store.whose(artifact)
-    Servers.here?(whose) and (Store.about(artifact)["trusted"] == false or Servers.runs?(whose))
+    Servers.runs?(Store.whose(artifact), Store.trusted?(artifact))
   end
 
   defp installed?(artifact),

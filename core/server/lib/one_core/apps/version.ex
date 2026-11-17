@@ -168,6 +168,19 @@ defmodule OneCore.Apps.Version do
   @doc "Whether a version is only described here, not loaded (`described/2`)."
   def described?(%__MODULE__{under: under}), do: is_tuple(under)
 
+  @doc """
+  Where a version runs, as this server holds it: `:here`, loaded, its module running each call; `:sandbox`, an
+  untrusted one, only described here and run in its sandbox (`OneCore.Sandbox`); or `:elsewhere`, a trusted one this
+  server only knows by its description, which a server that runs its owner's apps loads.
+  """
+  def runs(%__MODULE__{} = version) do
+    cond do
+      not described?(version) -> :here
+      version.trusted -> :elsewhere
+      true -> :sandbox
+    end
+  end
+
   @doc "A version's module that its app wrote as `name`, or `nil` if it has none by that name."
   def module(%__MODULE__{under: {:described, _artifact, _code}}, _name), do: nil
 

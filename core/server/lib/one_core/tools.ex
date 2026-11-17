@@ -792,12 +792,16 @@ defmodule OneCore.Tools do
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   defp at(owner, forward), do: Servers.here?(owner) || forward.(owner)
 
-  # Has a server that runs the apps installed for `owner` run this call, if this one doesn't, since what it
-  # deploys or installs runs there.
-  defp runs(owner, forward) do
+  # Has a server that runs an app installed for `owner`, `trusted` or not, run this call, if this one doesn't, since
+  # what it deploys or installs runs there (`OneCore.Servers.runs?/2`): a trusted app on a server that runs their
+  # apps, and an untrusted one on any acting for them.
+  defp runs(owner, trusted, forward) do
     cond do
-      Servers.runs?(owner) ->
+      Servers.runs?(owner, trusted) ->
         true
+
+      not trusted ->
+        forward.(owner)
 
       Servers.running(owner) == [] ->
         raise "An app for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
@@ -815,8 +819,8 @@ defmodule OneCore.Tools do
   # An untrusted app runs on any server acting for whoever it's for, the network's among them.
   defp run("deploy", %{"name" => name, "files" => files} = inputs, {_actor, subject} = principal, forward) do
     app = Apps.app(subject, name)
-    trusted = Map.get(inputs, "trusted", app == nil or Store.about(app)["trusted"] != false)
-    if trusted, do: runs(subject, forward), else: at(subject, forward)
+    trusted = Map.get(inputs, "trusted", app == nil or Store.trusted?(app))
+    runs(subject, trusted, forward)
 
     case app do
       nil -> reaches!(principal, subject, "installer")
@@ -866,7 +870,7 @@ defmodule OneCore.Tools do
 
   defp run("install", %{"app" => app} = inputs, {actor, subject} = principal, forward) do
     name = Map.get(inputs, "name", Path.basename(app))
-    if Store.about(app)["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
+    runs(subject, Store.trusted?(app), forward)
     opens!(principal, app)
     reaches!(principal, subject, "installer")
     moved!(subject, name, Lifecycle.install(subject, name, app, actor))
@@ -881,7 +885,7 @@ defmodule OneCore.Tools do
   # Restoring is undoing an uninstall, which is an owner's.
   defp run("apps_restore", %{"name" => name}, {_actor, subject} = principal, forward) do
     record = record!(subject, name)
-    if Store.about(record["app"])["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
+    runs(subject, Store.trusted?(record["app"]), forward)
     reaches!(principal, subject, "owner")
     moved!(subject, name, Lifecycle.restore(subject, name, principal))
   end
@@ -900,7 +904,7 @@ defmodule OneCore.Tools do
   defp run("apps_retry", %{"name" => name}, {_actor, subject} = principal, forward) do
     case record!(subject, name) do
       %{"state" => "not_installed", "app" => app} ->
-        if Store.about(app)["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
+        runs(subject, Store.trusted?(app), forward)
         reaches!(principal, subject, "installer")
         moved!(subject, name, Lifecycle.retry(subject, name))
 
@@ -913,7 +917,7 @@ defmodule OneCore.Tools do
   defp run("apps_trust", %{"name" => name, "trusted" => trusted}, {_actor, subject} = principal, forward) do
     app = record!(subject, name)["app"]
     whose = Store.whose(app)
-    if trusted, do: runs(whose, forward), else: at(whose, forward)
+    runs(whose, trusted, forward)
     reaches!(principal, app, "owner")
     with {:error, why} <- Lifecycle.trust(app, trusted), do: raise(why)
     moved!(subject, name, Installed.read(subject)[name])
@@ -1079,7 +1083,7 @@ defmodule OneCore.Tools do
       why: record["why"],
       deleted: record["deleted"],
       version: about["number"],
-      trusted: if(app, do: about["trusted"] != false),
+      trusted: if(app, do: Store.trusted?(about)),
       update:
         update &&
           %{
@@ -1123,7 +1127,7 @@ defmodule OneCore.Tools do
     record = record!(owner, name)
     app = record["app"]
     whose = Store.whose(app)
-    if Store.about(app)["trusted"] == false, do: at(whose, forward), else: runs(whose, forward)
+    runs(whose, Store.trusted?(app), forward)
 
     if record["by"] != actor and reaches(principal, owner, "installer") != :ok,
       do: reaches!(principal, app, "editor")

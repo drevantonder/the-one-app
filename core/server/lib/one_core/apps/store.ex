@@ -78,6 +78,14 @@ defmodule OneCore.Apps.Store do
   end
 
   @doc """
+  Whether the app `artifact` is trusted, as its latest version says (`about/1`): an untrusted one runs in a sandbox
+  (`OneCore.Sandbox`), and one not deployed yet is trusted until it says otherwise.
+  """
+  def trusted?(artifact) when is_binary(artifact), do: trusted?(about(artifact))
+
+  def trusted?(%{} = about), do: about["trusted"] != false
+
+  @doc """
   Writes a set of files, and makes it the app's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the app's history first, so every version but the
   latest is there, and `from`, the git repo its files came from, is kept with it (`:stored` keeps what the version
@@ -185,7 +193,7 @@ defmodule OneCore.Apps.Store do
       with %{"number" => number, "code" => code} <- in_bucket,
            true <- number > Map.get(latest, artifact, 0),
            version when version != nil <-
-             unanswered(artifact, fn -> version(artifact, code, load, in_bucket["trusted"] != false) end),
+             unanswered(artifact, fn -> version(artifact, code, load, trusted?(in_bucket)) end),
            true <- load or version != :error,
            do: [{artifact, number, version}],
            else: (_ -> [])

@@ -64,6 +64,12 @@ defmodule OneCore.Servers do
     end
   end
 
+  @doc """
+  Whether this server runs an app installed for `owner`, which is `trusted` or not: a trusted one where it runs the
+  apps installed for them (`runs?/1`), and an untrusted one, in a sandbox, wherever it acts for them (`here?/1`).
+  """
+  def runs?(owner, trusted), do: if(trusted, do: runs?(owner), else: here?(owner))
+
   @doc "The keys of the servers that run the apps installed for `owner`, as `runs?/1` says of each, the first first."
   def running(@network), do: listed(@network)
 
