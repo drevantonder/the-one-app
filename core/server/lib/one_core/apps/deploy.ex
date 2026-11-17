@@ -21,8 +21,6 @@ defmodule OneCore.Apps.Deploy do
   # What an app is for, as its skill's `metadata` says (`OneCore.App`): one of these.
   @categories [
     "Connectors",
-    "Communication",
-    "Productivity",
     "Privacy & Security",
     "Data",
     "AI",

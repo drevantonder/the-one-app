@@ -119,8 +119,6 @@ defmodule OneCore.App do
     | `category` | For |
     | --- | --- |
     | `Connectors` | Your accounts at outside services, for you and your agents: email, messages, calendars, contacts, documents and files |
-    | `Communication` | Email, messages, chats and notifications |
-    | `Productivity` | Accounts, calendars, documents, files, reminders and contacts |
     | `Privacy & Security` | Signing in, keeping secrets, encryption and who may reach what |
     | `Data` | Keeping data, backing it up and getting it back |
     | `AI` | Models, what agents remember and what they're told |

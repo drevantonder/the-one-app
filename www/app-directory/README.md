@@ -34,7 +34,7 @@ An installer doesn't wait on it or retry it, and nothing it installs depends on 
     GET https://one.drevan.me/apps/api/apps[?period=week]
 
     {"period": "all", "apps": [{"source": "drevantonder/the-one-app", "name": "gmail", "title": "Gmail",
-      "icon": "data:…", "subtitle": "…", "about": "…", "category": "Communication", "entrypoints": […], "widgets": […],
+      "icon": "data:…", "subtitle": "…", "about": "…", "category": "Connectors", "entrypoints": […], "widgets": […],
       "requires": […], "description": "…", "installs": 12, "code": "https://github.com/…/tree/HEAD/apps/gmail",
       "install": "one install drevantonder/the-one-app --app gmail"}]}
 
