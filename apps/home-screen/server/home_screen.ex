@@ -8,7 +8,9 @@ defmodule HomeScreen do
   The App Library holds every app that runs for whoever it's for, by category: what's installed for them and for each
   broader owner they're within (a user's has their groups' and the network's too, a group's the network's), each app
   once. An app installed since goes there, not on a page. An app about whoever opens it (`subject: "user"`, as Vault
-  and Devices say) is only in a user's, and is opened for them.
+  and Devices say) is only in a user's, and is opened for them. A background app, one with no entrypoint of its own
+  (Gmail, Database), is only ever in the App Library, where it opens its App Store page: there's nothing of it to put
+  on a page.
 
   Every tool here is asked for whoever's Home Screen it is, as an app opened from it is. What draws them is this
   app's `client/`: its app in the category `launcher`, which a client shows first.
@@ -171,8 +173,9 @@ defmodule HomeScreen do
         description: """
         Arranges your Home Screen's pages: each page's apps and widgets, in order, and whether it's hidden (`pages`),
         or the apps and widgets alone (`items`), which fill each page before the next. One not given is taken off, and
-        stays in the App Library; a page with nothing on it goes. Asked for a group or for the network, it arranges
-        theirs, for everyone who sees it, which their owners do.
+        stays in the App Library; a page with nothing on it goes. An app that isn't one whoever it's for can open,
+        such as a background app, with no screen of its own, isn't put there, and `skipped` says why. Asked for a
+        group or for the network, it arranges theirs, for everyone who sees it, which their owners do.
         """,
         inputs: %{
           type: "object",
@@ -203,17 +206,26 @@ defmodule HomeScreen do
               type: "array",
               items: %{type: "object"},
               description: "The pages now, each its `items` and, if it's hidden, `hidden`"
+            },
+            skipped: %{
+              type: "array",
+              description: "The apps given that weren't put on a page, and why",
+              items: %{
+                type: "object",
+                properties: %{entrypoint: %{type: "string"}, why: %{type: "string"}},
+                required: ["entrypoint", "why"]
+              }
             }
           },
-          required: ["pages"]
+          required: ["pages", "skipped"]
         }
       },
       %{
         name: "add",
         description: """
         Puts an app on your Home Screen, last on its last page: one installed for you, which is in your App Library,
-        or one of an app you can already use, in use for the network, which installs nothing. Asked for a group or
-        for the network, on theirs.
+        or one of an app you can already use, in use for the network, which installs nothing. A background app, with
+        no screen of its own, can't go on a page. Asked for a group or for the network, on theirs.
         """,
         inputs: adding,
         outputs: %{
@@ -284,6 +296,8 @@ defmodule HomeScreen do
 
   def call("arrange", inputs, call) do
     owner!(call)
+    apps = Call.apps(call)
+    openable = openable(apps)
 
     pages =
       case inputs do
@@ -297,10 +311,19 @@ defmodule HomeScreen do
           raise "Arranging takes the pages, each with its items (pages), or the items alone (items)."
       end
 
+    # Only an app whoever it's for can open goes on a page: not a background app, nor one that isn't theirs.
+    skipped =
+      for page <- pages, %{"entrypoint" => id} <- page["items"], not Map.has_key?(openable, id) do
+        %{entrypoint: id, why: unopenable(apps, id, call.subject)}
+      end
+
+    gone = MapSet.new(skipped, & &1.entrypoint)
+    pages = for page <- pages, do: %{page | "items" => Enum.reject(page["items"], &(&1["entrypoint"] in gone))}
+
     # A page with nothing on it goes, as a phone's does.
     pages = Enum.reject(pages, &(&1["items"] == []))
     store(call, fn _ -> pages end)
-    %{pages: pages}
+    %{pages: pages, skipped: skipped}
   end
 
   def call("add", %{"entrypoint" => entrypoint}, call) do
@@ -309,8 +332,7 @@ defmodule HomeScreen do
 
     case named(apps, entrypoint) do
       nil ->
-        raise "#{entrypoint} isn't installed for #{call.subject}, nor in use for the network, so it can't go on a page. " <>
-                "Install it first."
+        raise unopenable(apps, entrypoint, call.subject)
 
       {app, found} ->
         id = "#{app.name}/#{found.page}"
@@ -337,6 +359,21 @@ defmodule HomeScreen do
         end)
 
         %{entrypoint: id}
+    end
+  end
+
+  # Why an app can't go on a page: it's a background app, with no screen of its own, or it isn't installed for them.
+  defp unopenable(apps, entrypoint, subject) do
+    named = entrypoint |> String.split("/") |> hd()
+
+    case Enum.find(apps, &(named in [&1.name, &1.app])) do
+      %{entrypoints: [], title: title} ->
+        "#{title} is a background app, with no screen of its own, so it can't go on a page: it's only in the App " <>
+          "Library, under Background Apps."
+
+      _ ->
+        "#{entrypoint} isn't installed for #{subject}, nor in use for the network, so it can't go on a page. " <>
+          "Install it first."
     end
   end
 

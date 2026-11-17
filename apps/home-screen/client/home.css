@@ -296,6 +296,39 @@ body {
   align-content: start;
   gap: 1.25rem;
 }
+/* Background Apps: a row flush with the background, muted, as an iOS sidebar's section header is, whose chevron turns
+   down as it opens the background apps' categories under it. */
+.library .background {
+  display: grid;
+  gap: 0.75rem;
+}
+.library .disclosure {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+  padding: 0.25rem 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: var(--label-weight);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.library .disclosure .ui-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  transition: rotate var(--move-quick) var(--ease-quick);
+}
+.library .disclosure[aria-expanded="true"] .ui-icon {
+  rotate: 90deg;
+}
+.library .disclosure[aria-expanded="true"] .ui-icon.along:dir(rtl) {
+  rotate: -90deg;
+}
 /* Searched, the apps that match, as a Home page has them. */
 .library .found {
   display: grid;

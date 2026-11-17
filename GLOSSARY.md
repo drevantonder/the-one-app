@@ -25,6 +25,8 @@ An app's own words are defined in that app's `SKILL.md`.
   what an owner has.
 - **App entrypoint**: an icon an app puts in the launcher, with its name, category and page; people just see apps.
   It's on a Home Screen page or in an App Library, and in code it's an `entrypoint`.
+- **Background app**: an app with no app entrypoint, such as Gmail or Database: its tools, jobs and services work
+  for other apps and agents. It's only in the App Library, under Background Apps, never on a page.
 - **Account**: a user's account at an outside service (a Gmail address, a WhatsApp number), which they sign an app
   in to so its tools act there as them. It's a word for people: what's kept is an item in their Vault, of a type the
   app registers, which the Vault lists under Accounts. An account isn't an app entrypoint, and an app doesn't

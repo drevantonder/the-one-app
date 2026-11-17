@@ -329,65 +329,116 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
   )
 }
 
+/// Whether Background Apps is open, which each device remembers. Its storage may be missing or refused, as in a
+/// private window; then it starts closed.
+const BACKGROUND = "home-screen:background-apps"
+const [unfolded, setUnfolded] = createSignal(
+  (() => {
+    try {
+      return localStorage.getItem(BACKGROUND) === "open"
+    } catch {
+      return false
+    }
+  })(),
+)
+const unfold = (open: boolean) => {
+  setUnfolded(open)
+  try {
+    localStorage.setItem(BACKGROUND, open ? "open" : "closed")
+  } catch {}
+}
+
+/// An App Library's categories, each only its apps with an entrypoint, or under Background Apps (`background`), only
+/// its apps with none.
+const sorted = (library: Category[], background: boolean) =>
+  library.flatMap((category) => {
+    const entrypoints = category.entrypoints.filter((listed) => !listed.entrypoint === background)
+    return entrypoints.length ? [{ ...category, entrypoints }] : []
+  })
+/// A category of the App Library as it's opened, and its place there is registered: under Background Apps, apart from
+/// the category of the same name above it.
+const BEHIND = "background:"
+const openedCategory = (library: Category[], key: string) =>
+  key.startsWith(BEHIND) ? sorted(library, true).find((category) => category.category === key.slice(BEHIND.length)) : sorted(library, false).find((category) => category.category === key)
+
 /// The App Library: one page, which scrolls, as an iPhone's does, with every app you can reach once, whether it's
 /// installed for you, a group or everyone: your own App Library, which has theirs. Its search is at its top; under it,
-/// its categories, as many across as fit, each its first four apps' icons with their names in a square, or with more
-/// than that, three and the rest smaller in the fourth's place, and its name under it. Tapping an icon opens its app;
-/// tapping anywhere else in a category opens it. Typing in the search shows the apps whose names match, A to Z, in
-/// place of the categories. Touching and holding an app gives its menu, and moving it carries it onto Home's pages.
+/// the categories of the apps with a screen of their own, as many across as fit, each its first four apps' icons with
+/// their names in a square, or with more than that, three and the rest smaller in the fourth's place, and its name
+/// under it. Tapping an icon opens its app; tapping anywhere else in a category opens it. Under them is Background
+/// Apps, closed until it's tapped, as iOS's collapsible sections are: a row flush with the background whose chevron
+/// turns as it opens the categories of background apps, those with no screen of their own, under it. Typing in the
+/// search shows the apps whose names match, A to Z, in place of the categories, and the background apps that match
+/// under Background Apps, open. Touching and holding an app gives its menu, and moving one with a screen carries it
+/// onto Home's pages.
 function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
   const [query, setQuery] = createSignal("")
+  // Tapped while a search shows it open, Background Apps closes only for that search.
+  const [shut, setShut] = createSignal(false)
+  const searching = () => !!query().trim()
   // Tapped again as it shrinks back into its place, it turns and grows again.
-  const opening = (category: () => Category) => () => {
-    const back = state().matches({ category: "closing" }) && state().context.category === category().category
-    if (state().matches("nothing") || back) home.send({ type: "open", category: category().category })
+  const opening = (key: () => string) => () => {
+    const back = state().matches({ category: "closing" }) && state().context.category === key()
+    if (state().matches("nothing") || back) home.send({ type: "open", category: key() })
   }
-  const found = () => {
+  const found = (background: boolean) => {
     const words = query().trim().toLowerCase()
-    const all = props.owner.library.flatMap((category) => category.entrypoints)
+    const all = props.owner.library.flatMap((category) => category.entrypoints).filter((listed) => !listed.entrypoint === background)
     return all.filter((listed) => listed.name.toLowerCase().includes(words)).sort((a, b) => a.name.localeCompare(b.name))
   }
+  const apps = () => sorted(props.owner.library, false)
+  const background = () => sorted(props.owner.library, true)
+  const open = () => (searching() ? !shut() : unfolded())
+  const categories = (list: Category[], prefix: string) => (
+    <div class="categories">
+      <For each={list} keyed={(category) => category.category}>
+        {(category) => {
+          const key = () => prefix + category().category
+          const shown = () => (category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
+          return (
+            <div class="category">
+              <div class="place" ref={registered(props.places, key)} onClick={opening(key)}>
+                <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
+                  {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} />}
+                </For>
+                <Show when={category().entrypoints.length > 4}>
+                  <button type="button" class="more" aria-label={`All of ${category().category}`}>
+                    <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
+                      {(entrypoint) => <img src={entrypoint().icon} alt="" />}
+                    </For>
+                  </button>
+                </Show>
+              </div>
+              <button type="button" class="name" onClick={opening(key)}>{category().category}</button>
+            </div>
+          )
+        }}
+      </For>
+    </div>
+  )
+  const results = (list: Listed[]) => (
+    <div class="found">
+      <For each={list} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
+        {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} />}
+      </For>
+    </div>
+  )
   return (
     <section class="page library scrolls" aria-label="App Library">
       <div class="shelf">
-        <Search placeholder="App Library" aria-label="Search the App Library" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
-        <Show
-          when={query().trim()}
-          fallback={
-            <Show when={props.owner.library.length} fallback={<Empty>No apps yet.</Empty>}>
-              <div class="categories">
-                <For each={props.owner.library} keyed={(category) => category.category}>
-                  {(category) => {
-                    const shown = () => (category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
-                    return (
-                      <div class="category">
-                        <div class="place" ref={registered(props.places, () => category().category)} onClick={opening(category)}>
-                          <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                            {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} />}
-                          </For>
-                          <Show when={category().entrypoints.length > 4}>
-                            <button type="button" class="more" aria-label={`All of ${category().category}`}>
-                              <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                                {(entrypoint) => <img src={entrypoint().icon} alt="" />}
-                              </For>
-                            </button>
-                          </Show>
-                        </div>
-                        <button type="button" class="name" onClick={opening(category)}>{category().category}</button>
-                      </div>
-                    )
-                  }}
-                </For>
-              </div>
-            </Show>
-          }
-        >
-          <Show when={found().length} fallback={<Empty>No apps match.</Empty>}>
-            <div class="found">
-              <For each={found()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} />}
-              </For>
-            </div>
+        <Search placeholder="App Library" aria-label="Search the App Library" value={query()} onInput={(event) => (setQuery(event.currentTarget.value), setShut(false))} />
+        <Show when={searching() ? found(false).length || found(true).length : props.owner.library.length} fallback={<Empty>{searching() ? "No apps match." : "No apps yet."}</Empty>}>
+          <Show when={searching()} fallback={<Show when={apps().length}>{categories(apps(), "")}</Show>}>
+            <Show when={found(false).length}>{results(found(false))}</Show>
+          </Show>
+          <Show when={searching() ? found(true).length : background().length}>
+            <section class="background" aria-labelledby="background-apps">
+              <button type="button" id="background-apps" class="disclosure" aria-expanded={open() ? "true" : "false"} onClick={() => (searching() ? setShut(!shut()) : unfold(!unfolded()))}>
+                <span>Background Apps</span>
+                <Icon name="caret-right" along />
+              </button>
+              <Show when={open()}>{searching() ? results(found(true)) : categories(background(), BEHIND)}</Show>
+            </section>
           </Show>
         </Show>
       </div>
@@ -469,7 +520,7 @@ function OpenCategory(props: { owner: Owner; opened: string; places: Record<stri
   let panel!: HTMLDivElement
   let title!: HTMLHeadingElement
   let grid!: HTMLDivElement
-  const category = () => props.owner.library.find((category) => category.category === props.opened)
+  const category = () => openedCategory(props.owner.library, props.opened)
   const phase = () => (state().matches({ category: "opening" }) ? "opening" : state().matches({ category: "open" }) ? "open" : "closing")
   const close = () => !state().matches({ category: "closing" }) && home.send({ type: "close" })
   // What moves it, while it moves: turned back midway, each runs back from where it is.
@@ -511,7 +562,7 @@ function OpenCategory(props: { owner: Owner; opened: string; places: Record<stri
   return (
     // Escape, and the browser's own close requests, shrink it back as a tap beside it does, rather than closing it at once.
     <dialog class="opened" ref={veil} aria-labelledby="opened-category" data-phase={phase()} onCancel={(event) => (event.preventDefault(), close())} onClick={(event) => event.target === veil && close()}>
-      <h2 id="opened-category" ref={title}>{props.opened}</h2>
+      <h2 id="opened-category" ref={title}>{category()?.category}</h2>
       <div class="panel" ref={panel} onClick={(event) => event.target === panel && close()}>
         <div class="grid" ref={grid}>
           <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
@@ -1476,7 +1527,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey) return
       // A key pressed in an alert or a sheet is its own: the browser closes it on Escape, and that's all Escape does.
-      if ((event.target as Element).closest?.("dialog")) return
+      if ((event.target as Element).closest?.("dialog, input")) return
       // Escape closes the page overview, and otherwise ends editing, carrying something or not: nothing's open over it.
       if (event.key === "Escape" && home.getSnapshot().matches({ editing: "overview" })) return home.send({ type: "dismiss" })
       if (event.key === "Escape" && (home.getSnapshot().matches({ editing: "still" }) || home.getSnapshot().matches({ editing: "dragging" }))) return home.send({ type: "done" })
