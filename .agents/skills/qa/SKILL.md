@@ -21,3 +21,5 @@ guess you haven't reproduced.
 - A check that read a log before the process had created it, and failed for that. Follow a log with `tail -F`, as
   `tooling/network` does, never by reading it once.
 - Merging a fix whose check was failing, on the guess that the check was wrong.
+- Reproducing a reported bug in your own setup when it only happens in the reporter's: half an hour at the default
+  text size for a bug that showed only at the owner's. Start with their exact device, size, text size and build.

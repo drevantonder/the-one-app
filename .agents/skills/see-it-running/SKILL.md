@@ -3,7 +3,8 @@ name: see-it-running
 description: Use to get a real picture of a change in the app, on the desktop, Android or the iPhone simulator, and whenever you change a screen, which is shown with real pictures before it's called done.
 ---
 
-UI work is shown with real pictures of the real app, never described. Save pictures in your harness's scratch
+UI work is shown with real pictures of the real app, never described. A phone-sized desktop window (390×844) shows
+most screen changes in a minute; build for a phone or simulator only when the change is about that platform. Save pictures in your harness's scratch
 folder, never in the repo, and embed them in your reply. Screen wording and look follow `DESIGN.md`: read the
 section of the screen you change first.
 
