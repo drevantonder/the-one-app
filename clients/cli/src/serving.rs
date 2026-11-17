@@ -333,7 +333,8 @@ pub async fn update(client: &Client) -> Result<String> {
         return tool(client, "update", json!({"server": here.key()?})).await;
     }
     let builds = download(client).await?;
-    let one = builds.get("one").with_context(|| format!("The network has no build of one for {} yet.", target()))?;
+    let one =
+        builds.get(PROGRAM).with_context(|| format!("The network has no build of {PROGRAM} for {} yet.", target()))?;
     if one["build"] == BUILD {
         return Ok(format!("This device is on the latest build already: {BUILD}"));
     }
