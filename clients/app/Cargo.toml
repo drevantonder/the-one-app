@@ -31,7 +31,10 @@ window = [
   "dep:encryption_client",
   "dep:notifications_client",
   "dep:objc2",
+  "dep:objc2-core-foundation",
+  "dep:objc2-ui-kit",
   "dep:webkit2gtk",
+  "dep:gtk",
   "cli/window",
 ]
 
@@ -70,6 +73,8 @@ objc2 = { version = "0.6", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
+# Ctrl-Q and Ctrl-W, as a Linux app's window has them (`linux_keys`).
+gtk = { version = "0.18", optional = true }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"], optional = true }
@@ -77,3 +82,6 @@ tauri-plugin-notifications = { version = "0.4", default-features = false, featur
 # libc after 0.2.189 has no `in6_ifreq` on iOS, which netdev 0.46, through iroh, uses there.
 [target.'cfg(target_os = "ios")'.dependencies]
 libc = "=0.2.189"
+# A tap on the status bar scrolls the app that's showing to its top (`status_bar`).
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"], optional = true }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIResponder", "UIScrollView", "UIView"], optional = true }
