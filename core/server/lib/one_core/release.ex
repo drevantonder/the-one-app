@@ -2,8 +2,9 @@ defmodule OneCore.Release do
   @moduledoc """
   A server installed on a machine, as the program that keeps it running starts it (`one serve run`, in
   `clients/cli/src/serving.rs`): `bin/one_core eval 'OneCore.Release.serve()'`. It says on its output when it's
-  running, and when it's asked to update, and that program does the rest: it takes the latest build and `one`, starts
-  them to verify them, and goes back to the pair before if they don't start and answer by their key.
+  running, when it's asked to update and when it can reach the network again, and that program does the rest: it
+  takes the latest build and `one`, starts them to verify them, and goes back to the pair before if they don't start
+  and answer by their key.
 
   What each says to the other is a line of JSON, one of the messages the `client` crate defines
   (`core/client/src/serve.rs`), which this reads and writes through its NIF (`OneCore.Iroh.told/1` and `said/1`).
@@ -163,6 +164,14 @@ defmodule OneCore.Release do
     end
 
     status()
+  end
+
+  @doc """
+  Says this server can reach the network again after it couldn't (`OneCore.Server.reconnected/0`), as after its
+  machine slept, so the program keeping it running takes a release it may have missed.
+  """
+  def reconnected do
+    if Application.get_env(:one_core, :installed, false), do: say("reconnected")
   end
 
   defp restarting?(status), do: status["update_method"] == "restart" or status["server_daemon_status"] == "stopping"

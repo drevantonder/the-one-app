@@ -3,8 +3,8 @@
 //! server's Elixir through its NIF (`core/server/nif/one_core_iroh`).
 //!
 //! The program tells the server what it is (`Told`), as it starts it, in `ONE_SERVER_STATUS`, and on its input as that
-//! changes, and has it load a build. The server says on its output that it's running, that it's asked to update, and
-//! whether it loaded a build, and a build being checked says which it is and how it's taken (`Said`).
+//! changes, and has it load a build. The server says on its output that it's running, that it's asked to update, that
+//! it can reach the network again, and whether it loaded a build, and a build being checked says which it is and how it's taken (`Said`).
 
 use std::path::PathBuf;
 
@@ -93,6 +93,8 @@ pub enum Said {
     Running { key: String },
     /// Someone asked it to take the latest builds.
     UpdateAsked,
+    /// It can reach the network again after it couldn't, as after the machine slept, so it may have missed a release.
+    Reconnected,
     /// It loaded the build it was told to, and is that build now.
     Loaded { build: String },
     /// It couldn't load the build it was told to, and is on the code it had.

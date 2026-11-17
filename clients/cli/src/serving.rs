@@ -32,7 +32,14 @@
 //!                           └─doesn't─► up to date, went back
 //!   cut short: downloading ─► up to date · checking or loading ─► went back · starting ─► started again
 //!   every start of `serve run`: the `one` the record pairs with the build is put in place and started first
+//!   caught up: up to date ─started, or reconnected─► downloading as if asked, where the latest pair is newer;
+//!     not the pair it went back from until `AGAIN` after, and only once: then only when asked
 //! ```
+//!
+//! A server that missed a release, as one asleep, away or gone back during it, catches up by itself: every time it
+//! starts and every time it says it can reach the network again (`Said::Reconnected`), it takes the latest pair as
+//! when asked. A pair it went back from is tried once more on the first of those `AGAIN` after, and if it goes back
+//! again, only when it's asked (`one update`) or once there's a newer one.
 //!
 //! Every start is the one way: a build is started and has `START` to say it's running and answer by its key. What
 //! each machine is at is one small record, `state.json` in the client's home's `server/`, which every program changes
@@ -72,6 +79,8 @@ const START: Duration = Duration::from_secs(180);
 const STOP: Duration = Duration::from_secs(20);
 /// How many of the last lines a build said are kept to say why it didn't start.
 const LAST: usize = 5;
+/// How long after going back from a pair catching up tries it once more.
+const AGAIN: Duration = Duration::from_secs(10 * 60);
 
 /// Where joining or leaving is: each has the one way out on failure, back to where it began.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -93,6 +102,16 @@ struct Pair {
     program: String,
 }
 
+/// The pair an update last went back from: when, and whether it had gone back from it before, so catching up tries it
+/// only once more.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+struct WentBackFrom {
+    pair: Pair,
+    /// Seconds since 1970.
+    at: u64,
+    again: bool,
+}
+
 /// What this device is as a server, written in one step (`Here::write`).
 #[derive(Serialize, Deserialize, Default, Debug)]
 struct Record {
@@ -107,6 +126,8 @@ struct Record {
     next: Option<Pair>,
     /// Why the last update didn't take, which the server says until one does.
     went_back: Option<String>,
+    /// The pair it last went back from, until an update takes.
+    went_back_from: Option<WentBackFrom>,
 }
 
 impl Record {
@@ -124,7 +145,11 @@ impl Record {
 
     /// The pair a start of the server runs: the one being verified, or the one it's on.
     fn pair(&self) -> Option<Pair> {
-        if self.server_update_status == ServerUpdateStatus::Verifying { self.next.clone() } else { self.current.clone() }
+        if self.server_update_status == ServerUpdateStatus::Verifying {
+            self.next.clone()
+        } else {
+            self.current.clone()
+        }
     }
 
     /// Goes back from the pair being verified, which didn't take for `why`, to the one it's on, saying so until an
@@ -132,7 +157,8 @@ impl Record {
     fn go_back(&mut self, why: impl std::fmt::Display) {
         let build = |pair: &Option<Pair>| pair.as_ref().map(|pair| pair.build.clone()).unwrap_or_default();
         self.went(format!("Went back to {} from {}: {why}", build(&self.current), build(&self.next)));
-        self.next = None;
+        let again = self.went_back_from.as_ref().is_some_and(|from| Some(&from.pair) == self.next.as_ref());
+        self.went_back_from = self.next.take().map(|pair| WentBackFrom { pair, at: now(), again });
         self.server_update_status = ServerUpdateStatus::UpToDate;
         self.server_update_stage = None;
     }
@@ -142,6 +168,29 @@ impl Record {
         println!("{why}");
         self.went_back = Some(why);
     }
+
+    /// Keeps the pair being verified, `next`, which took: the server is on it, up to date.
+    fn took(&mut self, next: Pair) {
+        self.previous = self.current.replace(next);
+        self.next = None;
+        self.went_back = None;
+        self.went_back_from = None;
+        self.server_update_status = ServerUpdateStatus::UpToDate;
+        self.server_update_stage = None;
+    }
+
+    /// Whether catching up leaves the latest pair, `next`, alone: it went back from it less than `AGAIN` ago, or
+    /// twice.
+    fn holds(&self, next: &Pair) -> bool {
+        self.went_back_from
+            .as_ref()
+            .is_some_and(|from| &from.pair == next && (from.again || now() < from.at + AGAIN.as_secs()))
+    }
+}
+
+/// Seconds since 1970.
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |now| now.as_secs())
 }
 
 /// Makes this device a server of whoever it's for: its person, or the group or network `ONE_SUBJECT` names. It's put
@@ -475,17 +524,9 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     }
     record = here.change(|record| {
         if verifying {
-            let was = record.current.replace(pair.clone());
-            record.previous = was.clone();
-            record.next = None;
-            record.went_back = None;
-            record.server_update_status = ServerUpdateStatus::UpToDate;
-            record.server_update_stage = None;
-            println!(
-                "The server is on the build {} now, from {}.",
-                pair.build,
-                was.map(|was| was.build).unwrap_or_default()
-            );
+            let was = record.current.as_ref().map(|was| was.build.clone()).unwrap_or_default();
+            record.took(pair.clone());
+            println!("The server is on the build {} now, from {was}.", pair.build);
         }
         if record.server_membership == ServerMembership::Joining {
             record.server_membership = ServerMembership::Active;
@@ -495,14 +536,16 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     here.prune(&record)?;
     tell(&mut server, &record.told(ServerDaemonStatus::Running)).await;
     system::ready(&key)?;
+    update_server(&here, &mut record, &mut server, &mut said, &key, &program, false).await?;
 
     let stopping = stopped();
     tokio::pin!(stopping);
     loop {
         tokio::select! {
             heard = said.recv() => match heard {
-                Some(Heard { said: Some(Said::UpdateAsked), .. }) => {
-                    update_server(&here, &mut record, &mut server, &mut said, &key, &program).await?
+                Some(Heard { said: Some(asked @ (Said::UpdateAsked | Said::Reconnected)), .. }) => {
+                    let asked = asked == Said::UpdateAsked;
+                    update_server(&here, &mut record, &mut server, &mut said, &key, &program, asked).await?
                 }
                 Some(_) => {}
                 None => bail!("The server stopped: {}", server.wait().await?),
@@ -616,7 +659,9 @@ fn again(program: &Path) -> anyhow::Error {
 /// Takes the latest server build and `one` as a pair, and verifies them: checks the build starts and how it's taken
 /// (`method`), then loads it into the server while it runs, keeping it once the server answers by its key as that
 /// build and otherwise loading the one before again, or has the system start both in the server's place. While they
-/// download, the server answers on; nothing newer, or a download that failed, and it's up to date again.
+/// download, the server answers on; nothing newer, or a download that failed, and it's up to date again. Unless it was
+/// `asked`, as when it catches up, it's left as it is where there's nothing newer, it couldn't tell, or the latest is a
+/// pair it went back from (`Record::holds`).
 async fn update_server(
     here: &Here,
     record: &mut Record,
@@ -624,18 +669,46 @@ async fn update_server(
     said: &mut UnboundedReceiver<Heard>,
     key: &str,
     program: &Path,
+    asked: bool,
 ) -> Result<()> {
-    *record = here.save(server, |record| {
+    let downloading = |record: &mut Record| {
         record.server_update_status = ServerUpdateStatus::Downloading;
         record.server_update_stage = None;
         record.update_method = None;
-    })
-    .await?;
+    };
+    // Whoever asked is told at once it has begun (`OneCore.Release.update/0`).
+    if asked {
+        *record = here.save(server, downloading).await?;
+    }
     // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops where it was
     // told the device is nobody's, and its timer doesn't count while the machine sleeps.
     let now = Client::open(client::home()?, Vec::new()).await;
-    let taken = match &now {
-        Ok(now) => take(now, here, record, program).await,
+    let builds = match &now {
+        Ok(now) => download(now).await,
+        Err(error) => Err(anyhow::anyhow!("{error:#}")),
+    };
+    if !asked {
+        let next = builds
+            .as_ref()
+            .ok()
+            .zip(record.current.as_ref())
+            .and_then(|(builds, current)| latest_pair(builds, current));
+        let held = next.as_ref().is_some_and(|next| record.holds(next));
+        match &next {
+            Some(next) if held => println!("Not catching up to {}: it went back from it.", next.build),
+            Some(next) => println!("Catching up to {}, with one {}.", next.build, next.program),
+            None => {}
+        }
+        if next.is_none() || held {
+            if let Ok(now) = now {
+                now.close().await;
+            }
+            return Ok(());
+        }
+        *record = here.save(server, downloading).await?;
+    }
+    let taken = match &builds {
+        Ok(builds) => take(here, record, program, builds).await,
         Err(error) => Err(anyhow::anyhow!("{error:#}")),
     };
     match taken {
@@ -682,16 +755,14 @@ async fn update_server(
                     bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
                 }
             } else {
-                *record = here.change(|record| {
-                    record.previous = record.current.replace(next.clone());
-                    record.next = None;
-                    record.server_update_status = ServerUpdateStatus::UpToDate;
-                    record.server_update_stage = None;
-                })?;
+                *record = here.change(|record| record.took(next.clone()))?;
                 println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
             }
         }
-        Ok(None) => println!("This device is on the latest builds already."),
+        Ok(None) => {
+            println!("This device is on the latest builds already.");
+            *record = here.change(|record| record.went_back = None)?;
+        }
         Err(error) => {
             let on = record.current.as_ref().map(|current| current.build.clone()).unwrap_or_default();
             *record = here.change(|record| record.went(format!("Stayed on {on}: {error:#}")))?;
@@ -741,26 +812,32 @@ async fn load(server: &mut Child, said: &mut UnboundedReceiver<Heard>, folder: &
     .await
 }
 
-/// Takes the latest server build and `one` there's a newer one of: the build put together and checked, and the
-/// program replacing this one, the one before kept to go back to. Gives the pair, or `None` where both are the latest.
-async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> Result<Option<Pair>> {
-    let builds = download(client).await?;
-    let current = record.current.clone().context("a build it's on")?;
-    let mut next = Pair { build: current.build.clone(), program: BUILD.to_owned() };
-    if latest(&builds).is_some_and(|latest| latest != current.build) {
-        next.build = here.take(&builds, &record.told(ServerDaemonStatus::Running)).await?;
+/// Takes the latest server build and `one` among the network's `builds` there's a newer one of: the build put
+/// together and checked, and the program replacing this one, the one before kept to go back to. Gives the pair, or
+/// `None` where both are the latest.
+async fn take(here: &Here, record: &Record, program: &Path, builds: &Map<String, Value>) -> Result<Option<Pair>> {
+    let current = record.current.as_ref().context("a build it's on")?;
+    let Some(next) = latest_pair(builds, current) else { return Ok(None) };
+    if next.build != current.build {
+        here.take(builds, &record.told(ServerDaemonStatus::Running)).await?;
     }
-    if let Some(one) = builds.get(PROGRAM)
-        && one["build"] != BUILD
-    {
+    if next.program != BUILD {
         // Both are kept beside this one, which they're put in place of only as the pair they're in starts (`run`).
-        next.program = one["build"].as_str().context("a build says which it is")?.to_owned();
         let programs = here.folder.join("programs");
         fs::create_dir_all(&programs)?;
         fs::copy(program.canonicalize()?, programs.join(BUILD))?;
-        fs::rename(fetched_program(one, program).await?, programs.join(&next.program))?;
+        fs::rename(fetched_program(&builds[PROGRAM], program).await?, programs.join(&next.program))?;
     }
-    Ok((next != Pair { program: BUILD.to_owned(), ..current }).then_some(next))
+    Ok(Some(next))
+}
+
+/// The pair the network's latest `builds` make for a server on `current` run by this `one`, where it's another.
+fn latest_pair(builds: &Map<String, Value>, current: &Pair) -> Option<Pair> {
+    let next = Pair {
+        build: latest(builds).unwrap_or(&current.build).to_owned(),
+        program: builds.get(PROGRAM).and_then(|one| one["build"].as_str()).unwrap_or(BUILD).to_owned(),
+    };
+    (next != Pair { program: BUILD.to_owned(), ..current.clone() }).then_some(next)
 }
 
 /// The latest server build among the network's `builds`: its code's, where there's a runtime for this kind of machine

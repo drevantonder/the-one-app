@@ -85,17 +85,17 @@ done
 # What's under way, published and not yet taken by every server it can reach, and isn't this release's own: a line
 # for each server it hasn't reached. A server the network hasn't seen for longer than `asleep` (a Mac asleep, a
 # machine off), or one not ready with no update of its own under way (failing to start, which reconnects it each
-# time), can't be asked to update, so it holds up no release: it's named, and takes the latest with
-# `one update --server` once it's back.
+# time), can't be asked to update, so it holds up no release: it's named, and takes the latest by itself as it starts
+# or reconnects (`clients/cli/src/serving.rs`).
 asleep=600
 under_way() {
   jq -r --arg build "$build" --argjson asleep "$asleep" '(.latest["server-code"].build // "") as $latest |
     select($latest != $build) | .servers[] | select(.build != $latest or .server_update_status != "up_to_date") |
     ((now - (.last_seen // now * 1000) / 1000) / 60 | floor) as $away |
     if $away * 60 > $asleep then
-      "skipped: \(.name) was last seen \(if $away < 120 then "\($away) min" else "\($away / 60 | floor) h" end) ago, on \(.build): it takes the latest with `one update --server \(.server)` once it is back"
+      "skipped: \(.name) was last seen \(if $away < 120 then "\($away) min" else "\($away / 60 | floor) h" end) ago, on \(.build): it takes the latest by itself once it is back"
     elif .server_ready == false and .server_update_status == "up_to_date" then
-      "skipped: \(.name) is not ready (\(.server_ready_reason // "unknown")) and has no update under way, on \(.build): it takes the latest with `one update --server \(.server)` once it is ready"
+      "skipped: \(.name) is not ready (\(.server_ready_reason // "unknown")) and has no update under way, on \(.build): it takes the latest by itself once it starts"
     else "    \(.name) runs \(.build), \(.server_update_status), not \($latest)" end' <<<"$1"
 }
 refuse_under_way() {
