@@ -33,13 +33,9 @@ Exactly two rules hold at runtime:
 
 ## Order
 
-One release at a time. Before publishing a server or a client, look for another under way: a build in `one builds`'
-`latest` that not every server or device runs yet, or the release lock held (`${XDG_RUNTIME_DIR:-/tmp}/one-release.lock`
-names its build). If there's one, don't publish: say whose it is, from its commit's author and Agent Memory, and stop.
-
-A release is under way while it publishes (`tooling/release` holds the lock) and rolls out (`one update` until every
-server and device runs it), and no longer. Nothing is watched after it: each server verifies a build answers before it
-keeps it, and a bug found later is fixed forward.
+One release at a time: `tooling/release` refuses while another is under way, and says which; then say whose it is
+and stop. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
+found later is fixed forward.
 
 A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
 is split only for minutes:
@@ -78,8 +74,8 @@ On a device that is also a server, `one update` asks the program keeping that se
 take the latest builds, the program's among them, and answers before it has. What it did is in that program's log,
 `journalctl --user -u one-server-<key's first 12>` on Linux: `one --version` then says the new build.
 
-One server or edge release on a machine at a time. `tooling/release` waits for another itself; run an edge deploy
-under `flock "${XDG_RUNTIME_DIR:-/tmp}/one-release.lock" bun edge.js deploy <address>`. The network's address and
+Run an edge deploy under `flock -n "${XDG_RUNTIME_DIR:-/tmp}/one-release.lock" bun edge.js deploy <address>`, which
+refuses while a release publishes on the machine. The network's address and
 where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 ## What is live

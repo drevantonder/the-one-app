@@ -16,10 +16,10 @@
 # the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac builds a Mac's
 # `one`, which needs its system's frameworks: from Linux, it's built on the Mac `ssh mac` reaches, in its checkout
-# ~/scratch/one-release, at the same commit. One release runs on a machine at a time;
-# another waits for it. A commit older than one the network has
-# published is refused, so a release that finishes late doesn't undo a newer one. A build already published is
-# left as it is.
+# ~/scratch/one-release, at the same commit. A release is refused while another is under way: publishing on this
+# machine, or published and not yet taken by every server, which a release over it would split the network across
+# (17 Nov). A commit older than one the network has published is refused, so a release that finishes late doesn't
+# undo a newer one. A build already published is left as it is.
 #
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
@@ -82,6 +82,24 @@ for running in $(jq -r '[.servers[].build, .devices[].build, (.latest // {} | .[
   fi
 done
 
+# What's under way, published and not yet taken by every server, and isn't this release's own: a line for each
+# server it hasn't reached.
+under_way() {
+  jq -r --arg build "$build" '(.latest["server-code"].build // "") as $latest | select($latest != $build) | .servers[] |
+    select(.build != $latest or .server_update_status != "up_to_date") |
+    "    \(.name) runs \(.build), \(.server_update_status), not \($latest)"' <<<"$1"
+}
+refuse_under_way() {
+  local servers
+  servers=$(under_way "$1")
+  [[ -z $servers ]] || {
+    echo "Another release is under way, which every server hasn't taken yet: let it finish rather than publish over it. Whose it is is its commit's thread and Agent Memory; a server neither ready nor coming back after a few minutes is broken, which is said, not released over." >&2
+    echo "$servers" >&2
+    exit 1
+  }
+}
+refuse_under_way "$builds"
+
 # Which are built here, which on the Mac, and which are published already.
 mine=() mac=()
 for name in "${names[@]}"; do
@@ -110,7 +128,7 @@ updated=$(jq -r --argjson kinds "$(printf '%s\n' "${mine[@]}" "${mac[@]}" | sed 
 if command -v flock >/dev/null; then
   lock=${XDG_RUNTIME_DIR:-/tmp}/one-release.lock
   exec 9>>"$lock"
-  flock -n 9 || { echo "Waiting for the release of $(<"$lock") to finish"; flock 9; }
+  flock -n 9 || { echo "The release of $(<"$lock") is publishing on this machine: let it finish rather than publish over it." >&2 && exit 1; }
   echo "$build, pid $$" >"$lock"
 fi
 
@@ -259,6 +277,8 @@ for client in "${clients[@]}"; do wait "$client" || { echo "A client wasn't buil
 # Publishes what was built: the network gives a link for each file it doesn't have yet, which is sent there, and
 # once it has them all, they're the latest.
 if ((${#mine[@]})); then
+  # Another may have published while this built.
+  refuse_under_way "$(one builds)"
   echo "Publishing to the network"
   ONE=$(command -v one) OUT=$out BUILD=$build bun -e '
     const { ONE, OUT, BUILD } = process.env;
