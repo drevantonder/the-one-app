@@ -129,8 +129,9 @@ export interface RowMenu {
   select: (value: string) => void
 }
 
-/// How a menu in a row's `end` tells the row it's there, and that it's gone.
-export const RowMenu = createContext<(menu: RowMenu | undefined) => void>()
+/// How a menu in a row's `end` tells the row it's there, and that it's gone. A menu anywhere else, as in a screen's bar,
+/// finds none.
+export const RowMenu = createContext<((menu: RowMenu | undefined) => void) | null>(null)
 
 /// How far a finger moves before it's a swipe or a scroll, not a press.
 const SLOP = 10
