@@ -116,7 +116,7 @@ function App() {
             <Show when={emulators().length} fallback={<Empty>No emulators. Your agents create them as they need them.</Empty>}>
               <List>
                 <For each={emulators()} keyed={(e) => e.name}>
-                  {(e) => <Row heading={e().name} text={`${e().description} · ${says(e())} · ${e().machine} · used ${since(e().last_used)}`} current={open() === e().name} onClick={() => setOpen(e().name)} />}
+                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onClick={() => setOpen(e().name)} />}
                 </For>
               </List>
             </Show>

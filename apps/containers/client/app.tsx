@@ -35,7 +35,7 @@ function Container(props: { container: Listed }) {
   return (
     <Row
       heading={c().name}
-      text={c().state === "unknown" ? `${c().machine} · ${seen(c().last_on)}` : `${c().description} · ${STATE[c().state] ?? c().state} · ${c().machine} · used ${since(c().last_used)}`}
+      text={c().state === "unknown" ? `${c().machine} · ${seen(c().last_on)}` : [c().description, STATE[c().state] ?? c().state, c().machine, c().last_used && `used ${since(c().last_used)}`].filter(Boolean).join(" · ")}
       end={
         c().state !== "unknown" && <Menu.Root onSelect={act}>
           <Menu.Trigger aria-label={`More for ${c().name}`} />
