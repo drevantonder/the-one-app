@@ -1,13 +1,14 @@
 // What the Home Screen's tools answer, which every screen here reads.
 
-/** An app: its page's address, name, icon, plugin and category, and `subject: "user"` if it's opened for whoever opens it. */
+/** An app: its page's address, name, icon, plugin and category, and its `subject`: `"user"` if it's opened for whoever
+ * opens it, or the group it's opened for, where a group's install is in a user's App Library. */
 export interface App {
   app: string
   name: string
   icon: string
   plugin: string
   category: string | null
-  subject?: "user"
+  subject?: "user" | `groups/${string}`
 }
 
 /** A widget on a page, or one that could go on one: its tool, the sizes it comes in, and the app pressing it opens. */

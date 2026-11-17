@@ -21,12 +21,12 @@ Its words:
   the next. It holds only what was put there. A page can be hidden, kept but not shown, and a page with nothing on it
   goes. An owner's pages are one layout, so arranging everyone's or a group's arranges it for everyone who sees it.
   The user themselves arranges theirs, and a group's or the network's `owner`s theirs (`arranges`).
-- **App Library**: every app installed for an owner, by category, after their pages. An app installed lands there,
-  not on a page.
-- An app is in the App Library of whoever it's installed for, and in no other. One about whoever opens it
-  (`subject: "user"`) is in the user's own App Library wherever it's installed, and opens for them. A plugin a user
-  installed for themselves too is in theirs and not in everyone's; a group's own install keeps the group's data, so
-  it's in the group's.
+- **App Library**: every app that runs for an owner, by category, after their pages: what's installed for them and
+  for each broader owner they're within. A user's shows theirs, their groups' and everyone's; a group's, its own and
+  everyone's; everyone's, only everyone's. Each app is there once, as the narrowest install's, and a group's opens
+  for the group. An app installed lands there, not on a page.
+- One about whoever opens it (`subject: "user"`) is only in a user's App Library, wherever it's installed, and opens
+  for them.
 - Installing a plugin puts its code on a server, so for the network only its owners and those they let (`installer`,
   see `permissions`) do it, and for a group, its owners. Whoever can't asks one of them themselves.
 

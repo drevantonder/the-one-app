@@ -49,9 +49,9 @@ const rtl = () => (document.dir === "rtl" ? -1 : 1)
 const editing = () => state().context.editing
 const editingOwner = (owner: number) => state().matches("editing") && editing()?.owner === owner
 
-/// Opens an app for whoever its owner is, or for its person where it's about whoever opens it. `behind` only starts
-/// it, as a finger lands on it.
-const launch = (app: App, owner: Owner, behind?: boolean) => open(app.app, { subject: app.subject === "user" ? undefined : owner.subject, behind })
+/// Opens an app for whoever its owner is, for the group whose install it is, or for its person where it's about
+/// whoever opens it. `behind` only starts it, as a finger lands on it.
+const launch = (app: App, owner: Owner, behind?: boolean) => open(app.app, { subject: app.subject === "user" ? undefined : (app.subject ?? owner.subject), behind })
 
 /// An owner's pages as they're kept: each with what's on it and whether it's hidden, to edit.
 const draft = (owner: Owner, index: number): Editing => ({ owner: index, pages: fitted(owner.pages.map((page) => ({ items: [...page.items], hidden: page.hidden }))) })

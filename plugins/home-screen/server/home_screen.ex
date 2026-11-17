@@ -5,11 +5,10 @@ defmodule HomeScreen do
 
   Its pages hold what its owner put on them, apps and widgets, page by page in the order they arranged them, each page
   shown or hidden: an artifact made for them.
-  The App Library holds every app installed for whoever it's for, by category, and an app installed since goes there,
-  not on a page. An app about whoever opens it (`subject: "user"`, as Vault and Devices say) is in the user's own App
-  Library, wherever its plugin is installed, and is opened for them. No plugin's app is in two: one a user installed
-  for themselves is in theirs and not the network's, while a group's own install, which keeps the group's data, is in
-  the group's.
+  The App Library holds every app that runs for whoever it's for, by category: what's installed for them and for each
+  broader owner they're within (a user's has their groups' and the network's too, a group's the network's), each app
+  once. An app installed since goes there, not on a page. An app about whoever opens it (`subject: "user"`, as Vault
+  and Devices say) is only in a user's, and is opened for them.
 
   Every tool here is asked for whoever's Home Screen it is, as an app opened from it is. What draws them is this
   plugin's `client/`: its app in the category `launcher`, which a client shows first.
@@ -106,8 +105,8 @@ defmodule HomeScreen do
         read_only: true,
         description: """
         Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
-        Library, every app installed for you by category (`library`), the widgets that could be put on a page
-        (`widgets`), and whether you may arrange it. Asked for a group or for the network, it's theirs.
+        Library, every app that runs for you by category, yours, your groups' and everyone's (`library`), the widgets
+        that could be put on a page (`widgets`), and whether you may arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none,
         outputs: %{
@@ -252,7 +251,7 @@ defmodule HomeScreen do
     plugins = Call.plugins(call)
     stored = stored(call)
     openable = openable(plugins)
-    library = library(call, plugins)
+    library = library(call)
     in_library = for %{apps: apps} <- library, app <- apps, into: MapSet.new(), do: app.plugin
     put = for page <- stored, %{"app" => id} <- page["items"], app = openable[id], into: MapSet.new(), do: app.plugin
 
@@ -371,26 +370,22 @@ defmodule HomeScreen do
     )
   end
 
-  # The App Library: every app installed for whoever it's for, by category, in the order of `@categories`, then Other.
-  # A user's has the apps about whoever opens them too, wherever those are installed. The network's leaves out what
-  # the user asking has installed for themselves, which is in theirs.
-  defp library(call, plugins) do
-    mine =
-      case call.actor do
-        "users/" <> _ = actor when call.subject == "network" ->
-          for plugin <- Call.plugins(%{call | subject: actor}), plugin.installed == actor, into: MapSet.new(),
-            do: plugin.plugin
-
-        _ ->
-          MapSet.new()
-      end
-
+  # The App Library: every app that runs for whoever it's for, by category, in the order of `@categories`, then Other.
+  # That's what's installed for them and for each broader owner they're within: a user's has theirs, their groups'
+  # and the network's, a group's its own and the network's. A plugin installed for more than one of them is there
+  # once, as the narrowest's. An app about whoever opens it is only in a user's.
+  defp library(call) do
     apps =
-      for plugin <- plugins,
+      for scope <- scopes(call),
+          plugin <- Call.plugins(%{call | subject: scope}),
+          plugin.installed == scope,
           app <- plugin.apps,
           app.category != "launcher",
-          shown?(call.subject, plugin, app, mine),
-          do: entry(plugin, app)
+          match?("users/" <> _, call.subject) or app[:subject] != "user" do
+        {{plugin.plugin, app.page}, opened(entry(plugin, app), call.subject, scope)}
+      end
+      |> Enum.uniq_by(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
 
     known = for {category, name} <- @categories, do: {category, name, Enum.filter(apps, &(&1.category == category))}
     other = {nil, "Other", Enum.reject(apps, &List.keymember?(@categories, &1.category, 0))}
@@ -399,12 +394,23 @@ defmodule HomeScreen do
         do: %{category: category, name: name, apps: Enum.sort_by(apps, &String.downcase(&1.name))}
   end
 
-  defp shown?("users/" <> _ = user, plugin, app, _mine), do: plugin.installed == user or app[:subject] == "user"
+  # Whoever an App Library is for, then each broader owner they're within, narrowest first.
+  defp scopes(%{subject: "network"}), do: ["network"]
+  defp scopes(%{subject: "users/" <> _ = user} = call), do: [user | groups(call)] ++ ["network"]
+  defp scopes(%{subject: group}), do: [group, "network"]
 
-  defp shown?("network", plugin, app, mine),
-    do: plugin.installed == "network" and app[:subject] != "user" and not MapSet.member?(mine, plugin.plugin)
+  # The groups a user is in, as `permissions` keeps them. A network without it has none.
+  defp groups(call) do
+    for %{"group" => group} <- Call.tool(call, "permissions", "groups", %{})["groups"], do: group
+  rescue
+    _ -> []
+  end
 
-  defp shown?(group, plugin, _app, _mine), do: plugin.installed == group
+  # A group's app in a user's App Library opens for the group, whose install it is.
+  defp opened(entry, "users/" <> _, "groups/" <> _ = group) when not is_map_key(entry, :subject),
+    do: Map.put(entry, :subject, group)
+
+  defp opened(entry, _subject, _scope), do: entry
 
   # A plugin's app by what `add` and `remove` take: the app as `pages` gives it, or the plugin by its name or its
   # artifact, for its first.
