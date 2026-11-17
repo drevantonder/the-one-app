@@ -64,7 +64,8 @@ The app keeps its client in its App Group, which the simulator gives it, so `mai
 `SIMCTL_CHILD_ONE_HOME` changes nothing. To open it on a network of your own, set aside what's in
 `xcrun simctl get_app_container booted app.theone.client group.app.theone.client`, put your client's `key` and
 `network` there, make the network's address the Mac's too (`ssh -N -R <port>:localhost:<port> mac`), launch with
-`SIMCTL_CHILD_ONE_AS=owner`, and put back what was there after. `axe tap -x <x> -y <y> --udid <udid>` taps, in points.
+`SIMCTL_CHILD_ONE_AS=owner`, and put back what was there after. `axe tap -x <x> -y <y> --udid <udid>` taps, in points. `axe swipe` and drags need `--delta 4` to move like a finger: its default
+steps of 50 px look like a velocity bug in any gesture.
 
 ## Mistakes already made
 
