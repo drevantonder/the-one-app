@@ -61,7 +61,7 @@ defmodule OneCore.Services do
   """
   def install(app, service) do
     with :ok <- known(app, service),
-         {:ok, instance} <- :gen_statem.call(__MODULE__, {:install, {app, service}}) do
+         {:ok, instance} <- call({:install, {app, service}}) do
       Server.notify_servers(Servers.acts_for(Server.key()))
 
       case instance && Apps.Process.started(instance) do
@@ -77,14 +77,14 @@ defmodule OneCore.Services do
 
   @doc "Stops running an app's service on this server."
   def remove(app, service) do
-    with {:ok, instance} <- :gen_statem.call(__MODULE__, {:remove, {app, service}}) do
+    with {:ok, instance} <- call({:remove, {app, service}}) do
       if instance, do: Apps.Process.stop(instance)
       Server.notify_servers(Servers.acts_for(Server.key()))
     end
   end
 
   @doc "An app has a newer version: its services installed here that it didn't have before start."
-  def start(app), do: :gen_statem.call(__MODULE__, {:start, app})
+  def start(app), do: call({:start, app})
 
   @doc """
   Calls a function of an app's service running here, with the service's process and then `arguments`. Gives
@@ -107,7 +107,7 @@ defmodule OneCore.Services do
           {:error, "#{app} has no service named #{service}"}
 
         instance == nil ->
-          {:error, :gen_statem.call(__MODULE__, {:stopped, {app, service}})}
+          {:error, call({:stopped, {app, service}})}
 
         function = Calls.exported(module, function, length(arguments) + 1) ->
           {:ok, apply(module, function, [instance | arguments])}
@@ -175,55 +175,12 @@ defmodule OneCore.Services do
 
   def handle_event({:timeout, service}, :start, stages, _data), do: {:next_state, start(stages, service), nil}
 
-  def handle_event({:call, from}, {:install, {app, name} = service}, stages, _data) do
-    cond do
-      Servers.acts_for(Server.key()) == [] ->
-        {:keep_state_and_data, [{:reply, from, {:error, "This server acts for nobody yet, so it runs no services"}}]}
-
-      service in here() ->
-        {:keep_state_and_data, [{:reply, from, {:ok, Apps.Process.whereis(app, name)}}]}
-
-      true ->
-        Servers.install(here() ++ [service])
-        stages = start(stages, service)
-        {:next_state, stages, nil, [{:reply, from, {:ok, process(stages[service])}}]}
-    end
-  end
-
-  def handle_event({:call, from}, {:remove, {app, name} = service}, stages, _data) do
-    if service in here() do
-      Servers.install(here() -- [service])
-      instance = Apps.Process.whereis(app, name)
-
-      stages =
-        if instance do
-          Map.put(stages, service, {:removing, Process.monitor(instance)})
-        else
-          File.rm_rf!(folder(app, name))
-          Map.delete(stages, service)
-        end
-
-      {:next_state, stages, nil, [{:reply, from, {:ok, instance}}, {{:timeout, service}, :cancel}]}
-    else
-      {:keep_state_and_data, [{:reply, from, {:error, "#{name} of #{app} isn't installed on this server"}}]}
-    end
-  end
-
-  def handle_event({:call, from}, {:start, app}, stages, _data) do
-    starting = for {^app, name} = service <- here(), Apps.Process.whereis(app, name) == nil, do: service
-    cancel = for service <- starting, do: {{:timeout, service}, :cancel}
-    {:next_state, Enum.reduce(starting, stages, &start(&2, &1)), nil, [{:reply, from, :ok} | cancel]}
-  end
-
-  def handle_event({:call, from}, {:stopped, {app, name} = service}, stages, _data) do
-    why =
-      case service in here() && stages[service] do
-        false -> "#{app}'s #{name} isn't installed on this server"
-        {:restarting, why} -> "#{app}'s #{name} stopped, and is being started again: #{explained(app, why)}"
-        _ -> "#{app}'s #{name} is still starting"
-      end
-
-    {:keep_state_and_data, [{:reply, from, why}]}
+  # What's asked of this reads which services are installed here from the bucket, through the edge, which may not
+  # answer for a while (`OneCore.Edge.Unreachable`): that fails whoever asked, saying why (`call/1`), and not this.
+  def handle_event({:call, from}, ask, stages, _data) do
+    called(from, ask, stages)
+  rescue
+    unreachable in OneCore.Edge.Unreachable -> {:keep_state_and_data, [{:reply, from, {:unreachable, unreachable}}]}
   end
 
   def handle_event(:info, {:DOWN, monitor, :process, _instance, why}, stages, _data) do
@@ -245,6 +202,64 @@ defmodule OneCore.Services do
       # One that stopped after another took its place, as when its app's newer version started it again.
       nil ->
         :keep_state_and_data
+    end
+  end
+
+  defp called(from, {:install, {app, name} = service}, stages) do
+    cond do
+      Servers.acts_for(Server.key()) == [] ->
+        {:keep_state_and_data, [{:reply, from, {:error, "This server acts for nobody yet, so it runs no services"}}]}
+
+      service in here() ->
+        {:keep_state_and_data, [{:reply, from, {:ok, Apps.Process.whereis(app, name)}}]}
+
+      true ->
+        Servers.install(here() ++ [service])
+        stages = start(stages, service)
+        {:next_state, stages, nil, [{:reply, from, {:ok, process(stages[service])}}]}
+    end
+  end
+
+  defp called(from, {:remove, {app, name} = service}, stages) do
+    if service in here() do
+      Servers.install(here() -- [service])
+      instance = Apps.Process.whereis(app, name)
+
+      stages =
+        if instance do
+          Map.put(stages, service, {:removing, Process.monitor(instance)})
+        else
+          File.rm_rf!(folder(app, name))
+          Map.delete(stages, service)
+        end
+
+      {:next_state, stages, nil, [{:reply, from, {:ok, instance}}, {{:timeout, service}, :cancel}]}
+    else
+      {:keep_state_and_data, [{:reply, from, {:error, "#{name} of #{app} isn't installed on this server"}}]}
+    end
+  end
+
+  defp called(from, {:start, app}, stages) do
+    starting = for {^app, name} = service <- here(), Apps.Process.whereis(app, name) == nil, do: service
+    cancel = for service <- starting, do: {{:timeout, service}, :cancel}
+    {:next_state, Enum.reduce(starting, stages, &start(&2, &1)), nil, [{:reply, from, :ok} | cancel]}
+  end
+
+  defp called(from, {:stopped, {app, name} = service}, stages) do
+    why =
+      case service in here() && stages[service] do
+        false -> "#{app}'s #{name} isn't installed on this server"
+        {:restarting, why} -> "#{app}'s #{name} stopped, and is being started again: #{explained(app, why)}"
+        _ -> "#{app}'s #{name} is still starting"
+      end
+
+    {:keep_state_and_data, [{:reply, from, why}]}
+  end
+
+  defp call(ask) do
+    case :gen_statem.call(__MODULE__, ask) do
+      {:unreachable, unreachable} -> raise unreachable
+      answer -> answer
     end
   end
 

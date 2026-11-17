@@ -263,24 +263,25 @@ defmodule OneCore.Apps do
     # What couldn't be read or started is left out and said in the log, as when the bucket didn't give or refused it:
     # someone's apps, or everyone's, if it couldn't say whose apps run here. A bucket that didn't answer has
     # this server look again once it does (`OneCore.Bucket`). What's loaded already is adopted, not loaded again.
-    here = here(key)
-
-    state =
+    {here, state} =
       try do
-        for owner <- here, reduce: state do
-          state ->
-            try do
-              installed = Installed.running(owner)
-              newer = Store.newer(Enum.uniq(Map.values(installed)), state.latest)
-              {state, _changed, _any} = took_over(state, owner, installed, newer)
-              LoadedVersion.release(for {_artifact, _number, {:ok, version}} <- newer, do: version)
-              state
-            rescue
-              unanswered -> unstarted(state, owner, unanswered)
-            end
-        end
+        here = here(key)
+
+        {here,
+         for owner <- here, reduce: state do
+           state ->
+             try do
+               installed = Installed.running(owner)
+               newer = Store.newer(Enum.uniq(Map.values(installed)), state.latest)
+               {state, _changed, _any} = took_over(state, owner, installed, newer)
+               LoadedVersion.release(for {_artifact, _number, {:ok, version}} <- newer, do: version)
+               state
+             rescue
+               unanswered -> unstarted(state, owner, unanswered)
+             end
+         end}
       rescue
-        unanswered -> unstarted(state, "everyone", unanswered)
+        unanswered -> {[], unstarted(state, "everyone", unanswered)}
       end
 
     # Whoever else something loaded here is installed for, this looked at before it restarted: they're looked at
