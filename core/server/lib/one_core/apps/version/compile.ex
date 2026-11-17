@@ -1,13 +1,20 @@
 defmodule OneCore.Apps.Version.Compile do
   @moduledoc """
   Compiles a version's Elixir under the name `OneCore.Apps.LoadedVersion` gives it, as it's loading: each of its
-  modules sits under that name (`OneCore.Apps.Load7.Notes`), by an alias put before each file, and what its app
+  modules sits under that name (`OneCore.Apps.V<hash>.Notes`), by an alias put before each file, and what its app
   says of itself is checked (`OneCore.Apps.Version.Checks`).
+
+  What it's compiled to is kept on this machine, as `.beam` files, and loaded instead of compiling it again for as
+  long as nothing its compile read has changed: Elixir and OTP, and each module outside it that it used as it
+  compiled, as Mix tracks and compares them (`Kernel.LexicalTracker`): one whose macros it ran, or that it `use`d or
+  `require`d, by its MD5, and one whose struct it built, by its exports' MD5. So a server that restarts compiles
+  again only the apps whose code, or what they're compiled with, changed.
   """
   alias OneCore.{Entrypoint, Builds, Nif, Server, Skills}
   alias OneCore.App.Manifest
   alias OneCore.Apps.Version
   alias OneCore.Apps.Version.Checks
+  require Logger
 
   @doc """
   Compiles the `files` of the app `artifact` under the name `under`, as `OneCore.Apps.LoadedVersion.load/3`
@@ -56,15 +63,91 @@ defmodule OneCore.Apps.Version.Compile do
     end)
   end
 
+  # What a version was compiled to, kept by its name and the Elixir and OTP it was compiled with, or else its files
+  # compiled together.
+  defp compiled(under, sources, builds) do
+    cache =
+      Path.join([Server.home(), "compiled", Version.code({under, System.version(), :erlang.system_info(:otp_release)})])
+
+    with :error <- kept(cache) do
+      with {:ok, modules, warnings, binaries, references} <- compile_files(under, sources, builds) do
+        keep(cache, binaries, references, warnings)
+        {:ok, modules, warnings}
+      end
+    end
+  end
+
+  # What's kept is loaded at once (`:code.atomic_load`), if each module it was compiled with is as it was then.
+  defp kept(cache) do
+    with {:ok, kept} <- File.read(Path.join(cache, "compiled")),
+         %{modules: modules, references: references, warnings: warnings} <- :erlang.binary_to_term(kept),
+         true <- Enum.all?(references, fn {module, {kind, md5}} -> md5(module, kind) == md5 end),
+         :ok <- :code.atomic_load(for module <- modules, do: beam(cache, module)) do
+      File.touch(cache)
+      {:ok, modules, warnings}
+    else
+      _ -> :error
+    end
+  end
+
+  defp beam(cache, module) do
+    file = Path.join(cache, "#{module}.beam")
+    {module, String.to_charlist(file), File.read!(file)}
+  end
+
+  defp md5(module, kind) do
+    cond do
+      not Code.ensure_loaded?(module) -> nil
+      kind == :export and function_exported?(module, :__info__, 1) -> module.__info__(:exports_md5)
+      true -> module.module_info(:md5)
+    end
+  end
+
+  # Written beside, then renamed into place, so what's kept is all there or not at all. What wasn't loaded for a month
+  # goes: its version, or the Elixir it was compiled with, is long gone.
+  defp keep(cache, binaries, references, warnings) do
+    writing = cache <> ".writing"
+    File.rm_rf!(writing)
+    File.mkdir_p!(writing)
+    for {module, binary} <- binaries, do: File.write!(Path.join(writing, "#{module}.beam"), binary)
+
+    kept = %{
+      modules: Map.keys(binaries),
+      references: Map.new(references, fn {module, kind} -> {module, {kind, md5(module, kind)}} end),
+      warnings: warnings
+    }
+
+    File.write!(Path.join(writing, "compiled"), :erlang.term_to_binary(kept))
+    File.rm_rf!(cache)
+    File.rename!(writing, cache)
+    month_ago = System.os_time(:second) - 30 * 24 * 3600
+
+    for folder <- Path.wildcard(Path.join(Path.dirname(cache), "*")),
+        {:ok, %{mtime: used}} <- [File.stat(folder, time: :posix)],
+        used < month_ago,
+        do: File.rm_rf!(folder)
+  rescue
+    error -> Logger.warning("What an app was compiled to wasn't kept: #{Exception.message(error)}")
+  end
+
   # The files go to a folder of their own to be compiled together, so they can use each other's structs and macros
   # in any order. The aliases share each file's first line, which keeps its line numbers. A loading that was killed
-  # left its folder, which the next under its name clears.
-  defp compiled(under, sources, builds) do
+  # left its folder, which the next under its name clears. The compiler hands each module's binary, and each file's
+  # references, to the callbacks here, in this process, as it does Mix's.
+  defp compile_files(under, sources, builds) do
     folder = Path.join([Server.home(), "compiling", List.last(Module.split(under))])
     File.rm_rf!(folder)
     names = Enum.uniq(for {_, source} <- sources, name <- defined(source), do: name)
     names = Map.merge(builds, Map.new(names, &{Atom.to_string(&1), Module.concat(under, &1)}))
     aliases = Enum.map_join(names, fn {name, module} -> "alias #{inspect(module)}, as: #{name}, warn: false; " end)
+    me = self()
+    ref = make_ref()
+
+    options = [
+      return_diagnostics: true,
+      each_file: fn _file, lexical -> send(me, {ref, :references, Kernel.LexicalTracker.references(lexical)}) end,
+      each_module: fn _file, module, binary -> send(me, {ref, :module, module, binary}) end
+    ]
 
     try do
       paths =
@@ -75,11 +158,20 @@ defmodule OneCore.Apps.Version.Compile do
           file
         end
 
-      case Kernel.ParallelCompiler.compile(paths, return_diagnostics: true) do
+      outcome = Kernel.ParallelCompiler.compile(paths, options)
+      {binaries, references} = received(ref, %{}, %{})
+
+      case outcome do
         {:ok, modules, warnings} ->
           case Enum.reject(modules, &(Version.under(&1) == under)) do
             [] ->
-              {:ok, modules, messages(warnings.compile_warnings ++ warnings.runtime_warnings, under, folder)}
+              own = Atom.to_string(under) <> "."
+
+              references =
+                Map.reject(references, fn {module, _kind} -> String.starts_with?(Atom.to_string(module), own) end)
+
+              {:ok, modules, messages(warnings.compile_warnings ++ warnings.runtime_warnings, under, folder), binaries,
+               references}
 
             outside ->
               Enum.each(outside, &(:code.delete(&1) && :code.purge(&1)))
@@ -91,6 +183,21 @@ defmodule OneCore.Apps.Version.Compile do
       end
     after
       File.rm_rf!(folder)
+    end
+  end
+
+  # Each module's binary, and the modules each file used as it compiled, by how: `:compile` for one whose code ran
+  # as it compiled, `:export` for one whose struct or exports it read (Mix's compile and export references).
+  defp received(ref, binaries, references) do
+    receive do
+      {^ref, :module, module, binary} ->
+        received(ref, Map.put(binaries, module, binary), references)
+
+      {^ref, :references, {compile, exports, _runtime, _env}} ->
+        references = Enum.reduce(exports, references, &Map.put_new(&2, &1, :export))
+        received(ref, binaries, Enum.reduce(compile, references, &Map.put(&2, &1, :compile)))
+    after
+      0 -> {binaries, references}
     end
   end
 

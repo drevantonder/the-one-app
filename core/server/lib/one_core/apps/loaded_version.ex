@@ -4,20 +4,20 @@ defmodule OneCore.Apps.LoadedVersion do
   Erlang's word (`code:is_loaded`) for code in a server's memory, as opposed to deployed, in the bucket for the
   whole network (`OneCore.Apps.Deploy`).
 
-      loading ──compiled under a free name──► loaded (in use by n)
-      loading ──compile fails or raises──► (name free)
-      loaded ──n reaches 0──► unloading ──old calls finished (Erlang's purge)──► (name free)
+      loading ──compiled, or loaded as it was compiled before──► loaded (in use by n)
+      loading ──compile fails or raises──► (unloaded)
+      loaded ──n reaches 0──► unloading ──old calls finished (Erlang's purge)──► (unloaded)
 
-  The VM keeps only two versions of a module, so a version's modules sit under one of 4,096 names no other version
-  loaded has (`OneCore.Apps.Load7.Notes`). Loading takes the first free one and gives it back however it ends,
-  a raise or its loader's exit included, and so does unloading. A server updated for years uses no more names than
-  it ever ran versions at once.
+  The VM keeps only two versions of a module, so a version's modules sit under a name of its own, named for its app
+  and its code (`OneCore.Apps.V<hash>.Notes`), as a NIF's build is (`OneCore.Nif`): the same version has the same
+  name each time it's loaded, so what it was compiled to is loaded again rather than compiled
+  (`OneCore.Apps.Version.Compile`). Unloading purges its modules, so it can be loaded again under that name.
 
   `n` counts each owner the version is installed for (`installed/1`), and each hold of a process on it: a call, a
   app's process, or whatever loaded it (`hold/2`), until it lets go (`release/1`) or ends. Releasing is the only
   way a version is unloaded: by then every call on it has finished, and Erlang's purge ends whatever else still runs
   its code. A version loaded already, by its app and its code, isn't loaded again: whoever loads it holds it too.
-  The NIF builds a version loaded (`OneCore.Nif`) are let go of as its name is freed.
+  The NIF builds a version loaded (`OneCore.Nif`) are let go of as it's unloaded.
 
   A version only described here (`OneCore.Apps.Version.Description`) is in the same machine by its app and
   code, with no name or modules: it's loaded as it's described, and unloading it only forgets it.
@@ -29,13 +29,11 @@ defmodule OneCore.Apps.LoadedVersion do
   use GenServer
   alias OneCore.Nif
 
-  @names 4096
-
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   @doc """
   Loads the version of the app `artifact` whose files are named `code`, held by the caller: `{:ok, version, warnings}`,
-  or `{:error, why}`. One loaded already is the one held. Otherwise `compile` is called with the free name it's
+  or `{:error, why}`. One loaded already is the one held. Otherwise `compile` is called with the name it's
   loaded under, in the caller, and gives `{:ok, version, warnings, kept}`, with what `kept/1` gives, or `{:error,
   why}`.
   """
@@ -93,7 +91,7 @@ defmodule OneCore.Apps.LoadedVersion do
 
   # Each row is a version by the name it's under, with its state and who uses it: the owners it's installed for, and
   # how many holds each process has. `loaders` are the processes loading a version, by their monitors, which are
-  # watched too, so a loading that's killed frees its name, and `waiting` who waits for a version loading, by its name.
+  # watched too, so a loading that's killed is unloaded, and `waiting` who waits for a version loading, by its name.
   @impl true
   def init(nil) do
     # What an owner of this table before this one left loaded nobody can say is used any more, so it's unloaded:
@@ -108,23 +106,19 @@ defmodule OneCore.Apps.LoadedVersion do
 
   @impl true
   def handle_call({:load, artifact, code}, {pid, _} = from, state) do
-    case Enum.find(:ets.tab2list(__MODULE__), fn {under, row} -> is_atom(under) and row.artifact == artifact and row.code == code end) do
-      {under, %{state: :loaded} = row} ->
+    under = name(artifact, code)
+
+    case :ets.lookup(__MODULE__, under) do
+      [{^under, %{state: :loaded} = row}] ->
         {:reply, {:ok, row.version, row.warnings}, held(state, [under], pid)}
 
-      {under, %{state: :loading}} ->
+      [{^under, %{state: :loading}}] ->
         {:noreply, update_in(state.waiting[under], &[from | &1])}
 
-      nil ->
-        case free_name() do
-          nil ->
-            {:reply, {:error, "#{@names} versions of apps are loaded, which is as many as a server runs at once"}, state}
-
-          under ->
-            :ets.insert(__MODULE__, {under, %{state: :loading, artifact: artifact, code: code, version: nil, warnings: nil, owners: MapSet.new(), holds: %{}}})
-            state = put_in(state.loaders[Process.monitor(pid)], {under, pid})
-            {:reply, {:loading, under}, put_in(state.waiting[under], [])}
-        end
+      [] ->
+        :ets.insert(__MODULE__, {under, %{state: :loading, artifact: artifact, code: code, version: nil, warnings: nil, owners: MapSet.new(), holds: %{}}})
+        state = put_in(state.loaders[Process.monitor(pid)], {under, pid})
+        {:reply, {:loading, under}, put_in(state.waiting[under], [])}
     end
   end
 
@@ -201,7 +195,7 @@ defmodule OneCore.Apps.LoadedVersion do
     {:reply, :ok, state}
   end
 
-  # A process that loaded or held a version ended: a loading frees its name, and each hold is let go of.
+  # A process that loaded or held a version ended: a loading is unloaded, and each hold is let go of.
   @impl true
   def handle_info({:DOWN, monitor, :process, pid, why}, state) do
     case Map.pop(state.loaders, monitor) do
@@ -233,7 +227,7 @@ defmodule OneCore.Apps.LoadedVersion do
     end
   end
 
-  # A version whose `n` reaches 0 is unloading: its modules are purged, and its name is free.
+  # A version whose `n` reaches 0 is unloading: its modules are purged.
   defp used(state, under, row) do
     if MapSet.size(row.owners) == 0 and row.holds == %{} do
       :ets.insert(__MODULE__, {under, %{row | state: :unloading}})
@@ -270,17 +264,12 @@ defmodule OneCore.Apps.LoadedVersion do
     :persistent_term.erase({__MODULE__, under})
   end
 
-  defp free_name do
-    taken = MapSet.new(:ets.tab2list(__MODULE__), fn {under, _row} -> under end)
-    1..@names |> Stream.map(&name/1) |> Enum.find(&(&1 not in taken))
-  end
-
-  defp name(number), do: Module.concat(OneCore.Apps, "Load#{number}")
+  defp name(artifact, code), do: Module.concat(OneCore.Apps, "V" <> OneCore.Apps.Version.code({artifact, code}))
 
   # The name a module of a version sits under, or `nil` for any other module.
   defp slot(module) do
-    with [number] <- Regex.run(~r/^Elixir\.OneCore\.Apps\.Load(\d+)\./, Atom.to_string(module), capture: :all_but_first),
-         do: name(number)
+    with [under] <- Regex.run(~r/^(Elixir\.OneCore\.Apps\.V[0-9a-f]{64})\./, Atom.to_string(module), capture: :all_but_first),
+         do: String.to_atom(under)
   end
 
   defp loader(state, under), do: Enum.find_value(state.loaders, fn {monitor, {^under, pid}} -> {monitor, pid}; _ -> nil end)
