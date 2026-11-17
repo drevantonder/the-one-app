@@ -44,6 +44,10 @@ defmodule Permissions do
   @having "select who from tuples where artifact = ? and relation = ? order by who"
   @tuple "select 1 from tuples where artifact = ? and who = ? and relation in (?, ?, ?) limit 1"
 
+  # Its data is the network's relation tuples, one graph every call is checked against, whoever it's for.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires, do: %{"core" => ">= 0.20.0", "database" => "to keep who may reach what"}
 

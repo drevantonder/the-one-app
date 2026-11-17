@@ -17,6 +17,10 @@ defmodule Telemetry do
   @impl true
   def icon, do: "client/icon.svg"
 
+  # Its data is the network's: every call's spans and every app's errors, for whoever looks after it.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires, do: %{"core" => ">= 0.20.0", "database" => "to keep its schedule"}
 

@@ -73,6 +73,10 @@ defmodule Containers do
   @impl true
   def icon, do: "client/icon.svg"
 
+  # Its data is everyone's together: the network's settings, and each person's names for their containers.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires do
     %{

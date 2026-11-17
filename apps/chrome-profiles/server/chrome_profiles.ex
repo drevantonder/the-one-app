@@ -103,6 +103,10 @@ defmodule ChromeProfiles do
   }
   @states @steps |> Map.values() |> Enum.uniq()
 
+  # Its data is everyone's together, each person's notes kept apart by who they're for (`browsers/<who>/`).
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires do
     %{

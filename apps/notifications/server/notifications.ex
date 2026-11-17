@@ -48,6 +48,10 @@ defmodule Notifications do
   # The most of a person's notifications an inbox shows, newest first.
   @shown 100
 
+  # Its data is everyone's together, each person's inbox, quiet apps and devices kept apart by user.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires do
     %{

@@ -40,6 +40,10 @@ defmodule ComputerUse do
     y: %{type: "integer", minimum: 0, description: "pixels from the top of the screenshot"}
   }
 
+  # Its data is everyone's together: which screen was last used by whom, kept by who used it.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def icon, do: "client/icon.svg"
 

@@ -57,6 +57,10 @@ defmodule SoftDelete do
   @app ~r{^(users/[^/]+|groups/[^/]+|network)/apps/([a-z][a-z0-9-]*)$}
   @own ~r{^(users/[^/]+|groups/[^/]+|network)/own/([a-z][a-z0-9-]*)$}
 
+  # Its data is everyone's together: each item says whose it is, and only they reach it.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires, do: %{"core" => ">= 0.21.0", "database" => "to keep what you deleted for 30 days"}
 

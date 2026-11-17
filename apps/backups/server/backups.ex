@@ -44,6 +44,10 @@ defmodule Backups do
   @impl true
   def icon, do: "client/icon.svg"
 
+  # Its data is the network's backups: one schedule and one set of places for everyone.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires do
     %{

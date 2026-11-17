@@ -73,6 +73,10 @@ defmodule Chrome do
   @impl true
   def icon, do: "icon.svg"
 
+  # Its data is everyone's together, each person's browsers kept apart by who they're for (`browsers/<who>/`).
+  @impl true
+  def own, do: :installed
+
   @impl true
   def requires, do: %{"containers" => "to run each browser in a container"}
 

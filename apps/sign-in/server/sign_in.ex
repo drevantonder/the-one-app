@@ -12,6 +12,10 @@ defmodule SignIn do
   """
   @behaviour OneCore.App
 
+  # Its data is the network's people and devices, which its edge function keeps for everyone.
+  @impl true
+  def own, do: :installed
+
   # One Core asks it whose a device is, and every client signs in through it.
   @impl true
   def icon, do: "client/security.svg"
