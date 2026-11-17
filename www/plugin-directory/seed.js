@@ -8,8 +8,9 @@ import { frontMatter, listing } from "./worker.ts";
 
 const [source, folder] = process.argv.slice(2);
 const [owner, repo] = source.toLowerCase().split("/");
-// The network's own, not a copy someone in it deployed.
-const store = new Map((await Bun.stdin.json()).plugins.filter((plugin) => plugin.plugin.startsWith("network/")).map((plugin) => [plugin.plugin.split("/").pop(), plugin]));
+// The network's own over a copy someone in it deployed, where there are both.
+const plugins = (await Bun.stdin.json()).plugins.sort((a, b) => a.plugin.startsWith("network/") - b.plugin.startsWith("network/"));
+const store = new Map(plugins.map((plugin) => [plugin.plugin.split("/").pop(), plugin]));
 const quote = (text) => (text == null ? "NULL" : `'${text.replaceAll("'", "''")}'`);
 const now = new Date().toISOString();
 
