@@ -16,7 +16,7 @@ guess you haven't reproduced.
 
 ## Screens
 
-UI work is shown with real pictures of the real app, never described. A phone-sized desktop window (390×844) shows
+UI work is shown with real pictures of the real app, before and after, never described. A phone-sized desktop window (390×844) shows
 most screen changes in a minute; build for a phone or simulator only when the change is about that platform. Save pictures in your harness's scratch
 folder, never in the repo, and embed them in your reply. Screen wording and look follow `DESIGN.md`: read the
 section of the screen you change first.

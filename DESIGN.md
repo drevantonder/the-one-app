@@ -22,6 +22,14 @@ What users see, as the project's owner decided it. Only their decisions are here
 - A device says whether it's on in its grey line, never with a dot or the word "Offline": "Online" while its socket is open, else "Seen 2 minutes ago" (screens, long form) or "seen 2 min ago" (CLI and MCP), and nothing for one never seen. This device says "This device" instead. Everywhere a user picks a device (Devices rows, Run Priority cards, Enabled Services columns, an app's Runs On, where schedules run) each one says it; a call to a device that's off says "mac was last seen 2 min ago", never "offline". Mockups skipped on purpose (Andre, 11-11): this is the best fit for the rules above, so change it freely later.
 - A screen works fully within what MCP Apps allows (no reliance on notifications, a navigation stack, sheets outside its frame or native features), so it's the same in our clients and in someone else's.
 - Motion: the browser's own transitions and animations inside a screen, the browser's View Transitions between screens, and neither when the user asked for reduced motion.
+- Names people read are specific and title-cased (17 Nov): "Apple Calendar" next to "Google Calendar", never just "Calendar"; "Encryption", never an id like `encryption`. A long name is cut with "…"; there are no separate short names.
+- People see apps, never "plugin" (17 Nov). An app with several launcher icons (app entrypoints, in code) is still just an app to them.
+- Version numbers show only in the App Store (17 Nov).
+- Reuse a screen before building one (17 Nov): an app with no screen of its own opens its App Store page.
+- When something can't be done, it says why where the person tries it (17 Nov): Remove App greyed, with "This is Family's, and you're not one of its owners." Never a missing button with no reason.
+- Removing anything asks first, in an alert that names what goes with it (17 Nov), as iOS's Remove App does.
+- Admin things (infrastructure apps, managing users) show only to the people who can act on them, the network's owners (17 Nov). Everyone else never sees them.
+- A section header's See All sits on the title's baseline, smaller than the title, ending at the content's edge (17 Nov), as iOS's App Store does.
 
 ## Home Screen
 
@@ -35,6 +43,9 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Desktop and tablet: no sidebar. As many whole pages side by side as fit, one to three, with the dots only when not every page fits. Up and down moves between owners, and the same owner switcher works. Nothing there the phone doesn't have.
 - Editing Home pages follows iOS's own, in its gestures, states and look. Touch and hold an app or empty space, then Edit Home Screen (right-click on a computer). Icons jiggle, each with ⊖, which takes it off the Home Screen and leaves it in the App Library; uninstalling is the App Store's. Drag to reorder, and hold at a page's edge to move to the next page, a new one past the last. + opens the widget gallery: pick a widget and its size, then place it. Tapping the page dots opens the page overview, to reorder, hide or delete Home pages. + is at the top left and Done at the top right, as iOS's. Done, or a tap on empty space, leaves. From the App Library, touch and hold an app, then drag it onto a Home page. A computer has the same edit mode, as Launchpad does.
 - Whoever may arrange an owner's pages edits them; anyone else gets only the app's own menu on touch and hold, with no Edit Home Screen. An owner's pages are one layout: editing everyone's or a group's changes them for everyone who sees them.
+- Home Screen behaviour copies iOS's unless there's a reason not to (17 Nov): paging, long press into edit mode, the hold menu, drag with the other icons reflowing, haptics, and an alert before removing.
+- Big app icons on pages have their name under them (17 Nov), cut with "…" when long. The cards stay square: the icon shrinks to make room. Why: our icons aren't as well known as iOS's, so the name is needed.
+- Nothing is hidden (17 Nov): the App Library always shows everything installed, and Remove from Home Screen only takes an app off a page.
 - Settings isn't a place: its apps are ordinary apps, each in its category.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.
 
