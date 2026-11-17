@@ -340,12 +340,14 @@ defmodule Permissions do
   end
 
   # A group is named after what it's called, in lowercase letters, digits and hyphens: The Smiths is
-  # groups/the-smiths, and Wiśniewski groups/wisniewski.
+  # groups/the-smiths, and Wiśniewski groups/wisniewski. What's called in a script with no such letters (نور,
+  # 王家) or starts with a digit gets a name of its own, groups/group-<random>, and keeps what it's called.
   def call("group", %{"name" => called}, call) do
     called = String.trim(called)
+    if called == "", do: raise("A group needs a name.")
     plain = called |> String.normalize(:nfd) |> String.replace(~r/\p{Mn}/u, "") |> String.downcase()
     name = plain |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-")
-    if not (name =~ ~r/^[a-z]/), do: raise("A group's name starts with a letter.")
+    name = if name =~ ~r/^[a-z]/, do: name, else: "group-" <> Base.encode32(:crypto.strong_rand_bytes(5), case: :lower, padding: false)
     group = "groups/" <> name
 
     transaction(call, fn db ->
