@@ -79,6 +79,10 @@ defmodule OneCore.Apps.Version.Description do
   defp decoded(<<131, _::binary>> = term) do
     Code.ensure_loaded!(OneCore.Skills)
     {:ok, term |> :erlang.binary_to_term([:safe]) |> JSON.encode!() |> JSON.decode!()}
+  rescue
+    # A term may name atoms of the app's own, in a job's inputs say, which a server that never loaded it doesn't
+    # have and won't take from the bucket: it's as good as no description, until it's said again as JSON.
+    ArgumentError -> :error
   end
 
   defp decoded(json), do: JSON.decode(json)
