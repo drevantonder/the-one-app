@@ -135,12 +135,20 @@ updated=$(jq -r --argjson kinds "$(printf '%s\n' "${mine[@]}" "${mac[@]}" | sed 
 [[ -z $dry ]] || { echo "Then each server takes it with" && echo "${updated:-    (no server)}" && exit 0; }
 ((${#mine[@]} + ${#mac[@]})) || exit 0
 
-# One release on a machine at a time. A Mac has no flock, and what it builds is asked for by Linux's release.
-if command -v flock >/dev/null; then
-  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release.lock
-  exec 9>>"$lock"
-  flock -n 9 || { echo "The release of $(<"$lock") is publishing on this machine: let it finish rather than publish over it." >&2 && exit 1; }
-  echo "$build, pid $$" >"$lock"
+# One release on a machine at a time, kept as a pid file rather than flock: a daemon a build starts (epmd, a compiler
+# cache) inherits a flock's descriptor and outlives the release, which then refused the next one with nothing
+# publishing. What a Mac builds is asked for by Linux's release.
+if [[ $(uname) == Linux ]]; then
+  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release.pid
+  if ! (set -o noclobber && echo "$$ $build" >"$lock") 2>/dev/null; then
+    read -r pid was <"$lock" || true
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "The release of $was is publishing on this machine (pid $pid): let it finish rather than publish over it." >&2
+      exit 1
+    fi
+    echo "$$ $build" >"$lock"
+  fi
+  trap 'rm -f "$lock"' EXIT
 fi
 
 servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
