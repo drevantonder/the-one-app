@@ -16,7 +16,7 @@ defmodule OneCore.Apps.Store do
   no version names, which `prune/1` sweeps.
   """
   require Logger
-  alias OneCore.Bucket
+  alias OneCore.{Bucket, Server}
   alias OneCore.Apps.{LoadedVersion, Version}
   alias OneCore.Apps.Version.{Compile, Description}
 
@@ -321,8 +321,46 @@ defmodule OneCore.Apps.Store do
   @doc """
   A set of files of an app, by their paths: the files the server keeps, or with `"source"` the ones they were
   built from. Read at once: a bucket at an address is asked for each over the internet.
+
+  The files a server keeps are named by their hash, so they never change: once read, they're kept on this machine
+  beside what they're compiled to (`OneCore.Apps.Version.Compile`), which goes as that does, and read from there for
+  as long as they still hash to their name. So a server that restarts asks the bucket for no app's files it had.
   """
-  def files(artifact, code, prefix \\ "code") do
+  def files(artifact, code, prefix \\ "code")
+
+  def files(artifact, code, "code") do
+    kept = Path.join([Server.home(), "compiled", Version.code({artifact, code})])
+
+    with %{} = files <- kept(kept), ^code <- Version.code(files) do
+      File.touch(kept)
+      files
+    else
+      _ -> tap(read(artifact, code, "code"), &keep_files(kept, code, &1))
+    end
+  end
+
+  def files(artifact, code, prefix), do: read(artifact, code, prefix)
+
+  defp kept(file) do
+    :erlang.binary_to_term(File.read!(file))
+  rescue
+    _ -> nil
+  end
+
+  # Written beside, then renamed into place, so what's kept is all there or not at all; and only a set that's all
+  # there, as its hash says, is kept.
+  defp keep_files(kept, code, files) do
+    if Version.code(files) == code do
+      writing = "#{kept}.#{System.unique_integer([:positive])}"
+      File.mkdir_p!(Path.dirname(kept))
+      File.write!(writing, :erlang.term_to_binary(files))
+      File.rename!(writing, kept)
+    end
+  rescue
+    error -> Logger.warning("An app's files weren't kept on this machine: #{Exception.message(error)}")
+  end
+
+  defp read(artifact, code, prefix) do
     paths = Bucket.list("#{artifact}/#{prefix}/#{code}/")
 
     paths

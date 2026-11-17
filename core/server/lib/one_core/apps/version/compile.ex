@@ -104,7 +104,8 @@ defmodule OneCore.Apps.Version.Compile do
   end
 
   # Written beside, then renamed into place, so what's kept is all there or not at all. What wasn't loaded for a month
-  # goes: its version, or the Elixir it was compiled with, is long gone.
+  # goes, a version's files kept here among it too (`OneCore.Apps.Store.files/3`): its version, or the Elixir it was
+  # compiled with, is long gone.
   defp keep(cache, binaries, references, warnings) do
     writing = cache <> ".writing"
     File.rm_rf!(writing)
