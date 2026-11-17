@@ -299,10 +299,18 @@ body {
 /* A category opened over its App Library, with no owner above it: its name, and its apps in a panel, while what's
    behind blurs. */
 .opened {
-  position: absolute;
+  box-sizing: border-box;
+  position: fixed;
   inset: 0;
   z-index: 10;
-  display: grid;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
+  overscroll-behavior: contain;
   align-content: center;
   justify-items: center;
   gap: 1.25rem;
@@ -310,6 +318,13 @@ body {
   background: color-mix(in oklab, var(--background) 55%, transparent);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   backdrop-filter: blur(18px) saturate(1.2);
+}
+.opened[open] {
+  display: grid;
+}
+/* What's behind it blurs through the dialog itself, which covers the window. */
+.opened::backdrop {
+  background: none;
 }
 /* Shrinking back into its place, it lets a finger through to the pages, or to the category to open it again. */
 .opened[data-phase="closing"] {

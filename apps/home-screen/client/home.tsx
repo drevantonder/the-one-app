@@ -440,10 +440,11 @@ function StorePage(props: { name: string; shown: boolean }) {
 /// A category opened over its App Library: its name, and its apps in a panel that grows out of its place there and
 /// shrinks back into it, as an iPhone's folder does, while what's behind it blurs. Its apps open only once it has
 /// grown. Tapping beside the panel, Escape or the device's own back closes it, even as it grows: it turns back from
-/// where it got to. As it shrinks, the pages under it take a finger. For whoever asked for less motion, it fades in
-/// and out where it is.
+/// where it got to. For whoever asked for less motion, it fades in and out where it is. It's a modal `<dialog>`, so
+/// focus stays in it and the rest is inert while it's open; as it shrinks it's a dialog that isn't modal, so the pages
+/// under it take a finger.
 function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string, HTMLElement> }) {
-  let veil!: HTMLDivElement
+  let veil!: HTMLDialogElement
   let panel!: HTMLDivElement
   let title!: HTMLHeadingElement
   let grid!: HTMLDivElement
@@ -454,6 +455,12 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
   let moving: Animation[] = []
   // From its place to the middle, or back, and once that's done, whichever way it ended up going, the machine's told.
   const zoom = (opening: boolean) => {
+    // Modal while it's open or opening, and not as it shrinks: opened again, it's shown the other way.
+    if (veil.isConnected) {
+      if (veil.open) veil.close()
+      if (opening) veil.showModal()
+      else veil.show()
+    }
     if (moving.some((one) => one.playState === "running")) for (const one of moving) one.reverse()
     else {
       const place = props.places.get(`${props.opened.owner}:${props.opened.name}`)
@@ -479,15 +486,11 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
   createEffect(createMemo(phase), (now) => {
     if (now !== "open") zoom(now === "opening")
   })
-  onSettled(() => {
-    const shut = covers(close)
-    const escape = (event: KeyboardEvent) => event.key === "Escape" && close()
-    addEventListener("keydown", escape)
-    return () => (shut(), removeEventListener("keydown", escape))
-  })
+  onSettled(() => covers(close))
   return (
-    <div class="opened" ref={veil} data-phase={phase()} onClick={(event) => event.target === veil && close()}>
-      <h2 ref={title}>{props.opened.name}</h2>
+    // Escape, and the browser's own close requests, shrink it back as a tap beside it does, rather than closing it at once.
+    <dialog class="opened" ref={veil} aria-labelledby="opened-category" data-phase={phase()} onCancel={(event) => (event.preventDefault(), close())} onClick={(event) => event.target === veil && close()}>
+      <h2 id="opened-category" ref={title}>{props.opened.name}</h2>
       <div class="panel" ref={panel} onClick={(event) => event.target === panel && close()}>
         <div class="grid" ref={grid}>
           <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
@@ -501,7 +504,7 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
           </For>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }
 
