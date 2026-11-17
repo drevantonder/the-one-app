@@ -424,6 +424,8 @@ button.ui-box {
   align-items: center;
   justify-self: stretch;
   gap: 0.625rem;
+  /* As wide as a list, so a switch lines up with the end of one above it. */
+  max-width: var(--readable);
   min-height: var(--control);
   font-weight: var(--body-weight);
   cursor: pointer;
