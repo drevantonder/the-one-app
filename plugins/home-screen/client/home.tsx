@@ -9,7 +9,7 @@
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
-import { Button, call, changed, confirm, covers, Empty, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
+import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
@@ -122,9 +122,10 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
       const { x, y, width, height } = element.getBoundingClientRect()
       return { x, y, width, height }
     }
-    const lift = (event: PointerEvent) => {
+    const lift = (event: PointerEvent, from: PointerEvent) => {
       const what = held()
       if (!what?.item) return
+      grab = { x: from.clientX, y: from.clientY }
       home.send({ type: "lift", held: { ...what, rect: rect() }, editing: state().matches("editing") ? undefined : pending?.() })
       // The Home Screen keeps the finger from here on, whatever's drawn again under it.
       document.querySelector<HTMLElement>(".home")?.setPointerCapture(event.pointerId)
@@ -154,8 +155,9 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
       if (moved < 8) return
       // Held, or editing, a finger that moves carries what it's on; before that, it's a swipe.
       if (state().matches("holding") || (state().matches({ editing: "still" }) && held()?.item)) {
+        const from = start
         clear()
-        lift(event)
+        lift(event, from)
       } else clear()
     })
     element.addEventListener("pointerup", clear)
@@ -172,8 +174,9 @@ let pending: (() => Editing | undefined) | undefined
 
 /// Until when a tap isn't one: just after something carried was put down.
 let quiet = 0
-/// Where the pointer was last, so what's carried starts under it.
+/// Where the pointer was last, and where it pressed what it lifted: what's carried stays where the finger took it.
 let pointer = { x: 0, y: 0 }
+let grab = { x: 0, y: 0 }
 addEventListener("pointermove", (event) => (pointer = { x: event.clientX, y: event.clientY }), { capture: true, passive: true })
 
 /// A Home page: its grid, each item where it was placed. While its owner's pages are edited, everything jiggles with
@@ -753,35 +756,46 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (performance.now() - swiped < 350) (event.stopPropagation(), event.preventDefault())
   }
 
-  /// What's carried, while it's dragged: a copy that follows the finger, and over what it would go before. Held at a
-  /// page's edge, it goes on to the next page, or the one before.
+  /// What's carried, while it's dragged: a copy that lifts larger with a shadow and follows the finger one to one, and
+  /// over what it would go before. Held at a page's edge a moment, it goes on to the next page, or the one before. Let
+  /// go, it springs into its place from where it was, at the speed it was moving.
   createEffect(
     () => state().matches({ editing: "dragging" }),
     (dragging) => {
       if (!dragging) return
       const held = home.getSnapshot().context.held!
-      const rect = held.rect ?? { x: 0, y: 0, width: 60, height: 80 }
+      const rect = held.rect ?? { x: pointer.x - 30, y: pointer.y - 40, width: 60, height: 80 }
       const copy = document.createElement("div")
       copy.className = "carried"
       Object.assign(copy.style, { left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` })
       const item = held.item!
-      copy.style.translate = `${pointer.x - rect.x - rect.width / 2}px ${pointer.y - rect.y - rect.height / 2}px`
+      const follow = (x: number, y: number) => (copy.style.translate = `${x - grab.x}px ${y - grab.y}px`)
+      follow(pointer.x, pointer.y)
       copy.innerHTML = item.widget ? `<div class="ui-widget" data-size="${item.size}"></div>` : `<span class="tile"><span class="icon"><img src="${(item as App).icon}" alt=""></span><span>${(item as App).name}</span></span>`
       root.append(copy)
+      if (!still.matches) copy.animate([{ scale: "1", filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" })
+      haptic("medium")
+      const moves: { time: number; x: number; y: number }[] = []
       let edge: ReturnType<typeof setTimeout> | undefined
       let side = 0
+      // A page turns after a moment at its edge, and again while it stays there, as an iPhone's does.
+      const turn = () => {
+        const page = home.getSnapshot().context.at.page
+        home.send({ type: "flip", by: side as 1 | -1 })
+        if (home.getSnapshot().context.at.page !== page) haptic("selection")
+        edge = setTimeout(turn, 900)
+      }
       const move = (event: PointerEvent) => {
-        copy.style.translate = `${event.clientX - rect.x - rect.width / 2}px ${event.clientY - rect.y - rect.height / 2}px`
+        follow(event.clientX, event.clientY)
+        moves.push({ time: event.timeStamp, x: event.clientX, y: event.clientY })
+        if (moves.length > 32) moves.shift()
         const strip = strips[home.getSnapshot().context.at.owner]
         const bounds = strip.getBoundingClientRect()
         const now = event.clientX < bounds.left + 28 ? -1 : event.clientX > bounds.right - 28 ? 1 : 0
         if (now !== side) {
           clearTimeout(edge)
           side = now
-          if (side) edge = setTimeout(function flip() {
-            home.send({ type: "flip", by: side as 1 | -1 })
-            edge = setTimeout(flip, 900)
-          }, 600)
+          if (side) edge = setTimeout(turn, 600)
         }
         if (side) return
         const under = document.elementsFromPoint(event.clientX, event.clientY) as HTMLElement[]
@@ -799,8 +813,11 @@ function HomeScreen(props: { owners: Owner[] }) {
       }
       // Where it was last, so it can settle there once it's let go.
       let left = held
-      const drop = () => {
+      // How fast the finger was going as it let go, which the copy goes on at.
+      let thrown = { x: 0, y: 0 }
+      const drop = (event: PointerEvent) => {
         left = home.getSnapshot().context.held ?? left
+        if (event.type === "pointerup") thrown = { x: speed(moves.map(({ time, x }) => ({ time, value: x })), event.timeStamp), y: speed(moves.map(({ time, y }) => ({ time, value: y })), event.timeStamp) }
         home.send({ type: "drop" })
       }
       addEventListener("pointermove", move)
@@ -812,13 +829,37 @@ function HomeScreen(props: { owners: Owner[] }) {
         removeEventListener("pointerup", drop)
         removeEventListener("pointercancel", drop)
         quiet = Date.now() + 400
-        // What was carried settles into its place as it's let go, rather than vanishing over it.
+        haptic("light")
+        // What was carried settles into its place as it's let go, rather than vanishing over it: a spring from where
+        // the finger left it, at the speed it was going, to the middle of its place, wherever that is as it goes.
         const place = strips[home.getSnapshot().context.at.owner]?.querySelector<HTMLElement>(`[data-page="${left.page}"] .cell[data-index="${left.index}"]`)
-        if (!place || still.matches) return void copy.remove()
-        const [to, glided] = [place.getBoundingClientRect(), offset(place)]
+        if (!place || still.matches) {
+          copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: place ? 200 : 150, easing: "ease-out", fill: "forwards" }).finished.finally(() => copy.remove())
+          place?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" })
+          return
+        }
         place.style.visibility = "hidden"
-        const settling = copy.animate([{ translate: copy.style.translate, scale: "1.08" }, { translate: `${to.x - glided.x - rect.x}px ${to.y - glided.y - rect.y}px`, scale: "1" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
-        settling.finished.finally(() => (copy.remove(), (place.style.visibility = "")))
+        const target = () => {
+          const to = place.getBoundingClientRect()
+          const glided = offset(place)
+          return { x: to.x - glided.x + to.width / 2 - (rect.x + rect.width / 2), y: to.y - glided.y + to.height / 2 - (rect.y + rect.height / 2) }
+        }
+        const draw = () => {
+          // Its place may still be on its way, as the pages turn or the others make room: the copy goes after it.
+          const to = target()
+          if (Math.abs(x.target - to.x) > 0.5) glide(x, to.x)
+          if (Math.abs(y.target - to.y) > 0.5) glide(y, to.y)
+          copy.style.translate = `${x.value}px ${y.value}px`
+          if (x.value === x.target && y.value === y.target && !x.velocity && !y.velocity) (copy.remove(), (place.style.visibility = ""))
+        }
+        const [x, y] = [spring(draw), spring(draw)]
+        const [fromX = 0, fromY = 0] = copy.style.translate.split(" ").map(parseFloat)
+        const to = target()
+        Object.assign(x, { value: fromX, target: to.x })
+        Object.assign(y, { value: fromY, target: to.y })
+        glide(x, to.x, thrown.x)
+        glide(y, to.y, thrown.y)
+        copy.animate([{}, { scale: "1", filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
       }
     },
   )
@@ -889,6 +930,13 @@ function HomeScreen(props: { owners: Owner[] }) {
     return () => (sliding.unsubscribe(), arranging.unsubscribe(), removeEventListener("resize", resized), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
   })
 
+  // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own.
+  createEffect(
+    () => state().matches("editing"),
+    (now) => {
+      if (now && home.getSnapshot().matches({ editing: "still" })) haptic("selection")
+    },
+  )
   // While pages are edited, the device's own back ends editing, as Done does.
   createEffect(
     () => state().matches({ editing: "still" }),
