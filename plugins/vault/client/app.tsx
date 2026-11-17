@@ -278,7 +278,12 @@ function ItemScreen(props: { item: Item }) {
   return (
     <Screen heading={shown(item())} back>
       <Show when={item().state}>
-        {(state) => <Line state={state()} />}
+        {(state) => (
+          <div class="atop">
+            <Line state={state()} />
+            <Fix item={item()} />
+          </div>
+        )}
       </Show>
       <Section heading={item().sign_in ? "Signed in" : "Fields"}>
         <List>
@@ -418,28 +423,38 @@ function Whose() {
 }
 
 /// What its plugin says an item is in, in a row's grey line or atop its screen: a spinner and what's under way, or a
-/// dot, why and the action that fixes it. Ready is nothing: fine is silent.
+/// dot and why. Ready is nothing: fine is silent.
 function Line(props: { state: State }) {
-  const [busy, setBusy] = createSignal(false)
-  const run = async () => {
-    setBusy(true)
-    await act(props.state.action!, props.state.by)
-    setBusy(false)
-  }
   return (
     <span class="state">
       <Show when={props.state.state === "busy"} fallback={<span class="dot" aria-hidden="true" />}>
         <Spinner />
       </Show>
       <span class="message">{props.state.message}</span>
-      <Show when={props.state.state === "action_required" && props.state.action}>
-        <Button variant="outline" loading={busy()} onClick={(event: MouseEvent) => (event.stopPropagation(), run())}>
-          {props.state.action!.label}
-        </Button>
-      </Show>
     </span>
   )
 }
+
+/// The one action that fixes what its plugin says an item needs, if it says one: at the end of its row, beside the
+/// row's own button, or atop its screen.
+function Fix(props: { item: Item }) {
+  const [busy, setBusy] = createSignal(false)
+  const action = () => (props.item.state?.state === "action_required" ? props.item.state.action : undefined)
+  const run = async () => {
+    setBusy(true)
+    await act(action()!, props.item.state!.by)
+    setBusy(false)
+  }
+  return (
+    <Show when={action()}>
+      <Button variant="outline" loading={busy()} onClick={run}>
+        {action()!.label}
+      </Button>
+    </Show>
+  )
+}
+/// Whether an item has an action that fixes it.
+const fixable = (item: Item) => item.state?.state === "action_required" && !!item.state.action
 
 /// A section of a kind of item: its items, each with its plugin's icon and its state, and a way to add one where
 /// its types make one.
@@ -461,6 +476,7 @@ function Kind(props: { section: string; types: ItemType[] }) {
                 text={item().state ? <Line state={item().state!} /> : <Summary type={typeOf(item())!} item={item()} />}
                 current={item().name === open()}
                 onClick={() => choose(item())}
+                action={fixable(item()) ? <Fix item={item()} /> : undefined}
               />
             )}
           </For>
@@ -610,6 +626,7 @@ function Vault() {
                         text={item().state ? <Line state={item().state!} /> : users(item()).length ? `Used by ${listed(users(item()))}` : "Nothing uses it"}
                         current={item().name === open()}
                         onClick={() => setOpen(item().name)}
+                        action={fixable(item()) ? <Fix item={item()} /> : undefined}
                       />
                     )}
                   </For>

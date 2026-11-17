@@ -920,8 +920,9 @@ button.ui-box {
 .ui-row + .ui-row {
   border-top: 1px solid var(--border);
 }
-/* A row with a control before it: the control's part is the row's whole height, pressed apart from the rest. */
-.ui-row:has(> .control) {
+/* A row with a control before it, or an action after it: each is pressed apart from the rest, the control's part
+   the row's whole height. */
+.ui-row:has(> .control, > .action) {
   display: flex;
 }
 .ui-row > .control {
@@ -934,6 +935,16 @@ button.ui-box {
   flex: 1;
   min-width: 0;
   padding-inline-start: 0;
+}
+.ui-row > .action {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding-inline-end: 0.75rem;
+}
+.ui-row > .row:has(+ .action) {
+  flex: 1;
+  min-width: 0;
 }
 .ui-row > .row {
   display: flex;
@@ -999,7 +1010,7 @@ button.ui-box {
   transition: translate var(--move-settle) var(--ease-settle), width var(--move-settle) var(--ease-settle);
 }
 /* The one that's open beside the list. Where it's pushed over the list instead, nothing is (the split's). */
-.ui-row[data-current] > .row {
+.ui-row[data-current] {
   background: var(--row-current, var(--accent));
 }
 .ui-row > .row:focus-visible {

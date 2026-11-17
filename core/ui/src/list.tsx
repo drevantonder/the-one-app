@@ -61,7 +61,8 @@ function leave(list: HTMLElement, row: HTMLElement, before: HTMLElement | null =
 /// `current` marks the one that's open beside the list, in a split. `control` is a control before all of it,
 /// pressed apart from the row, as a checkbox that picks rows is: `control={<input type="checkbox" aria-label="On
 /// this claim" checked={...} onChange={...} />}`. It's drawn as the UI library's, and the row's whole height in front of
-/// the row is its to press. A ⋯ `Menu` in its `end` opens on a long press or a right-click on the row too, and a
+/// the row is its to press. `action` is a button after all of it, pressed apart from the row, as Sign In is for an
+/// account that needs it: a button can't be inside the row's own. A ⋯ `Menu` in its `end` opens on a long press or a right-click on the row too, and a
 /// `destructive` item in it (Delete, Remove) shows as a swipe toward the row's start under a finger, as a phone's
 /// lists do.
 export function Row(props: {
@@ -73,6 +74,7 @@ export function Row(props: {
   onClick?: (event: MouseEvent) => void
   current?: boolean
   control?: JSX.Element
+  action?: JSX.Element
 }) {
   const inside = () => (
     <>
@@ -109,6 +111,9 @@ export function Row(props: {
       }>
         <a class="row press" href={props.href} aria-current={props.current ? "true" : undefined}>{inside()}</a>
       </Show>
+      <Show when={props.action}>
+        <span class="action">{props.action}</span>
+      </Show>
       <Show when={menu()?.destructive()}>
         {(item) => (
           <button type="button" class="swipe" tabindex="-1" aria-hidden="true" onClick={() => menu()?.select(item().dataset.value!)}>
@@ -140,7 +145,7 @@ const SLOP = 10
 /// (`getContextTriggerProps`). With a `destructive` item, a finger swiping the row toward its start moves it aside
 /// to show that item, which stays shown past half its width and is done when swiped most of the way. A press on the
 /// row while it's aside, anywhere but that item, puts it back. Presses on the menu's own button, or the row's
-/// `control`, are theirs. → what stops it.
+/// `control` or `action`, are theirs. → what stops it.
 function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
   let start: { x: number; y: number; at: number } | undefined
   let swiping = false
@@ -155,7 +160,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
     row.toggleAttribute("data-settling", settle)
     row.style.setProperty("--swiped", `${swiped}px`)
   }
-  const theirs = (event: Event) => event.target instanceof Element && !!event.target.closest("[data-menu-trigger], .control, .swipe")
+  const theirs = (event: Event) => event.target instanceof Element && !!event.target.closest("[data-menu-trigger], .control, .action, .swipe")
   const context = () => menu()?.api().getContextTriggerProps()
 
   const down = (event: PointerEvent) => {
