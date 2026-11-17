@@ -212,10 +212,6 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     // What the server says goes on, in what the system keeps of this program's output.
     let log = here.folder.join("server.log");
     system::bound(&log)?;
-    let say = |line: &str| {
-        println!("{line}");
-        system::bound(&log)
-    };
     loop {
         let trying = here.next();
         let build = match &trying {
@@ -262,20 +258,37 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                 keep_error(&line);
             }
         });
+        // Its output is read and said as it comes, whatever this is doing meanwhile. Its log is on its output, and a
+        // server whose output isn't read is held up once the pipe it writes to is full, 16 KB on a Mac: each line it
+        // logs then holds up whatever logged it for seconds, so a build being tried that was slow to answer by its
+        // key, as on a busy machine, ended up not answering at all. What this acts on, that the server is running
+        // and that it's asked to update, is handed to it here.
+        let (heard, mut said) = tokio::sync::mpsc::unbounded_channel();
         let mut lines = BufReader::new(server.stdout.take().context("the server's output")?).lines();
-        let running = async {
-            while let Some(line) = lines.next_line().await? {
-                say(&line)?;
-                keep(&line);
-                if line.starts_with(RUNNING) {
-                    return Ok::<_, anyhow::Error>(Started::Running);
+        let (log, keep_output) = (log.clone(), keep);
+        tokio::spawn(async move {
+            while let Ok(Some(line)) = lines.next_line().await {
+                println!("{line}");
+                if let Err(error) = system::bound(&log) {
+                    eprintln!("Couldn't keep {} small: {error:#}", log.display());
+                }
+                keep_output(&line);
+                if line.starts_with(RUNNING) || line == UPDATE_ASKED {
+                    let _ = heard.send(line);
                 }
             }
-            Ok(Started::Stopped)
+        });
+        let running = async {
+            while let Some(line) = said.recv().await {
+                if line.starts_with(RUNNING) {
+                    return Started::Running;
+                }
+            }
+            Started::Stopped
         };
         let running = match &trying {
-            Some(_) => timeout(START, running).await.unwrap_or(Ok(Started::Late))?,
-            None => running.await?,
+            Some(_) => timeout(START, running).await.unwrap_or(Started::Late),
+            None => running.await,
         };
         if let Some(build) = &trying {
             fs::remove_file(here.folder.join("next"))?;
@@ -307,8 +320,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             bail!("The server stopped before it was running: {}", server.wait().await?)
         }
         system::ready(&key)?;
-        while let Some(line) = lines.next_line().await? {
-            say(&line)?;
+        while let Some(line) = said.recv().await {
             if line == UPDATE_ASKED {
                 tell(&mut server, Some(Stage::Downloading), None).await;
                 // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops
