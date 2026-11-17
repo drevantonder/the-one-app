@@ -354,10 +354,13 @@ export class Relay extends DurableObject<RelayEnv> {
     return new Response(null, { status: 101, webSocket: theirs });
   }
 
-  /** Says `message` to every server that's here. Each takes it as a call, whose answer nothing waits for. */
+  /**
+   * Says `message` to every server that's here. Each takes it as a call, whose answer nothing waits for. A connection
+   * that has closed is listed until the relay hears so, as one a server that's starting again left behind is.
+   */
   notify(message: string) {
     for (const server of this.ctx.getWebSockets()) {
-      if (server.deserializeAttachment()?.outside) server.send(JSON.stringify({ message }));
+      if (server.deserializeAttachment()?.outside && server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ message }));
     }
     return new Response(null, { status: 204 });
   }
