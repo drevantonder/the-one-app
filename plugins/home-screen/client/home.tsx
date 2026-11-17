@@ -124,7 +124,7 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
 /// finger held it.
 function Tile(props: { name: string; onPress?: (behind?: boolean) => void; children: JSX.Element }) {
   return (
-    <button type="button" class="tile" onPointerDown={() => props.onPress?.(true)} onClick={() => props.onPress?.()}>
+    <button type="button" class="tile" onPointerDown={(event) => event.button === 0 && props.onPress?.(true)} onClick={() => props.onPress?.()}>
       <span class="icon">{props.children}</span>
       <span>{props.name}</span>
     </button>
