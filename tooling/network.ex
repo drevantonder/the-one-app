@@ -109,7 +109,9 @@ defmodule Mix.Tasks.Network do
     end
 
     if without = options[:without] do
-      case OneCore.Plugins.Lifecycle.uninstall(options[:subject] || "network", without) do
+      owner = options[:subject] || "network"
+
+      case OneCore.Plugins.Lifecycle.uninstall(owner, without, {nil, owner}) do
         %{} ->
           Mix.shell().info("#{without} is removed from what's installed for #{options[:subject] || "the network"}.")
 

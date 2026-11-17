@@ -165,7 +165,7 @@ defmodule OneCore.Tools do
       (`trusted: false`) runs in a sandbox, a VM of its own on any of the network's servers, so it needs no server of
       yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0 names. It answers
       with them. One nobody has installed is removed as anything deleted is, by the plugin that keeps what's deleted,
-      where there is one (recently-deleted).
+      where there is one (soft-delete).
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
       refused where the live version came from a commit that yours doesn't contain, unless `--force`.
@@ -348,16 +348,16 @@ defmodule OneCore.Tools do
     %{
       name: "uninstall",
       description: """
-      Removes a plugin from what's installed for you. It waits in Recently Deleted with what it kept for 30 days,
-      when `plugins_restore` brings it back as it was, and is then removed for good with what it kept. It stays
-      whoever's it is.
+      Removes a plugin from what's installed for you. It waits in Recently Deleted with what it kept and made for
+      you for 30 days, when `plugins_restore` brings it back as it was, and is then removed for good with them. It
+      stays whoever's it is.
       """,
       inputs: @named,
       outputs: @moved
     },
     %{
       name: "plugins_restore",
-      description: "Brings back a plugin of yours from Recently Deleted, as it was, with what it kept.",
+      description: "Brings back a plugin of yours from Recently Deleted, as it was, with what it kept and made for you.",
       inputs: @named,
       outputs: @moved
     },
@@ -887,14 +887,14 @@ defmodule OneCore.Tools do
   defp run("uninstall", %{"name" => name}, {_actor, subject} = principal, forward) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
-    moved!(subject, name, Lifecycle.uninstall(subject, name))
+    moved!(subject, name, Lifecycle.uninstall(subject, name, principal))
   end
 
   # Restoring is undoing an uninstall, which is an owner's.
   defp run("plugins_restore", %{"name" => name}, {_actor, subject} = principal, forward) do
     record!(subject, name, forward)
     reaches!(principal, subject, "owner")
-    moved!(subject, name, Lifecycle.restore(subject, name))
+    moved!(subject, name, Lifecycle.restore(subject, name, principal))
   end
 
   defp run("plugins_update", %{"name" => name} = inputs, {_actor, subject} = principal, forward) do

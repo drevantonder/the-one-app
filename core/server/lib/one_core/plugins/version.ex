@@ -519,7 +519,7 @@ defmodule OneCore.Plugins.Version do
         {:error,
          "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
            Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ") <>
-           ", and the ones plugins offer, each as <plugin>.<hook>: recently-deleted.removed"}
+           ", and the ones plugins offer, each as <plugin>.<hook>: soft-delete.moved"}
 
       not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
         {:error,

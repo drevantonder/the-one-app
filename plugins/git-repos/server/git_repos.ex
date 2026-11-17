@@ -26,10 +26,10 @@ defmodule GitRepos do
   # The most of a file that's shown, and of a commit's changes.
   @shown 1_048_576
   @page 25
-  # A repo that's removed goes to Recently Deleted, which keeps it for 30 days (`RecentlyDeleted`), and tells this plugin what became
+  # A repo that's removed goes to Recently Deleted, which keeps it for 30 days (`SoftDelete`), and tells this plugin what became
   # of it, so `list` leaves out what's in Recently Deleted.
   @impl true
-  def hooks, do: ["recently-deleted.removed"]
+  def hooks, do: ["soft-delete.moved"]
 
   @impl true
   def apps, do: [%{name: "Git Repos", page: "client/index.html", icon: "client/icon.svg", category: "coding"}]
@@ -313,10 +313,10 @@ defmodule GitRepos do
   end
 
   @impl true
-  def hook("recently-deleted.removed", %{"artifact" => name, "what" => what}, call) do
+  def hook("soft-delete.moved", %{"artifact" => name, "to" => to} = about, call) do
     # It's heard where the repo was removed, and its list is kept by a server acting for whoever Git Repos is installed for.
     if not OneCore.Servers.here?(call.installed), do: Call.forward(call, call.installed)
-    if name =~ @repo, do: indexed(name, what)
+    if name =~ @repo, do: indexed(name, to, about["as"] || name)
     :ok
   end
 
@@ -341,7 +341,8 @@ defmodule GitRepos do
     if Artifact.write(repo, "repo.json", JSON.encode!(state)) == :exists,
       do: raise("#{Artifact.name(repo)} is a repo already. Pick another name.")
 
-    Artifact.write(index(), "index/" <> Artifact.name(repo), JSON.encode!(%{"pushed" => now}))
+    # One deleted at this name is listed as this one now, and one restored goes beside it.
+    Artifact.update(index(), "index/" <> Artifact.name(repo), fn _ -> JSON.encode!(%{"pushed" => now}) end)
 
     %{repo: Artifact.name(repo), clone: address(repo)}
   end
@@ -355,7 +356,8 @@ defmodule GitRepos do
       |> Enum.flat_map(fn {name, {:ok, data, _tag}} ->
         stored = JSON.decode!(data)
 
-        if stored["removed"],
+        # A repo restored while Git Repos wasn't installed wasn't heard of, so one marked removed is looked for.
+        if stored["removed"] && OneCore.Bucket.size(name <> "/repo.json") == :absent,
           do: [],
           else: [
             %{
@@ -567,12 +569,25 @@ defmodule GitRepos do
     result
   end
 
-  def call(tool, %{"repo" => name}, call) when tool in ["remove", "restore"] do
+  def call("remove", %{"repo" => name}, call) do
     repo!(name)
-    Call.tool(call, "recently-deleted", tool, %{"artifact" => name})
-    indexed(name, tool <> "d")
-
+    Call.tool(call, "soft-delete", "delete", %{"artifact" => name})
+    indexed(name, "deleted", name)
     %{repo: name}
+  end
+
+  # Restored beside a repo made at its name since, it's at another name, notes-2, which it answers with.
+  def call("restore", %{"repo" => name}, call) do
+    repo!(name)
+
+    item =
+      Enum.find_value(Call.tool(call, "soft-delete", "list", %{})["deleted"], fn item ->
+        if item["artifacts"] == [name], do: item["item"]
+      end) || raise "#{name} isn't in Recently Deleted."
+
+    [%{"as" => as}] = Call.tool(call, "soft-delete", "restore", %{"item" => item})["restored"]
+    indexed(name, "active", as)
+    %{repo: as}
   end
 
   def call("git", %{"repo" => name, "path" => path} = inputs, call) do
@@ -828,17 +843,29 @@ defmodule GitRepos do
     end
   end
 
-  # A repo's line in the index once it was removed, restored or purged: `list` leaves out one that's removed.
-  defp indexed(name, what) do
+  # A repo in Recently Deleted stays in the index, saying when it was removed, until it's purged or a repo is made at
+  # its name. One restored beside a repo made at its name since is indexed at the name it's at now, `as`.
+  defp indexed(name, "active", as) when as != name,
+    do: Artifact.update(index(), "index/" <> as, &(&1 || JSON.encode!(%{"pushed" => now()})))
+
+  defp indexed(name, to, _as) do
     key = "index/" <> name
 
     with {:ok, data, tag} <- Artifact.read(index(), key) do
       stored = JSON.decode!(data)
 
-      case what do
-        "removed" -> Artifact.replace(index(), key, JSON.encode!(Map.put(stored, "removed", now())), tag)
-        "restored" -> Artifact.replace(index(), key, JSON.encode!(Map.delete(stored, "removed")), tag)
-        "purged" -> Artifact.remove(index(), key)
+      case to do
+        to when to in ["deleted", "purging"] ->
+          Artifact.replace(index(), key, JSON.encode!(Map.put_new(stored, "removed", now())), tag)
+
+        "active" ->
+          Artifact.replace(index(), key, JSON.encode!(Map.delete(stored, "removed")), tag)
+
+        "purged" when is_map_key(stored, "removed") ->
+          Artifact.remove(index(), key)
+
+        "purged" ->
+          :ok
       end
     end
   end

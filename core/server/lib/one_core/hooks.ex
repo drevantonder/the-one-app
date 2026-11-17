@@ -5,7 +5,7 @@ defmodule OneCore.Hooks do
   `asked` below: who asked for what brought the moment on, and who it runs for.
 
   The hooks are One Core's, below, and the ones plugins offer (`offers/0`), each named with the plugin's name:
-  `recently-deleted.removed`. A plugin's hook is run here as One Core's are, and only that plugin runs it
+  `soft-delete.moved`. A plugin's hook is run here as One Core's are, and only that plugin runs it
   (`OneCore.Call.run_hook/3`).
 
   A hook is one of four kinds, as with Kubernetes' admission webhooks, which are mutating or validating, and its
@@ -132,6 +132,18 @@ defmodule OneCore.Hooks do
      A plugin was renamed (`OneCore.Plugins.Rename`). It's about its artifact's name as it `was` and as it `is`, and,
      for whoever it's installed `for`, the name it was installed by there, `from`, and is now, `to`. It's observed
      for each of them: a plugin that keeps something of another plugin's by its name or its artifact's changes it.
+     """},
+    {"uninstalled", :observe,
+     """
+     A plugin was uninstalled for someone. It's about who it was installed `for`, the `name` it was installed by
+     there and the `plugin` it is, by its artifact's name. A plugin that keeps what's deleted takes what it kept and
+     made for them along.
+     """},
+    {"restored", :observe,
+     """
+     A plugin was brought back from Recently Deleted for someone. It's about who it's installed `for`, the `name` it's
+     installed by there and the `plugin` it is. A plugin that keeps what's deleted brings back what it kept and made for
+     them with it.
      """},
     {"joined", :observe,
      """

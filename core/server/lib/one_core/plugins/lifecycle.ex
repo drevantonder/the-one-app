@@ -124,9 +124,11 @@ defmodule OneCore.Plugins.Lifecycle do
 
   @doc """
   Uninstalls a plugin for `owner`: it stops running for them, and waits in Recently Deleted, with what it keeps, for
-  30 days. Refused where another plugin they have uses it, or it's the network's launcher.
+  30 days. Refused where another plugin they have uses it, or it's the network's launcher. The plugins that observe
+  `uninstalled` are told, so one that keeps what's deleted takes what it kept and made for them along. `asked` is who
+  asked.
   """
-  def uninstall(owner, name) do
+  def uninstall(owner, name, {actor, _subject}) do
     # What uses it still finds it where it's installed for the network too.
     after_it = Map.new(Plugins.versions(Plugins.chain(owner) -- [owner]))
 
@@ -137,6 +139,8 @@ defmodule OneCore.Plugins.Lifecycle do
          :ok <- last_launcher(owner, name),
          %{} = record <- move(owner, name, :uninstall) do
       ran(owner)
+      about = %{"for" => owner, "name" => name, "plugin" => record["plugin"]}
+      OneCore.Hooks.observe("uninstalled", about, {actor, owner})
       record
     else
       {:error, why} -> {:error, why}
@@ -156,11 +160,26 @@ defmodule OneCore.Plugins.Lifecycle do
     end
   end
 
-  @doc "Brings a plugin back from Recently Deleted for `owner`, as it was. Gives the record it's at."
-  def restore(owner, name) do
+  @doc """
+  Brings a plugin back from Recently Deleted for `owner`, as it was. Gives the record it's at. The plugins that observe
+  `restored` are told, so one that keeps what's deleted brings back what it kept and made for them. `asked` is who asked.
+  """
+  def restore(owner, name, {actor, _subject}) do
     with %{} = record <- move(owner, name, :restore) do
       ran(owner)
+      OneCore.Hooks.observe("restored", %{"for" => owner, "name" => name, "plugin" => record["plugin"]}, {actor, owner})
       record
+    end
+  end
+
+  @doc "Removes a plugin in Recently Deleted for `owner` for good, with what it kept: `nil`, or `{:error, why}`."
+  def purge(owner, name) do
+    {records, _automatic} = Installed.read(owner)
+
+    with nil <- move(owner, name, :purge) do
+      for blob <- Bucket.list("#{owner}/own/#{name}/"), do: Bucket.remove(blob)
+      Installed.unmarked(records[name]["plugin"], owner)
+      nil
     end
   end
 
@@ -184,13 +203,10 @@ defmodule OneCore.Plugins.Lifecycle do
     :ok
   end
 
-  defp reconciled(owner, name, %{"state" => "recently_deleted", "deleted" => deleted} = record, _automatic) do
+  defp reconciled(owner, name, %{"state" => "recently_deleted", "deleted" => deleted}, _automatic) do
     if deleted <= System.system_time(:millisecond) - @kept do
-      with nil <- move(owner, name, :purge) do
-        for blob <- Bucket.list("#{owner}/own/#{name}/"), do: Bucket.remove(blob)
-        Installed.unmarked(record["plugin"], owner)
-        Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
-      end
+      with nil <- purge(owner, name),
+           do: Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
     end
   end
 

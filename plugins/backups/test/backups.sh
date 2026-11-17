@@ -179,3 +179,29 @@ backups destinations | grep -o '"problem":[^}]*}' | head -1 | shown || true
 echo "  what was changed is gone from the disk, and the next backup sends it again:"
 backups now --destination Disk | shown
 backups check --destination Disk | shown
+
+say "What's deleted waits in Recently Deleted for 30 days, and is restored as it was"
+item() { grep -o '"item":"[^"]*"' | head -1 | cut -d'"' -f4; }
+before=$(as alice shelf all)
+item=$(as alice soft-delete delete --artifact users/alice/made/shelf/files | item)
+as alice shelf all | grep -q diary.txt && { echo "  alice's files are still there"; exit 1; }
+echo "  alice's files are deleted, and wait in Recently Deleted"
+as alice soft-delete restore --item "$item" | shown
+[[ $(as alice shelf all) == "$before" ]] || { echo "  not so: and they're back as they were"; exit 1; }
+echo "  and they're back as they were"
+item=$(as alice soft-delete delete --artifact users/alice/made/shelf/files | item)
+as alice shelf put --name new.txt --text "made since" >/dev/null
+echo "  deleted again, and new files made at the same name since: the old ones are restored beside them"
+as alice soft-delete restore --item "$item" | grep -q '"as":"users/alice/made/shelf/files-2"' || { echo "  not so: as files-2"; exit 1; }
+echo "  as files-2"
+[[ $(find "$folder/bucket/users/alice/made/shelf/files-2" -type f | wc -l) -gt 0 ]] || { echo "  not so: which holds what was deleted"; exit 1; }
+echo "  which holds what was deleted"
+
+say "A plugin uninstalled takes what it kept and made along, as one item, and Restore brings back both"
+everyone=$(as owner for network shelf add --text "everyone's note" >/dev/null && as owner for network shelf all)
+as owner for network uninstall --name shelf | shown
+as owner for network soft-delete list | grep -o '"plugin":"shelf"' | shown
+item=$(as owner for network soft-delete list | item)
+as owner for network soft-delete restore --item "$item" | shown
+[[ $(as owner for network shelf all) == "$everyone" ]] || { echo "  not so: shelf is installed again, with everyone's note"; exit 1; }
+echo "  shelf is installed again, with everyone's note"

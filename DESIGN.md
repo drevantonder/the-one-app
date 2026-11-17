@@ -48,7 +48,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 ## App Store
 
 - A tile's button is "Add to", then "Manage" once an owner has it. Both change which owners have it.
-- Taking an app off keeps its data, and adding it back brings the data back.
+- Taking an app off puts it and its data in Recently Deleted, as one item, whose Restore brings both back for 30 days.
 - An owner you can't install for shows a plain line, "Only Andre can install for Everyone", with no button.
 
 ## Devices, Sign-In & Security and Connect Your AI

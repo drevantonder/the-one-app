@@ -58,8 +58,12 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
 - **Plugin hook**: a moment a plugin can be called at, such as a tool being called or an artifact changing. Each states
   whether a plugin observes it, mutates it, or validates it, as Kubernetes' admission webhooks do, or collects it,
   each plugin answering its own part, where one that can't answer is left out.
-  One Core offers some, and a plugin offers its own, named with its name (`recently-deleted.removed`), for plugins it
+  One Core offers some, and a plugin offers its own, named with its name (`soft-delete.moved`), for plugins it
   can't know of to hook into.
+- **Soft delete**: what a network does with an artifact someone deletes: it's kept, as it was, so it can be restored
+  for 30 days, and then purged, as Rails' and Laravel's soft deletes keep a row. An artifact is **active**, then
+  **deleted**, **purging** while it's being deleted for good, and **purged**. Uninstalling a plugin deletes what it
+  kept and made for whoever it was installed for, together. People see it as Recently Deleted, the app's name.
 - **Sharing link**: a subject that is whoever holds it, without signing in. Making one writes a relation tuple naming it.
 - **Gateway**: sends each request at the network's address where its path says.
 - **Relay**: passes traffic between a network's servers and clients when they can't reach each other directly. It

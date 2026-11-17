@@ -133,7 +133,7 @@ defmodule OneCore.Plugin do
   - `OneCore.Call.make(call, id)` makes an artifact for whoever the call runs for, `call.subject`, under an id the
     plugin chooses, and the plugin keeps blobs in it as it does in its own. It's theirs, not the plugin's, and its
     name (`OneCore.Artifact.name/1`, such as `users/alice/made/hello/7`) is what they share it by. When they
-    delete one, it goes to Recently Deleted, which brings it back for 30 days: `OneCore.Call.tool(call, "recently-deleted", "remove",
+    delete one, it goes to Recently Deleted, which restores it for 30 days: `OneCore.Call.tool(call, "soft-delete", "delete",
     %{"artifact" => name})`, whose skill says more.
   - `OneCore.Call.reach(call, name)` gives an artifact by its name, to a call that may reach it: as a `viewer`,
     to read it, or with `"editor"` or `"owner"` as a third argument, to change it or to say who else may. It
@@ -273,9 +273,9 @@ defmodule OneCore.Plugin do
   as One Core runs its own of that kind, for whoever the call runs for. Another plugin hooks into it by its full name,
   the plugin's name and the hook's, in its `hooks/0`, and before the offering plugin is installed it's never run:
 
-      def offers, do: [%{name: "removed", kind: :observe, description: "Something made for someone was removed"}]
-      OneCore.Call.run_hook(call, "removed", %{"artifact" => name})        # in recently-deleted
-      def hooks, do: ["recently-deleted.removed"]                           # in repos
+      def offers, do: [%{name: "moved", kind: :observe, description: "Something made for someone was deleted"}]
+      OneCore.Call.run_hook(call, "moved", %{"artifact" => name, "to" => "deleted"})   # in soft-delete
+      def hooks, do: ["soft-delete.moved"]                                               # in git-repos
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,

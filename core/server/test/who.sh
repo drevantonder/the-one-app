@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests, on a whole network with a standby (`tooling/network <folder> --standby`), who may do what and that the clock calls
 # a scheduled job once. As users of a network being built: what one made is read by another only once a relation
-# tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. A plugin reaches
+# tuple says so, by a group's member, and by a sharing link's holder until its tuple is removed. Only an owner of what's deleted restores it or purges it. A plugin reaches
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
@@ -361,6 +361,22 @@ refused as carol notes read --note "$note"
 may as alice permissions share --artifact groups/family --relation member --who users/carol
 may as carol notes change --note "$note" --text "Buy oat milk"
 may as alice notes read --note "$note"
+
+say "Only an owner of what's deleted sees it, restores it and deletes it for good"
+gone=$(as alice notes write --id gone --text "Old list" | grep -o '"note":"[^"]*"' | cut -d'"' -f4)
+item=$(as alice soft-delete delete --artifact "$gone" | grep -o '"item":"[^"]*"' | cut -d'"' -f4)
+echo "  alice deleted $gone"
+refused as bob notes read --note "$gone"
+[[ $(as bob soft-delete list) != *"$item"* ]] || { echo "  not so: bob's list doesn't have it"; exit 1; }
+echo "  bob's list doesn't have it"
+refused as bob soft-delete restore --item "$item"
+refused as bob soft-delete purge --item "$item"
+may as bob soft-delete purge_all
+may as alice soft-delete restore --item "$item"
+may as alice notes read --note "$gone"
+item=$(as alice soft-delete delete --artifact "$gone" | grep -o '"item":"[^"]*"' | cut -d'"' -f4)
+may as alice soft-delete purge --item "$item"
+refused as alice soft-delete restore --item "$item"
 
 say "A sharing link's holder can, until its tuple is removed"
 output=$(as alice permissions link --artifact "$note")
