@@ -9,12 +9,15 @@
 //!   Linux, a LaunchAgent on a Mac, a scheduled task on Windows (`system`). This program only ends, non-zero where it
 //!   failed.
 //! - `server_update_status` (`ServerUpdateStatus`), while it's active: up to date, downloading the latest server
-//!   build and `one` together, verifying the pair by starting both, and up to date again, kept or gone back.
+//!   build and `one` together, verifying the pair, and up to date again, kept or gone back. Verifying is checking
+//!   the build starts and how it's taken (`UpdateMethod`), then loading it into the server while it runs, or starting
+//!   both in its place (`ServerUpdateStage`).
 //!
 //! Every start is the one way: a build is started and has `START` to say it's running and answer by its key. What
 //! each machine is at is one small record, `state.json` in the client's home's `server/`, beside `builds/<build>`,
-//! each build kept, `programs/<build>`, the `one` before an update, and `home`, the server's own folder, its key among
-//! it. The server is told on its input what changes of it (`OneCore.Release`), and says it to the network, where
+//! each build kept, `runtimes/<build>`, each runtime kept, `programs/<build>`, the `one` before an update, and `home`,
+//! the server's own folder, its key among it. A build is put together from its runtime, as hard links, and its code
+//! (`Here::assemble`), so it's a whole Erlang release that any start starts. The server is told on its input what changes of it (`OneCore.Release`), and says it to the network, where
 //! it's ready once it's active and running.
 
 use std::path::{Path, PathBuf};
@@ -36,6 +39,9 @@ use client::{BUILD, Client, target};
 /// What the server says when it's running, with its key after, and when it's asked to take the latest builds.
 const RUNNING: &str = "A server is running: ";
 const UPDATE_ASKED: &str = "Update asked";
+/// What the server says once it has loaded a build, or couldn't (`OneCore.Release.load/1`).
+const LOADED: &str = "Loaded ";
+const NOT_LOADED: &str = "Didn't load ";
 /// Which build of `one` an update takes the latest of: the app, with its window, or `one` built without it.
 const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// How long every start of a build has to say it's running and answer by its key.
@@ -77,6 +83,24 @@ pub enum ServerUpdateStatus {
     Verifying,
 }
 
+/// Where verifying is: checking the build starts and how it's taken, then loading it or starting it.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum ServerUpdateStage {
+    Checking,
+    Loading,
+    Starting,
+}
+
+/// How a build is taken, as checking chose (`OneCore.Release.compare/2`): loaded into the server while it runs, as
+/// a build that changed only One Core's code is, or started in its place, with `one` if that changed too.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateMethod {
+    HotLoad,
+    Restart,
+}
+
 /// What this program tells the server of its daemon: it's starting as it's started, running once it answers by its
 /// key, and stopping as it's stopped. Stopped is what the network says of one that's gone.
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -100,6 +124,9 @@ struct Record {
     server_membership: ServerMembership,
     server_membership_stage: Option<ServerMembershipStage>,
     server_update_status: ServerUpdateStatus,
+    server_update_stage: Option<ServerUpdateStage>,
+    /// How the last update was taken, or is being.
+    update_method: Option<UpdateMethod>,
     current: Option<Pair>,
     previous: Option<Pair>,
     next: Option<Pair>,
@@ -113,6 +140,8 @@ impl Record {
         json!({
             "server_membership": self.server_membership,
             "server_update_status": self.server_update_status,
+            "server_update_stage": self.server_update_stage,
+            "update_method": self.update_method,
             "went_back": self.went_back,
         })
     }
@@ -155,10 +184,12 @@ async fn join(client: &Client, here: &Here, record: &mut Record, key: &str, who:
     here.stage(record, ServerMembershipStage::Downloading)?;
     if record.current.is_none() {
         let builds = download(client).await?;
-        let build = builds
-            .get("server")
-            .with_context(|| format!("The network has no server for {} yet: `tooling/release` makes one.", target()))?;
-        record.current = Some(Pair { build: here.take(build).await?, program: Some(BUILD.to_owned()) });
+        ensure!(
+            latest(&builds).is_some(),
+            "The network has no server for {} yet: `tooling/release` makes one.",
+            target()
+        );
+        record.current = Some(Pair { build: here.take(&builds).await?, program: Some(BUILD.to_owned()) });
     }
     here.stage(record, ServerMembershipStage::Installing)?;
     system::install(here, key, &env::current_exe()?, &unit_env(who.to_owned(), None).await?)?;
@@ -356,6 +387,21 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     let log = here.folder.join("server.log");
     system::bound(&log)?;
 
+    // A build being checked or loaded when this program or the server stopped wasn't kept, and the server starts on
+    // the one it was on.
+    if record.server_update_status == ServerUpdateStatus::Verifying
+        && matches!(record.server_update_stage, Some(ServerUpdateStage::Checking | ServerUpdateStage::Loading))
+    {
+        let (current, next) = (record.current.clone(), record.next.clone());
+        record.went_back = Some(format!(
+            "Went back to {} from {}: it stopped while {}",
+            current.map(|pair| pair.build).unwrap_or_default(),
+            next.map(|pair| pair.build).unwrap_or_default(),
+            if record.server_update_stage == Some(ServerUpdateStage::Checking) { "checking it" } else { "loading it" }
+        ));
+        println!("{}", record.went_back.as_deref().unwrap_or_default());
+        here.went_back(&mut record, &program)?;
+    }
     let verifying = record.server_update_status == ServerUpdateStatus::Verifying;
     let pair = if verifying { record.next.clone() } else { record.current.clone() };
     let pair = pair.context("The record names no build to run")?;
@@ -409,6 +455,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         record.next = None;
         record.went_back = None;
         record.server_update_status = ServerUpdateStatus::UpToDate;
+        record.server_update_stage = None;
         println!(
             "The server is on the build {} now, from {}.",
             pair.build,
@@ -431,7 +478,9 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     loop {
         tokio::select! {
             line = said.recv() => match line {
-                Some(line) if line == UPDATE_ASKED => update_server(&here, &mut record, &mut server, &program).await?,
+                Some(line) if line == UPDATE_ASKED => {
+                    update_server(&here, &mut record, &mut server, &mut said, &key, &program).await?
+                }
                 Some(_) => {}
                 None => bail!("The server stopped: {}", server.wait().await?),
             },
@@ -483,7 +532,11 @@ fn listen(
                 eprintln!("Couldn't keep {} small: {error:#}", log.display());
             }
             keep(&line);
-            if line.starts_with(RUNNING) || line == UPDATE_ASKED {
+            if line.starts_with(RUNNING)
+                || line == UPDATE_ASKED
+                || line.starts_with(LOADED)
+                || line.starts_with(NOT_LOADED)
+            {
                 let _ = heard.send(line);
             }
         }
@@ -543,33 +596,90 @@ fn again(program: &Path) -> anyhow::Error {
     anyhow::anyhow!("It ended to run {}, which Task Scheduler starts within a minute.", program.display())
 }
 
-/// Takes the latest server build and `one` as a pair, and has the system start them to verify them. While they
+/// Takes the latest server build and `one` as a pair, and verifies them: checks the build starts and how it's taken
+/// (`method`), then loads it into the server while it runs, keeping it once the server answers by its key as that
+/// build and otherwise loading the one before again, or has the system start both in the server's place. While they
 /// download, the server answers on; nothing newer, or a download that failed, and it's up to date again.
-async fn update_server(here: &Here, record: &mut Record, server: &mut Child, program: &Path) -> Result<()> {
+async fn update_server(
+    here: &Here,
+    record: &mut Record,
+    server: &mut Child,
+    said: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    key: &str,
+    program: &Path,
+) -> Result<()> {
     record.server_update_status = ServerUpdateStatus::Downloading;
+    record.server_update_stage = None;
+    record.update_method = None;
     here.write(record)?;
     tell(server, record.told()).await;
     // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops where it was
     // told the device is nobody's, and its timer doesn't count while the machine sleeps.
-    let taken = match Client::open(client::home()?, Vec::new()).await {
-        Ok(now) => {
-            let taken = take(&now, here, record, program).await;
-            now.close().await;
-            taken
-        }
-        Err(error) => Err(error),
+    let now = Client::open(client::home()?, Vec::new()).await;
+    let taken = match &now {
+        Ok(now) => take(now, here, record, program).await,
+        Err(error) => Err(anyhow::anyhow!("{error:#}")),
     };
     record.server_update_status = ServerUpdateStatus::UpToDate;
     match taken {
         Ok(Some(next)) => {
-            record.next = Some(next);
+            record.next = Some(next.clone());
             record.server_update_status = ServerUpdateStatus::Verifying;
+            record.server_update_stage = Some(ServerUpdateStage::Checking);
             here.write(record)?;
-            let mut told = record.told();
-            told["server_daemon_status"] = json!(ServerDaemonStatus::Stopping);
-            tell(server, told).await;
-            stop(server).await?;
-            return Err(again(program));
+            tell(server, record.told()).await;
+            let current = record.current.clone().context("a build it's on")?;
+            let method = method(here, &current, &next);
+            println!("Taking {} by {}", next.build, method.as_ref().err().map_or("a hot load", |why| why.as_str()));
+            if method.is_ok()
+                && let Ok(now) = &now
+            {
+                record.update_method = Some(UpdateMethod::HotLoad);
+                record.server_update_stage = Some(ServerUpdateStage::Loading);
+                here.write(record)?;
+                tell(server, record.told()).await;
+                let loaded = load(server, said, &here.build(&next.build)).await;
+                let loaded = match loaded {
+                    Ok(()) => timeout(START, answers(now, key, &next.build)).await.unwrap_or_else(|_| {
+                        Err(anyhow::anyhow!("it didn't answer by its key within {} s", START.as_secs()))
+                    }),
+                    Err(why) => Err(why),
+                };
+                match loaded {
+                    Ok(()) => {
+                        record.previous = record.current.replace(next.clone());
+                        println!(
+                            "The server is on the build {} now, from {}, loaded while it ran.",
+                            next.build, current.build
+                        );
+                    }
+                    Err(why) => {
+                        record.went_back = Some(format!("Went back to {} from {}: {why:#}", current.build, next.build));
+                        println!("{}", record.went_back.as_deref().unwrap_or_default());
+                        let back = match server.try_wait()? {
+                            None => load(server, said, &here.build(&current.build)).await,
+                            Some(_) => Err(anyhow::anyhow!("it stopped")),
+                        };
+                        if let Err(why) = back {
+                            here.went_back(record, program)?;
+                            let _ = server.kill().await;
+                            bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
+                        }
+                    }
+                }
+                record.next = None;
+                record.server_update_status = ServerUpdateStatus::UpToDate;
+                record.server_update_stage = None;
+            } else {
+                record.update_method = Some(UpdateMethod::Restart);
+                record.server_update_stage = Some(ServerUpdateStage::Starting);
+                here.write(record)?;
+                let mut told = record.told();
+                told["server_daemon_status"] = json!(ServerDaemonStatus::Stopping);
+                tell(server, told).await;
+                stop(server).await?;
+                return Err(again(program));
+            }
         }
         Ok(None) => println!("This device is on the latest builds already."),
         Err(error) => {
@@ -578,21 +688,66 @@ async fn update_server(here: &Here, record: &mut Record, server: &mut Child, pro
             println!("{}", record.went_back.as_deref().unwrap_or_default());
         }
     }
+    if let Ok(now) = now {
+        now.close().await;
+    }
     here.write(record)?;
     tell(server, record.told()).await;
     Ok(())
 }
 
-/// Takes the latest server build and `one` there's a newer one of: the build unpacked and checked, and the program
-/// replacing this one, the one before kept to go back to. Gives the pair, or `None` where both are the latest.
+/// How the build `next` is taken from `current`: `Ok` to load it into the server while it runs, or why it restarts.
+/// A new `one` restarts, as does whatever `OneCore.Release.compare/2`, run in a VM of the new build, says does.
+fn method(here: &Here, current: &Pair, next: &Pair) -> Result<(), String> {
+    if next.program.as_deref() != Some(BUILD) {
+        return Err("restart: a new one".to_owned());
+    }
+    let compare = "OneCore.Release.compare(System.fetch_env!(\"ONE_FROM\"), System.fetch_env!(\"ONE_TO\"))";
+    let output = command(release(&here.build(&next.build)))
+        .args(["eval", compare])
+        .env("ONE_FROM", here.build(&current.build))
+        .env("ONE_TO", here.build(&next.build))
+        .output()
+        .map_err(|error| format!("restart: checking couldn't start: {error}"))?;
+    let out = String::from_utf8_lossy(&output.stdout);
+    match out.lines().last().map(str::trim) {
+        Some("hot_load") => Ok(()),
+        Some(why) if why.starts_with("restart: ") => Err(why.to_owned()),
+        _ => Err(format!("restart: checking failed: {}", String::from_utf8_lossy(&output.stderr).trim())),
+    }
+}
+
+/// Has the server load the build in `folder` while it runs, and waits for it to say it has, within `START`.
+async fn load(
+    server: &mut Child,
+    said: &mut tokio::sync::mpsc::UnboundedReceiver<String>,
+    folder: &Path,
+) -> Result<()> {
+    tell(server, json!({"load": folder})).await;
+    let loaded = timeout(START, async {
+        while let Some(line) = said.recv().await {
+            if line.starts_with(LOADED) || line.starts_with(NOT_LOADED) {
+                return Some(line);
+            }
+        }
+        None
+    });
+    match loaded.await {
+        Ok(Some(line)) if line.starts_with(LOADED) => Ok(()),
+        Ok(Some(line)) => bail!("{line}"),
+        Ok(None) => bail!("it stopped while loading"),
+        Err(_) => bail!("it didn't load within {} s", START.as_secs()),
+    }
+}
+
+/// Takes the latest server build and `one` there's a newer one of: the build put together and checked, and the
+/// program replacing this one, the one before kept to go back to. Gives the pair, or `None` where both are the latest.
 async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> Result<Option<Pair>> {
     let builds = download(client).await?;
     let current = record.current.clone().context("a build it's on")?;
     let mut next = Pair { build: current.build.clone(), program: Some(BUILD.to_owned()) };
-    if let Some(server) = builds.get("server")
-        && server["build"] != current.build
-    {
-        next.build = here.take(server).await?;
+    if latest(&builds).is_some_and(|latest| latest != current.build) {
+        next.build = here.take(&builds).await?;
     }
     if let Some(one) = builds.get(PROGRAM)
         && one["build"] != BUILD
@@ -603,6 +758,16 @@ async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> 
         next.program = one["build"].as_str().map(str::to_owned);
     }
     Ok((next != Pair { program: Some(BUILD.to_owned()), ..current }).then_some(next))
+}
+
+/// The latest server build among the network's `builds`: its code's, which goes with the runtime for this kind of
+/// machine, or a whole one's from before builds came in two.
+fn latest(builds: &Map<String, Value>) -> Option<&str> {
+    match (builds.get("server-code"), builds.get("server-runtime"), builds.get("server")) {
+        (Some(code), Some(_runtime), _) => code["build"].as_str(),
+        (_, _, Some(server)) => server["build"].as_str(),
+        _ => None,
+    }
 }
 
 /// Replaces the program `program` with the build `one`, once it has said it's that build. What runs now runs on, and
@@ -746,6 +911,8 @@ impl Here {
             next: next.map(|build| Pair { build, program: Some(BUILD.to_owned()) }),
             went_back: fs::read_to_string(file("went-back")).ok(),
             server_membership_stage: None,
+            server_update_stage: None,
+            update_method: None,
         };
         self.write(&record)?;
         for name in ["current", "previous", "next", "went-back"] {
@@ -792,10 +959,18 @@ impl Here {
             }
         }
         record.server_update_status = ServerUpdateStatus::UpToDate;
+        record.server_update_stage = None;
         self.write(record)
     }
 
-    /// Removes the builds and programs the record names as neither current, previous nor next.
+    /// The folder of the build `build`.
+    fn build(&self, build: &str) -> PathBuf {
+        self.folder.join("builds").join(build)
+    }
+
+    /// Removes the builds and programs the record names as neither current, previous nor next, and the runtimes no
+    /// build kept is put together from. Only as the server starts, on current or next: one it has loaded builds into
+    /// since runs on from the build it started.
     fn prune(&self, record: &Record) -> Result<()> {
         let pairs = [&record.current, &record.previous, &record.next];
         let named = |name: &str| {
@@ -812,27 +987,41 @@ impl Here {
                 }
             }
         }
+        let runtimes: Vec<String> = fs::read_dir(self.folder.join("builds"))
+            .into_iter()
+            .flatten()
+            .filter_map(|build| fs::read_to_string(build.ok()?.path().join("runtime")).ok())
+            .map(|runtime| runtime.trim().to_owned())
+            .collect();
+        for kept in fs::read_dir(self.folder.join("runtimes")).into_iter().flatten() {
+            let kept = kept?;
+            if !runtimes.contains(&kept.file_name().to_string_lossy().into_owned()) {
+                let _ = fs::remove_dir_all(kept.path());
+            }
+        }
         Ok(())
     }
 
-    /// Downloads the build `build`, unpacks it and has it say which it is, which starts its VM and loads its
-    /// NIFs: a build that can't do that here goes. Gives its name. One that's here already is taken as it is.
-    async fn take(&self, build: &Value) -> Result<String> {
-        let name = build["build"].as_str().context("a build says which it is")?.to_owned();
-        let builds = self.folder.join("builds");
-        let folder = builds.join(&name);
+    /// Takes the latest server build among the network's `builds` (`latest`), put together from its runtime and
+    /// its code, or a whole one from before builds came in two, and has it say which it is, which starts its VM and
+    /// loads its NIFs: a build that can't do that here goes. Gives its name. One that's here already is taken as it
+    /// is.
+    async fn take(&self, builds: &Map<String, Value>) -> Result<String> {
+        let name = latest(builds).context("The network has no server build for this machine")?.to_owned();
+        let folder = self.build(&name);
         if folder.exists() {
             return Ok(name);
         }
-        fs::create_dir_all(&builds)?;
-        let archive = builds.join(format!("{name}.tar.gz"));
-        let unpacking = builds.join(format!("{name}.unpacking"));
-        fetch(build, &archive).await.with_context(|| format!("the build {name} didn't download"))?;
+        let unpacking = self.folder.join("builds").join(format!("{name}.unpacking"));
         let _ = fs::remove_dir_all(&unpacking);
         fs::create_dir_all(&unpacking)?;
-        let unpacked = command("tar").arg("-xzf").arg(&archive).arg("-C").arg(&unpacking).status()?;
-        fs::remove_file(&archive)?;
-        ensure!(unpacked.success(), "The build {name} didn't unpack.");
+        if let (Some(code), Some(runtime)) = (builds.get("server-code"), builds.get("server-runtime")) {
+            let kept = self.runtime(runtime).await?;
+            linked(&kept, &unpacking).with_context(|| format!("the build {name} couldn't be put together"))?;
+            unpack(code, &unpacking).await?;
+        } else {
+            unpack(&builds["server"], &unpacking).await?;
+        }
         let output = command(release(&unpacking)).args(["eval", "OneCore.Release.check()"]).output()?;
         let (out, errors) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         let out = out.trim();
@@ -847,6 +1036,47 @@ impl Here {
         fs::rename(&unpacking, &folder)?;
         Ok(name)
     }
+
+    /// The folder of the runtime `runtime`, downloaded and unpacked the first time.
+    async fn runtime(&self, runtime: &Value) -> Result<PathBuf> {
+        let name = runtime["build"].as_str().context("a runtime says which build it is")?;
+        let folder = self.folder.join("runtimes").join(name);
+        if !folder.exists() {
+            let unpacking = folder.with_extension("unpacking");
+            let _ = fs::remove_dir_all(&unpacking);
+            fs::create_dir_all(&unpacking)?;
+            unpack(runtime, &unpacking).await?;
+            fs::rename(&unpacking, &folder)?;
+        }
+        Ok(folder)
+    }
+}
+
+/// Downloads a build that's an archive and unpacks it into `folder`.
+async fn unpack(build: &Value, folder: &Path) -> Result<()> {
+    let name = build["build"].as_str().context("a build says which it is")?;
+    let archive = folder.with_extension("tar.gz");
+    fetch(build, &archive).await.with_context(|| format!("the build {name} didn't download"))?;
+    let unpacked = command("tar").arg("-xzf").arg(&archive).arg("-C").arg(folder).status()?;
+    fs::remove_file(&archive)?;
+    ensure!(unpacked.success(), "The build {name} didn't unpack.");
+    Ok(())
+}
+
+/// Puts the files of the folder `from` in the folder `to` as hard links, the same files under another name, as a
+/// runtime is in each build put together from it.
+fn linked(from: &Path, to: &Path) -> Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let path = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            linked(&entry.path(), &path)?;
+        } else {
+            fs::hard_link(entry.path(), &path)?;
+        }
+    }
+    Ok(())
 }
 
 /// How the system keeps the server running, restarts it when it ends non-zero, and backs off one that keeps failing:
