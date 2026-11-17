@@ -1,18 +1,18 @@
 {
   "server/bin/wall/linux-aarch64": {
     "sha256": "c52516fdc2649b1c9b5b410bedc101e3fd4e08e4b0dcb51449116ac930e28f8a",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/wall-33f302672da80dfe74a7cb66d74481972ca96d6b1cf438c8f91a14842a813d74-linux-aarch64"
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4727ecec80aa/wall-42ff5a7cc2edf70fc25d206b34b4838d92f47ef06646dfc219a4fa11a7bdc66f-linux-aarch64"
   },
   "server/bin/wall/linux-x86_64": {
     "sha256": "dab75eea997af7faec920d10198bddd14a7c947a39449b47e3e9f8a5418cdb2d",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/wall-d1fb0241b608cf2af04930fa0b520fa593a2ba36f92ed25333ce7a19b8ad400c-linux-x86_64"
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4727ecec80aa/wall-4cf9053e7b0895d54ba12d293f5e99b8044531f276c6b282eab35679fb8e4059-linux-x86_64"
   },
   "server/bin/wall/macos-aarch64": {
-    "sha256": "8c761fda77daab12efd0e70a46d3e420af2e2e935081559cebc0f7c18b7f1c27",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/wall-6f17d620a54c105addc115c3d4ba717349fb8542197cca0fced1d05e5de25168-macos-aarch64"
+    "sha256": "7ecb2815cef31e72bd0b9b347275e76f70ab031f0848345efd5549ed5bfffe94",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4727ecec80aa/wall-f5af3176de61a8e8c71edd4194e1c18ece5e3ffcbbb298c83aa1f10513324aec-macos-aarch64"
   },
   "server/bin/wall/windows-x86_64": {
     "sha256": "cbae1b4c72ea5fb44e6f97ba0ebb8dabbe63062320e37bec09ff475e7062902c",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/wall-2922788cbc5de4633afcf58822cd4a8f4c9b5bab8fc3e13e15de8c9451c3645a-windows-x86_64"
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4727ecec80aa/wall-7526d09c458fa0cb5d20953c48165cc76e0841a6756d59f40855241f6d68ba12-windows-x86_64"
   }
 }
