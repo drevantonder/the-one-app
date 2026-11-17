@@ -157,6 +157,10 @@ defmodule OneCore.Call.State do
     end
   end
 
+  @doc "The calls the process `pid` began and hasn't finished: each one's id and row."
+  def left(pid),
+    do: :ets.select(@table, [{{:"$1", :_, :"$2"}, [{:==, {:map_get, :pid, :"$2"}, pid}], [{{:"$1", :"$2"}}]}])
+
   @doc "The call that's the MCP task `task`: its id and its row, or `nil`."
   def task(task) do
     case :ets.select(@table, [{{:"$1", :_, :"$2"}, [{:==, {:map_get, :task, :"$2"}, task}], [{{:"$1", :"$2"}}]}]) do

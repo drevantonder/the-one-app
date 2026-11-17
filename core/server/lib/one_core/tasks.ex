@@ -13,8 +13,8 @@ defmodule OneCore.Tasks do
   A task is its call, running on the server that runs it, in a process of its own, so it carries on whatever its
   caller does. What it is is kept in the bucket, `<whoever it runs for>/tasks/<id>`, which is its `taskId` too, so any
   server finds it: when it's made, and once it ends, for an hour after. While it runs, the server running it answers
-  for it, and one that has stopped meanwhile is taken to have failed it. Only whoever started a task gets it, answers
-  it or cancels it: to anyone else, it isn't there.
+  for it, and one that has stopped meanwhile, or whose run ended without returning, is taken to have failed it. Only
+  whoever started a task gets it, answers it or cancels it: to anyone else, it isn't there.
   """
   alias OneCore.{Artifact, Call, Server, Servers, Trace, User}
   alias OneCore.Call.State
@@ -78,6 +78,7 @@ defmodule OneCore.Tasks do
         State.finish(id)
       end)
 
+    Task.Supervisor.start_child(OneCore.Asks, fn -> watched(runner) end)
     watched = Process.monitor(runner)
 
     receive do
@@ -95,6 +96,21 @@ defmodule OneCore.Tasks do
 
       {:DOWN, ^watched, :process, _runner, why} ->
         {:error, -32603, "It stopped before it was accepted: #{Exception.format_exit(why)}"}
+    end
+  end
+
+  # What a task runs in can end without returning, as it does when a process it's linked to crashes, or when it's
+  # stopped outright once cancelled. Its task has then failed, as MCP's Tasks has one whose run fails (or stays
+  # cancelled), and what it began goes.
+  defp watched(runner) do
+    monitor = Process.monitor(runner)
+
+    receive do
+      {:DOWN, ^monitor, :process, _runner, why} ->
+        for {id, row} <- State.left(runner) do
+          if row.task, do: ended(row, {:error, -32603, "It ended without an answer: #{Exception.format_exit(why)}"})
+          State.finish(id)
+        end
     end
   end
 
@@ -323,7 +339,8 @@ defmodule OneCore.Tasks do
         record["server"] == Server.key() and State.task(record["taskId"]) == nil ->
           gone(subject, name, Server.key())
 
-        record["server"] != Server.key() and Servers.presence(record["server"])["server_daemon_status"] in ["starting", "stopped"] ->
+        record["server"] != Server.key() and
+            Servers.presence(record["server"])["server_daemon_status"] in ["starting", "stopped"] ->
           gone(subject, name, record["server"])
 
         true ->
