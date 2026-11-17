@@ -36,14 +36,16 @@ Exactly two rules hold at runtime:
 One release at a time: `tooling/release` refuses while another is under way, and says which; then say whose it is
 and stop. A server the network hasn't seen for 10 minutes (`asleep` in it), or one not ready with no update
 under way, holds up none: it's named, and takes the latest by itself as it starts or reconnects. A build it went
-back from it tries once more, 10 minutes on, and after that only when asked (`one update --server`). Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
+back from it tries once more, 10 minutes on, and after that only when asked (`one update --server`). `tooling/release` updates each server itself once it has
+published, one at a time, and says what each took; it stops at the first that fails, saying why, and the rest stay on the old build, safe. Run no
+`one update --server` by hand for a release. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
 found later is fixed forward.
 
 A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
 is split only for minutes:
 
-1. The servers (`tooling/release server`, then one server first and the rest at once, as below). A first server that
-   goes back stops the release: read its log, and update no other.
+1. The servers (`tooling/release server`, which updates them one at a time). A server that goes back stops the
+   release: read its log, and update no other.
 2. The apps that require the new platform, once every server is on it.
 3. The edge, from the commit the servers run.
 4. The clients (`tooling/release client`, `one update` on each device).
@@ -55,7 +57,7 @@ is split only for minutes:
 | An app's native code (`server/nif/`, `server/bin/`) | Also `tooling/publish-nifs` once it's on `main`: it publishes the new builds to a GitHub Release and pushes their `server/checksums.json`, from which every network updating the app from git gets them. A Mac's are built on GitHub's macOS runner when the Mac is busy |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, an app's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
-| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <first>` for one server, then `one update --server <key>` for each of the rest at once. `one update --server` answers once `one builds` says that server is ready on the new build, or fails saying why it went back (within the 180 s a start has, and a minute). A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, seconds); one with a new runtime, `one`, 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, as before) |
+| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, which updates each server after publishing and fails saying why one went back (within the 180 s a start has, and a minute). A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, seconds); one with a new runtime, `one`, 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, as before) |
 | The desktop app or CLI (`core/client/`, `clients/`, an app's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, `tooling/`, `.agents/` | Nothing |
