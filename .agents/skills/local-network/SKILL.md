@@ -43,8 +43,9 @@ node's name as `tooling/network` prints it. `:recon`, `:recon_trace` and `:obser
 Everything is in the folder: `server.log`, `reloader.log` (and `standby.log`, `edge.log`, `bucket.log` with those flags), the
 bucket, and the client's home. Starting again in the same folder carries on with what's there.
 
-Stop it by its PID: `kill <pid of tooling/network>` stops every process it started, since each is its own process
-group.
+Start it in the background, however you like (`setsid`, `mise exec`); its PID is then in `<folder>/pid`.
+Stop it with `kill $(cat <folder>/pid)`, which stops all of it. Started again in the same folder it keeps its ports,
+so a server installed with `one serve on` there reconnects by itself.
 
 ## Mistakes already made
 

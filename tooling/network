@@ -9,8 +9,8 @@
 # It builds what isn't built, then starts the network's server in the folder, which is where everything the network
 # keeps goes: its bucket, each server's home, a client's home and the logs. A new network has every app of this
 # repo deployed for it, and installs the ones a network starts with (`OneCore.Apps.Lifecycle.make_first_owner/1`); after that,
-# deploy an app you change into it. Starting again in the same folder carries on with what's there, and Ctrl-C
-# stops it.
+# deploy an app you change into it. Starting again in the same folder carries on with what's there, on the same
+# ports. Its PID is in the folder's `pid`, and `kill $(cat <folder>/pid)` (or Ctrl-C) stops all of it.
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
@@ -50,6 +50,14 @@ done
 if [[ -n $owner ]]; then as=(--owner "$owner"); else as=(--development --owner owner); fi
 mkdir -p "$folder"
 folder=$(cd "$folder" && pwd)
+# As `pg_ctl` does, the folder holds the PID of what's running in it, whatever started it (`setsid` forks, for one).
+if [[ -s $folder/pid ]] && kill -0 "$(cat "$folder/pid")" 2>/dev/null; then
+  echo "A network is already running in $folder: kill $(cat "$folder/pid") stops it." >&2 && exit 1
+fi
+echo $$ >"$folder/pid"
+started=()
+trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait; rm -f "$folder/pid"' EXIT
+trap exit TERM INT HUP
 one=$root/target/debug/one
 
 (cd "$root/core/ui" && bun install --frozen-lockfile && bun build.js)
@@ -57,8 +65,6 @@ one=$root/target/debug/one
 # (`core/server/mix.exs`).
 (cd "$root/core/server" && mix deps.get)
 
-started=()
-trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait' EXIT
 # Waits for a line in a log that the job just started is still writing. Fails if the job ends without it.
 # GNU's tail follows a file for as long as a process runs, which on a Mac is Homebrew's coreutils' `gtail`.
 tail=$(command -v gtail || command -v tail)
@@ -69,10 +75,12 @@ random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 at_address=()
 if [[ -n $edge ]]; then
   (cd "$root/core/edge" && bun install --frozen-lockfile)
-  # The bucket's credentials are made up for this run, and only the presigner is given them, with the secret a
-  # network's first server shows.
-  access=$(random 8) secret=$(random 24) first=$(random 16)
-  bucket=127.0.0.1:$(free_port) gateway=$(free_port)
+  # The bucket's credentials are made up for this network, and only the presigner is given them, with the secret a
+  # network's first server shows. They're kept in the folder with its ports, so started again it's at the same
+  # address, which a server installed with `one serve on` still reaches.
+  [[ -s $folder/edge.env ]] || (umask 077 && echo "access=$(random 8) secret=$(random 24) first=$(random 16)" \
+    "bucket=127.0.0.1:$(free_port) gateway=$(free_port)" >"$folder/edge.env")
+  source "$folder/edge.env"
   mkdir -p "$folder/bucket"
   RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
   started+=($!)
@@ -134,7 +142,7 @@ Its client's home is $folder/client, which is nobody's device until they sign in
     $one                                             opens the app, which signs in
     $one sign-in devices                             shows the code and link that let this device in
 
-What each part says is in $folder/*.log. Ctrl-C stops it.
+What each part says is in $folder/*.log. kill \$(cat $folder/pid) stops it.
 SAID
 [[ -n $owner ]] || cat <<SAID
 
@@ -152,6 +160,6 @@ A network is running in $folder. Its client's home is $folder/client:
 ${at_address:+
 Its address is ${at_address[1]}.
 }
-What each part says is in $folder/*.log. Ctrl-C stops it.
+What each part says is in $folder/*.log. kill \$(cat $folder/pid) stops it.
 SAID
 wait
