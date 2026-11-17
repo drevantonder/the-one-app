@@ -4,7 +4,7 @@ fn main() {
     // The build a program is, as `tooling/version` names it from the commit checked out, which a server and a phone's
     // app are named by too. It's named again whenever the commit does: git's HEAD, or the branch it's on. Not when
     // git's index does, which git writes whenever it looks at the files (`git status`), and every program would be
-    // built again for nothing: its `-dirty` is what was uncommitted when the commit last changed.
+    // built again for nothing: its `.dirty` is what was uncommitted when the commit last changed.
     let git = |args: &[&str]| {
         let output = std::process::Command::new("git").args(args).output().expect("git is there");
         String::from_utf8(output.stdout).expect("git says text").trim().to_owned()

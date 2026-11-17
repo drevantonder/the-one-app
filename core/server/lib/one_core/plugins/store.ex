@@ -263,7 +263,10 @@ defmodule OneCore.Plugins.Store do
     |> Map.new()
   end
 
-  @doc "Loads the set of the plugin `artifact`'s files named `code`: `{:ok, version}`, or `:error` if it doesn't compile here."
+  @doc """
+  Loads the set of the plugin `artifact`'s files named `code`: `{:ok, version}`, or `:error` if it doesn't compile
+  here, or doesn't run on this server's build (`OneCore.Plugins.Version`).
+  """
   def loaded(artifact, code) do
     case Version.load(Path.basename(artifact), files(artifact, code)) do
       {:ok, version, _warnings} ->
@@ -272,7 +275,7 @@ defmodule OneCore.Plugins.Store do
         {:ok, version}
 
       {:error, why} ->
-        Logger.error("#{artifact} isn't updated here, because its latest version doesn't compile:\n#{why}")
+        Logger.error("#{artifact} isn't updated here, because its latest version doesn't load:\n#{why}")
         :error
     end
   end

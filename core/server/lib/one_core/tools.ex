@@ -612,7 +612,9 @@ defmodule OneCore.Tools do
       build each of your devices last said it is, and the latest for each kind of machine, so it says whether
       everything is on the same build, and which plugins The One App ships with the server is still deploying, or
       failed to deploy and why, under `bundled`.
-      A build is the commit it was built from. With `server`, that server answers, saying its own.
+      A build is the version of the commit it was built from, Semantic Versioning's, with its commit's count and
+      hash as build metadata: 0.15.2+2974.febd37350abc. Servers, the edge and clients talk only on the same 0.minor:
+      `why` says what's on one that doesn't. With `server`, that server answers, saying its own.
       """,
       inputs: %{
         type: "object",
@@ -622,7 +624,8 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{
           server: %{type: "string", description: "The key of the server that answered"},
-          build: %{type: "string", description: "Its build: <count>-<commit>"},
+          build: %{type: "string", description: "Its build: <version>+<count>.<commit>"},
+          edge: %{type: ["string", "null"], description: "The build the network's edge is, if it says"},
           latest: %{type: "object", description: "The latest build of each kind of machine, by its name: server/linux-x86_64"},
           servers: %{
             type: "array",
@@ -637,9 +640,9 @@ defmodule OneCore.Tools do
                   description:
                     "\"on\", \"restarting\" while it stops to start again or starts, until it's up, or when it was last on, in milliseconds since 1970"
                 },
-                protocol: %{
-                  type: "integer",
-                  description: "The version of what it asks other servers, which those it asks share"
+                why: %{
+                  type: "string",
+                  description: "Why it doesn't talk with the server that answered or the edge, being on another 0.minor"
                 },
                 update: @update,
                 went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
@@ -661,7 +664,7 @@ defmodule OneCore.Tools do
             description: "Each plugin it ships that it's still deploying, by its name: waiting, building, or why it failed"
           }
         },
-        required: ["server", "build", "latest", "servers", "devices", "bundled"]
+        required: ["server", "build", "edge", "latest", "servers", "devices", "bundled"]
       }
     },
     %{
@@ -951,16 +954,16 @@ defmodule OneCore.Tools do
     {records, _automatic} = Installed.read(owner)
     %{for: owner, plugins: for({name, record} <- Enum.sort(records), do: moved(owner, name, record))}
   end
-
   defp run("plugins_automatic_updates", %{"on" => on}, {_actor, subject} = principal, forward) do
     owner = User.owner(subject) || "network"
     at(owner, forward)
+
     reaches!(principal, owner, "installer")
     Installed.automatic(owner, on)
     if on, do: Task.start(fn -> Lifecycle.reconcile(owner) end)
+
     %{for: owner, automatic: on}
   end
-
 
   # A file sent this way lands in the plugin's own artifact, for whoever it was installed for, under a name nobody
   # could guess.

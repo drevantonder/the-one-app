@@ -2,7 +2,7 @@ defmodule OneCore.Builds do
   @moduledoc """
   Which build each machine runs, and the latest, which a machine takes when it's asked to update.
 
-  A build is named by the commit it was built from (`build/0`), and is made for a kind of machine (`target/0`):
+  A build is named by the version it is, its commit's (`build/0`), and is made for a kind of machine (`target/0`):
   `server/<target>`, an installed server, `one/<target>`, the program `one`, and `one-cli/<target>`, `one` without its
   window. `tooling/release` makes them and publishes them (`publish/1`): each is a blob under the network's `builds/`, named
   by its SHA-256, and the blob `builds/latest` says which is latest for each name, by its build, its SHA-256 and its
@@ -21,8 +21,31 @@ defmodule OneCore.Builds do
   @latest @builds <> "latest"
   @plugin ~r{^((?:network|(?:users|groups)/[^/]+)/plugins/[^/]+)/latest$}
 
-  @doc "The build this server is: the commit it was built from."
+  @doc "The build this server is, as `tooling/version` names its commit: `0.15.2+2974.febd37350abc`."
   def build, do: Application.fetch_env!(:one_core, :build)
+
+  @doc """
+  The version a build is, Semantic Versioning's. A build from before builds had versions, named `<count>-<commit>`,
+  is 0.15.0, whose servers, clients and edge it talked with as they were.
+  """
+  def version(build) do
+    case Version.parse(to_string(build)) do
+      {:ok, version} -> version
+      :error -> Version.parse!("0.15.0")
+    end
+  end
+
+  @doc """
+  Whether the builds `a` and `b` talk: parts of the platform (servers, the edge, clients) talk only on the same
+  0.minor, or from 1.0 the same major, as Cargo, npm and Hex read a version, where a breaking change takes the next.
+  """
+  def talk?(a, b), do: series(version(a)) == series(version(b))
+
+  defp series(%Version{major: 0, minor: minor}), do: {0, minor}
+  defp series(%Version{major: major}), do: major
+
+  @doc "Whether the build `a` is a version before `b`'s."
+  def older?(a, b), do: Version.compare(version(a), version(b)) == :lt
 
   @doc "The kind of machine this is, as builds are named, the same as a client names it: `linux-x86_64`, `macos-aarch64`."
   def target do
@@ -38,7 +61,7 @@ defmodule OneCore.Builds do
 
   @doc """
   What this server says of itself, as it starts and as an update of it moves on: its build, its kind of machine,
-  the device it's on, if any, the protocol it speaks with other servers (`OneCore.Server.protocol/0`), whether it was
+  the device it's on, if any, whether it was
   installed with `one serve on`, which is what takes the latest builds when it's asked to update, where an update
   of it is, if one is under way (`OneCore.Release`), and, if the last one didn't take, why, as that program said it.
   """
@@ -47,7 +70,6 @@ defmodule OneCore.Builds do
       build: build(),
       target: target(),
       device: Application.get_env(:one_core, :device),
-      protocol: Server.protocol(),
       installed: Application.get_env(:one_core, :installed, false),
       update: update(),
       went_back: Application.get_env(:one_core, :went_back)
@@ -188,10 +210,13 @@ defmodule OneCore.Builds do
     [latest | read] = Bucket.read_all([@latest | Enum.map(keys, &"servers/#{&1}/build")] ++ devices)
     {server_reads, device_reads} = Enum.split(read, length(keys))
 
+    edge = Servers.edge()
+
     servers =
       for {key, read} <- Enum.zip(keys, server_reads) do
         info = with {:ok, info, _tag} <- read, do: JSON.decode!(info), else: (:absent -> %{})
-        Map.merge(info, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
+        server = Map.merge(info, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
+        if why = why(server, edge), do: Map.put(server, "why", why), else: server
       end
 
     devices =
@@ -201,12 +226,30 @@ defmodule OneCore.Builds do
     %{
       server: Server.key(),
       build: build(),
+      edge: edge,
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
       devices: devices,
       bundled: OneCore.Plugins.Deploy.deploying_bundled()
     }
   end
+
+  # Why `server` doesn't talk with this one or the edge, for being on a version that doesn't talk with theirs, or
+  # `nil` where it does. The edge takes one on a version before its own for restarting until it's updated.
+  defp why(%{"build" => theirs, "name" => name}, edge) do
+    cond do
+      not talk?(theirs, build()) ->
+        "It's on #{theirs} and #{Servers.name(Server.key()) || "this server"} on #{build()}, so they don't talk until both are on one"
+
+      (edge && not talk?(theirs, edge)) and older?(theirs, edge) ->
+        "It's on #{theirs}, before the edge's #{edge}, so the edge takes #{name || "it"} for restarting until it's updated"
+
+      true ->
+        nil
+    end
+  end
+
+  defp why(_server, _edge), do: nil
 
   # Whether a server is on, as `"on"`, stopping to start again or starting and not up yet, as `"restarting"`, or
   # when it was last, in milliseconds since 1970, or `nil` if that isn't known.

@@ -19,9 +19,20 @@
 // A server that stops to start again, as it does to update, says so first, and so does one as it starts: it's
 // restarting until it says it's up, once its plugins have started and it isn't a build still being tried.
 // Servers are told when one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
+//
+// Parts of the platform talk only on the same 0.minor (`OneCore.Builds.talk?/2`): a server says its build as it
+// says it's restarting or up, and one on a version before the edge's that doesn't talk with it is restarting until
+// it's updated. A call from outside goes only to a server that talks with the edge, and says the edge's build.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
+
+declare global {
+  interface RelayEnv {
+    /** The edge's build, as `tooling/version` names the commit it was deployed from, which `edge.js` sets. */
+    VERSION: string;
+  }
+}
 
 const PROTOCOL = "iroh-relay-v2";
 /** What an endpoint signs to prove its key: a key derived from the relay's challenge under this name. */
@@ -48,6 +59,20 @@ const SEEN = JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/seen" }
 const REACH = 5_000;
 /** MCP's ping, which a server answers at once, whoever asks. */
 const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
+/**
+ * The versions a build talks with, as Semantic Versioning's 0.x reads at Cargo, npm and Hex: its 0.minor, or from
+ * 1.0 its major. A server from before builds had versions says none, and is 0.15.0.
+ */
+function series(version = "0.15.0"): [number, number] {
+  const [major, minor] = version.split(".").map(Number);
+  return major === 0 ? [0, minor] : [major, 0];
+}
+const talk = (a?: string, b?: string) => series(a).join() === series(b).join();
+const before = (a?: string, b?: string) => {
+  const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
+  return major < otherMajor || (major === otherMajor && minor < otherMinor);
+};
+
 /** A W3C `traceparent`: its trace and span. */
 const TRACE = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
 
@@ -185,9 +210,18 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const call = JSON.parse(message);
     const parent: string | undefined = call.params?._meta?.traceparent;
     const traceparent = `00-${TRACE.exec(parent ?? "")?.[1] ?? hex.encode(crypto.getRandomValues(new Uint8Array(16)))}-${hex.encode(crypto.getRandomValues(new Uint8Array(8)))}-01`;
-    message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent } } });
+    message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent, version: this.env.VERSION } } });
 
-    // One that's restarting isn't up yet, so it's asked only if every one is.
+    // Only a server that talks with the edge is asked, and one that's restarting isn't up yet, so it's asked only if
+    // every one is.
+    const versions = await this.relay().versions(servers);
+    const talking = servers.filter((server) => !versions[server] || talk(versions[server], this.env.VERSION));
+    if (!talking.length) {
+      const error = `None of its ${servers.length} servers is on a version that talks with the edge's ${this.env.VERSION}: ${servers.map((server) => `${server.slice(0, 8)} ${versions[server]}`).join(", ")}`;
+      console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length }, error } }));
+      return null;
+    }
+    servers = talking;
     const seen = await this.seen(servers);
     const on = servers.filter((server) => seen[server] !== "restarting");
     if (on.length) servers = on;
@@ -222,10 +256,11 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   }
 
   /**
-   * A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`. A server says
-   * it's stopping to start again, or starting, with a POST of `{"restarting": <seconds>, "until": "up"}`, the most it
-   * may take to be back, and that it's up with `{"up": true}`. One that leaves out `"until": "up"`, from before
-   * servers said they're up, is back once it connects again.
+   * A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`, and is told the
+   * edge's build as `one-version`. A server says it's stopping to start again, or starting, with a POST of
+   * `{"restarting": <seconds>, "until": "up", "version": <its build>}`, the most it may take to be back, and that it's
+   * up with `{"up": true, "version": <its build>}`. One that leaves out `"until": "up"`, from before servers said
+   * they're up, is back once it connects again.
    */
   async handleSeen(request: Request, url: URL) {
     const body = request.method === "POST" ? await request.text() : "";
@@ -233,19 +268,24 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const admitted = key && (await this.env.NETWORK.admits(key, request.headers.get("one-token")));
     if (!admitted) return refuse(403, "This network doesn't know you");
     if (request.method === "POST") {
-      const said = JSON.parse(body || "{}") as { restarting?: unknown; until?: unknown; up?: unknown };
+      const said = JSON.parse(body || "{}") as { restarting?: unknown; until?: unknown; up?: unknown; version?: unknown };
       if (admitted.until !== undefined) return refuse(403, "Only a server says it's restarting or up");
+      const version = typeof said.version === "string" ? said.version : undefined;
       if (said.up === true) {
-        await this.relay().up(key);
+        await this.relay().up(key, version);
+        if (!talk(version, this.env.VERSION) && before(version, this.env.VERSION)) {
+          const error = `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, before the edge's ${this.env.VERSION}, so it's restarting until it's updated`;
+          console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes: { "one.server": key.slice(0, 8) }, error } }));
+        }
       } else if (typeof said.restarting === "number" && said.restarting > 0 && said.restarting <= RESTART) {
-        await this.relay().restarting(key, said.restarting, said.until === "up");
+        await this.relay().restarting(key, said.restarting, said.until === "up", version);
       } else {
         return refuse(400, `A server says it's restarting with {"restarting": <seconds>, "until": "up"}, up to ${RESTART}, or {"up": true}`);
       }
       return new Response(null, { status: 204 });
     }
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
-    return Response.json(await this.seen(keys.slice(0, 1000)));
+    return Response.json(await this.seen(keys.slice(0, 1000)), { headers: { "one-version": this.env.VERSION } });
   }
 
   /** A network has one relay. */
@@ -314,27 +354,38 @@ export class Relay extends DurableObject<RelayEnv> {
   /**
    * A server says it's stopping to start again, or starting, and may take up to `seconds` to be back: until it says
    * it's up, or with `up` false until it connects again, or until that's passed, it's restarting, while it finishes
-   * what it took too. The other servers are told.
+   * what it took too. The other servers are told. It says its build, `version`, or none from before builds had them.
    */
-  async restarting(key: string, seconds: number, up: boolean) {
-    await this.ctx.storage.put(`restarting ${key}`, { until: Date.now() + seconds * 1000, up } satisfies Restarting);
+  async restarting(key: string, seconds: number, up: boolean, version = "0.15.0") {
+    await this.ctx.storage.put({ [`restarting ${key}`]: { until: Date.now() + seconds * 1000, up } satisfies Restarting, [`version ${key}`]: version });
     this.notify(SEEN);
   }
 
-  /** A server says it's up: it's on while it's connected here. The other servers are told. */
-  async up(key: string) {
+  /** A server says it's up: it's on while it's connected here. The other servers are told. It says its build, as `restarting` does. */
+  async up(key: string, version = "0.15.0") {
     await this.ctx.storage.delete(`restarting ${key}`);
+    await this.ctx.storage.put(`version ${key}`, version);
     this.notify(SEEN);
   }
 
-  /** Who's on, of `keys`, as the relay's `seen` says. */
+  /** The build each of `keys` that's a server said it is, by its key, leaving out one that never said. */
+  async versions(keys: string[]): Promise<Record<string, string>> {
+    return Object.fromEntries([...(await this.ctx.storage.get<string>(keys.map((key) => `version ${key}`)))].map(([at, version]) => [at.slice(8), version]));
+  }
+
+  /**
+   * Who's on, of `keys`, as the relay's `seen` says. A server on a version before the edge's that doesn't talk with
+   * it is restarting, until it's updated.
+   */
   async seen(keys: string[]): Promise<Record<string, Seen>> {
-    const [left, restarting] = await Promise.all([
+    const [left, restarting, versions] = await Promise.all([
       this.ctx.storage.get<number>(keys.map((key) => `seen ${key}`)),
       this.ctx.storage.get<Restarting>(keys.map((key) => `restarting ${key}`)),
+      this.versions(keys),
     ]);
+    const behind = (key: string) => key in versions && !talk(versions[key], this.env.VERSION) && before(versions[key], this.env.VERSION);
     const seen = (key: string): Seen =>
-      (restarting.get(`restarting ${key}`)?.until ?? 0) > Date.now() ? "restarting" : this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null);
+      (restarting.get(`restarting ${key}`)?.until ?? 0) > Date.now() || behind(key) ? "restarting" : this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null);
     return Object.fromEntries(keys.map((key) => [key, seen(key)]));
   }
 

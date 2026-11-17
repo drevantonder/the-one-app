@@ -46,7 +46,7 @@ for arg in "$@"; do
 done
 ((${#wanted[@]})) || wanted=(server client)
 
-# A build is named by its commit (`tooling/version`), so what's built is all committed.
+# A build is named by its commit's version (`tooling/version`), so what's built is all committed.
 [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
 build=$(tooling/version)
 commit=$(git rev-parse HEAD)
@@ -69,7 +69,7 @@ names=($(printf '%s\n' "${names[@]}" | sort -u))
 
 # Nothing older than what the network runs or has published: a release that finished late would undo it.
 for running in $(jq -r '[.servers[].build, .devices[].build, (.latest // {} | .[].build)] | unique[]' <<<"$builds"); do
-  sha=$(cut -d- -f2 <<<"$running")
+  sha=${running##*[-.]}
   if [[ $commit != "$sha"* ]] && git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$commit" "$sha"; then
     echo "The network has $running already, which is newer than $build: release from main as it is now." >&2 && exit 1
   fi

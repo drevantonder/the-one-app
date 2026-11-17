@@ -141,21 +141,36 @@ defmodule OneCore.Servers do
   end
 
   @doc """
+  The build the network's edge is, as its relay says, or `nil` where it says none or can't be reached. The relay
+  takes a server on a version before the edge's that doesn't talk with it (`OneCore.Builds.talk?/2`) for restarting
+  until it's updated.
+  """
+  def edge do
+    if at = Application.get_env(:one_core, :address) do
+      path = "/relay/seen"
+      response = Edge.send!(method: :get, url: at <> path, params: [keys: ""], headers: Edge.signed(path, ""))
+      List.first(Req.Response.get_header(response, "one-version"))
+    end
+  rescue
+    Edge.Unreachable -> nil
+  end
+  @doc """
   Says at the network's edge that this server is stopping to start again, or starting, and is up within `seconds`:
   until it says it's up (`up/0`), or that's passed, the relay there says it's restarting, not off or on, so the
   other servers ask it nothing and wait for it only where it's the one to ask. Where the edge can't be reached it's
-  only taken for off or on meanwhile, so that's no reason not to start.
+  only taken for off or on meanwhile, so that's no reason not to start. Each says the server's build, by which the
+  relay knows whether it talks with the edge.
   """
   def restarting(seconds), do: say_seen(%{restarting: seconds, until: "up"}, "restarting")
-
   @doc "Says at the network's edge that this server is up (`OneCore.Server.up?/0`), and its plugins started: it's on."
   def up, do: say_seen(%{up: true}, "up")
 
   defp say_seen(said, what) do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
-      body = JSON.encode!(said)
+      body = JSON.encode!(Map.put(said, :version, Builds.build()))
       response = Edge.send!(method: :post, url: at <> path, body: body, headers: Edge.signed(path, body))
+
       if response.status != 204,
         do: Logger.warning("The edge didn't take that this server is #{what}: #{inspect(response.body)}")
     end
@@ -208,13 +223,13 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  The protocol the server whose key is `key` speaks with other servers (`OneCore.Server.protocol/0`), as it said
-  when it last started: the first, for one from before servers said it.
+  The build the server whose key is `key` runs, as it said when it last started (`OneCore.Builds.say/1`), or `nil`
+  where it never said.
   """
-  def protocol(key), do: cached({:protocol, key}, fn -> read("servers/#{key}/build", %{})["protocol"] || 1 end)
+  def build(key), do: cached({:build, key}, fn -> read("servers/#{key}/build", %{})["build"] end)
 
-  @doc "Which protocol the server whose key is `key` speaks is read again: it refused what it was asked in this server's."
-  def protocol_again(key), do: again({:protocol, key})
+  @doc "Which build the server whose key is `key` runs is read again: it refused what it was asked for being on another."
+  def build_again(key), do: again({:build, key})
 
   @doc """
   Whether the server whose key is `key` is on, as `seen/1` says, read again now. What was kept may be from before

@@ -47,6 +47,8 @@ before choosing.
   `git push -u origin HEAD:main`.
 - One commit per change, once it works, as a Conventional Commit: `type(area): what changes, for whoever uses it`. No
   co-author or "Generated with" lines.
+- Mark a breaking change with `!` (`feat(core)!: …`): a rename with no alias is breaking. It's what gives the platform
+  its next 0.minor version, which older parts don't talk with (the `release` skill).
 - A change that adds to `core/` says in its commit why a plugin or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in

@@ -120,9 +120,12 @@ const config = {
   web: "web/wrangler.jsonc",
   presigner: "presigner/wrangler.jsonc",
 };
+// The relay is told the edge's build, by which it knows which servers talk with it (`relay/relay.ts`).
+const version = (await $`sh ${root}/tooling/version`.text()).trim();
 for (const piece of ["relay", "mcp"]) {
   const worker = (await import(`${here}/${piece}/wrangler.jsonc`)).default;
   if (piece === "mcp" && who) worker.services = [...worker.services, { binding: who.binding, service: who.service, entrypoint: who.entrypoint }];
+  if (piece === "relay") worker.vars = { ...worker.vars, VERSION: version };
   await Bun.write(`${built}/${piece}.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/${piece}/${worker.main}`) }), null, 2));
   config[piece] = relative(here, `${built}/${piece}.jsonc`);
 }

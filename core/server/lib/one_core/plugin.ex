@@ -228,6 +228,10 @@ defmodule OneCore.Plugin do
     for where it's installed for them or for the network (`OneCore.Plugins.Requires`). `deploy`, `install` and
     `plugins` say them, and `plugins` says the other way, what each plugin is required by. An untrusted plugin calls
     the tools of only the plugins it requires.
+    It names the platform too, as `"core"`, where it uses what's new in it: the versions it runs on, as an Elixir
+    requirement, `%{"core" => "~> 0.16.0", ...}`. Before 1.0 a minor version is a breaking change, so `~> 0.16.0`
+    is 0.16's, while `~> 0.16` would allow 0.17 too. It runs only on servers whose build that allows: deploying it
+    to older ones is refused, saying so, and is done again once they're updated. `one builds` says their versions.
   - `OneCore.Call.fetch(call, %{url: "https://api.example.com/x", method: "POST", headers: %{...}, body: "..."})`
     makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`. An
     untrusted plugin reaches no website.

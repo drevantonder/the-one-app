@@ -108,10 +108,11 @@ targets:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
     postBuildScripts:
-      # The build's number, as `tooling/version` says it, which the App Store takes as its version and build number.
+      # The build's number, its count of commits in what `tooling/version` says, which the App Store takes as its version
+      # and build number.
       - &name-the-build
         script: |
-          number=$(sh "${SRCROOT:?}/../../../../tooling/version" | cut -d- -f1)
+          number=$(sh "${SRCROOT:?}/../../../../tooling/version" | sed -E 's/.*\+([0-9]+).*/\1/')
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $number" -c "Set :CFBundleVersion $number" "${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}"
         name: Name the Build
         basedOnDependencyAnalysis: false

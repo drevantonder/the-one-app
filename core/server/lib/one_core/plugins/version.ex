@@ -31,7 +31,12 @@ defmodule OneCore.Plugins.Version do
   `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
   `description`, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
-  without it (`OneCore.Plugins.Deploy`), and `requires` the other plugins it needs, each by its name with why (`OneCore.Plugin`). `artifact` is the plugin it's a version of, and `number` which version, which whatever loaded it says.
+  without it (`OneCore.Plugins.Deploy`), `requires` the other plugins it needs, each by its name with why, and `core`
+  the versions of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any, both from its
+  `requires/0` (`OneCore.Plugin`). `artifact` is the plugin it's a version of, and `number` which version, which whatever loaded it says.
+
+  A version runs only on a server whose build its `core` allows: one that doesn't is refused where it's deployed, and
+  where it's loaded runs nowhere here, as one that doesn't compile, until the server is updated.
 
   A server that doesn't run a plugin for whoever it's installed for never loads its code, which runs with all of
   its machine's access: it knows the version by what the version says of itself (`description/1`), which a server
@@ -58,6 +63,7 @@ defmodule OneCore.Plugins.Version do
     :number,
     :title,
     :icon,
+    :core,
     essential: false,
     requires: %{},
     trusted: true
@@ -171,7 +177,8 @@ defmodule OneCore.Plugins.Version do
         :essential,
         :title,
         :icon,
-        :requires
+        :requires,
+        :core
       ])
 
     # It holds only names any server knows: a tool's inputs as JSON has them, not the atoms its plugin wrote them
@@ -221,7 +228,8 @@ defmodule OneCore.Plugins.Version do
         :essential,
         :title,
         :icon,
-        :requires
+        :requires,
+        :core
       ])
 
     {:ok, struct!(__MODULE__, Map.merge(fields, %{under: under, plugin: nil, tools: tools, artifact: artifact}))}
@@ -549,7 +557,13 @@ defmodule OneCore.Plugins.Version do
       not (is_map(requires) and Enum.all?(requires, &requirement?/1)) ->
         {:error,
          "requires/0 gives the other plugins it needs, each by its name with why, as a person reads it after " <>
-           "\"Gmail uses Google Account\": %{\"google-account\" => \"to reach your mail\"}"}
+           "\"Gmail uses Google Account\", and \"core\" the versions of the platform it runs on, as an Elixir " <>
+           "requirement: %{\"core\" => \"~> 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
+
+      not runs_here?(requires["core"]) ->
+        {:error,
+         "It requires core #{requires["core"]}, and this server is on #{Builds.build()}, which that doesn't allow: " <>
+           "it runs on servers updated to a version it allows (`one builds`)"}
 
       true ->
         tools = Enum.map(tools, &schemas/1)
@@ -567,16 +581,25 @@ defmodule OneCore.Plugins.Version do
                     offers: offers,
                     jobs: jobs,
                     essential: description.essential == true,
-                    requires: requires
+                    requires: Map.delete(requires, "core"),
+                    core: requires["core"]
                 }}
     end
   end
 
-  # Another plugin it requires, by its name, and why, which isn't left out.
+  # The versions of the platform it runs on, as an Elixir requirement, or another plugin it requires, by its name,
+  # and why, which isn't left out.
+  defp requirement?({"core", requirement}),
+    do: is_binary(requirement) and match?({:ok, _}, Elixir.Version.parse_requirement(requirement))
+
   defp requirement?({name, why}),
     do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/ and is_binary(why) and String.trim(why) != ""
 
   defp requirement?(_requirement), do: false
+
+  # Whether this server's build is one of the versions of the platform `core` says a plugin runs on, where it says.
+  defp runs_here?(nil), do: true
+  defp runs_here?(core), do: Elixir.Version.match?(Builds.version(Builds.build()), core)
 
   defp offer?(%{name: name, kind: kind, description: description}),
     do:

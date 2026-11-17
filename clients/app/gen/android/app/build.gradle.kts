@@ -14,9 +14,10 @@ android {
         applicationId = "app.theone.client"
         minSdk = 24
         targetSdk = 37
-        // The build's name, as `tooling/version` says it, and its number, which Google Play takes as its version code.
+        // The build's name, as `tooling/version` says it, and its number, its count of commits, which Google Play takes as
+        // its version code.
         val build = providers.exec { commandLine("sh", rootProject.file("../../../../tooling/version").path) }.standardOutput.asText.get().trim()
-        versionCode = build.substringBefore('-').toInt()
+        versionCode = build.substringAfter('+').substringBefore('.').toInt()
         versionName = build
     }
     buildTypes {

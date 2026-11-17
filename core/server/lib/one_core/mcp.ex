@@ -95,7 +95,7 @@ defmodule OneCore.Mcp do
           Trace.follow(meta(params)["traceparent"])
 
           with :ok <- speaks(version),
-               :ok <- protocol(meta(params)),
+               :ok <- talks(method, params),
                {:ok, principal, forwarded} <- User.asking(from, asking(method, meta(params)), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
@@ -189,16 +189,31 @@ defmodule OneCore.Mcp do
   defp speaks(version),
     do: {:error, -32022, "Unsupported protocol version", %{supported: @versions, requested: version}}
 
-  # What a server asks is of the protocol it says (`OneCore.Server.protocol/0`), and one that says none, from before
-  # servers said it, speaks the first: a server says who asks, its `actor`. A client asks nothing of it.
-  defp protocol(%{"protocol" => theirs}), do: speaks_protocol(theirs)
-  defp protocol(%{"actor" => _actor}), do: speaks_protocol(1)
-  defp protocol(%{}), do: :ok
+  # Parts of the platform talk only on versions that talk with each other (`OneCore.Builds.talk?/2`): a server, a
+  # client and the edge each say their build as `_meta.version`, and what one of another says is refused before
+  # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022). One that says none is from
+  # before builds had versions, 0.15's. What updates a part that's behind, the builds it downloads and a server's
+  # update, is answered whatever it's on, since that's how it catches up, and so is the list of tools a client
+  # reads before it calls one.
+  defp talks("tools/list", _params), do: :ok
+  defp talks("tools/call", %{"name" => name}) when name in ["download", "update"], do: :ok
 
-  defp speaks_protocol(theirs) do
-    if theirs == Server.protocol(),
-      do: :ok,
-      else: {:error, -32022, "Unsupported protocol version", %{supported: [Server.protocol()], requested: theirs}}
+  defp talks(_method, params) do
+    theirs = meta(params)["version"] || "0.15.0"
+
+    if Builds.talk?(theirs, Builds.build()) do
+      :ok
+    else
+      here = Servers.name(Server.key()) || "This server"
+
+      why =
+        if Builds.older?(theirs, Builds.build()),
+          do:
+            "#{here} is on #{Builds.build()}, and what asked on #{theirs}, which doesn't talk with it until it's updated (`one update`)",
+          else: "#{here} is on #{Builds.build()}, behind what asked on #{theirs}: it's asked once it's updated"
+
+      {:error, -32022, why, %{version: Builds.build(), requested: theirs}}
+    end
   end
 
   # A result to a client of a version that says what kind of result it is, and how long it may keep it.

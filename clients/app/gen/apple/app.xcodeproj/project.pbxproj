@@ -320,7 +320,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "number=$(sh \"${SRCROOT:?}/../../../../tooling/version\" | cut -d- -f1)\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $number\" -c \"Set :CFBundleVersion $number\" \"${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}\"\n";
+			shellScript = "number=$(sh \"${SRCROOT:?}/../../../../tooling/version\" | sed -E 's/.*\\+([0-9]+).*/\\1/')\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $number\" -c \"Set :CFBundleVersion $number\" \"${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}\"\n";
 		};
 		FE7011340CC1D7ACA9036525 /* Name the Build */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -339,7 +339,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "number=$(sh \"${SRCROOT:?}/../../../../tooling/version\" | cut -d- -f1)\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $number\" -c \"Set :CFBundleVersion $number\" \"${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}\"\n";
+			shellScript = "number=$(sh \"${SRCROOT:?}/../../../../tooling/version\" | sed -E 's/.*\\+([0-9]+).*/\\1/')\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $number\" -c \"Set :CFBundleVersion $number\" \"${TARGET_BUILD_DIR:?}/${INFOPLIST_PATH:?}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
