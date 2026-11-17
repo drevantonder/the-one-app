@@ -32,7 +32,8 @@ defmodule Backups do
     "create table problems (destination text primary key, at integer not null, kind text not null, text text not null)",
     "create table settings (name text primary key, value text not null)",
     "alter table destinations drop column whose",
-    "alter table destinations drop column recipient"
+    "alter table destinations drop column recipient",
+    "create table runs (destination text primary key, server text not null, at integer not null, beat integer not null)"
   ]
 
   # How often each schedule backs up, in seconds.
@@ -108,6 +109,17 @@ defmodule Backups do
                   size: %{type: "integer", description: "How much it holds, in bytes"},
                   last: %{anyOf: [backup, %{type: "null"}], description: "The newest backup"},
                   backups: %{type: "array", items: backup, description: "Newest first"},
+                  state: %{
+                    type: "string",
+                    enum: ~w(never backing_up backed_up failed changed interrupted),
+                    description:
+                      "never backed up; backing up now; backed up; the last backup failed; what's there was changed since it was sent; or the last backup was cut short, as by its server restarting"
+                  },
+                  running: %{
+                    type: ["object", "null"],
+                    description: "The backup under way, or the one cut short: when it began, and the machine running it",
+                    properties: %{at: %{type: "integer"}, machine: %{type: ["string", "null"]}}
+                  },
                   problem: %{
                     type: ["object", "null"],
                     description: "What's wrong, if anything",
@@ -118,7 +130,7 @@ defmodule Backups do
                     }
                   }
                 },
-                required: ~w(name kind where machine item size last backups problem)
+                required: ~w(name kind where machine item size last backups state running problem)
               }
             }
           },
@@ -281,7 +293,7 @@ defmodule Backups do
         end
 
       {failed, backups} = Enum.split_with(made, &match?({:failed, _}, &1))
-      %{backups: backups, failed: for({:failed, name} <- failed, do: name)}
+      %{backups: Enum.reject(backups, &(&1 == :running)), failed: for({:failed, name} <- failed, do: name)}
     else
       %{backups: [], failed: []}
     end
@@ -292,6 +304,13 @@ defmodule Backups do
     owned(tool, inputs, call)
   end
 
+  # A destination's state, from the backup under way there (`runs`), what's wrong with it and its backups.
+  defp state(%{"beat" => beat}, _problem, _listed, now), do: if(now - beat < Run.stale(), do: "backing_up", else: "interrupted")
+  defp state(nil, %{"kind" => "check"}, _listed, _now), do: "changed"
+  defp state(nil, %{}, _listed, _now), do: "failed"
+  defp state(nil, nil, [], _now), do: "never"
+  defp state(nil, nil, _listed, _now), do: "backed_up"
+
   defp owner!(call) do
     cond do
       call.subject != "network" -> raise "Backups are the network's: ask for the network (ONE_SUBJECT=network)."
@@ -301,14 +320,16 @@ defmodule Backups do
   end
 
   defp owned("destinations", _inputs, call) do
-    {destinations, every, problems, backups} =
+    {destinations, every, problems, backups, runs} =
       transaction(call, fn db ->
         {destinations(db), setting(db, "every"), Map.new(query(db, "select * from problems"), &{&1["destination"], &1}),
          query(
            db,
            "select destination, name, at, took, blobs, bytes, sent, sent_bytes from backups order by destination, at desc"
-         )}
+         ), Map.new(query(db, "select * from runs"), &{&1["destination"], &1})}
       end)
+
+    now = System.os_time(:millisecond)
 
     sizes = sizes(call)
     backups = Enum.group_by(backups, & &1["destination"])
@@ -330,6 +351,8 @@ defmodule Backups do
             size: sizes[destination["id"]] || 0,
             last: List.first(listed),
             backups: for(backup <- listed, do: Map.drop(backup, ["destination"])),
+            state: state(runs[destination["id"]], problems[destination["id"]], listed, now),
+            running: with(%{} = run <- runs[destination["id"]], do: %{at: run["at"], machine: Service.name(run["server"])}),
             problem: problems[destination["id"]] && Map.take(problems[destination["id"]], ["at", "kind", "text"])
           }
         end
@@ -398,7 +421,7 @@ defmodule Backups do
       [destination] = named(db, name)
       for table <- ~w(destinations), do: query(db, "delete from #{table} where id = ?", [destination["id"]])
 
-      for table <- ~w(backups objects problems),
+      for table <- ~w(backups objects problems runs),
           do: query(db, "delete from #{table} where destination = ?", [destination["id"]])
     end)
 
@@ -408,7 +431,12 @@ defmodule Backups do
   defp owned("now", inputs, call) do
     destinations = transaction(call, fn db -> if inputs["destination"], do: named(db, inputs["destination"]), else: destinations(db) end)
     if destinations == [], do: raise("There's nowhere to back up to yet: add a destination first.")
-    %{backups: each(destinations, &Run.back_up(call, &1))}
+    %{
+      backups:
+        each(destinations, fn destination ->
+          with :running <- Run.back_up(call, destination), do: raise("It's backing up to #{destination["name"]} already.")
+        end)
+    }
   end
 
   defp owned("schedule", %{"every" => every}, call) do

@@ -1,9 +1,9 @@
 // Backups, a part of Settings: the destinations backups go, each saying when it was last backed up and how big it is, or
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
-import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, toast } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, toast } from "ui"
 import "./app.css"
 
 /** A backup made to a destination. */
@@ -24,6 +24,8 @@ interface Destination {
   item?: string
   size: number
   last?: { at: number }
+  state: "never" | "backing_up" | "backed_up" | "failed" | "changed" | "interrupted"
+  running?: { at: number; machine?: string }
   problem?: { kind: string; text: string }
   backups: Backup[]
 }
@@ -61,9 +63,19 @@ const took = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.rou
 /// A name as relation tuples say it, short: "users/andre" is "andre".
 const short = (who?: string) => String(who ?? "").replace(/^(users|groups)\//, "")
 
-/// A destination's grey line: what's wrong, or when it was last backed up and how big it is, or that it hasn't been yet.
-const about = (destination: Destination) =>
-  destination.problem ? (destination.problem.kind === "check" ? "Changed since it was sent" : "Couldn't back up") : destination.last ? `Backed up ${since(destination.last.at)} · ${size(destination.size)}` : "Not backed up yet"
+const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
+/// A destination's grey line, by its state: what's under way or wrong, or when it was last backed up and how big it is.
+const ABOUT: Record<Destination["state"], (destination: Destination) => string> = {
+  never: () => "Not backed up yet",
+  backing_up: () => "Backing up…",
+  backed_up: (destination) => `Backed up ${since(destination.last!.at)} · ${size(destination.size)}`,
+  failed: () => "Couldn't back up",
+  changed: () => "Changed since it was sent",
+  interrupted: () => "Last backup cut short",
+}
+const about = (destination: Destination) => ABOUT[destination.state](destination)
+/// Whether its grey line is a warning.
+const warns = (destination: Destination) => ["failed", "changed", "interrupted"].includes(destination.state)
 
 /// Does something, says why if it couldn't, and shows everything as it is after. → whether it was done.
 async function doing<T>(does: () => Promise<T>): Promise<T | true | false> {
@@ -111,11 +123,24 @@ function Opened(props: { destination: Destination }) {
     const [checked] = JSON.parse(await call("backups_check", { destination: destination().name }, network)).checks as { backup: string | null; objects?: number }[]
     toast(checked.backup ? `Read back ${checked.objects} objects. Every one is as it was sent.` : "There's no backup here yet.")
   })
+  const now = () => <Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>
+  const on = () => (destination().running?.machine ? ` on ${destination().running!.machine}` : "")
   return (
     <Screen heading={destination().name} back>
-      <Show when={destination().problem}>
-        <Problem heading={destination().problem!.kind === "check" ? `What's at ${destination().name} was changed` : `Couldn't back up to ${destination().name}`} text={destination().problem!.kind === "check" ? "Part of the newest backup isn't there as it was sent. Back up now to send it again." : destination().problem!.text} action={<Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>} />
-      </Show>
+      <Switch>
+        <Match when={destination().state === "backing_up"}>
+          <Status heading="Backing up…" text={`Since ${time.format(destination().running!.at)}${on()}.`} />
+        </Match>
+        <Match when={destination().state === "interrupted"}>
+          <Problem warn heading="The last backup was cut short" text={`It stopped${on()} before it finished, at ${time.format(destination().running!.at)}. Backing up again sends only what it didn't.`} action={now()} />
+        </Match>
+        <Match when={destination().state === "changed"}>
+          <Problem heading={`What's at ${destination().name} was changed`} text="Part of the newest backup isn't there as it was sent. Back up now to send it again." action={now()} />
+        </Match>
+        <Match when={destination().state === "failed"}>
+          <Problem heading={`Couldn't back up to ${destination().name}`} text={destination().problem!.text} action={now()} />
+        </Match>
+      </Switch>
       <List>
         <Row heading={destination().kind === "folder" ? "Folder" : "Bucket"} text={destination().where} />
         <Show when={destination().machine}>
@@ -272,15 +297,16 @@ function Backups(props: { all: All }) {
   const destinations = () => props.all.destinations
   const opened = () => destinations().find((destination) => destination.name === open())
   const now = press("now", () => call("backups_now", {}, network))
+  const backingUp = () => destinations().some((destination) => destination.state === "backing_up")
   const schedule = ({ value: [every] }: { value: string[] }) => every && every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
   return (
     <>
       <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
-        <Screen heading="Backups" back onBack={leave} action={<Show when={destinations().length}><Button loading={working() === "now"} onClick={now}>Back Up Now</Button></Show>}>
+        <Screen heading="Backups" back onBack={leave} action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onClick={now}>Back Up Now</Button></Show>}>
           <Show when={destinations().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
               <For each={destinations()} keyed={(destination) => destination.name}>
-                {(destination) => <Row heading={destination().name} text={<span class={{ warn: !!destination().problem }}>{about(destination())}</span>} current={open() === destination().name} onClick={() => setOpen(destination().name)} />}
+                {(destination) => <Row heading={destination().name} text={<span class={{ warn: warns(destination()) }}>{about(destination())}</span>} current={open() === destination().name} onClick={() => setOpen(destination().name)} />}
               </For>
               <Row heading="Add Destination" onClick={() => setAdding(true)} />
             </List>

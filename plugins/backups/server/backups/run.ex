@@ -13,6 +13,12 @@ defmodule Backups.Run do
   was at some moment, whatever was written meanwhile.
 
   Old backups go by the rule `Backups` says, and with them the objects no backup kept holds any more.
+
+  A backup under way is a row of `runs`, written before anything is sent, so every app and agent sees it, and a second
+  one to the same destination, as the hourly job and Back Up Now at once, is refused. It goes when the backup is done
+  or has failed, and a failure is kept as the destination's problem. Its server writes `beat` every 30 seconds while
+  it runs: a row whose `beat` is older than `@stale` was cut short, as by its server restarting, and the next backup
+  takes its place, sending only what the cut-short one didn't.
   """
   alias Backups.Destination
   alias OneCore.Bucket
@@ -20,10 +26,36 @@ defmodule Backups.Run do
 
   # How many blobs are read from the bucket at once.
   @together 32
+  # How often a backup under way says it still is, and how long after it last did it's taken to have been cut short.
+  @beat 30_000
+  @stale 120_000
 
-  @doc "Backs up to `destination` now, and says what was sent and how long it took. A failure is kept as its problem."
+  @doc "How long after its last `beat` a backup under way is taken to have been cut short, in milliseconds."
+  def stale, do: @stale
+
+  @doc """
+  Backs up to `destination` now, and says what was sent and how long it took, or `:running` when a backup there is
+  under way already. A failure is kept as its problem.
+  """
   def back_up(call, destination) do
     began = System.os_time(:millisecond)
+
+    started =
+      transaction(call, fn db ->
+        query(
+          db,
+          "insert into runs (destination, server, at, beat) values (?, ?, ?, ?) on conflict (destination) do update set server = excluded.server, at = excluded.at, beat = excluded.beat where runs.beat < ? returning destination",
+          [destination["id"], call.server, began, began, began - @stale]
+        )
+      end)
+
+    if started == [], do: :running, else: run(call, destination, began)
+  end
+
+  defp run(call, destination, began) do
+    id = destination["id"]
+    OneCore.Call.changed(call)
+    beat = spawn_link(fn -> beat(call, id) end)
 
     try do
       opened = Destination.open(call, destination)
@@ -77,6 +109,7 @@ defmodule Backups.Run do
         )
 
         query(db, "delete from problems where destination = ?", [destination["id"]])
+        query(db, "delete from runs where destination = ?", [id])
       end)
 
       gone = prune(call, opened, destination)
@@ -102,9 +135,27 @@ defmodule Backups.Run do
             began,
             text
           ])
+
+          query(db, "delete from runs where destination = ?", [id])
         end)
 
+        # A call that fails tells no app that anything changed, as one that succeeds does once it's over.
+        OneCore.Call.changed(call)
         reraise "Couldn't back up to #{destination["name"]}: #{text}", __STACKTRACE__
+    after
+      Process.unlink(beat)
+      Process.exit(beat, :kill)
+    end
+  end
+
+  # Says the backup to `id` is still under way, every `@beat`, for as long as the backup's process runs: it's linked
+  # to it, so it ends with it, however that ends.
+  defp beat(call, id) do
+    receive do
+    after
+      @beat ->
+        transaction(call, &query(&1, "update runs set beat = ? where destination = ?", [System.os_time(:millisecond), id]))
+        beat(call, id)
     end
   end
 
