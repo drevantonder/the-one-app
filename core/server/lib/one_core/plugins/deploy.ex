@@ -82,6 +82,7 @@ defmodule OneCore.Plugins.Deploy do
 
       with :ok <- outputs(version),
            :ok <- categorized(version),
+           :ok <- icon(name, version),
            :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
            _ = stage.("Keeping it in the bucket"),
@@ -220,6 +221,15 @@ defmodule OneCore.Plugins.Deploy do
            Enum.join(@categories, ", ") <> " (the skill building-plugins)."}
     end
   end
+
+  # Every plugin has an icon of its own, shown wherever it is (the App Store, the Vault), as an Android package does.
+  defp icon(name, %{icon: nil}),
+    do:
+      {:error,
+       "#{name} has no icon. icon/0 names one of its files, its app's icon or one of its own, as the skill " <>
+         "building-plugins says."}
+
+  defp icon(_name, _version), do: :ok
 
   # A version's code, compiled and loaded here, or for an untrusted plugin only described, by its sandbox's VM.
   defp loaded(artifact, built, true), do: Version.load(Path.basename(artifact), built)
@@ -379,7 +389,8 @@ defmodule OneCore.Plugins.Deploy do
 
     with true <- files != %{} || {:error, "There are no files to deploy it from"},
          {installed, _automatic} = Installed.read(@network),
-         install? = &(installed[name] == nil and &1.essential or installed[name]["state"] not in [nil, "recently_deleted"]),
+         install? =
+           &((installed[name] == nil and &1.essential) or installed[name]["state"] not in [nil, "recently_deleted"]),
          {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, true, install?),
          :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")

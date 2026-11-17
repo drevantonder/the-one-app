@@ -22,7 +22,7 @@ defmodule OneCore.Plugins.Version do
   `ui` is the code of the UI library its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
   `title` is its name where a person reads it, its first app's unless it says, and `icon` its icon as a `data:`
-  address, the file it names (`OneCore.Plugin`), or its first app's. `apps` lists its apps: each one's `name`, its
+  address, the file it names (`OneCore.Plugin`). `apps` lists its apps: each one's `name`, its
   `page`, its `icon` as a `data:` address, its own or else the plugin's,
   its `category` and its `subject`, which are the plugin's to say and nil where it says none. `widgets` lists its widgets: each
   one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
@@ -200,7 +200,12 @@ defmodule OneCore.Plugins.Version do
 
     tools = Enum.map(description.tools, &schemas/1)
 
-    :persistent_term.put({__MODULE__, under}, %{files: description.files, hashes: %{}, skills: description.skills, own: %{}})
+    :persistent_term.put({__MODULE__, under}, %{
+      files: description.files,
+      hashes: %{},
+      skills: description.skills,
+      own: %{}
+    })
 
     fields =
       Map.take(description, [
@@ -245,7 +250,8 @@ defmodule OneCore.Plugins.Version do
     end
 
     offers =
-      for offer <- taken.(description["offers"], ~w(name kind description)), do: Map.update(offer, :kind, nil, &hook_kind/1)
+      for offer <- taken.(description["offers"], ~w(name kind description)),
+          do: Map.update(offer, :kind, nil, &hook_kind/1)
 
     description = %{
       tools:
@@ -512,13 +518,13 @@ defmodule OneCore.Plugins.Version do
            "Schema of an object, ui, if a tool has one, is a page of client/, and task_support, if it has one, is " <>
            ":optional or :required"}
 
-      not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
-        {:error, "title/0 gives text, and icon/0 a file here"}
+      not ((title == nil or is_binary(title)) and (icon == nil or is_binary(icon))) ->
+        {:error, "title/0 gives text, and icon/0 a file's path"}
 
-      not (is_list(apps) and Enum.all?(apps, &app?(&1, rest, icon))) ->
+      not (is_list(apps) and Enum.all?(apps, &app?(&1, rest))) ->
         {:error,
          "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-           "here, which icon/0 gives instead where an app has none, and category and subject, if it has them, are text"}
+           "here, the plugin's icon/0 where an app has none, and category and subject, if it has them, are text"}
 
       not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
         {:error,
@@ -605,17 +611,17 @@ defmodule OneCore.Plugins.Version do
   def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # An icon goes to clients as a `data:` address, so a home screen asks for nothing more. The plugin's is the file it
-  # names, and an app's its own or else the plugin's; a plugin that names none is drawn as its first app is.
+  # names, nil where that isn't one of its files (which deploying refuses), and an app's its own or else the plugin's.
   defp version(under, plugin, tools, apps, widgets, services, rest, icon) do
     apps =
       for %{name: name, page: page} = app <- apps,
           do: %{
-                name: name,
-                page: page,
-                icon: data(app[:icon] || icon, rest),
-                category: app[:category],
-                subject: app[:subject]
-              }
+            name: name,
+            page: page,
+            icon: if(is_map_key(rest, app[:icon] || icon), do: data(app[:icon] || icon, rest)),
+            category: app[:category],
+            subject: app[:subject]
+          }
 
     widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
 
@@ -625,7 +631,7 @@ defmodule OneCore.Plugins.Version do
       tools: tools,
       apps: apps,
       title: List.first(for(app <- apps, do: app.name)),
-      icon: if(icon, do: data(icon, rest), else: List.first(for(app <- apps, do: app.icon))),
+      icon: if(is_map_key(rest, icon), do: data(icon, rest)),
       widgets: widgets,
       uses: [],
       services: services,
@@ -664,12 +670,12 @@ defmodule OneCore.Plugins.Version do
 
   defp data(path, rest), do: "data:#{kind(path)};base64,#{Base.encode64(rest[path])}"
 
-  defp app?(%{name: name, page: page} = app, rest, icon) when is_binary(name),
+  defp app?(%{name: name, page: page} = app, rest) when is_binary(name),
     do:
-      page?(page, rest) and is_map_key(rest, app[:icon] || icon) and
+      page?(page, rest) and (app[:icon] == nil or is_map_key(rest, app[:icon])) and
         (app[:category] == nil or is_binary(app[:category])) and (app[:subject] == nil or is_binary(app[:subject]))
 
-  defp app?(_, _, _), do: false
+  defp app?(_, _), do: false
 
   # A widget is drawn from what one of the plugin's tools answers, which a Home Screen page asks again and again.
   defp widget?(%{name: name, tool: tool, sizes: [_ | _] = sizes}, tools) when is_binary(name),

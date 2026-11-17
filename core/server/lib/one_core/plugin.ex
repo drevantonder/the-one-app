@@ -321,8 +321,8 @@ defmodule OneCore.Plugin do
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
-  and its edge function. A plugin's icon is its own, as an Android package's is: `icon/0` names its file, which
-  goes wherever the plugin itself is shown (the App Store, the Vault). `apps/0`, if the plugin has one, names its apps,
+  and its edge function. A plugin's icon is its own, as an Android package's is, and deploying one without it is
+  refused: `icon/0` names its file, its app's icon or one of its own, which goes wherever the plugin itself is shown (the App Store, the Vault). `apps/0`, if the plugin has one, names its apps,
   as many as it has, each a page of `client/`, with an icon of its own or else the plugin's:
 
       @impl true
@@ -339,8 +339,7 @@ defmodule OneCore.Plugin do
   - An app may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
     `subject: "user"` is an app about whoever opens it, as Vault and Devices are, which is opened for them wherever
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
-  - A plugin's name where a person reads it is `title/0`, and without one its first app's; one that names no icon
-    is drawn with its first app's. One with no app gives `title/0`: `def title, do: "Gmail"`.
+  - A plugin's name where a person reads it is `title/0`, and without one its first app's. One with no app gives `title/0`: `def title, do: "Gmail"`.
   - A plugin that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
     registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
     one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:
