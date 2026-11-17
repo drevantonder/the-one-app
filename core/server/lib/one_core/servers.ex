@@ -18,11 +18,11 @@ defmodule OneCore.Servers do
   alone, never on the network's merely because those act for everyone. The network's owners own the network's
   servers, so what they install for themselves runs there too.
 
-  What's read of this is kept, so a call asks the bucket nothing, and read again when this server looks at someone
-  (`look/1`) or forgets it all (`forget/0`).
+  What's read of this is cached (`OneCore.Cache`), so a call asks the bucket nothing, and read again once this server
+  looks at someone (`reload/1`) or invalidates it all (`invalidate/0`).
   """
   require Logger
-  alias OneCore.{Bucket, Builds, Edge, Hooks, Server}
+  alias OneCore.{Bucket, Builds, Cache, Edge, Hooks, Server}
 
   @network "network"
 
@@ -100,7 +100,7 @@ defmodule OneCore.Servers do
   @doc "This server's services installed are `services` from now on."
   def install(services) do
     say("servers/#{Server.key()}/services", JSON.encode!(for {plugin, name} <- services, do: [plugin, name]))
-    forget()
+    invalidate()
   end
 
   @doc "What the machine the server whose key is `key` runs on is called, as it said when it last started."
@@ -133,8 +133,7 @@ defmodule OneCore.Servers do
   to be back (`back/1`) looks again.
   """
   def seen_again do
-    if :ets.whereis(__MODULE__) != :undefined,
-      do: Enum.each(:ets.match(__MODULE__, {{:seen, :"$1"}, :_, :_}), fn [key] -> again({:seen, key}) end)
+    for {:seen, _key} = seen <- Cache.keys(__MODULE__), do: Cache.invalidate(__MODULE__, seen)
 
     Registry.dispatch(OneCore.Waiting, :seen, fn waiting -> for {process, _} <- waiting, do: send(process, :seen) end)
     :ok
@@ -154,6 +153,7 @@ defmodule OneCore.Servers do
   rescue
     Edge.Unreachable -> nil
   end
+
   @doc """
   Says at the network's edge that this server is stopping to start again, or starting, and is up within `seconds`:
   until it says it's up (`up/0`), or that's passed, the relay there says it's restarting, not off or on, so the
@@ -229,7 +229,7 @@ defmodule OneCore.Servers do
   def build(key), do: cached({:build, key}, fn -> read("servers/#{key}/build", %{})["build"] end)
 
   @doc "Which build the server whose key is `key` runs is read again: it refused what it was asked for being on another."
-  def build_again(key), do: again({:build, key})
+  def build_again(key), do: Cache.invalidate(__MODULE__, {:build, key})
 
   @doc """
   Whether the server whose key is `key` is on, as `seen/1` says, read again now. What was kept may be from before
@@ -237,7 +237,7 @@ defmodule OneCore.Servers do
   being told, is missed.
   """
   def seen_again(key) do
-    again({:seen, key})
+    Cache.invalidate(__MODULE__, {:seen, key})
     seen(key)
   end
 
@@ -279,7 +279,7 @@ defmodule OneCore.Servers do
     say("servers/#{key}/name", JSON.encode!(name))
     Builds.say(key)
     Bucket.write("servers/#{key}/members", JSON.encode!([owner]))
-    forget()
+    invalidate()
   end
 
   @doc """
@@ -299,7 +299,7 @@ defmodule OneCore.Servers do
           if Server.key() in listed(@network), do: Bucket.write(blob, JSON.encode!([key])), else: :refused
       end
 
-    forget()
+    invalidate()
 
     case wrote do
       :ok -> :ok
@@ -320,7 +320,7 @@ defmodule OneCore.Servers do
          true <- key in keys do
       cond do
         owner == @network and keys == [key] -> {:error, "The network keeps a server. Add another before this one goes."}
-        Bucket.replace(blob, JSON.encode!(keys -- [key]), tag) == :ok -> forget()
+        Bucket.replace(blob, JSON.encode!(keys -- [key]), tag) == :ok -> invalidate()
         true -> remove(key, owner)
       end
     else
@@ -334,7 +334,7 @@ defmodule OneCore.Servers do
     {:ok, members, tag} = Bucket.read(blob)
     members = JSON.decode!(members)
     if member not in members, do: :ok = Bucket.replace(blob, JSON.encode!(members ++ [member]), tag)
-    forget()
+    invalidate()
   end
 
   @doc "Writes one of a server's own blobs. Only that server writes it, so what's there is its own from before."
@@ -346,45 +346,23 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  Reads again what's kept of the servers acting for `owner`: their list, and what each server on it acts for and
-  has installed. Until it's read, what was kept is what's asked. The network's first owner is the network's.
+  Invalidates what's cached of the servers acting for `owner`: their list, and what each server on it acts for, has
+  installed and is called. The network's first owner is the network's.
   """
   def reload(owner) do
-    again({:listed, owner})
+    Cache.invalidate(__MODULE__, {:listed, owner})
     servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}, {:name, key}], do: what
-    Enum.each(if(owner == @network, do: [:first_owner | servers], else: servers), &again/1)
+    Enum.each(if(owner == @network, do: [:first_owner | servers], else: servers), &Cache.invalidate(__MODULE__, &1))
   end
 
-  defp again(what) do
-    with true <- :ets.whereis(__MODULE__) != :undefined,
-         [{^what, _value, read}] <- :ets.lookup(__MODULE__, what),
-         do: :ets.insert(__MODULE__, {what, read.(), read})
-  end
+  @doc "Invalidates everything cached here, so that it's read again when next asked for."
+  def invalidate, do: Cache.invalidate(__MODULE__)
 
-  @doc "Forgets what was read, so that it's read again when next asked for."
-  def forget do
-    if :ets.whereis(__MODULE__) != :undefined, do: :ets.delete_all_objects(__MODULE__)
-    :ok
-  end
+  @doc "Makes the cache of what's read. Whatever calls this owns it, and it goes when that ends."
+  def keep, do: Cache.new(__MODULE__)
 
-  @doc "Makes where what's read is kept. Whatever calls this owns it, and it goes when that ends."
-  def keep, do: :ets.new(__MODULE__, [:named_table, :public, read_concurrency: true])
-
-  @doc "What `read` gave for `what` when it was last asked, which is asked again where nothing keeps it."
-  def cached(what, read) do
-    case :ets.whereis(__MODULE__) != :undefined and :ets.lookup(__MODULE__, what) do
-      [{^what, value, _read}] ->
-        value
-
-      [] ->
-        value = read.()
-        :ets.insert(__MODULE__, {what, value, read})
-        value
-
-      false ->
-        read.()
-    end
-  end
+  @doc "What `read` gives for `what`, cached until it's invalidated."
+  def cached(what, read), do: Cache.fetch(__MODULE__, what, fn -> {:commit, read.()} end)
 
   defp read(blob, absent) do
     case Bucket.read(blob) do

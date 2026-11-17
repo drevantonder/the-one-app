@@ -886,7 +886,7 @@ defmodule OneCore.Tools do
     at(subject, forward)
     reaches!(principal, subject, "owner")
 
-    Servers.forget()
+    Servers.invalidate()
     members = Servers.members(key)
 
     if members != [] and subject not in members,

@@ -185,7 +185,7 @@ defmodule OneCore.Server do
   @doc """
   Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
   and the services it runs, and what's installed for them, running the latest version of each plugin. Looking at the
-  network forgets whose each device is too, which the network's plugins say. Its clients are told if a plugin
+  network invalidates whose each device is too, which the network's plugins say. Its clients are told if a plugin
   changed.
 
   A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
@@ -195,7 +195,7 @@ defmodule OneCore.Server do
   def reload(owner) do
     Servers.reload(owner)
     OneCore.Plugins.Deploy.forget()
-    if owner == "network", do: Hooks.forget(["device"])
+    if owner == "network", do: Hooks.invalidate(["device"])
     if Plugins.reload(owner), do: changed()
     # A plugin updated by a server elsewhere may require what isn't installed for them yet.
     if Servers.here?(owner), do: Task.start(fn -> OneCore.Plugins.Lifecycle.required(owner) end)
@@ -204,12 +204,12 @@ defmodule OneCore.Server do
 
   @doc """
   This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
-  missed being told something: it forgets what it kept of servers and hooks, looks at once at who it acts for, and
+  missed being told something: it invalidates what it cached of servers and hooks, looks at once at who it acts for, and
   at everyone else it has looked at behind the next request for them (`OneCore.Plugins.refresh/0`).
   """
   def reconnected do
-    Hooks.forget()
-    Servers.forget()
+    Hooks.invalidate()
+    Servers.invalidate()
     Enum.each(Plugins.refresh(), &reload/1)
   end
 

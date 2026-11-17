@@ -52,16 +52,16 @@ defmodule OneCore.Plugins.Calls do
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs, _meta: %{caller: caller}}}
           about = %{"plugin" => name, "tool" => tool, "inputs" => inputs}
           # What a plugin answered a hook that's kept, it answered from what its tools change. So after one of those
-          # that doesn't only read, it's forgotten: here, and by the servers this one tells.
+          # that doesn't only read, it's invalidated: here, and by the servers this one tells.
           cached = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           try do
             call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
             result = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
-            if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(subject)]), "forget", cached)
+            if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(subject)]), "invalidate", cached)
             {:ran, result}
           after
-            Hooks.forget(cached)
+            Hooks.invalidate(cached)
           end
       end
     end)

@@ -196,7 +196,7 @@ defmodule OneCore.Plugins do
     end
 
     if any do
-      Hooks.forget()
+      Hooks.invalidate()
       Jobs.reload()
     end
 

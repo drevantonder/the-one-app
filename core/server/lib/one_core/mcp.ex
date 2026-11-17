@@ -140,8 +140,8 @@ defmodule OneCore.Mcp do
 
       # Another server, or a plugin's edge function, saying that what this one kept of some hooks
       # was decided from what has since changed.
-      {:ok, %{"method" => "notifications/one/forget"} = notification} ->
-        Hooks.forget(for hook <- List.wrap(notification["params"]["hooks"]), is_binary(hook), do: hook)
+      {:ok, %{"method" => "notifications/one/invalidate"} = notification} ->
+        Hooks.invalidate(for hook <- List.wrap(notification["params"]["hooks"]), is_binary(hook), do: hook)
         ""
 
       # Another server saying there's something new in the bucket for some owners, or with none, this server saying

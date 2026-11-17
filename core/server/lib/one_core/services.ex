@@ -6,7 +6,7 @@ defmodule OneCore.Services do
   `servers/<its key>/services`: each service's name with its plugin, by its artifact's name. Only that server
   writes it. Every server keeps what the servers it asked about have installed, as it last read it
   (`OneCore.Servers`), so calling a service asks the bucket nothing. It reads again when it looks at whoever the
-  servers act for (`OneCore.Server.reload/1`), and when it knows of none that runs a service.
+  servers act for (`OneCore.Server.reload/1`), and for whoever it knows of no server running a service for.
 
   Each service installed here is a process (`OneCore.Plugins.Process`) for as long as its plugin has it. One that
   stops is started again, whatever stopped it, and the server carries on meanwhile. This process only keeps
@@ -30,7 +30,7 @@ defmodule OneCore.Services do
   """
   def servers(plugin, service, who) do
     running = fn -> for key <- Servers.acting(owner(who)), {plugin, service} in Servers.installed(key), do: key end
-    running = with [] <- running.(), :ok <- Servers.forget(), do: running.()
+    running = with [] <- running.(), :ok <- reload(who), do: running.()
     Enum.sort_by(running, &(&1 != Server.key()))
   end
 
@@ -40,7 +40,7 @@ defmodule OneCore.Services do
   `servers` that run it.
   """
   def list(who) do
-    Servers.forget()
+    reload(who)
     acting = Servers.acting(owner(who))
 
     for {plugin, version} <- Enum.sort(Plugins.running(who)), service <- version.services do
@@ -48,6 +48,9 @@ defmodule OneCore.Services do
       %{plugin: plugin, service: service.name, called: service.called, needs: service.needs, servers: servers}
     end
   end
+
+  # Invalidates what's cached of the servers acting for `who`, which is all that a service running depends on.
+  defp reload(who), do: Enum.each(Enum.uniq([owner(who), "network"]), &Servers.reload/1)
 
   # Whose servers something that runs for `who` is run by.
   defp owner(who), do: User.owner(who) || "network"

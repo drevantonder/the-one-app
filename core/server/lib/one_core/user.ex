@@ -166,7 +166,7 @@ defmodule OneCore.User do
   def make_first_owner(who) do
     if is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
       wrote = Bucket.write("network/owner", who)
-      Servers.forget()
+      Servers.invalidate()
 
       if wrote == :ok or first_owner() == who do
         Server.notify_servers(["network"])

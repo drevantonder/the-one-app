@@ -116,7 +116,7 @@ async function secret() {
 }
 
 /** Tells every server that whose a device is has changed, so each asks again. */
-const forget = () => env.RELAY.notify(JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/forget", params: { hooks: ["device"] } }));
+const invalidate = () => env.RELAY.notify(JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/invalidate", params: { hooks: ["device"] } }));
 
 /** Makes `device` the user's, under `name`, from now on. */
 async function place(adapter: Adapter, device: string, kind: Device["kind"], name: string, user: { id: string; name: string }) {
@@ -144,14 +144,14 @@ async function browserIn(session: { id: string; userId: string }) {
 /** Makes a browser's session nobody's, on every server. */
 async function browserOut(session: string) {
   await env.OWN.remove(`devices/${await browserDevice(session)}`);
-  await forget();
+  await invalidate();
 }
 
 /** Makes a device nobody's, on every server. */
 async function remove(adapter: Adapter, device: { id: string }) {
   await adapter.delete({ model: "device", where: [{ field: "id", value: device.id }] });
   await env.OWN.remove(`devices/${device.id}`);
-  await forget();
+  await invalidate();
 }
 
 /** The invitation a link carries, if it's one that still stands. The link is kept nowhere: only its hash is. */

@@ -33,8 +33,8 @@ defmodule OneCore.Hooks do
   another server is validated on both.
 
   That something may be reached is kept by the server that asked, so that it asks once: until a tool that doesn't
-  only read is called of a plugin that validates it, which that server and the ones it tells forget at once, and
-  for a few seconds anywhere else. Whose a device is is kept the same way, until a server is told to forget it:
+  only read is called of a plugin that validates it, which that server and the ones it tells invalidate at once,
+  and for a few seconds anywhere else. Whose a device is is kept the same way, until a server is told to invalidate it:
   by a tool of a plugin that says whose, or by that plugin's edge function. A refusal is never
   kept, nor that a device is nobody's. So taking access away reaches every server, and giving it is seen at once.
 
@@ -46,7 +46,7 @@ defmodule OneCore.Hooks do
   A history of who changed what, relation tuples included, is a plugin's to keep, through plugin hooks.
   """
   require Logger
-  alias OneCore.Plugins
+  alias OneCore.{Cache, Plugins}
   alias OneCore.Plugins.Calls
 
   @kinds [
@@ -195,33 +195,29 @@ defmodule OneCore.Hooks do
     end
   end
 
-  # How long a server keeps that something may be reached, in milliseconds, where nothing told it to forget.
+  # How long a server keeps that something may be reached, in milliseconds, where nothing told it to invalidate it.
   @ttl 10_000
-  @allowed __MODULE__.Allowed
 
-  @doc "Makes where which plugins hook into what is kept, and what was decided. Whatever calls this owns both."
+  # Where what each of `cached/0` answered is cached.
+  @caches %{"reach" => __MODULE__.Reach, "device" => __MODULE__.Device}
+
+  @doc "Makes where which plugins hook into what is kept, and what was decided. Whatever calls this owns them."
   def keep do
     :ets.new(__MODULE__, [:named_table, read_concurrency: true])
-    :ets.new(@allowed, [:named_table, :public, read_concurrency: true])
+    Enum.each(Map.values(@caches), &Cache.new/1)
   end
 
-  @doc "The hooks whose answers a server keeps."
-  def cached, do: ["reach", "device"]
+  @doc "The hooks whose answers a server caches."
+  def cached, do: Map.keys(@caches)
 
   @doc """
-  Forgets what `hooks` were answered, so that they're asked again: who may reach what may have changed, or whose
-  a device is.
+  Invalidates what `hooks` answered, so that they're asked again: who may reach what may have changed, or whose a
+  device is.
   """
-  def forget(hooks \\ cached()) do
-    for hook <- hooks, hook in cached() do
-      :ets.update_counter(@allowed, {:forgotten, hook}, 1, {{:forgotten, hook}, 0})
-      :ets.match_delete(@allowed, {{hook, :_}, :_})
-    end
-
+  def invalidate(hooks \\ cached()) do
+    for hook <- hooks, cache = @caches[hook], do: Cache.invalidate(cache)
     :ok
   end
-
-  defp forgotten(hook), do: :ets.lookup_element(@allowed, {:forgotten, hook}, 2, 0)
 
   @doc """
   The plugins that hook into `hook` for a moment that runs for `who`: each as who it was installed for, and its name
@@ -297,7 +293,7 @@ defmodule OneCore.Hooks do
   """
   def mutate(hook, about, {_actor, subject} = principal, apart \\ nil) do
     Enum.reduce_while(hooking(hook, subject) -- [apart], {:ok, %{}, %{}}, fn {_at, plugin} = installed,
-                                                                         {:ok, changes, by} ->
+                                                                             {:ok, changes, by} ->
       with {:ok, changed} <- call_hook(installed, :mutate, hook, about, principal),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, plugin} end), by)
@@ -317,39 +313,37 @@ defmodule OneCore.Hooks do
   refuse. `apart` is a plugin that isn't asked, as who it was installed for and its name there. Where no plugin
   validates `reach` for them, a call or a reach is the network's first owner's alone.
   """
-  def validate(hook, about, {actor, subject} = principal, apart \\ nil) do
-    # Who validates is whoever's plugins they are, so what's kept is what they validated.
-    cache_key = if hook == "reach", do: {"reach", {about, Plugins.chain(subject)}}
-    forgotten = forgotten("reach")
-
-    if cache_key != nil and cached?(cache_key) do
-      :ok
+  def validate(hook, about, {_actor, subject} = principal, apart \\ nil) do
+    # Who validates is whoever's plugins they are, so what's cached is what they validated. A refusal never is.
+    if hook == "reach" do
+      Cache.fetch(@caches["reach"], {about, Plugins.chain(subject)}, fn ->
+        with :ok <- decide(hook, about, principal, apart),
+             do: {:commit, :ok, expire: @ttl},
+             else: (refused -> {:ignore, refused})
+      end)
     else
-      # Who may do what is decided only where a plugin validates who reaches what.
-      undecided = hook in ["call", "reach"] and hooking("reach", subject) -- [apart] == []
+      decide(hook, about, principal, apart)
+    end
+  end
 
-      decided =
-        with :ok <- if(undecided, do: undecided(actor), else: :ok) do
-          Enum.find_value(hooking(hook, subject) -- [apart], :ok, fn {_at, plugin} = installed ->
-            case call_hook(installed, :validate, hook, about, principal) do
-              {:ok, "ok"} ->
-                nil
+  defp decide(hook, about, {actor, subject} = principal, apart) do
+    # Who may do what is decided only where a plugin validates who reaches what.
+    undecided = hook in ["call", "reach"] and hooking("reach", subject) -- [apart] == []
 
-              {:ok, %{"refuse" => why}} ->
-                Logger.info("#{plugin} refused #{hook} for #{subject}: #{why}")
-                {:refuse, why}
+    with :ok <- if(undecided, do: undecided(actor), else: :ok) do
+      Enum.find_value(hooking(hook, subject) -- [apart], :ok, fn {_at, plugin} = installed ->
+        case call_hook(installed, :validate, hook, about, principal) do
+          {:ok, "ok"} ->
+            nil
 
-              {:error, why} ->
-                {:refuse, "#{plugin} couldn't validate it: #{why}"}
-            end
-          end)
+          {:ok, %{"refuse" => why}} ->
+            Logger.info("#{plugin} refused #{hook} for #{subject}: #{why}")
+            {:refuse, why}
+
+          {:error, why} ->
+            {:refuse, "#{plugin} couldn't validate it: #{why}"}
         end
-
-      # Kept only if nothing was forgotten meanwhile: it may have been decided from what has since changed.
-      if cache_key != nil and decided == :ok and forgotten == forgotten("reach"),
-        do: :ets.insert(@allowed, {cache_key, System.monotonic_time(:millisecond) + @ttl})
-
-      decided
+      end)
     end
   end
 
@@ -376,37 +370,20 @@ defmodule OneCore.Hooks do
     end
   end
 
-  # Whether it's kept that this may be reached, and not for too long. The clock it's kept by starts anywhere.
-  defp cached?(cache_key) do
-    case :ets.lookup(@allowed, cache_key) do
-      [{^cache_key, until}] -> until > System.monotonic_time(:millisecond)
-      [] -> false
-    end
-  end
-
   @doc """
   Whose the device `device` is, as the plugins that mutate `device` say: a user, or `nil` for nobody's. Kept
   once it's somebody's, so a call asks nothing. `{:error, why}` where a plugin couldn't say, which isn't nobody's.
   """
   def whose(device) do
-    cache_key = {"device", device}
-
-    case :ets.lookup(@allowed, cache_key) do
-      [{^cache_key, who}] ->
-        who
-
-      [] ->
-        forgotten = forgotten("device")
-
-        with {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
-             true <- is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
-          if forgotten == forgotten("device"), do: :ets.insert(@allowed, {cache_key, who})
-          who
-        else
-          {:refuse, why} -> {:error, why}
-          _ -> nil
-        end
-    end
+    Cache.fetch(@caches["device"], device, fn ->
+      with {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
+           true <- is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
+        {:commit, who}
+      else
+        {:refuse, why} -> {:ignore, {:error, why}}
+        _ -> {:ignore, nil}
+      end
+    end)
   end
 
   # A hook whose plugin keeps what it needs where another server writes it is answered there.
