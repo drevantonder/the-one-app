@@ -34,13 +34,14 @@ Exactly two rules hold at runtime:
 
 ## Order
 
-One release at a time: `tooling/release` refuses while another is under way, and says which; then say whose it is
-and stop. A server the network hasn't seen for 10 minutes (`asleep` in it), or one not ready with no update
-under way, holds up none: it's named, and takes the latest by itself as it starts or reconnects. A build it went
-back from it tries once more, 10 minutes on, and after that only when asked (`one update --server`). `tooling/release` updates each server itself once it has
-published, in turn, saying what each took; the first that goes back stops the rest, which stay on the old build, safe.
-Run it again to take on the servers still behind. Run no `one update --server` by hand for a release. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
-found later is fixed forward.
+Publishing is all a release does. The network's update takes every server to the latest build published by itself
+(`core/edge/updater/updater.ts`): each awake server prepares it, those that load it in place take it at once, and
+those that restart one at a time, never the last ready one. A build published while another is under way takes its
+place; a server asleep or gone is caught up once it's back; one that goes back holds it, saying which and why, until
+a newer build or Update Now (the `update` tool). Run no `one update` for a release. `one builds` says how far it is
+(`network`: its `network_update_status`, the servers `behind` it, and when each step was reached, in `timings`).
+Nothing is watched after a release: each server verifies a build before it keeps it, and a bug found later is fixed
+forward.
 
 Any release mixes with what's live, a breaking one too, since parts one 0.minor apart talk. Release the servers
 first, then the edge from the commit they run, then the clients; an app that requires the new platform is deployed
@@ -54,7 +55,7 @@ talk.
 | An app's native code (`server/nif/`, `server/bin/`) | Also `tooling/publish-nifs` once it's on `main`: it publishes the new builds to a GitHub Release and pushes their `server/checksums.json`, from which every network updating the app from git gets them. A Mac's are built on GitHub's macOS runner when the Mac is busy |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, an app's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
-| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, which updates each server after publishing and fails saying why one went back (within the 180 s a start has, and a minute). A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, seconds); a changed NIF of One Core's is loaded beside the one before, and what calls it started again on it; one with a runtime built from anything else (`runtime-inputs`), messages `one` doesn't speak (`client::serve`), 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, as before). A new `one` alone restarts nothing: it's put in place as its build is loaded, and runs the server from its next start |
+| The server (`core/server/`, or Rust it builds with) | `tooling/release server`. A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, about a second); a changed NIF of One Core's is loaded beside the one before, and what calls it started again on it; one with a runtime built from anything else (`runtime-inputs`), messages `one` doesn't speak (`client::serve`), 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, in `update_method_reason`). A new `one` alone restarts nothing: it's put in place as its build is loaded, and runs the server from its next start |
 | The desktop app or CLI (`core/client/`, `clients/`, an app's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, `tooling/`, `.agents/` | Nothing |
@@ -71,9 +72,8 @@ changed, into each network the release serves, the owner's (its address is in Ag
 network's own trusted apps, so every install of them takes the new version at once. A new network gets them from
 whoever makes it (`tooling/network`).
 
-On a device that is also a server, `one update` asks the program keeping that server running (`one serve run`) to
-take the latest builds, the program's among them, and answers as `one update --server` does. What it did is in that
-program's log, `journalctl --user -u one-server-<key's first 12>` on Linux.
+On a device that is also a server, `one update` is the network's Update Now. What a server did is in the log of the
+program keeping it running (`one serve run`), `journalctl --user -u one-server-<key's first 12>` on Linux.
 
 Run an edge deploy only while no release publishes on the machine, which `tooling/release` keeps as a pid file:
 `! { read -r pid _ <"${XDG_RUNTIME_DIR:-/tmp}/one-release.pid" && kill -0 "$pid"; } 2>/dev/null && bun edge.js deploy <address>`. The network's address and
@@ -81,8 +81,8 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 ## What is live
 
-- `one builds` gives each server's `build` as `<version>+<count>.<commit>`, and the `edge`'s;
-  `one builds | jq -r '.servers[] | .server + " " + .name + " " + .build'` lists the keys `one update --server` takes.
+- `one builds` gives the network's update (`network`), each server's `build` as `<version>+<count>.<commit>`, and the
+  `edge`'s.
 - `git diff --stat <commit> origin/main` is what isn't live on the server.
 - `ONE_SUBJECT=network one code --name <app>` is an app's files as deployed.
 
@@ -119,4 +119,4 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 ## Report
 
 What you released, by which command, and the minutes from your commit reaching `main` to `one builds` (or
-`one code`) showing it live.
+`one code`) showing it live: for a server, its `network.timings`.

@@ -38,16 +38,12 @@
 //!   asked (`one update`): prepare, then go at once
 //!   cut short: downloading ─► up to date · checked stays checked · loading ─► went back · starting ─► started again
 //!   every start of `serve run`: the `one` the record pairs with the build is put in place and started first
-//!   caught up: up to date ─started, or reconnected─► downloading as if asked, where the latest pair is newer;
-//!     not the pair it went back from until `AGAIN` after, and only once: then only when asked
 //!   said at the edge: the build started says it's running at the network's edge, by its key. Nothing else is asked,
 //!     so no other server, or an app it runs, has a say: every server can take a build at once
 //! ```
 //!
-//! A server that missed a release, as one asleep, away or gone back during it, catches up by itself: every time it
-//! starts and every time it says it can reach the network again (`Said::Reconnected`), it takes the latest pair as
-//! when asked. A pair it went back from is tried once more on the first of those `AGAIN` after, and if it goes back
-//! again, only when it's asked (`one update`) or once there's a newer one.
+//! A server that missed a release, as one asleep or away during it, is caught up by its network's update once it's
+//! back, which it hears of as the server says it's running, or can reach the network again, at the network's edge.
 //!
 //! Every start is the one way: a build is started and has `START` to say it's running at the network's edge. What
 //! each machine is at is one small record, `state.json` in the client's home's `server/`, which every program changes
@@ -87,8 +83,6 @@ const START: Duration = Duration::from_secs(180);
 const STOP: Duration = Duration::from_secs(20);
 /// How many of the last lines a build said are kept to say why it didn't start.
 const LAST: usize = 5;
-/// How long after going back from a pair catching up tries it once more.
-const AGAIN: Duration = Duration::from_secs(10 * 60);
 
 /// Where joining or leaving is: each has the one way out on failure, back to where it began.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -110,16 +104,6 @@ struct Pair {
     program: String,
 }
 
-/// The pair an update last went back from: when, and whether it had gone back from it before, so catching up tries it
-/// only once more.
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-struct WentBackFrom {
-    pair: Pair,
-    /// Seconds since 1970.
-    at: u64,
-    again: bool,
-}
-
 /// What this device is as a server, written in one step (`Here::write`).
 #[derive(Serialize, Deserialize, Default, Debug)]
 struct Record {
@@ -136,8 +120,6 @@ struct Record {
     next: Option<Pair>,
     /// Why the last update didn't take, which the server says until one does.
     went_back: Option<String>,
-    /// The pair it last went back from, until an update takes.
-    went_back_from: Option<WentBackFrom>,
 }
 
 impl Record {
@@ -169,8 +151,7 @@ impl Record {
     fn go_back(&mut self, why: impl std::fmt::Display) {
         let build = |pair: &Option<Pair>| pair.as_ref().map(|pair| pair.build.clone()).unwrap_or_default();
         self.went(format!("Went back to {} from {}: {why}", build(&self.current), build(&self.next)));
-        let again = self.went_back_from.as_ref().is_some_and(|from| Some(&from.pair) == self.next.as_ref());
-        self.went_back_from = self.next.take().map(|pair| WentBackFrom { pair, at: now(), again });
+        self.next = None;
         self.server_update_status = ServerUpdateStatus::UpToDate;
         self.server_update_stage = None;
     }
@@ -186,23 +167,10 @@ impl Record {
         self.previous = self.current.replace(next);
         self.next = None;
         self.went_back = None;
-        self.went_back_from = None;
         self.server_update_status = ServerUpdateStatus::UpToDate;
         self.server_update_stage = None;
     }
 
-    /// Whether catching up leaves the latest pair, `next`, alone: it went back from it less than `AGAIN` ago, or
-    /// twice.
-    fn holds(&self, next: &Pair) -> bool {
-        self.went_back_from
-            .as_ref()
-            .is_some_and(|from| &from.pair == next && (from.again || now() < from.at + AGAIN.as_secs()))
-    }
-}
-
-/// Seconds since 1970.
-fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |now| now.as_secs())
 }
 
 /// Makes this device a server of whoever it's for: its person, or the group or network `ONE_SUBJECT` names. It's put
@@ -557,7 +525,6 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     here.prune(&record)?;
     tell(&mut server, &record.told(ServerDaemonStatus::Running)).await;
     system::ready(&key)?;
-    catch_up(&here, &mut record, &mut server, &mut said, &program).await?;
 
     let stopping = stopped();
     tokio::pin!(stopping);
@@ -567,9 +534,6 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
                 Some(Heard { said: Some(Said::UpdateAsked), .. }) => {
                     prepare(&here, &mut record, &mut server, &mut said, &program).await?;
                     go(&here, &mut record, &mut server, &mut said, &program).await?
-                }
-                Some(Heard { said: Some(Said::Reconnected), .. }) => {
-                    catch_up(&here, &mut record, &mut server, &mut said, &program).await?
                 }
                 Some(Heard { said: Some(Said::Prepare), .. }) => prepare(&here, &mut record, &mut server, &mut said, &program).await?,
                 Some(Heard { said: Some(Said::Go), .. }) => go(&here, &mut record, &mut server, &mut said, &program).await?,
@@ -658,29 +622,6 @@ fn again(program: &Path) -> anyhow::Error {
     return std::os::unix::process::CommandExt::exec(std::process::Command::new(program).args(["serve", "run"])).into();
     #[cfg(not(unix))]
     anyhow::anyhow!("It ended to run {}, which Task Scheduler starts within a minute.", program.display())
-}
-
-/// Catches up, as it starts and once it can reach the network again after it couldn't: where the latest pair is
-/// newer and isn't one it went back from (`Record::holds`), it's prepared and taken at once.
-async fn catch_up(
-    here: &Here,
-    record: &mut Record,
-    server: &mut Child,
-    said: &mut UnboundedReceiver<Heard>,
-    program: &Path,
-) -> Result<()> {
-    let builds = latest_builds(server, said).await;
-    let next = builds.ok().zip(record.current.as_ref()).and_then(|(builds, current)| latest_pair(&builds, current));
-    match &next {
-        Some(next) if record.holds(next) => println!("Not catching up to {}: it went back from it.", next.build),
-        Some(next) => {
-            println!("Catching up to {}, with one {}.", next.build, next.program);
-            prepare(here, record, server, said, program).await?;
-            go(here, record, server, said, program).await?;
-        }
-        None => {}
-    }
-    Ok(())
 }
 
 /// Prepares the latest server build and `one` as a pair, while the server answers on: downloads them, checks the build
