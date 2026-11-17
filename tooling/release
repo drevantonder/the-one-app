@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds server and client builds from the commit checked out, which is on main, and publishes them to a network,
-# whose machines take them when they're asked to update (`one update` for a device; each server is updated here, one at a time,
-# once it is published):
+# whose machines take them when they're asked to update (`one update` for a device; each server is updated here once
+# it is published, one first and then the rest at once):
 #
 #     tooling/release [server] [client] [--dry-run]
 #     tooling/release <name>...
@@ -134,7 +134,7 @@ for name in "${mine[@]}"; do echo "$name  $build, built here"; done
 for name in "${mac[@]}"; do echo "$name  $build, built on the Mac"; done
 updated=$(jq -r --argjson kinds "$(printf '%s\n' "${mine[@]}" "${mac[@]}" | sed -n 's|^server/||p' | jq -R . | jq -s .)" \
   '.servers[] | select(.target as $t | $kinds | index($t)) | "    \(.name)"' <<<"$builds")
-[[ -z $dry ]] || { echo "Then each server takes it, one at a time:" && echo "${updated:-    (no server)}" && exit 0; }
+[[ -z $dry ]] || { echo "Then the first server takes it, and the rest at once:" && echo "${updated:-    (no server)}" && exit 0; }
 ((${#mine[@]} + ${#mac[@]})) || exit 0
 
 # One release on a machine at a time, kept as a pid file rather than flock: a daemon a build starts (epmd, a compiler
@@ -331,11 +331,14 @@ if ((${#mine[@]})); then
 fi
 [[ -z ${on_mac-} ]] || wait "$on_mac" || { echo "The Mac's part wasn't released." >&2 && exit 1; }
 
-# Each server takes it, one at a time, as `one update --server` answers once that server is ready on it or fails
-# saying why. The first failure stops the rest, which stay on the old build, safe: they catch up when they start or
-# reconnect. A server the check above skips (asleep, not ready with no update under way, not installed) is named.
+# The first server takes it alone, so a build that goes back stops there; then the rest take it at once, since each
+# verifies a build answers before it keeps it and goes back by itself otherwise. `one update --server` answers once
+# that server is ready on it, or fails saying why. A server that doesn't take it stays on the old build, safe, and
+# catches up when it starts or reconnects. A server the check above skips (asleep, not ready with no update under
+# way, not installed) is named.
 echo "A device takes $build with \`one update\`."
 builds=$(one builds)
+keys=()
 for key in $(jq -r --argjson kinds "$(printf '%s\n' "${servers[@]}" | jq -R . | jq -s .)" \
   '.servers[] | select(.target as $t | $kinds | index($t)) | .server' <<<"$builds"); do
   skip=$(jq -r --arg key "$key" --argjson asleep "$asleep" '.servers[] | select(.server == $key) |
@@ -344,12 +347,25 @@ for key in $(jq -r --argjson kinds "$(printf '%s\n' "${servers[@]}" | jq -R . | 
     elif $away * 60 > $asleep then "was last seen \($away) min ago"
     elif .server_ready == false and .server_update_status == "up_to_date" then "is not ready (\(.server_ready_reason // "unknown")) and has no update under way"
     else empty end' <<<"$builds")
-  name=$(jq -r --arg key "$key" '.servers[] | select(.server == $key) | .name' <<<"$builds")
   if [[ -n $skip ]]; then
-    echo "skipped: $name $skip: it takes the latest with \`one update --server $key\` once it is back"
-    continue
+    echo "skipped: $(jq -r --arg key "$key" '.servers[] | select(.server == $key) | .name' <<<"$builds") $skip: it takes the latest with \`one update --server $key\` once it is back"
+  else
+    keys+=("$key")
   fi
-  started=$SECONDS
-  one update --server "$key" >/dev/null || { echo "$name: not updated after $((SECONDS - started)) s, so no other server is: it and the rest stay on the old build" >&2 && exit 1; }
-  echo "$name: updated in $((SECONDS - started)) s"
 done
+update() {
+  local name started=$SECONDS
+  name=$(jq -r --arg key "$1" '.servers[] | select(.server == $key) | .name' <<<"$builds")
+  if one update --server "$1" >/dev/null; then
+    echo "$name: updated in $((SECONDS - started)) s"
+  else
+    echo "$name: not updated after $((SECONDS - started)) s: it stays on the old build" >&2 && return 1
+  fi
+}
+((${#keys[@]})) || exit 0
+update "${keys[0]}" || { echo "So no other server takes it." >&2 && exit 1; }
+pids=()
+for key in "${keys[@]:1}"; do update "$key" & pids+=($!); done
+failed=0
+for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+exit $failed
