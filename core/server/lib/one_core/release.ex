@@ -194,10 +194,17 @@ defmodule OneCore.Release do
     [was, now] = Enum.map([old, new], &named/1)
 
     cond do
-      runtime(old) == nil or runtime(old) != runtime(new) -> "it's on another runtime"
-      not Builds.talk?(was, now) -> "#{now} is a breaking change from #{was}"
-      not same_app?(apps) -> "One Core's .app changed beyond its modules"
-      true -> changed(changes(old, new), old, new)
+      runtime(old) == nil or runtime(old) != runtime(new) ->
+        "its runtime is #{runtime(new)}, and the server's #{runtime(old) || "a whole build's"}"
+
+      not Builds.talk?(was, now) ->
+        "#{now} is a breaking change from #{was}"
+
+      not same_app?(apps) ->
+        "One Core's .app changed beyond its modules"
+
+      true ->
+        changed(changes(old, new), old, new)
     end
   end
 
