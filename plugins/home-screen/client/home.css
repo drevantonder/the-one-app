@@ -547,7 +547,6 @@ body {
   background: color-mix(in oklab, var(--background) 40%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
   backdrop-filter: blur(14px) saturate(1.2);
-  animation: appear var(--move-quick) var(--ease-quick);
 }
 .holding .lifted-copy img.alone {
   width: 100%;
@@ -560,7 +559,6 @@ body {
   position: fixed;
   display: grid;
   scale: 1.06;
-  transition: scale var(--move-quick) var(--ease-quick);
 }
 .hold-menu {
   position: fixed;
@@ -571,7 +569,6 @@ body {
   background: color-mix(in oklab, var(--popover) 88%, transparent);
   color: var(--popover-foreground);
   box-shadow: var(--shadow-lg);
-  animation: appear var(--move-quick) var(--ease-quick);
 }
 .hold-menu button {
   display: flex;
@@ -752,8 +749,6 @@ body {
   .cell.jiggles {
     animation: none;
   }
-  .holding,
-  .hold-menu,
   .overview {
     animation: none;
   }

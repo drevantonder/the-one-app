@@ -4,9 +4,9 @@
 // owner's name, in the bar at the bottom beside their page dots, opens a list of every owner. A page never scrolls:
 // it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole pages of an owner's
 // side by side as fit, one to three. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
-// touch and hold an app or a widget, or right-click it, then Edit Home Screen, or touch and hold a page's empty
-// space. Where it is, what's open over it and the editing are one state machine (machine.ts), whose snapshot is one
-// signal here.
+// touch and hold an app or a widget (press and hold it, or right-click it, with a mouse), then Edit Home Screen, or
+// hold it a while longer, or touch and hold a page's empty space. Where it is, what's open over it and the editing are
+// one state machine (machine.ts), whose snapshot is one signal here.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
@@ -93,8 +93,10 @@ const draft = (owner: Owner, index: number): Editing => ({ owner: index, pages: 
 /// An owner's pages as they were just edited, shown until the Home Screen is asked again.
 const [kept, setKept] = createSignal<Editing>()
 
-// A finger that stays this long holds what it's on, as a phone's does.
+// A finger that stays this long holds what it's on, as a phone's does, and on a Home page, held this much longer
+// still, it's lifted into editing, as an iPhone's menu gives way to the drag.
 const HOLD = 450
+const LONGER = 800
 
 /// A widget on a page: what its plugin's tool answers, drawn, and asked again each minute it's in view. Pressing it
 /// opens its app.
@@ -131,62 +133,93 @@ function Tile(props: { name: string; onPress?: (behind?: boolean) => void; child
   )
 }
 
+/// Taking an item off a Home page asks first, as an iPhone's does: an app stays in the App Library, and a widget's app
+/// and data stay.
+const removal = (item: Item): Parameters<typeof confirm>[0] =>
+  item.widget ? { heading: "Remove Widget?", action: "Remove", destructive: true } : { heading: `Remove “${item.name}”?`, text: "It stays in your App Library.", action: "Remove from Home Screen" }
+
 /// What a Home page holds as it's drawn: an item of the owner's, and where it is among the page's.
 type Cell = { item: Item; index: number }
 
-/// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a touch held still is a hold, as is
-/// a right-click; a press that moves while editing, or once held, lifts it. `held` says what it is, as it is then. A
+/// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a press held still is a hold, as is
+/// a right-click; a press that moves while editing, or once held, lifts it, and so does one held still a while longer
+/// on a Home page. A mouse holds as a finger does, as an iPad's pointer does. `held` says what it is, as it is then. A
 /// hold on a page's empty space has nothing to lift or offer, so it edits the page at once, as a phone's does.
 function holds(held: () => Held | undefined, arranges: () => boolean) {
   return (element: HTMLElement) => {
     let timer: ReturnType<typeof setTimeout> | undefined
     let start: PointerEvent | undefined
-    const clear = () => (clearTimeout(timer), (start = undefined))
+    // Whether this press has held: a mouse's click as it lets go is the hold's end, not a tap.
+    let fired = false
+    const clear = () => {
+      clearTimeout(timer)
+      start = undefined
+      fired = false
+      removeEventListener("pointermove", move)
+      removeEventListener("pointerup", up)
+      removeEventListener("pointercancel", clear)
+    }
     const rect = () => {
       const { x, y, width, height } = element.getBoundingClientRect()
       return { x, y, width, height }
     }
-    const lift = (event: PointerEvent, from: PointerEvent) => {
+    // `at` is where the pointer is now: a press held still a while longer lifts with no move to say so.
+    const lift = (at: PointerEvent, from: PointerEvent) => {
+      clear()
       const what = held()
       if (!what?.item) return
       grab = { x: from.clientX, y: from.clientY }
+      pointer = { x: at.clientX, y: at.clientY }
       home.send({ type: "lift", held: { ...what, rect: rect() }, editing: state().matches("editing") ? undefined : pending?.() })
-      // The Home Screen keeps the finger from here on, whatever's drawn again under it.
-      document.querySelector<HTMLElement>(".home")?.setPointerCapture(event.pointerId)
+      // The Home Screen keeps the pointer from here on, whatever's drawn again under it.
+      document.querySelector<HTMLElement>(".home")?.setPointerCapture(at.pointerId)
     }
     const hold = () => {
       const what = held()
       if (!arranges() || !what || !state().matches("nothing")) return
-      if (what.item) home.send({ type: "hold", held: { ...what, rect: rect() } })
-      else if (pending?.()) home.send({ type: "edit", editing: pending()! })
+      fired = !!start
+      if (!what.item) return pending?.() && home.send({ type: "edit", editing: pending()! })
+      home.send({ type: "hold", held: { ...what, rect: rect() } })
+      const from = start
+      if (from && what.from === "page") timer = setTimeout(() => state().matches("holding") && lift(from, from), LONGER)
+    }
+    const move = (event: PointerEvent) => {
+      if (!start || event.pointerId !== start.pointerId) return
+      const moved = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY)
+      if (moved < 8) return
+      // Held, or editing, a press that moves carries what it's on; before that, it's a swipe.
+      if (state().matches("holding") || (state().matches({ editing: "still" }) && held()?.item)) lift(event, start)
+      else clear()
+    }
+    const up = (event: PointerEvent) => {
+      if (event.pointerId !== start?.pointerId) return
+      if (fired) {
+        const swallow = (event: MouseEvent) => (event.stopPropagation(), event.preventDefault())
+        addEventListener("click", swallow, { capture: true, once: true })
+        setTimeout(() => removeEventListener("click", swallow, true))
+      }
+      clear()
     }
     element.addEventListener("contextmenu", (event) => {
       event.preventDefault()
       event.stopPropagation()
+      clear()
       hold()
     })
     element.addEventListener("pointerdown", (event) => {
       // ⊖ is pressed, not held or lifted.
       if (event.button || !arranges() || (event.target as Element).closest(".minus")) return
+      clear()
       start = event
-      // Editing, a press that moves lifts at once, wherever the pointer goes first; otherwise a finger held still is a
+      // Once held, the menu lies over what's held, and an iPhone's web view sends the press's moves and its end to
+      // whatever's under the finger then, whatever has the pointer: so the press is followed wherever it goes.
+      addEventListener("pointermove", move)
+      addEventListener("pointerup", up)
+      addEventListener("pointercancel", clear)
+      // Editing, a press that moves lifts at once, wherever the pointer goes first; otherwise a press held still is a
       // hold.
-      if (state().matches({ editing: "still" }) && held()?.item) element.setPointerCapture(event.pointerId)
-      else if (!state().matches("editing") && event.pointerType !== "mouse") timer = setTimeout(hold, HOLD)
+      if (!state().matches("editing")) timer = setTimeout(hold, HOLD)
     })
-    element.addEventListener("pointermove", (event) => {
-      if (!start) return
-      const moved = Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY)
-      if (moved < 8) return
-      // Held, or editing, a finger that moves carries what it's on; before that, it's a swipe.
-      if (state().matches("holding") || (state().matches({ editing: "still" }) && held()?.item)) {
-        const from = start
-        clear()
-        lift(event, from)
-      } else clear()
-    })
-    element.addEventListener("pointerup", clear)
-    element.addEventListener("pointercancel", clear)
     // A web view drags an icon as a picture of itself unless it's told not to, and a finger carrying something moves
     // it, not the page.
     element.addEventListener("dragstart", (event) => event.preventDefault())
@@ -213,10 +246,8 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
     return editingHere() && state().matches({ editing: "dragging" }) && held?.page === props.page && held.index === cell.index
   }
   const arranges = () => props.owner.arranges && !props.small
-  // ⊖ asks first, as an iPhone's does: an app stays in the App Library, and a widget's app and data stay.
   const removing = async (item: Item, index: number) => {
-    const question = item.widget ? { heading: "Remove Widget?", action: "Remove", destructive: true } : { heading: `Remove “${item.name}” from Home Screen?`, text: "It stays in your App Library.", action: "Remove from Home Screen" }
-    if (await confirm(question)) home.send({ type: "remove", page: props.page, index })
+    if (await confirm(removal(item))) home.send({ type: "remove", page: props.page, index })
   }
   return (
     <section class={["page", { small: props.small }]} data-page={props.page} ref={props.small ? undefined : holds(() => (editingHere() ? undefined : { page: props.page, index: -1, from: "page" }), arranges)}>
@@ -358,64 +389,120 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
   )
 }
 
-/// What a finger holds, lifted over the blurred Home Screen, as a phone's is, with its menu under it: Edit Home Screen,
-/// and for an item, taking it off. Moving the finger carries it into editing; anywhere else, Escape or the device's
-/// own back puts it down.
+/// A spring as an easing, for what opens out of something, as iOS's menus do: quick, a little past where it goes and
+/// back.
+const springy = `linear(${Array.from({ length: 41 }, (_, step) => {
+  const [t, damping, natural] = [step / 40, 0.7, 10]
+  const damped = natural * Math.sqrt(1 - damping ** 2)
+  return (1 - Math.exp(-damping * natural * t) * (Math.cos(damped * t) + ((damping * natural) / damped) * Math.sin(damped * t))).toFixed(4)
+}).join(", ")})`
+const settling: KeyframeAnimationOptions = { duration: 250, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" }
+
+/// What a finger holds, lifted over the blurred Home Screen, as a phone's is, with its menu beside it, which grows out
+/// of it with a spring and shrinks back into it: Edit Home Screen and Remove App on a Home page, Add to Home Screen and
+/// Remove App in the App Library. Moving the finger, or on a Home page holding it a while longer, carries it into
+/// editing; anywhere else, Escape or the device's own back puts it down.
 function Holding(props: { owner: Owner; index: number; held: Held }) {
+  let veil!: HTMLDivElement
+  let menu!: HTMLDivElement
+  let copy: HTMLDivElement | undefined
   const dismiss = () => state().matches("holding") && home.send({ type: "dismiss" })
   const edit = () => home.send({ type: "edit", editing: draft(props.owner, props.index) })
-  const removing = () => {
-    const editing = draft(props.owner, props.index)
-    const at = shown(editing.pages)[props.held.page]
-    const pages = editing.pages.map((page, index) => (index === at ? { ...page, items: page.items.toSpliced(props.held.index, 1) } : page))
-    home.send({ type: "dismiss" })
-    keep({ ...editing, pages: pages.filter((page) => page.items.length) }, props.owner)
+  // Off its Home page, once that's what's wanted.
+  const removing = async () => {
+    const [owner, editing, held] = [props.owner, draft(props.owner, props.index), props.held]
+    dismiss()
+    if (!(await confirm(removal(held.item!)))) return
+    const at = shown(editing.pages)[held.page]
+    const pages = editing.pages.map((page, index) => (index === at ? { ...page, items: page.items.toSpliced(held.index, 1) } : page))
+    keep({ ...editing, pages: pages.filter((page) => page.items.length) }, owner)
+  }
+  // The App Library holds every app that's installed: it goes from there by being uninstalled, which is Plugins' job.
+  const uninstalls = async () => {
+    const name = props.held.item!.name
+    dismiss()
+    if (await confirm({ heading: `Can't Remove “${name}” Here`, text: "The App Library shows every app that's installed. To remove it, uninstall it in Plugins.", action: "Open Plugins" })) open("plugins/client/index.html").catch(toast)
   }
   // From the App Library, it goes last on the owner's last page, as a phone's does.
   const adding = () => {
     const editing = draft(props.owner, props.index)
     const at = shown(editing.pages).at(-1)
     const pages = at === undefined ? [...editing.pages, { items: [props.held.item!] }] : editing.pages.map((page, index) => (index === at ? { ...page, items: [...page.items, props.held.item!] } : page))
-    home.send({ type: "dismiss" })
+    dismiss()
     keep({ ...editing, pages: fitted(pages) }, props.owner)
   }
   onSettled(() => {
+    haptic("medium")
+    const fade: KeyframeAnimationOptions = { duration: 150, easing: "ease-out" }
+    veil.animate([{ opacity: 0 }, {}], { duration: 200, easing: "ease-out" })
+    menu.animate([{ opacity: 0 }, {}], fade)
+    if (!still.matches) {
+      menu.animate([{ scale: "0.25" }, {}], { duration: 450, easing: springy })
+      copy?.animate([{ scale: "1" }, {}], { duration: 450, easing: springy })
+    }
     const shut = covers(dismiss)
     const escape = (event: KeyboardEvent) => event.key === "Escape" && dismiss()
     addEventListener("keydown", escape)
-    return () => (shut(), removeEventListener("keydown", escape))
+    return () => {
+      shut()
+      removeEventListener("keydown", escape)
+      close()
+    }
   })
+  // As it goes, a copy of it shrinks back into what was held and the blur clears, from wherever it had got to: unless
+  // it's being carried, when what follows the finger takes the copy's place.
+  const close = () => {
+    const now = (element: Element | undefined) => (element?.isConnected ? getComputedStyle(element) : undefined)
+    const [menuNow, copyNow] = [now(menu), now(copy)]
+    const ghost = veil.cloneNode(true) as HTMLDivElement
+    ghost.inert = true
+    ghost.style.pointerEvents = "none"
+    document.querySelector(".home")?.append(ghost)
+    const [ghostMenu, ghostCopy] = [ghost.querySelector<HTMLElement>(".hold-menu")!, ghost.querySelector<HTMLElement>(".lifted-copy")]
+    if (home.getSnapshot().matches({ editing: "dragging" })) ghostCopy?.remove()
+    ghost.animate([{ opacity: now(veil)?.opacity ?? 1 }, { opacity: 0 }], settling).finished.finally(() => ghost.remove())
+    ghostMenu.animate([{ opacity: menuNow?.opacity ?? 1, scale: menuNow?.scale ?? "1" }, { opacity: 0, scale: still.matches ? "1" : "0.25" }], settling)
+    if (!still.matches) ghostCopy?.animate([{ scale: copyNow?.scale ?? "1.06" }, { scale: "1" }], settling)
+  }
   const rect = props.held.rect ?? { x: innerWidth / 2, y: innerHeight / 2, width: 0, height: 0 }
   const below = rect.y + rect.height < innerHeight * 0.6
+  const left = Math.max(12, Math.min(innerWidth - 252, rect.x))
   const item = props.held.item
   // An app of the App Library that's on a page already has no Add to Home Screen.
   const added = !!item && props.owner.pages.some((page) => page.items.some((other) => other.app === item.app))
   const library = props.held.from === "library"
   return (
-    <div class="holding" onClick={(event) => event.target === event.currentTarget && dismiss()}>
+    <div class="holding" ref={veil} onClick={(event) => event.target === event.currentTarget && dismiss()}>
       <Show when={item}>
         {(item) => (
-          <div class="lifted-copy" style={{ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}>
+          <div class="lifted-copy" ref={copy} style={{ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}>
             <Show when={item().widget} fallback={library ? <img class="alone" src={(item() as App).icon} alt="" /> : <Tile name={(item() as App).name}><img src={(item() as App).icon} alt="" /></Tile>}>
               <Card item={item() as WidgetItem} owner={props.owner} still />
             </Show>
           </div>
         )}
       </Show>
-      <div class="hold-menu" role="menu" hidden={library && added} style={{ left: `${Math.max(12, Math.min(innerWidth - 252, rect.x))}px`, ...(below ? { top: `${rect.y + rect.height + 12}px` } : { bottom: `${innerHeight - rect.y + 12}px` }) }}>
-        <button type="button" role="menuitem" hidden={props.held.from === "library"} onClick={edit}>
-          <span>Edit Home Screen</span>
-          <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z" /></svg>
-        </button>
+      <div
+        class="hold-menu"
+        role="menu"
+        ref={menu}
+        style={{ left: `${left}px`, "transform-origin": `${rect.x + rect.width / 2 - left}px ${below ? "0" : "100%"}`, ...(below ? { top: `${rect.y + rect.height + 12}px` } : { bottom: `${innerHeight - rect.y + 12}px` }) }}
+      >
+        <Show when={!library}>
+          <button type="button" role="menuitem" onClick={edit}>
+            <span>Edit Home Screen</span>
+            <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z" /></svg>
+          </button>
+        </Show>
         <Show when={library && !added}>
           <button type="button" role="menuitem" onClick={adding}>
             <span>Add to Home Screen</span>
             <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48-88a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z" /></svg>
           </button>
         </Show>
-        <Show when={item && props.held.from === "page"}>
-          <button type="button" role="menuitem" class="destructive" onClick={removing}>
-            <span>{item?.widget ? "Remove Widget" : "Remove from Home Screen"}</span>
+        <Show when={item}>
+          <button type="button" role="menuitem" class="destructive" onClick={library ? uninstalls : removing}>
+            <span>{item?.widget ? "Remove Widget" : "Remove App"}</span>
             <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48-88a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,128Z" /></svg>
           </button>
         </Show>
@@ -534,7 +621,7 @@ function Overview(props: { owner: Owner; index: number }) {
 }
 
 /// An owner's page dots: one for each Home page and the App Library's mark last, the one shown current. Tapping one
-/// goes there, and so does sliding a finger along them, a page for every 28 points, as a phone's do. While the owner's
+/// goes there, and so does sliding a finger along them, a page for every 28 points with a tick at each, as a phone's do. While the owner's
 /// pages are edited, they open the page overview.
 function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
   const current = () => (seen().owner === props.index ? seen().page : (state().context.last[props.index] ?? 0))
@@ -549,7 +636,9 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
       sliding = true
       dots.setPointerCapture(down.pointerId)
       const page = Math.max(0, Math.min(props.kinds.length - 1, from + Math.trunc(across / 28)))
-      if (page !== current()) home.send({ type: "go", page })
+      if (page === current()) return
+      home.send({ type: "go", page })
+      haptic("selection")
     }
     const up = () => {
       dots.removeEventListener("pointermove", move)
