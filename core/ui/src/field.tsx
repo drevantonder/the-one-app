@@ -108,7 +108,7 @@ export function Textarea(props: JSX.TextareaHTMLAttributes<HTMLTextAreaElement>)
 /// clears it. Escape clears it too. The list it narrows is the app's.
 export function Search(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
   let control!: HTMLInputElement
-  const [text, setText] = createSignal(String(props.value ?? ""))
+  const [text, setText] = createSignal(() => String(props.value ?? ""))
   const clear = () => {
     control.value = ""
     control.dispatchEvent(new Event("input", { bubbles: true }))
