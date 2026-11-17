@@ -358,13 +358,17 @@ for key in $(jq -r --argjson kinds "$(printf '%s\n' "${servers[@]}" | jq -R . | 
   fi
 done
 update() {
-  local name started=$SECONDS
+  local name started=$SECONDS why
   name=$(jq -r --arg key "$1" '.servers[] | select(.server == $key) | .name' <<<"$builds")
-  if one update --server "$1" >/dev/null; then
-    echo "$name: updated in $((SECONDS - started)) s"
-  else
-    echo "$name: not updated after $((SECONDS - started)) s: it stays on the old build" >&2 && return 1
-  fi
+  # The update tool is a task another ready server hosts while the one it updates restarts, and every server updates
+  # at once here, so that host restarts for its own update just as often: its task then ends "stopped while it ran
+  # this" (17 Nov: the Mac was said not to have updated, and had). That is the wait lost, not the update: it's
+  # idempotent, one under way is left to finish, so it's asked again, for as long as the tool itself waits (240 s).
+  until why=$(one update --server "$1" 2>&1 >/dev/null); do
+    if [[ $why == *"stopped while it ran this"* && $((SECONDS - started)) -lt 240 ]]; then continue; fi
+    echo "$name: not updated after $((SECONDS - started)) s: it stays on the old build: $why" >&2 && return 1
+  done
+  echo "$name: updated in $((SECONDS - started)) s"
 }
 ((${#keys[@]})) || exit 0
 update "${keys[0]}" || { echo "So no other server takes it." >&2 && exit 1; }
