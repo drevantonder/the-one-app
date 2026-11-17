@@ -227,17 +227,18 @@ defmodule HomeScreen do
         Map.merge(widget, %{widget: "#{app.name}/#{widget.tool}", opens: opens})
       end
 
+    # What's gone since it was put there, as an app that no longer has that entrypoint, isn't there, and a page left
+    # with nothing goes, as one emptied by hand does.
     pages =
-      for page <- stored do
-        items =
-          Enum.flat_map(page["items"], fn
-            %{"entrypoint" => id} -> List.wrap(openable[id])
-            %{"widget" => id} = item -> for w <- widgets, w.widget == id, do: Map.put(w, :size, size(w, item))
-            _ -> []
-          end)
-
-        %{items: items, hidden: page["hidden"] == true}
-      end
+      for page <- stored,
+          items =
+            Enum.flat_map(page["items"], fn
+              %{"entrypoint" => id} -> List.wrap(openable[id])
+              %{"widget" => id} = item -> for w <- widgets, w.widget == id, do: Map.put(w, :size, size(w, item))
+              _ -> []
+            end),
+          items != [],
+          do: %{items: items, hidden: page["hidden"] == true}
 
     %{
       who: call.subject,
