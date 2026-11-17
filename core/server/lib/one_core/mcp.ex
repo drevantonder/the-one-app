@@ -193,10 +193,11 @@ defmodule OneCore.Mcp do
   # client and the edge each say their build as `_meta.version`, and what one of another says is refused before
   # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022). One that says none is from
   # before builds had versions, 0.15's. What updates a part that's behind, the builds it downloads and a server's
-  # update, is answered whatever it's on, since that's how it catches up, and so is the list of tools a client
-  # reads before it calls one.
+  # update, is answered whatever it's on, since that's how it catches up, and so are the list of tools a client
+  # reads before it calls one and which builds run, by which the program keeping a server running, still the build
+  # before, tells a build it tries answers (`clients/cli/src/serving.rs`).
   defp talks("tools/list", _params), do: :ok
-  defp talks("tools/call", %{"name" => name}) when name in ["download", "update"], do: :ok
+  defp talks("tools/call", %{"name" => name}) when name in ["builds", "download", "update"], do: :ok
 
   defp talks(_method, params) do
     theirs = meta(params)["version"] || "0.15.0"

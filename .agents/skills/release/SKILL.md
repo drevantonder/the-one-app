@@ -14,16 +14,17 @@ version, Semantic Versioning's, which `tooling/version` reads from the commits s
 Commit types, as semantic-release does: a breaking change (`type!:` or a `BREAKING CHANGE:` footer) takes the next
 minor, a `feat` or a `fix` the next patch. Before 1.0 a minor is breaking, as Cargo, npm and Hex read 0.x. A build
 is that version with its commit's count and hash as build metadata, `0.15.2+2974.febd37350abc`. Nothing decides a
-bump but how commits are marked: a change that makes an older part misread or refuse a newer one (a renamed field,
-tool or method with no alias, a new required param, a removed function plugins call) is marked `!`. One that
-wasn't is marked by a commit after it, `fix!: <what broke>`, before it's released.
+bump but how commits are marked: only a change a part, plugin or agent using the platform must change for (a
+renamed field, tool or method with no alias, a new required param, a removed function plugins call) is marked `!`,
+never one inside the repo (tests, skills, tooling). One that wasn't is marked by a commit after it,
+`fix!: <what broke>`, before it's released.
 
 Exactly two rules hold at runtime:
 
 - Parts talk only on the same 0.minor (`OneCore.Builds.talk?/2`). A server refuses a request of another
   (`OneCore.Mcp`), which says why; a server asks one behind it nothing, as if it were off; the relay takes a server
   behind the edge for restarting and passes the edge's calls only to servers on its own (`core/edge/relay/relay.ts`).
-  What updates a part that's behind, `tools/list`, `download` and `update`, is answered whatever it's on. `one builds` says each
+  What updates a part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
   server's `build`, the `edge`'s, and `why` one doesn't talk.
 - A plugin runs only on a server its `requires`' `"core" => "~> 0.16.0"` allows (`OneCore.Plugins.Version`):
   deploying it to an older one is refused, saying so, and a server that loads it runs the plugin nowhere until it's
