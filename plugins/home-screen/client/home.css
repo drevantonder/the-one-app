@@ -41,7 +41,8 @@ body {
   display: none;
 }
 /* A page has no title at its top, and keeps the gap a phone's own home screen has, under the owner switcher. It
-   never scrolls, so a vertical swipe on it moves between owners. */
+   never scrolls, so a vertical swipe on it moves between owners. Pages snap without stopping at each, so a swipe
+   while they still move carries on from where they are, as a phone's do. */
 .page {
   box-sizing: border-box;
   flex: 0 0 100%;
@@ -50,7 +51,6 @@ body {
   padding: 3.5rem 1.25rem 0;
   overflow: hidden;
   scroll-snap-align: start;
-  scroll-snap-stop: always;
   container-type: size;
 }
 /* A page that scrolls keeps every vertical swipe on it, even where it has little: it can always move a point. */
@@ -309,7 +309,7 @@ body {
   }
 }
 
-/* The owner switcher, at the top in the middle, over every page that has it. */
+/* The owner switcher, at the top in the middle, over every page. */
 .top {
   position: absolute;
   z-index: 6;
@@ -318,15 +318,11 @@ body {
   display: flex;
   justify-content: center;
   pointer-events: none;
-  transition: opacity var(--move-quick) var(--ease-quick);
 }
 .home.wide .top {
   top: 1.25rem;
 }
-.top[data-hidden] {
-  opacity: 0;
-}
-.top:not([data-hidden]) .switch {
+.top .switch {
   pointer-events: auto;
 }
 .home .switch {
@@ -349,7 +345,8 @@ body {
   height: 0.875rem;
   color: var(--muted-foreground);
 }
-/* The owner's name rolls with the owners as they move: each name a line, one shown. */
+/* The owner's name rolls with the owners as they move: each name a line exactly as tall as the window onto them, so at
+   rest one shows and none of its neighbours. */
 .roll {
   display: inline-block;
   height: 1.25rem;
@@ -358,6 +355,7 @@ body {
 }
 .names {
   display: grid;
+  grid-auto-rows: 1.25rem;
   justify-items: center;
   translate: 0 calc(var(--f, 0) * -1.25rem);
 }
@@ -372,8 +370,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .dots i,
-  .dots,
-  .top {
+  .dots {
     transition: none;
   }
 }

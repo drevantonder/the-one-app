@@ -539,11 +539,11 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[]; hidden: boole
 /// The owner switcher, fixed at the top in the middle: the owner's name, which rolls as the owners move, and a tap
 /// opens the list of every owner, the current one ticked. Picking one slides there. While pages are edited, + and Done
 /// are there instead, as on a phone.
-function Switcher(props: { owners: Owner[]; hidden: boolean }) {
+function Switcher(props: { owners: Owner[] }) {
   const at = () => state().context.at.owner
   let button!: HTMLButtonElement
   return (
-    <div class="top" data-hidden={props.hidden ? "" : undefined}>
+    <div class="top">
       <Show
         when={!state().matches("editing")}
         fallback={
@@ -627,15 +627,18 @@ function HomeScreen(props: { owners: Owner[] }) {
   const step = (strip: HTMLElement) => (strip.firstElementChild as HTMLElement | null)?.offsetWidth ?? strip.clientWidth
   const gap = (strip: HTMLElement) => parseFloat(getComputedStyle(strip).columnGap) || 0
 
-  /// Where the pages rest now, told to the machine when it's somewhere new; and the owner's name rolls as they move.
-  const moved = () => {
-    const height = Math.max(1, main.clientHeight)
-    root.style.setProperty("--f", String(main.scrollTop / height))
-    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(main.scrollTop / height)))
+  /// The owner's name rolls as the owners move.
+  const moved = () => root.style.setProperty("--f", String(main.scrollTop / Math.max(1, main.getBoundingClientRect().height)))
+  /// Where the pages came to rest, told to the machine when it's somewhere new, and the name exactly that owner's,
+  /// whatever fraction of a pixel the scroll stopped short by. Nothing waits for it: a swipe while they move is the
+  /// browser's, and a step goes on from where the machine last sent them.
+  const rested = () => {
+    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(main.scrollTop / Math.max(1, main.getBoundingClientRect().height))))
     const strip = strips[owner]
     const page = strip ? Math.round(Math.abs(strip.scrollLeft) / (step(strip) + gap(strip))) : 0
     const { at } = home.getSnapshot().context
     if (at.owner !== owner || at.page !== page) home.send({ type: "settled", at: { owner, page } })
+    root.style.setProperty("--f", String(owner))
   }
 
   /// Moves the pages to `at`, as the machine says.
@@ -710,16 +713,23 @@ function HomeScreen(props: { owners: Owner[] }) {
     addEventListener("resize", resized)
 
     // A trackpad or a wheel: one gesture is one page or one owner, read here, since a browser snaps a trackpad's small
-    // scroll back where it started. Up and down on a page that scrolls itself is that page's.
+    // scroll back where it started. Up and down on a page that scrolls itself is that page's. A gesture's momentum
+    // dies away, so once it has stepped, what follows is its tail and is let be, until a pause, or a push that grows
+    // again once the tail has fallen to half its peak: a new gesture, which steps at once, wherever the pages are.
     let total = 0
     let axis: "x" | "y" | undefined
     let done = false
     let last = 0
+    let size = 0
+    let peak = 0
     const wheel = (event: WheelEvent) => {
       if (!home.getSnapshot().matches("nothing")) return
       const now = performance.now()
-      if (now - last > 250) [total, axis, done] = [0, undefined, false]
+      const push = Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY))
+      if (now - last > 250 || (done && size < peak / 2 && push > 8 && push > size * 1.5)) [total, axis, done, peak] = [0, undefined, false, 0]
       last = now
+      size = push
+      peak = Math.max(peak, push)
       axis ??= Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
       if (axis === "y" && (event.target as Element).closest?.(".page.scrolls")) return
       event.preventDefault()
@@ -758,22 +768,22 @@ function HomeScreen(props: { owners: Owner[] }) {
   const owner = () => props.owners[state().context.at.owner]
   return (
     <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .dots, .overview, .ui-dialog") && home.send({ type: "done" })}>
-      <main class="owners" ref={main} onScroll={moved}>
+      <main class="owners" ref={main} onScroll={moved} onScrollEnd={rested}>
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (
             <section class="owner" aria-label={owner().name}>
-              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }} onScroll={moved}>
+              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }} onScrollEnd={rested}>
                 <For each={pages()[index()] ?? [[]]} keyed={false}>
                   {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
                 </For>
                 <Library owner={owner()} index={index()} places={places} />
               </div>
-              <Dots owner={owner()} index={index()} kinds={laid()[index()] ?? []} hidden={!kinds[kindOf(index())].chrome || (laid()[index()]?.length ?? 0) <= room().fit} />
+              <Dots owner={owner()} index={index()} kinds={laid()[index()] ?? []} hidden={!kinds[kindOf(index())].dots || (laid()[index()]?.length ?? 0) <= room().fit} />
             </section>
           )}
         </For>
       </main>
-      <Switcher owners={props.owners} hidden={!kinds[kindOf(state().context.at.owner)].chrome && !state().matches("editing")} />
+      <Switcher owners={props.owners} />
       <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[opened().owner]} opened={opened()} places={places} />}</Show>
       <Show when={held()}>{(held) => <Holding owner={owner()} index={state().context.at.owner} held={held()} />}</Show>
       <Show when={state().matches({ editing: "overview" }) && editing()}>

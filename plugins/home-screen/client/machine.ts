@@ -7,12 +7,13 @@ import type { Item } from "./types.ts"
 
 /// What a page is. Every owner (you, everyone, each of your groups) has a list of pages, each of a kind, and each kind
 /// says how it behaves: whether it scrolls up and down itself, which keeps a vertical swipe on it rather than moving
-/// between owners, and whether the dots and the owner switcher show over it.
+/// between owners; whether the page dots show over it; and whether every owner has just one, so that picking another
+/// owner from it lands on theirs rather than on the page they were last on. The owner switcher shows over every kind.
 export const kinds = {
   /** A fixed grid of apps and widgets, as a phone's Home Screen page. */
-  home: { scrolls: false, chrome: true },
+  home: { scrolls: false, dots: true, one: false },
   /** The App Library, an owner's last page: every app installed for them, by category. */
-  library: { scrolls: true, chrome: false },
+  library: { scrolls: true, dots: false, one: true },
 } as const
 
 export type Kind = keyof typeof kinds
@@ -228,9 +229,11 @@ export const machine = setup({
       const page = within((event as Extract<Event, { type: "go" }>).page, pages[at.owner]?.length ?? 1)
       return { at: { ...at, page }, last: last.with(at.owner, page) }
     }),
-    pick: assign(({ context: { last, pages }, event }) => {
+    pick: assign(({ context: { at, last, pages }, event }) => {
       const owner = within((event as Extract<Event, { type: "pick" }>).owner, pages.length)
-      return { at: { owner, page: last[owner] ?? 0 } }
+      const here = pages[at.owner]?.[at.page] ?? "home"
+      const theirs = kinds[here].one ? pages[owner]?.indexOf(here) ?? -1 : -1
+      return { at: { owner, page: theirs >= 0 ? theirs : (last[owner] ?? 0) } }
     }),
     glide: emit(({ context: { at } }) => ({ type: "slide" as const, at, smooth: true })),
     jump: emit(({ context: { at } }) => ({ type: "slide" as const, at, smooth: false })),
