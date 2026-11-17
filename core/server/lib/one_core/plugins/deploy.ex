@@ -10,6 +10,7 @@ defmodule OneCore.Plugins.Deploy do
   server ships with for whoever it's installed for, where they aren't there.
   """
   require Logger
+  alias OneCore.Call.State
   alias OneCore.{App, Bucket, Builds, Folder, Sandbox, Server, Servers}
   alias OneCore.Plugins
   alias OneCore.Plugins.{Installed, Calls, Store, Version}
@@ -54,8 +55,12 @@ defmodule OneCore.Plugins.Deploy do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
     trusted = if trusted == :stored, do: stored_trust(owner, name, artifact), else: trusted != false
 
+    stage = &State.stage(State.id(), &1)
+
     with :ok <- check(name, files),
+         _ = stage.("Building its app"),
          {:ok, built} <- built(owner, name, files, trusted),
+         _ = stage.(if(trusted, do: "Compiling its code", else: "Compiling its code in its sandbox")),
          {:ok, version, warnings} <- loaded(artifact, built, trusted) do
       version = %{version | artifact: artifact}
       install = install?.(version)
@@ -63,9 +68,11 @@ defmodule OneCore.Plugins.Deploy do
       with :ok <- outputs(version),
            :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
+           _ = stage.("Keeping it in the bucket"),
            {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
            :ok <- Store.describe(version) do
         listed(artifact, version)
+        warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
         {:ok, number, warnings, %{version | number: number}}
       else
         {:error, why} ->
@@ -96,6 +103,79 @@ defmodule OneCore.Plugins.Deploy do
       %{^name => %{"plugin" => ^artifact, "trusted" => trusted}} -> trusted != false
       _ -> Store.about(artifact)["trusted"] != false
     end
+  end
+
+  # A tool that says what it's doing (`OneCore.Call.stage/2`) or asks a person (`OneCore.Call.ask/2`) is one that
+  # should be an MCP task: one that isn't says neither to anyone, and can't ask. Each such tool is warned of, by
+  # what its call/3 clause runs and the plugin's own functions that runs, which is what reading its code shows.
+  defp untasked(name, version, files) do
+    quoted =
+      for {path, text} <- files,
+          String.starts_with?(path, "server/") and Path.extname(path) == ".ex" and is_binary(text),
+          {:ok, quoted} <- [Code.string_to_quoted(text)],
+          do: quoted
+
+    {functions, tools} = Enum.reduce(quoted, {%{}, %{}}, &defined/2)
+
+    for tool <- version.tools,
+        tool[:task_support] == nil,
+        Enum.any?(Map.get(tools, tool.name, []), &tasky?(&1, functions, MapSet.new())) do
+      "#{name}_#{tool.name} says what it's doing or asks a person (OneCore.Call.stage or OneCore.Call.ask), which " <>
+        "only a task shows or asks: give it task_support: :optional beside its name in tools/0."
+    end
+  end
+
+  # Each function the code defines, by its name and arity, and each tool's call/3 clause, by the tool's name.
+  defp defined(quoted, defined) do
+    {_quoted, defined} =
+      Macro.prewalk(quoted, defined, fn
+        {kind, _, [head, [do: body]]} = node, {functions, tools} when kind in [:def, :defp] ->
+          case head do
+            {:when, _, [head | _]} -> {node, function(head, body, functions, tools)}
+            head -> {node, function(head, body, functions, tools)}
+          end
+
+        node, defined ->
+          {node, defined}
+      end)
+
+    defined
+  end
+
+  defp function({:call, _, [tool, _inputs, _call]}, body, functions, tools) when is_binary(tool),
+    do: {functions, Map.update(tools, tool, [body], &[body | &1])}
+
+  defp function({name, _, arguments}, body, functions, tools) when is_atom(name) and is_list(arguments),
+    do: {Map.update(functions, {name, length(arguments)}, [body], &[body | &1]), tools}
+
+  defp function(_head, _body, functions, tools), do: {functions, tools}
+
+  # Whether `body` calls `OneCore.Call.stage` or `ask`, itself or through the code's own functions.
+  defp tasky?(body, functions, seen) do
+    {_body, found} =
+      Macro.prewalk(body, {false, seen}, fn
+        node, {true, seen} ->
+          {node, {true, seen}}
+
+        {{:., _, [{:__aliases__, _, module}, function]}, _, _} = node, {false, seen}
+        when module in [[:Call], [:OneCore, :Call]] and function in [:stage, :ask] ->
+          {node, {true, seen}}
+
+        {name, _, arguments} = node, {false, seen} when is_atom(name) and is_list(arguments) ->
+          called = {name, length(arguments)}
+
+          if Map.has_key?(functions, called) and not MapSet.member?(seen, called) do
+            seen = MapSet.put(seen, called)
+            {node, {Enum.any?(functions[called], &tasky?(&1, functions, seen)), seen}}
+          else
+            {node, {false, seen}}
+          end
+
+        node, found ->
+          {node, found}
+      end)
+
+    elem(found, 0)
   end
 
   # Every tool of a version deployed now says what it answers, which every answer is checked against: a version

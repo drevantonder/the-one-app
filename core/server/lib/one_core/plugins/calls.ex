@@ -7,7 +7,8 @@ defmodule OneCore.Plugins.Calls do
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Plugins, Sandbox, Server, Servers, Trace, User}
+  alias OneCore.{Artifact, Call, Hooks, Plugins, Sandbox, Server, Servers, Tasks, Trace, User}
+  alias OneCore.Call.State
   alias OneCore.Plugins.Version
 
   @doc """
@@ -20,17 +21,19 @@ defmodule OneCore.Plugins.Calls do
   def call(name, tool, inputs, principal, forwarded \\ false, caller \\ nil) do
     principal = principal(principal)
 
-    case run(name, tool, inputs, principal, forwarded, caller) do
-      {:ran, ended} ->
-        ended
+    State.run(fn ->
+      case run(name, tool, inputs, principal, forwarded, caller) do
+        {:ran, ended} ->
+          ended
 
-      # A tool that isn't there is observed as a call that failed, as one refused is.
-      {:error, why} ->
-        observed(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, principal, fn -> {:error, why} end)
+        # A tool that isn't there is observed as a call that failed, as one refused is.
+        {:error, why} ->
+          observed(%{"plugin" => name, "tool" => tool, "inputs" => inputs}, principal, fn -> {:error, why} end)
 
-      forwarded ->
-        forwarded
-    end
+        forwarded ->
+          forwarded
+      end
+    end)
   end
 
   # `{:ran, ended}` where the plugin and the tool are there, `{:error, why}` where they aren't, and what `call/5`
@@ -53,7 +56,7 @@ defmodule OneCore.Plugins.Calls do
           cached = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           try do
-            call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller}
+            call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
             result = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
             if cached != [], do: Server.notify_servers(Enum.uniq([at | Plugins.chain(subject)]), "forget", cached)
             {:ran, result}
@@ -74,16 +77,29 @@ defmodule OneCore.Plugins.Calls do
   """
   def tool(tool, about, principal, version \\ nil, fun, apart \\ nil) do
     with :ok <- open_to(tool, about, principal),
-         :ok <- given(tool.takes, about["inputs"]),
+         :ok <- refused(given(tool.takes, about["inputs"]), -32602),
          {:ok, about} <- hooked(about, tool.takes, principal, apart) do
+      # It's accepted: a caller that asked for a task is answered it now, and the tool runs.
+      State.accepted(State.id(), &Tasks.made/1)
+
       observed(about, principal, fn ->
         Plugins.held(nil, List.wrap(version), fn -> answered(tool, about, fun.(about["inputs"])) end)
       end)
     else
-      # A call refused is observed as one that failed, with why.
-      {:error, why} -> observed(about, principal, fn -> {:error, why} end)
+      # A call refused is observed as one that failed, with why: what it was given is wrong, or who may or a hook
+      # said no.
+      {:error, why, code} -> refuse(about, principal, code, why)
+      {:error, why} -> refuse(about, principal, -32000, why)
     end
   end
+
+  defp refuse(about, principal, code, why) do
+    State.refuse(State.id(), code, why)
+    observed(about, principal, fn -> {:error, why} end)
+  end
+
+  defp refused({:error, why}, code), do: {:error, why, code}
+  defp refused(:ok, _code), do: :ok
 
   # What a tool answers is what its outputs say, so an answer that isn't fails here, loudly, rather than reaching
   # whoever asked in a shape nothing told them of. A tool of a version from before tools said it isn't checked.

@@ -8,6 +8,7 @@ mod codemode;
 mod install;
 mod mcp;
 pub mod serving;
+mod tasks;
 
 use std::io::Write;
 use std::path::Path;
@@ -60,6 +61,7 @@ const COMMANDS: &str = "Besides the tools:\n\n\
                            one update         takes the latest builds\n\
                            one search <words> finds the tools for a task, each with its command\n\
                            one run <file>     runs a script that calls tools, as MCP's execute does\n\
+                           one task <id>      says how a tool called with --task is going; --result waits for its answer\n\
                            one mcp [--code]   serves MCP to an agent here: every tool, or code mode's few\n\
                            one restore        restores a whole network from a backup, with none running\n\
                            one --version      says which build it is";
@@ -101,6 +103,8 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
             ExitCode::SUCCESS
         }
         ["update"] => printed(serving::update(&client).await?),
+        ["task", id] => tasks::show(&client, id, false).await?,
+        ["task", id, "--result"] => tasks::show(&client, id, true).await?,
         // A plugin from a git repo, as `npx skills add` adds a skill; with no repo, the plugin is the network's own.
         ["install", repo, ..] if !repo.starts_with("--") => install::install(&client, &args[1..]).await?,
         ["install"] if std::path::Path::new("plugins.lock").exists() => install::locked(&client).await?,
@@ -136,6 +140,34 @@ fn printed(text: String) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Prints what a tool answered: its text, or a file as it is, to be sent to a file (`> photo.jpg`). An answer that's
+/// an error is printed to stderr, and fails.
+pub(crate) fn answered(client: &Client, result: &Value) -> Result<ExitCode> {
+    let parts = result["content"].as_array().map(Vec::as_slice).unwrap_or_default();
+    if result["isError"] == true {
+        let text: Vec<&str> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
+        eprintln!("{}", text.join("\n"));
+        return Ok(ExitCode::FAILURE);
+    }
+    for part in parts {
+        match part["text"].as_str() {
+            Some(text) => println!("{text}"),
+            None => {
+                // A large file is one the client fetched and kept, and any other is in the answer.
+                let file = match part["uri"].as_str().and_then(|uri| uri.strip_prefix("/.file/")) {
+                    Some(path) => client.file(path).context("the answer isn't a file")?.1,
+                    None => {
+                        let file = part["data"].as_str().or(part["resource"]["blob"].as_str());
+                        BASE64.decode(file.unwrap_or_default().as_bytes()).context("the answer isn't a file")?
+                    }
+                };
+                io::stdout().write_all(&file)?;
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 /// Calls the tool `args` name, or shows what they could have named.
 pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode> {
     let (words, flags) = args.split_at(args.iter().take_while(|arg| !arg.starts_with("--")).count());
@@ -150,31 +182,10 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
         Some(tool) if flags.iter().any(|flag| flag == "--help") => usage(tool),
         Some(tool) => {
             listed_result?;
-            let inputs = inputs(client, tool, flags).await?;
-            let result = client.request("tools/call", json!({"name": name, "arguments": inputs})).await?;
-            let parts = result["content"].as_array().map(Vec::as_slice).unwrap_or_default();
-            if result["isError"] == true {
-                let text: Vec<&str> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
-                eprintln!("{}", text.join("\n"));
-                return Ok(ExitCode::FAILURE);
-            }
-            // Text is printed, and a file is written out as it is, to be sent to a file: `> photo.jpg`.
-            for part in parts {
-                match part["text"].as_str() {
-                    Some(text) => println!("{text}"),
-                    None => {
-                        // A large file is one the client fetched and kept, and any other is in the answer.
-                        let file = match part["uri"].as_str().and_then(|uri| uri.strip_prefix("/.file/")) {
-                            Some(path) => client.file(path).context("the answer isn't a file")?.1,
-                            None => {
-                                let file = part["data"].as_str().or(part["resource"]["blob"].as_str());
-                                BASE64.decode(file.unwrap_or_default().as_bytes()).context("the answer isn't a file")?
-                            }
-                        };
-                        io::stdout().write_all(&file)?;
-                    }
-                }
-            }
+            let task = flags.iter().any(|flag| flag == "--task");
+            let flags: Vec<String> = flags.iter().filter(|flag| *flag != "--task").cloned().collect();
+            let inputs = inputs(client, tool, &flags).await?;
+            return tasks::call(client, &name, inputs, task).await;
         }
         None => {
             let within: Vec<&Value> = tools

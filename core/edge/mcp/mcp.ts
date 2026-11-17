@@ -177,7 +177,7 @@ const VERSION = `${MCP}protocolVersion`;
 /** How often a request with a `progressToken` is told it's still running, as a server tells one (`client::THERE`). */
 const PROGRESS = 1_000;
 
-type Call = { id?: unknown; method?: unknown; params?: { _meta?: Record<string, unknown>; name?: unknown; uri?: unknown } };
+type Call = { id?: unknown; method?: unknown; params?: { _meta?: Record<string, unknown>; name?: unknown; uri?: unknown; taskId?: unknown } };
 
 /**
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `from`, a device or a sharing link's
@@ -244,17 +244,19 @@ function streamed(forwarded: Promise<{ answer: string } | null>, id: unknown, to
 
 /**
  * Which of the headers MCP's streamable HTTP has a request carry, from 2026-07-28, doesn't say what its body does, if
- * one doesn't. A name that isn't plain ASCII is sent in base64, between `=?base64?` and `?=`.
+ * one doesn't. A name that isn't plain ASCII is sent in base64, between `=?base64?` and `?=`. A task's request names
+ * its task, as MCP's Tasks have it.
  */
 function mismatched(headers: Headers, call: Call) {
-  const named = ["tools/call", "resources/read", "prompts/get"].includes(call.method as string);
+  const tasked = ["tasks/get", "tasks/update", "tasks/cancel"].includes(call.method as string);
+  const named = tasked || ["tools/call", "resources/read", "prompts/get"].includes(call.method as string);
   const sent = headers.get("mcp-name");
   const encoded = sent && /^=\?base64\?(.*)\?=$/.exec(sent);
   const name = encoded ? new TextDecoder().decode(Uint8Array.from(atob(encoded[1]), (c) => c.charCodeAt(0))) : sent;
   const expected: [string, unknown, string | null][] = [
     ["MCP-Protocol-Version", call.params?._meta?.[VERSION], headers.get("mcp-protocol-version")],
     ["Mcp-Method", call.method, headers.get("mcp-method")],
-    ...(named ? [["Mcp-Name", call.params?.name ?? call.params?.uri, name] as [string, unknown, string | null]] : []),
+    ...(named ? [["Mcp-Name", tasked ? call.params?.taskId : (call.params?.name ?? call.params?.uri), name] as [string, unknown, string | null]] : []),
   ];
   const wrong = expected.find(([, body, header]) => header === null || body !== header);
   return wrong && `${wrong[0]} header value '${wrong[2] ?? ""}' does not match body value '${wrong[1] ?? ""}'`;

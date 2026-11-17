@@ -83,8 +83,12 @@ impl Drop for Reached {
     }
 }
 
-/// One message asked, holding the way its answer goes back. Dropped unanswered, whoever asked is told nothing came.
-struct Ask(Mutex<Option<oneshot::Sender<Vec<u8>>>>);
+/// One message asked, holding the way its answer goes back, and what the call it asked for says it's doing, which its
+/// progress notifications carry (`stage`). Dropped unanswered, whoever asked is told nothing came.
+struct Ask {
+    answer: Mutex<Option<oneshot::Sender<Vec<u8>>>>,
+    stage: Arc<Mutex<Option<String>>>,
+}
 
 #[rustler::resource_impl]
 impl Resource for Ask {}
@@ -161,9 +165,14 @@ fn start(
 /// Hands `message` to the server's Elixir, with the key of whoever asked it if they have one, and waits for its
 /// answer. There's none if the Elixir is gone: `REFUSED` if it was before it took the message, and `STOPPED` if it
 /// went after, so it may have done what was asked.
-async fn ask(handler: &LocalPid, from: Option<&str>, message: &[u8]) -> Result<Vec<u8>, VarInt> {
+async fn ask(
+    handler: &LocalPid,
+    from: Option<&str>,
+    message: &[u8],
+    stage: Arc<Mutex<Option<String>>>,
+) -> Result<Vec<u8>, VarInt> {
     let (reply_sender, reply_receiver) = oneshot::channel();
-    let ask = ResourceArc::new(Ask(Mutex::new(Some(reply_sender))));
+    let ask = ResourceArc::new(Ask { answer: Mutex::new(Some(reply_sender)), stage });
     let sent = OwnedEnv::new().send_and_clear(handler, |env| {
         let mut binary = NewBinary::new(env, message.len());
         binary.as_mut_slice().copy_from_slice(message);
@@ -198,11 +207,13 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
                     // A stream ended unanswered is reset, so whoever asked knows it wasn't answered, and whether it
                     // was taken.
                     let Ok(_answering) = asks.try_read_owned() else { return drop(send.reset(client::REFUSED)) };
-                    let response = ask(&handler, Some(&from), &message);
+                    let stage = Arc::new(Mutex::new(None));
+                    let response = ask(&handler, Some(&from), &message, stage.clone());
                     tokio::pin!(response);
                     // While it runs, whoever asked with a progress token is told so every `THERE`, which is how
                     // they know it's still running, however long it takes (`client::Reached::ask`). How far it
-                    // is, is the seconds it's run, since nothing says how far a call is.
+                    // is, is the seconds it's run, since nothing says how far a call is, and what it's doing is
+                    // what the call last said (`stage`).
                     let response = match client::progress_token(&message) {
                         None => response.await,
                         Some(token) => {
@@ -215,7 +226,8 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
                                     response = &mut response => break response,
                                     _ = every.tick(), if telling => {
                                         let ran = started.elapsed().as_secs();
-                                        telling = send.write_all(&client::progress(&token, ran)).await.is_ok();
+                                        let doing = stage.lock().expect("no answer panics").clone();
+                                        telling = send.write_all(&client::progress(&token, ran, doing.as_deref())).await.is_ok();
                                     }
                                 }
                             }
@@ -311,10 +323,17 @@ fn close(reached: ResourceArc<Reached>, within: u64) -> Atom {
 /// Sends `message` back to whoever asked `ask`. An empty answer only ends the stream.
 #[rustler::nif]
 fn reply(ask: ResourceArc<Ask>, message: Binary) -> Atom {
-    if let Some(reply_sender) = ask.0.lock().expect("no answer panics").take() {
+    if let Some(reply_sender) = ask.answer.lock().expect("no answer panics").take() {
         // Whoever asked may have gone, and then nobody is left to tell.
         let _ = reply_sender.send(message.as_slice().to_vec());
     }
+    atoms::ok()
+}
+
+/// Says what the call `ask` asked for is doing, which its progress notifications carry from now on.
+#[rustler::nif]
+fn stage(ask: ResourceArc<Ask>, doing: String) -> Atom {
+    *ask.stage.lock().expect("no answer panics") = Some(doing);
     atoms::ok()
 }
 
@@ -348,15 +367,29 @@ fn connect(reached: ResourceArc<Reached>, address: String, to: LocalPid, referen
 /// Asks the server whose key is `server` one message over its open connection, and sends `to` the message
 /// `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, or `{:gone, address}` if the
 /// one that was open, made to `address`, no longer answers, so either way it was asked nothing; or `:stopped` if it
-/// stopped answering after it was asked, so it may have done what was asked.
+/// stopped answering after it was asked, so it may have done what was asked. What that server says the call is doing,
+/// in its progress notifications, is said of `relay` too, the message this server is answering by asking it.
 #[rustler::nif]
-fn ask_server(reached: ResourceArc<Reached>, server: String, message: Binary, to: LocalPid, reference: Term) -> Atom {
+fn ask_server(
+    reached: ResourceArc<Reached>,
+    server: String,
+    message: Binary,
+    to: LocalPid,
+    reference: Term,
+    relay: Option<ResourceArc<Ask>>,
+) -> Atom {
     let open = reached.servers.lock().expect("no connection panics").get(&server).cloned();
     let message = message.as_slice().to_vec();
     let reference = Reference::keep(reference);
+    let relay = relay.map(|ask| ask.stage.clone());
     RUNTIME.spawn(async move {
+        let relayed = |line: &[u8]| {
+            if let (Some(relay), Some(doing)) = (&relay, client::progress_message(line)) {
+                *relay.lock().expect("no answer panics") = Some(doing);
+            }
+        };
         let response = match open {
-            Some((address, Some(open))) => match open.ask(&message, |_| {}).await {
+            Some((address, Some(open))) => match open.ask(&message, relayed).await {
                 Ok(response) => Ok(response),
                 Err(unanswered) => {
                     let mut servers = reached.servers.lock().expect("no connection panics");

@@ -27,7 +27,7 @@ defmodule OneCore.Sandbox do
 
   What it's offered is what the plugin interface offers, as messages: `OneCore.Artifact`'s read, read_all, write,
   replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, plugins,
-  deployed, process (its own VM's) and forward_to; `OneCore.Plugin.file/2` and `nif/2`; Logger; and `fetch`, a
+  deployed, process (its own VM's), forward_to, stage and ask; `OneCore.Plugin.file/2` and `nif/2`; Logger; and `fetch`, a
   web request this server makes for it. An artifact it's given is a handle this server looks up, never a prefix
   it could rewrite, and a call is one this server is running, never a subject, actor or caller it could name. It hooks
   only into what it observes: a mutate, validate or collect hook asks it nothing. It has no services, no other plugins'
@@ -39,6 +39,7 @@ defmodule OneCore.Sandbox do
   @behaviour :gen_statem
   require Logger
   alias OneCore.{Artifact, Bucket, Builds, Call, Plugins, Server}
+  alias OneCore.Call.State
   alias OneCore.Plugins.{Calls, Version}
 
   @registry __MODULE__.Children
@@ -154,11 +155,18 @@ defmodule OneCore.Sandbox do
 
     id = System.unique_integer([:positive])
 
+    used = Map.delete(versions, name)
+
+    if Registry.lookup(@registry, {call.installed, key(version, used)}) == [],
+      do: State.working(call.state, :waiting, "Starting its sandbox")
+
     {child, port, context} =
-      case child(call.installed, version, Map.delete(versions, name), nil, {:begin, id}) do
+      case child(call.installed, version, used, nil, {:begin, id}) do
         {:ok, child, port, context} -> {child, port, context}
         {:error, why} -> raise why
       end
+
+    State.working(call.state, :running, nil)
 
     try do
       about = %{
@@ -300,6 +308,8 @@ defmodule OneCore.Sandbox do
   defp op("plugins", _request, call, _context), do: Call.plugins(call)
   defp op("deployed", _request, call, _context), do: Call.deployed(call)
   defp op("forward_to", %{"server" => server}, call, _context) when is_binary(server), do: Call.forward_to(call, server)
+  defp op("stage", %{"text" => text}, call, _context) when is_binary(text), do: Call.stage(call, text)
+  defp op("ask", %{"question" => question}, call, _context), do: Call.ask(call, question)
   defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered to an untrusted plugin")
 
   defp named(context, artifact), do: [handle(context, artifact), Artifact.name(artifact)]

@@ -805,14 +805,30 @@ pub fn progress_token(message: &[u8]) -> Option<Value> {
     (token.is_string() || token.is_number()).then_some(token)
 }
 
-/// MCP's progress notification for the request whose `token` it is, `progress` being how far it is, on a line of its
-/// own as it's sent ahead of the response (`Reached::ask`).
-pub fn progress(token: &Value, progress: u64) -> Vec<u8> {
-    let mut line = json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": progress}})
-        .to_string()
-        .into_bytes();
+/// An id for a request of this run's own, which no other request of it has, so one is cancelled by it alone.
+pub fn request_id() -> u64 {
+    static IDS: AtomicU64 = AtomicU64::new(1);
+    IDS.fetch_add(1, Ordering::Relaxed)
+}
+
+/// MCP's progress notification for the request whose `token` it is, `progress` being how far it is and `message`
+/// what it's doing, if it says, on a line of its own as it's sent ahead of the response (`Reached::ask`).
+pub fn progress(token: &Value, progress: u64, message: Option<&str>) -> Vec<u8> {
+    let mut params = json!({"progressToken": token, "progress": progress});
+    if let Some(message) = message {
+        params["message"] = json!(message);
+    }
+    let mut line =
+        json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": params}).to_string().into_bytes();
     line.push(b'\n');
     line
+}
+
+/// What a progress notification says its request is doing, if it says.
+pub fn progress_message(line: &[u8]) -> Option<String> {
+    let notification: Value = serde_json::from_slice(line).ok()?;
+    (notification["method"] == "notifications/progress")
+        .then(|| notification["params"]["message"].as_str().map(str::to_owned))?
 }
 
 /// The connection to a server, once one is open, and when trying to open one last failed.
@@ -1286,8 +1302,20 @@ impl Client {
 
     /// Asks the server for `method`, and gives its result.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
-        let message = json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params});
-        let response = self.ask(message.to_string().as_bytes()).await?;
+        self.request_notified(request_id(), method, params, |_| {}).await
+    }
+
+    /// Asks as `request` does, as the request `id`, which cancels it (`notifications/cancelled`), handing `notified`
+    /// each notification the server sends about it while it runs, as MCP's progress notifications.
+    pub async fn request_notified(
+        &self,
+        id: u64,
+        method: &str,
+        params: Value,
+        notified: impl Fn(&[u8]),
+    ) -> Result<Value> {
+        let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        let response = self.ask_notified(message.to_string().as_bytes(), notified).await?;
         let mut response: Value = serde_json::from_slice(&response).context("the server's answer isn't JSON")?;
         if let Some(error) = response.get("error") {
             bail!("{}", error["message"].as_str().unwrap_or("the server refused"))

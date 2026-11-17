@@ -21,6 +21,10 @@ defmodule OneCore.Mcp do
   server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each of a skill's files is
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
 
+  A tool its plugin makes a task (`task_support`) is answered as MCP's Tasks have it, to a client that says it takes
+  them (`OneCore.Tasks`), and every call is in a state while it runs (`OneCore.Call.State`): a client cancels one
+  that isn't a task with `notifications/cancelled`, and is told what it's doing in its progress notifications.
+
   An agent's client chooses how it calls tools, by what its requests say (`_meta.mode`), which the CLI says for
   `one mcp --code` and the network's address for `/mcp?code`. With none, every tool is listed, and `skills`, and the
   client finds tools itself, as Claude Code's tool search and the model APIs' deferred tools do. In code mode, as
@@ -43,11 +47,13 @@ defmodule OneCore.Mcp do
     Servers,
     Services,
     Skills,
+    Tasks,
     Tools,
     Trace,
     User
   }
 
+  alias OneCore.Call.State
   alias OneCore.Plugins.{Calls, Deploy, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
@@ -62,17 +68,26 @@ defmodule OneCore.Mcp do
   @versions ~w(2026-07-28)
   @initialized ~w(2025-11-25 2025-06-18 2025-03-26 2024-11-05)
 
-  @capabilities %{tools: %{}, resources: %{}, extensions: %{"io.modelcontextprotocol/skills" => %{}}}
+  @capabilities %{
+    tools: %{},
+    resources: %{},
+    extensions: Map.merge(%{"io.modelcontextprotocol/skills" => %{}}, Tasks.extension())
+  }
 
   # What a client keeps a list or a file of these for, before it asks again: none of it, since who's asking and
   # what's installed for them changes what's there.
   @cacheable ~w(server/discover tools/list resources/list resources/read)
 
-  @doc "The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty."
-  def handle(message, from) do
+  @doc """
+  The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty. `ask` is the
+  message as this server took it, which says what a call it asks for is doing while it runs (`OneCore.Iroh`).
+  """
+  def handle(message, from, ask \\ nil) do
     case JSON.decode(message) do
       {:ok, %{"method" => method, "id" => id} = request} ->
         params = Map.get(request, "params", %{})
+        # What a call it asks for is cancelled by, and where its progress is told.
+        Process.put(:"$one_request", %{request: {from, User.device(from, meta(params)), id}, ask: ask})
 
         version = meta(params)["io.modelcontextprotocol/protocolVersion"]
 
@@ -81,7 +96,7 @@ defmodule OneCore.Mcp do
 
           with :ok <- speaks(version),
                :ok <- protocol(meta(params)),
-               {:ok, principal, forwarded} <- User.asking(from, meta(params), method == "hooks/call"),
+               {:ok, principal, forwarded} <- User.asking(from, asking(method, meta(params)), method == "hooks/call"),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
           else
@@ -144,6 +159,11 @@ defmodule OneCore.Mcp do
         Server.changed()
         ""
 
+      # A client cancelling a call it asked for that isn't a task, by the request's id, as only it may.
+      {:ok, %{"method" => "notifications/cancelled", "params" => %{"requestId" => id} = params}} ->
+        State.cancel_request({from, User.device(from, meta(params)), id})
+        ""
+
       {:ok, %{"method" => _notification}} ->
         ""
 
@@ -155,6 +175,12 @@ defmodule OneCore.Mcp do
   # What a request says of itself.
   defp meta(%{"_meta" => %{} = meta}), do: meta
   defp meta(_params), do: %{}
+
+  # Who a request is from and for, as it says. A task is only whoever started it's, so a client checking on one, or
+  # answering or cancelling it, asks as themselves, whoever it runs for: that's what the task says, not the request.
+  defp asking("tasks/" <> _method, %{"actor" => _actor} = meta), do: meta
+  defp asking("tasks/" <> _method, meta), do: Map.delete(meta, "subject")
+  defp asking(_method, meta), do: meta
 
   # A request with no version is of a client that said its version in `initialize`, or of a server.
   defp speaks(nil), do: :ok
@@ -237,17 +263,33 @@ defmodule OneCore.Mcp do
   end
 
   # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
-  # asks for (a request that says its `actor`). A client calls as nobody's plugin.
-  defp result("tools/call", %{"name" => name} = params, _from, principal, forwarded) do
+  # asks for (a request that says its `actor`). A client calls as nobody's plugin. A tool its plugin makes a task is
+  # one for a person's client that takes tasks, and refused to one that doesn't if it needs one. A script's calls
+  # are never tasks, since it waits on each.
+  defp result("tools/call", %{"name" => name} = params, _from, {actor, subject} = principal, forwarded) do
     caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
 
-    case call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller) do
-      {:ok, result} -> changed(name, answer(name, result), principal)
-      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
-      # Another server ran it, and told its own clients.
-      {:forwarded, %{"isError" => true} = result} -> {:ok, result}
-      {:forwarded, result} -> changed(name, result, principal)
-      :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass #{name} on in turn"}
+    run = fn ->
+      rendered(name, call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller), principal)
+    end
+
+    case Tasks.support(tool(name, subject)) do
+      support when support != nil and is_binary(actor) and caller == nil and not is_map_key(params, :script) ->
+        cond do
+          Tasks.capable?(params) and not User.link?(actor) -> Tasks.start(run, name, principal)
+          support == :required -> Tasks.required()
+          true -> plainly(run)
+        end
+
+      _never ->
+        plainly(run)
+    end
+  end
+
+  defp result("tasks/" <> method, params, _from, principal, forwarded) when method in ["get", "update", "cancel"] do
+    cond do
+      not Tasks.capable?(params) -> Tasks.required()
+      true -> with({:forwarded, result} <- Tasks.handle(method, params, principal, forwarded), do: {:ok, result})
     end
   end
 
@@ -484,9 +526,10 @@ defmodule OneCore.Mcp do
     {:ok, CodeMode.calls(calls, named, called(from, principal, forwarded))}
   end
 
+  # A script waits on each call it makes, so none is a task.
   defp called(from, principal, forwarded),
     do: fn name, inputs ->
-      result("tools/call", %{"name" => name, "arguments" => inputs}, from, principal, forwarded)
+      result("tools/call", %{"name" => name, "arguments" => inputs, script: true}, from, principal, forwarded)
     end
 
   # A tool's path in a script, `gmail.search` or `deploy`.
@@ -530,6 +573,42 @@ defmodule OneCore.Mcp do
       end
 
     own ++ plugins
+  end
+
+  # A call that isn't a task, run in the process answering it, which its client cancels by the request's id. One
+  # cancelled is answered as MCP has a cancelled request: it's said, and its client has stopped listening.
+  defp plainly(run) do
+    asked = Process.get(:"$one_request", %{})
+    id = State.begin(Map.take(asked, [:request, :ask]))
+
+    try do
+      run.()
+    after
+      State.finish(id)
+    end
+  end
+
+  # What MCP's `tools/call` answers of a call: its answer, the error it ended with, or another server's answer.
+  defp rendered(name, outcome, principal) do
+    case outcome do
+      {:ok, result} -> changed(name, answer(name, result), principal)
+      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+      # Another server ran it, and told its own clients.
+      {:forwarded, %{"isError" => true} = result} -> {:ok, result}
+      {:forwarded, result} -> changed(name, result, principal)
+      :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass #{name} on in turn"}
+    end
+  end
+
+  # The tool `name` is for `who`: One Core's own, or a plugin's by its name and the plugin's, or `nil`.
+  defp tool(name, who) do
+    Enum.find(Tools.tools(), &(&1.name == name)) ||
+      with [plugin, tool] <- String.split(name, "_", parts: 2),
+           %{^plugin => version} <- Plugins.running(who) do
+        Enum.find(version.tools, &(&1.name == tool))
+      else
+        _ -> nil
+      end
   end
 
   # A tool is one of One Core's own, or a plugin's by its name and the plugin's.

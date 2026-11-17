@@ -17,6 +17,7 @@ defmodule OneCore.Tools do
   the call on to.
   """
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
+  alias OneCore.Call.State
   alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Store}
 
   # What a plugin may do beyond its own, as `permissions/0` says it.
@@ -154,6 +155,7 @@ defmodule OneCore.Tools do
   @tools [
     %{
       name: "deploy",
+      task_support: :optional,
       description: """
       Adds a plugin for you, or updates it, from its files.
       The server builds its apps from their source in client/, compiles its Elixir in server/ and runs the plugin at
@@ -297,6 +299,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "install",
+      task_support: :optional,
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them. Also tries
       again one that failed to install. It's installing, a stage at a time, until it answers where it is: installed,
@@ -714,6 +717,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "update",
+      task_support: :optional,
       description: """
       Has a server's machine take the latest builds, its server's and its program's, if it isn't on them already.
       It checks each before it runs it, hands its work to another server meanwhile, and goes back to the build it
@@ -768,7 +772,7 @@ defmodule OneCore.Tools do
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in @apart, do: {User.owner(elem(principal, 1)), inputs["name"]}
 
-        Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward), apart)
+        State.run(fn -> Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward), apart) end)
     end
   end
 

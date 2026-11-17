@@ -25,7 +25,7 @@ defmodule OneCore.Plugin do
   to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `uses/0`, `jobs/0` and
   `permissions/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
-  `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
+  `forward_to`, `fetch`, `stage` and `ask`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
   run in its VM too, as it, `database` among them. It has no services, no hooks it mutates or validates, no other
   plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
   which goes when the VM stops, a minute after its last call. Deploying an untrusted one that uses what isn't
@@ -153,6 +153,30 @@ defmodule OneCore.Plugin do
     each with who it was installed for, its apps and its widgets. A Home Screen page is drawn from it.
   - `OneCore.Call.deployed(call)` lists every plugin anyone in the network has deployed, with its apps, whether or
     not it's installed for anyone now: an app store is drawn from it.
+  - Make a tool an MCP task ([Tasks](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks))
+    with `task_support: :optional` when it can take more than a few seconds, works through stages, or waits on a
+    person. Callers can then start it, carry on, check back, and cancel it. `Call.stage` sets the task's
+    `statusMessage`; `Call.ask` moves it to `input_required` and asks the person through MCP elicitation. Its code
+    doesn't change otherwise: a caller that doesn't ask for a task waits on it as on any other, and is told its stages
+    as progress. `:required` is for one that can't run unless it's a task, as one that always asks. Cancelling a call
+    raises at its next `Call.stage` or `Call.ask`, so `try … after` cleans up, and stops its process outright if it
+    reaches neither within a few seconds, with what it started linked to it.
+
+        %{name: "copy", task_support: :optional, description: "Copies every photo to the archive", ...}
+
+        def call("copy", _inputs, call) do
+          photos = OneCore.Artifact.list(call.own, "photos/")
+
+          for {photo, done} <- Enum.with_index(photos, 1) do
+            OneCore.Call.stage(call, "Copying \#{done} of \#{length(photos)}")
+            archive(call, photo)
+          end
+
+          %{copied: length(photos)}
+        end
+
+    `OneCore.Call.ask(call, "Replace the archive's copies?")` gives `%{"action" => "accept"}` when they say yes, and
+    takes a `requestedSchema` for more (`%{message: ..., requestedSchema: %{type: "object", properties: ...}}`).
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
   - `uses/0`, if the plugin has one, names the other plugins it uses, as they're installed for whoever it's installed for, or

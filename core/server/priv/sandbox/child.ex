@@ -44,6 +44,12 @@ defmodule OneCore.Call do
   def plugins(%__MODULE__{id: id}), do: Child.request("plugins", %{}, id)
   def deployed(%__MODULE__{id: id}), do: Child.request("deployed", %{}, id)
 
+  @doc "Says what the call is doing, as the server's own does."
+  def stage(%__MODULE__{id: id}, text) when is_binary(text), do: Child.request("stage", %{"text" => text}, id)
+
+  @doc "Asks the person the call is for `question`, and gives their answer, as the server's own does."
+  def ask(%__MODULE__{id: id}, question), do: Child.request("ask", %{"question" => question}, id)
+
   @doc "Has the server holding what this call needs run it instead: it ends here if that server runs it."
   def forward_to(%__MODULE__{id: id}, server), do: Child.request("forward_to", %{"server" => server}, id)
 
@@ -521,7 +527,7 @@ defmodule OneCore.Sandbox.Check do
 
   @offered %{
     OneCore.Call =>
-      ~w(plugin tool make reach reaches? member? owns? plugins deployed process forward_to fetch __struct__)a,
+      ~w(plugin tool make reach reaches? member? owns? plugins deployed process forward_to fetch stage ask __struct__)a,
     OneCore.Artifact => ~w(name read read_all write replace remove size list __struct__)a,
     OneCore.Plugin => ~w(file nif behaviour_info)a
   }

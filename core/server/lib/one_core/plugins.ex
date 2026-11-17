@@ -78,6 +78,7 @@ defmodule OneCore.Plugins do
   # else is a fault, in its code or in what it waited on: a tool error's first paragraph is what a person's screen
   # shows of it (`ui`'s `call`), so theirs is only that something went wrong, and the rest is for an agent.
   defp said?(:error, %RuntimeError{}), do: true
+  defp said?(:error, %Call.State.Cancelled{}), do: true
   defp said?(:exit, {%RuntimeError{}, raised}) when is_list(raised), do: true
   defp said?(:exit, {reason, {module, function, arguments}}) when is_atom(module) and is_atom(function) and is_list(arguments), do: said?(:exit, reason)
   defp said?(_kind, _reason), do: false

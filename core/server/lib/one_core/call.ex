@@ -18,17 +18,32 @@ defmodule OneCore.Call do
     called by a person, an app or an agent has none: `nil`.
 
   The rest is One Core's: the plugin's name where it was installed and the plugin as a who, what was asked of it, the
-  plugins it uses, and whether another server passed it on.
+  plugins it uses, whether another server passed it on, and the state it's in (`OneCore.Call.State`).
 
   A call is passed between servers at most twice, so none goes round. A server that can't run it has one that can
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
   what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
-  alias OneCore.{Artifact, Hooks, Mcp, Plugins, Server, Servers, User}
+  alias OneCore.{Artifact, Hooks, Mcp, Plugins, Server, Servers, Tasks, User}
+  alias OneCore.Call.State
   alias OneCore.Plugins.{Calls, Version}
 
   @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
-  defstruct [:own, :installed, :folder, :server, :subject, :actor, :caller, :plugin, :who, :request, :uses, :forwarded]
+  defstruct [
+    :own,
+    :installed,
+    :folder,
+    :server,
+    :subject,
+    :actor,
+    :caller,
+    :plugin,
+    :who,
+    :request,
+    :uses,
+    :forwarded,
+    :state
+  ]
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
@@ -223,11 +238,12 @@ defmodule OneCore.Call do
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
   `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle` and `about`, its
-  `apps`, its `widgets` and its `tools`' names and pages (`ui`). A Home Screen page is drawn from these.
+  `apps`, its `widgets` and its `tools`' names, pages (`ui`) and whether each is a task (`task_support`). A Home
+  Screen page is drawn from these.
   """
   def plugins(%__MODULE__{subject: subject}) do
     for at <- Enum.reverse(Plugins.chain(subject)), {name, version} <- Plugins.versions([at]), into: %{} do
-      tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui])
+      tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui, :task_support])
 
       {name,
        Map.merge(
@@ -262,6 +278,26 @@ defmodule OneCore.Call do
       OneCore.Call.changed(call)
   """
   def changed(%__MODULE__{}), do: OneCore.Server.changed()
+
+  @doc """
+  Says what the call is doing, a stage of the plugin's own, such as `"Copying 3 of 12"`: an MCP task's
+  `statusMessage`, and the progress a caller waiting on it is told. Only the latest is said. A call that was cancelled
+  raises here, so its `try … after` cleans up.
+
+      OneCore.Call.stage(call, "Copying \#{done} of \#{length(files)}")
+  """
+  def stage(%__MODULE__{state: state}, text) when is_binary(text), do: State.stage(state, text)
+
+  @doc """
+  Asks the person the call is for `question`, and gives their answer: the call is `input_required` until it comes,
+  and its caller asks them through MCP elicitation. `question` is elicitation's params, a `message` and the
+  `requestedSchema` of what to answer, or only a message, to say yes or no to. The answer is elicitation's result:
+  `%{"action" => "accept", "content" => %{...}}`, or an `action` of `"decline"` or `"cancel"`. Only a call made as an MCP
+  task asks (`task_support`), and one that isn't raises saying so. A call that was cancelled raises here too.
+
+      %{"action" => "accept"} = OneCore.Call.ask(call, "Replace the backup from Tuesday?")
+  """
+  def ask(%__MODULE__{state: state}, question), do: State.ask(state, Tasks.question(question))
 
   @doc """
   Makes a web request from the server running this call: its `url`, and its `method`, `headers` and `body` if it
@@ -383,6 +419,8 @@ defmodule OneCore.Call do
     forwarding_loop = Server.forwarding_loop()
 
     meta = %{forwarded: forwarded, actor: actor, subject: subject}
+    # A call whose caller asked for a task that isn't made yet is made one where it runs, which then answers it.
+    meta = if method == "tools/call", do: Map.merge(meta, Tasks.asking()), else: meta
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
 
     response =
@@ -412,10 +450,12 @@ defmodule OneCore.Call do
   # is taken as gone after it was asked, and its answer, if it ever comes, goes to nobody.
   defp request_within(server, method, params, within) do
     trace = OneCore.Trace.traceparent()
+    state = State.id()
 
     asking =
       Task.async(fn ->
         OneCore.Trace.follow(trace)
+        State.follow(state)
 
         try do
           {:returned, Server.request(server, method, params)}

@@ -12,8 +12,8 @@
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. Whoever may deploy a plugin looks into it as it runs, at their own calls alone, and not into a sensitive
 # one. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
-# a tuple, and a job that's being called when the server calling it is killed is called once by the standby. It says
-# what a check costs a call.
+# a tuple, and a job that's being called when the server calling it is killed is called once by the standby. A task
+# is only whoever started it's to get or cancel. It says what a check costs a call.
 #
 #     mise exec -- core/server/test/who.sh [--edge]
 #
@@ -94,7 +94,24 @@ refused() { ! output=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was an
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
 # due and which server made it. `boxed` is untrusted and may call only `notes`' `read`. `spy` is untrusted
 # and hostile: it keeps what it's given, and its own artifact, in its VM, for a later call to use.
-mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed,spy}/server
+mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed,spy,chores}/server
+# `chores` has a tool that's an MCP task, which takes a while.
+cat >"$folder/chores/server/chores.ex" <<'EOF'
+defmodule Chores do
+  @behaviour OneCore.Plugin
+
+  @impl true
+  def tools do
+    [%{name: "tidy", task_support: :optional, description: "Tidies up, which takes a while", inputs: %{type: "object"}, outputs: %{type: "object", properties: %{tidy: %{type: "boolean"}}}}]
+  end
+
+  @impl true
+  def call("tidy", _inputs, call) do
+    OneCore.Call.stage(call, "Tidying")
+    receive do after 60_000 -> %{tidy: true} end
+  end
+end
+EOF
 cat >"$folder/spy/server/spy.ex" <<'EOF'
 defmodule Spy do
   @behaviour OneCore.Plugin
@@ -342,7 +359,7 @@ defmodule Ticker do
 end
 EOF
 # They're deployed for the network, so they're everyone's.
-for plugin in notes reader ticker; do as owner for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
+for plugin in notes reader ticker chores; do as owner for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
 
 say "One can't read the other's artifact until a tuple says so"
 note=$(as alice notes write --id shopping --text "Buy milk" | grep -o '"note":"[^"]*"' | cut -d'"' -f4)
@@ -604,6 +621,23 @@ refused as bob approvals approve
 refused as alice permissions share --artifact network/own/approvals --relation editor --who users/alice
 may as owner permissions share --artifact network/own/approvals --relation editor --who users/bob
 may as bob approvals approve
+
+say "A task is whoever started it's: only they get it or cancel it"
+# A task's request as MCP has it, `tasks/get` or `tasks/cancel`, from a client that says it takes tasks.
+mcp_task() {
+  local response
+  response=$(echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tasks/$2\",\"params\":{\"taskId\":\"$3\",\"_meta\":{\"io.modelcontextprotocol/clientCapabilities\":{\"extensions\":{\"io.modelcontextprotocol/tasks\":{}}}}}}" | as "$1" mcp)
+  echo "$response"
+  [[ $response == *'"result"'* ]]
+}
+started_task=$(as alice chores tidy --task)
+echo "  alice started $started_task"
+may as alice task "$started_task"
+refused as bob task "$started_task"
+refused mcp_task bob get "$started_task"
+refused mcp_task bob cancel "$started_task"
+may mcp_task alice cancel "$started_task"
+[[ $(as alice task "$started_task") == cancelled* ]] || { echo "alice's task wasn't cancelled"; exit 1; }
 
 say "What a check costs a call, over one connection as an agent's MCP session keeps"
 # Each server has a client that asks it and no other. The server writing the relation tuples' database answers a

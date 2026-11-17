@@ -170,7 +170,7 @@ defmodule OneCore.Plugins.Version do
     tools =
       for tool <- description.tools do
         tool
-        |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui])
+        |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
         |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
         |> Map.replace_lazy(:outputs, &JSON.decode!(JSON.encode!(&1)))
       end
@@ -239,7 +239,11 @@ defmodule OneCore.Plugins.Version do
       for offer <- taken.(description["offers"], ~w(name kind description)), do: Map.update(offer, :kind, nil, &hook_kind/1)
 
     description = %{
-      tools: taken.(description["tools"], ~w(name description inputs outputs read_only by_link ui)),
+      tools:
+        for(
+          tool <- taken.(description["tools"], ~w(name description inputs outputs read_only by_link ui task_support)),
+          do: Map.replace_lazy(tool, :task_support, &task_support/1)
+        ),
       apps: taken.(description["apps"], ~w(name page icon category subject)),
       title: description["title"],
       icon: description["icon"],
@@ -496,7 +500,8 @@ defmodule OneCore.Plugins.Version do
       not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
         {:error,
          "tools/0 gives a list of %{name: ..., description: ..., inputs: ..., outputs: ...}, where outputs is a JSON " <>
-           "Schema of an object, and ui, if a tool has one, is a page of client/"}
+           "Schema of an object, ui, if a tool has one, is a page of client/, and task_support, if it has one, is " <>
+           ":optional or :required"}
 
       not ((title == nil or is_binary(title)) and (icon == nil or is_map_key(rest, icon))) ->
         {:error, "title/0 gives text, and icon/0 a file here"}
@@ -679,9 +684,16 @@ defmodule OneCore.Plugins.Version do
   # before tools said what they answer says nothing of it, and still loads (`OneCore.Plugins.Deploy` refuses a new one).
   defp tool?(%{name: name, description: description, inputs: %{}} = tool, rest)
        when is_binary(name) and is_binary(description),
-       do: name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest)) and outputs?(tool[:outputs])
+       do:
+         name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest)) and outputs?(tool[:outputs]) and
+           tool[:task_support] in [nil, :optional, :required]
 
   defp tool?(_, _), do: false
+
+  # An untrusted plugin's code said its tools in JSON, where an atom is text.
+  defp task_support("optional"), do: :optional
+  defp task_support("required"), do: :required
+  defp task_support(other), do: other
 
   defp outputs?(nil), do: true
   defp outputs?(%{} = outputs), do: JSON.decode!(JSON.encode!(outputs))["type"] == "object"

@@ -26,6 +26,9 @@ defmodule OneCore.Application do
     {:ok, key} = Iroh.key(Server.key_file())
 
     if Servers.joined?(key, Application.get_env(:one_core, :owner, "network")) do
+      # What state each call is in, which this process, the application's, keeps.
+      OneCore.Call.State.table()
+
       # `OneCore.Waiting` is who waits for something to happen, by what: `:seen`, another server coming or going
       # (`OneCore.Servers.back/1`), and `:update`, this one's update moving on (`OneCore.Builds.await_update/1`).
       children = [

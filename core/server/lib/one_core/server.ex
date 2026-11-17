@@ -10,6 +10,7 @@ defmodule OneCore.Server do
   """
   use GenServer
   alias OneCore.{Edge, Hooks, Iroh, Mcp, Plugins, Servers, Trace}
+  alias OneCore.Call.State
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -87,14 +88,17 @@ defmodule OneCore.Server do
   def request(server, method, params, opts \\ []) do
     # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
     # this one knows the other is still running it, however long it takes (`client::Reached::ask`).
-    meta = %{progressToken: System.unique_integer([:positive]), protocol: protocol()}
+    # Its id is its own, so cancelling the call it's for tells that server which of its calls to cancel.
+    id = System.unique_integer([:positive])
+    meta = %{progressToken: id, protocol: protocol()}
     meta = if parent = Trace.traceparent(), do: Map.put(meta, :traceparent, parent), else: meta
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
+    message = JSON.encode!(%{jsonrpc: "2.0", id: id, method: method, params: params})
 
     asked = if opts[:restarting], do: [:on, :restarting, nil], else: [:on, nil]
 
     with true <- Servers.seen(server) in asked or Servers.seen_again(server) in asked or :unreachable,
-         {:ok, response} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
+         {:ok, response} <- passed(method, server, id, fn -> ask(server, message, State.answering()) end) do
       case JSON.decode(response) do
         {:ok, %{"result" => result}} -> {:ok, result}
         {:ok, %{"error" => %{"code" => -32022, "data" => %{"supported" => [theirs]}}}} -> refused(server, theirs)
@@ -104,6 +108,11 @@ defmodule OneCore.Server do
       end
     end
   end
+
+  # A call passed on is routed there while it runs, so cancelling it tells that server: anything else asked, such
+  # as a hook while it's checked, is part of what it's doing here.
+  defp passed("tools/call", server, id, ask), do: State.forwarding(server, id, ask)
+  defp passed(_method, _server, _id, ask), do: ask.()
 
   # A server on another protocol asked nothing. One that's behind is updated in its turn, which a release does
   # next: it's as if it were off, so whoever asked asks another. One that's ahead was updated first, and this one
@@ -154,6 +163,13 @@ defmodule OneCore.Server do
   def notify_servers(owners, what \\ "reload", hooks \\ []),
     do: notify(Enum.uniq(Enum.flat_map(owners, &Servers.acting/1)), owners, what, hooks)
 
+  @doc "Tells `server` to cancel the call it's running for what this server asked it as `request` (`request/3`)."
+  def cancel(server, request) do
+    notification = %{jsonrpc: "2.0", method: "notifications/cancelled", params: %{requestId: request}}
+    Task.Supervisor.start_child(OneCore.Asks, fn -> ask(server, JSON.encode!(notification)) end)
+    :ok
+  end
+
   @doc "Tells `servers`, by their keys, what `notify_servers/3` tells the servers acting for `owners`."
   def notify(servers, owners, what \\ "reload", hooks \\ []) do
     params = %{owners: owners, hooks: hooks}
@@ -195,9 +211,9 @@ defmodule OneCore.Server do
   # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
   # answered may only have lost what it was sent, as a network now and then does, so it's connected to again, which
   # one that's there answers at once (`Iroh.connect/4`), one that started again too.
-  defp ask(server, message) do
+  defp ask(server, message, relay \\ nil) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
-    request = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1)) end
+    request = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1, relay)) end
 
     case request.() do
       :closed -> connect(endpoint, server, request)
@@ -255,7 +271,7 @@ defmodule OneCore.Server do
   def handle_info({:ask, ask, from, message}, server) do
     reply = fn ->
       Plugins.started()
-      Iroh.reply(ask, Mcp.handle(message, from))
+      Iroh.reply(ask, Mcp.handle(message, from, ask))
     end
 
     Task.Supervisor.start_child(OneCore.Asks, reply)

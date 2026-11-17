@@ -42,6 +42,9 @@ defmodule OneCore.Iroh do
   @doc "Sends `answer` back to whoever asked `ask`."
   def reply(_ask, _response), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "Says what the call `ask` asked for is doing, which the progress notifications it's sent carry from now on."
+  def stage(_ask, _doing), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc """
   Connects to the server at `address`, and sends `to` the message `{reference, :ok}`, or `{reference, :unreachable}`
   if it doesn't answer in time.
@@ -52,7 +55,8 @@ defmodule OneCore.Iroh do
   Asks the server whose key is `server` one message over its open connection, and sends `to` the message
   `{reference, outcome}`: `{:ok, answer}`; `:closed` if no connection to it is open, or `{:gone, address}` if the
   one that was open, made to `address`, no longer answers, so either way it was asked nothing; or `:stopped` if it
-  stopped answering after it was asked.
+  stopped answering after it was asked. What that server says the call is doing, in its progress notifications, is
+  said of `relay` too (`stage/2`), the message this server is answering by asking it, if it is.
   """
-  def ask_server(_endpoint, _server, _message, _to, _reference), do: :erlang.nif_error(:nif_not_loaded)
+  def ask_server(_endpoint, _server, _message, _to, _reference, _relay), do: :erlang.nif_error(:nif_not_loaded)
 end

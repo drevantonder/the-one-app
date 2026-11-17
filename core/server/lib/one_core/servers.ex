@@ -180,6 +180,8 @@ defmodule OneCore.Servers do
 
     if restarting != [] do
       Registry.register(OneCore.Waiting, :seen, nil)
+      names = Enum.map_join(restarting, " or ", &(name(&1) || "a server"))
+      OneCore.Call.State.working(OneCore.Call.State.id(), :waiting, "Waiting for #{names} to start again")
 
       try do
         await(restarting, System.monotonic_time(:millisecond) + @back)

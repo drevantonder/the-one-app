@@ -42,7 +42,9 @@ async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Resu
     // So it looks again, as a server that comes back does (`OneCore.Server.reconnected/0`), meanwhile answering
     // what it's asked here: looking again reads the bucket and starts plugins, which can take minutes.
     let reload = *handler;
-    tokio::spawn(async move { crate::ask(&reload, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#).await });
+    tokio::spawn(async move {
+        crate::ask(&reload, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#, Default::default()).await
+    });
     let (mut up, mut down) = socket.split();
     let (responses, mut pending) = mpsc::unbounded_channel();
     let mut say = interval(EVERY);
@@ -57,7 +59,7 @@ async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Resu
                     tokio::spawn(async move {
                         let Ok(call) = serde_json::from_str::<Value>(call.as_str()) else { return };
                         let Some(message) = call["message"].as_str() else { return };
-                        if let Ok(response) = crate::ask(&handler, None, message.as_bytes()).await {
+                        if let Ok(response) = crate::ask(&handler, None, message.as_bytes(), Default::default()).await {
                             let response = json!({"call": call["call"], "answer": String::from_utf8_lossy(&response)});
                             let _ = responses.send(response.to_string());
                         }

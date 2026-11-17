@@ -1,8 +1,8 @@
 defmodule OneCore.Search do
   @moduledoc """
   Code mode's `search`, and `one search`: the tools for a task among those whoever asks has, best first, each with
-  the exact way to call it, what it does and whether it only reads, then the skill of each plugin they're in. It also
-  offers the plugins they could install that match, from what anyone has deployed.
+  the exact way to call it, what it does, whether it only reads and whether it runs as a task, then the skill of each
+  plugin they're in. It also offers the plugins they could install that match, from what anyone has deployed.
 
   It ranks as the `search()` inside a code mode script does (OpenCode's, `@opencode/codemode`'s `tool-runtime.js`),
   over the same tools: field-weighted BM25 over each tool's name, its plugin's name, its description, its inputs'
@@ -78,7 +78,8 @@ defmodule OneCore.Search do
       lines =
         for {entry, call, about} <- Enum.zip([matches, calls, described]) do
           reads = if entry.tool.read_only, do: " It only reads.", else: ""
-          "#{call}\n  #{about}#{reads}"
+          task = if entry.tool.task, do: " It runs as a task.", else: ""
+          "#{call}\n  #{about}#{reads}#{task}"
         end
 
       shown = for(entry <- matches, entry.plugin != nil, do: {entry.plugin, running[entry.plugin]}) |> Enum.uniq()
@@ -102,13 +103,18 @@ defmodule OneCore.Search do
       plugin = listed[:_meta][:plugin]
       name = if plugin, do: String.replace_prefix(listed.name, plugin <> "_", ""), else: listed.name
       read_only = listed[:annotations][:readOnlyHint] == true
+      # Whether its plugin makes it an MCP task, which a tool's listing doesn't say (`OneCore.Tasks`).
+      own = if plugin, do: running[plugin].tools, else: OneCore.Tools.tools()
+
       tool = %{
         name: name,
         description: listed.description || "",
         inputs: listed.inputSchema,
         outputs: listed[:outputSchema],
-        read_only: read_only
+        read_only: read_only,
+        task: Enum.any?(own, &(&1.name == name and &1[:task_support] != nil))
       }
+
       about = if plugin, do: [described(running[plugin])], else: []
 
       %{
