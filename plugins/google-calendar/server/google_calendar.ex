@@ -26,6 +26,13 @@ defmodule GoogleCalendar do
   @impl true
   def permissions, do: ["google-account"]
 
+  # Its accounts are items in its person's Vault, "Google <address>", which the Vault lists under Accounts.
+  @impl true
+  def hooks, do: ["vault.types"]
+
+  @impl true
+  def hook("vault.types", _about, _call), do: [%{name: "Google account", prefix: "Google ", account: true}]
+
   @impl true
   def tools do
     string = &%{type: "string", description: &1}

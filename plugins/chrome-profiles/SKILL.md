@@ -19,8 +19,8 @@ already signed in as them; then use Chrome's tools with its session, as with any
   kept. A browser left to stop by itself isn't saved.
 - Signing in is your person's. Never ask for, read out or type their password, a code or a passkey, even if they
   offer. When a site wants them signed in, `update` opens the profile's browser for them (with a `url`, at that
-  site's sign-in page), and you tell them: open Chrome Profiles on any of their devices, tap the profile, sign in
-  there, and tap Save. `notifications_send` with `app: "chrome-profiles"` reaches their devices. It's saved by
+  site's sign-in page), and you tell them: open Vault on any of their devices, tap the profile under Chrome
+  Profiles, sign in there, and tap Save. `notifications_send` with `app: "vault"` reaches their devices. It's saved by
   itself after 15 minutes. Don't use that browser while they do; once it's saved, `open` the profile again.
 - `save` and `discard` finish an update for them when they ask: with and without saving.
 - `create`, `rename` and `remove` are for when your person asks. Removing one signs it out of everything, for good.

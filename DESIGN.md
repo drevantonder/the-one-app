@@ -38,7 +38,12 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Whoever may arrange an owner's pages edits them; anyone else gets only the app's own menu on touch and hold, with no Edit Home Screen. An owner's pages are one layout: editing everyone's or a group's changes them for everyone who sees them.
 - Settings isn't a place: its apps are ordinary apps, each in its category.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.
-- Accounts is a folder with no count, and opens as a page, not a dialog.
+
+## Vault
+
+- The one place for everything a person has given access to, in sections: Asked for, Passwords and keys, Accounts, then one for each other kind of item a plugin keeps there (Chrome Profiles).
+- Accounts are every plugin's, in one list: each with its plugin's logo, Sign In where it needs signing in again, and Sign Out; Add Account under them.
+- An item a plugin keeps opens beside the list on a desktop, drawn by that plugin itself (a Chrome profile by Chrome Profiles).
 
 ## App Store
 

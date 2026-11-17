@@ -107,16 +107,18 @@ defmodule ChromeProfiles do
   def uses, do: ["vault", "containers", "chrome"]
 
   @impl true
-  def hooks, do: ["chrome.starting", "chrome.closing"]
+  def hooks, do: ["chrome.starting", "chrome.closing", "vault.types"]
 
   @impl true
   def jobs, do: [%{tool: "save_updates", every: 60}]
 
+  # It has no app: its profiles are items of a type of the Vault's, which lists them and draws one with this plugin's
+  # component (`vault.types`), so it names and draws itself.
   @impl true
-  def apps,
-    do: [
-      %{name: "Chrome Profiles", page: "client/index.html", icon: "client/icon.svg", category: "access", subject: "user"}
-    ]
+  def title, do: "Chrome Profiles"
+
+  @impl true
+  def icon, do: "client/icon.svg"
 
   @impl true
   def tools do
@@ -233,7 +235,7 @@ defmodule ChromeProfiles do
       %{
         name: "update",
         description:
-          "Open a profile's browser for your person, in the Chrome Profiles app on any device of theirs, to sign in to sites themselves, or anything else they'd do in their browser. Never sign in for them. It's saved when they tap Save there, or after #{@update_minutes} minutes.",
+          "Open a profile's browser for your person, in Vault on any device of theirs, to sign in to sites themselves, or anything else they'd do in their browser. Never sign in for them. It's saved when they tap Save there, or after #{@update_minutes} minutes.",
         inputs: %{
           type: "object",
           required: ["profile"],
@@ -358,8 +360,8 @@ defmodule ChromeProfiles do
       session: session,
       until: until,
       then:
-        "It's open for your person, in the Chrome Profiles app on any device of theirs, where the profile says Updating. " <>
-          "Ask them to open it there (notifications_send with app chrome-profiles reaches their devices) and sign in to what they want, in its own address bar and tabs. " <>
+        "It's open for your person, in Vault on any device of theirs, where the profile says Updating under Chrome Profiles. " <>
+          "Ask them to open it there (notifications_send with app vault reaches their devices) and sign in to what they want, in its own address bar and tabs. " <>
           "It's saved when they tap Save, or in #{@update_minutes} minutes. Don't sign in for them, and don't use its browser while they do."
     }
   end
@@ -388,8 +390,12 @@ defmodule ChromeProfiles do
     %{saved: saved}
   end
 
-  # A browser on a profile is starting: the profile's last save, if it has one, goes into its container.
+  # A profile is an item of the Vault's, in a section of its own, drawn by `client/profile.tsx`.
   @impl true
+  def hook("vault.types", _about, _call),
+    do: [%{name: "Chrome profile", plural: "Chrome Profiles", prefix: @item, component: "profile", create: "create"}]
+
+  # A browser on a profile is starting: the profile's last save, if it has one, goes into its container.
   def hook("chrome.starting", %{"session" => session, "container" => container}, call) do
     if match?(%{"state" => "starting"}, note(call, session)), do: step(call, session, "opening")
 

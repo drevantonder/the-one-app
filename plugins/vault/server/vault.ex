@@ -71,6 +71,27 @@ defmodule Vault do
   @impl true
   def uses, do: ["encryption", "database"]
 
+  # The kinds of item other plugins keep here, which they register by answering `vault.types` (SKILL.md).
+  @impl true
+  def offers do
+    [
+      %{
+        name: "types",
+        kind: :collect,
+        description:
+          "The kinds of item a plugin keeps in its people's Vaults, which the Vault lists and opens as the plugin says. " <>
+            "It's about nothing. A plugin with item types answers with its list of them, each a map: `name`, one item " <>
+            "of it as a person reads it (Chrome profile); `prefix`, what its items' names start with, for the items " <>
+            "switched on for the plugin (\"Chrome profile: \"), what follows being the item as a person reads it; and " <>
+            "either `account: true`, for items that are accounts, which the Vault lists under Accounts by the plugin's " <>
+            "`accounts`, `sign_in` and `sign_out` tools, or `plural`, the heading of their own section (Chrome " <>
+            "Profiles). `component` names a Solid component the plugin's client exports (client/package.json's " <>
+            "`exports`, as ./<component>), which draws one item, given `item` and `subject`, beside the list; and " <>
+            "`create`, a tool of the plugin's that makes one from its `name`."
+      }
+    ]
+  end
+
   @impl true
   def apps, do: [%{name: "Vault", page: "client/index.html", icon: "client/icon.svg", category: "access", subject: "user"}]
 
@@ -105,6 +126,7 @@ defmodule Vault do
                 type: "object",
                 properties: %{
                   name: %{type: "string"},
+                  type: %{type: ["string", "null"], description: "Its type's id, as `types` lists them, if it's of one"},
                   fields: %{
                     type: "array",
                     items: %{
@@ -123,7 +145,7 @@ defmodule Vault do
                   sign_in: %{type: "boolean", description: "Whether a sign-in made it"},
                   changed: %{type: ["integer", "null"], description: "When it last changed, in milliseconds since 1970"}
                 },
-                required: ["name", "fields", "hosts", "plugins", "agents", "sign_in"]
+                required: ["name", "type", "fields", "hosts", "plugins", "agents", "sign_in"]
               }
             },
             requests: %{
@@ -142,9 +164,31 @@ defmodule Vault do
                 required: ["id", "title", "fields", "hosts", "plugin", "why"]
               }
             },
-            plugins: %{type: "array", items: %{type: "string"}, description: "The plugins that use the Vault"}
+            plugins: %{type: "array", items: %{type: "string"}, description: "The plugins that use the Vault"},
+            types: %{
+              type: "array",
+              description: "The kinds of item plugins keep here (`vault.types`)",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "string"},
+                  plugin: %{type: "string", description: "The plugin's name, which its tools start with"},
+                  title: %{type: ["string", "null"], description: "The plugin's name, as a person reads it"},
+                  icon: %{type: ["string", "null"], description: "The plugin's icon, a data: address"},
+                  trusted: %{type: "boolean", description: "Whether its component is drawn in the Vault's page, or in a frame of its own"},
+                  name: %{type: "string", description: "One item of it, as a person reads it"},
+                  prefix: %{type: "string", description: "What its items' names start with"},
+                  account: %{type: "boolean", description: "Whether its items are accounts"},
+                  plural: %{type: ["string", "null"], description: "Its section's heading"},
+                  component: %{type: ["string", "null"], description: "What the plugin's client exports that draws one"},
+                  create: %{type: ["string", "null"], description: "The plugin's tool that makes one, from its name"},
+                  sign_in: %{type: ["string", "null"], description: "The page the plugin signs an account in on, if it has one"}
+                },
+                required: ~w(id plugin title icon trusted name prefix account plural component create sign_in)
+              }
+            }
           },
-          required: ["items", "requests", "plugins"]
+          required: ["items", "requests", "plugins", "types"]
         }
       },
       %{
@@ -743,6 +787,7 @@ defmodule Vault do
 
   def call("list", _inputs, call) do
     names = names(call)
+    types = types(call)
 
     use_it =
       Enum.sort(
@@ -770,8 +815,12 @@ defmodule Vault do
             for %{"plugin" => plugin} <- query(db, "select plugin from uses where item = ?", [item["id"]]),
                 do: named(names, plugin)
 
+          # An item is of a plugin's type when it's switched on for that plugin and named as the type says.
+          type = Enum.find(types, &(&1.plugin in plugins and String.starts_with?(item["name"], &1.prefix)))
+
           %{
             name: item["name"],
+            type: type && type.id,
             fields: fields,
             hosts: JSON.decode!(item["hosts"]),
             plugins: Enum.sort(plugins),
@@ -796,7 +845,7 @@ defmodule Vault do
           }
         end
 
-      %{items: items, requests: requests, plugins: use_it}
+      %{items: items, requests: requests, plugins: use_it, types: types}
     end)
   end
 
@@ -1212,6 +1261,40 @@ defmodule Vault do
         else: raise("A site is a host's name, like api.example.com.")
     end
   end
+
+  # The item types of the plugins whoever this runs for has (`vault.types`), each as `list` gives it, with its
+  # plugin's name, title and icon, whether its plugin is trusted, which decides where its component is drawn, and the
+  # page its plugin signs an account in on, if it has one. A type that doesn't say what one must is left out.
+  defp types(call) do
+    {:ok, parts, _failed} = Call.run_hook(call, "types", %{})
+    running = Plugins.running(call.subject)
+
+    for {plugin, part} <- Enum.sort(parts),
+        version = running[plugin],
+        version != nil,
+        type <- List.wrap(JSON.decode!(JSON.encode!(part))),
+        type?(type) do
+      %{
+        id: "#{plugin}/#{type["name"]}",
+        plugin: plugin,
+        title: version.title,
+        icon: version.icon,
+        trusted: Map.get(version, :trusted, true),
+        name: type["name"],
+        prefix: type["prefix"],
+        account: type["account"] == true,
+        plural: type["plural"],
+        component: type["component"],
+        create: type["create"],
+        sign_in: Enum.find_value(version.tools, &(&1.name == "sign_in" and &1[:ui] && "#{plugin}/#{&1[:ui]}"))
+      }
+    end
+  end
+
+  defp type?(%{"name" => name, "prefix" => prefix} = type) when is_binary(name) and is_binary(prefix) and prefix != "",
+    do: type["account"] == true or is_binary(type["plural"])
+
+  defp type?(_type), do: false
 
   # The plugins' names as whoever this runs for finds them, by their artifacts.
   defp names(call), do: Map.new(Plugins.running(call.subject), fn {name, version} -> {version.artifact, name} end)

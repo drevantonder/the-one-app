@@ -3,3 +3,25 @@
   margin: 0;
   color: var(--muted-foreground);
 }
+/* A plugin's icon, at the start of a row of its accounts or items: its flat tile, as on the Home Screen. */
+.logo {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 22.5%;
+}
+/* An account that needs signing in again. */
+.warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--warning);
+}
+.actions {
+  display: flex;
+  gap: 0.25rem;
+}
+/* Add Account, under the accounts. */
+.more {
+  padding-top: 0.75rem;
+}

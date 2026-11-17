@@ -1,11 +1,13 @@
-// The Vault: someone's keys, sign-ins and accounts, or a group's or the network's, for whoever owns them. A list of items, each opening beside it: its fields (a secret
-// one is typed and never shown again), the sites its secrets go to, and what may use it. Above them, what's been
-// asked for and waits for an answer. Below, the servers that open the Vault, and which devices hold its person's
-// key, since only one of those chooses the servers.
+// The Vault: everything someone has given access to, or a group or the network has, for whoever owns them. What's
+// been asked for and waits for an answer; their passwords and keys, each opening beside the list with its fields (a
+// secret one is typed and never shown again), the sites its secrets go to, and what may use it; their accounts, each
+// plugin's as its `accounts` lists them, with Sign In and Sign Out; and a section for each other kind of item a plugin
+// keeps here (`vault.types`), one of which its plugin's own component draws beside the list. Below, the servers that
+// open the Vault, and which devices hold its person's key, since only one of those chooses the servers.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
+import { Dynamic, render } from "@solidjs/web"
 import "./app.css"
-import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Split, Switch, toast, useRecoveryKey } from "ui"
+import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Icon, Input, leave, List, Menu, open as opening, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Split, Switch, toast, useRecoveryKey } from "ui"
 
 /// Whose Vault this is: a person's, a group's or the network's. Left unchosen, it's whoever the app was opened for.
 /** A field of an item: a secret one has no value here. */
@@ -18,11 +20,35 @@ interface ItemField {
 /** An item, as `vault_list` answers it. */
 interface Item {
   name: string
+  type: string | null
   fields: ItemField[]
   hosts: string[]
   plugins: string[]
   agents: boolean
   sign_in?: boolean
+}
+
+/** A kind of item a plugin keeps here, as `vault_list` answers it. */
+interface ItemType {
+  id: string
+  plugin: string
+  title: string | null
+  icon: string | null
+  trusted: boolean
+  name: string
+  prefix: string
+  account: boolean
+  plural: string | null
+  component: string | null
+  create: string | null
+  sign_in: string | null
+}
+
+/** An outside account, as a plugin's `accounts` lists it. */
+interface Account {
+  account: string
+  ok: boolean
+  why?: string
 }
 
 /** What a plugin or an agent asked for, waiting for an answer. */
@@ -41,8 +67,9 @@ interface Device {
   name: string
 }
 
-/** The sheet that's open over the page: a field to type, or a request to answer. */
-type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "request"; request: Request }
+/** The sheet that's open over the page: a field to type, a request to answer, a new item of a type to name, or the
+ * plugins an account is added to. */
+type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "request"; request: Request } | { kind: "create"; type: ItemType } | { kind: "accounts" }
 
 const [whose, setWhose] = createSignal<string>()
 const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs, { subject: whose() }).then(JSON.parse)
@@ -50,7 +77,7 @@ const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs
 /// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
 const opened = createMemo(() => ask<{ servers: string[]; may: { key: string; name?: string }[] }>("vault_unlocked_on"))
 const key = createMemo(() => ask<{ owner: string; slot?: unknown; check?: unknown; device: string; devices: Device[]; asking: Device[] }>("encryption_key"))
-const contents = createMemo(() => (opened().servers.length ? ask<{ items: Item[]; requests: Request[]; plugins: string[] }>("vault_list") : { items: [], requests: [], plugins: [] }))
+const contents = createMemo(() => (opened().servers.length ? ask<{ items: Item[]; requests: Request[]; plugins: string[]; types: ItemType[] }>("vault_list") : { items: [], requests: [], plugins: [], types: [] }))
 const again = () => [opened, key, contents].forEach(refresh)
 changed(again)
 
@@ -92,6 +119,15 @@ const listed = (things: string[]) => new Intl.ListFormat("en", { type: "conjunct
 const sites = (typed: unknown) => String(typed ?? "").split(/[\s,]+/).filter(Boolean)
 /// What may use an item, in its grey line.
 const users = (item: Item) => [...item.plugins, ...(item.agents ? ["your agents"] : [])]
+/// An item's type, if it's of one, and its name as a person reads it: "Personal", not "Chrome profile: Personal".
+const typeOf = (item: Item) => contents().types.find((type) => type.id === item.type)
+const shown = (item: Item) => item.name.slice(typeOf(item)?.prefix.length ?? 0)
+/// The plugins with accounts, one each, by their names as a person reads them.
+const withAccounts = () => [...new Map(contents().types.filter((type) => type.account).map((type) => [type.plugin, type])).values()].sort((a, b) => (a.title ?? a.plugin).localeCompare(b.title ?? b.plugin))
+/// A type's name as a menu or a heading says it: "Chrome Profile".
+const titled = (name: string) => name.replace(/(^|\s)\S/g, (first) => first.toUpperCase())
+/// A component a plugin exports (client/package.json), beside the Vault's page, where a client serves each plugin's.
+const component = (type: ItemType) => import(/* @vite-ignore */ new URL(`../../${type.plugin}/client/${type.component}.js`, document.baseURI).href)
 
 /// The item that's open beside the list, by its name, and the sheet that's open over the page.
 const [open, setOpen] = createSignal<string>()
@@ -348,18 +384,185 @@ function Whose() {
   )
 }
 
+/// Signs an account in to a plugin, or with `account`, signs that one in again: on the plugin's own page for it, or at
+/// the web address its `sign_in` answers, in the device's browser.
+const signIn = (type: ItemType, account?: string) =>
+  (type.sign_in
+    ? opening(account ? `${type.sign_in}#${encodeURIComponent(account)}` : type.sign_in, { subject: whose() })
+    : ask<{ url: string }>(`${type.plugin}_sign_in`, account ? { account } : {}).then(({ url }) => opening(url))
+  ).catch(toast)
+
+/// A plugin's accounts, once its `accounts` answers: each with Sign Out, and Sign In where it needs signing in again.
+function AccountsOf(props: { type: ItemType }) {
+  const accounts = createMemo(() => ask<{ accounts: Account[] }>(`${props.type.plugin}_accounts`).then((listed) => listed.accounts))
+  changed(() => refresh(accounts))
+  const title = () => props.type.title ?? props.type.plugin
+  const signOut = async (account: string) => {
+    const sure = await confirm({ heading: `Sign out of ${account}?`, text: `${title()} can't use it until it's signed in again.`, action: "Sign Out", destructive: true })
+    if (sure) await call(`${props.type.plugin}_sign_out`, { account }, { subject: whose() }).catch(toast)
+    refresh(accounts)
+  }
+  return (
+    <For each={accounts()} keyed={(account) => account.account}>
+      {(account) => (
+        <Row
+          start={<img class="logo" src={props.type.icon ?? ""} alt="" />}
+          heading={account().account}
+          text={account().ok ? title() : <span class="warn"><Icon name="warning-circle" />{account().why ?? "Sign in again"}</span>}
+          end={
+            <span class="actions">
+              <Show when={!account().ok}>
+                <Button variant="outline" onClick={() => signIn(props.type, account().account)}>Sign In</Button>
+              </Show>
+              <Button variant="ghost" onClick={() => signOut(account().account)}>Sign Out</Button>
+            </span>
+          }
+        />
+      )}
+    </For>
+  )
+}
+
+/// Every plugin's accounts, in one list, and Add Account.
+function Accounts() {
+  const add = () => (withAccounts().length === 1 ? signIn(withAccounts()[0]) : setSheet({ kind: "accounts" }))
+  return (
+    <Section heading="Accounts">
+      <List>
+        <For each={withAccounts()} keyed={(type) => type.plugin}>
+          {(type) => (
+            <Errored fallback={(error) => <Row start={<img class="logo" src={type().icon ?? ""} alt="" />} heading={type().title ?? type().plugin} text={<span class="warn"><Icon name="warning-circle" />{`Can't list its accounts: ${(error() as Error).message ?? error()}`}</span>} />}>
+              <Loading fallback={null}>
+                <AccountsOf type={type()} />
+              </Loading>
+            </Errored>
+          )}
+        </For>
+      </List>
+      <div class="more">
+        <Button variant="secondary" onClick={add}>Add Account</Button>
+      </div>
+    </Section>
+  )
+}
+
+/// The plugins an account is added to, each signing one in.
+function AccountsSheet() {
+  return (
+    <Sheet heading="Add Account" open={sheet()?.kind === "accounts"} onClose={shut}>
+      <List>
+        <For each={withAccounts()} keyed={(type) => type.plugin}>
+          {(type) => <Row start={<img class="logo" src={type().icon ?? ""} alt="" />} heading={type().title ?? type().plugin} onClick={() => (shut(), signIn(type()))} />}
+        </For>
+      </List>
+    </Sheet>
+  )
+}
+
+/// A new item of a type: its name, which the type's plugin makes it from (`create`), and then it opens.
+function CreateSheet() {
+  const type = () => { const open = sheet(); return open?.kind === "create" ? open.type : undefined }
+  const [busy, setBusy] = createSignal(false)
+  const create = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
+    event.preventDefault()
+    const name = String(new FormData(event.currentTarget).get("name")).trim()
+    const made = type()!
+    setBusy(true)
+    const done = await call(`${made.plugin}_${made.create}`, { name }, { subject: whose() }).then(() => true, (error) => (toast(error), false))
+    setBusy(false)
+    if (done) {
+      shut()
+      again()
+      setOpen(made.prefix + name)
+    }
+  }
+  return (
+    <Sheet heading={type() ? `Add ${titled(type()!.name)}` : ""} open={!!type()} onClose={shut}>
+      <form onSubmit={create}>
+        <Field label="Name">
+          <Input name="name" required autofocus />
+        </Field>
+        <Button type="submit" loading={busy()}>Add</Button>
+      </form>
+    </Sheet>
+  )
+}
+
+/// An item of a type with a component, drawn by its plugin's own: in this page for a trusted plugin, as one of the
+/// Vault's own screens, with what the Vault's page may do.
+function Drawn(props: { type: ItemType; item: Item }) {
+  const drawn = createMemo(() => component(props.type).then((module) => module.default))
+  return <Dynamic component={drawn()} item={shown(props.item)} subject={whose()} open={(name: string) => setOpen(props.type.prefix + name)} close={() => setOpen()} />
+}
+
+/// What's open beside the list: an item of a type with a component, drawn by its trusted plugin's, or else its fields.
+function Detail(props: { item: Item }) {
+  const drawn = () => { const type = typeOf(props.item); return type?.component && type.trusted ? type : undefined }
+  return (
+    <Show when={drawn()} keyed fallback={<ItemScreen item={props.item} />}>
+      {(type) => (
+        <Errored fallback={(error) => <Problem heading={`Can't show ${shown(props.item)}`} text={error() as Error} />}>
+          <Loading fallback={<Skeleton rows={4} />}>
+            <Drawn type={type} item={props.item} />
+          </Loading>
+        </Errored>
+      )}
+    </Show>
+  )
+}
+
+/// An item's grey line in a type's section: what its plugin's component says of it, else what it is.
+function Summary(props: { type: ItemType; item: Item }) {
+  const summary = createMemo(() => (props.type.trusted && props.type.component ? component(props.type).then((module) => module.Summary) : undefined))
+  return (
+    <Errored fallback={props.type.name}>
+      <Loading fallback={props.type.name}>
+        <Show when={summary()} fallback={props.type.name}>
+          {(drawn) => <Dynamic component={drawn()} item={shown(props.item)} subject={whose()} />}
+        </Show>
+      </Loading>
+    </Errored>
+  )
+}
+
+/// An item of a type with a component opens beside the list, but one of an untrusted plugin's opens in a frame of its
+/// own, its page for it (client/<component>.html), where it keeps what an app of its own may do.
+function choose(item: Item) {
+  const type = typeOf(item)
+  if (type?.component && !type.trusted) return opening(`${type.plugin}/client/${type.component}.html#${encodeURIComponent(shown(item))}`, { subject: whose() })
+  setOpen(item.name)
+}
+
 function Vault() {
   const item = () => contents().items.find(({ name }) => name === open())
+  const plain = () => contents().items.filter((item) => !item.type)
+  /// Each other kind of item with any here, in its own section, by the name of the plugin that keeps it.
+  const kinds = () => contents().types.filter((type) => !type.account && contents().items.some((item) => item.type === type.id))
+  const creatable = () => contents().types.filter((type) => type.create && type.trusted)
+  const add = ({ value }: { value: string }) => {
+    const type = contents().types.find(({ id }) => id === value)
+    setSheet(type ? { kind: "create", type } : { kind: "field" })
+  }
   return (
     <>
-      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={contents().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <ItemScreen item={item()} />}</Show>}>
+      <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={contents().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Detail item={item()} />}</Show>}>
         <Screen
         heading="Vault"
         back
         onBack={leave}
         action={
           <Show when={opened().servers.length}>
-            <Button onClick={() => setSheet({ kind: "field" })}>Add</Button>
+            <Show when={creatable().length} fallback={<Button onClick={() => setSheet({ kind: "field" })}>Add</Button>}>
+              <Menu.Root onSelect={add}>
+                <Menu.Trigger variant="default">Add</Menu.Trigger>
+                <Menu.Positioner>
+                  <Menu.Content>
+                    <Menu.Item value="item">Password or Key</Menu.Item>
+                    <For each={creatable()}>{(type) => <Menu.Item value={type.id}>{titled(type.name)}</Menu.Item>}</For>
+                  </Menu.Content>
+                </Menu.Positioner>
+              </Menu.Root>
+            </Show>
           </Show>
         }
       >
@@ -378,10 +581,10 @@ function Vault() {
             </Section>
           </Show>
           <Show when={opened().servers.length}>
-            <Section>
-              <Show when={contents().items.length} fallback={<Empty>Nothing's kept here yet.</Empty>}>
+            <Section heading="Passwords and keys">
+              <Show when={plain().length} fallback={<Empty>None yet.</Empty>}>
                 <List>
-                  <For each={contents().items}>
+                  <For each={plain()}>
                     {(item) => (
                       <Row
                         heading={item.name}
@@ -394,6 +597,28 @@ function Vault() {
                 </List>
               </Show>
             </Section>
+            <Show when={withAccounts().length}>
+              <Accounts />
+            </Show>
+            <For each={kinds()} keyed={(type) => type.id}>
+              {(type) => (
+                <Section heading={type().plural}>
+                  <List>
+                    <For each={contents().items.filter((item) => item.type === type().id)}>
+                      {(item) => (
+                        <Row
+                          start={<img class="logo" src={type().icon ?? ""} alt="" />}
+                          heading={shown(item)}
+                          text={<Summary type={type()} item={item} />}
+                          current={item.name === open()}
+                          onClick={() => choose(item)}
+                        />
+                      )}
+                    </For>
+                  </List>
+                </Section>
+              )}
+            </For>
           </Show>
           <OpenedBy />
           <YourKey />
@@ -402,6 +627,8 @@ function Vault() {
       </Split>
       <FieldSheet />
       <RequestSheet />
+      <CreateSheet />
+      <AccountsSheet />
     </>
   )
 }

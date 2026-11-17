@@ -6,9 +6,10 @@ metadata:
   about: "Keeps your passwords, keys and sign-ins, and lets your apps and your AI use them without ever seeing them. You choose who may use each one."
 ---
 
-The Vault keeps keys, sign-ins and accounts as items, used without being seen. An item has fields (a secret one is
-never read back, by anyone), the sites its secrets are sent to, the plugins switched on for it, and whether agents
-may use it.
+The Vault is the one place for everything a person has given access to: keys, passwords, sign-ins, accounts and
+Chrome profiles, each an item, used without being seen. An item has fields (a secret one is never read back, by
+anyone), the sites its secrets are sent to, the plugins switched on for it, and whether agents may use it, and
+can have contents too large for a field, kept sealed.
 
 Never ask for a password, key or token in the chat, and never paste one. `request` gives the person a link to
 their own device, where they pick or type it; `fetch` makes a web request with an item they let agents use, and
@@ -96,3 +97,35 @@ A plugin trusted with a secret itself, whose service hands it to a program, uses
   then. `read_contents(call, item, name, receive)` gives `receive` a link that reads them and the key, for
   Containers' `download`, or gives `nil` where there are none yet. Neither ever passes the bytes through a tool's
   result, whatever their size. Removing the item removes its contents.
+
+## Item types
+
+A plugin that keeps items in its people's Vaults says what kind they are, as Android's AccountManager has apps
+define account types and keeps the accounts itself. It hooks into `vault.types`, answering with its list of types:
+
+    @impl true
+    def hooks, do: ["vault.types"]
+
+    @impl true
+    def hook("vault.types", _about, _call),
+      do: [%{name: "Chrome profile", plural: "Chrome Profiles", prefix: "Chrome profile: ", component: "profile", create: "create"}]
+
+- `name` is one item of it, as a person reads it, and `prefix` what its items' names start with. An item switched on
+  for the plugin whose name starts with it is of that type, and what follows is the item as a person reads it.
+- `account: true` makes its items accounts: they're under Accounts in the Vault, by the plugin's own three tools.
+  `accounts` lists them, the default first: `%{accounts: [%{account: "sam@example.com", ok: true}]}`, with `why`,
+  a few words, where `ok` is false. `sign_in` signs one in, or with `account` signs that one in again, answering
+  `%{url: ...}`, where the person signs in; one whose signing in needs a screen of its own (a QR code) gives it as
+  `sign_in`'s `ui` (`client/sign-in.html`), which is opened instead, with the account after a `#`. `sign_out` takes
+  `account`. Its other tools take `account`, the first `accounts` lists when it's left out.
+- Any other type has its own section, headed `plural`. `component` is what draws one item beside the list: a Solid
+  component the plugin's client exports (`client/package.json`: `{"exports": {"./profile": "./profile.tsx"}}`), the
+  module's default export, given `item` (the item as a person reads it), `subject` (whose Vault it is), and `open(item)`
+  and `close()`, for once it's renamed or gone. Its `Summary` export, given the same, is the item's line in the
+  list. A trusted plugin's component is drawn in the Vault's page and acts with what the Vault may do. An untrusted
+  plugin's item opens its page `client/<component>.html` in a frame of its own instead, with the item after a `#`,
+  where it keeps what its own app may do. Without a component, an item opens with its fields, as a password does.
+- `create` is the plugin's tool that makes one from a `name`, which the Vault's Add offers.
+
+What the plugin keeps of an item, and the bytes in its contents, are the Vault's to keep and encrypt; what they mean
+and do (a running browser, signed-in tools) are the plugin's.
