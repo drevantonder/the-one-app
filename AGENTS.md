@@ -56,8 +56,6 @@ before choosing.
   the old, and the old removed in the next. No version gate until something needs one.
 - An app's `requires` says the lowest core it needs, `"core" => ">= 0.20.0"`, as Android's `minSdkVersion` does, and
   runs on every version after.
-- Deprecate, don't remove. What an app says that the platform no longer lists is read as what replaced it, and its
-  deploy warns (`@deprecations` in `OneCore.Apps.Deploy`). It's never refused.
 - A change that adds to `core/` says in its commit why an app or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in

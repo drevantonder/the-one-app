@@ -113,8 +113,8 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
   updates went back (17 Nov). It now sends nothing only to those more than one 0.minor behind it; the edge still
   goes after the servers.
 - A breaking release that removed two app categories (17 Nov), when parts talked only on one 0.minor and apps
-  pinned one with `~>`: the network split in two and six apps waited for updates. Now parts talk across one, apps
-  say a minimum, and a removal is a deprecation.
+  pinned one with `~>`: the network split in two and six apps waited for updates. Now parts talk across one, and apps
+  say a minimum.
 
 ## Report
 

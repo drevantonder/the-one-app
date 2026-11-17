@@ -34,16 +34,6 @@ defmodule OneCore.Apps.Deploy do
   @doc "What an app may say it's for, its `category`, in the order a listing shows them."
   def categories, do: @categories
 
-  # What an app may still say that the platform no longer lists, each with what it is now. It's never refused: it's
-  # read as what it is now wherever it's read (`current/2`), and deploying an app that says it warns (`deprecated/1`),
-  # so a removal strands no app and its author moves on when they next change it.
-  @deprecations %{
-    category: %{"Communication" => "Connectors", "Productivity" => "Connectors"}
-  }
-
-  @doc "What `value`, as an app says its `what` (`:category`), is now: what replaced it, or itself."
-  def current(what, value), do: get_in(@deprecations, [what, value]) || value
-
   @doc """
   Deploys an app for `owner` from its files by their paths: the app that `name` is for them is updated, for
   everyone who has it, and if there's none it's a new app of theirs, installed for them. Its app, if it has one, is
@@ -81,7 +71,6 @@ defmodule OneCore.Apps.Deploy do
         with :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
              :ok <- outputs(version),
              :ok <- categorized(version),
-             deprecated = deprecated(version),
              :ok <- icon(name, version),
              :ok <- if(install, do: fits(owner, name, version), else: :ok),
              {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
@@ -91,8 +80,7 @@ defmodule OneCore.Apps.Deploy do
              :ok <- listed(artifact),
              {:ok, number} <- Store.keep(artifact, name, version, built, files, from, trusted, was),
              :ok <- committed(owner, name, number, version, install) do
-          warnings =
-            Enum.join(Enum.reject([warnings | deprecated ++ untasked(name, version, built)], &(&1 == "")), "\n")
+          warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}
         end
       after
@@ -202,16 +190,6 @@ defmodule OneCore.Apps.Deploy do
         {:error, "#{Enum.join(missing, ", ")} don't say what they answer. #{@outputs}"}
     end
   end
-
-  # What of `@deprecations` a version says, each as a warning saying what it is now.
-  defp deprecated(version) do
-    for {what, now} <- @deprecations, said = said(version, what), is_map_key(now, said) do
-      "Its skill's metadata says its #{what} is #{inspect(said)}, which is #{inspect(now[said])} now: say that " <>
-        "(the skill building-apps)."
-    end
-  end
-
-  defp said(version, :category), do: Version.metadata(version)["category"]
 
   defp categorized(version) do
     case Version.listing(version).category do
