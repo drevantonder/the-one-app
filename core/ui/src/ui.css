@@ -999,6 +999,15 @@ button.ui-box {
     background: color-mix(in oklab, var(--accent) 50%, transparent);
   }
 }
+/* Pressed, a row fills grey at once, as a phone's lists do, rather than dimming, and clears as it's let go. */
+.ui-row > :is(a, button).row.press {
+  transition: background-color var(--move-quick) var(--ease-quick);
+}
+.ui-row > :is(a, button).row.press:active {
+  background: var(--pressed);
+  opacity: 1;
+  transition-duration: 0s;
+}
 /* A row with a menu opens it on a long press or a right-click too, so pressing it long selects nothing and opens no
    preview of a link. */
 .ui-row[data-menu] {
