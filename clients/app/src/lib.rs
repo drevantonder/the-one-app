@@ -552,9 +552,6 @@ mod status_bar {
     }
 }
 
-/// Ctrl-Q quits and Ctrl-W closes the window, as they do in a Linux app's, before the page hears them. A Mac's
-/// Cmd-Q and Cmd-W are its menu's, and Windows' Alt-F4 the system's.
-#[cfg(target_os = "linux")]
 /// A developer's build writes what its pages say to their console, warnings and errors among them, to its stdout,
 /// every frame's, as WebKitGTK offers: its web view has no other console to read without a window of its own.
 #[cfg(all(target_os = "linux", debug_assertions))]
@@ -567,6 +564,9 @@ fn console_to_stdout(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     })
 }
 
+/// Ctrl-Q quits and Ctrl-W closes the window, as they do in a Linux app's, before the page hears them. A Mac's
+/// Cmd-Q and Cmd-W are its menu's, and Windows' Alt-F4 the system's.
+#[cfg(target_os = "linux")]
 fn linux_keys(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     use gtk::gdk::{ModifierType, keys::constants as key};
     use gtk::glib::Propagation;
