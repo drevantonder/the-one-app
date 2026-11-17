@@ -107,6 +107,20 @@ fn sign(key_file: String, message: Binary) -> Result<String, String> {
     Ok(HEXLOWER.encode(&key.sign(message.as_slice()).to_bytes()))
 }
 
+/// What `one serve run` told the server in `line`, read as `client::serve::Told` and given as the JSON it's read as,
+/// or why it's not one.
+#[rustler::nif]
+fn told(line: &str) -> Result<String, String> {
+    Ok(serde_json::from_str::<client::serve::Told>(line).map_err(|error| error.to_string())?.to_string())
+}
+
+/// The line the server says `message` in, the JSON of a `client::serve::Said`, which `one serve run` reads, or why it
+/// isn't one.
+#[rustler::nif]
+fn said(message: &str) -> Result<String, String> {
+    Ok(serde_json::from_str::<client::serve::Said>(message).map_err(|error| error.to_string())?.to_string())
+}
+
 /// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
 /// `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, its address and the token
 /// shown there, it's reached through the relay at that address too, and hears what outsiders ask there, whose `from`

@@ -9,6 +9,18 @@ defmodule OneCore.Iroh do
   def sign(_key_file, _message), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
+  What the program keeping this server running told it in `line` (`client::serve::Told`, which says each message),
+  as the JSON it's read as: `{:ok, json}`, or `{:error, why}` for a line that isn't one.
+  """
+  def told(_line), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  The line this server says `message` in to the program keeping it running, `message` being the JSON of one of
+  `client::serve::Said`: `{:ok, line}`, or `{:error, why}` for one that isn't.
+  """
+  def said(_message), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
   Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
   `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, `{address, token}`, it's
   reached through the relay at that address too, and hears what outsiders ask there, whose `from` is `nil`, and it

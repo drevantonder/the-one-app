@@ -11,6 +11,7 @@
 
 mod resolve;
 mod cache;
+pub mod serve;
 
 use std::io::{ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};

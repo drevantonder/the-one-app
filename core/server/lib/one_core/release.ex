@@ -5,8 +5,10 @@ defmodule OneCore.Release do
   running, and when it's asked to update, and that program does the rest: it takes the latest build and `one`, starts
   them to verify them, and goes back to the pair before if they don't start and answer by their key.
 
+  What each says to the other is a line of JSON, one of the messages the `client` crate defines
+  (`core/client/src/serve.rs`), which this reads and writes through its NIF (`OneCore.Iroh.told/1` and `said/1`).
   That program says what this server is (`status/0`) as it starts it, in `ONE_SERVER_STATUS`, and as that changes, a
-  line of JSON on its input each time:
+  line on its input each time:
 
   - `server_membership`: whether this device is one of its network's servers: `joining` while `one serve on` makes
     it one, until it answers by its key, `active`, and `leaving` while `one serve off` drains it.
@@ -22,13 +24,7 @@ defmodule OneCore.Release do
   apps have started.
   """
   require Logger
-  alias OneCore.{Builds, Server, Servers}
-
-  @doc "What it says when it's running, with its key after."
-  def running, do: "A server is running: "
-
-  @doc "What it says when it's asked to take the latest build."
-  def update_asked, do: "Update asked"
+  alias OneCore.{Builds, Iroh, Server, Servers}
 
   @doc """
   Starts the server, says so, and runs until it's stopped: until its input closes, as the program that started it
@@ -38,7 +34,7 @@ defmodule OneCore.Release do
   def serve do
     case Application.ensure_all_started(:one_core) do
       {:ok, _started} ->
-        IO.puts(running() <> Server.key())
+        say(%{"running" => %{"key" => Server.key()}})
         __MODULE__.read()
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->
@@ -59,10 +55,10 @@ defmodule OneCore.Release do
   def read do
     case IO.read(:line) do
       line when is_binary(line) ->
-        case JSON.decode(line) do
+        case told_in(line) do
           {:ok, %{"load" => build}} -> load(build)
-          {:ok, %{} = said} -> told(said)
-          _ -> Logger.warning("The program keeping this server running said what it doesn't read: #{String.trim(line)}")
+          {:ok, said} -> told(said)
+          {:error, why} -> Logger.warning("The program keeping this server running said what it doesn't read (#{why}): #{line}")
         end
 
         __MODULE__.read()
@@ -73,6 +69,22 @@ defmodule OneCore.Release do
     end
   end
 
+  # Says `message`, the terms of one of the `client` crate's `Said` as JSON has them, to the program keeping this
+  # server running, or to the program checking this build: a line of JSON, where that program says all of what this
+  # server is in `ONE_SERVER_STATUS`, and otherwise the text a server said before, which a program from before reads.
+  defp say(message) do
+    {:ok, line} = Iroh.said(JSON.encode!(message))
+    IO.puts(if match?({:ok, _}, Iroh.told(System.get_env("ONE_SERVER_STATUS", ""))), do: line, else: text(message))
+  end
+
+  defp text(%{"running" => %{"key" => key}}), do: "A server is running: " <> key
+  defp text("update_asked"), do: "Update asked"
+  defp text(%{"loaded" => %{"build" => build}}), do: "Loaded " <> build
+  defp text(%{"not_loaded" => %{"build" => build, "why" => why}}), do: "Didn't load #{build}: #{why}"
+  defp text(%{"checked" => %{"build" => build}}), do: build
+  defp text(%{"compared" => %{"update_method" => "hot_load"}}), do: "hot_load"
+  defp text(%{"compared" => %{"why" => why}}), do: "restart: " <> why
+
   @status %{
     "server_membership" => "active",
     "server_daemon_status" => "starting",
@@ -81,6 +93,21 @@ defmodule OneCore.Release do
     "update_method" => nil,
     "went_back" => nil
   }
+
+  # What a line the program keeping it running said is: a `Told`, or some of what this server is, as a program from
+  # before says it.
+  defp told_in(line) do
+    case Iroh.told(line) do
+      {:ok, json} ->
+        {:ok, JSON.decode!(json)}
+
+      {:error, why} ->
+        case JSON.decode(line) do
+          {:ok, %{} = said} -> {:ok, Map.take(said, Map.keys(@status))}
+          _ -> {:error, why}
+        end
+    end
+  end
 
   @doc """
   What this server is, as the program keeping it running last said: `server_membership`, `server_daemon_status`,
@@ -139,7 +166,7 @@ defmodule OneCore.Release do
   def update do
     if status()["server_update_status"] == "up_to_date" do
       Registry.register(OneCore.Waiting, :status, nil)
-      IO.puts(update_asked())
+      say("update_asked")
 
       with :ok <- awaiting(&(&1["server_update_status"] != "up_to_date"), @begun),
            do: awaiting(&(&1["server_update_status"] == "up_to_date" or restarting?(&1)), :infinity)
@@ -161,13 +188,13 @@ defmodule OneCore.Release do
         function_exported?(module, :__nif__, 0),
         do: OneCore.Nif.build(module)
 
-    IO.puts(Builds.build())
+    say(%{"checked" => %{"build" => Builds.build()}})
   end
 
   @doc """
   Whether the build in the folder `new` can be loaded into a server running the one in `old` while it runs, as
-  `one serve run` asks before it takes a build (both whole releases, as it keeps them): says `hot_load`, or
-  `restart: <why>`, and gives it. It's run in a fresh VM of `new`, which nothing else runs in: to tell what changed,
+  `one serve run` asks before it takes a build (both whole releases, as it keeps them): says so (`compared`), and
+  gives `nil` for a hot load, or why it restarts. It's run in a fresh VM of `new`, which nothing else runs in: to tell what changed,
   it loads the code of `old` there too.
 
   A hot load replaces only One Core's own code (`load/1`), so it restarts for anything else, and for what its code
@@ -179,14 +206,9 @@ defmodule OneCore.Release do
   the rest of its module's, so any change to a module with macros restarts.
   """
   def compare(old, new) do
-    said =
-      case restart(old, new) do
-        nil -> "hot_load"
-        why -> "restart: " <> why
-      end
-
-    IO.puts(said)
-    said
+    why = restart(old, new)
+    say(%{"compared" => %{"update_method" => if(why, do: "restart", else: "hot_load"), "why" => why}})
+    why
   end
 
   defp restart(old, new) do
@@ -368,8 +390,8 @@ defmodule OneCore.Release do
 
   @doc """
   Loads the build in the folder `build` into this server while it runs, as `one serve run` asks once `compare/2` said
-  `hot_load`, and says `Loaded <build>`; or where it can't, leaves this server on the code it had and says
-  `Didn't load <build>: <why>`. Going back is the same: loading the build before.
+  `hot_load`, and says it's `loaded` it; or where it can't, leaves this server on the code it had and says it's
+  `not_loaded` it, and why. Going back is the same: loading the build before.
 
   Each process of its supervision tree whose code changed is stopped first, then the modules that changed are loaded
   all at once or none (`:code.atomic_load/1`), and those it no longer has are deleted, and the processes are started
@@ -384,11 +406,11 @@ defmodule OneCore.Release do
   def load(build) do
     case loaded(build) do
       :ok ->
-        IO.puts("Loaded #{Builds.build()}")
+        say(%{"loaded" => %{"build" => Builds.build()}})
         :ok
 
       {:error, why} ->
-        IO.puts("Didn't load #{named(build)}: #{why}")
+        say(%{"not_loaded" => %{"build" => named(build), "why" => why}})
         {:error, why}
     end
   end
