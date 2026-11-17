@@ -621,6 +621,18 @@ async fn opens(app: AppHandle) {
         }
     });
 
+    // A server refused this client for being behind it: the window says only that it needs updating, as an app that
+    // requires an update does.
+    let (handle, mut behind) = (app.clone(), client.behind());
+    tauri::async_runtime::spawn(async move {
+        while behind.changed().await.is_ok() {
+            if let Some(why) = behind.borrow_and_update().clone() {
+                eprintln!("this client is behind its servers: {why}");
+                drop(handle.emit("behind", why));
+            }
+        }
+    });
+
     // A server said something changed, so every view on screen asks again, and the window is told which open apps
     // were loaded against a version it says is gone (`stale`). Servers tell this client for as long as it runs, so a
     // notification reaches it with its window hidden.

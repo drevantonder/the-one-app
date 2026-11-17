@@ -167,6 +167,8 @@ export interface Events {
   stale: string[]
   /** Where the device is with its network, as it moves. */
   session: Told
+  /** Why a server refused this client for being on a version before its own, once one has. */
+  behind: string
 }
 
 export type Listen = <Event extends keyof Events>(event: Event, handler: (event: { payload: Events[Event] }) => void) => unknown

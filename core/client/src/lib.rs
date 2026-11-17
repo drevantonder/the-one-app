@@ -934,6 +934,10 @@ pub struct Client {
     watching: AtomicBool,
     /// Whether its network answers, which only `connection_moved` changes.
     connection: watch::Sender<Connection>,
+    /// Why a server refused it for being on a version before the server's that doesn't talk with it (`OneCore.Mcp`),
+    /// once one has: from then on it asks only what brings it up to date (`updates`), as an app that requires an
+    /// update does nothing but offer it, rather than being refused again for everything it asks.
+    behind: watch::Sender<Option<String>>,
     /// What the native code of the apps the program ships with fills in of a tool's inputs (`resolve`).
     resolvers: Vec<Arc<dyn InputResolver>>,
     /// What this client knows of each tool, as a server last listed them (`resolve`).
@@ -1028,7 +1032,7 @@ impl Client {
         let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
             home, key, address, session: watch::Sender::new(session), admitting: Mutex::default(),
-            again: Arc::default(), link, reach, notifications, says, watching, connection, resolvers,
+            again: Arc::default(), link, reach, notifications, says, watching, connection, behind: watch::Sender::new(None), resolvers,
             listed, resource, reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
             me: me.clone(), runtime: tokio::runtime::Handle::current(),
         });
@@ -1208,6 +1212,11 @@ impl Client {
         self.connection.subscribe()
     }
 
+    /// Why its servers refused it for being behind them, once one has, which lasts until it's updated (`behind`).
+    pub fn behind(&self) -> watch::Receiver<Option<String>> {
+        self.behind.subscribe()
+    }
+
     /// Moves whether its network answers to `next`, if that's a move there is from where it is
     /// (`Connection::moves_to`), and once it answers again after it didn't for longer than a person is shown nothing
     /// of it, reports how long it didn't. Gives whether it moved.
@@ -1312,6 +1321,12 @@ impl Client {
                 changed = connection.changed() => changed?,
             }
         }
+        // Behind its servers, it asks them nothing they'd refuse it for that.
+        if let Some(why) = self.behind.borrow().clone()
+            && !updates(message)
+        {
+            bail!("{why}")
+        }
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
         let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<Value>) =
@@ -1355,6 +1370,11 @@ impl Client {
         };
         let response = request.await;
         self.answered(response.is_ok());
+        if let Ok(response) = &response
+            && let Some(why) = left_behind(response)
+        {
+            self.behind.send_if_modified(|now| now.is_none() && now.replace(why).is_none());
+        }
         if let Some(mut span) = span {
             let refused = match &response {
                 Err(why) => Some(why.to_string()),
@@ -1744,6 +1764,31 @@ fn keep(home: &Path, record: &Value) {
 
 /// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
 /// A refusal is short, and a long answer isn't read twice to find it isn't one.
+/// Whether `message` asks what a server answers whatever version asks it, as it's how a client catches up: the list
+/// of tools, which builds there are, downloading one, and updating (`talks` in `OneCore.Mcp`).
+fn updates(message: &[u8]) -> bool {
+    let Ok(request) = serde_json::from_slice::<Value>(message) else { return false };
+    let tool = request["params"]["name"].as_str().unwrap_or_default();
+    request["method"] == "tools/list" || (request["method"] == "tools/call" && ["builds", "download", "update"].contains(&tool))
+}
+
+/// Why a server refused this client, where it's for this client being on a version before the server's that doesn't
+/// talk with it: a server answers that -32022, with its own version, as MCP refuses a protocol version it doesn't speak.
+/// One behind this client, which is asked again once it's updated, isn't this client's to fix.
+fn left_behind(response: &[u8]) -> Option<String> {
+    if response.len() > 16 << 10 {
+        return None;
+    }
+    let response: Value = serde_json::from_slice(response).ok()?;
+    let error = &response["error"];
+    let minor = |build: &str| -> Option<(u64, u64)> {
+        let mut parts = build.split(['.', '+']);
+        Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+    };
+    let (ours, theirs) = (minor(BUILD)?, minor(error["data"]["version"].as_str()?)?);
+    (error["code"] == -32022 && ours < theirs).then(|| error["message"].as_str().unwrap_or("This app needs updating").to_owned())
+}
+
 fn refused(response: &[u8]) -> Option<String> {
     if response.len() > 16 << 10 {
         return None;

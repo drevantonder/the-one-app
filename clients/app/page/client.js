@@ -108,7 +108,8 @@ visualViewport?.addEventListener("resize", keyboard)
 
 /// What the window shows of itself, one state at a time: while it opens, until it can start the launcher; the
 /// launcher, once it has drawn; signing in, where the device isn't in its network; why there's no launcher to show,
-/// with Apps to install one; and an update. Only `on` moves it, by the moves `machine` has, and a move that isn't
+/// with Apps to install one; and an update, which is all it shows once a server has refused this client for being
+/// behind it (`behind` from core/client), as an app that requires an update does. Only `on` moves it, by the moves `machine` has, and a move that isn't
 /// there is refused. Whether its network answers is the client's (`Connection` in core/client), which the
 /// window follows and never decides: it says it as it opens, and as a banner over the launcher.
 const { assign, createActor, fromPromise, setup } = XState
@@ -176,19 +177,19 @@ const machine = setup({
     sign_in: { entry: "signIn" },
     launcher: {
       entry: "listen",
-      on: { update: { guard: "updateReady", target: "updating" } },
+      on: { update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating" },
     },
     no_launcher: {
-      on: { openAppStore: { guard: "appStore", target: "app_store" } },
+      on: { openAppStore: { guard: "appStore", target: "app_store" }, tooOld: "needs_updating" },
     },
     // The App Store, shown with no launcher under it, until a launcher is installed.
     app_store: {
       entry: "openAppStore",
-      on: { listed: "opening" },
+      on: { listed: "opening", tooOld: "needs_updating" },
     },
     // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
     launcher_failed: {
-      on: { retry: "opening", drawn: "launcher" },
+      on: { retry: "opening", drawn: "launcher", tooOld: "needs_updating" },
     },
     needs_updating: {
       on: { update: { guard: "updates", target: "updating" } },
@@ -863,6 +864,9 @@ async function hearTaps() {
   await window.__TAURI__.core.addPluginListener("notifications", "notificationClicked", (tapped) => invoke("tapped", { tapped }))
   await invoke("plugin:notifications|set_click_listener_active", { active: true })
 }
+
+// A server refused this client for being behind it: it asks nothing more, and says only that it needs updating.
+listen("behind", () => on({ type: "tooOld" }))
 
 // A server says which open apps were loaded against a version that's gone.
 listen("stale", ({ payload: hosts }) => {
