@@ -298,8 +298,8 @@ defmodule OneCore.Apps.Lifecycle do
 
   @doc """
   Moves on what's installed for `owner` that the clock moves, as a server acting for them does once a day: one in
-  Recently Deleted for 30 days is removed for good, with what it kept, and one installing for longer than it could
-  has failed.
+  Recently Deleted for 30 days is removed for good, with what it kept, one installing for longer than it could
+  has failed, and one that failed isn't in use for them.
   """
   def reconcile(owner) do
     now = System.system_time(:millisecond)
@@ -312,6 +312,10 @@ defmodule OneCore.Apps.Lifecycle do
 
         %{"state" => "installing", "at" => at} when at <= now - @partway ->
           failed(owner, name, "It stopped partway, as the server installing it did. Try again.")
+
+        # Its server may have stopped between its failing and saying so in its artifact.
+        %{"state" => "not_installed", "app" => artifact} ->
+          Installed.unmarked(artifact, owner)
 
         _ ->
           :ok

@@ -18,9 +18,9 @@ defmodule OneCore.Apps.Installed do
   `OneCore.Artifact.update/3`: two servers moving one record at once each see the other's move first, and a move the
   table doesn't have is refused, saying why. A record keeps what it held that this doesn't read.
 
-  That someone installed an app is kept with the app too, as the blob `installed/<who>` in its artifact, which
-  ends `deleted` while it's in their Recently Deleted: so a deploy tells their servers, and it's in use for them only
-  while it isn't deleted.
+  That someone installed an app is kept with the app too, as the blob `installed/<who>` in its artifact, from when
+  it's installing, which ends `deleted` while it's in their Recently Deleted and goes where it failed to install: so a
+  deploy tells their servers, and it's in use for them only while it's installing or installed.
   """
   alias OneCore.{Artifact, Bucket}
 
@@ -102,12 +102,12 @@ defmodule OneCore.Apps.Installed do
     end
   end
 
-  defp marked(_owner, _record), do: :ok
+  defp marked(owner, %{"app" => app, "state" => "not_installed"}), do: unmarked(app, owner)
 
   @doc "Says the app `artifact` is no longer installed for `owner`, unless they have it by another name."
   def unmarked(artifact, owner) do
-    if not Enum.any?(read(owner), fn {_name, record} -> record["app"] == artifact end),
-      do: Bucket.remove("#{artifact}/installed/#{owner}")
+    has = fn {_name, record} -> record["app"] == artifact and record["state"] != "not_installed" end
+    if not Enum.any?(read(owner), has), do: Bucket.remove("#{artifact}/installed/#{owner}")
   end
 
   @doc """
