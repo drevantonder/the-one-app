@@ -5,9 +5,9 @@ it lives in any GitHub repo at `plugins/<name>/`, with a `SKILL.md` whose front 
 `description`, and what a person reads of it in its `metadata`'s `subtitle`, `about` and `category`, each on one line,
 and it's listed the first time an installer says it installed it. Each is listed as a network's marketplace lists it:
 what its SKILL.md says, and what its code says (`listing`), as the network that installed it gave it. `seed.js` lists
-a repo's plugins as a network's App Store lists them, so the list isn't empty before anyone has installed them:
+a repo's plugins as a network's Marketplace lists them, so the list isn't empty before anyone has installed them:
 
-    one home-screen store | bun seed.js drevantonder/the-one-app ../../plugins > seed.sql
+    one plugins marketplace | bun seed.js drevantonder/the-one-app ../../plugins > seed.sql
 
 ## The installer's call
 

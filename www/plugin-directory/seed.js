@@ -1,13 +1,13 @@
 // The SQL that lists the plugins of a repo's plugins/ folder: what each one's SKILL.md says, and what its code says
-// as a network's App Store lists it (`home-screen store`), where it lists it:
-//     one home-screen store | bun seed.js <owner>/<repo> <its plugins/ folder> > seed.sql
+// as a network's Marketplace lists it (`plugins marketplace`), where it lists it:
+//     one plugins marketplace | bun seed.js <owner>/<repo> <its plugins/ folder> > seed.sql
 import { Glob } from "bun";
 import { frontMatter, listing } from "./worker.ts";
 
 const [source, folder] = process.argv.slice(2);
 const [owner, repo] = source.toLowerCase().split("/");
 // The network's own over a copy someone in it deployed, where there are both.
-const plugins = (await Bun.stdin.json()).plugins.sort((a, b) => a.plugin.startsWith("network/") - b.plugin.startsWith("network/"));
+const plugins = (await Bun.stdin.json()).plugins.filter((plugin) => plugin.plugin).sort((a, b) => a.plugin.startsWith("network/") - b.plugin.startsWith("network/"));
 const store = new Map(plugins.map((plugin) => [plugin.plugin.split("/").pop(), plugin]));
 const quote = (text) => (text == null ? "NULL" : `'${text.replaceAll("'", "''")}'`);
 const now = new Date().toISOString();

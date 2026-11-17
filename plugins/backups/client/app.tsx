@@ -228,17 +228,17 @@ function RestoreSheet() {
   const choices = createMemo(async () => {
     if (!destination()) return { whose: createListCollection<{ value: string; label: string }>({ items: [] }), apps: createListCollection<{ value: string; label: string }>({ items: [] }) }
     const listed = <T,>(tool: string, key: string) => call(tool).then((text): T[] => JSON.parse(text)[key], (): T[] => [])
-    const [people, groups, store] = await Promise.all([
+    const [people, groups, plugins] = await Promise.all([
       listed<{ who: string; called?: string; joined?: boolean }>("sign-in_everyone", "people"),
       listed<{ group: string; called: string }>("permissions_groups", "groups"),
-      listed<{ plugin: string; name: string }>("home-screen_store", "plugins"),
+      listed<{ plugin: string | null; name: string; title: string }>("plugins_marketplace", "plugins"),
     ])
     const whose = [
       ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
       ...groups.map((group) => ({ value: group.group, label: group.called })),
       { value: "network", label: "Everyone" },
     ]
-    const apps = [...new Map(store.map((app) => [app.plugin.split("/").pop()!, app.name])).entries()].map(([value, label]) => ({ value, label }))
+    const apps = [...new Map(plugins.filter((plugin) => plugin.plugin).map((plugin) => [plugin.name, plugin.title])).entries()].map(([value, label]) => ({ value, label }))
     return { whose: createListCollection({ items: whose }), apps: createListCollection({ items: apps }) }
   })
   const backupsOf = () => createListCollection({ items: destination()!.backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
