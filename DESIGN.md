@@ -71,6 +71,15 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Words are bare: a title and a button. Warnings about who will act as you stay.
 - Try a Demo is in a ? menu in the start screen's corner.
 
+## Opening, the connection and updates (17 Nov)
+
+- The window's states and the connection's are the owner's signed-off machines (`client.js`, `Connection` in core/client): a new state or move is theirs to sign off.
+- Opening is the `Steps` look: "Connecting to your network" the first time, "Can't reach your network" while it's offline with nothing kept, then "Opening Home Screen". A launcher kept from before opens without the network.
+- With the launcher showing, a network that doesn't answer is a thin banner at the top, as Slack and Gmail have, and everything else stays: "Reconnecting…" as it tries again, and nothing once it's back.
+- No launcher: "There's no Home Screen yet." with Open Plugins, or "Only Andre can install a Home Screen for Everyone" where the person can't.
+- A launcher that doesn't draw: "Home Screen didn't open." with Try Again and Show Details.
+- Update is an icon top right on Home pages, beside the owner switcher, with the word beside it on desktop as Chrome's Update pill, shown only when an update for this device is ready.
+
 ## Desktop windows
 
 - A Mac window has an overlay title bar with one fixed sidebar button. Windows and Linux keep the system's bar, tinted.
