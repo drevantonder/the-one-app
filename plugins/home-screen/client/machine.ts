@@ -56,7 +56,7 @@ export function pack<T>(items: T[], spans: (item: T) => [number, number] = () =>
 }
 
 /// The cells an item of a page takes: an app one, a widget its size.
-export const spans = (item: Item | "accounts"): [number, number] => (typeof item === "object" && item.widget ? (SPANS[item.size!] ?? [2, 2]) : [1, 1])
+export const spans = (item: Item): [number, number] => (item.widget ? (SPANS[item.size!] ?? [2, 2]) : [1, 1])
 
 /** A Home page as it's edited: what's on it, and whether it's hidden. */
 export interface Page {

@@ -11,10 +11,9 @@ import { createActor } from "xstate"
 import { Button, call, changed, confirm, covers, Empty, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 import { type At, type Editing, fitted, type Held, kinds, type Kind, machine, type Opened, pack, type Page, type Placed, shown, spans } from "./machine.ts"
-import type { Account, App, Category, Item, Pages, PluginWithAccounts, Size, Widget as WidgetItem } from "./types.ts"
+import type { App, Category, Item, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
 const HOME = "home-screen/client/index.html"
-const ACCOUNTS = "home-screen/client/accounts.html"
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
 const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
 
@@ -87,8 +86,8 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
   )
 }
 
-/// An icon with its name under it, an app's or the Accounts folder's. The app starts as a finger lands on it, and shows
-/// as the finger lifts, unless the finger held it.
+/// An icon with its name under it. The app starts as a finger lands on it, and shows as the finger lifts, unless the
+/// finger held it.
 function Tile(props: { name: string; onPress?: (behind?: boolean) => void; children: JSX.Element }) {
   return (
     <button type="button" class="tile" onPointerDown={() => props.onPress?.(true)} onClick={() => props.onPress?.()}>
@@ -98,39 +97,8 @@ function Tile(props: { name: string; onPress?: (behind?: boolean) => void; child
   )
 }
 
-/// The Accounts folder, last on your pages: the icons of the plugins with accounts, which aren't apps, small in a 3×3
-/// grid, and a dot while an account needs its person.
-function AccountsTile(props: { plugins: PluginWithAccounts[] }) {
-  return (
-    <Tile name="Accounts" onPress={(behind) => state().matches("nothing") && open(ACCOUNTS, { behind })}>
-      <span class="folder">
-        <For each={props.plugins.slice(0, 9)} keyed={(plugin) => plugin.plugin}>
-          {(plugin) => <img src={plugin().icon} alt="" />}
-        </For>
-      </span>
-      <Loading>
-        <Attention plugins={props.plugins} />
-      </Loading>
-    </Tile>
-  )
-}
-
-/// A dot while any account of the folder's plugins is not ok, as each plugin's `accounts` answers.
-function Attention(props: { plugins: PluginWithAccounts[] }) {
-  const needed = createMemo(async () => {
-    const lists = await Promise.all(props.plugins.map((plugin) => json<{ accounts: Account[] }>(`${plugin.name}_accounts`, {}, plugin.subject).then((listed) => listed.accounts, (): Account[] => [])))
-    return lists.flat().some((account) => !account.ok)
-  })
-  onSettled(() => changed(() => refresh(needed)))
-  return (
-    <Show when={needed()}>
-      <i class="attention" aria-label="An account needs you" />
-    </Show>
-  )
-}
-
-/// What a Home page holds as it's drawn: an item of the owner's, where it is among the page's, or the Accounts folder.
-type Cell = { item: Item; index: number } | { item: "accounts"; index: -1 }
+/// What a Home page holds as it's drawn: an item of the owner's, and where it is among the page's.
+type Cell = { item: Item; index: number }
 
 /// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a touch held still is a hold, as is
 /// a right-click; a press that moves while editing, or once held, lifts it. `held` says what it is, as it is then.
@@ -198,7 +166,7 @@ addEventListener("pointermove", (event) => (pointer = { x: event.clientX, y: eve
 
 /// A Home page: its grid, each item where it was placed. While its owner's pages are edited, everything jiggles with
 /// its ⊖, and what's lifted leaves its place empty. An owner with nothing on their pages has one grey line.
-function HomePage(props: { owner: Owner; index: number; page: number; placed: Placed<Cell>[]; withAccounts: PluginWithAccounts[]; small?: boolean }) {
+function HomePage(props: { owner: Owner; index: number; page: number; placed: Placed<Cell>[]; small?: boolean }) {
   const editingHere = () => !props.small && editingOwner(props.index)
   const lifted = (cell: Cell) => {
     const held = state().context.held
@@ -209,16 +177,16 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
     <section class={["page", { small: props.small }]} data-page={props.page} ref={props.small ? undefined : holds(() => (editingHere() ? undefined : { page: props.page, index: -1, from: "page" }), arranges)}>
       <Show when={props.placed.length || editingHere()} fallback={<Empty>No apps on this page.</Empty>}>
         <div class="grid">
-          <For each={props.placed} keyed={({ item }) => (item.item === "accounts" ? "accounts" : (item.item.widget ?? item.item.app) + (item.item.size ?? ""))}>
+          <For each={props.placed} keyed={({ item }) => (item.item.widget ?? item.item.app) + (item.item.size ?? "")}>
             {(placed) => (
               <div
-                class={["cell", { jiggles: editingHere() && placed().item.item !== "accounts", lifted: lifted(placed().item) }]}
+                class={["cell", { jiggles: editingHere(), lifted: lifted(placed().item) }]}
                 data-index={placed().item.index}
-                data-size={placed().item.item !== "accounts" ? (placed().item.item as Item).size : undefined}
+                data-size={placed().item.item.size}
                 style={{ "--column": placed().column, "--row": placed().row, "--width": placed().width, "--height": placed().height, "--wobble": `${(placed().item.index * 97) % 240}ms` }}
-                ref={props.small ? undefined : holds(() => (placed().item.item === "accounts" ? undefined : { item: placed().item.item as Item, page: props.page, index: placed().item.index, from: "page" }), arranges)}
+                ref={props.small ? undefined : holds(() => ({ item: placed().item.item, page: props.page, index: placed().item.index, from: "page" }), arranges)}
               >
-                <Show when={placed().item.item !== "accounts" && (placed().item.item as Item)} fallback={<AccountsTile plugins={props.withAccounts} />}>
+                <Show when={placed().item.item}>
                   {(item) => (
                     <>
                       <Show when={item().widget} fallback={<Tile name={(item() as App).name} onPress={(behind) => state().matches("nothing") && launch(item() as App, props.owner, behind)}><img src={(item() as App).icon} alt="" /></Tile>}>
@@ -472,7 +440,7 @@ function Gallery(props: { owner: Owner }) {
 
 /// The page overview: every Home page small, in order, each with a tick for whether it's shown. Unticked, a page is
 /// hidden and can be deleted; dragging one puts it elsewhere. Done goes back to editing.
-function Overview(props: { owner: Owner; index: number; withAccounts: PluginWithAccounts[] }) {
+function Overview(props: { owner: Owner; index: number }) {
   const pages = () => editing()?.pages ?? []
   const [dragging, setDragging] = createSignal<number>()
   const remove = async (page: number) => {
@@ -501,7 +469,7 @@ function Overview(props: { owner: Owner; index: number; withAccounts: PluginWith
           {(page, index) => (
             <div class={["thumbnail", { hidden: page.hidden, dragging: dragging() === index() }]} data-overview={index()}>
               <div class="miniature" onPointerDown={drag(index())}>
-                <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} withAccounts={props.withAccounts} small />
+                <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} small />
                 <Show when={page.hidden}>
                   <button type="button" class="minus" aria-label={`Delete page ${index() + 1}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => remove(index())}>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 12h10" /></svg>
@@ -573,6 +541,7 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[]; hidden: boole
 /// are there instead, as on a phone.
 function Switcher(props: { owners: Owner[]; hidden: boolean }) {
   const at = () => state().context.at.owner
+  let button!: HTMLButtonElement
   return (
     <div class="top" data-hidden={props.hidden ? "" : undefined}>
       <Show
@@ -586,15 +555,15 @@ function Switcher(props: { owners: Owner[]; hidden: boolean }) {
           </div>
         }
       >
-        <Menu.Root open={state().matches("listing")} onOpenChange={({ open }) => home.send({ type: open ? "list" : "dismiss" })} onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })} positioning={{ placement: "bottom" }}>
-          <Menu.Trigger class="switch" variant="ghost" aria-label={props.owners[at()]?.name}>
-            <span class="roll" aria-hidden="true">
-              <span class="names">
-                <For each={props.owners}>{(owner) => <span>{owner.name}</span>}</For>
-              </span>
+        <button type="button" class="switch ui-button press ring" data-variant="ghost" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
+          <span class="roll" aria-hidden="true">
+            <span class="names">
+              <For each={props.owners}>{(owner) => <span>{owner.name}</span>}</For>
             </span>
-            <Icon name="caret-up-down" />
-          </Menu.Trigger>
+          </span>
+          <Icon name="caret-up-down" />
+        </button>
+        <Menu.Root open={state().matches("listing")} onOpenChange={({ open }) => !open && home.send({ type: "dismiss" })} onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })} positioning={{ placement: "bottom", getAnchorRect: () => button.getBoundingClientRect() }}>
           <Menu.Positioner>
             <Menu.Content>
               <For each={props.owners}>
@@ -628,18 +597,15 @@ function HomeScreen(props: { owners: Owner[] }) {
   const places = new Map<string, HTMLElement>()
   const [room, setRoom] = createSignal(measure())
 
-  // Every plugin with accounts on any owner's pages, each once, is in the one Accounts folder, last on yours.
-  const withAccounts = createMemo(() => [...new Map(props.owners.flatMap((owner) => owner.plugins_with_accounts.map((plugin): [string, PluginWithAccounts] => [plugin.plugin, { ...plugin, subject: owner.subject }]))).values()])
 
   /// Each owner's Home pages as they're drawn: the ones they keep shown, or while they're edited, as they're edited,
-  /// each placed on its grid. A page kept with more than fits goes on over the next ones. Yours end with Accounts.
+  /// each placed on its grid. A page kept with more than fits goes on over the next ones.
   const pages = createMemo(() =>
     props.owners.map((owner, index) => {
       const edited = editingOwner(index) ? editing()!.pages : kept()?.owner === index ? kept()!.pages : owner.pages
       const showing: Page[] = shown(edited).map((at) => edited[at])
       const cells = showing.map((page): Cell[] => page.items.map((item, at) => ({ item, index: at })))
       if (!cells.length) cells.push([])
-      if (index === 0 && withAccounts().length && !editingOwner(index)) cells[cells.length - 1].push({ item: "accounts", index: -1 })
       return cells.flatMap((page) => (editingOwner(index) ? [pack(page, (cell) => spans(cell.item)).flat()] : pack(page, (cell) => spans(cell.item))))
     }),
   )
@@ -798,7 +764,7 @@ function HomeScreen(props: { owners: Owner[] }) {
             <section class="owner" aria-label={owner().name}>
               <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }} onScroll={moved}>
                 <For each={pages()[index()] ?? [[]]} keyed={false}>
-                  {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} withAccounts={withAccounts()} />}
+                  {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
                 </For>
                 <Library owner={owner()} index={index()} places={places} />
               </div>
@@ -811,7 +777,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[opened().owner]} opened={opened()} places={places} />}</Show>
       <Show when={held()}>{(held) => <Holding owner={owner()} index={state().context.at.owner} held={held()} />}</Show>
       <Show when={state().matches({ editing: "overview" }) && editing()}>
-        {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} withAccounts={withAccounts()} />}
+        {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} />}
       </Show>
       <Show when={editing()}>{(edited) => <Gallery owner={props.owners[edited().owner]} />}</Show>
     </div>

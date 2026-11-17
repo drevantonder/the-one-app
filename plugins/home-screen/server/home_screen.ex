@@ -13,10 +13,6 @@ defmodule HomeScreen do
 
   Every tool here is asked for whoever's Home Screen it is, as an app opened from it is. What draws them is this
   plugin's `client/`: its app in the category `launcher`, which a client shows first.
-
-  A plugin has accounts, outside accounts a person signs it in to, when it has an icon and the tools `accounts`,
-  `sign_in` and `sign_out` (SKILL.md). Accounts, a folder at the end of the first page, lists them by plugin. Having
-  accounts doesn't make a plugin's app, nor put it on a page.
   """
   @behaviour OneCore.Plugin
 
@@ -52,11 +48,6 @@ defmodule HomeScreen do
       }
     ]
   end
-
-  # The tools a plugin with accounts has, beside its icon (SKILL.md). A plugin that only serves other plugins' code
-  # (google-account) may have tools named the same, and no icon.
-  @accounts ~w(accounts sign_in sign_out)
-  defp accounts?(%{icon: icon}, tools), do: icon != nil and @accounts -- tools == []
 
   @impl true
   def tools do
@@ -116,8 +107,7 @@ defmodule HomeScreen do
         description: """
         Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
         Library, every app installed for you by category (`library`), the widgets that could be put on a page
-        (`widgets`), the plugins with accounts (`plugins_with_accounts`), which Accounts lists, and whether you may
-        arrange it. Asked for a group or for the network, it's theirs.
+        (`widgets`), and whether you may arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none,
         outputs: %{
@@ -154,24 +144,9 @@ defmodule HomeScreen do
                 required: ["category", "name", "apps"]
               }
             },
-            widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"},
-            plugins_with_accounts: %{
-              type: "array",
-              description: "The plugins with accounts, which Accounts lists. None is an app",
-              items: %{
-                type: "object",
-                properties: %{
-                  plugin: %{type: "string"},
-                  name: %{type: "string", description: "What its tools start with"},
-                  title: %{type: "string", description: "Its name, as a person reads it"},
-                  icon: %{type: "string", description: "Its own icon, as a data: address"},
-                  sign_in: %{type: "string", description: "Its sign_in tool's page, if signing in needs one"}
-                },
-                required: ["plugin", "name", "title", "icon"]
-              }
-            }
+            widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"}
           },
-          required: ["who", "arranges", "pages", "library", "widgets", "plugins_with_accounts"]
+          required: ["who", "arranges", "pages", "library", "widgets"]
         }
       },
       %{
@@ -216,7 +191,7 @@ defmodule HomeScreen do
         name: "store",
         read_only: true,
         description:
-          "Lists every plugin anyone has deployed that a person could add: one with an icon that not every network has. Each with what a person reads of it (`subtitle`, `about`) and whether it has accounts (`accounts`)",
+          "Lists every plugin anyone has deployed that a person could add: one with an icon that not every network has. Each with what a person reads of it (`subtitle`, `about`)",
         inputs: none,
         outputs: %{
           type: "object",
@@ -230,10 +205,9 @@ defmodule HomeScreen do
                   title: %{type: "string", description: "Its name, as a person reads it"},
                   icon: %{type: "string", description: "A data: address"},
                   subtitle: %{type: ["string", "null"]},
-                  about: %{type: ["string", "null"]},
-                  accounts: %{type: "boolean", description: "Whether it has accounts"}
+                  about: %{type: ["string", "null"]}
                 },
-                required: ["plugin", "title", "icon", "subtitle", "about", "accounts"]
+                required: ["plugin", "title", "icon", "subtitle", "about"]
               }
             }
           },
@@ -324,24 +298,12 @@ defmodule HomeScreen do
         %{items: items, hidden: page["hidden"] == true}
       end
 
-    # A plugin with accounts is listed in Accounts, and signs one in on its `sign_in`'s page if it has one.
-    plugins_with_accounts =
-      for plugin <- plugins,
-          plugin.installed == call.subject,
-          names = Enum.map(plugin.tools, & &1.name),
-          accounts?(plugin, names) do
-        page = Enum.find_value(plugin.tools, &(&1.name == "sign_in" && &1[:ui]))
-        signs_in = if page, do: %{sign_in: "#{plugin.name}/#{page}"}, else: %{}
-        Map.merge(%{plugin: plugin.plugin, name: plugin.name, title: plugin.title, icon: plugin.icon}, signs_in)
-      end
-
     %{
       who: call.subject,
       arranges: Call.owns?(call),
       pages: pages,
       library: library,
-      widgets: widgets,
-      plugins_with_accounts: Enum.sort_by(plugins_with_accounts, &String.downcase(&1.title))
+      widgets: widgets
     }
   end
 
@@ -376,8 +338,7 @@ defmodule HomeScreen do
             title: plugin.title,
             icon: plugin.icon,
             subtitle: plugin.subtitle,
-            about: plugin.about,
-            accounts: accounts?(plugin, plugin.tools)
+            about: plugin.about
           }
 
     %{plugins: Enum.sort_by(plugins, &String.downcase(&1.title))}

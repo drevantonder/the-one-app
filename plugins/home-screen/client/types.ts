@@ -10,16 +10,6 @@ export interface App {
   subject?: "user"
 }
 
-/** A plugin with accounts, which Accounts lists. Not an app: its name there (what its tools start with), its own title and icon, and its `sign_in` tool's page, if it has one. */
-export interface PluginWithAccounts {
-  plugin: string
-  name: string
-  title: string
-  icon: string
-  sign_in?: string
-  subject?: string
-}
-
 /** A widget on a page, or one that could go on one: its tool, the sizes it comes in, and the app pressing it opens. */
 export interface Widget {
   widget: string
@@ -48,12 +38,4 @@ export interface Pages {
   pages: { items: Item[]; hidden: boolean }[]
   library: Category[]
   widgets: Widget[]
-  plugins_with_accounts: PluginWithAccounts[]
-}
-
-/** An outside account, as a plugin's `accounts` lists it. */
-export interface Account {
-  account: string
-  ok: boolean
-  why?: string
 }

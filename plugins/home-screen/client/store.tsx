@@ -1,9 +1,7 @@
-// The App Store: every plugin a person could add, one with an app or with accounts, each with its subtitle, and on
-// its sheet what it's about and whose it's in use for: yours, everyone's or a group's. Adding one installs it for
-// them, into their App Library, or where it's in use for everyone already, puts its app on their Home Screen; one with
-// accounts and no app is then in Accounts. Taking one off keeps what it kept, and adding it back brings that back.
-// Where the person may not install, a grey line says who may, whom they ask themselves. Opened as `#accounts`
-// (Accounts' Add Account for Another App), it lists the plugins with accounts.
+// The App Store: every plugin a person could add, each with its subtitle, and on its sheet what it's about and whose
+// it's in use for: yours, everyone's or a group's. Adding one installs it for them, into their App Library, or where
+// it's in use for everyone already, puts its app on their Home Screen. Taking one off keeps what it kept, and adding
+// it back brings that back. Where the person may not install, a grey line says who may, whom they ask themselves.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Sheet, Skeleton, Switch, toast } from "ui"
@@ -16,13 +14,14 @@ interface Plugin {
   icon: string
   subtitle?: string
   about?: string
-  accounts: boolean
 }
 
-/** An owner of a Home Screen, by the name a person reads, what `home-screen_pages` answers for them, and who may install for them. */
+/** An owner of a Home Screen, by the name a person reads, what `home-screen_pages` answers for them, the plugins
+ * installed for them, by their names there, and who may install for them. */
 interface Owner extends Pages {
   subject?: string
   name: string
+  installed: Map<string, string>
   installers: string[]
 }
 
@@ -41,26 +40,24 @@ const store = createMemo(async () => {
     json<{ plugins: Plugin[] }>("home-screen_store").then(({ plugins }) => plugins),
     Promise.all(
       whose.map(async (who): Promise<Owner> => {
-        const pages = await json<Pages>("home-screen_pages", {}, who.subject)
+        const [pages, plugins] = await Promise.all([json<Pages>("home-screen_pages", {}, who.subject), json<{ plugins: { name: string; plugin: string; for: string }[] }>("plugins", {}, who.subject).then(({ plugins }) => plugins)])
+        // What's installed for them, rather than for whoever they're in.
+        const installed = new Map(plugins.filter((plugin) => plugin.for === pages.who).map((plugin) => [plugin.plugin, plugin.name]))
         // Whoever may install for a group or everyone; anyone installs for themselves.
         const installers = who.subject ? await json<{ users: string[] }>("permissions_users", { artifact: who.subject, relation: "installer" }).then(({ users }) => users, (): string[] => []) : [pages.who]
-        return { ...pages, ...who, installers }
+        return { ...pages, ...who, installed, installers }
       }),
     ),
   ])
-  const me = owners[0].who
-  const plugins = location.hash === "#accounts" ? all.filter((plugin) => plugin.accounts) : all
-  return { plugins, owners, me, called }
+  return { plugins: all, owners, me: owners[0].who, called }
 })
 changed(() => refresh(store))
 
-/// The plugin, by its name there, if an owner has it: installed for them, so in their App Library or Accounts, or with
-/// its app put on their Home Screen (`put`).
+/// The plugin, by its name there, if an owner has it: installed for them, or with its app put on their Home Screen
+/// (`put`).
 function on(owner: Owner, plugin: Plugin): { name: string; put?: boolean } | undefined {
-  const installed = owner.library.flatMap((category) => category.apps).find((app) => app.plugin === plugin.plugin)
-  if (installed) return { name: installed.app.split("/")[0] }
-  const withAccounts = owner.plugins_with_accounts.find((one) => one.plugin === plugin.plugin)
-  if (withAccounts) return { name: withAccounts.name }
+  const name = owner.installed.get(plugin.plugin)
+  if (name) return { name }
   const item = owner.pages.flatMap((page) => page.items).find((item) => item.app && item.plugin === plugin.plugin)
   return item?.app ? { name: item.app.split("/")[0], put: true } : undefined
 }

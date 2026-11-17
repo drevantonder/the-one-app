@@ -1,6 +1,6 @@
 ---
 name: home-screen
-description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, or giving a plugin's app a category, accounts or the user it's about.
+description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, or giving a plugin's app a category or the user it's about.
 metadata:
   subtitle: "Your pages of apps"
   about: "Your Home Screen, everyone's and your groups': pages of apps and widgets, arranged your way, and an App Library of every app you have, by category."
@@ -50,24 +50,3 @@ An App Library shows them in that order. An app that says none of these is in Ot
 An app opens for whoever's Home Screen it's on, or whose App Library it's in. One about whoever opens it, as Vault,
 Devices and Notifications are, says `subject: "user"`: it's in the user's own App Library and opens for them,
 wherever its plugin is installed.
-
-## Accounts
-
-An account is a person's account at an outside service (a Gmail address, a WhatsApp number) that they sign a
-plugin in to, so its tools act there as them. A plugin that does has accounts, and says so with three tools:
-
-- `accounts` lists them, the default first: `%{accounts: [%{account: "sam@example.com", ok: true}]}`, and when `ok` is false,
-  `why`, a few words saying what's wrong. It may add fields of its own.
-- `sign_in` signs one in, or with `account` signs that one in again. It answers `%{url: ...}`, the web address
-  the person signs in at. One whose signing in needs a screen of its own (a QR code, a device to pick) gives
-  `sign_in` that page as its `ui`, named for what it is (`client/sign-in.html`), which is opened instead, with the
-  account after a `#` when signing one in again.
-- `sign_out` takes `account` and signs it out.
-
-Its other tools take `account`, the first `accounts` lists when it's left out. It gives its own icon (`icon/0`)
-and, with no app to take it from, its name (`title/0`): the plugin's, which Accounts and the App Store show.
-
-Accounts, a folder at the end of your pages, lists them: a section for each plugin with accounts, by its name and
-icon, its accounts with Sign In and Sign Out, and Add Account. Neither an account nor a plugin with accounts is an
-app, so `pages` gives them apart from its apps, as `plugins_with_accounts`. A plugin with accounts has an app only
-for a screen a person opens for something else.
