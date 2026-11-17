@@ -241,7 +241,7 @@ defmodule OneCore.Builds do
       not talk?(theirs, build()) ->
         "It's on #{theirs} and #{Servers.name(Server.key()) || "this server"} on #{build()}, so they don't talk until both are on one"
 
-      (edge && not talk?(theirs, edge)) and older?(theirs, edge) ->
+      edge != nil and not talk?(theirs, edge) and older?(theirs, edge) ->
         "It's on #{theirs}, before the edge's #{edge}, so the edge takes #{name || "it"} for restarting until it's updated"
 
       true ->
