@@ -45,7 +45,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Uninstalling is in the App Library (17 Nov): touch and hold an app, then Remove App, which asks in an alert naming what goes with it ("Remove Sign-In? Devices, Users & Groups and Connect Your AI are part of it and will be removed too.") and puts it in Recently Deleted. Where you may not, Remove App is greyed, with why under it: "This is Family's, and you're not one of its owners."
 - Whoever may arrange an owner's pages edits them; anyone else gets only the app's own menu on touch and hold, with no Edit Home Screen. An owner's pages are one layout: editing everyone's or a group's changes them for everyone who sees them.
 - Home Screen behaviour copies iOS's unless there's a reason not to (17 Nov): paging, long press into edit mode, the hold menu, drag with the other icons reflowing, haptics, and an alert before removing.
-- An app opened from its icon grows out of it and closes back into it, as iOS's (17 Nov); one opened any other way slides in.
+- An app opened from its icon grows out of it and closes back into it, as iOS's (17 Nov); one opened any other way slides in. For whoever asked for reduced motion, either fades in place.
 - The page dots are all one size, the current one brighter, as iOS's (17 Nov).
 - Editing moves no icon (17 Nov): on a phone the status bar hides and + and Done take its place, as iOS's; where there's no status bar, the strip above the first row is tall enough for them, so they never cover an icon or its ⊖.
 - Big app icons on pages have their name under them (17 Nov), cut with "…" when long. The cards stay square: the icon shrinks to make room. Why: our icons aren't as well known as iOS's, so the name is needed.
