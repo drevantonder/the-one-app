@@ -12,6 +12,7 @@ import { createActor } from "xstate"
 import { Button, call, changed, confirm, covers, Empty, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
+import { offset, reflow } from "./reflow.ts"
 import { type At, type Editing, fitted, type Held, kinds, type Kind, machine, type Opened, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { App, Category, Item, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
@@ -628,6 +629,14 @@ function HomeScreen(props: { owners: Owner[] }) {
     { defer: true },
   )
   createEffect(laid, (pages) => home.send({ type: "laid", pages }))
+  /// The cells of the Home pages, which glide to their new places while they're edited, and not as editing begins.
+  const cells = () => root.querySelectorAll<HTMLElement>(".strip .page .cell")
+  let wasEditing = false
+  createEffect(pages, () => {
+    const now = home.getSnapshot().matches("editing")
+    reflow(cells(), now && wasEditing)
+    wasEditing = now
+  })
   pending = () => (props.owners[state().context.at.owner]?.arranges ? draft(props.owners[state().context.at.owner], state().context.at.owner) : undefined)
 
   /// The kind of the page an owner is on: the one shown, for whoever's shown.
@@ -778,7 +787,11 @@ function HomeScreen(props: { owners: Owner[] }) {
         const under = document.elementsFromPoint(event.clientX, event.clientY) as HTMLElement[]
         const page = under.find((element) => element.dataset?.page !== undefined)
         if (!page) return
-        const cell = under.find((element) => element.classList.contains("cell") && element.dataset.index !== undefined && !element.classList.contains("lifted"))
+        // Over where each cell sits, not where it's drawn while it glides there, or one gliding past takes the place.
+        const cell = [...page.querySelectorAll<HTMLElement>(".cell[data-index]:not(.lifted)")].find((one) => {
+          const [box, by] = [one.getBoundingClientRect(), offset(one)]
+          return event.clientX >= box.left - by.x && event.clientX < box.right - by.x && event.clientY >= box.top - by.y && event.clientY < box.bottom - by.y
+        })
         const { held } = home.getSnapshot().context
         const index = cell ? Number(cell.dataset.index) : Number.MAX_SAFE_INTEGER
         const at = Number(page.dataset.page)
@@ -802,9 +815,9 @@ function HomeScreen(props: { owners: Owner[] }) {
         // What was carried settles into its place as it's let go, rather than vanishing over it.
         const place = strips[home.getSnapshot().context.at.owner]?.querySelector<HTMLElement>(`[data-page="${left.page}"] .cell[data-index="${left.index}"]`)
         if (!place || still.matches) return void copy.remove()
-        const to = place.getBoundingClientRect()
+        const [to, glided] = [place.getBoundingClientRect(), offset(place)]
         place.style.visibility = "hidden"
-        const settling = copy.animate([{ translate: copy.style.translate, scale: "1.08" }, { translate: `${to.x - rect.x}px ${to.y - rect.y}px`, scale: "1" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
+        const settling = copy.animate([{ translate: copy.style.translate, scale: "1.08" }, { translate: `${to.x - glided.x - rect.x}px ${to.y - glided.y - rect.y}px`, scale: "1" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
         settling.finished.finally(() => (copy.remove(), (place.style.visibility = "")))
       }
     },
@@ -816,6 +829,8 @@ function HomeScreen(props: { owners: Owner[] }) {
     // The window may have changed since this was first drawn, and every owner's pages stay on the page they were.
     const resized = () => {
       setRoom(measure())
+      // Once it's drawn again for the new size, where each cell is is where it is.
+      requestAnimationFrame(() => reflow(cells(), false))
       const { at, last } = home.getSnapshot().context
       props.owners.forEach((_, owner) => jump(sideways(owner), Math.min(furthest(owner), (owner === at.owner ? at.page : (last[owner] ?? 0)) * pitch(owner))))
       jump(down, at.owner * height())
