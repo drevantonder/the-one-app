@@ -80,6 +80,8 @@
   --text-base: 0.875rem;
   --text-lg: 1.0625rem;
   --text-title: 1.75rem;
+  /* What's typed in a field: body, but never under 16px under a finger, below. */
+  --text-field: var(--text-base);
 
   /* The type styles, which every text is one of: body; label, for what's pressed, named or a row's heading; title,
      for a screen's, a dialog's and a big widget text; figure, for a big number. Each is a weight and, for the big
@@ -134,12 +136,15 @@
   }
 }
 
-/* Under a finger: a target of 44px, and text an iPhone doesn't zoom into a field to show. */
+/* Under a finger: a target of 44px, and text an iPhone doesn't zoom into a field to show. It zooms into one whose
+   text is under 16px and doesn't zoom back out, so what's typed stays 16px where body is smaller, as at an iPhone's
+   smaller Text Sizes (below). */
 @media (pointer: coarse) {
   :root {
     --text-sm: 0.875rem;
     --text-base: 1rem;
     --text-lg: 1.0625rem;
+    --text-field: max(16px, var(--text-base));
     --control: 2.75rem;
     --icon: 1.125rem;
   }

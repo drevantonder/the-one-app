@@ -5,7 +5,10 @@
 /* The page itself, before any script has run: the theme, so nothing flashes white. */
 html {
   -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
   scrollbar-gutter: stable;
+  /* A tap is a tap at once, never the first of a double tap that zooms: what's pressed answers without the wait. */
+  touch-action: manipulation;
   /* An app isn't a document: pulling past its top neither refreshes it nor drags the window. Sideways is the
      device's: a trackpad's two-finger swipe goes back, as it does in a browser. */
   overscroll-behavior-y: none;
@@ -115,6 +118,18 @@ html:has(.ui-dialog[open]) {
   margin: 0;
   font: inherit;
   color: inherit;
+}
+/* What's typed in an app's own field, as in the UI library's, at least 16px under a finger (tokens.css). */
+:where(input, textarea, select) {
+  font-size: var(--text-field);
+}
+/* A picture is part of what it's in, as in a phone's own apps: a long press on it opens no menu (iOS's Share, Copy,
+   Save to Photos), selects nothing, and it isn't dragged out of the page. */
+img {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 /* What's the app's own, not what it shows: read and pressed, not selected, and a long press on it opens no link's
    preview. */
@@ -300,7 +315,7 @@ html:has(.ui-dialog[open]) {
   border: 1px solid var(--input);
   border-radius: var(--radius-md);
   background: light-dark(transparent, color-mix(in oklab, var(--input) 30%, transparent));
-  font-size: var(--text-base);
+  font-size: var(--text-field);
   text-align: start;
   box-shadow: var(--shadow-xs);
 }
@@ -739,9 +754,6 @@ button.ui-box {
   border-radius: var(--radius-sm);
   font-weight: var(--label-weight);
 }
-[data-date-picker-view-control] button:hover {
-  background: var(--accent);
-}
 [data-date-picker-view-control] button:disabled {
   opacity: 0.5;
 }
@@ -773,9 +785,6 @@ button.ui-box {
   min-width: calc(var(--cell) * 7 / 4);
   height: calc(var(--cell) * 1.25);
 }
-[data-date-picker-table-cell-trigger]:hover:not([data-disabled], [data-selected]) {
-  background: var(--accent);
-}
 [data-date-picker-table-cell-trigger][data-today] {
   background: var(--accent);
   color: var(--accent-foreground);
@@ -799,9 +808,15 @@ button.ui-box {
   color: var(--muted-foreground);
   font-size: var(--text-sm);
 }
-[data-date-picker-clear-trigger]:hover {
-  background: var(--accent);
-  color: var(--accent-foreground);
+@media (hover: hover) and (pointer: fine) {
+  [data-date-picker-view-control] button:hover,
+  [data-date-picker-table-cell-trigger]:hover:not([data-disabled], [data-selected]) {
+    background: var(--accent);
+  }
+  [data-date-picker-clear-trigger]:hover {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
 }
 
 /* Tabs: a few views of one thing. */
