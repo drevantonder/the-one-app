@@ -400,10 +400,6 @@ defmodule OneCore.Apps.Lifecycle do
     end
   end
 
-  @doc false
-  # Soft delete's before it called `restore/2`, until it's deployed calling that.
-  def restore(owner, name, _asked), do: restore(owner, name)
-
   @doc """
   Removes an app in Recently Deleted for `owner` for good, with what it kept, and whatever went there with it, as
   Recently Deleted purging it does: `nil`, or `{:error, why}`.

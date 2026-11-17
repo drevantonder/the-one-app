@@ -231,12 +231,6 @@ defmodule OneCore.App.Manifest do
      and went with it, by its `name` and `app`. An app that keeps what's deleted takes what they kept and made for
      them along, as one.
      """},
-    {"restored", :observe,
-     """
-     An app was brought back from Recently Deleted for someone. It's about who it's installed `for`, the `name` it's
-     installed by there and the `app` it is. An app that keeps what's deleted brings back what it kept and made for
-     them with it.
-     """},
     {"joined", :observe,
      """
      A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the
