@@ -25,22 +25,14 @@ defmodule OneCore.Apps.Version.Description do
   def description(%Version{under: under} = version) do
     kept = LoadedVersion.kept(under)
 
-    # Until every server reads its JSON form (`described/2`), it's kept as the term it was, holding only names any
-    # server knows: a tool's inputs as JSON has them, not the atoms its app wrote them with.
-    json = &JSON.decode!(JSON.encode!(&1))
-
     tools =
       for tool <- version.tools,
-          do:
-            tool
-            |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
-            |> Map.update!(:inputs, json)
-            |> Map.replace_lazy(:outputs, json)
+          do: Map.take(tool, [:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
 
     version
     |> Map.take(Manifest.said() ++ @kept)
     |> Map.merge(%{tools: tools, files: kept.files, skills: kept.skills})
-    |> :erlang.term_to_binary()
+    |> JSON.encode!()
   end
 
   @doc """
