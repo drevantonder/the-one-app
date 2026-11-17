@@ -280,19 +280,21 @@ async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> 
             .iter()
             .map(|kind| {
                 let (os, arch) = kind.split_once('-').unwrap_or((kind.as_str(), ""));
+                // The same as tooling/nifs builds them: a Windows DLL is kept under the same kind of name.
                 let (triple, build, glibc, file) = match os {
-                    "macos" => (format!("{arch}-apple-darwin"), "build", "", "dylib"),
-                    _ => (format!("{arch}-unknown-linux-gnu"), "zigbuild", ".2.35", "so"),
+                    "macos" => (format!("{arch}-apple-darwin"), "build", "", format!("lib{library}.dylib")),
+                    "windows" => (format!("{arch}-pc-windows-msvc"), "xwin build", "", format!("{library}.dll")),
+                    _ => (format!("{arch}-unknown-linux-gnu"), "zigbuild", ".2.35", format!("lib{library}.so")),
                 };
                 format!(
                     "    rustup target add {triple} && CARGO_TARGET_DIR=target cargo {build} --release --target {triple}{glibc} \
-                     && cp target/{triple}/release/lib{library}.{file} {kind}.so"
+                     && cp target/{triple}/release/{file} {kind}.so"
                 )
             })
             .collect();
         bail!(
             "{name} has native code, the NIF in {}, which isn't built for {}, where the network's servers run. Build it \
-             as tooling/nifs does, Linux's with zig (cargo-zigbuild) for a server's glibc and a Mac's on a Mac, then \
+             as tooling/nifs does, Linux's with zig (cargo-zigbuild) for a server's glibc, Windows' with cargo-xwin and a Mac's on a Mac, then \
              install it again:\n\n    cd {}\n{}",
             crate_folder.display(),
             missing.iter().map(|kind| kind.as_str()).collect::<Vec<_>>().join(" and "),
