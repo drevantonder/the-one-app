@@ -12,8 +12,9 @@
 //! - `server_update_status` (`ServerUpdateStatus`), while it's active: up to date, downloading the latest server
 //!   build and `one` together, verifying the pair, and up to date again, kept or gone back. Verifying is checking
 //!   the build starts and how it's taken (`UpdateMethod`), then loading it into the server while it runs, or starting
-//!   both in its place (`ServerUpdateStage`). A build is only ever run by the `one` the record pairs it with: a new
-//!   one is kept beside this one until its pair starts.
+//!   both in its place (`ServerUpdateStage`). A build is started only by the `one` the record pairs it with, and
+//!   loaded only into a server whose `one` speaks what it does (`client::serve::protocol`): a new `one` is put in
+//!   place as its build is loaded, and runs the server from its next start, which only what needs one brings.
 //!
 //! ```text
 //! server_membership:
@@ -26,7 +27,7 @@
 //!
 //! server_update_status:
 //!   up to date ─asked─► downloading (the build, and `one` beside this one) ─► verifying: checking
-//!     ─hot load─► loading ─answers─► up to date on the new pair
+//!     ─hot load─► loading ─answers─► up to date on the new pair, its `one` put in place
 //!                           └─doesn't─► the build before loaded again ─► up to date, went back
 //!     ─restart─► starting (the new `one` put in place) ─answers─► up to date on the new pair
 //!                           └─doesn't─► up to date, went back
@@ -729,7 +730,7 @@ async fn update_server(
                     record.server_update_stage = Some(ServerUpdateStage::Starting);
                 })?;
                 stop(server, &record.told(ServerDaemonStatus::Stopping)).await?;
-                if next.program != BUILD {
+                if next.program != current.program {
                     here.put_program(&next.program, program)?;
                 }
                 return Err(again(program));
@@ -755,6 +756,12 @@ async fn update_server(
                     bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
                 }
             } else {
+                // This `one` runs on, as the server speaks what it does; the new one is what's used from now on, and
+                // what runs the server from its next start.
+                if next.program != current.program {
+                    here.put_program(&next.program, program)?;
+                    println!("one {} is in place, and runs the server from its next start.", next.program);
+                }
                 *record = here.change(|record| record.took(next.clone()))?;
                 println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
             }
@@ -775,17 +782,15 @@ async fn update_server(
     Ok(())
 }
 
-/// How the build `next` is taken from `current`: `Ok` to load it into the server while it runs, or why it restarts.
-/// A new `one` restarts, as does whatever `OneCore.Release.compare/2`, run in a VM of the new build, says does.
+/// How the build `next` is taken from `current`: `Ok` to load it into the server while it runs, or why it restarts,
+/// as `OneCore.Release.compare/2`, run in a VM of the new build, says, told which messages this `one` speaks.
 fn method(here: &Here, record: &Record, current: &Pair, next: &Pair) -> Result<(), String> {
-    if next.program != BUILD {
-        return Err("restart: a new one".to_owned());
-    }
     let compare = "OneCore.Release.compare(System.fetch_env!(\"ONE_FROM\"), System.fetch_env!(\"ONE_TO\"))";
     let output = command(release(&here.build(&next.build)))
         .args(["eval", compare])
         .env("ONE_FROM", here.build(&current.build))
         .env("ONE_TO", here.build(&next.build))
+        .env("ONE_PROTOCOL", client::serve::protocol())
         .env("ONE_SERVER_STATUS", record.told(ServerDaemonStatus::Running).to_string())
         .output()
         .map_err(|error| format!("restart: checking couldn't start: {error}"))?;
@@ -821,23 +826,23 @@ async fn take(here: &Here, record: &Record, program: &Path, builds: &Map<String,
     if next.build != current.build {
         here.take(builds, &record.told(ServerDaemonStatus::Running)).await?;
     }
-    if next.program != BUILD {
-        // Both are kept beside this one, which they're put in place of only as the pair they're in starts (`run`).
+    if next.program != current.program {
+        // Both are kept beside the one in place, which they're put in place of only as the pair they're in is taken.
         let programs = here.folder.join("programs");
         fs::create_dir_all(&programs)?;
-        fs::copy(program.canonicalize()?, programs.join(BUILD))?;
+        fs::copy(program.canonicalize()?, programs.join(&current.program))?;
         fs::rename(fetched_program(&builds[PROGRAM], program).await?, programs.join(&next.program))?;
     }
     Ok(Some(next))
 }
 
-/// The pair the network's latest `builds` make for a server on `current` run by this `one`, where it's another.
+/// The pair the network's latest `builds` make for a server on `current`, where it's another.
 fn latest_pair(builds: &Map<String, Value>, current: &Pair) -> Option<Pair> {
     let next = Pair {
         build: latest(builds).unwrap_or(&current.build).to_owned(),
-        program: builds.get(PROGRAM).and_then(|one| one["build"].as_str()).unwrap_or(BUILD).to_owned(),
+        program: builds.get(PROGRAM).and_then(|one| one["build"].as_str()).unwrap_or(&current.program).to_owned(),
     };
-    (next != Pair { program: BUILD.to_owned(), ..current.clone() }).then_some(next)
+    (&next != current).then_some(next)
 }
 
 /// The latest server build among the network's `builds`: its code's, where there's a runtime for this kind of machine
