@@ -106,7 +106,6 @@ if command -v flock >/dev/null; then
 fi
 
 servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
-((${#servers[@]})) && tooling/nifs
 
 # The Mac builds its part from the same commit meanwhile, once it's built its NIFs in the same checkout.
 if ((${#mac[@]})); then
@@ -114,10 +113,32 @@ if ((${#mac[@]})); then
   on_mac=$!
 fi
 
+# `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
+# which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
+# that machine's system libraries, so each kind builds its own. Each builds at once, beside the servers, in a target
+# folder of its own: cargo holds one folder for one build at a time.
 target=${CARGO_TARGET_DIR:-$root/target}
 out=$target/builds/$build
+rm -rf "$out" && mkdir -p "$out"
+clients=()
+for name in "${mine[@]}"; do
+  file=$(tr / - <<<"$name")
+  case $name in
+    one-cli/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc --no-default-features) program=x86_64-pc-windows-msvc/release/one.exe ;;
+    one-cli/*) cargo=(build --no-default-features) program=release/one ;;
+    one/*) cargo=(build) program=release/one ;;
+    *) continue ;;
+  esac
+  (echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
+    gzip -9 -c "$target/clients/$file/$program" >"$out/$file.gz") &
+  clients+=($!)
+done
+
+# The servers' NIFs, for the kinds of machine they're built for.
+((${#servers[@]})) && tooling/nifs "${servers[@]}"
+
 cache=$target/release-cache
-rm -rf "$out" && mkdir -p "$out" "$cache"
+mkdir -p "$cache"
 
 # Downloads a file once, into the cache, checked against its SHA-256.
 fetched() {
@@ -210,21 +231,7 @@ for kind in "${servers[@]}"; do
   tar -czf "$out/server-$kind.tar.gz" -C "$release" .
 done
 
-# `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
-# which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
-# that machine's system libraries, so each kind builds its own.
-for name in "${mine[@]}"; do
-  case $name in
-    one-cli/windows-*) echo "Building $name" && cargo xwin build --release --target x86_64-pc-windows-msvc -p app --no-default-features &&
-      gzip -9 -c "$target/x86_64-pc-windows-msvc/release/one.exe" >"$out/$(tr / - <<<"$name").gz" ;;
-    one-cli/*) echo "Building $name" && cargo build --release -p app --no-default-features && gzip -9 -c "$target/release/one" >"$out/one-cli-$here.gz" ;;
-  esac
-done
-for name in "${mine[@]}"; do
-  case $name in
-    one/*) echo "Building $name" && cargo build --release -p app && gzip -9 -c "$target/release/one" >"$out/one-$here.gz" ;;
-  esac
-done
+for client in "${clients[@]}"; do wait "$client" || { echo "A client wasn't built." >&2 && exit 1; }; done
 
 # Publishes what was built: the network gives a link for each file it doesn't have yet, which is sent there, and
 # once it has them all, they're the latest.
