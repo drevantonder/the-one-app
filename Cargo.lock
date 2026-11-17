@@ -741,6 +741,7 @@ dependencies = [
  "dispatch2",
  "futures-util",
  "gethostname",
+ "httpdate",
  "ignore",
  "iroh",
  "jni 0.21.1",

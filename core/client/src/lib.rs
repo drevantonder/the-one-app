@@ -16,7 +16,7 @@ use std::io::{ErrorKind, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
@@ -94,7 +94,7 @@ impl Network {
     /// The headers of an ask of `path` at the address, with `body`: `key`'s signature of it, and the token. The pieces
     /// there check both (`core/edge/ask.ts`), and a server's Elixir signs the same bytes (`OneCore.Edge`).
     pub fn signed(&self, key: &SecretKey, path: &str, body: &str) -> Result<[(&'static str, String); 4]> {
-        let at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis().to_string();
+        let at = (millis(SystemTime::now())? + SKEW.load(Ordering::Relaxed)).to_string();
         let signature = key.sign(format!("one/ask/1\n{path}\n{at}\n{body}").as_bytes());
         Ok([
             ("one-key", key.public().to_string()),
@@ -114,15 +114,9 @@ impl Network {
     /// list and then the ones acting for the network, which act for everyone. Each is its key, reached through the
     /// relay there until a straighter path is found.
     async fn servers(&self, key: &SecretKey, of: &str) -> Result<Vec<EndpointAddr>> {
-        let mut ask = web()?
-            .get(format!("{}/presigner/servers", self.address.trim_end_matches('/')))
-            .timeout(CONNECT)
-            .query(&[("of", of)]);
-        for (name, value) in self.signed(key, "/presigner/servers", "")? {
-            ask = ask.header(name, value);
-        }
-        let sent = ask.send().await?;
-        let (status, response): (_, Value) = (sent.status(), sent.json().await?);
+        let url = format!("{}/presigner/servers", self.address.trim_end_matches('/'));
+        let (status, response) =
+            ask(self, key, "/presigner/servers", "", || Ok(web()?.get(&url).timeout(CONNECT).query(&[("of", of)]))).await?;
         if !status.is_success() {
             bail!("{}", response["error"].as_str().unwrap_or("the presigner refused"))
         }
@@ -490,12 +484,47 @@ const FORM: &str = "application/x-www-form-urlencoded";
 async fn ask_edge(url: &str, key: &SecretKey, content_type: &str, body: String) -> Result<(bool, Value)> {
     let parsed: reqwest::Url = url.parse().with_context(|| format!("{url} isn't an address"))?;
     let network = Network { address: parsed.origin().ascii_serialization(), token: String::new() };
-    let mut request = web()?.post(url).timeout(CONNECT * 3).header("content-type", content_type);
-    for (name, value) in network.signed(key, parsed.path(), &body)? {
-        request = request.header(name, value);
+    let request = || Ok(web()?.post(url).timeout(CONNECT * 3).header("content-type", content_type).body(body.clone()));
+    let (status, response) = ask(&network, key, parsed.path(), &body, request).await?;
+    Ok((status.is_success(), response))
+}
+
+/// How far this device's clock is from the edge's, in milliseconds, as the edge last said (`ask`).
+static SKEW: AtomicI64 = AtomicI64::new(0);
+
+fn millis(time: SystemTime) -> Result<i64> {
+    Ok(time.duration_since(UNIX_EPOCH)?.as_millis().try_into()?)
+}
+
+/// Sends what `request` makes, signed by `key` as an ask of `path` with `body` at `network`'s edge, and gives its
+/// status and what it said. One the edge refuses for this device's clock (`RequestTimeTooSkewed`, as S3 says) is
+/// signed again by the edge's clock, its `Date`, and sent once more, as AWS's SDKs do: the device keeps how far its
+/// clock is from the edge's for every ask after.
+async fn ask(
+    network: &Network,
+    key: &SecretKey,
+    path: &str,
+    body: &str,
+    request: impl Fn() -> Result<reqwest::RequestBuilder>,
+) -> Result<(reqwest::StatusCode, Value)> {
+    let mut again = true;
+    loop {
+        let mut ask = request()?;
+        for (name, value) in network.signed(key, path, body)? {
+            ask = ask.header(name, value);
+        }
+        let sent = ask.send().await?;
+        let status = sent.status();
+        let date = sent.headers().get(reqwest::header::DATE).and_then(|date| httpdate::parse_http_date(date.to_str().ok()?).ok());
+        let response: Value = sent.json().await?;
+        // The edge's `Date` is to the second, so its time is taken as the middle of that second.
+        if let Some(edge) = date.filter(|_| again && response["code"] == "RequestTimeTooSkewed") {
+            SKEW.store(millis(edge)? + 500 - millis(SystemTime::now())?, Ordering::Relaxed);
+            again = false;
+            continue;
+        }
+        return Ok((status, response));
     }
-    let response = request.body(body).send().await?;
-    Ok((response.status().is_success(), response.json().await?))
 }
 
 impl NetworkConfig {
