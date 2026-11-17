@@ -366,20 +366,31 @@ defmodule OneCore.Call do
   If it didn't run there, `:no_answer` means that server couldn't be reached just now, or went away after it was
   asked something that's safe to ask again; and `:forwarding_loop` that it answered, saying it would pass it on in
   turn. A server that stops answering after it was asked anything else raises, since it may have run.
-  """
-  def forward_to(%__MODULE__{forwarded: true}, _server), do: throw({__MODULE__, :forwarding_loop})
 
-  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server),
-    do: asks(ask, {actor, subject}, server, true)
+  With `within`, in milliseconds, a server that hasn't answered within that long what's safe to ask again is taken
+  as gone too: one that's there but stuck keeps the call open however long, saying it's still running it. What
+  isn't safe to ask again is waited for as long as it takes, since it may be doing it.
+  """
+  def forward_to(call, server, within \\ :infinity)
+  def forward_to(%__MODULE__{forwarded: true}, _server, _within), do: throw({__MODULE__, :forwarding_loop})
+
+  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server, within),
+    do: asks(ask, {actor, subject}, server, true, within)
 
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
-  defp asks({method, params}, {actor, subject}, server, forwarded) do
+  defp asks({method, params}, {actor, subject}, server, forwarded, within \\ :infinity) do
     forwarding_loop = Server.forwarding_loop()
 
     meta = %{forwarded: forwarded, actor: actor, subject: subject}
+    params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
 
-    case Server.request(server, method, Map.update(params, :_meta, meta, &Map.merge(&1, meta))) do
+    response =
+      if within != :infinity and again?(method, params, subject),
+        do: request_within(server, method, params, within),
+        else: Server.request(server, method, params)
+
+    case response do
       {:ok, result} ->
         throw({__MODULE__, {:forwarded, result}})
 
@@ -394,6 +405,29 @@ defmodule OneCore.Call do
 
       :stopped ->
         if again?(method, params, subject), do: :no_response, else: raise(Server.error_message(:stopped, server))
+    end
+  end
+
+  # Asks `server` from a process of its own, in this call's trace, and gives it `within` to answer: one that hasn't
+  # is taken as gone after it was asked, and its answer, if it ever comes, goes to nobody.
+  defp request_within(server, method, params, within) do
+    trace = OneCore.Trace.traceparent()
+
+    asking =
+      Task.async(fn ->
+        OneCore.Trace.follow(trace)
+
+        try do
+          {:returned, Server.request(server, method, params)}
+        catch
+          kind, reason -> {kind, reason, __STACKTRACE__}
+        end
+      end)
+
+    case Task.yield(asking, within) || Task.shutdown(asking, :brutal_kill) do
+      {:ok, {:returned, response}} -> response
+      {:ok, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
+      nil -> :stopped
     end
   end
 
