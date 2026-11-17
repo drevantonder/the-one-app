@@ -12,6 +12,11 @@ defmodule OneCore.Application do
   # (`OneCore.Server.up?/0`), one server builds again the apps built against another UI library than the one it ships
   # with, for everyone (`OneCore.Plugins.Deploy.rebuild/0`), and `OneCore.Plugins.Deploy.await_bundled/0` waits for
   # both.
+
+  # How long a server that's starting may take to be up, in seconds, after which the edge takes it for on once it's
+  # connected: a build being tried has three minutes to answer by its key, after its plugins have started.
+  @up_within 300
+
   @impl true
   def start(_type, _args) do
     # What a crash reports holds what it was working with, which may be a person's tokens: none of it reaches the log.
@@ -33,6 +38,11 @@ defmodule OneCore.Application do
         Jobs
       ]
 
+      # It's restarting at the network's edge from before it's reached there until it's up, its plugins started, so
+      # nobody asks it what it would answer only once they have: another server's lease it held before it stopped
+      # among them.
+      Servers.restarting(@up_within)
+
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do
         bundled = fn ->
@@ -41,7 +51,14 @@ defmodule OneCore.Application do
           Deploy.rebuild()
         end
 
+        up = fn ->
+          Plugins.started()
+          Server.await_up()
+          Servers.up()
+        end
+
         Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, bundled}, id: :bundled))
+        Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, up}, id: :up))
         started
       end
     else

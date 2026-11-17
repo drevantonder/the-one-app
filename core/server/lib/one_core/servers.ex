@@ -107,8 +107,8 @@ defmodule OneCore.Servers do
   def name(key), do: cached({:name, key}, fn -> read("servers/#{key}/name", nil) end)
 
   @doc """
-  Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge, `:restarting`
-  while it's stopping to start again and isn't back yet (`restarting/1`), the time its machine was last on there,
+  Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge and up, `:restarting`
+  while it's stopping to start again, or starting, and isn't up yet (`restarting/1`), the time its machine was last on there,
   in milliseconds since 1970, if it isn't, or `nil` where that isn't known: a network with no address, or a server
   never seen. The relay at the address keeps it, and tells servers when one comes or goes (`seen_again/0`), so a
   server that's known to be off isn't waited for, and one that's restarting is waited for only where it's the one
@@ -141,22 +141,28 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  Says at the network's edge that this server is stopping to start again, and is back within `seconds`: until it
-  is, the relay there says it's restarting, not off, and the other servers wait for it where it's the one to ask.
-  Where the edge can't be reached it's only taken for off meanwhile, so that's no reason not to restart.
+  Says at the network's edge that this server is stopping to start again, or starting, and is up within `seconds`:
+  until it says it's up (`up/0`), or that's passed, the relay there says it's restarting, not off or on, so the
+  other servers ask it nothing and wait for it only where it's the one to ask. Where the edge can't be reached it's
+  only taken for off or on meanwhile, so that's no reason not to start.
   """
-  def restarting(seconds) do
+  def restarting(seconds), do: say_seen(%{restarting: seconds, until: "up"}, "restarting")
+
+  @doc "Says at the network's edge that this server is up (`OneCore.Server.up?/0`), and its plugins started: it's on."
+  def up, do: say_seen(%{up: true}, "up")
+
+  defp say_seen(said, what) do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
-      body = JSON.encode!(%{restarting: seconds})
+      body = JSON.encode!(said)
       response = Edge.send!(method: :post, url: at <> path, body: body, headers: Edge.signed(path, body))
       if response.status != 204,
-        do: Logger.warning("The edge didn't take that this server is restarting: #{inspect(response.body)}")
+        do: Logger.warning("The edge didn't take that this server is #{what}: #{inspect(response.body)}")
     end
 
     :ok
   rescue
-    error in Edge.Unreachable -> Logger.warning("Couldn't say this server is restarting: #{Exception.message(error)}")
+    error in Edge.Unreachable -> Logger.warning("Couldn't say this server is #{what}: #{Exception.message(error)}")
   end
 
   # How long a server that's stopping to start again, to update, takes to be back, in milliseconds: it finishes what

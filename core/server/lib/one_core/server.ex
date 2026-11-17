@@ -80,15 +80,20 @@ defmodule OneCore.Server do
   `:unreachable` if it couldn't be reached, is known to be off or restarting, or is on the protocol before this
   server's (`protocol/0`), so it was asked nothing; or `:stopped` if it stopped answering after it was asked, so it
   may have done what was asked. One on a newer protocol than this server refuses, saying this one is behind.
+
+  With `restarting: true`, one that's restarting is asked too, for what only it can answer: a server that's
+  starting answers once its plugins have, and a build being tried is up only once it has answered by its key.
   """
-  def request(server, method, params) do
+  def request(server, method, params, opts \\ []) do
     # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
     # this one knows the other is still running it, however long it takes (`client::Reached::ask`).
     meta = %{progressToken: System.unique_integer([:positive]), protocol: protocol()}
     meta = if parent = Trace.traceparent(), do: Map.put(meta, :traceparent, parent), else: meta
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
 
-    with true <- Servers.seen(server) in [:on, nil] or Servers.seen_again(server) in [:on, nil] or :unreachable,
+    asked = if opts[:restarting], do: [:on, :restarting, nil], else: [:on, nil]
+
+    with true <- Servers.seen(server) in asked or Servers.seen_again(server) in asked or :unreachable,
          {:ok, response} <- ask(server, JSON.encode!(%{jsonrpc: "2.0", id: 1, method: method, params: params})) do
       case JSON.decode(response) do
         {:ok, %{"result" => result}} -> {:ok, result}

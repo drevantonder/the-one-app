@@ -208,8 +208,8 @@ defmodule OneCore.Builds do
     }
   end
 
-  # Whether a server is on, as `"on"`, stopping to start again, as `"restarting"`, or when it was last, in
-  # milliseconds since 1970, or `nil` if that isn't known.
+  # Whether a server is on, as `"on"`, stopping to start again or starting and not up yet, as `"restarting"`, or
+  # when it was last, in milliseconds since 1970, or `nil` if that isn't known.
   defp seen(key) do
     case Servers.seen(key) do
       :on -> "on"

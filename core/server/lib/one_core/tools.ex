@@ -462,7 +462,7 @@ defmodule OneCore.Tools do
                 seen: %{
                   type: ["string", "integer", "null"],
                   description:
-                    "\"on\", \"restarting\" while it stops to start again, or when it was last on, in milliseconds since 1970"
+                    "\"on\", \"restarting\" while it stops to start again or starts, until it's up, or when it was last on, in milliseconds since 1970"
                 },
                 protocol: %{
                   type: "integer",
@@ -902,13 +902,15 @@ defmodule OneCore.Tools do
   end
 
   # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked, which
-  # ends the call here with its answer. One that's restarting is waited for.
+  # ends the call here with its answer. One that's restarting is asked too, since only it can answer: a build being
+  # tried is asked its build this way before it's up. One that can't be reached yet is waited for.
   defp on(server, tool, inputs, {actor, subject}, here) do
     if server in [nil, Server.key()] do
       here.()
     else
       ask = fn ->
-        Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: %{actor: actor, subject: subject}})
+        meta = %{actor: actor, subject: subject}
+        Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: meta}, restarting: true)
       end
 
       answered =
