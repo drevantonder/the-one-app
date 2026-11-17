@@ -61,7 +61,7 @@ An app is a network's: the commands that build it are in that repo's `app/README
    Then `xcrun devicectl device process launch --device <id> <the app's identifier>`, which a locked phone refuses
    (`Locked`). `one builds` shows the phone's new build only once the app has opened.
 
-The keychain's password is in the owner's password manager; ask the orchestrator or Agent Memory for the item.
+The keychain's password is the 1Password item "Mac build keychain (ptc-build)" in the `ptc-nosudo` vault.
 
 ## Mistakes already made
 
