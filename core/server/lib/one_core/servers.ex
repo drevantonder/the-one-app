@@ -166,23 +166,65 @@ defmodule OneCore.Servers do
   @doc """
   Says at the network's edge this server's `server_membership` and `server_daemon_status`
   (`OneCore.Release.status/0`), and its build, by which the relay knows whether it talks with the edge. It's ready
-  once it's active and running. Where the edge can't be reached, it's taken as what it last said meanwhile, so
-  that's no reason not to go on.
+  once it's active and running. Where the edge can't be reached or doesn't take it, it's said again until it does
+  (`Report`), as it is then, so that's no reason not to go on.
   """
   def report do
+    with {:error, why} <- say() do
+      Logger.warning("Couldn't say this server's status, so it's said again until the edge takes it: #{why}")
+      if reporting = Process.whereis(__MODULE__.Report), do: send(reporting, :failed)
+    end
+
+    :ok
+  end
+
+  @doc false
+  def say do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
       said = Map.take(OneCore.Release.status(), ["server_membership", "server_daemon_status"])
       body = JSON.encode!(Map.put(said, "version", Builds.build()))
       response = Edge.send!(method: :post, url: at <> path, body: body, headers: Edge.signed(path, body))
+      if response.status == 204, do: :ok, else: {:error, "the edge didn't take #{body}: #{inspect(response.body)}"}
+    else
+      :ok
+    end
+  rescue
+    error in Edge.Unreachable -> {:error, Exception.message(error)}
+  end
 
-      if response.status != 204,
-        do: Logger.warning("The edge didn't take this server's #{body}: #{inspect(response.body)}")
+  defmodule Report do
+    @moduledoc """
+    Says this server's status at the edge again (`OneCore.Servers.report/0`) once saying it failed, as an edge that's
+    briefly unreachable or being deployed fails it, until it's taken: after a second, then twice as long each time, up
+    to a minute. Each try says the status as it is then, so the edge is told the latest, never one that's gone.
+    """
+    use GenServer
+
+    @first 1_000
+    @most 60_000
+
+    def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
+
+    # Its state is how long it waits before it tries again, or `nil` while there's nothing to say again.
+    @impl true
+    def init(nil), do: {:ok, nil}
+
+    @impl true
+    def handle_info(:failed, nil), do: {:noreply, again(@first)}
+    def handle_info(:failed, wait), do: {:noreply, wait}
+
+    def handle_info(:again, wait) do
+      case OneCore.Servers.say() do
+        :ok -> {:noreply, nil}
+        {:error, _why} -> {:noreply, again(min(wait * 2, @most))}
+      end
     end
 
-    :ok
-  rescue
-    error in Edge.Unreachable -> Logger.warning("Couldn't say this server's status: #{Exception.message(error)}")
+    defp again(wait) do
+      Process.send_after(self(), :again, wait)
+      wait
+    end
   end
 
   # How long a server that's stopping to start again, to update, takes to be back, in milliseconds: it finishes what

@@ -29,6 +29,7 @@ defmodule OneCore.Application do
       children = [
         {Registry, keys: :duplicate, name: OneCore.Waiting},
         {Task.Supervisor, name: OneCore.Asks},
+        Servers.Report,
         Plugins,
         Server,
         Services,

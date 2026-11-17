@@ -214,10 +214,12 @@ defmodule OneCore.Server do
 
   @doc """
   This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
-  missed being told something: it invalidates what it cached of servers and hooks, looks at once at who it acts for, and
-  at everyone else it has looked at behind the next request for them (`OneCore.Plugins.refresh/0`).
+  missed being told something, and the edge what it is: it says its status again (`OneCore.Servers.report/0`),
+  invalidates what it cached of servers and hooks, looks at once at who it acts for, and at everyone else it has
+  looked at behind the next request for them (`OneCore.Plugins.refresh/0`).
   """
   def reconnected do
+    Servers.report()
     Hooks.invalidate()
     Servers.invalidate()
     Enum.each(Plugins.refresh(), &reload/1)
