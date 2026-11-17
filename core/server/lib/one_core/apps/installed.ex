@@ -3,14 +3,15 @@ defmodule OneCore.Apps.Installed do
   What's installed for an owner, a user, a group or the network: one install per app per owner, each one explicit
   state machine.
 
-      not installed ─Install─► installing ─► installed ─Uninstall─► recently deleted ─30 days─► removed
-                                                                    recently deleted ─Restore─► installed
+      not installed ─Install─► installing ─► installed ─Uninstall─► recently deleted ─purged─► not installed
+                                                                    recently deleted ─restored─► installed
       installing ─fails, or its task ends first, as its server stopping ends it─► not installed (why · Try Again)
       not installed ─Deploy─► installed (whoever it's for deployed it, so it's theirs)
 
   with a `stage` inside installing: its `requirements` installed first, then `fetching` its code, `building` it and
   `starting` it. Whatever's installed runs the app's one version, the same everywhere it's installed: its updates
-  and whether it's trusted are the app's (`OneCore.Apps.Update`).
+  and whether it's trusted are the app's (`OneCore.Apps.Update`). Recently Deleted (the app soft-delete) purges and
+  restores it, with what it kept, by its own clock and its own Restore: this machine has neither.
 
   Each owner's are one blob, `<owner>/installs`, with each app's record by the name it's installed by: the
   `app` it is, its `state`, its `stage`, `why` it isn't installed where it failed to be, when it was `deleted`, who
@@ -118,7 +119,7 @@ defmodule OneCore.Apps.Installed do
   app, for what it says.
 
   Events, as the machine names them: `{:install, app, by, task}` (Install, and Try Again on one that failed to),
-  `{:stage, stage}`, `:done`, `{:fail, why}`, `{:uninstall, group}`, `:restore` and `:purge` (30 days on), where
+  `{:stage, stage}`, `:done`, `{:fail, why}`, `{:uninstall, group}`, `:restore` and `:purge` (Recently Deleted's), where
   `group` says what went to Recently Deleted together, as one: `%{"with" => names}` on the one uninstalled, and
   `%{"deleted_with" => name}` on each app that required it; and
   `{:deployed, app, by}`, where whoever it's installed for deployed it, which is theirs, installed at once.
@@ -174,7 +175,7 @@ defmodule OneCore.Apps.Installed do
     do: "#{name} isn't installed for #{owner}: #{why}\n\nTry again (apps_retry)."
 
   defp refused(%{"state" => "recently_deleted"}, _event, name, owner),
-    do: "#{name} is in Recently Deleted for #{owner}. Restore it (apps_restore) to use it again."
+    do: "#{name} is in Recently Deleted for #{owner}. Restore it there (soft-delete restore) to use it again."
 
   defp refused(%{"state" => "installing", "stage" => stage}, _event, name, _owner),
     do: "#{name} is installing (#{stage}). Wait until it's done."

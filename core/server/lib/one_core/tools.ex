@@ -518,8 +518,8 @@ defmodule OneCore.Tools do
       name: "uninstall",
       description: """
       Removes an app from what's installed for you. It waits in Recently Deleted with what it kept and made for
-      you for 30 days, when `apps_restore` brings it back as it was, and is then removed for good with them. It
-      stays whoever's it is. Where other apps you have require it, it's refused, saying which and why: they can't
+      you, as one item, for 30 days, when Recently Deleted's restore brings it back as it was (`soft-delete
+      restore`), and is then removed for good with them. It stays whoever's it is. Where other apps you have require it, it's refused, saying which and why: they can't
       work without it. Ask the person, and on their yes uninstall it again with `confirm`, which takes them to Recently
       Deleted with it, as one, and Restore brings them all back. What it only requires stays installed.
       """,
@@ -531,12 +531,6 @@ defmodule OneCore.Tools do
         },
         required: ["name"]
       },
-      outputs: @moved
-    },
-    %{
-      name: "apps_restore",
-      description: "Brings back an app of yours from Recently Deleted, as it was, with what it kept and made for you.",
-      inputs: @named,
       outputs: @moved
     },
     %{
@@ -930,7 +924,7 @@ defmodule OneCore.Tools do
   @ready :timer.seconds(240)
 
   # The tools an app has no say in for itself: how one that breaks is undone.
-  @apart ~w(deploy uninstall apps_restore apps_update apps_retry apps_trust)
+  @apart ~w(deploy uninstall apps_update apps_retry apps_trust)
 
   @doc "One Core's own tools, each as an app says one of its own."
   def tools, do: @taking
@@ -1132,14 +1126,6 @@ defmodule OneCore.Tools do
     at(subject, forward)
     reaches!(principal, subject, "owner")
     moved!(subject, name, Lifecycle.uninstall(subject, name, principal, inputs["confirm"] == true))
-  end
-
-  # Restoring is undoing an uninstall, which is an owner's.
-  defp run("apps_restore", %{"name" => name}, {_actor, subject} = principal, forward, _request) do
-    record = record!(subject, name)
-    runs(subject, Store.trusted?(record["app"]), forward)
-    reaches!(principal, subject, "owner")
-    moved!(subject, name, Lifecycle.restore(subject, name, principal))
   end
 
   defp run("apps_update", %{"name" => name}, {_actor, subject} = principal, forward, _request) do

@@ -1,8 +1,8 @@
 defmodule OneCore.Apps.Lifecycle do
   @moduledoc """
   What moves an install through its life (`OneCore.Apps.Installed`) and an app through its updates
-  (`OneCore.Apps.Update`): installing, a stage at a time; uninstalling to Recently Deleted, restoring, and removing
-  for good 30 days after; and taking a newer version of an app, or switching whether it's trusted, for everyone who
+  (`OneCore.Apps.Update`): installing, a stage at a time; uninstalling to Recently Deleted, and restoring or removing
+  for good as Recently Deleted does; and taking a newer version of an app, or switching whether it's trusted, for everyone who
   has it.
 
   A newer version is a new commit at the git source an app was deployed from, which changes its folder and comes
@@ -16,14 +16,18 @@ defmodule OneCore.Apps.Lifecycle do
   required by takes them to Recently Deleted with it, as one, once whoever asked confirms it; restoring any of them
   brings them all back. Uninstalling one that only requires others leaves them installed.
 
+  Recently Deleted is the app soft-delete's, as for everything a person deletes: hearing `uninstalled`, it keeps what
+  the app kept and made for them as one item, and its clock and its Restore are the only ones. Its Restore brings the
+  app back here (`restore/2`), and purging the item removes it here for good (`purge/2`). A network without it
+  keeps what was uninstalled in Recently Deleted.
+
   Each install and update is the MCP task that runs it (`OneCore.Tasks.within/3`), which its record names: however
   the task ends, it moves the record. Done or failed, the run moves it itself; where its server stopped, or started
   again, which loses what it ran, whoever finds the task over moves it (`settle/0`): this server as it starts, and
   each time the network's edge says a server came or went, and Try Again.
 
-  It's a GenServer only for the clock and for that: once a day it looks for newer versions, and removes for good
-  what's been in Recently Deleted for 30 days, for whoever this server acts for; and it settles what lost its task as
-  it starts and as servers come and go.
+  It's a GenServer only for the clock and for that: once a day it looks for newer versions, for whoever this server
+  acts for; and it settles what lost its task as it starts and as servers come and go.
   """
   use GenServer
   require Logger
@@ -34,7 +38,6 @@ defmodule OneCore.Apps.Lifecycle do
 
   @network "network"
   @day :timer.hours(24)
-  @kept :timer.hours(24 * 30)
   # What an install or update whose task ended before it did says, where its task doesn't say why.
   @stopped "It stopped partway. Try again."
 
@@ -142,9 +145,9 @@ defmodule OneCore.Apps.Lifecycle do
     end)
   end
 
-  # Installs each of the app's requirements that isn't there for `owner`, deepest first, as its own install, or
-  # brings it back from their Recently Deleted. Gives a line for each, saying why it's installed too, or `{:error,
-  # why}` naming the first that couldn't be.
+  # Installs each of the app's requirements that isn't there for `owner`, deepest first, as its own install. Gives a
+  # line for each, saying why it's installed too, or `{:error, why}` naming the first that couldn't be: one in their
+  # Recently Deleted is restored there, with what it kept, never installed again without it.
   defp requirements(owner, name, artifact, by) do
     title = title(artifact, name)
     missing = Requires.missing(owner, artifact, Requires.requires(artifact))
@@ -165,7 +168,7 @@ defmodule OneCore.Apps.Lifecycle do
       installed =
         cond do
           requirement.app == nil -> {:error, "it isn't in this network, so it can't be installed for #{owner}"}
-          requirement.deleted -> restore(owner, requirement.name, {by, owner})
+          requirement.deleted -> {:error, "it's in Recently Deleted for #{owner}: restore it there first"}
           true -> install(owner, requirement.name, requirement.app, by)
         end
 
@@ -324,8 +327,8 @@ defmodule OneCore.Apps.Lifecycle do
   end
 
   @doc """
-  Uninstalls an app for `owner`: it stops running for them, and waits in Recently Deleted, with what it keeps, for
-  30 days. Where other apps installed for them are required by it, it's refused saying so, unless whoever asked
+  Uninstalls an app for `owner`: it stops running for them, and waits in Recently Deleted, with what it keeps, until
+  that restores or purges it. Where other apps installed for them are required by it, it's refused saying so, unless whoever asked
   `confirm`s that they go too: then they all go to Recently Deleted, as one. Refused where it's the network's launcher. The apps that observe `uninstalled` are told once, with each
   that went (`with`), so one that keeps what's deleted takes what they kept and made for them along, as one item.
   `asked` is who asked.
@@ -382,26 +385,28 @@ defmodule OneCore.Apps.Lifecycle do
   end
 
   @doc """
-  Brings an app back from Recently Deleted for `owner`, as it was, with whatever went there with it. Gives its record.
-  The apps that observe `restored` are told once, of the one uninstalled, so one that keeps what's deleted brings
-  back what they kept and made for them. `asked` is who asked.
+  Brings an app back from Recently Deleted for `owner`, as it was, with whatever went there with it, as Recently
+  Deleted's Restore does, which brings back what it kept and made. Gives its record, or `{:error, why}`.
   """
-  def restore(owner, name, {actor, _subject}) do
+  def restore(owner, name) do
     records = Installed.read(owner)
     first = (records[name] || %{})["deleted_with"] || name
     group = [first | (records[first] || %{})["with"] || []]
 
-    with %{} = record <- move(owner, first, :restore) do
+    with %{} <- move(owner, first, :restore) do
       for other <- group -- [first], match?(%{"state" => "recently_deleted"}, records[other]), do: move(owner, other, :restore)
       ran(owner)
-      Hooks.observe("restored", %{"for" => owner, "name" => first, "app" => record["app"]}, {actor, owner})
       Installed.read(owner)[name]
     end
   end
 
+  @doc false
+  # Soft delete's before it called `restore/2`, until it's deployed calling that.
+  def restore(owner, name, _asked), do: restore(owner, name)
+
   @doc """
-  Removes an app in Recently Deleted for `owner` for good, with what it kept, and whatever went there with it:
-  `nil`, or `{:error, why}`.
+  Removes an app in Recently Deleted for `owner` for good, with what it kept, and whatever went there with it, as
+  Recently Deleted purging it does: `nil`, or `{:error, why}`.
   """
   def purge(owner, name) do
     records = Installed.read(owner)
@@ -421,19 +426,12 @@ defmodule OneCore.Apps.Lifecycle do
   end
 
   @doc """
-  Moves on what's installed for `owner` that the clock moves, as a server acting for them does once a day: one in
-  Recently Deleted for 30 days is removed for good, with what it kept, one whose task is over has failed, and one
-  that failed isn't in use for them.
+  Moves on what's installed for `owner` that the clock moves, as a server acting for them does once a day: one whose
+  task is over has failed, and one that failed isn't in use for them.
   """
   def reconcile(owner) do
-    now = System.system_time(:millisecond)
-
     for {name, record} <- Installed.read(owner) do
       case record do
-        %{"state" => "recently_deleted", "deleted" => deleted} when deleted <= now - @kept ->
-          with nil <- purge(owner, name),
-               do: Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
-
         %{"state" => "installing"} ->
           settled(owner, name, record)
 

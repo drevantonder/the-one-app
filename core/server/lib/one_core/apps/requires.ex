@@ -27,7 +27,7 @@ defmodule OneCore.Apps.Requires do
         app: "network/apps/google-account", deleted: false}
 
   `by` is the app that requires it, and `why` its reason. `app` is where to get it from: the owner's Recently
-  Deleted (`deleted`, to restore), their own app of that name, that of whoever's app requires it, or the
+  Deleted (`deleted`, restored there first), their own app of that name, that of whoever's app requires it, or the
   network's; `nil` where it's none of these, so it can't be installed.
   """
   def missing(owner, artifact, requires), do: found(owner, artifact, requires, [Path.basename(artifact)], [])
