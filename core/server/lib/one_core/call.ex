@@ -238,12 +238,12 @@ defmodule OneCore.Call do
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
   `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle`, `about` and
-  `category`, its `apps`, its `widgets` and its `tools`' names, pages (`ui`) and whether each is a task
-  (`task_support`). A Home Screen page is drawn from these.
+  `category`, its `apps`, its `widgets` and its `tools`' names and pages (`ui`). A Home Screen page is drawn from
+  these.
   """
   def plugins(%__MODULE__{subject: subject}) do
     for at <- Enum.reverse(Plugins.chain(subject)), {name, version} <- Plugins.versions([at]), into: %{} do
-      tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui, :task_support])
+      tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui])
 
       {name,
        Map.merge(OneCore.Plugins.Version.listing(version), %{

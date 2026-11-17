@@ -111,8 +111,8 @@ defmodule OneCore.Hooks do
      """
      A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
      which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `forwarded`
-     to another server to run, and its `trace`: its `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A
-     call passed on is observed on both servers.
+     to another server to run, whether its plugin makes it an MCP `task` (`OneCore.Tasks`), and its `trace`: its
+     `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A call passed on is observed on both servers.
      """},
     {"changed", :observe,
      """

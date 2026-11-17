@@ -76,6 +76,8 @@ defmodule OneCore.Plugins.Calls do
   isn't asked.
   """
   def tool(tool, about, principal, version \\ nil, fun, apart \\ nil) do
+    about = Map.put(about, "task", tool[:task_support] != nil)
+
     with :ok <- open_to(tool, about, principal),
          :ok <- refused(given(tool.takes, about["inputs"]), -32602),
          {:ok, about} <- hooked(about, tool.takes, principal, apart) do

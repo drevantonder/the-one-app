@@ -36,6 +36,8 @@ defmodule Telemetry.Recorded do
   def called(call, %{"trace" => trace, "took" => took} = about) do
     plugin = about["plugin"] || "one"
     attributes = %{"one.plugin" => plugin, "one.tool" => about["tool"]}
+    # Whether its plugin makes it an MCP task, which a slow tool that isn't should be (`Read.slowest/4`).
+    attributes = if about["task"] == true, do: Map.put(attributes, "one.task", true), else: attributes
     now = System.os_time(:nanosecond)
     error = about["error"]
     forwarded = about["forwarded"] == true

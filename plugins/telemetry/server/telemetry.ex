@@ -331,7 +331,7 @@ defmodule Telemetry do
       from: div(from, 1_000_000),
       to: div(to, 1_000_000),
       failing: Read.errors(batches, shown(call)) |> Enum.take(20),
-      slowest: Read.slowest(batches, from, to, names(call), tasks(call)) |> Enum.take(12),
+      slowest: Read.slowest(batches, from, to, names(call)) |> Enum.take(12),
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
@@ -346,7 +346,7 @@ defmodule Telemetry do
 
   def call("slowest", inputs, call) do
     {batches, from, to} = read(call, inputs["hours"] || 24)
-    %{slowest: Read.slowest(batches, from, to, names(call), tasks(call))}
+    %{slowest: Read.slowest(batches, from, to, names(call))}
   end
 
   def call("trace", %{"id" => id} = inputs, call) do
@@ -395,11 +395,6 @@ defmodule Telemetry do
   end
 
   # What a person calls each plugin: its first app's name, where it has one.
-  # The tools whose plugins make them MCP tasks, by the plugin's name and the tool's.
-  defp tasks(call) do
-    MapSet.new(for %{name: plugin, tools: tools} <- Call.plugins(call), %{name: tool, task_support: _} <- tools, do: {plugin, tool})
-  end
-
   defp names(call) do
     for %{name: name, apps: [%{name: app} | _]} <- Call.plugins(call), into: %{}, do: {name, app}
   end
