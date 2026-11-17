@@ -38,9 +38,54 @@ defmodule OneCore.Edge do
               __STACKTRACE__
   end
 
+  @doc """
+  Sends `request` to `path` at the network's edge, signed by this server (`signed/2`), as `send!/1` does. One the
+  edge refuses for this server's clock (`RequestTimeTooSkewed`, as S3 says) is signed again by the edge's clock, its
+  `Date`, and sent once more, as AWS's SDKs do: the server keeps how far its clock is from the edge's for every ask
+  after.
+  """
+  def ask!(request, path) do
+    ask = fn -> send!(Keyword.put(request, :headers, signed(path, request[:body] || ""))) end
+    response = ask.()
+    if skewed?(response), do: ask.(), else: response
+  end
+
+  # Seconds from year 0 to 1970, by which Erlang's calendar counts.
+  @unix_epoch 62_167_219_200
+
+  # Whether the edge refused `response`'s ask for this server's clock, and if so, keeps how far that is from the
+  # edge's. Its `Date` is to the second, so the edge's time is taken as the middle of that second.
+  defp skewed?(%{status: 401} = response) do
+    with "RequestTimeTooSkewed" <- code(response.body),
+         [date] <- Req.Response.get_header(response, "date"),
+         {{_, _, _}, {_, _, _}} = time <- :httpd_util.convert_request_date(String.to_charlist(date)) do
+      edge = (:calendar.datetime_to_gregorian_seconds(time) - @unix_epoch) * 1000 + 500
+      :persistent_term.put({__MODULE__, :skew}, edge - System.system_time(:millisecond))
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp skewed?(_response), do: false
+
+  defp code(%{"code" => code}), do: code
+
+  defp code(body) when is_binary(body) do
+    case JSON.decode(body) do
+      {:ok, %{"code" => code}} -> code
+      _ -> nil
+    end
+  end
+
+  defp code(_body), do: nil
+
+  # The time by the edge's clock, in milliseconds: this server's, as far from it as the edge last said (`ask!/2`).
+  defp now, do: System.system_time(:millisecond) + :persistent_term.get({__MODULE__, :skew}, 0)
+
   @doc "The headers of an ask of `path` there, with `body`: this server's signature of it, and its token."
   def signed(path, body) do
-    at = Integer.to_string(System.system_time(:millisecond))
+    at = Integer.to_string(now())
     signature = sign("one/ask/1\n#{path}\n#{at}\n#{body}")
     [{"one-key", key()}, {"one-at", at}, {"one-signature", signature}, {"one-token", token()}]
   end
@@ -63,7 +108,7 @@ defmodule OneCore.Edge do
 
   @doc "A token for the client whose key is `client`: this server's word for it, for an hour."
   def token(client) do
-    until = System.system_time(:millisecond) + @lasts
+    until = now() + @lasts
     encode(%{list: list(), by: key(), until: until, signature: sign("one/token/1\n#{client}\n#{list()}\n#{until}")})
   end
 

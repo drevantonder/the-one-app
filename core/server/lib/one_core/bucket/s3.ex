@@ -129,14 +129,16 @@ defmodule OneCore.Bucket.S3 do
 
     response =
       sent(
-        method: :post,
-        url: address <> "/presigner/read",
-        body: ask,
-        headers: Edge.signed("/presigner/read", ask),
-        retry: :transient,
-        decode_body: false,
-        compressed: false,
-        receive_timeout: @reads_within
+        [
+          method: :post,
+          url: address <> "/presigner/read",
+          body: ask,
+          retry: :transient,
+          decode_body: false,
+          compressed: false,
+          receive_timeout: @reads_within
+        ],
+        "/presigner/read"
       )
 
     case Req.Response.get_header(response, "content-type") do
@@ -166,10 +168,9 @@ defmodule OneCore.Bucket.S3 do
 
   defp signed(address, ask) do
     ask = JSON.encode!(ask)
-    url = address <> "/presigner/sign"
-    headers = Edge.signed("/presigner/sign", ask)
+    request = [method: :post, url: address <> "/presigner/sign", body: ask, retry: :transient, receive_timeout: @signs_within]
 
-    case sent(method: :post, url: url, body: ask, headers: headers, retry: :transient, receive_timeout: @signs_within) do
+    case sent(request, "/presigner/sign") do
       %{status: 200, body: %{"method" => _method} = signed} -> signed
       %{status: status, body: %{"error" => why}} -> raise refused_by(address, status, why)
       refused -> raise refusal(refused)
@@ -186,8 +187,13 @@ defmodule OneCore.Bucket.S3 do
   # turn, however long. A server that starts asks for hundreds at once, and an uplink at home that's sent them all
   # stalls every one of them past its timeout. Each one's timeout runs from when it's sent.
   @at_once 16
+  @pool [finch: [size: @at_once, pool_timeout: :infinity]]
 
-  defp sent(request), do: Edge.send!(request ++ [finch: [size: @at_once, pool_timeout: :infinity]])
+  defp sent(request), do: Edge.send!(request ++ @pool)
+
+  # An ask of the presigner at `path`, signed (`OneCore.Edge.ask!/2`). It's signed before it waits its turn, which
+  # under heavy load is longer than a minute: the edge takes a signature that's 15 minutes old.
+  defp sent(request, path), do: Edge.ask!(request ++ @pool, path)
 
   defp tag(got), do: got |> Req.Response.get_header("etag") |> hd()
 
