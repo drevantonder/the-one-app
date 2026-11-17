@@ -12,7 +12,7 @@ defmodule OneCore.Services do
   stops is started again, whatever stopped it, and the server carries on meanwhile. This process only keeps
   track: it never waits on a service's code, so one service being slow holds up no other.
   """
-  use GenServer
+  @behaviour :gen_statem
   require Logger
   alias OneCore.{Plugins, Server, Servers, User}
   alias OneCore.Plugins.{Calls, Version}
@@ -21,7 +21,8 @@ defmodule OneCore.Services do
   # while (a program that won't build, a device unplugged), and it would otherwise be started as fast as it stops.
   @apart 5_000
 
-  def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
+  def child_spec(_), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [nil]}}
+  def start_link(nil), do: :gen_statem.start_link({:local, __MODULE__}, __MODULE__, nil, [])
 
   @doc """
   The keys of the servers that run a plugin's service, among those acting for `who`: this one first if it does,
@@ -57,7 +58,7 @@ defmodule OneCore.Services do
   """
   def install(plugin, service) do
     with :ok <- known(plugin, service),
-         {:ok, instance} <- GenServer.call(__MODULE__, {:install, {plugin, service}}) do
+         {:ok, instance} <- :gen_statem.call(__MODULE__, {:install, {plugin, service}}) do
       Server.notify_servers(Servers.acts_for(Server.key()))
 
       case instance && Plugins.Process.started(instance) do
@@ -73,14 +74,14 @@ defmodule OneCore.Services do
 
   @doc "Stops running a plugin's service on this server."
   def remove(plugin, service) do
-    with {:ok, instance} <- GenServer.call(__MODULE__, {:remove, {plugin, service}}) do
+    with {:ok, instance} <- :gen_statem.call(__MODULE__, {:remove, {plugin, service}}) do
       if instance, do: Plugins.Process.stop(instance)
       Server.notify_servers(Servers.acts_for(Server.key()))
     end
   end
 
   @doc "A plugin has a newer version: its services installed here that it didn't have before start."
-  def start(plugin), do: GenServer.call(__MODULE__, {:start, plugin})
+  def start(plugin), do: :gen_statem.call(__MODULE__, {:start, plugin})
 
   @doc """
   Calls a function of a plugin's service running here, with the service's process and then `arguments`. Gives
@@ -103,7 +104,7 @@ defmodule OneCore.Services do
           {:error, "#{plugin} has no service named #{service}"}
 
         instance == nil ->
-          {:error, GenServer.call(__MODULE__, {:stopped, {plugin, service}})}
+          {:error, :gen_statem.call(__MODULE__, {:stopped, {plugin, service}})}
 
         function = Calls.exported(module, function, length(arguments) + 1) ->
           {:ok, apply(module, function, [instance | arguments])}
@@ -148,105 +149,119 @@ defmodule OneCore.Services do
     end
   end
 
-  # `started` says when each service here last started, `monitors` which service each running one is, and
-  # `stopped` why each last stopped.
+  # The state is each service installed here by its stage:
+  #
+  # - `:starting`, until its plugin runs here with it;
+  # - `{:running, process, monitor, at}`, started at `at`;
+  # - `{:restarting, why}`, stopped for `why`, and started again by a timeout named for it, at least `@apart` after
+  #   it last started;
+  # - `{:removing, monitor}`, no longer installed, while its process stops, and what it built here goes once it has.
+  @impl true
+  def callback_mode, do: :handle_event_function
+
   @impl true
   def init(nil) do
     Servers.keep()
-    for service <- here(), do: send(self(), {:start, service})
-    {:ok, %{started: %{}, monitors: %{}, stopped: %{}}}
+
+    {:ok, Map.new(here(), &{&1, :starting}), nil,
+     for(service <- here(), do: {:next_event, :internal, {:start, service}})}
   end
 
   @impl true
-  def handle_call({:install, {plugin, name} = service}, _from, state) do
+  def handle_event(:internal, {:start, service}, stages, _data), do: {:next_state, start(stages, service), nil}
+
+  def handle_event({:timeout, service}, :start, stages, _data), do: {:next_state, start(stages, service), nil}
+
+  def handle_event({:call, from}, {:install, {plugin, name} = service}, stages, _data) do
     cond do
       Servers.acts_for(Server.key()) == [] ->
-        {:reply, {:error, "This server acts for nobody yet, so it runs no services"}, state}
+        {:keep_state_and_data, [{:reply, from, {:error, "This server acts for nobody yet, so it runs no services"}}]}
 
       service in here() ->
-        {:reply, {:ok, Plugins.Process.whereis(plugin, name)}, state}
+        {:keep_state_and_data, [{:reply, from, {:ok, Plugins.Process.whereis(plugin, name)}}]}
 
       true ->
         Servers.install(here() ++ [service])
-        {instance, state} = start(service, state)
-        {:reply, {:ok, instance}, state}
+        stages = start(stages, service)
+        {:next_state, stages, nil, [{:reply, from, {:ok, process(stages[service])}}]}
     end
   end
 
-  def handle_call({:remove, {plugin, name} = service}, _from, state) do
+  def handle_event({:call, from}, {:remove, {plugin, name} = service}, stages, _data) do
     if service in here() do
       Servers.install(here() -- [service])
       instance = Plugins.Process.whereis(plugin, name)
-      if instance == nil, do: File.rm_rf!(folder(plugin, name))
-      {:reply, {:ok, instance}, state}
+
+      stages =
+        if instance do
+          Map.put(stages, service, {:removing, Process.monitor(instance)})
+        else
+          File.rm_rf!(folder(plugin, name))
+          Map.delete(stages, service)
+        end
+
+      {:next_state, stages, nil, [{:reply, from, {:ok, instance}}, {{:timeout, service}, :cancel}]}
     else
-      {:reply, {:error, "#{name} of #{plugin} isn't installed on this server"}, state}
+      {:keep_state_and_data, [{:reply, from, {:error, "#{name} of #{plugin} isn't installed on this server"}}]}
     end
   end
 
-  def handle_call({:start, plugin}, _from, state) do
-    state =
-      for {^plugin, name} = service <- here(), Plugins.Process.whereis(plugin, name) == nil, reduce: state do
-        state -> elem(start(service, state), 1)
-      end
-
-    {:reply, :ok, state}
+  def handle_event({:call, from}, {:start, plugin}, stages, _data) do
+    starting = for {^plugin, name} = service <- here(), Plugins.Process.whereis(plugin, name) == nil, do: service
+    cancel = for service <- starting, do: {{:timeout, service}, :cancel}
+    {:next_state, Enum.reduce(starting, stages, &start(&2, &1)), nil, [{:reply, from, :ok} | cancel]}
   end
 
-  def handle_call({:stopped, {plugin, name} = service}, _from, state) do
+  def handle_event({:call, from}, {:stopped, {plugin, name} = service}, stages, _data) do
     why =
-      cond do
-        service not in here() -> "#{plugin}'s #{name} isn't installed on this server"
-        why = state.stopped[service] -> "#{plugin}'s #{name} stopped, and is being started again: #{explained(plugin, why)}"
-        true -> "#{plugin}'s #{name} is still starting"
+      case service in here() && stages[service] do
+        false -> "#{plugin}'s #{name} isn't installed on this server"
+        {:restarting, why} -> "#{plugin}'s #{name} stopped, and is being started again: #{explained(plugin, why)}"
+        _ -> "#{plugin}'s #{name} is still starting"
       end
 
-    {:reply, why, state}
+    {:keep_state_and_data, [{:reply, from, why}]}
   end
 
-  @impl true
-  def handle_info({:start, service}, state) do
-    if service in here() and service not in Map.values(state.monitors) do
-      {:noreply, elem(start(service, state), 1)}
-    else
-      {:noreply, state}
+  def handle_event(:info, {:DOWN, monitor, :process, _instance, why}, stages, _data) do
+    case Enum.find(stages, fn {_service, stage} ->
+           match?({:running, _, ^monitor, _}, stage) or match?({:removing, ^monitor}, stage)
+         end) do
+      {{plugin, name} = service, {:running, _instance, _monitor, at}} ->
+        Logger.warning(
+          "#{plugin}'s #{name} stopped, and is started again: #{explained(plugin, OneCore.Redact.redact(why))}"
+        )
+
+        wait = max(0, at + @apart - System.monotonic_time(:millisecond))
+        {:next_state, Map.put(stages, service, {:restarting, why}), nil, [{{:timeout, service}, wait, :start}]}
+
+      {{plugin, name} = service, {:removing, _monitor}} ->
+        File.rm_rf!(folder(plugin, name))
+        {:next_state, Map.delete(stages, service), nil}
+
+      # One that stopped after another took its place, as when its plugin's newer version started it again.
+      nil ->
+        :keep_state_and_data
     end
-  end
-
-  def handle_info({:DOWN, monitor, :process, _instance, why}, state) do
-    {{plugin, name} = service, monitors} = Map.pop(state.monitors, monitor)
-    state = %{state | monitors: monitors, stopped: Map.put(state.stopped, service, why)}
-
-    if service in here() do
-      Logger.warning("#{plugin}'s #{name} stopped, and is started again: #{explained(plugin, OneCore.Redact.redact(why))}")
-      wait = max(0, state.started[service] + @apart - System.monotonic_time(:millisecond))
-      Process.send_after(self(), {:start, service}, wait)
-    else
-      File.rm_rf!(folder(plugin, name))
-    end
-
-    {:noreply, state}
   end
 
   # The services installed on this server.
   defp here, do: Servers.installed(Server.key())
 
-  # Starts a service, and gives its process: none if its plugin isn't running here, or no longer has it, which is
-  # when what it built here goes. One that outlived this process is already running, and is watched again.
-  defp start({plugin, name} = service, state) do
+  defp process({:running, process, _monitor, _at}), do: process
+  defp process(_stage), do: nil
+
+  # Starts a service: it's running, or starting while its plugin isn't running here. One whose plugin no longer has
+  # it is starting too, until it's removed, and what it built here goes. One that outlived this process is already
+  # running, and is watched again.
+  defp start(stages, {plugin, name} = service) do
     case Plugins.Process.of(plugin, name) do
       nil ->
         if Plugins.version(plugin), do: File.rm_rf!(folder(plugin, name))
-        {nil, state}
+        Map.put(stages, service, :starting)
 
       instance ->
-        {instance, watch(instance, service, state)}
+        Map.put(stages, service, {:running, instance, Process.monitor(instance), System.monotonic_time(:millisecond)})
     end
-  end
-
-  defp watch(instance, service, state) do
-    monitor = Process.monitor(instance)
-    started = Map.put(state.started, service, System.monotonic_time(:millisecond))
-    %{state | monitors: Map.put(state.monitors, monitor, service), started: started}
   end
 end
