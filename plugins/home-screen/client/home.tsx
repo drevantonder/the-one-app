@@ -328,7 +328,8 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
     grid.animate(way([{ opacity: 0 }, { opacity: 1 }]), { ...timing, duration: Number(timing.duration) * 0.7, delay: opening ? Number(timing.duration) * 0.3 : 0 })
     panel.animate(way([{ transform: moved, borderRadius: "1.5rem" }, { transform: "none", borderRadius: "2.25rem" }]), timing)
   }
-  createEffect(phase, (now) => {
+  // Driven by a memo, which changes only when the phase does, not at every event of the machine.
+  createEffect(createMemo(phase), (now) => {
     if (now !== "open") zoom(now === "opening")
   })
   onSettled(() => {
