@@ -16,7 +16,7 @@ defmodule GoogleDrive do
   @fields_hint "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink"
   @no_folder "No folder among its parents: folder ids come from google-drive_files_list (root is My Drive)."
 
-  # It has no app, so it names and draws itself, in the App Store.
+  # It has no app, so it names and draws itself, in the Plugins app.
   @impl true
   def title, do: google().title
 

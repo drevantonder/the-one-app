@@ -91,7 +91,7 @@ defmodule OneCore.Plugins.Version do
 
   @doc """
   What a version of the plugin `name` described (`OneCore.Plugins.Version.Description.description/1`) lists, as
-  `listing/1` with what the App Store says besides: its skill's `description`, its `tools`' names and its
+  `listing/1` with what the Plugins app's Marketplace says besides: its skill's `description`, its `tools`' names and its
   `requires`. `{:ok, listing}`, or `:error` where that isn't a description. Nothing is loaded.
   """
   def listed(name, description) do

@@ -22,7 +22,7 @@ restored one is **active** again.
 - `delete --artifact <name>` deletes one. An app's own way of deleting, such as `git-repos remove`, does the same and
   keeps its own list true, so use the app's when it has one. Delete only when asked.
 - A plugin someone deployed is deleted the same way, by its artifact (`users/alice/plugins/notes`), once nobody has
-  it installed: `uninstall` it for everyone first. It's gone from the App Store until it's restored.
+  it installed: `uninstall` it for everyone first. It's gone from the Plugins app's Marketplace until it's restored.
 - Uninstalling a plugin deletes what it kept and made for whoever it was installed for, as one item. Restoring that
   item installs the plugin again with all of it. What was deleted before the uninstall stays its own item.
 - `purge --item <id>` deletes one for good now, and `purge_all` everything you own. Only when asked: neither can be

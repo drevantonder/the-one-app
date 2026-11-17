@@ -8,7 +8,7 @@ defmodule GoogleCalendar do
   @api "https://www.googleapis.com/calendar/v3/"
   @day 86_400
 
-  # It has no app, so it names and draws itself, in the App Store.
+  # It has no app, so it names and draws itself, in the Plugins app.
   @impl true
   def title, do: google().title
 

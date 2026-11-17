@@ -201,7 +201,7 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # Every plugin has an icon of its own, shown wherever it is (the App Store, the Vault), as an Android package does.
+  # Every plugin has an icon of its own, shown wherever it is (the Plugins app, the Vault), as an Android package does.
   defp icon(name, %{icon: nil}),
     do:
       {:error,

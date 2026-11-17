@@ -8,9 +8,9 @@ metadata:
 ---
 
 Home Screen is the network's launcher: the app every client opens first, which draws the rest. It keeps how each
-owner's pages are arranged: `pages` gives an owner's Home Screen, `arrange` changes its pages, `add` and `remove` put
-an app on them or take it off, and `store` lists the plugins that could be added. A person edits their pages as on a
-phone: touch and hold, or right-click, then Edit Home Screen.
+owner's pages are arranged: `pages` gives an owner's Home Screen, `arrange` changes its pages, and `add` and `remove`
+put an app on them or take it off. A person edits their pages as on a phone: touch and hold, or right-click, then Edit
+Home Screen. Plugins are installed with the Plugins app, whose `plugins_marketplace` lists what could be.
 
 Its words:
 

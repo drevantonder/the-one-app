@@ -600,11 +600,11 @@ defmodule SoftDelete do
     Enum.find_value(Stream.iterate(from, &(&1 + 1)), &if(not taken?("#{base}-#{&1}"), do: "#{base}-#{&1}"))
   end
 
-  # A plugin's listing in the App Store, which shows it only while it has a latest version: so it's kept while it's
+  # A plugin's listing in the Plugins app's Marketplace, which shows it only while it has a latest version: so it's kept while it's
   # deleted, for `restore`, and goes when it's purged.
   defp listing(plugin), do: "network/deployed/#{User.owner(plugin)}/#{Path.basename(plugin)}"
 
-  # Servers look again at what's deployed, so a plugin deleted or restored leaves the App Store or is back in it at once.
+  # Servers look again at what's deployed, so a plugin deleted or restored leaves the Marketplace or is back in it at once.
   defp relisted(names) do
     plugins = for name <- names, name =~ @plugin, do: User.owner(name)
 
@@ -644,7 +644,7 @@ defmodule SoftDelete do
     end
   end
 
-  # A plugin's name as people read it, as the App Store lists it, whether or not it's installed now.
+  # A plugin's name as people read it, as the Marketplace lists it, whether or not it's installed now.
   defp title(call, app),
     do: Enum.find_value(Call.deployed(call), app, &(Path.basename(&1[:plugin]) == app and is_binary(&1[:title]) and &1[:title]))
 

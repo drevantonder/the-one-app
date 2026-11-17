@@ -81,7 +81,7 @@ p.subtitle { color: var(--muted-foreground); font-size: 1.0625rem; margin-top: -
 }
 .command button:hover { background: var(--accent); }
 
-/* An icon as the app draws one (home-screen's App Store): a rounded square. */
+/* An icon as the app draws one (the Plugins app): a rounded square. */
 .icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; background: var(--muted); }
 .icon.small { width: 1.5rem; height: 1.5rem; }
 .icon.large { width: 4rem; height: 4rem; }

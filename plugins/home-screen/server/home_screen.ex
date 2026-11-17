@@ -37,7 +37,6 @@ defmodule HomeScreen do
   def apps do
     [
       %{name: "Home Screen", page: "client/index.html", category: "launcher"},
-      %{name: "App Store", page: "client/store.html", icon: "client/store.svg", category: "admin", subject: "user"},
       %{
         name: "Colour Mode",
         page: "client/colour-mode.html",
@@ -93,7 +92,7 @@ defmodule HomeScreen do
         app: %{
           type: "string",
           description:
-            "An app, as `pages` gives it (notes/client/index.html), or a plugin, by its name or as `store` lists it, for its first app"
+            "An app, as `pages` gives it (notes/client/index.html), or a plugin, by its name or as `plugins_marketplace` lists it, for its first app"
         }
       },
       required: ["app"]
@@ -123,7 +122,9 @@ defmodule HomeScreen do
                   items: %{
                     type: "array",
                     description: "What's on it, in order: each an app or a widget",
-                    items: %{anyOf: [app, Map.put(widget, :required, ["widget", "name", "tool", "sizes", "opens", "size"])]}
+                    items: %{
+                      anyOf: [app, Map.put(widget, :required, ["widget", "name", "tool", "sizes", "opens", "size"])]
+                    }
                   },
                   hidden: %{type: "boolean", description: "Whether it's hidden, kept but not shown"}
                 },
@@ -165,7 +166,11 @@ defmodule HomeScreen do
               items: %{
                 type: "object",
                 properties: %{
-                  items: %{type: "array", items: arranged, description: "Each an app or a widget, as `pages` gives them"},
+                  items: %{
+                    type: "array",
+                    items: arranged,
+                    description: "Each an app or a widget, as `pages` gives them"
+                  },
                   hidden: %{type: "boolean", description: "Whether it's hidden, kept but not shown"}
                 },
                 required: ["items"]
@@ -187,36 +192,6 @@ defmodule HomeScreen do
         }
       },
       %{
-        name: "store",
-        read_only: true,
-        description:
-          "Lists every plugin anyone has deployed that a person could add: one with an icon that not every network has. Each as it's listed: what a person reads of it (`subtitle`, `about`), what it's for (`category`), and its apps and widgets",
-        inputs: none,
-        outputs: %{
-          type: "object",
-          properties: %{
-            plugins: %{
-              type: "array",
-              items: %{
-                type: "object",
-                properties: %{
-                  plugin: %{type: "string", description: "Its artifact: users/alice/plugins/notes"},
-                  title: %{type: "string", description: "Its name, as a person reads it"},
-                  icon: %{type: "string", description: "A data: address"},
-                  subtitle: %{type: ["string", "null"]},
-                  about: %{type: ["string", "null"]},
-                  category: %{type: ["string", "null"], description: "What it's for: Communication, Productivity, ..."},
-                  apps: %{type: "array", description: "Each one's name, icon and App Library category"},
-                  widgets: %{type: "array", description: "Each one's name and sizes"}
-                },
-                required: ["plugin", "title", "icon", "subtitle", "about", "category", "apps", "widgets"]
-              }
-            }
-          },
-          required: ["plugins"]
-        }
-      },
-      %{
         name: "add",
         description: """
         Puts an app on your Home Screen, last on its last page: one installed for you, which is in your App Library,
@@ -235,7 +210,8 @@ defmodule HomeScreen do
       },
       %{
         name: "remove",
-        description: "Takes an app off your Home Screen's pages. It stays in the App Library, and `uninstall` removes it.",
+        description:
+          "Takes an app off your Home Screen's pages. It stays in the App Library, and `uninstall` removes it.",
         inputs: adding,
         outputs: %{
           type: "object",
@@ -307,16 +283,6 @@ defmodule HomeScreen do
     %{pages: pages}
   end
 
-  # Every plugin anyone deployed that a person could add, whether or not anyone has it now.
-  def call("store", _inputs, call) do
-    plugins =
-      for plugin <- Call.deployed(call),
-          plugin.icon != nil,
-          do: Map.take(plugin, [:plugin, :title, :icon, :subtitle, :about, :category, :apps, :widgets])
-
-    %{plugins: Enum.sort_by(plugins, &String.downcase(&1.title))}
-  end
-
   def call("add", %{"app" => app}, call) do
     owner!(call)
     plugins = Call.plugins(call)
@@ -344,7 +310,9 @@ defmodule HomeScreen do
         id = "#{plugin.name}/#{found.page}"
 
         store(call, fn pages ->
-          for page <- pages, items = Enum.reject(page["items"], &(&1["app"] == id)), items != [],
+          for page <- pages,
+              items = Enum.reject(page["items"], &(&1["app"] == id)),
+              items != [],
               do: %{page | "items" => items}
         end)
 
@@ -365,7 +333,13 @@ defmodule HomeScreen do
     about = if app[:subject], do: %{subject: app[:subject]}, else: %{}
 
     Map.merge(
-      %{app: "#{plugin.name}/#{app.page}", plugin: plugin.plugin, name: app.name, icon: app.icon, category: app.category},
+      %{
+        app: "#{plugin.name}/#{app.page}",
+        plugin: plugin.plugin,
+        name: app.name,
+        icon: app.icon,
+        category: app.category
+      },
       about
     )
   end
@@ -390,7 +364,8 @@ defmodule HomeScreen do
     known = for {category, name} <- @categories, do: {category, name, Enum.filter(apps, &(&1.category == category))}
     other = {nil, "Other", Enum.reject(apps, &List.keymember?(@categories, &1.category, 0))}
 
-    for {category, name, apps} <- known ++ [other], apps != [],
+    for {category, name, apps} <- known ++ [other],
+        apps != [],
         do: %{category: category, name: name, apps: Enum.sort_by(apps, &String.downcase(&1.name))}
   end
 

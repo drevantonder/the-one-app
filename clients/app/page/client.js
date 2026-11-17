@@ -423,7 +423,7 @@ function launcherIn(resources) {
 }
 
 /// Who may install for everyone, if not this person, who then can't install a Home Screen: "Only Andre can install a
-/// Home Screen for Everyone", by the names they go by, as the App Store says it. Nothing where they can, or where
+/// Home Screen for Everyone", by the names they go by, as the Plugins app says it. Nothing where they can, or where
 /// the network can't say.
 async function only() {
   /** @param {string} name @param {Record<string, unknown>} [inputs] @returns {Promise<any>} */

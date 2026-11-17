@@ -110,7 +110,7 @@ defmodule OneCore.Plugin do
     Skill (agentskills.io): it starts with the skill's `name`, which is the plugin's, and its `description`, one line
     saying when an agent should read it, as YAML between two lines of `---`, whose words `search` finds the plugin's
     tools by too. Its `metadata`, which Agent Skills leaves to whoever reads
-    it, is what a person reads where the plugin's listed (the App Store, the plugin directory): its `subtitle`, a
+    it, is what a person reads where the plugin's listed (the Plugins app's Marketplace, the plugin directory): its `subtitle`, a
     few words under its name, as an App Store app's is, and `about`, a few plain sentences on its page, as Google
     Play's "About this app" is. Both say what it does for a person, with no word of an agent's. Its `category`
     says what the plugin is for, and a listing groups plugins by it; it's one of these, and a deploy without one is
@@ -343,7 +343,7 @@ defmodule OneCore.Plugin do
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
   and its edge function. A plugin's icon is its own, as an Android package's is, and deploying one without it is
-  refused: `icon/0` names its file, its app's icon or one of its own, which goes wherever the plugin itself is shown (the App Store, the Vault). `apps/0`, if the plugin has one, names its apps,
+  refused: `icon/0` names its file, its app's icon or one of its own, which goes wherever the plugin itself is shown (the Plugins app, the Vault). `apps/0`, if the plugin has one, names its apps,
   as many as it has, each a page of `client/`, with an icon of its own or else the plugin's:
 
       @impl true

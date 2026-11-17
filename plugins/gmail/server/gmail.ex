@@ -10,7 +10,7 @@ defmodule Gmail do
   @api "https://gmail.googleapis.com/gmail/v1/users/me/"
   @upload "https://gmail.googleapis.com/upload/gmail/v1/users/me/"
 
-  # It has no app, so it names and draws itself, in the App Store.
+  # It has no app, so it names and draws itself, in the Plugins app.
   @impl true
   def title, do: google().title
 

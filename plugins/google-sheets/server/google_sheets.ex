@@ -8,7 +8,7 @@ defmodule GoogleSheets do
   @api "https://sheets.googleapis.com/v4/"
   @range_hint "ranges are A1 notation, like Budget!A1:F20, Budget!A:C or Budget; google-sheets_spreadsheet lists the sheets"
 
-  # It has no app, so it names and draws itself, in the App Store.
+  # It has no app, so it names and draws itself, in the Plugins app.
   @impl true
   def title, do: google().title
 

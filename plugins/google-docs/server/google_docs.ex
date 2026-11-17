@@ -8,7 +8,7 @@ defmodule GoogleDocs do
   @api "https://docs.googleapis.com/v1/"
   @ordered ~r/DECIMAL|ALPHA|ROMAN|ZERO/
 
-  # It has no app, so it names and draws itself, in the App Store.
+  # It has no app, so it names and draws itself, in the Plugins app.
   @impl true
   def title, do: google().title
 
