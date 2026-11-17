@@ -622,6 +622,7 @@ defmodule Containers do
           name <- Service.call(call, Podman, :stop_idle, [idle], server),
           do: %{machine: Service.name(server), name: name}
 
+    if stopped != [], do: Call.changed(call)
     %{stopped: stopped}
   end
 
