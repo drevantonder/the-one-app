@@ -10,12 +10,14 @@
 # Each kind is built in one place, so every build of a commit is the same bytes, and an app deployed again from
 # an unchanged folder is unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM
 # (`tooling/release`) and Windows' with cargo-xwin, as a DLL, which is kept under the same kind of name,
-# `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. From Linux, a Mac's are built on the Mac `ssh
-# mac` reaches, in its checkout ~/scratch/one-release, at the same commit, which is on GitHub, so what's built is
-# committed. The Mac sleeps, so only one whose inputs changed is built there: one that hasn't is the one built before,
-# from this machine's cache, or One Core's from the latest server published for a Mac, whose `nifs` lists what each
-# NIF was built from, as `$target/nifs/<kind>` does for the ones here, which `tooling/release` puts in a server, and
-# an app's from where its `server/checksums.json` says it's published (`tooling/publish-nifs`).
+# `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. A build is kept by what it's built from
+# (`tooling/input-hash`), in this machine's cache, outside any worktree, so one whose inputs haven't changed is
+# the one built before, by any worktree, and only a crate that changed is built. A Mac's too: from Linux, it's built
+# on the Mac `ssh mac` reaches, in its checkout ~/scratch/one-release, at the same commit, which is on GitHub, so
+# what's built is committed. The Mac sleeps, so before that, One Core's is looked for in the latest server published
+# for a Mac, whose `nifs` lists what each NIF was built from, as `$target/nifs/<kind>` does for the ones here,
+# which `tooling/release` puts in a server, and an app's where its `server/checksums.json` says it's published
+# (`tooling/publish-nifs`).
 #
 # Each NIF is named for its build, what it's built from (`tooling/input-hash`), so a server loads a changed one beside
 # the one before (`OneCore.Nif`). The Mac is given the names this machine worked out, in NIF_BUILD_<CRATE>, so a
@@ -41,24 +43,25 @@ for kind in "${kinds[@]}"; do
     macos-aarch64) triple=aarch64-apple-darwin build="build --target $triple" library=lib%s.dylib ;;
     *) echo "No server runs on $kind" >&2 && exit 1 ;;
   esac
+  cache=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/nifs
+  mkdir -p "$cache" "$target/nifs"
+  files=()
+  for crate in "${crates[@]}"; do
+    file=$crate/$kind && [[ $crate == */bin/* ]] || file+=.so
+    sums[$file]=$(tooling/input-hash "$crate" "$triple") && files+=("$file")
+  done
   builds=()
   for crate in "${crates[@]}"; do
     [[ $crate == */nif/* ]] || continue
     name=NIF_BUILD_$(basename "$crate" | tr '[:lower:]' '[:upper:]')
-    builds+=("$name=${!name:-$(tooling/input-hash "$crate" "$triple")}")
+    builds+=("$name=${!name:-${sums[$crate/$kind.so]}}")
   done
+  for file in "${files[@]}"; do echo "${sums[$file]} $file"; done | sort -k2 >"$target/nifs/$kind"
+  changed() { for file in "${files[@]}"; do cp "$cache/${sums[$file]}" "$file" 2>/dev/null || echo "$file"; done; }
+  # A build is renamed into the cache whole, so what another build reads is never half-written.
+  keep() { cp "$1" "$cache/${sums[$1]}.$$" && mv "$cache/${sums[$1]}.$$" "$cache/${sums[$1]}"; }
 
   if [[ $kind == macos-* && $here == Linux ]]; then
-    cache=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/nifs
-    mkdir -p "$cache" "$target/nifs"
-    files=()
-    for crate in "${crates[@]}"; do
-      file=$crate/$kind && [[ $crate == */bin/* ]] || file+=.so
-      sums[$file]=$(tooling/input-hash "$crate" "$triple") && files+=("$file")
-    done
-    for file in "${files[@]}"; do echo "${sums[$file]} $file"; done | sort -k2 >"$target/nifs/$kind"
-    changed() { for file in "${files[@]}"; do cp "$cache/${sums[$file]}" "$file" 2>/dev/null || echo "$file"; done; }
-
     # An app's published build, named for what it's built from, checked against the SHA-256 published with it.
     for file in $(changed); do
       [[ $file == apps/* ]] || continue
@@ -82,7 +85,7 @@ for kind in "${kinds[@]}"; do
       tar -xzf "$unpacked.tar.gz" -C "$unpacked"
       # Where `tooling/release` puts One Core's in a server: beside its code.
       [[ ! -e $unpacked/nifs ]] || while read -r sum file; do
-        [[ $file != core/* ]] || { crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum"; }
+        [[ $file != core/* ]] || { crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum.$$" && mv "$cache/$sum.$$" "$cache/$sum"; }
       done <"$unpacked/nifs"
       rm -r "$unpacked" "$unpacked.tar.gz"
     fi
@@ -98,19 +101,23 @@ for kind in "${kinds[@]}"; do
     echo "$kind's are built on Linux" >&2 && exit 1
   fi
 
+  built=($(changed))
+  ((${#built[@]})) || continue
   # Each kind of machine needs Rust's standard library for it, which a new machine may not have yet.
   rustup target add "$triple" >/dev/null
-  env "${builds[@]}" cargo $build --release $(printf -- '-p %s ' $(basename -a "${crates[@]}"))
-  for crate in "${crates[@]}"; do
+  env "${builds[@]}" cargo $build --release $(printf -- '-p %s ' $(basename -a $(dirname "${built[@]}")))
+  for file in "${built[@]}"; do
+    crate=$(dirname "$file")
     if [[ $crate == */bin/* ]]; then
       program=$target/$triple/release/$(basename "$crate")
-      cp "$program" "$crate/$kind" 2>/dev/null || cp "$program.exe" "$crate/$kind"
+      cp "$program" "$file" 2>/dev/null || cp "$program.exe" "$file"
     else
-      cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$crate/$kind.so"
+      cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$file"
     fi
+    keep "$file"
   done
 done
 if [[ -n ${on_mac-} ]]; then
   wait "$on_mac" || { echo "${mac[*]} changed since the last build of it, so the Mac builds it, and it didn't: wake the Mac and run this again." >&2 && exit 1; }
-  for file in "${mac[@]}"; do cp "$file" "$cache/${sums[$file]}"; done
+  for file in "${mac[@]}"; do keep "$file"; done
 fi
