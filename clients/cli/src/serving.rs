@@ -348,8 +348,11 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         println!("This device isn't a server: `one serve on` makes it one.");
         return Ok(());
     }
-    // The system runs it as this build says to, from its next start.
-    system::install(&here, &key, &program, &unit_env(who.clone(), env::var("PATH").ok()).await?)?;
+    // The system runs it as this build says to, from its next start. Where it can't be rewritten, as one changed by
+    // hand may not be, it runs as it was set up rather than not at all.
+    if let Err(error) = system::install(&here, &key, &program, &unit_env(who.clone(), env::var("PATH").ok()).await?) {
+        eprintln!("Couldn't rewrite how the system runs it, so it runs as it was set up: {error:#}");
+    }
     let log = here.folder.join("server.log");
     system::bound(&log)?;
 
@@ -858,11 +861,23 @@ mod system {
         format!("one-server-{}.service", &key[..12])
     }
 
-    /// Writes the unit and enables it, which takes effect from its next start. It's restarted 10 s after it ends
-    /// non-zero, and left failed after 10 starts in 10 minutes, a crash loop. A start has `START` twice over: a pair
-    /// being verified, then the one before it. Only `one serve run` is told to stop, and has the server drain first.
+    /// The file systemd reads the unit from, where it knows the unit: wherever it is, as a person may have put it
+    /// in their own folder of units by hand.
+    fn loaded(key: &str) -> Result<Option<PathBuf>> {
+        let done = std::process::Command::new("systemctl")
+            .args(["--user", "show", "-p", "FragmentPath", "--value", &name(key)])
+            .output()?;
+        let path = String::from_utf8_lossy(&done.stdout).trim().to_owned();
+        Ok((!path.is_empty()).then(|| PathBuf::from(path)))
+    }
+
+    /// Writes the unit, which takes effect from its next start: over the file systemd reads it from, or, new, in the
+    /// server's folder, enabled from there. It's restarted 10 s after it ends non-zero, and left failed after 10
+    /// starts in 10 minutes, a crash loop. A start has `START` twice over: a pair being verified, then the one before
+    /// it. Only `one serve run` is told to stop, and has the server drain first.
     pub fn install(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
-        let unit = here.folder.join(name(key));
+        let loaded = loaded(key)?;
+        let unit = loaded.clone().unwrap_or_else(|| here.folder.join(name(key)));
         let env: String = env.iter().map(|(name, value)| format!("Environment=\"{name}={value}\"\n")).collect();
         fs::write(
             &unit,
@@ -875,7 +890,9 @@ mod system {
                 STOP.as_secs() + 10,
             ),
         )?;
-        systemctl(&["enable", &unit.display().to_string()])?;
+        if loaded.is_none() {
+            systemctl(&["enable", &unit.display().to_string()])?;
+        }
         systemctl(&["daemon-reload"])
     }
 
@@ -890,8 +907,14 @@ mod system {
         systemctl(&["stop", &name(key)])
     }
 
+    /// Has systemd forget the unit: one in its own folder of units goes, and one in the server's folder goes with it.
     pub fn remove(_here: &Here, key: &str) -> Result<()> {
-        systemctl(&["disable", "--now", &name(key)])
+        let loaded = loaded(key)?;
+        systemctl(&["disable", "--now", &name(key)])?;
+        if let Some(unit) = loaded.filter(|unit| unit.exists()) {
+            fs::remove_file(unit)?;
+        }
+        systemctl(&["daemon-reload"])
     }
 
     /// What the server says is in systemd's journal, which keeps it within its own bounds.
