@@ -244,8 +244,11 @@ fn requires(app: &Path) -> Vec<String> {
 /// Stops with what to build, where an app brings a NIF that isn't built for every kind of machine the network's
 /// servers run on, here or published where its `server/checksums.json` says, which the server downloads
 /// (`OneCore.Apps.Precompiled`): its source is never deployed, only the library built from it (`OneCore.App`),
-/// so the agent installing it builds it, as `tooling/nifs` does for the apps The One App ships with.
+/// so the agent installing or deploying it builds it, as `tooling/nifs` does for the apps The One App ships with.
 async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> {
+    if !app.join("server/nif").is_dir() {
+        return Ok(());
+    }
     let published: Value = fs::read_to_string(app.join("server/checksums.json"))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -295,7 +298,7 @@ async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> 
         bail!(
             "{name} has native code, the NIF in {}, which isn't built for {}, where the network's servers run. Build it \
              as tooling/nifs does, Linux's with zig (cargo-zigbuild) for a server's glibc, Windows' with cargo-xwin and a Mac's on a Mac, then \
-             install it again:\n\n    cd {}\n{}",
+             run that again:\n\n    cd {}\n{}",
             crate_folder.display(),
             missing.iter().map(|kind| kind.as_str()).collect::<Vec<_>>().join(" and "),
             crate_folder.display(),
@@ -542,12 +545,13 @@ pub async fn deploy_folder(client: &Client, args: &[String]) -> Result<ExitCode>
         return crate::command(client, &args).await;
     };
     let folder = PathBuf::from(folder);
+    let (of, apps) = installed(client, None).await?;
+    built(client, &of, &name, &folder).await?;
     let Ok(commit) = git(&folder, &["rev-parse", "HEAD"]) else { return crate::command(client, &args).await };
     let dirty = !git(&folder, &["status", "--porcelain", "--", "."])?.is_empty();
     let source =
         git(&folder, &["remote", "get-url", "origin"]).or_else(|_| git(&folder, &["rev-parse", "--show-toplevel"]))?;
 
-    let (of, apps) = installed(client, None).await?;
     let live = apps.iter().find(|app| app["name"] == name.as_str() && app["for"] == of.as_str());
     let live = live.and_then(|app| app["from"]["commit"].as_str());
     if let Some(live) = live.filter(|live| !force && *live != commit) {
