@@ -43,9 +43,9 @@ Without `dbus-run-session` GTK waits half a minute for a desktop that isn't ther
   `one:<app>/<page>` (a page by its file, `one:sign-in/client/security.html`), and a fragment the app follows,
   `one:home-screen#library`. Click only for what the change is about.
 - Wait for state, never a time: the window is ready once `body:not([aria-busy]) iframe:not([inert]):not([aria-busy])`
-  is there (the app showing has drawn), and still once
-  `Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished))`
-  has settled, in the window and in the app's frame (`switch_to.frame`).
+  is there (the app showing has drawn), and still once what moves has ended, in the window and in the app's frame
+  (`switch_to.frame`): `Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !==
+  Infinity).map(a => a.finished.catch(() => {})))`, as a cancelled one rejects.
 - An app's elements are in its frame: switch to it to find, click or wait, and back to the window for the picture
   (`save_screenshot`). An element's own screenshot inside a frame comes out black.
 - A hold is `click_and_hold(…).pause(1).release()`; WebKit's driver's right-click opens no menu.
