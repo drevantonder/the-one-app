@@ -142,7 +142,8 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
       hold()
     })
     element.addEventListener("pointerdown", (event) => {
-      if (event.button || !arranges()) return
+      // ⊖ is pressed, not held or lifted.
+      if (event.button || !arranges() || (event.target as Element).closest(".minus")) return
       start = event
       // Editing, a press that moves lifts at once, wherever the pointer goes first; otherwise a finger held still is a
       // hold.
@@ -188,6 +189,11 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
     return editingHere() && state().matches({ editing: "dragging" }) && held?.page === props.page && held.index === cell.index
   }
   const arranges = () => props.owner.arranges && !props.small
+  // ⊖ asks first, as an iPhone's does: an app stays in the App Library, and a widget's app and data stay.
+  const removing = async (item: Item, index: number) => {
+    const question = item.widget ? { heading: "Remove Widget?", action: "Remove", destructive: true } : { heading: `Remove “${item.name}” from Home Screen?`, text: "It stays in your App Library.", action: "Remove" }
+    if (await confirm(question)) home.send({ type: "remove", page: props.page, index })
+  }
   return (
     <section class={["page", { small: props.small }]} data-page={props.page} ref={props.small ? undefined : holds(() => (editingHere() ? undefined : { page: props.page, index: -1, from: "page" }), arranges)}>
       <Show when={props.placed.length || editingHere()} fallback={<Empty>No apps on this page.</Empty>}>
@@ -208,7 +214,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
                         <Card item={item() as WidgetItem} owner={props.owner} still={props.small || editingHere()} />
                       </Show>
                       <Show when={editingHere()}>
-                        <button type="button" class="minus" aria-label={`Remove ${item().name}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => home.send({ type: "remove", page: props.page, index: placed().item.index })}>
+                        <button type="button" class="minus" aria-label={`Remove ${item().name}`} onClick={() => removing(item(), placed().item.index)}>
                           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 12h10" /></svg>
                         </button>
                       </Show>
