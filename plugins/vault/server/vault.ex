@@ -1299,7 +1299,7 @@ defmodule Vault do
   end
 
   # The items the database held before each was an artifact of its own are copied into one, each once, under its
-  # id, with what was kept of it; the database's copy stays as it was.
+  # id, with what was kept of it, and listed once the copy is written; the database's copy stays as it was.
   defp moved(d, db) do
     for old <- query(d, "select * from items where id not in (select id from artifacts)") do
       fields =
@@ -1324,7 +1324,7 @@ defmodule Vault do
         "changed" => old["changed"]
       }
 
-      Artifact.write(root(db), "#{old["id"]}/item", JSON.encode!(record))
+      :ok = Artifact.write(root(db), "#{old["id"]}/item", JSON.encode!(record))
       query(d, "insert into artifacts (id, name) values (?, ?)", [old["id"], old["name"]])
     end
 
