@@ -1,0 +1,40 @@
+#!/bin/sh
+# Git runs this on each commit's message, once the clone has `git config core.hooksPath .githooks`.
+#
+# A commit marked breaking (`type!:` or a `BREAKING CHANGE:` footer) takes each part it touches to its next minor
+# (`tooling/version`), so the mark is refused where it can't mean that: on a type that changes nothing a part's user
+# reaches, on a commit that touches no part, or where it touches a part its scope doesn't name, as
+# `feat(home-screen)!` taking the platform to its next minor with it did (9c43d976a).
+root=$(cd "$(dirname "$0")/.." && pwd)
+subject=$(grep -v '^#' "$1" | sed -n '/./{p;q;}')
+grep -q '^BREAKING[ -]CHANGE:' "$1" || case $subject in *'!:'*) ;; *) exit 0 ;; esac
+type=$(echo "$subject" | sed -n 's/^\([a-z]*\).*/\1/p')
+scopes=$(echo "$subject" | sed -n 's/^[a-z]*(\([^)]*\)).*/\1/p' | tr ', ' '\n\n')
+
+case $type in
+  feat | fix | refactor | perf | revert | build) ;;
+  *) echo "A $type can't break whoever uses a part, so it isn't marked breaking: drop the \`!\` (and any BREAKING CHANGE footer)." >&2 && exit 1 ;;
+esac
+
+parts=$(git diff --cached --name-only -z | xargs -0 "$root/tooling/version" parts)
+[ -n "$parts" ] || {
+  echo "This touches no part with a version (the platform's paths, in tooling/version, or apps/<name>), so it can't break one: drop the \`!\`." >&2
+  exit 1
+}
+
+unnamed=
+for part in $parts; do
+  version=$("$root/tooling/version" $([ "$part" = platform ] || echo "$part"))
+  echo "$part ${version%%+*} goes to its next minor" >&2
+  [ -n "$scopes" ] || continue
+  if [ "$part" = platform ]; then
+    named=$(for scope in $scopes; do [ -d "$root/apps/$scope" ] || echo "$scope"; done)
+  else
+    named=$(for scope in $scopes; do [ "apps/$scope" = "$part" ] && echo "$scope"; done)
+  fi
+  [ -n "$named" ] || unnamed="$unnamed $part"
+done
+[ -z "$unnamed" ] || {
+  echo "Its scope names none of$unnamed, which it takes to a next minor too. Mark \`!\` only on the commit that breaks a part, and commit the rest unmarked beside it, or name each part it breaks in its scope: an app by its name, the platform by core, cli, edge or another word of it." >&2
+  exit 1
+}

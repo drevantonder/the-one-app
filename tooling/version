@@ -11,14 +11,24 @@
 # breaking change (`type!:`, or a `BREAKING CHANGE:` footer) takes the next minor before 1.0 and the next major from
 # it, a `feat` the next patch before 1.0 and the next minor from it, and a `fix` the next patch, as Cargo, npm and Hex
 # read 0.x. Anything else leaves it as it is, and a commit touching two parts moves each.
+#
+# `tooling/version parts <path>...` says which parts those paths are in, `platform` or `apps/<name>`, one a line.
 set -e
 cd "$(dirname "$0")/.."
+platform="core clients icons Cargo.toml Cargo.lock mise.toml tooling/release"
 # The platform was 0.18.40 there, counted from 0.15.0 by every commit; each app starts at 0.1.0.
 since=4706f3067
 case $1 in
-  "") paths="core clients icons Cargo.toml Cargo.lock mise.toml tooling/release" start=0.18.40 ;;
+  "") paths=$platform start=0.18.40 ;;
   apps/*) paths=$1 start=0.1.0 ;;
-  *) echo "tooling/version [apps/<name>]" >&2 && exit 1 ;;
+  parts)
+    shift
+    for path; do
+      for part in $platform; do case $path in "$part" | "$part"/*) echo platform ;; esac; done
+      case $path in apps/*/*) path=${path#apps/} && echo "apps/${path%%/*}" ;; esac
+    done | sort -u
+    exit ;;
+  *) echo "tooling/version [apps/<name>], or tooling/version parts <path>..." >&2 && exit 1 ;;
 esac
 # shellcheck disable=SC2086 # the paths are words
 version=$(git log --reverse --format='%s%n%b%x1e' "$since..HEAD" -- $paths | awk -v version=$start '
