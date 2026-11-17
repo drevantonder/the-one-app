@@ -42,6 +42,10 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
+# Each line says how many seconds into the release it is, so where a release's time goes is in what it printed. The
+# Mac's lines come through Linux's.
+[[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
+
 usage="tooling/release [server] [client] [--dry-run], or tooling/release <name>..."
 dry= wanted=()
 for arg in "$@"; do
