@@ -384,9 +384,32 @@ defmodule OneCore.Mcp do
          true <- Version.client?(path),
          %{^plugin => version} <- Plugins.running(who),
          {:ok, data} <- Store.file(version.artifact, code, path) do
+      data = if Path.extname(path) == ".html", do: mapped(data, path, [plugin | version.uses]), else: data
       {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content(data))]}}
     else
       _ -> {:error, -32002, "There's nothing at #{uri}"}
+    end
+  end
+
+  # A page, with the import map its modules are resolved by in its head, before anything loads: what every app shares
+  # by name, the UI library's one copy, which an app's build already imports by where it's served (`core/ui/app.js`),
+  # and as `<plugin>/` the client of its own plugin and of each plugin it uses, which a client serves beside it, at
+  # <its address>/<plugin>/client/, for what's imported by name as it runs. So separately built plugins share one
+  # Solid. It depends on nothing but the page's own version, so the page is still read once.
+  @shared %{
+    "solid-js" => "/ui/client/solid.js",
+    "@solidjs/web" => "/ui/client/web.js",
+    "@zag-js/solid" => "/ui/client/zag.js",
+    "ui" => "/ui/client/ui.js"
+  }
+  defp mapped(page, path, plugins) do
+    up = String.duplicate("../", length(Path.split(path)))
+    imports = Map.merge(@shared, Map.new(plugins, &{"#{&1}/", "#{up}#{&1}/client/"}))
+    map = ~s(<script type="importmap">#{JSON.encode!(%{imports: imports})}</script>)
+
+    case Regex.split(~r/<!doctype html>|<head(?:\s[^>]*)?>/i, page, parts: 2, include_captures: true) do
+      [before, tag, rest] -> before <> tag <> map <> rest
+      [_page] -> map <> page
     end
   end
 

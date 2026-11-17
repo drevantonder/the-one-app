@@ -40,10 +40,13 @@ defmodule OneCore.App do
   end
 
   @doc """
-  Whether a plugin's files hold an app's source to build: a page in `client/`. One whose `client/` has none was built
-  already.
+  Whether a plugin's files hold a client's source to build: a page in `client/`, or a module its `client/package.json`
+  exports for another plugin's page. One whose `client/` has neither was built already.
   """
-  def app?(files), do: Enum.any?(Map.keys(files), &(String.starts_with?(&1, @client) and Path.extname(&1) == ".html"))
+  def app?(files) do
+    Enum.any?(Map.keys(files), &(String.starts_with?(&1, @client) and Path.extname(&1) == ".html")) or
+      match?({:ok, %{"exports" => %{}}}, JSON.decode(files["client/package.json"] || ""))
+  end
 
   @doc """
   The files of a plugin with an app as a server keeps them, from the files deployed, built against this server's UI

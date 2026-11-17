@@ -279,7 +279,7 @@ defmodule OneCore.Plugin do
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
   and its edge function. A plugin's icon is its own, as an Android package's is: `icon/0` names its file, which
-  goes wherever the plugin itself is shown (the App Store, Accounts). `apps/0`, if the plugin has one, names its apps,
+  goes wherever the plugin itself is shown (the App Store, the Vault). `apps/0`, if the plugin has one, names its apps,
   as many as it has, each a page of `client/`, with an icon of its own or else the plugin's:
 
       @impl true
@@ -298,9 +298,10 @@ defmodule OneCore.Plugin do
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
   - A plugin's name where a person reads it is `title/0`, and without one its first app's; one that names no icon
     is drawn with its first app's. One with no app gives `title/0`: `def title, do: "Gmail"`.
-  - A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts, as the launcher's skill
-    says. Accounts aren't an app, and having them makes no app: a plugin has an app only for a screen a person
-    opens for something else.
+  - A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts, as the Vault's skill says:
+    items in the person's Vault, of a type the plugin registers, which the Vault lists under Accounts. Accounts
+    aren't an app, and having them makes no app: a plugin has an app only for a screen a person opens for something
+    else.
   - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
     listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
     an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's.
@@ -313,6 +314,14 @@ defmodule OneCore.Plugin do
         client/app.jsx       import { render } from "@solidjs/web"; import { Screen } from "ui"; ...
         client/app.css       the app's own look, if it has any, imported by app.jsx
         client/package.json  packages of its own, if it needs any, under "dependencies"
+
+  - A plugin's client may export modules for another plugin's page to import, as a package does, in
+    `client/package.json`'s `exports` (`{"exports": {"./profile": "./profile.tsx"}}`), each built as
+    `client/<name>.js` with what it exports: a component another plugin draws, as the Vault draws an item of a type a
+    plugin registers. Solid, `@zag-js/solid` and `ui` are the one copy every page and every module it imports shares,
+    whichever plugin built it, so signals and context work across plugins; and every page is served with an import map
+    (`OneCore.MCP`) that names them and `<plugin>/`, the client of its own plugin and of each plugin it uses, for what
+    it imports by name as it runs.
 
   - The source is what's deployed, and the server builds it (`OneCore.App`): what a client is served at `client/` is
     what it built. A client keeps what a page loads, and reads a sourcemap only when something asks for it. The
