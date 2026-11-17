@@ -201,6 +201,18 @@ defmodule OneCore.Release do
     end
   end
 
+  @doc """
+  One Core's modules that differ from the code `old` to the code `new`, as `{removed, added, changed}`, and why a
+  running server can't load them, or `nil`: the rule `compare/2` applies to them. `old` and `new` are whole builds, or
+  the folders a developer's `_build` keeps One Core's code in, `%{ebin: <folder>, consolidated: <folder>}`, as a local
+  network's code reloader has them (`mix network.reload`, in `tooling/`). It loads the code of both into the VM it runs
+  in, as `compare/2` does.
+  """
+  def modules(old, new) do
+    changes = changes(old, new)
+    {changes, changed(changes, old, new)}
+  end
+
   defp changed({removed, added, changed} = changes, old, new) do
     modules = removed ++ added ++ changed
 
@@ -267,7 +279,9 @@ defmodule OneCore.Release do
     a == b
   end
 
+  defp ebin(%{ebin: ebin}), do: ebin
   defp ebin(build), do: build |> Path.join("lib/one_core-*/ebin") |> Path.wildcard() |> hd()
+  defp consolidated(%{consolidated: consolidated}), do: consolidated
   defp consolidated(build), do: build |> Path.join("releases/*/consolidated") |> Path.wildcard() |> hd()
 
   # One Core's modules that differ from `old` to `new`, with its consolidated protocols: those only `old` has, those
@@ -365,7 +379,15 @@ defmodule OneCore.Release do
 
   defp loaded(build) do
     was = :code.lib_dir(:one_core) |> to_string() |> Path.join("../..") |> Path.expand()
-    {removed, added, changed} = changes(was, build)
+    swap(changes(was, build), build, fn -> moved(build) end)
+  end
+
+  @doc """
+  Loads `changes` of One Core's modules, as `modules/2` gives them, from the code `build` into this server while it
+  runs, as `load/1` does, running `then` once they're loaded and before its processes start again: `:ok`, or
+  `{:error, why}`.
+  """
+  def swap({removed, added, changed}, build, then \\ fn -> :ok end) do
     stop(MapSet.new(removed ++ changed))
     for module <- changed, do: :code.purge(module)
 
@@ -373,7 +395,7 @@ defmodule OneCore.Release do
       case :code.atomic_load(files(added ++ changed, build)) do
         :ok ->
           for module <- removed, do: {:code.purge(module), :code.delete(module)}
-          moved(build)
+          then.()
 
         {:error, why} ->
           {:error, "its code didn't load: #{inspect(why)}"}
