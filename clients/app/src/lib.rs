@@ -405,6 +405,25 @@ fn navigation_gestures(window: tauri::WebviewWindow, on: bool) -> Result<(), Str
         .map_err(|error| error.to_string())
 }
 
+/// Shows or hides an iPhone's status bar, as the app that's showing asks: its Home Screen hides it while it's edited, as
+/// iOS's own does, and puts + and Done where it was. Tao's view controller says whether it's hidden, and has iOS ask
+/// again as it changes. A computer has none, and Android's window is already clear of its bars.
+#[tauri::command]
+fn status_bar(window: tauri::WebviewWindow, shown: bool) -> Result<(), String> {
+    window
+        .with_webview(move |webview| {
+            #[cfg(target_os = "ios")]
+            unsafe {
+                // Tauri hands over the window's view controller on the main thread.
+                let controller = &*webview.view_controller().cast::<objc2::runtime::AnyObject>();
+                let () = objc2::msg_send![controller, setPrefersStatusBarHidden: !shown];
+            }
+            #[cfg(not(target_os = "ios"))]
+            let _ = (webview, shown);
+        })
+        .map_err(|error| error.to_string())
+}
+
 /// Light or dark, as Colour Mode has it on this device, or as the device is with neither: what's the window's own and
 /// not its page follows it too, a computer's title bar and an iPhone's status bar, which would otherwise follow the
 /// device and show dark on dark. Android's bars are `MainActivity`'s (`androidTheme` in host.js).
@@ -781,6 +800,7 @@ pub fn run() {
             tapped,
             opened,
             navigation_gestures,
+            status_bar,
             theme,
             report
         ])

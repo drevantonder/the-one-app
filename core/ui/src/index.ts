@@ -14,7 +14,7 @@
 /// JavaScript: the UI library's types are its `types/` (`one code --name ui`), which the app's `tsconfig.json` names
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them.
 export { call, changed, client, connection, covers, haptic, leave, open, showRecoveryKey, updateReady, upload, useRecoveryKey } from "./bridge.ts"
-export { seen, share, words } from "./shared.ts"
+export { pace, seen, share, words } from "./shared.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
 export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"
 export { NumberInput } from "./number-input.tsx"

@@ -200,10 +200,11 @@ export const leave = () => greet().then(() => notify("ui/notifications/request-t
 /// from it does. `open("notes/client/index.html", { subject: "groups/family" })` names a page of the app's that isn't
 /// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a Home Screen page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
-/// without. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an
+/// without. `from` is where its icon is in this page, which the app grows out of as it shows and goes back into
+/// as it closes, as an iPhone's do. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an
 /// outside service's sign-in page is opened.
-export const open = (app: string, { subject, behind }: Subject & { behind?: boolean } = {}): Promise<unknown> =>
-  greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind }))
+export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number } } = {}): Promise<unknown> =>
+  greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
 /// `const { device, network, build, server, push } = await client()`: this device's key, as Devices lists it, the
 /// network's address, if it has one, the build it's on, its server's key if it's a server, and on a phone, whether
@@ -211,7 +212,9 @@ export const open = (app: string, { subject, behind }: Subject & { behind?: bool
 /// `null` as the device is, and `client({ leave: true })` signs this device out once it's been removed from its
 /// person's devices. `client({ serve: true })` makes this device a server of its person's and `false` stops it being
 /// one, `client({ update: true })` has it take the latest builds, and `client({ push: true })` has a phone whose push
-/// failed try again: each answers `{ message }`, what it did, or throws why it couldn't. An update shows over every app
+/// failed try again: each answers `{ message }`, what it did, or throws why it couldn't. `client({ statusBar: false })`
+/// hides the device's status bar while this app is showing, as an iPhone's Home Screen does while it's edited, and
+/// `true` shows it again; a device with none, or whose app can't, keeps what it has. An update shows over every app
 /// as it's under way, and the app starts again on the new build.
 export function client(): Promise<Client>
 export function client(change: ClientChange): Promise<{ message: string }>
@@ -234,6 +237,7 @@ export interface Client {
 /** What `client(change)` changes. */
 export interface ClientChange {
   theme?: "light" | "dark" | null
+  statusBar?: boolean
   leave?: boolean
   serve?: boolean
   update?: boolean

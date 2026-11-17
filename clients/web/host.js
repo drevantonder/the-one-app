@@ -289,8 +289,9 @@ const commands = {
   // What the app does as it's seen, which a browser doesn't: it hears notifications.
   visible() {},
   listen() {},
-  // A browser's back and forward gestures are its own.
+  // A browser's back and forward gestures are its own, and so is its status bar.
   navigation_gestures() {},
+  status_bar() {},
 }
 
 /// Light or dark for the browser's own bars, as its `theme-color` (index.html) names the page's background in each:

@@ -9,7 +9,7 @@
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, haptic, invoke, listen, openLink, sandbox, setTheme } from "./host.js"
-/** @import { Context, Moved, Paged, Told, View } from "./host.js" */
+/** @import { Context, Moved, Paged, Rect, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -61,7 +61,7 @@ let phone = false
 
 /// Light or dark, as Colour Mode has it on this device, or as the device is.
 const scheme = matchMedia("(prefers-color-scheme: dark)")
-const chosen = () => localStorage.getItem("theme")
+const chosen = () => /** @type {"light" | "dark" | null} */ (localStorage.getItem("theme"))
 const theme = () => chosen() ?? (scheme.matches ? "dark" : "light")
 function dress() {
   document.documentElement.style.colorScheme = chosen() ?? ""
@@ -514,18 +514,51 @@ function load(entrypoint, subject) {
   return view
 }
 
+/// The app showing, or the launcher: what goes as another shows.
+/** @type {View | undefined} */
+let front
+
+/// The device's status bar, as the app that's showing would have it: shown unless it asked otherwise.
+let statusBar = true
+function bar() {
+  const shown = front?.statusBar !== false
+  if (shown === statusBar) return
+  statusBar = shown
+  invoke("status_bar", { shown })
+}
+
 /// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
 /// mustn't show it a second time.
 let shownByDevice = false
 
+/// Where `rect`, a place in a frame's page, is in the window: an icon an app is opened from.
+/** @param {HTMLIFrameElement} frame @param {Rect} [rect] @returns {Rect | undefined} */
+function within(frame, rect) {
+  if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || !(rect.width > 0 && rect.height > 0)) return undefined
+  const { x, y } = frame.getBoundingClientRect()
+  return { x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height }
+}
+
 /// Changes between the launcher and an app as a move, as the UI library moves between an app's screens
 /// (core/ui/src/screen.tsx): the browser slides the app in over the launcher, or with `back`, back out from over
-/// them. Where the browser can't, or the user asked for no motion, it's a plain swap.
-/** @param {() => void} change */
-function move(change, back = false) {
-  const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
-  if (plain || shownByDevice) return void change()
-  document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
+/// them. An app opened from its icon (`from`) grows out of it instead, as an iPhone's does, and goes back into it.
+/// For whoever asked for less motion, one fades into the other, and where the browser can't, it's a plain swap.
+/** @param {() => void} change @param {Rect} [from] */
+function move(change, back = false, from) {
+  if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || shownByDevice) return void change()
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return void document.startViewTransition({ update: change, types: ["fade"] })
+  if (!from) return void document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
+  // The app, drawn as small as the icon is wide, its middle on the icon's, and cut to a square of it with the icon's
+  // corners (client.css's `grow`): the window's size is the app's, and the icon's is a share of its width.
+  const [width, height] = [innerWidth, innerHeight]
+  const scale = from.width / width
+  const root = document.documentElement.style
+  root.setProperty("--icon-x", `${from.x + from.width / 2 - width / 2}px`)
+  root.setProperty("--icon-y", `${from.y + from.height / 2 - height / 2}px`)
+  root.setProperty("--icon-scale", String(scale))
+  root.setProperty("--icon-inset", `${Math.max(0, (height - width) / 2)}px ${Math.max(0, (width - height) / 2)}px`)
+  root.setProperty("--icon-radius", `${(from.width * 0.225) / scale}px`)
+  document.startViewTransition({ update: change, types: [back ? "close" : "open"] })
 }
 
 /// Shows the app that's open as `at` over the rest, or with none there, the launcher. `tapped` is when its icon
@@ -549,6 +582,8 @@ function show(at, tapped) {
 /** @param {string | null} at */
 function layer(at) {
   const view = showing(at)
+  front = view
+  bar()
   const home = open.get(key(launcher))
   for (const other of open.values()) {
     other.frame.inert = other !== view
@@ -677,9 +712,9 @@ async function respond(view, method, params) {
   if (method === "one/recovery-key") return recoveryKey(params.typed === true, params.subject ?? view.subject)
   // Another app, shown over this one, as tapping its icon or a notification from it does: by its app's name,
   // and its page if it isn't the app's first app, for whoever this one is for unless it says. `behind` starts
-  // it as a finger lands on its icon, and it shows as the finger lifts.
+  // it as a finger lands on its icon, and it shows as the finger lifts, out of the icon at `from` in its page.
   if (method === "ui/open-link" && params.url?.startsWith("one:")) {
-    if (!go(params.url.slice("one:".length), params.subject ?? view.subject, params.behind)) throw new Error("That app isn't on this device")
+    if (!go(params.url.slice("one:".length), params.subject ?? view.subject, params.behind, within(view.frame, params.from))) throw new Error("That app isn't on this device")
     return {}
   }
   // A web address opens in the device's own browser, outside the app.
@@ -697,6 +732,12 @@ async function respond(view, method, params) {
   // What an app is told of its client, and the few things one changes of it.
   if (method === "one/client") {
     if (params.leave) return invoke("sign_out")
+    // The device's status bar, hidden while this app shows, as an iPhone's Home Screen hides it while it's edited.
+    if ("statusBar" in params) {
+      view.statusBar = params.statusBar !== false
+      bar()
+      return { message: "" }
+    }
     // A phone whose push failed tries again.
     if (params.push) return invoke("push")
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
@@ -758,15 +799,17 @@ addEventListener("message", async ({ source, data }) => {
 
 /// Shows an app over whatever's showing: by its app's name, and its page if it isn't the app's first app,
 /// for `subject`. With `behind` it only starts. → whether there is one here.
-/** @param {string} entrypoint @param {string} [subject] @param {boolean} [behind] */
-function go(entrypoint, subject, behind) {
+/** @param {string} entrypoint @param {string} [subject] @param {boolean} [behind] @param {Rect} [from] */
+function go(entrypoint, subject, behind, from) {
   const page = entrypoint.includes("/") ? entrypoint : first.get(entrypoint)
   if (!page) return false
   const tapped = performance.now()
   const next = load(page, subject)
   if (behind) return true
   const showing = history.state === next.key
-  move(() => show(next.key, tapped))
+  // It goes back into the icon it came out of, or slides out if it came from none.
+  next.from = from
+  move(() => show(next.key, tapped), false, from)
   // The way back out of an app is an entry in this window's history, made as it's opened, so the device's back
   // leads out of the app however soon it's pressed.
   if (!showing) history.pushState(next.key, "")
@@ -813,7 +856,9 @@ addEventListener("popstate", (event) => {
   const { state } = event
   const tapped = performance.now()
   shownByDevice = Boolean(event.hasUAVisualTransition)
-  move(() => show(state, tapped), !open.has(state))
+  // Back to the launcher, the app that was showing goes back into the icon it came out of.
+  const back = !open.has(state)
+  move(() => show(state, tapped), back, back ? front?.from : undefined)
   shownByDevice = false
 })
 

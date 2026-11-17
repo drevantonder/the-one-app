@@ -20,6 +20,14 @@ export declare const setTheme: (theme: "light" | "dark" | null) => Promise<unkno
 /** A haptic, by iOS's name: an impact, a selection, or a notification's outcome. */
 export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"
 
+/** A place in a page, as `getBoundingClientRect` says it. */
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 /** An open app, as `client.js` keeps it. */
 export interface View {
   key: string
@@ -29,6 +37,10 @@ export interface View {
   frame: HTMLIFrameElement
   tapped?: number
   over?: boolean
+  /** Where in the window the icon it was opened from was, which it goes back into as it closes. */
+  from?: Rect
+  /** Whether the device's status bar shows while it does: unless it asked otherwise (`client({ statusBar })`). */
+  statusBar?: boolean
   /** Where its page is, one state at a time (`client.js`'s `pageMachine`). */
   page: import("xstate").AnyActorRef
 }
@@ -127,6 +139,8 @@ export interface Commands {
   report(args: { record: Record<string, unknown> }): void
   /** Turns the device's own back and forward gestures on or off. */
   navigation_gestures(args: { on: boolean }): void
+  /** Shows or hides an iPhone's status bar, as the app that's showing asks; a device with none keeps what it has. */
+  status_bar(args: { shown: boolean }): void
   /** Light or dark for the window's own bars, or with `null`, as the device is. */
   theme(args: { theme: "light" | "dark" | null }): void
   listen(): void

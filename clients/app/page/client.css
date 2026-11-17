@@ -146,7 +146,10 @@ iframe {
   border: 0;
   background: var(--background);
 }
+/* The launcher runs under the status bar, as an iPhone's Home Screen does, and keeps its pages clear of it itself:
+   it puts + and Done there while it's edited, with the status bar hidden. */
 iframe.launcher {
+  padding-top: 0;
   padding-bottom: var(--safe-bottom);
 }
 /* What the device keeps for itself, measured (client.js's `insets`). */
@@ -199,6 +202,63 @@ iframe[inert] {
 }
 @keyframes new {
   from { translate: calc(var(--new-from) * var(--toward-end)) 0; }
+}
+
+/* An app opened from its icon grows out of it, as an iPhone's does: drawn as small as the icon, its middle on the
+   icon's and cut to the icon's square and corners (`--icon-*`, from client.js's `move`), it opens to the whole window
+   as the launcher sinks back under it, and shows itself over the icon in its first moments. Closing, it shrinks
+   back into the icon as the launcher comes forward. For whoever asked for less motion, the app fades in over what
+   was there, as briefly as what settles. */
+:root:active-view-transition-type(open)::view-transition-new(root) {
+  animation: grow 400ms var(--ease-travel) both, show var(--move-quick) linear both;
+}
+:root:active-view-transition-type(open)::view-transition-old(root) {
+  animation: sink 400ms var(--ease-travel) both;
+}
+:root:active-view-transition-type(close)::view-transition-old(root) {
+  z-index: 1;
+  animation: shrink 400ms var(--ease-travel) both, hide var(--move-quick) linear 280ms both;
+}
+:root:active-view-transition-type(close)::view-transition-new(root) {
+  animation: rise 400ms var(--ease-travel) both;
+}
+:root:active-view-transition-type(fade)::view-transition-old(root) {
+  animation: none;
+}
+:root:active-view-transition-type(fade)::view-transition-new(root) {
+  animation: show var(--move-settle) var(--ease-settle) both;
+}
+@keyframes grow {
+  from {
+    translate: var(--icon-x) var(--icon-y);
+    scale: var(--icon-scale);
+    clip-path: inset(var(--icon-inset) round var(--icon-radius));
+  }
+  to {
+    clip-path: inset(0 round 0);
+  }
+}
+@keyframes shrink {
+  from {
+    clip-path: inset(0 round 0);
+  }
+  to {
+    translate: var(--icon-x) var(--icon-y);
+    scale: var(--icon-scale);
+    clip-path: inset(var(--icon-inset) round var(--icon-radius));
+  }
+}
+@keyframes sink {
+  to { scale: 0.92; }
+}
+@keyframes rise {
+  from { scale: 0.92; }
+}
+@keyframes show {
+  from { opacity: 0; }
+}
+@keyframes hide {
+  to { opacity: 0; }
 }
 
 /* A person's recovery key, shown or typed over whatever app asked: the client's own, in the UI library's sheet. */
