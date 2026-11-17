@@ -114,7 +114,7 @@ defmodule OneCore.Bucket.S3 do
   # A link is one request to the bucket as the presigner signs it, which works for a minute.
   @impl true
   def link(address, key, mode) do
-    %{"method" => method, "url" => url, "headers" => headers} = signed(address, %{mode => key})
+    %{"method" => method, "url" => url, "headers" => headers} = signed(address, %{mode => key}, :transient)
     %{method: method, url: url, headers: headers}
   end
 
@@ -147,9 +147,15 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  # Has the presigner sign `ask`, a write or a removal, and sends what it signed.
+  # The bucket answers a write once it has all of it, and starts well within a second, so one it's said nothing of for
+  # this many milliseconds, and this many more for each kilobyte sent, is taken as lost. `OneCore.Bucket` sends a
+  # write that was lost again, so a write's own tries are three of these, not more.
+  @writes_within 9_000
+
+  # Has the presigner sign `ask`, a write or a removal, and sends what it signed. `OneCore.Bucket` asks again for a
+  # write or a removal that was lost, signing it anew, so a sign that was lost isn't asked for again here.
   defp request(address, ask, data \\ nil) do
-    %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask)
+    %{"method" => method, "url" => url, "headers" => headers} = signed(address, ask, false)
 
     sent(
       method: method |> String.downcase() |> String.to_existing_atom(),
@@ -158,17 +164,18 @@ defmodule OneCore.Bucket.S3 do
       body: data,
       decode_body: false,
       compressed: false,
-      receive_timeout: :timer.seconds(15)
+      receive_timeout: @writes_within + div(byte_size(data || ""), 1000)
     )
   end
 
-  # A sign changes nothing, so one the internet lost or held up is asked for again, as Req asks a read again. The
-  # presigner answers well within a second, so one that hasn't come in this many milliseconds is taken as lost.
+  # A sign changes nothing, so one the internet lost or held up is asked for again where `retry` says so, as Req asks a
+  # read again. The presigner answers well within a second, so one that hasn't come in this many milliseconds is
+  # taken as lost.
   @signs_within 5_000
 
-  defp signed(address, ask) do
+  defp signed(address, ask, retry) do
     ask = JSON.encode!(ask)
-    request = [method: :post, url: address <> "/presigner/sign", body: ask, retry: :transient, receive_timeout: @signs_within]
+    request = [method: :post, url: address <> "/presigner/sign", body: ask, retry: retry, receive_timeout: @signs_within]
 
     case sent(request, "/presigner/sign") do
       %{status: 200, body: %{"method" => _method} = signed} -> signed

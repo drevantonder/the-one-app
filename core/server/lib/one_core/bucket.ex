@@ -129,9 +129,9 @@ defmodule OneCore.Bucket do
     """
     @behaviour :gen_event
 
-    # A call that fails has already been sent again: by Req up to three more times, and a write by
-    # `OneCore.Bucket` too, so a call failing at all is too many failures. One whose bucket couldn't be reached took
-    # 7 to 27 seconds to say so, so one every 15 seconds is all that waits while it's away.
+    # A call that fails has already been sent again: a read by Req up to three more times, a write by `OneCore.Bucket`
+    # twice, so a call failing at all is too many failures. One whose bucket couldn't be reached took 7 to 30 seconds
+    # to say so, so one every 15 seconds is all that waits while it's away.
     @reset 15_000
 
     @doc "Installs `bucket_fuse`, and this handler of what it does, which runs `back` in a process of its own each time it's `ok` again."
