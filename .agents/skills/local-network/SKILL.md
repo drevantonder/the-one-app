@@ -51,5 +51,5 @@ group. Never `pkill` or `killall`: other agents run networks on this machine too
 - Restarting the network to try a change to a plugin, rather than deploying it into the running one.
 - Rebuilding from scratch in a new worktree each time. Keep one worktree built and rebase it, rather than making a
   new one for every check.
-- Starting the app where there's no desktop without `dbus-run-session` (see `see-it-running`).
+- Starting the app where there's no desktop without `dbus-run-session` (see `qa`'s Screens).
 - Setting `CARGO_TARGET_DIR`: `tooling/network` runs `target/release/one` from the repo.
