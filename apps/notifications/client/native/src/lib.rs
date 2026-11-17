@@ -180,10 +180,16 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
                 }
             }
         }
-        // Until a server says something changed.
+        // Until a server says something of Notifications' changed, or something it doesn't name: another app's
+        // change is never a new notification, as sending one says so itself.
         loop {
             match notifications.recv().await {
-                Ok(message) if message["method"] == "notifications/one/changed" => break,
+                Ok(message)
+                    if message["method"] == "notifications/one/changed"
+                        && matches!(message["params"]["app"].as_str(), None | Some("notifications")) =>
+                {
+                    break;
+                }
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => return,
             }
