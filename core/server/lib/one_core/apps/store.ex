@@ -214,24 +214,33 @@ defmodule OneCore.Apps.Store do
   The versions in the bucket of the apps `artifacts` that are newer than the ones in `latest`: each one's
   app, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
   false the version described (`described/2`), leaving out one not described yet. An untrusted one is never
-  loaded here, only described. Read at once: a bucket at an address is asked for each over the internet.
+  loaded here, only described. Read and loaded at once: a bucket at an address is asked for each over the
+  internet, and a version loaded may be compiled.
 
   One that couldn't be read or loaded, as when the bucket didn't give its blobs or refused them, is left out, as one
   that isn't newer is, and said in the log: one app never stops the others. The first answer a bucket that didn't
   answer gives after has this server look again (`OneCore.Bucket`), which finds it newer then.
   """
   def newer(artifacts, latest, load \\ true) do
+    caller = self()
+
     artifacts
-    |> Task.async_stream(&{&1, unanswered(&1, fn -> about(&1) end)}, max_concurrency: 16, timeout: :infinity)
-    |> Enum.flat_map(fn {:ok, {artifact, in_bucket}} ->
-      with %{"number" => number, "code" => code} <- in_bucket,
-           true <- number > Map.get(latest, artifact, 0),
-           version when version != nil <-
-             unanswered(artifact, fn -> version(artifact, code, load, trusted?(in_bucket)) end),
-           true <- load or version != :error,
-           do: [{artifact, number, version}],
-           else: (_ -> [])
-    end)
+    |> Task.async_stream(&newer(&1, latest, load, caller), max_concurrency: 16, timeout: :infinity)
+    |> Enum.flat_map(fn {:ok, newer} -> newer end)
+  end
+
+  # Each is loaded beside the others, and held for the caller before the process that loaded it ends.
+  defp newer(artifact, latest, load, caller) do
+    with %{"number" => number, "code" => code} = in_bucket <- unanswered(artifact, fn -> about(artifact) end),
+         true <- number > Map.get(latest, artifact, 0),
+         version when version != nil <-
+           unanswered(artifact, fn -> version(artifact, code, load, trusted?(in_bucket)) end),
+         true <- load or version != :error do
+      with {:ok, held} <- version, do: :ok = LoadedVersion.hold([held], caller)
+      [{artifact, number, version}]
+    else
+      _ -> []
+    end
   end
 
   defp unanswered(artifact, read) do
