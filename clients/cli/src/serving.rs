@@ -110,12 +110,11 @@ pub enum ServerDaemonStatus {
     Stopping,
 }
 
-/// A server's build and the `one` that runs it, which an update takes, keeps and goes back from together. A record
-/// from before pairs doesn't know its program.
+/// A server's build and the `one` that runs it, which an update takes, keeps and goes back from together.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 struct Pair {
     build: String,
-    program: Option<String>,
+    program: String,
 }
 
 /// What this device is as a server, written in one step (`Here::write`).
@@ -189,7 +188,7 @@ async fn join(client: &Client, here: &Here, record: &mut Record, key: &str, who:
             "The network has no server for {} yet: `tooling/release` makes one.",
             target()
         );
-        record.current = Some(Pair { build: here.take(&builds).await?, program: Some(BUILD.to_owned()) });
+        record.current = Some(Pair { build: here.take(&builds).await?, program: BUILD.to_owned() });
     }
     here.stage(record, ServerMembershipStage::Installing)?;
     system::install(here, key, &env::current_exe()?, &unit_env(who.to_owned(), None).await?)?;
@@ -333,7 +332,7 @@ pub async fn update(client: &Client) -> Result<String> {
 pub fn replaced() -> bool {
     let Some(record) = client::home().ok().and_then(|home| Here::of(&home).read().ok()) else { return false };
     let pair = if record.server_update_status == ServerUpdateStatus::Verifying { record.next } else { record.current };
-    pair.and_then(|pair| pair.program).is_some_and(|program| program != BUILD)
+    pair.is_some_and(|pair| pair.program != BUILD)
 }
 
 /// This device's server, if it's one or becoming or stopping being one: its key, `server_membership` and the stage.
@@ -699,7 +698,7 @@ async fn update_server(
 /// How the build `next` is taken from `current`: `Ok` to load it into the server while it runs, or why it restarts.
 /// A new `one` restarts, as does whatever `OneCore.Release.compare/2`, run in a VM of the new build, says does.
 fn method(here: &Here, current: &Pair, next: &Pair) -> Result<(), String> {
-    if next.program.as_deref() != Some(BUILD) {
+    if next.program != BUILD {
         return Err("restart: a new one".to_owned());
     }
     let compare = "OneCore.Release.compare(System.fetch_env!(\"ONE_FROM\"), System.fetch_env!(\"ONE_TO\"))";
@@ -745,7 +744,7 @@ async fn load(
 async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> Result<Option<Pair>> {
     let builds = download(client).await?;
     let current = record.current.clone().context("a build it's on")?;
-    let mut next = Pair { build: current.build.clone(), program: Some(BUILD.to_owned()) };
+    let mut next = Pair { build: current.build.clone(), program: BUILD.to_owned() };
     if latest(&builds).is_some_and(|latest| latest != current.build) {
         next.build = here.take(&builds).await?;
     }
@@ -755,9 +754,9 @@ async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> 
         fs::create_dir_all(here.folder.join("programs"))?;
         fs::copy(program.canonicalize()?, here.folder.join("programs").join(BUILD))?;
         take_program(one, program).await?;
-        next.program = one["build"].as_str().map(str::to_owned);
+        next.program = one["build"].as_str().context("a build says which it is")?.to_owned();
     }
-    Ok((next != Pair { program: Some(BUILD.to_owned()), ..current }).then_some(next))
+    Ok((next != Pair { program: BUILD.to_owned(), ..current }).then_some(next))
 }
 
 /// The latest server build among the network's `builds`: its code's, where there's a runtime for this kind of machine
@@ -879,42 +878,13 @@ impl Here {
         Ok(client::key(&self.folder.join("home/key"))?.public().to_string())
     }
 
-    /// What this device is as a server. A device from before the record had a file for each part of it, which say
-    /// the same: `current` and `previous`, links to builds, `next`, a build being tried by the program that's here
-    /// now, and `went-back`. They're moved into it the first time.
+    /// What this device is as a server: inactive where it has no record.
     fn read(&self) -> Result<Record> {
         match fs::read(self.folder.join("state.json")) {
-            Ok(record) => return Ok(serde_json::from_slice(&record)?),
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error.into()),
-            Err(_) => {}
+            Ok(record) => Ok(serde_json::from_slice(&record)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Record::default()),
+            Err(error) => Err(error.into()),
         }
-        let file = |name: &str| self.folder.join(name);
-        let linked =
-            |name: &str| fs::read_link(file(name)).ok()?.file_name().map(|build| build.to_string_lossy().into_owned());
-        let Some(current) = linked("current") else { return Ok(Record::default()) };
-        let next = fs::read_to_string(file("next")).ok().map(|next| next.trim().to_owned());
-        let record = Record {
-            server_membership: ServerMembership::Active,
-            server_update_status: if next.is_some() {
-                ServerUpdateStatus::Verifying
-            } else {
-                ServerUpdateStatus::UpToDate
-            },
-            // The program running is the current one's, unless it's the next one's, from an update the program before
-            // took.
-            current: Some(Pair { build: current, program: next.is_none().then(|| BUILD.to_owned()) }),
-            previous: linked("previous").map(|build| Pair { build, program: None }),
-            next: next.map(|build| Pair { build, program: Some(BUILD.to_owned()) }),
-            went_back: fs::read_to_string(file("went-back")).ok(),
-            server_membership_stage: None,
-            server_update_stage: None,
-            update_method: None,
-        };
-        self.write(&record)?;
-        for name in ["current", "previous", "next", "went-back"] {
-            let _ = fs::remove_file(file(name)).or_else(|_| fs::remove_dir(file(name)));
-        }
-        Ok(record)
     }
 
     /// Writes the record in one step: a file beside it, renamed over it.
@@ -943,11 +913,10 @@ impl Here {
     /// A pair that didn't start goes: the program before it is put back, and it's up to date on what it was on.
     fn went_back(&self, record: &mut Record, program: &Path) -> Result<()> {
         let next = record.next.take();
-        let current = record.current.as_ref().and_then(|current| current.program.clone());
-        if let Some(before) =
-            current.filter(|before| next.as_ref().is_some_and(|next| next.program.as_ref() != Some(before)))
+        if let Some(before) = record.current.as_ref().map(|current| &current.program)
+            && next.is_some_and(|next| &next.program != before)
         {
-            let kept = self.folder.join("programs").join(&before);
+            let kept = self.folder.join("programs").join(before);
             if kept.exists() {
                 let new = program.canonicalize()?.with_extension("new");
                 fs::copy(kept, &new)?;
@@ -973,7 +942,7 @@ impl Here {
             pairs
                 .iter()
                 .filter_map(|pair| pair.as_ref())
-                .any(|pair| pair.build == name || pair.program.as_deref() == Some(name))
+                .any(|pair| pair.build == name || pair.program == name)
         };
         for folder in ["builds", "programs"] {
             for kept in fs::read_dir(self.folder.join(folder)).into_iter().flatten() {
