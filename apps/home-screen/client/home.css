@@ -49,21 +49,22 @@ body {
 .page::-webkit-scrollbar {
   display: none;
 }
-/* A page has no title at its top, and keeps the gap a phone's own home screen has. It never scrolls, so a vertical
-   swipe on it moves between owners. While it's edited, it makes room for + and Done above it. */
+/* A page has no title at its top, and keeps the gap a phone's own home screen has under the status bar, which the
+   Home Screen runs under (`--safe-top`). It never scrolls, so a vertical swipe on it moves between owners. While it's
+   edited it stays where it is: + and Done take the status bar's place, as an iPhone's do, or where there's none, the
+   strip above the page's first row, which is tall enough for them (`--edit-bar`). */
+.home {
+  --edit-bar: max(var(--safe-top, 0px), 2.75rem);
+}
 .page {
   box-sizing: border-box;
   flex: 0 0 100%;
   height: 100%;
   min-width: 0;
-  padding: 1rem 1.25rem 0;
+  padding: calc(1rem + var(--edit-bar)) 1.25rem 0;
   overflow: hidden;
   container-type: size;
   touch-action: none;
-  transition: padding-top var(--move-settle) var(--ease-settle);
-}
-.home.editing .page {
-  padding-top: 3.5rem;
 }
 /* A page that scrolls keeps every vertical swipe on it, even where it has little: it can always move a point. */
 .page.scrolls {
@@ -79,9 +80,11 @@ body {
 /* Each page takes an equal share of the room, as wide as a phone or wider, and is a phone's page laid out in that share
    made `--pages-scale` times smaller, then drawn that much larger, so everything on it is where the owner put it, only
    bigger: its layout box is the share, and the page inside it is scaled from its corner. */
-.home.wide .strip {
+.home.wide :is(.strip, .edit-bar) {
   --page-width: min((100cqi - 2 * var(--pages-side) - (var(--pages) - 1) * var(--pages-gap)) / var(--pages), 35rem * var(--pages-scale));
   width: calc(var(--pages) * (var(--page-width) + var(--pages-gap)) - var(--pages-gap));
+}
+.home.wide .strip {
   margin-inline: auto;
 }
 .home.wide .track {
@@ -91,27 +94,19 @@ body {
   flex: 0 0 calc(var(--page-width) / var(--pages-scale));
   height: calc(100% / var(--pages-scale));
   margin-inline-end: calc(var(--page-width) - var(--page-width) / var(--pages-scale));
-  padding-top: 2rem;
   scale: var(--pages-scale);
   transform-origin: 0 0;
 }
 .home.wide .track > .page:dir(rtl) {
   transform-origin: 100% 0;
 }
-.home.wide.editing .track > .page {
-  padding-top: 4.5rem;
-}
 /* What's over the pages is as much larger as they are, scaled as they are: `zoom` would size a page's container
    units, and anything in rem, differently in WebKit and Chromium. The bar grows from its foot, + and Done from their
    top, an opened category from the middle, and what's held from the window's corner, where it's placed in the
-   points it's drawn in (home.tsx's `Holding`). */
+   points it's drawn in (home.tsx's `Holding`). + and Done grow from their corners, over the pages shown. */
 .home.wide .toolbar {
   scale: var(--pages-scale);
   transform-origin: 50% 100%;
-}
-.home.wide .top {
-  scale: var(--pages-scale);
-  transform-origin: 50% 0;
 }
 .home.wide .opened {
   scale: var(--pages-scale);
@@ -161,10 +156,13 @@ body {
   border-radius: 22.5%;
   transition: scale var(--move-quick) var(--ease-quick), opacity var(--move-quick) var(--ease-quick);
 }
-.tile:active img {
+/* Pressed, it dims at once, as a tap does, and sinks under the finger for as long as it takes to hold (`--hold`), so
+   the menu comes as what the press built up to. Let go, it comes back quickly. */
+.tile:active img,
+.category .app:active img {
   scale: 0.94;
   opacity: 0.85;
-  transition-duration: 0s;
+  transition: opacity 0s, scale var(--hold) var(--ease-quick);
 }
 .tile:focus-visible {
   outline: none;
@@ -262,6 +260,7 @@ body {
   width: var(--icon);
   height: var(--icon);
   border-radius: 22.5%;
+  transition: scale var(--move-quick) var(--ease-quick), opacity var(--move-quick) var(--ease-quick);
 }
 .category .app span {
   max-width: 100%;
@@ -270,10 +269,6 @@ body {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.category .app:active img {
-  scale: 0.94;
-  opacity: 0.85;
 }
 /* More than four: the fourth's place, an icon and its name, holds the rest, smaller. */
 .category .more {
@@ -315,6 +310,10 @@ body {
   background: color-mix(in oklab, var(--background) 55%, transparent);
   -webkit-backdrop-filter: blur(18px) saturate(1.2);
   backdrop-filter: blur(18px) saturate(1.2);
+}
+/* Shrinking back into its place, it lets a finger through to the pages, or to the category to open it again. */
+.opened[data-phase="closing"] {
+  pointer-events: none;
 }
 .opened h2 {
   margin: 0;
@@ -429,17 +428,17 @@ body {
 .dots button[aria-current] {
   color: var(--foreground);
 }
-/* A dot is as wide as the current page's, cut down to a dot, so it grows into it without the dots moving. */
+/* Every dot is the same size, and the current page's is brighter, as an iPhone's are. */
 .dots i {
-  width: 1rem;
+  width: 0.4375rem;
   height: 0.4375rem;
+  margin-inline: 0.28125rem;
+  border-radius: 50%;
   background: currentColor;
   opacity: 0.4;
-  clip-path: inset(0 0.28125rem round 999px);
-  transition: clip-path var(--move-settle) var(--ease-settle), opacity var(--move-settle) var(--ease-settle);
+  transition: opacity var(--move-settle) var(--ease-settle);
 }
 .dots [aria-current] i {
-  clip-path: inset(0 0 round 999px);
   opacity: 1;
 }
 .dots button:focus-visible {
@@ -496,10 +495,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dots i,
-  .toolbar,
-  .page {
-    transition: none;
+  .toolbar {
+    transition-property: opacity;
   }
 }
 
@@ -566,18 +563,28 @@ body {
 .carried .ui-widget {
   height: 100%;
 }
-/* + and Done, at the top, + on the left and Done on the right, as on a phone. */
+/* + and Done, floating at the top over the pages, + on the left and Done on the right, as on a phone. They fade in
+   as editing begins, and go at once. On a wide window they're over the corners of the pages shown, as large as
+   they are. */
 .top {
   position: absolute;
   z-index: 6;
-  top: 0.5rem;
+  top: 0;
   inset-inline: 0;
   display: flex;
   justify-content: center;
+  align-items: center;
+  height: var(--edit-bar);
   pointer-events: none;
+  transition: opacity var(--move-settle) var(--ease-settle);
+}
+@starting-style {
+  .top {
+    opacity: 0;
+  }
 }
 .home.wide .top {
-  top: 1.25rem;
+  height: calc(var(--edit-bar) * var(--pages-scale));
 }
 .top .edit-bar {
   display: flex;
@@ -589,7 +596,16 @@ body {
   pointer-events: auto;
 }
 .home.wide .top .edit-bar {
-  max-width: 52rem;
+  --pages: var(--pages-shown);
+  max-width: none;
+  padding-inline: calc(0.75rem * var(--pages-scale));
+}
+.home.wide .edit-bar > * {
+  scale: var(--pages-scale);
+  transform-origin: 0 50%;
+}
+.home.wide .edit-bar > :last-child {
+  transform-origin: 100% 50%;
 }
 /* What a finger holds, lifted over the blurred Home Screen, with its menu. */
 .holding {
@@ -688,10 +704,13 @@ body {
   backdrop-filter: blur(18px) saturate(1.2);
   animation: appear var(--move-settle) var(--ease-settle);
 }
+/* Done is where editing's is, in the status bar's place or the strip above the pages. */
 .overview .bar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  padding: 0.5rem 1rem;
+  height: var(--edit-bar);
+  padding: 0 1rem;
 }
 .overview .thumbnails {
   display: grid;
@@ -717,9 +736,16 @@ body {
   cursor: grab;
   touch-action: none;
 }
+/* Lifted while it's dragged, as an iPhone's are: larger, over the others. */
+.thumbnail.dragging {
+  position: relative;
+  z-index: 1;
+}
+.thumbnail .miniature {
+  transition: scale var(--move-quick) var(--ease-quick);
+}
 .thumbnail.dragging .miniature {
   scale: 1.05;
-  opacity: 0.8;
 }
 .thumbnail.hidden .miniature > .page {
   opacity: 0.4;

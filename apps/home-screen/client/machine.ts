@@ -143,6 +143,8 @@ export type Event =
   /** A category was tapped in an App Library, or closed. */
   | { type: "open"; category: Opened }
   | { type: "close" }
+  /** An opened category has grown out of its place, or shrunk back into it: its animations have finished. */
+  | { type: "zoomed" }
   /** The window shows an app over the Home Screen, or the Home Screen again. */
   | { type: "launch" }
   | { type: "home" }
@@ -198,8 +200,6 @@ function put(editing: Editing, held: Held, page: number, index: number): { editi
 
 export const machine = setup({
   types: {} as { context: Context; events: Event; emitted: Emitted },
-  // A category grows out of its place as an iPhone's folder does, or is there at once for whoever asked for less motion.
-  delays: { zoom: () => (matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320) },
   guards: {
     // A step goes somewhere, and a vertical one moves between owners only from a page that doesn't scroll itself.
     moves: ({ context, event }) => {
@@ -327,15 +327,17 @@ export const machine = setup({
     listing: {
       on: { dismiss: "nothing" },
     },
-    // A category, grown out of its place in the App Library: taps are let be until it's open, and it shrinks back
-    // into its place as it closes.
+    // A category, grown out of its place in the App Library as an iPhone's folder does: its apps are let be until
+    // it's open, and it shrinks back into its place as it closes. Either can be changed midway, as a finger changes its
+    // mind: closed as it grows, or tapped again as it shrinks, it turns back from where it got to. It's open, or gone,
+    // once its animations say they're done (`zoomed`), whichever way they ended up going.
     category: {
       initial: "opening",
       exit: "forget",
       states: {
-        opening: { after: { zoom: "open" } },
+        opening: { on: { zoomed: "open", close: "closing" } },
         open: { on: { close: "closing" } },
-        closing: { after: { zoom: "#home.nothing" } },
+        closing: { on: { zoomed: "#home.nothing", open: "opening" } },
       },
     },
     // What a finger holds, lifted over the blurred Home Screen, with its menu: Edit Home Screen, and taking it off.

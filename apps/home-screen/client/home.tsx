@@ -7,10 +7,10 @@
 // touch and hold an app or a widget (press and hold it, or right-click it, with a mouse), then Edit Home Screen, or
 // hold it a while longer, or touch and hold a page's empty space. Where it is, what's open over it and the editing are
 // one state machine (machine.ts), whose snapshot is one signal here.
-import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { Dynamic, render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
-import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
+import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
@@ -93,8 +93,14 @@ const editing = () => state().context.editing
 const editingOwner = (owner: number) => state().matches("editing") && editing()?.owner === owner
 
 /// Opens an app for whoever its owner is, for the group whose install it is, or for its person where it's about
-/// whoever opens it. `behind` only starts it, as a finger lands on it.
-const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean) => open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind })
+/// whoever opens it. `behind` only starts it, as a finger lands on it. It grows out of its icon, `from`, as an
+/// iPhone's does.
+const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: Element) => {
+  const icon = from?.getBoundingClientRect()
+  open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from: icon && { x: icon.x, y: icon.y, width: icon.width, height: icon.height } })
+}
+/// The UI library's pace of that name, from its tokens.
+const paced = (name: "quick" | "settle" | "travel") => pace(document.documentElement, name)
 
 /// An owner's pages as they're kept: each with what's on it and whether it's hidden, to edit.
 const draft = (owner: Owner, index: number): Editing => ({ owner: index, pages: fitted(owner.pages.map((page) => ({ items: [...page.items], hidden: page.hidden }))) })
@@ -103,7 +109,8 @@ const draft = (owner: Owner, index: number): Editing => ({ owner: index, pages: 
 const [kept, setKept] = createSignal<Editing>()
 
 // A finger that stays this long holds what it's on, as a phone's does, and on a Home page, held this much longer
-// still, it's lifted into editing, as an iPhone's menu gives way to the drag.
+// still, it's lifted into editing, as an iPhone's menu gives way to the drag. An icon sinks under the finger for as
+// long as it takes to hold (home.css's `--hold`).
 const HOLD = 450
 const LONGER = 800
 
@@ -133,9 +140,9 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
 
 /// An icon with its name under it. The app starts as a finger lands on it, and shows as the finger lifts, unless the
 /// finger held it.
-function Tile(props: { name: string; onPress?: (behind?: boolean) => void; children: JSX.Element }) {
+function Tile(props: { name: string; onPress?: (behind?: boolean, icon?: Element) => void; children: JSX.Element }) {
   return (
-    <button type="button" class="tile" onPointerDown={(event) => event.button === 0 && props.onPress?.(true)} onClick={() => props.onPress?.()}>
+    <button type="button" class="tile" onPointerDown={(event) => event.button === 0 && props.onPress?.(true)} onClick={(event) => props.onPress?.(false, event.currentTarget.querySelector("img") ?? undefined)}>
       <span class="icon">{props.children}</span>
       <span>{props.name}</span>
     </button>
@@ -276,7 +283,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
                 <Show when={placed().item.item}>
                   {(item) => (
                     <>
-                      <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} onPress={(behind) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind)}><img src={(item() as Entrypoint).icon} alt="" /></Tile>}>
+                      <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} onPress={(behind, icon) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind, icon)}><img src={(item() as Entrypoint).icon} alt="" /></Tile>}>
                         <Card item={item() as WidgetItem} owner={props.owner} still={props.small || editingHere()} />
                       </Show>
                       <Show when={editingHere()}>
@@ -327,7 +334,12 @@ function shelve(library: Category[]): Folder[][] {
 /// or with more than that, all but the last and the rest smaller in the last's place. Tapping an icon opens its app;
 /// tapping anywhere else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
 function Library(props: { owner: Owner; index: number; folders: Folder[]; places: Map<string, HTMLElement> }) {
-  const opening = (category: Category) => () => state().matches("nothing") && home.send({ type: "open", category: { owner: props.index, name: category.category } })
+  // Tapped again as it shrinks back into its place, it turns and grows again.
+  const opening = (category: Category) => () => {
+    const opened = state().context.category
+    const back = state().matches({ category: "closing" }) && opened?.owner === props.index && opened.name === category.category
+    if (state().matches("nothing") || back) home.send({ type: "open", category: { owner: props.index, name: category.category } })
+  }
   return (
     <section class="page library" aria-label={`${props.owner.name}'s App Library`}>
       <Show when={props.folders.length} fallback={<Empty>No apps yet.</Empty>}>
@@ -371,7 +383,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; index: num
       class="app"
       ref={holds(() => ({ item: opens(props.entrypoint), listed: props.entrypoint, page: 0, index: -1, from: "library" }), () => props.owner.arranges, () => true)}
       onPointerDown={() => state().matches("nothing") && opens(props.entrypoint) && launch(opens(props.entrypoint)!, props.owner, true)}
-      onClick={(event) => (event.stopPropagation(), state().matches("nothing") && press(props.entrypoint, props.owner))}
+      onClick={(event) => (event.stopPropagation(), state().matches("nothing") && press(props.entrypoint, props.owner, false, event.currentTarget.querySelector("img") ?? undefined))}
     >
       <img src={props.entrypoint.icon} alt="" />
       <span>{props.entrypoint.name}</span>
@@ -382,7 +394,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; index: num
 /// An app of an App Library as an entrypoint, which it opens, or nothing, for an app with none.
 const opens = (listed: Listed): Entrypoint | undefined => (listed.entrypoint ? (listed as Entrypoint) : undefined)
 /// Opens an app of an App Library: its entrypoint, or for an app with none, its App Store page over the Home Screen.
-const press = (listed: Listed, owner: Owner, behind?: boolean) => (opens(listed) ? launch(opens(listed)!, owner, behind) : !behind && setAbout(listed.app))
+const press = (listed: Listed, owner: Owner, behind?: boolean, icon?: Element) => (opens(listed) ? launch(opens(listed)!, owner, behind, icon) : !behind && setAbout(listed.app))
 
 /// Who a call about an install is for: a group or the network, or for a user's own, nobody said.
 const subjectOf = (installed: string) => (installed.startsWith("users/") ? undefined : installed)
@@ -426,8 +438,10 @@ function StorePage(props: { name: string; shown: boolean }) {
 }
 
 /// A category opened over its App Library: its name, and its apps in a panel that grows out of its place there and
-/// shrinks back into it, as an iPhone's folder does, while what's behind it blurs. It's open only once it has grown:
-/// until then a tap does nothing. Tapping beside the panel, Escape or the device's own back closes it.
+/// shrinks back into it, as an iPhone's folder does, while what's behind it blurs. Its apps open only once it has
+/// grown. Tapping beside the panel, Escape or the device's own back closes it, even as it grows: it turns back from
+/// where it got to. As it shrinks, the pages under it take a finger. For whoever asked for less motion, it fades in
+/// and out where it is.
 function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string, HTMLElement> }) {
   let veil!: HTMLDivElement
   let panel!: HTMLDivElement
@@ -435,20 +449,31 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
   let grid!: HTMLDivElement
   const category = () => props.owner.library.find((category) => category.category === props.opened.name)
   const phase = () => (state().matches({ category: "opening" }) ? "opening" : state().matches({ category: "open" }) ? "open" : "closing")
-  const close = () => state().matches({ category: "open" }) && home.send({ type: "close" })
-  // From its place to the middle, or back, in the time the machine gives it.
+  const close = () => !state().matches({ category: "closing" }) && home.send({ type: "close" })
+  // What moves it, while it moves: turned back midway, each runs back from where it is.
+  let moving: Animation[] = []
+  // From its place to the middle, or back, and once that's done, whichever way it ended up going, the machine's told.
   const zoom = (opening: boolean) => {
-    const place = props.places.get(`${props.opened.owner}:${props.opened.name}`)
-    if (!place || !panel.isConnected) return
-    const [from, to] = [place.getBoundingClientRect(), panel.getBoundingClientRect()]
-    // It's drawn `scale` times larger, its own points with it, so the way across the window is that many fewer of them.
-    const moved = `translate(${(from.x + from.width / 2 - (to.x + to.width / 2)) / scale}px, ${(from.y + from.height / 2 - (to.y + to.height / 2)) / scale}px) scale(${from.width / to.width}, ${from.height / to.height})`
-    const timing: KeyframeAnimationOptions = { duration: still.matches ? 0 : 320, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "both" }
-    const way = <T,>(frames: T[]) => (opening ? frames : frames.toReversed())
-    veil.animate(way([{ opacity: 0 }, { opacity: 1 }]), timing)
-    title.animate(way([{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }]), timing)
-    grid.animate(way([{ opacity: 0 }, { opacity: 1 }]), { ...timing, duration: Number(timing.duration) * 0.7, delay: opening ? Number(timing.duration) * 0.3 : 0 })
-    panel.animate(way([{ transform: moved, borderRadius: "1.5rem" }, { transform: "none", borderRadius: "2.25rem" }]), timing)
+    if (moving.some((one) => one.playState === "running")) for (const one of moving) one.reverse()
+    else {
+      const place = props.places.get(`${props.opened.owner}:${props.opened.name}`)
+      if (!place || !panel.isConnected) return void home.send({ type: "zoomed" })
+      for (const one of moving) one.cancel()
+      const [from, to] = [place.getBoundingClientRect(), panel.getBoundingClientRect()]
+      // It's drawn `scale` times larger, its own points with it, so the way across the window is that many fewer of them.
+      const moved = `translate(${(from.x + from.width / 2 - (to.x + to.width / 2)) / scale}px, ${(from.y + from.height / 2 - (to.y + to.height / 2)) / scale}px) scale(${from.width / to.width}, ${from.height / to.height})`
+      const timing: KeyframeAnimationOptions = { ...paced("travel"), fill: "both" }
+      const way = <T,>(frames: T[]) => (opening ? frames : frames.toReversed())
+      const appear: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
+      moving = [
+        veil.animate(way(appear), timing),
+        title.animate(way(still.matches ? appear : [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }]), timing),
+        grid.animate(way(appear), { ...timing, duration: Number(timing.duration) * 0.7, delay: opening ? Number(timing.duration) * 0.3 : 0 }),
+        panel.animate(way(still.matches ? appear : [{ transform: moved, borderRadius: "1.5rem" }, { transform: "none", borderRadius: "2.25rem" }]), timing),
+      ]
+    }
+    const now = moving
+    Promise.all(now.map((one) => one.finished)).then(() => moving === now && home.send({ type: "zoomed" }), () => {})
   }
   // Driven by a memo, which changes only when the phase does, not at every event of the machine.
   createEffect(createMemo(phase), (now) => {
@@ -468,7 +493,7 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
           <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
             {(entrypoint) => (
               <div class="cell">
-                <Tile name={entrypoint().name} onPress={(behind) => phase() === "open" && press(entrypoint(), props.owner, behind)}>
+                <Tile name={entrypoint().name} onPress={(behind, icon) => phase() === "open" && press(entrypoint(), props.owner, behind, icon)}>
                   <img src={entrypoint().icon} alt="" />
                 </Tile>
               </div>
@@ -487,7 +512,6 @@ const springy = `linear(${Array.from({ length: 41 }, (_, step) => {
   const damped = natural * Math.sqrt(1 - damping ** 2)
   return (1 - Math.exp(-damping * natural * t) * (Math.cos(damped * t) + ((damping * natural) / damped) * Math.sin(damped * t))).toFixed(4)
 }).join(", ")})`
-const settling: KeyframeAnimationOptions = { duration: 250, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" }
 
 /// What a finger holds, lifted over the blurred Home Screen, as a phone's is, with its menu beside it, which grows out
 /// of it with a spring and shrinks back into it: Edit Home Screen and Remove App on a Home page, Add to Home Screen and
@@ -553,8 +577,8 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   }
   onSettled(() => {
     haptic("medium")
-    const fade: KeyframeAnimationOptions = { duration: 150, easing: "ease-out" }
-    veil.animate([{ opacity: 0 }, {}], { duration: 200, easing: "ease-out" })
+    const fade = paced("quick")
+    veil.animate([{ opacity: 0 }, {}], paced("settle"))
     menu.animate([{ opacity: 0 }, {}], fade)
     if (!still.matches) {
       menu.animate([{ scale: "0.25" }, {}], { duration: 450, easing: springy })
@@ -574,6 +598,7 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   const close = () => {
     const now = (element: Element | undefined) => (element?.isConnected ? getComputedStyle(element) : undefined)
     const [menuNow, copyNow] = [now(menu), now(copy)]
+    const settling: KeyframeAnimationOptions = { ...paced("travel"), fill: "forwards" }
     const ghost = veil.cloneNode(true) as HTMLDivElement
     ghost.inert = true
     ghost.style.pointerEvents = "none"
@@ -701,21 +726,58 @@ function Gallery(props: { owner: Owner }) {
 /// hidden and can be deleted; dragging one puts it elsewhere. Done goes back to editing.
 function Overview(props: { owner: Owner; index: number }) {
   const pages = () => editing()?.pages ?? []
-  const [dragging, setDragging] = createSignal<number>()
+  const [dragging, setDragging] = createSignal<Page>()
   const remove = async (page: number) => {
     if (await confirm({ heading: "Delete Page?", text: "Its apps stay in the App Library.", action: "Delete", destructive: true })) home.send({ type: "delete", page })
   }
-  const drag = (page: number) => (down: PointerEvent & { currentTarget: HTMLElement }) => {
+  // A page dragged is lifted and follows the finger one to one, from where it was taken; as it passes over another,
+  // it takes that one's place then, and the others glide aside (reflow.ts). Let go, it springs into its place from
+  // where it was, at the speed it was going, as an icon dropped on a page does.
+  const drag = (page: Page) => (down: PointerEvent & { currentTarget: HTMLElement }) => {
+    if (down.button) return
     const from = down.currentTarget
+    const thumbnail = from.closest<HTMLElement>(".thumbnail")!
+    const others = () => [...thumbnail.parentElement!.children].filter((one): one is HTMLElement => one !== thumbnail && one instanceof HTMLElement)
     from.setPointerCapture(down.pointerId)
     setDragging(page)
-    const up = (event: PointerEvent) => {
-      from.removeEventListener("pointerup", up)
-      setDragging()
-      const over = (document.elementsFromPoint(event.clientX, event.clientY) as HTMLElement[]).find((under) => under.dataset?.overview !== undefined)
-      if (over && Number(over.dataset.overview) !== page) home.send({ type: "reorder", from: page, to: Number(over.dataset.overview) })
+    reflow(others(), false)
+    const laid = { x: thumbnail.offsetLeft, y: thumbnail.offsetTop }
+    const moves: { time: number; x: number; y: number }[] = []
+    const follow = (event: PointerEvent) => {
+      const [x, y] = [event.clientX - down.clientX - (thumbnail.offsetLeft - laid.x), event.clientY - down.clientY - (thumbnail.offsetTop - laid.y)]
+      thumbnail.style.translate = `${x}px ${y}px`
+      return { x, y }
     }
+    const move = (event: PointerEvent) => {
+      follow(event)
+      moves.push({ time: event.timeStamp, x: event.clientX, y: event.clientY })
+      if (moves.length > 32) moves.shift()
+      const over = (document.elementsFromPoint(event.clientX, event.clientY) as HTMLElement[]).find((under) => under !== thumbnail && under.dataset?.overview !== undefined)
+      const [at, to] = [pages().indexOf(page), Number(over?.dataset.overview)]
+      if (!over || at < 0 || to === at) return
+      home.send({ type: "reorder", from: at, to })
+      flush()
+      haptic("selection")
+      follow(event)
+      reflow(others(), true)
+    }
+    const up = (event: PointerEvent) => {
+      from.removeEventListener("pointermove", move)
+      from.removeEventListener("pointerup", up)
+      from.removeEventListener("pointercancel", up)
+      setDragging()
+      const at = follow(event)
+      const thrown = event.type === "pointerup" ? { x: speed(moves.map(({ time, x }) => ({ time, value: x })), event.timeStamp), y: speed(moves.map(({ time, y }) => ({ time, value: y })), event.timeStamp) } : { x: 0, y: 0 }
+      const draw = () => (thumbnail.style.translate = x.value || y.value ? `${x.value}px ${y.value}px` : "")
+      const [x, y] = [spring(draw), spring(draw)]
+      jump(x, at.x)
+      jump(y, at.y)
+      glide(x, 0, thrown.x)
+      glide(y, 0, thrown.y)
+    }
+    from.addEventListener("pointermove", move)
     from.addEventListener("pointerup", up)
+    from.addEventListener("pointercancel", up)
   }
   onSettled(() => covers(() => home.send({ type: "dismiss" })))
   return (
@@ -726,8 +788,8 @@ function Overview(props: { owner: Owner; index: number }) {
       <div class="thumbnails">
         <For each={pages()}>
           {(page, index) => (
-            <div class={["thumbnail", { hidden: page.hidden, dragging: dragging() === index() }]} data-overview={index()}>
-              <div class="miniature" onPointerDown={drag(index())}>
+            <div class={["thumbnail", { hidden: page.hidden, dragging: dragging() === page }]} data-overview={index()}>
+              <div class="miniature" onPointerDown={drag(page)}>
                 <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} small />
                 <Show when={page.hidden}>
                   <button type="button" class="minus" aria-label={`Delete page ${index() + 1}`} onPointerDown={(event) => event.stopPropagation()} onClick={() => remove(index())}>
@@ -852,7 +914,7 @@ function Toolbar(props: { owners: Owner[]; laid: Kind[][]; fit: number }) {
   )
 }
 
-/// While pages are edited, + and Done are at the top, as on a phone.
+/// While pages are edited, + and Done float at the top, over the pages, which stay where they are, as on a phone.
 function EditBar() {
   return (
     <div class="top">
@@ -970,7 +1032,8 @@ function HomeScreen(props: { owners: Owner[] }) {
   const press = (event: PointerEvent) => {
     const on = event.target as Element
     if (event.pointerType === "mouse" || event.button || !on.closest(".owners")) return
-    if (!state().matches("nothing") && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
+    // A category shrinking back into its place lets the pages under it have the finger.
+    if (!state().matches("nothing") && !state().matches({ category: "closing" }) && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
     const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(down.value / height())))
     // A finger that lands while they move catches them.
     stop(down)
@@ -984,7 +1047,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (Math.hypot(dx, dy) < 10) return
       const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
       // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while editing.
-      const free = state().matches("nothing") || state().matches({ editing: "still" })
+      const free = state().matches("nothing") || state().matches({ category: "closing" }) || state().matches({ editing: "still" })
       if (!free || (axis === "y" && (state().matches("editing") || kinds[kindOf(swipe.owner)].scrolls))) return void (swipe = undefined)
       const moving = axis === "x" ? sideways(swipe.owner) : down
       const size = axis === "x" ? pitch(swipe.owner) : height()
@@ -1052,7 +1115,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       follow(pointer.x, pointer.y)
       copy.innerHTML = item.widget ? `<div class="ui-widget" data-size="${item.size}"></div>` : `<span class="tile"><span class="icon"><img src="${(item as Entrypoint).icon}" alt=""></span><span>${(item as Entrypoint).name}</span></span>`
       root.append(copy)
-      if (!still.matches) copy.animate([{ scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], { duration: 200, easing: "cubic-bezier(0.32, 0.72, 0, 1)" })
+      if (!still.matches) copy.animate([{ scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], paced("settle"))
       haptic("medium")
       const moves: { time: number; x: number; y: number }[] = []
       let edge: ReturnType<typeof setTimeout> | undefined
@@ -1113,8 +1176,8 @@ function HomeScreen(props: { owners: Owner[] }) {
         // the finger left it, at the speed it was going, to the middle of its place, wherever that is as it goes.
         const place = strips[home.getSnapshot().context.at.owner]?.querySelector<HTMLElement>(`[data-page="${left.page}"] .cell[data-index="${left.index}"]`)
         if (!place || still.matches) {
-          copy.animate([{ opacity: 1 }, { opacity: 0 }], { duration: place ? 200 : 150, easing: "ease-out", fill: "forwards" }).finished.finally(() => copy.remove())
-          place?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" })
+          copy.animate([{ opacity: 1 }, { opacity: 0 }], { ...paced(place ? "settle" : "quick"), fill: "forwards" }).finished.finally(() => copy.remove())
+          place?.animate([{ opacity: 0 }, { opacity: 1 }], paced("settle"))
           return
         }
         place.style.visibility = "hidden"
@@ -1138,7 +1201,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         Object.assign(y, { value: fromY, target: to.y })
         glide(x, to.x, thrown.x)
         glide(y, to.y, thrown.y)
-        copy.animate([{}, { scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
+        copy.animate([{}, { scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }], { ...paced("travel"), fill: "forwards" })
       }
     },
   )
@@ -1212,12 +1275,15 @@ function HomeScreen(props: { owners: Owner[] }) {
     return () => (sliding.unsubscribe(), arranging.unsubscribe(), removeEventListener("resize", resized), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
   })
 
-  // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own.
+  // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own. While it lasts, the
+  // device's status bar is hidden, and + and Done are where it was.
   createEffect(
     createMemo(() => state().matches("editing")),
     (now) => {
       if (now && home.getSnapshot().matches({ editing: "still" })) haptic("selection")
+      client({ statusBar: !now }).catch(() => {})
     },
+    { defer: true },
   )
   // While pages are edited, the device's own back ends editing, as Done does.
   createEffect(
@@ -1229,7 +1295,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages-shown": Math.min(room().fit, laid()[state().context.at.owner]?.length ?? 1), "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <main class="owners" ref={main}>
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (

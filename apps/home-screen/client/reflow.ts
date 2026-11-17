@@ -2,6 +2,7 @@
 // dragged among them or taken off, rather than jumping there: each is drawn where it was, then springs to its new place
 // (pager.ts's spring, which keeps its speed if it moves again on the way). For whoever asked for less motion, one that
 // moved fades in where it is instead, as iOS cross-fades.
+import { pace } from "ui"
 import { glide, spring, type Spring } from "./pager.ts"
 
 const still = matchMedia("(prefers-reduced-motion: reduce)")
@@ -31,7 +32,7 @@ export function reflow(cells: Iterable<HTMLElement>, glides: boolean) {
     Object.assign(was, { left, top })
     if (!glides || (!x && !y)) continue
     if (still.matches) {
-      cell.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" })
+      cell.animate([{ opacity: 0 }, { opacity: 1 }], pace(cell, "settle"))
       continue
     }
     was.x.value += x
