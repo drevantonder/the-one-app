@@ -23,7 +23,8 @@ defmodule OneCore.App.Manifest do
     hooks: [],
     offers: [],
     jobs: [],
-    requires: %{}
+    requires: %{},
+    own: :subject
   ]
 
   # The keys of each map in a list an app says, as JSON names them.
@@ -49,10 +50,12 @@ defmodule OneCore.App.Manifest do
     title: 0,
     icon: 0,
     requires: 0,
+    own: 0,
     sensitive: 0
   ]
 
   @task_support [:optional, :required]
+  @owns [:subject, :installed]
   @hook_kinds [:observe, :mutate, :validate, :collect]
 
   @doc """
@@ -75,6 +78,7 @@ defmodule OneCore.App.Manifest do
       @callback title() :: String.t()
       @callback icon() :: String.t()
       @callback requires() :: %{String.t() => String.t()}
+      @callback own() :: :subject | :installed
       @callback sensitive() :: boolean
       @optional_callbacks unquote(@callbacks)
     end
@@ -135,6 +139,7 @@ defmodule OneCore.App.Manifest do
     end
   end
 
+  defp decode(:own, own) when is_binary(own), do: atom(own, @owns)
   defp decode(_function, value), do: value
 
   defp atoms(%{kind: kind} = offer) when is_binary(kind), do: %{offer | kind: atom(kind, @hook_kinds)}
@@ -227,9 +232,10 @@ defmodule OneCore.App.Manifest do
     {"uninstalled", :observe,
      """
      An app was uninstalled for someone. It's about who it was installed `for`, the `name` it was installed by
-     there and the `app` it is, by its artifact's name, and `with`, each app installed for them that required it
-     and went with it, by its `name` and `app`. An app that keeps what's deleted takes what they kept and made for
-     them along, as one.
+     there and the `app` it is, by its artifact's name, `with`, each app installed for them that required it
+     and went with it, by its `name` and `app`, and `artifacts`, the names of what they kept and made that goes with
+     them: what the same app installed for everyone reads for them stays. An app that keeps what's deleted takes
+     those along, as one.
      """},
     {"joined", :observe,
      """

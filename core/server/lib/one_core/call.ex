@@ -2,11 +2,11 @@ defmodule OneCore.Call do
   @moduledoc """
   What a tool is called with besides its inputs.
 
-  - `own`: the app's own `OneCore.Artifact` for whoever it was installed for. Only this app reaches it.
+  - `own`: the app's own `OneCore.Artifact` for whoever this call runs for, or for an app that says its data is
+    whoever it was installed for's (`own/0`), theirs (`OneCore.Apps.Calls.whose/3`). Only this app reaches it.
   - `installed`: who the app was installed for, whose `own` is: a user, a group or the network. It's who the app
     runs for with nobody there, as a scheduled job and a service do.
-  - `folder`: a folder on the machine running this call that is the app's own for whoever it was installed for, for what
-    it keeps there. It may not be there yet, and another server has another.
+  - `folder`: a folder on the machine running this call that is the app's own, as `own` is, for what it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
   - `subject`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
     or the group or the network they asked for. What it makes is theirs, and it reaches what they may. A

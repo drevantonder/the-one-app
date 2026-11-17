@@ -24,8 +24,13 @@ defmodule OneCore.Apps.Installed do
   That someone installed an app is kept with the app too, as the blob `installed/<who>` in its artifact, from when
   it's installing, which ends `deleted` while it's in their Recently Deleted and goes where it failed to install: so a
   deploy tells their servers, and it's in use for them only while it's installing or installed.
+
+  An app that keeps each person's data apart (`own/0`, `OneCore.Apps.Calls.whose/3`), installed for the network, has
+  an own artifact for each person who keeps something with it, as an Android app installed for every user of a device
+  has a data folder for each. Who they are is kept beside the network's installs, the blob
+  `<owner>/subjects/<name>/<who>` for each, so its jobs run and its services act for each of them (`subjects/2`).
   """
-  alias OneCore.{Artifact, Bucket}
+  alias OneCore.{Artifact, Bucket, Cache}
 
   @blob "installs"
 
@@ -197,6 +202,36 @@ defmodule OneCore.Apps.Installed do
     for {blob, {:ok, marked, _tag}} <- Enum.zip(blobs, Bucket.read_all(blobs)), not String.ends_with?(marked, "deleted"),
         do: String.replace_prefix(blob, "#{artifact}/installed/", "")
   end
+
+  @doc """
+  Says that `who` keeps their own data with the app installed for `owner` as `name`, which keeps each person's apart.
+  Said once: each server keeps that it has.
+  """
+  def subject(owner, name, who) do
+    Cache.fetch(__MODULE__, {owner, name, who}, fn ->
+      Bucket.write("#{owner}/subjects/#{name}/#{who}", "")
+      {:commit, :ok}
+    end)
+  end
+
+  @doc "Who keeps their own data with the app installed for `owner` as `name`, besides `owner`: each user or group."
+  def subjects(owner, name) do
+    for blob <- Bucket.list("#{owner}/subjects/#{name}/"),
+        do: String.replace_prefix(blob, "#{owner}/subjects/#{name}/", "")
+  end
+
+  @doc "Forgets who kept their own data with the app installed for `owner` as `name`, once it's removed for good."
+  def unsubjected(owner, name) do
+    for who <- subjects(owner, name) do
+      Bucket.remove("#{owner}/subjects/#{name}/#{who}")
+      Cache.invalidate(__MODULE__, {owner, name, who})
+    end
+
+    :ok
+  end
+
+  @doc "Makes the cache of who's said to keep their own data with an app (`subject/3`), owned by whatever calls it."
+  def keep, do: Cache.new(__MODULE__)
 
   @doc "Whether `name` is one an app is installed by: `:ok`, or `{:error, why}`."
   def named(name) do

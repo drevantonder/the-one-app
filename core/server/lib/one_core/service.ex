@@ -7,7 +7,7 @@ defmodule OneCore.Service do
   functions are what the rest of its app calls there.
   """
   alias OneCore.{Call, Apps, Server, Servers, Services}
-  alias OneCore.Apps.{Calls, Store, Version}
+  alias OneCore.Apps.{Calls, Installed, Store, Version}
 
   @doc "What the service needs of a machine, for its owner to read before installing it."
   @callback needs() :: String.t()
@@ -88,17 +88,24 @@ defmodule OneCore.Service do
 
   @doc """
   Who the service that asks runs for on its server, each as `app/4` takes it: everyone its app was installed
-  for, a user, a group or the network, whose apps its server runs (`OneCore.Servers.runs?/1`). Whoever the server is for comes first, as its
-  owner chose them, so a service that's for one of them at a time, its machine's person, takes the first.
+  for, a user, a group or the network, whose apps its server runs (`OneCore.Servers.runs?/1`), and where it keeps
+  each person's data apart, each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). Whoever the server
+  is for comes first, as its owner chose them, so a service that's for one of them at a time, its machine's person,
+  takes the first.
   """
   def acts_for do
     {app, _name, _version} = which(self())
     members = Servers.members(Server.key())
 
-    Enum.sort_by(
-      Enum.filter(Apps.installed_for(app), &Servers.runs?/1),
-      &(Enum.find_index(members, fn member -> member == &1 end) || length(members))
-    )
+    whos =
+      for at <- Apps.installed_for(app),
+          Servers.runs?(at),
+          {name, %Version{artifact: ^app} = version} <- Apps.versions([at]),
+          who <- [at | if(version.own == :subject, do: Installed.subjects(at, name), else: [])],
+          uniq: true,
+          do: who
+
+    Enum.sort_by(whos, &(Enum.find_index(members, fn member -> member == &1 end) || length(members)))
   end
 
   @doc "The key of the server a service runs on, as `call/5` takes it."

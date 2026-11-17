@@ -4,14 +4,15 @@ defmodule OneCore.Jobs do
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
   telling another. At each of those times, and when this server starts or an app's version changes, the app is
-  asked to have what's due called (`OneCore.Apps.Calls.schedule/2`), for each one it was installed for. Every server asks,
+  asked to have what's due called (`OneCore.Apps.Calls.schedule/3`), for each one it was installed for, and where it keeps
+  each person's data apart, for each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). Every server asks,
   and the app keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
   app was installed for: a time that passed with no server up is made up for by the first that's back.
   """
   use GenServer
   require Logger
   alias OneCore.{Apps, Edge, Servers}
-  alias OneCore.Apps.Calls
+  alias OneCore.Apps.{Calls, Installed}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -39,7 +40,9 @@ defmodule OneCore.Jobs do
     now = System.os_time(:second)
     scheduled = Apps.scheduled()
     clock = asked(clock, scheduled, at, now)
-    next = for {_owner, _name, jobs, _trusted} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every
+
+    next =
+      for {_owner, _name, jobs, _trusted, _own} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every
 
     timer =
       if next != [],
@@ -52,10 +55,11 @@ defmodule OneCore.Jobs do
   # (`OneCore.Edge.Unreachable`): then nothing is asked this time, and what was due since `at` is asked for at the
   # next, once it does. Said once each time it stops answering.
   defp asked(clock, scheduled, at, now) do
-    for {owner, name, jobs, trusted} <- scheduled,
+    for {owner, name, jobs, trusted, own} <- scheduled,
         Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))),
-        Servers.runs?(owner, trusted) do
-      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(owner, name) end)
+        Servers.runs?(owner, trusted),
+        subject <- [owner | if(own == :subject, do: Installed.subjects(owner, name), else: [])] do
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(owner, name, subject) end)
     end
 
     if clock.unreachable, do: Logger.info("Scheduled jobs are asked for again: the bucket answers")

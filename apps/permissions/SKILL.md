@@ -21,8 +21,9 @@ Its words:
 - An artifact is named by where its blobs are, and its name starts with whose it is:
   `users/alice/made/notes/7` is alice's, `groups/family/made/notes/2` is the group's. An app's tool that
   makes something answers with its name. A group is the artifact `groups/<name>`, and the network `network`.
-  An app is whoever's deployed it, `users/alice/apps/<name>`, and its own artifact is whoever's it was
-  installed for, `users/alice/own/<name>`: the network's are `network/apps/<name>` and `network/own/<name>`.
+  An app is whoever's deployed it, `users/alice/apps/<name>`, and its own artifact is whoever's it runs for,
+  `users/alice/own/<name>`, even where it's installed for the network, unless it says its data is the network's:
+  the network's are `network/apps/<name>` and `network/own/<name>`.
 - Who is a user (`users/alice`), a group, meaning its members (`groups/family`), `everyone` in the network, a
   app by its artifact's name, or a sharing link's holder (`users/alice/links/...`).
 - `owner`, `editor` and `viewer` are what someone may do: an owner is an editor, and an editor is a viewer.

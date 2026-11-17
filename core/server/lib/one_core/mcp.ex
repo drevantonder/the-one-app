@@ -288,8 +288,8 @@ defmodule OneCore.Mcp do
     between(forwarded, function)
   end
 
-  defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, _principal, forwarded) do
-    between(forwarded, fn -> Calls.schedule(at, app, true) end)
+  defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, {_actor, subject}, forwarded) do
+    between(forwarded, fn -> Calls.schedule(at, app, subject, true) end)
   end
 
   defp result(

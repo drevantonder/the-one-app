@@ -29,7 +29,8 @@ defmodule OneCore.Apps.Version do
   hooks it offers, each one's `name`, `kind` and `description`, and `jobs` lists its scheduled jobs: each one's `tool`,
   the `inputs` it's called with, and `every` how many seconds. `requires` names the other apps it needs, each with
   why, and `core` the lowest version of the platform it runs on, as an Elixir requirement (`>= 0.15.0`), or `nil` for
-  any, both from its `requires/0` (`OneCore.App`). `exports` are the functions its module provides other apps, as name/arity, which run inside
+  any, both from its `requires/0` (`OneCore.App`). `own` says whose its own artifact is (`OneCore.Apps.Calls.own/3`):
+  `:subject`, whoever each call runs for, or `:installed`, whoever it was installed for. `exports` are the functions its module provides other apps, as name/arity, which run inside
   each app that requires it. `artifact` is the app it's a version of, which whatever loaded it says.
 
   A version runs only on a server on its `core` or newer (`platform/1`): one older is refused where it's deployed, and
@@ -60,6 +61,7 @@ defmodule OneCore.Apps.Version do
     :core,
     requires: %{},
     exports: [],
+    own: :subject,
     trusted: true
   ]
 

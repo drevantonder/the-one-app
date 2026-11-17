@@ -294,7 +294,7 @@ defmodule OneCore.Sandbox.Child do
       id: id,
       own: artifact(about["own"]),
       installed: about["installed"],
-      folder: Path.join([System.tmp_dir!(), "own", about["installed"], about["app"]]),
+      folder: Path.join(System.tmp_dir!(), Enum.at(about["own"], 1)),
       server: about["server"],
       subject: about["subject"],
       actor: about["actor"],

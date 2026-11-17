@@ -140,9 +140,12 @@ defmodule OneCore.App do
         ---
 
         Use `greet` when someone arrives, once for each of them.
-  - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the app's own artifact for whoever it was
-    installed for, which only this app reaches: one installed for a user keeps that user's, and one installed for the network
-    keeps everyone's together. It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok,
+  - The third argument to `call/3` is an `OneCore.Call`. Its `own` is the app's own artifact for whoever the call
+    runs for, which only this app reaches: installed for the network, it keeps each person's apart, as an Android app
+    installed for every user of a device does, and one installed for a user keeps that user's. An app whose data is
+    the network's as a whole, such as its permissions or its backups, or that keeps everyone's together and apart
+    itself, says so with `def own, do: :installed`: its `own` is then whoever it was installed for's, one for everyone.
+    It keeps what it needs there as blobs through `OneCore.Artifact`: `read/2` gives `{:ok,
     data, tag}` or `:absent`, `write/3` writes only if absent and gives `:ok` or `:exists`, `replace/4` takes that
     tag, replaces only if unchanged and gives `:ok` or `:changed`, `update/3` changes a record in one step (it's
     given what's there, and given it again if someone else wrote it meanwhile), `list/2` gives the names that start
@@ -286,7 +289,9 @@ defmodule OneCore.App do
     seconds apart. It's due at each whole multiple of that since 1970 in UTC, so `every: 3600` is on the hour and
     `every: 86_400` is at midnight UTC, and first at the next one after it's deployed.
   - The call is made on one server, for whoever the app was installed for, when a server is up: once for each of
-    them, with `call.subject` the user, the group or the network, and `call.actor` nobody. Times that
+    them, with `call.subject` the user, the group or the network, and `call.actor` nobody. One installed for the
+    network that keeps each person's data apart is called for each person who keeps something with it too, with
+    their own `own`. Times that
     passed with none up are made up for with one call when one is back.
   - Nobody is told a job ran, as they are a person's call: one that changes what a screen shows calls
     `OneCore.Call.changed/1` once it has, and one that changed nothing tells nobody.

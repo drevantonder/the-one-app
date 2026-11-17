@@ -6,8 +6,9 @@ defmodule OneCore.Sandbox do
   Core asks one thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it,
   no untrusted app runs, and a call to one says why.
 
-  There's one child for each version of an untrusted app on a server and each user, group or network it's installed
-  for, with the versions of the apps it requires whose code runs inside it, as it, where that code can run there
+  There's one child for each version of an untrusted app on a server and each user, group or network whose own artifact
+  it keeps (`OneCore.Apps.Calls.whose/3`): whoever it's installed for, or each person, where it keeps theirs apart,
+  with the versions of the apps it requires whose code runs inside it, as it, where that code can run there
   (`database` among them, its SQLite too). So a child only ever runs one owner's calls, and what a stranger's app
   keeps from one person's call isn't there in another's: its handles are its own, and a request for an artifact or a
   call that isn't its own is refused. It's started by the first call, compiles the code itself, behind the wall, and
@@ -37,7 +38,7 @@ defmodule OneCore.Sandbox do
   """
   @behaviour :gen_statem
   require Logger
-  alias OneCore.{Artifact, Builds, Call, Apps, Server}
+  alias OneCore.{Artifact, Builds, Call, Apps, Server, User}
   alias OneCore.Call.State
   alias OneCore.Apps.{Store, Version}
 
@@ -146,11 +147,14 @@ defmodule OneCore.Sandbox do
 
     required = Map.delete(versions, name)
 
-    if Registry.lookup(@registry, {call.installed, key(version, required)}) == [],
+    # Its child is whoever's own artifact the call has, so what it keeps from one person's call isn't there in another's.
+    whose = User.owner(Artifact.name(call.own))
+
+    if Registry.lookup(@registry, {whose, key(version, required)}) == [],
       do: State.working(call.state, :waiting, "Starting its sandbox")
 
     {child, port, context} =
-      case child(call.installed, version, required, nil, {:begin, id}) do
+      case child(whose, version, required, nil, {:begin, id}) do
         {:ok, child, port, context} -> {child, port, context}
         {:error, why} -> raise why
       end
@@ -178,7 +182,7 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
-  Asks the VM of the app `name` among `versions`, the one for `owner`, what the app `server-debug` asks of it:
+  Asks the VM of the app `name` among `versions`, the one whose own artifact is `owner`'s, what the app `server-debug` asks of it:
   `request`, a map JSON holds, which its side of One Core answers (`OneCore.Sandbox.Child.Debug`). Gives what it
   answered, or raises with why it didn't. Only a VM that's running is asked, unless `start` says to start one.
   """

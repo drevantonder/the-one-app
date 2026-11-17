@@ -27,7 +27,7 @@ defmodule OneCore.Apps.Version.Checks do
     } =
       description
 
-    %{offers: offers, jobs: jobs, requires: requires} = description
+    %{offers: offers, jobs: jobs, requires: requires, own: own} = description
 
     cond do
       not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
@@ -70,6 +70,11 @@ defmodule OneCore.Apps.Version.Checks do
            "\"Gmail uses Google Account\", and \"core\" the lowest version of the platform it runs on, as an Elixir " <>
            "requirement: %{\"core\" => \">= 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
 
+      own not in [:subject, :installed] ->
+        {:error,
+         "own/0 gives whose its own artifact is: :subject, whoever each call runs for (the default), or :installed, " <>
+           "whoever it was installed for, everyone's together"}
+
       true ->
         tools = Enum.map(tools, &Version.schemas/1)
 
@@ -85,6 +90,7 @@ defmodule OneCore.Apps.Version.Checks do
                     hooks: Enum.uniq(hooks),
                     offers: offers,
                     jobs: jobs,
+                    own: own,
                     requires: Map.delete(requires, "core"),
                     core: requires["core"]
                 }}

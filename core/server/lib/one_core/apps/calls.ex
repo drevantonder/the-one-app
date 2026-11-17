@@ -10,7 +10,7 @@ defmodule OneCore.Apps.Calls do
   alias ExJsonSchema.Validator.Error
   alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Servers, Tasks, Trace, User}
   alias OneCore.Call.State
-  alias OneCore.Apps.Version
+  alias OneCore.Apps.{Installed, Version}
 
   @doc """
   Calls an app's tool for `asked`: who asked and who it's for, `{by, for}`, or one who that is both. Gives
@@ -344,43 +344,43 @@ defmodule OneCore.Apps.Calls do
   defp observes?(_call, _about), do: true
 
   @doc """
-  Has the scheduled jobs that are due called, of the app that `name` is for `at`: the app it requires
-  that keeps schedules is given its jobs, as the app, and a function that makes one's call here. That app has one
-  server make each call, once. The call runs for whoever the app was installed for, asked by nobody, and is never
-  passed on: it's made where the schedule is kept.
+  Has the scheduled jobs that are due called, of the app that `name` is for `at`, for `subject`: whoever it was
+  installed for, or one who keeps their own data with it (`whose/3`). The app it requires that keeps schedules is
+  given its jobs, as the app, and a function that makes one's call here. That app has one server make each call,
+  once. The call runs for `subject`, asked by nobody, and is never passed on: it's made where the schedule is kept.
 
   An untrusted app's schedule is kept the same way, by the keeper's code here, never in its sandbox: only its calls
   run there, each as any call of its tools does. The keeper keeps it in an artifact of its own for the app, not the
   app's own artifact, which the app writes, so what this server reads of it is nothing the app wrote.
   """
-  def schedule(at, name, forwarded \\ false) do
-    clock = {nil, at}
+  def schedule(at, name, subject, forwarded \\ false) do
+    clock = {nil, subject}
 
     Apps.run([at], name, fn at, versions ->
       version = versions[name]
       scheduled = called(at, name, versions, {"apps/schedule", %{installed: at, app: name}}, clock, forwarded)
-      scheduled = if version.trusted, do: scheduled, else: apart(scheduled, at, name)
+      scheduled = if version.trusted, do: scheduled, else: apart(scheduled, name)
 
-      fire = &fire(at, name, &1)
+      fire = &fire(at, name, subject, &1)
       for keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, version.jobs, fire)
 
       {:ok, :ok}
     end)
   end
 
-  # Where an untrusted app's schedule is kept: in the sandbox app's own artifact for whoever it's installed for, a
-  # folder for each app, which no untrusted app is given.
-  defp apart(%Call{} = call, at, name) do
-    own = "#{at}/own/sandbox/#{name}"
+  # Where an untrusted app's schedule is kept: in the sandbox app's own artifact for whoever its own is, a folder for
+  # each app, which no untrusted app is given.
+  defp apart(%Call{own: own} = call, name) do
+    own = "#{User.owner(Artifact.name(own))}/own/sandbox/#{name}"
     %{call | own: %Artifact{prefix: own <> "/"}, folder: Path.join(Server.home(), own)}
   end
 
   # Makes a scheduled job's call, the `tool` of the app that `name` is for `at` with its `inputs`, as the clock: for
-  # whoever it was installed for, asked by nobody, and never passed on. What went wrong is logged. Nobody is told it
-  # ran: a job that changes what a screen shows says so itself (`OneCore.Call.changed/1`).
-  defp fire(at, name, job) do
-    with {:error, why} <- call(name, job.tool, job.inputs, {nil, at}, true),
-         do: Logger.error("#{name}'s scheduled #{job.tool} for #{at} failed: #{why}")
+  # `subject`, asked by nobody, and never passed on. What went wrong is logged. Nobody is told it ran: a job that
+  # changes what a screen shows says so itself (`OneCore.Call.changed/1`).
+  defp fire(at, name, subject, job) do
+    with {:error, why} <- call(name, job.tool, job.inputs, {nil, subject}, true),
+         do: Logger.error("#{name}'s scheduled #{job.tool} for #{subject} (installed for #{at}) failed: #{why}")
   end
 
   @doc "The apps among `versions`, by their names, that keep other apps' schedules."
@@ -437,9 +437,14 @@ defmodule OneCore.Apps.Calls do
       else: Call.run_elsewhere(call, at)
   end
 
-  # The call as this server would run it.
+  # The call as this server would run it. One run for someone who keeps their own data apart from whoever the app was
+  # installed for is said to be theirs where it runs, so its jobs and services act for them too.
   defp new_call(at, name, versions, ask, {actor, subject}, forwarded) do
-    own = "#{at}/own/#{name}"
+    whose = whose(at, versions[name], subject)
+
+    if whose != at and Servers.runs?(at, versions[name].trusted), do: Installed.subject(at, name, whose)
+
+    own = "#{whose}/own/#{name}"
 
     %Call{
       own: %Artifact{prefix: own <> "/"},
@@ -456,6 +461,16 @@ defmodule OneCore.Apps.Calls do
       forwarded: forwarded
     }
   end
+
+  @doc """
+  Whose own artifact an app installed for `at` keeps, in a call for `subject`, by what its `version` says (`own/0`):
+  whoever the call runs for, a user, a group or the network, so one installed for the network keeps each person's data
+  apart, as an Android app installed for every user of a device does; or, for one that says `:installed`, whoever it
+  was installed for, everyone's together, as the network's Permissions and Backups are. They differ only for an app
+  installed for the network: one installed for a user or a group runs only for them.
+  """
+  def whose(at, %Version{own: :installed}, _subject), do: at
+  def whose(at, %Version{own: :subject}, subject), do: User.owner(subject) || at
 
   # Who asked and who for: one who is both.
   defp principal({_by, _for} = principal), do: principal

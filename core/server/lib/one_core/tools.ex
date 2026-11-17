@@ -1138,14 +1138,14 @@ defmodule OneCore.Tools do
     %{for: owner, apps: listed(for {name, record} <- Enum.sort(Installed.read(owner)), do: {owner, name, record})}
   end
 
-  # A file sent this way lands in the app's own artifact, for whoever it was installed for, under a name nobody
-  # could guess.
+  # A file sent this way lands in the app's own artifact, whoever's its calls for them reach (`Calls.whose/3`), under a
+  # name nobody could guess.
   defp run("upload", %{"app" => app}, {_actor, subject}, forward, _request) do
     with %{^app => version} <- Apps.running(subject),
          {installed, ^app} <- Apps.installed(subject, version.artifact) do
       at(installed, forward)
       name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
-      own = %Artifact{prefix: "#{installed}/own/#{app}/"}
+      own = %Artifact{prefix: "#{Calls.whose(installed, version, subject)}/own/#{app}/"}
       Map.put(Artifact.link(own, name, :write), :upload, name)
     else
       _ -> raise "There's no app named #{app}"

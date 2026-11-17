@@ -34,7 +34,7 @@ defmodule OneCore.Apps.Lifecycle do
   alias OneCore.{Bucket, Hooks, Server, Servers, Tasks}
   alias OneCore.Call.State
   alias OneCore.Apps
-  alias OneCore.Apps.{Deploy, Git, Installed, LoadedVersion, Requires, Store, Update}
+  alias OneCore.Apps.{Deploy, Git, Installed, LoadedVersion, Requires, Store, Update, Version}
 
   @network "network"
   @day :timer.hours(24)
@@ -330,29 +330,108 @@ defmodule OneCore.Apps.Lifecycle do
   Uninstalls an app for `owner`: it stops running for them, and waits in Recently Deleted, with what it keeps, until
   that restores or purges it. Where other apps installed for them are required by it, it's refused saying so, unless whoever asked
   `confirm`s that they go too: then they all go to Recently Deleted, as one. Refused where it's the network's launcher. The apps that observe `uninstalled` are told once, with each
-  that went (`with`), so one that keeps what's deleted takes what they kept and made for them along, as one item.
-  `asked` is who asked.
+  that went (`with`) and the artifacts that go with them, what they kept and made (`artifacts`, `kept/2`), so one that
+  keeps what's deleted takes those along, as one item. `asked` is who asked.
+
+  One of someone's own that the network installs for everyone too leaves what it made for them where it is, and where
+  the network's keeps each person's data apart, what it kept too: it's what the network's reads for them now. One
+  whose data the network's wouldn't read, since it keeps everyone's together, is refused while it keeps anything,
+  saying why.
   """
   def uninstall(owner, name, {actor, _subject}, confirm \\ false) do
     versions = Map.new(Apps.versions([owner]))
 
     required_by = Requires.required_by(owner, name)
+    group = [name | required_by]
 
     cond do
       required_by != [] and confirm != true ->
         {:error, "#{removed_too(versions, name, required_by)}\n\nTo uninstall them all, uninstall #{name} again with confirm, once the person has said yes."}
 
+      why = Enum.find_value(group, &stranded(owner, versions, &1)) ->
+        {:error, why}
+
       true ->
-        with :ok <- Enum.find_value([name | required_by], :ok, &with(:ok <- last_launcher(owner, &1), do: nil)),
+        artifacts = Enum.uniq(Enum.flat_map(group, &kept(owner, &1)))
+
+        with :ok <- Enum.find_value(group, :ok, &with(:ok <- last_launcher(owner, &1), do: nil)),
              :ok <- Enum.find_value(required_by, :ok, &with(%{} <- move(owner, &1, {:uninstall, %{"deleted_with" => name}}), do: nil)),
              %{} = record <- move(owner, name, {:uninstall, %{"with" => required_by}}) do
           ran(owner)
+          # What theirs kept, the same app installed for everyone reads for them now, so it acts for them too.
+          for each <- group,
+              {at, %Version{own: :subject}} <- [beyond(owner, each)],
+              do: Installed.subject(at, each, owner)
+
           records = Installed.read(owner)
           went = for other <- required_by, do: %{"name" => other, "app" => records[other]["app"]}
-          about = %{"for" => owner, "name" => name, "app" => record["app"], "with" => went}
+          about = %{"for" => owner, "name" => name, "app" => record["app"], "with" => went, "artifacts" => artifacts}
           Hooks.observe("uninstalled", about, {actor, owner})
           record
         end
+    end
+  end
+
+  @doc """
+  What the app installed for `owner` as `name` kept and made that goes with it, by the names of the artifacts: those of
+  its own artifacts that keep anything (`owns/2`), and each it made for `owner`. What it made for them stays where the
+  same name is installed for everyone too, which makes and reads them at the same names for them now.
+  """
+  def kept(owner, name) do
+    made =
+      if beyond(owner, name),
+        do: [],
+        else:
+          for(
+            blob <- Bucket.list("#{owner}/made/#{name}/"),
+            [artifact] <- [Regex.run(~r{^[^/]+(?:/[^/]+)?/made/[^/]+/[^/]+}, blob)],
+            uniq: true,
+            do: artifact
+          )
+
+    made ++ for(own <- owns(owner, name), Bucket.list(own <> "/") != [], do: own)
+  end
+
+  @doc """
+  The own artifacts that the app installed for `owner` as `name` keeps and nothing else reads, by their names, which go
+  to Recently Deleted with it and are removed for good with it: whoever it was installed for's, unless the same name
+  installed for everyone keeps each person's data apart (`OneCore.Apps.Calls.whose/3`), and so reads it for them now;
+  and where it keeps each person's apart, the own artifact of each who keeps something with it and hasn't it
+  installed for themselves.
+  """
+  def owns(owner, name) do
+    mine = if match?({_at, %Version{own: :subject}}, beyond(owner, name)), do: [], else: ["#{owner}/own/#{name}"]
+
+    theirs =
+      for who <- Installed.subjects(owner, name),
+          not Map.has_key?(Map.new(Apps.versions([who])), name),
+          do: "#{who}/own/#{name}"
+
+    mine ++ theirs
+  end
+
+  # What `owner` uses as `name` once theirs goes: the install of it further along whose apps they find (the network's),
+  # as who it was installed for and its version, or `nil`.
+  defp beyond(owner, name) do
+    Enum.find_value(Apps.chain(owner) -- [owner], fn at ->
+      with %Version{} = version <- Map.new(Apps.versions([at]))[name], do: {at, version}
+    end)
+  end
+
+  # Why uninstalling `name` for `owner` would leave what it keeps where nothing reads it, or `nil`: they'd go on using
+  # the same name installed for everyone, which keeps everyone's data together, so what theirs kept would only wait in
+  # Recently Deleted.
+  defp stranded(owner, versions, name) do
+    with {at, %Version{own: :installed}} <- beyond(owner, name),
+         [_ | _] <- Bucket.list("#{owner}/own/#{name}/") do
+      title = (versions[name] && versions[name].title) || name
+
+      "This #{title} keeps data that the #{title} installed for everyone doesn't read, since that one keeps " <>
+        "everyone's together. So it isn't uninstalled: its data would only wait in Recently Deleted.\n\n" <>
+        "#{at}'s #{name} says its data is #{at}'s (own/0 is :installed), so #{owner}/own/#{name} isn't what it " <>
+        "reads for #{owner}. Keep this one, or move what it keeps into #{at}'s first."
+    else
+      _ -> nil
     end
   end
 
@@ -411,7 +490,8 @@ defmodule OneCore.Apps.Lifecycle do
     Enum.reduce(group, nil, fn each, outcome ->
       if match?(%{"state" => "recently_deleted"}, records[each]) do
         with nil <- move(owner, each, :purge) do
-          for blob <- Bucket.list("#{owner}/own/#{each}/"), do: Bucket.remove(blob)
+          for own <- owns(owner, each), blob <- Bucket.list(own <> "/"), do: Bucket.remove(blob)
+          Installed.unsubjected(owner, each)
           Installed.unmarked(records[each]["app"], owner)
           outcome
         end

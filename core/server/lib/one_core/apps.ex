@@ -141,7 +141,10 @@ defmodule OneCore.Apps do
   @doc "The version running here of the app `artifact`, or `nil`: also where it's only described here."
   def version(artifact), do: ask({:version, artifact})
 
-  @doc "Every app this server has looked at that has scheduled jobs: who it was installed for, its name there, the jobs, and whether it's trusted."
+  @doc """
+  Every app this server has looked at that has scheduled jobs: who it was installed for, its name there, the jobs,
+  whether it's trusted, and whose its own artifact is (`OneCore.Apps.Calls.whose/3`).
+  """
   def scheduled, do: ask(:scheduled)
 
   @doc "What's installed for everyone this server has looked at, by who: each app's name there, with the app."
@@ -253,6 +256,7 @@ defmodule OneCore.Apps do
   @impl true
   def init(nil) do
     Hooks.keep()
+    Installed.keep()
     {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}, syncs: %{}}, {:continue, :start}}
   end
 
@@ -358,8 +362,8 @@ defmodule OneCore.Apps do
     scheduled =
       for {owner, installed} <- state.installed,
           {name, artifact} <- installed,
-          %Version{jobs: [_ | _] = jobs, trusted: trusted} <- [state.running[artifact]],
-          do: {owner, name, jobs, trusted}
+          %Version{jobs: [_ | _] = jobs, trusted: trusted, own: own} <- [state.running[artifact]],
+          do: {owner, name, jobs, trusted, own}
 
     {:reply, scheduled, state}
   end
