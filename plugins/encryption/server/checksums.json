@@ -1,0 +1,18 @@
+{
+  "server/nif/encryption/linux-aarch64.so": {
+    "sha256": "ae8fdaef836b474766062d4053cf9eea630c18965e1ba1baefbcdcf345ce8885",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/encryption-1ebad380221ebb487a4fac1bb4c9a1aba83bd205f00849ef1778c9556b22b18a-linux-aarch64.so"
+  },
+  "server/nif/encryption/linux-x86_64.so": {
+    "sha256": "4659c2ba333b88ab230d609dec58ab3843cab1730375f3bdde1bda57c16849ca",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/encryption-9eef50bcbd88f00db4c33793f57b5f849e49d907fec6117b8c35c6599692e597-linux-x86_64.so"
+  },
+  "server/nif/encryption/macos-aarch64.so": {
+    "sha256": "d86890ba67b0cb9a8c8bf778cc933f4cb11001b0b8a7d59c3ab25e781da17327",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/encryption-aeae998607f88f0b653f5f42471f4c7922934a1ccc85e30e11e27f0580232f23-macos-aarch64.so"
+  },
+  "server/nif/encryption/windows-x86_64.so": {
+    "sha256": "989b8cfb90e1e5c1ba7aba0f1c00662673c8ad3330804ac6194ad6a31ebbb030",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-58766282444f/encryption-62d6a6f520903e990127a5ded9c34fb95fefb84b53b41f932da495d6ce84aab9-windows-x86_64.so"
+  }
+}
