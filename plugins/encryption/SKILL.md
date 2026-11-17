@@ -32,9 +32,9 @@ Its words:
 - An assistant that reaches the network over the web has no device, so it lets nothing in and chooses no
   server: its person does that in the app, or an agent with `one` on a device of theirs.
 
-A plugin keeps something encrypted by using this plugin:
+A plugin keeps something encrypted by requiring this plugin:
 
-    def uses, do: ["encryption"]
+    def requires, do: %{"encryption" => "to keep your notes unreadable"}
 
     def call("keep", %{"text" => text}, call) do
       encryption = OneCore.Call.plugin(call, "encryption")

@@ -202,9 +202,9 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  Keeps what a loaded version says of itself, for the servers that don't load it, as this server says it. Only a
-  server acting for whoever the plugin is says it, since only those may write the plugin's blobs: a user's own
-  server loads the network's plugins it uses too, and the network's servers say what those are.
+  Keeps what a loaded version says of itself, for the servers that don't load it, as this server says it. Only a server
+  acting for whoever the plugin is says it, since only those may write the plugin's blobs: a user's own server loads the
+  network's plugins whose code runs inside its plugins too, and the network's servers say what those are.
   """
   def describe(%Version{artifact: artifact, code: code} = version) do
     if OneCore.Servers.here?(OneCore.User.owner(artifact)) do

@@ -34,7 +34,13 @@ defmodule IphoneSimulator do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def uses, do: ["database", "webrtc"]
+  def requires do
+    %{
+      "core" => "~> 0.18.0",
+      "database" => "to keep your simulators",
+      "webrtc" => "to show a simulator's screen live"
+    }
+  end
 
   @impl true
   def jobs, do: [%{tool: "stop_idle", every: 3600}]

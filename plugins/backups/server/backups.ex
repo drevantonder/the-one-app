@@ -45,7 +45,13 @@ defmodule Backups do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def uses, do: ["database", "vault"]
+  def requires do
+    %{
+      "core" => "~> 0.18.0",
+      "database" => "to keep where and when you back up",
+      "vault" => "to keep your storage's keys"
+    }
+  end
 
   @impl true
   def apps, do: [%{name: "Backups", page: "client/index.html", category: "admin"}]

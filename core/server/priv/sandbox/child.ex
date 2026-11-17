@@ -8,12 +8,17 @@ defmodule OneCore.Call do
   # the server. `id` is the call's, which the server knows it by: a call that has ended asks nothing more.
   alias OneCore.Sandbox.Child
 
-  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :plugin, :who, :uses]
+  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :plugin, :who, :loaded]
 
-  def plugin(%__MODULE__{uses: uses, plugin: plugin}, name) do
-    case uses do
-      %{^name => module} -> module
-      _ -> raise "#{plugin} doesn't say it uses #{name}. Its uses/0 names the plugins it uses."
+  def plugin(%__MODULE__{loaded: loaded, plugin: plugin}, name) do
+    case loaded do
+      %{^name => module} ->
+        module
+
+      _ ->
+        raise "#{name}'s code doesn't run inside #{plugin}: it does where #{plugin} requires it (requires/0), it's " <>
+                "installed for whoever #{plugin} runs for, its module provides functions, and its code can run in a " <>
+                "sandbox. Otherwise call its tools."
     end
   end
 
@@ -116,7 +121,8 @@ defmodule OneCore.Plugin do
   @callback call(String.t(), map, struct) :: term
   @callback apps() :: [map]
   @callback widgets() :: [map]
-  @callback uses() :: [String.t()]
+  @callback title() :: String.t()
+  @callback icon() :: String.t()
   @callback hooks() :: [String.t()]
   @callback hook(String.t(), map, struct) :: term
   @callback offers() :: [map]
@@ -129,7 +135,8 @@ defmodule OneCore.Plugin do
                       call: 3,
                       apps: 0,
                       widgets: 0,
-                      uses: 0,
+                      title: 0,
+                      icon: 0,
                       hooks: 0,
                       hook: 3,
                       offers: 0,
@@ -305,7 +312,7 @@ defmodule OneCore.Sandbox.Child do
     })
   end
 
-  # A job is called by the server, as the clock: whichever plugin it uses keeps its schedule.
+  # A job is called by the server, as the clock: whichever plugin it requires keeps its schedule.
   defp run({:schedule, jobs}, call) do
     fire = fn job ->
       request(
@@ -315,7 +322,7 @@ defmodule OneCore.Sandbox.Child do
       )
     end
 
-    for {_name, module} <- call.uses, function_exported?(module, :schedule, 3), do: module.schedule(call, jobs, fire)
+    for {_name, module} <- call.loaded, function_exported?(module, :schedule, 3), do: module.schedule(call, jobs, fire)
     nil
   end
 
@@ -331,7 +338,13 @@ defmodule OneCore.Sandbox.Child do
       caller: about["caller"],
       plugin: about["plugin"],
       who: about["who"],
-      uses: Map.new(about["uses"], &{&1, :persistent_term.get({__MODULE__, :plugin, &1})})
+      loaded:
+        for(
+          name <- about["loaded"],
+          module = :persistent_term.get({__MODULE__, :plugin, name}, nil),
+          into: %{},
+          do: {name, module}
+        )
     }
   end
 
@@ -346,8 +359,9 @@ defmodule OneCore.Sandbox.Child do
 
   defp plugin, do: :persistent_term.get({__MODULE__, :main})
 
-  # Compiles each set of files in turn, the plugins it uses before the plugin, and says what the plugin is. What it
-  # uses runs here as it, as it would run as it on a server. A VM of the same version that ran before compiled them
+  # Compiles each set of files in turn, the plugins it requires before the plugin, and says what the plugin is. What
+  # it requires runs here as it, as it would run as it on a server, where its code can run here: what can't, the
+  # plugin calls by its tools. A VM of the same version that ran before compiled them
   # already, and the server kept what it compiled in `cache`, where they're loaded from instead. Otherwise what was
   # compiled is answered with, its own side of One Core among it, for the server to keep.
   defp loaded(sets, target, cache) do
@@ -362,9 +376,14 @@ defmodule OneCore.Sandbox.Child do
 
     case for {^main, module} <- plugins, do: module do
       [plugin] ->
-        for {name, module} <- plugins, do: :persistent_term.put({__MODULE__, :plugin, name}, module)
+        runs = OneCore.Sandbox.Check.runs(Map.keys(modules) -- [main])
+
+        for {name, module} <- plugins,
+            name == main or name in runs,
+            do: :persistent_term.put({__MODULE__, :plugin, name}, module)
+
         :persistent_term.put({__MODULE__, :main}, plugin)
-        described = described(plugin, main, modules[main], Map.keys(modules) -- [main])
+        described = described(plugin, main, modules[main], runs)
         {:returned, if(cache, do: described, else: Map.put(described, "beams", beams(modules)))}
 
       found ->
@@ -452,7 +471,7 @@ defmodule OneCore.Sandbox.Child do
   def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
   # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what an untrusted plugin isn't offered.
-  defp described(plugin, main, modules, uses) do
+  defp described(plugin, main, modules, runs) do
     value = fn function, none ->
       if function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none
     end
@@ -468,15 +487,27 @@ defmodule OneCore.Sandbox.Child do
       "icon" => value.(:icon, nil),
       "offers" => offers,
       "widgets" => value.(:widgets, []),
-      "uses" => value.(:uses, []),
+      "exports" => exports(plugin),
       "hooks" => hooks,
       "jobs" => value.(:jobs, []),
       "requires" => value.(:requires, %{}),
       "warnings" => Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
-      "problems" => OneCore.Sandbox.Check.problems(plugin, modules, uses, hooks, offers, services)
+      "problems" => OneCore.Sandbox.Check.problems(plugin, modules, runs, hooks, offers, services)
     }
     |> JSON.encode!()
     |> JSON.decode!()
+  end
+
+  # The functions its module provides other plugins, as `OneCore.Plugins.Version` says them.
+  defp exports(plugin) do
+    callbacks = OneCore.Plugin.behaviour_info(:callbacks)
+
+    Enum.sort(
+      for {name, arity} <- plugin.__info__(:functions),
+          {name, arity} not in callbacks,
+          not String.starts_with?(Atom.to_string(name), "__"),
+          do: "#{name}/#{arity}"
+    )
   end
 
   # An IO server that takes whatever it's sent and keeps none of it.
@@ -520,18 +551,17 @@ defmodule OneCore.Sandbox.Check do
   # Core's hooks that mutate or validate what happens, which only a plugin on a server of its owner's may.
   @deciding ~w(inputs call reach device owner)
 
-  # The plugins it uses run in its VM as it, so they're checked too: one that can't run there, as most of the
-  # network's own can't, is used by its tools instead.
-  def problems(plugin, modules, uses, hooks, offers, services) do
-    loaded = MapSet.new(modules ++ Enum.flat_map(uses, &modules_of/1))
-    calls = calls(modules, loaded)
+  # Which of the plugins it requires, by their names, run in its VM as it: those whose code can run there. One that
+  # can't, as most of the network's own can't, is called by its tools instead.
+  def runs(required) do
+    loaded = MapSet.new(Enum.flat_map(required, &modules_of/1))
+    for name <- required, calls(modules_of(name), loaded) == [], do: name
+  end
 
-    using =
-      for name <- uses, calls = calls(modules_of(name), loaded), calls != [] do
-        "#{where(plugin)}: it uses #{name}, whose code would run in its sandbox, and can't there " <>
-          "(#{hd(calls)}#{if length(calls) > 1, do: " And #{length(calls) - 1} more."}) Call its tools instead, naming " <>
-          "it in requires/0, and leave what can't run out of uses/0."
-      end
+  # `runs` are the plugins it requires that run in its VM, whose modules it may call.
+  def problems(plugin, modules, runs, hooks, offers, services) do
+    loaded = MapSet.new(modules ++ Enum.flat_map(runs, &modules_of/1))
+    calls = calls(modules, loaded)
 
     hooking =
       for hook <- hooks,
@@ -554,7 +584,7 @@ defmodule OneCore.Sandbox.Check do
             "#{service} is a service, which runs on particular machines: an untrusted plugin has none. A plugin " <>
               "with one runs trusted, on a server of its owner's."
 
-    calls ++ using ++ hooking ++ offering ++ serving
+    calls ++ hooking ++ offering ++ serving
   end
 
   defp calls(modules, loaded) do

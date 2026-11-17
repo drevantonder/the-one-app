@@ -7,7 +7,7 @@ metadata:
   category: Data
 ---
 
-A plugin keeps its data in a database by using this plugin. The database is SQLite, kept in the plugin's own
+A plugin keeps its data in a database by requiring this plugin. The database is SQLite, kept in the plugin's own
 artifact for whoever it runs for, so each user and each group has their own.
 
 Its words:
@@ -15,7 +15,7 @@ Its words:
 - **Lease**: the record of which server writes a database for now. One server holds it at a time. Part of the database
   plugin.
 
-    def uses, do: ["database"]
+    def requires, do: %{"database" => "to keep your notes"}
 
     @schema ["create table notes (id integer primary key, text text not null, at text not null)"]
 

@@ -310,7 +310,7 @@ defmodule OneCore.Tools do
       It's the same plugin, with its one version and whether it's trusted, for everyone who has it, with an artifact of
       its own for whoever it's installed for: a copy is another plugin. One in use for a group you're in or for the
       network is open to you; one that isn't, whoever it belongs to shares with you first, as a viewer. The plugins it
-      uses are installed for you first.
+      requires are installed for you first.
       """,
       inputs: %{
         type: "object",

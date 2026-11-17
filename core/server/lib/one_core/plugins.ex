@@ -40,9 +40,10 @@ defmodule OneCore.Plugins do
   def chain(who), do: Enum.uniq(List.wrap(User.owner(who)) ++ [@network])
 
   @doc """
-  Runs `fun` with who a plugin was installed for and the latest version of it and of each plugin it uses, by their
-  names. The plugin is the first that `name` is for one of `owners`. Those versions stay loaded until `fun`
-  returns. Gives what `fun` does, or `{:error, why}` with what it raised, as its caller is told it.
+  Runs `fun` with who a plugin was installed for and the latest version of it and of each plugin it requires whose code
+  runs inside it (`required/2`) for them, by their names. The plugin is the first that `name` is for one of `owners`.
+  Those versions stay loaded until `fun` returns. Gives what `fun` does, or `{:error, why}` with what it raised, as its
+  caller is told it.
   """
   def run(owners, name, fun) do
     with {:ok, held, at, versions} <- begin(owners, name),
@@ -147,10 +148,12 @@ defmodule OneCore.Plugins do
   def installed, do: ask(:installed)
 
   @doc """
-  The versions running here of the plugins `names` and of each plugin they use, by their names, as `owner` finds
-  them: `{:ok, versions}`, or `{:absent, name}` for the first that isn't running here.
+  The versions running here of the plugins `version` requires whose code runs inside it, by their names, as `owner`
+  finds them: each whose module provides functions (its `exports`, `OneCore.Plugin`), and those such a one requires in
+  turn. A requirement that isn't running here runs inside nothing, and an untrusted one runs inside only an untrusted
+  plugin, in its sandbox: its code never loads in this server's VM.
   """
-  def used(owner, names), do: ask({:used, owner, names})
+  def required(owner, %Version{} = version), do: ask({:required, owner, version})
 
   @doc """
   Has everyone this server has looked at looked at again behind the next request for them, and gives who to look
@@ -203,17 +206,13 @@ defmodule OneCore.Plugins do
     any
   end
 
-  # A call holds the latest version of its plugin and of each plugin that one uses, however far that goes. A
+  # A call holds the latest version of its plugin and of each plugin whose code runs inside it, however far that goes. A
   # plugin this server doesn't run is looked for first.
   defp begin(owners, name) do
     with {:absent, _missing} <- ask({:begin, owners, name}),
          _ = Enum.each(Enum.uniq(owners ++ [@network]), &reload(&1)),
-         {:absent, missing} <- ask({:begin, owners, name}) do
-      if missing == name,
-        do: {:error, "There's no plugin named #{name}"},
-        else:
-          {:error, "#{name} needs #{missing}, which isn't installed for #{Enum.join(owners, " or ")} or the network"}
-    end
+         {:absent, _missing} <- ask({:begin, owners, name}),
+         do: {:error, "There's no plugin named #{name}"}
   end
 
   @doc "Returns once this server has started the plugins it runs whether or not it's asked for them."
@@ -310,14 +309,16 @@ defmodule OneCore.Plugins do
     {:reply, scheduled, state}
   end
 
-  def handle_call({:used, owner, names}, _from, state), do: {:reply, used(state, [owner, @network], names, %{}), state}
+  def handle_call({:required, owner, version}, _from, state),
+    do: {:reply, inside(state, [owner, @network], version.trusted, Map.keys(version.requires), %{}), state}
 
   # The caller is watched, so a call that dies has ended too.
   def handle_call({:begin, owners, name}, {caller, _}, state) do
     state = behind(state, owners)
 
-    with {at, _artifact} <- found(state, owners, name),
-         {:ok, versions} <- used(state, [at, @network], [name], %{}) do
+    with {at, artifact} <- found(state, owners, name),
+         %Version{} = version <- state.running[artifact] || {:absent, name} do
+      versions = inside(state, [at, @network], version.trusted, Map.keys(version.requires), %{name => version})
       call = Process.monitor(caller)
       {:reply, {:ok, call, at, versions}, put_in(state.calls[call], Map.values(versions))}
     else
@@ -457,17 +458,20 @@ defmodule OneCore.Plugins do
     end
   end
 
-  # The versions a call to `names` holds, by their plugins' names as `owners` find them, or the first plugin that
-  # isn't running.
-  defp used(_state, _owners, [], found), do: {:ok, found}
-  defp used(state, owners, [name | names], found) when is_map_key(found, name), do: used(state, owners, names, found)
+  # `found` with the versions of the plugins `names` whose code runs inside whatever requires them, by their names as
+  # `owners` find them, and of those they require in turn: the ones running here whose modules provide functions, and
+  # only trusted ones inside a `trusted` plugin, whose call runs in this server's VM.
+  defp inside(_state, _owners, _trusted, [], found), do: found
 
-  defp used(state, owners, [name | names], found) do
+  defp inside(state, owners, trusted, [name | names], found) when is_map_key(found, name),
+    do: inside(state, owners, trusted, names, found)
+
+  defp inside(state, owners, trusted, [name | names], found) do
     with {_at, artifact} <- found(state, owners, name),
-         %{^artifact => version} <- state.running do
-      used(state, owners, version.uses ++ names, Map.put(found, name, version))
+         %{^artifact => %Version{exports: [_ | _]} = version} when version.trusted or not trusted <- state.running do
+      inside(state, owners, trusted, Map.keys(version.requires) ++ names, Map.put(found, name, version))
     else
-      _ -> {:absent, name}
+      _ -> inside(state, owners, trusted, names, found)
     end
   end
 

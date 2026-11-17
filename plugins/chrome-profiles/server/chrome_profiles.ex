@@ -104,7 +104,14 @@ defmodule ChromeProfiles do
   @states @steps |> Map.values() |> Enum.uniq()
 
   @impl true
-  def uses, do: ["vault", "containers", "chrome"]
+  def requires do
+    %{
+      "core" => "~> 0.18.0",
+      "vault" => "to keep your profiles",
+      "containers" => "to move a profile in and out of its browser",
+      "chrome" => "to open a browser with a profile"
+    }
+  end
 
   @impl true
   def hooks, do: ["chrome.starting", "chrome.closing", "vault.types"]

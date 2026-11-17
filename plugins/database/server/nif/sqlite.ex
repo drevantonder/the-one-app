@@ -1,6 +1,6 @@
 defmodule Sqlite do
   @moduledoc """
-  SQLite: the database plugin's NIF (`nif/sqlite`), which its Elixir calls, and so could a plugin that uses
+  SQLite: the database plugin's NIF (`nif/sqlite`), which its Elixir calls, and so could a plugin that requires
   `database`.
 
       db = Sqlite.open("/tmp/notes.sqlite")

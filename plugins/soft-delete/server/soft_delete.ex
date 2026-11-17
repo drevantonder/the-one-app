@@ -35,7 +35,7 @@ defmodule SoftDelete do
   """
   @behaviour OneCore.Plugin
 
-  # Any plugin deletes what it made through it, by its tool, without naming it among what it uses.
+  # Any plugin deletes what it made through it, by its tool, without naming it among what it requires.
   @impl true
   def icon, do: "client/icon.svg"
 
@@ -57,7 +57,7 @@ defmodule SoftDelete do
   @own ~r{^(users/[^/]+|groups/[^/]+|network)/own/([a-z][a-z0-9-]*)$}
 
   @impl true
-  def uses, do: ["database"]
+  def requires, do: %{"core" => "~> 0.18.0", "database" => "to keep what you deleted for 30 days"}
 
   @impl true
   def hooks, do: ["uninstalled", "restored"]

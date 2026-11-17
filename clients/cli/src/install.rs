@@ -222,20 +222,23 @@ fn offered(folder: &Path) -> Vec<(String, String)> {
     offered
 }
 
-/// The plugins a plugin uses, as its `uses/0` names them (`OneCore.Plugin`).
-fn uses(plugin: &Path) -> Vec<String> {
-    let mut used = Vec::new();
+/// The plugins a plugin requires, as its `requires/0` names them (`OneCore.Plugin`): each `"name" =>` of its map.
+fn requires(plugin: &Path) -> Vec<String> {
+    let mut required = Vec::new();
     for file in fs::read_dir(plugin.join("server")).into_iter().flatten().flatten() {
         let code = fs::read_to_string(file.path()).unwrap_or_default();
-        let Some((_, after)) = code.split_once("def uses") else { continue };
-        let Some(list) = after.split_once('[').and_then(|(_, list)| list.split_once(']')).map(|(list, _)| list) else {
+        let Some((_, after)) = code.split_once("def requires") else { continue };
+        let Some(map) = after.split_once("%{").and_then(|(_, map)| map.split_once('}')).map(|(map, _)| map) else {
             continue;
         };
-        used.extend(
-            list.split(',').map(|name| name.trim().trim_matches('"').to_owned()).filter(|name| !name.is_empty()),
-        );
+        let keys = map.split("=>").map(str::trim_end).collect::<Vec<_>>();
+        for key in &keys[..keys.len() - 1] {
+            if let Some(name) = key.strip_suffix('"').and_then(|key| key.rsplit_once('"')).map(|(_, name)| name) {
+                required.push(name.to_owned());
+            }
+        }
     }
-    used
+    required
 }
 
 /// Stops with what to build, where a plugin brings a NIF that isn't built for every kind of machine the network's
@@ -411,7 +414,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
     }
     let (of, plugins) = installed(client, None).await?;
     let is = |name: &str, at: &str| plugins.iter().find(|plugin| plugin["name"] == name && plugin["for"] == at);
-    // Each plugin after the ones it uses that aren't installed for them or the network yet and the repo has.
+    // Each plugin after the ones it requires that aren't installed for them or the network yet and the repo has.
     let mut order: Vec<String> = Vec::new();
     let mut next: Vec<(String, bool)> = names.iter().rev().map(|name| (name.clone(), false)).collect();
     while let Some((name, placed)) = next.pop() {
@@ -427,14 +430,16 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
             continue;
         }
         next.push((name.clone(), true));
-        for used in uses(&plugin) {
-            let there = is(&used, &of).or(is(&used, "network")).is_some();
-            if !there && folder.join("plugins").join(&used).join("SKILL.md").exists() && !order.contains(&used) {
+        for required in requires(&plugin) {
+            let there = is(&required, &of).or(is(&required, "network")).is_some();
+            let repo = folder.join("plugins").join(&required).join("SKILL.md").exists();
+            if !there && repo && !order.contains(&required) {
                 println!(
-                    "{name} uses {used}, which isn't installed for {of} or the network, so it's installed from {} too.",
+                    "{name} requires {required}, which isn't installed for {of} or the network, so it's installed \
+                     from {} too.",
                     source.spec
                 );
-                next.push((used, false));
+                next.push((required, false));
             }
         }
     }
@@ -460,8 +465,8 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
 }
 
 /// `one install` in a folder with a `plugins.lock`: installs everything it records, at the commits it records, for
-/// whoever it records, as it was, each after the ones it records that it uses. A plugin whose files hash differently
-/// now (a NIF built again) is said so.
+/// whoever it records, as it was, each after the ones it records that it requires. A plugin whose files hash
+/// differently now (a NIF built again) is said so.
 pub async fn locked(client: &Client) -> Result<ExitCode> {
     let file = PathBuf::from(LOCK);
     let mut waiting = read_lock(&file)?;
@@ -471,7 +476,8 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
         for (name, it) in &waiting {
             let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
             let (folder, commit) = source.fetch(Some(&it.commit))?;
-            if uses(&folder.join("plugins").join(name)).iter().any(|used| used != name && waiting.contains_key(used)) {
+            let required = requires(&folder.join("plugins").join(name));
+            if required.iter().any(|required| required != name && waiting.contains_key(required)) {
                 continue;
             }
             let now = deploy(client, &it.of, name, &folder, &source, &commit, None, false).await?;

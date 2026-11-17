@@ -1,9 +1,10 @@
 defmodule OneCore.Plugins.Calls do
   @moduledoc """
-  Calling a plugin: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having
-  its scheduled jobs called. A call runs on the version of the plugin that was latest when it began, and the ones
-  it uses, which stay loaded until it ends (`OneCore.Plugins.run/3`). It runs on a server that runs the plugins of
-  whoever the plugin was installed for (`OneCore.Servers.runs?/1`): this one, or one it's passed on to.
+  Calling a plugin: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having its
+  scheduled jobs called. A call runs on the version of the plugin that was latest when it began, and those of the
+  plugins it requires whose code runs inside it, which stay loaded until it ends (`OneCore.Plugins.run/3`). It runs on a
+  server that runs the plugins of whoever the plugin was installed for (`OneCore.Servers.runs?/1`): this one, or one
+  it's passed on to.
   """
   require Logger
   alias ExJsonSchema.Validator.Error
@@ -340,8 +341,8 @@ defmodule OneCore.Plugins.Calls do
   defp observes?(_call, _about), do: true
 
   @doc """
-  Has the scheduled jobs that are due called, of the plugin that `name` is for `at`: the plugin it uses that
-  keeps schedules is given its jobs, as the plugin, and a function that makes one's call here. That plugin has one
+  Has the scheduled jobs that are due called, of the plugin that `name` is for `at`: the plugin it requires
+  that keeps schedules is given its jobs, as the plugin, and a function that makes one's call here. That plugin has one
   server make each call, once. The call runs for whoever the plugin was installed for, asked by nobody, and is never
   passed on: it's made where the schedule is kept.
   """
@@ -358,7 +359,7 @@ defmodule OneCore.Plugins.Calls do
         Server.changed()
       end
 
-      # An untrusted plugin has its jobs kept in its sandbox, by the plugin it uses there.
+      # An untrusted plugin has its jobs kept in its sandbox, by the plugin it requires there.
       if versions[name].trusted,
         do: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, versions[name].jobs, fire)),
         else: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, scheduled)
@@ -435,7 +436,8 @@ defmodule OneCore.Plugins.Calls do
       plugin: name,
       who: versions[name].artifact,
       request: ask,
-      uses: for({used, version} <- versions, used != name, into: %{}, do: {used, {version.artifact, version.plugin}}),
+      loaded:
+        for({other, version} <- versions, other != name, into: %{}, do: {other, {version.artifact, version.plugin}}),
       forwarded: forwarded
     }
   end

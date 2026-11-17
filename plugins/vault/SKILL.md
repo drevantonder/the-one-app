@@ -84,8 +84,8 @@ and never sees a secret, so an untrusted plugin can use one too. It requires thi
 - A plugin that does something for other plugins, as `google-account` does for the Google plugins, calls these on
   behalf of whichever called it: `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`.
 
-A plugin trusted with a secret itself, whose service hands it to a program, uses this plugin (`def uses, do:
-["vault"]`) and calls its functions, which run on a server of its owner's:
+A plugin trusted with a secret itself, whose service hands it to a program, requires this plugin (`def requires, do:
+%{"vault" => "to sign you in to GitHub"}`) and calls its functions, which run inside it on a server of its owner's:
 
 - `value(call, item, field)` gives one field itself, to hand to a program a service brings. Hand it over on the
   program's input, and never answer with it, raise it or log it.

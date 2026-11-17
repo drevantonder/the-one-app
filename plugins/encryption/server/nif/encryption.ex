@@ -1,6 +1,6 @@
 defmodule Cipher do
   @moduledoc """
-  Encryption for a server's plugins: the encryption plugin's NIF (`nif/encryption`), which a plugin that uses
+  Encryption for a server's plugins: the encryption plugin's NIF (`nif/encryption`), which a plugin that requires
   `encryption` calls. It names no plugin: each says what it encrypts something for, `about`, which is all that then
   opens it. Which artifacts are encrypted, and who holds their keys, is the plugin `encryption`'s, whose skill says
   how a plugin keeps something encrypted.

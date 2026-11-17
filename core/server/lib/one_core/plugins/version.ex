@@ -27,13 +27,14 @@ defmodule OneCore.Plugins.Version do
   its `category` and its `subject`, which are the plugin's to say and nil where it says none. `widgets` lists its widgets: each
   one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
 
-  `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
-  `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
-  `description`, and `jobs` lists its scheduled jobs: each one's
-  `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
-  without it (`OneCore.Plugins.Deploy`), `requires` the other plugins it needs, each by its name with why, and `core`
-  the versions of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any, both from its
-  `requires/0` (`OneCore.Plugin`). `artifact` is the plugin it's a version of, which whatever loaded it says.
+  `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's `called`
+  where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the
+  hooks it offers, each one's `name`, `kind` and `description`, and `jobs` lists its scheduled jobs: each one's `tool`,
+  the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work without it
+  (`OneCore.Plugins.Deploy`), `requires` the other plugins it needs, each by its name with why, and `core` the versions
+  of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any, both from its `requires/0`
+  (`OneCore.Plugin`). `exports` are the functions its module provides other plugins, as name/arity, which run inside
+  each plugin that requires it. `artifact` is the plugin it's a version of, which whatever loaded it says.
 
   A version runs only on a server whose build its `core` allows: one that doesn't is refused where it's deployed, and
   where it's loaded runs nowhere here, as one that doesn't compile, until the server is updated.
@@ -45,14 +46,13 @@ defmodule OneCore.Plugins.Version do
   """
   alias OneCore.{App, Builds, Hooks, Nif, Server, Skills}
 
-  @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :uses, :services, :hooks, :offers, :jobs, :code]
+  @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :services, :hooks, :offers, :jobs, :code]
   defstruct [
     :under,
     :plugin,
     :tools,
     :apps,
     :widgets,
-    :uses,
     :services,
     :hooks,
     :offers,
@@ -65,6 +65,7 @@ defmodule OneCore.Plugins.Version do
     :core,
     essential: false,
     requires: %{},
+    exports: [],
     trusted: true
   ]
 
@@ -165,7 +166,7 @@ defmodule OneCore.Plugins.Version do
         :tools,
         :apps,
         :widgets,
-        :uses,
+        :exports,
         :services,
         :hooks,
         :offers,
@@ -216,7 +217,7 @@ defmodule OneCore.Plugins.Version do
       Map.take(description, [
         :apps,
         :widgets,
-        :uses,
+        :exports,
         :services,
         :hooks,
         :offers,
@@ -269,7 +270,7 @@ defmodule OneCore.Plugins.Version do
       title: description["title"],
       icon: description["icon"],
       widgets: taken.(description["widgets"], ~w(name tool sizes)),
-      uses: description["uses"],
+      exports: description["exports"],
       hooks: description["hooks"],
       offers: offers,
       jobs: taken.(description["jobs"], ~w(tool every inputs)),
@@ -423,7 +424,6 @@ defmodule OneCore.Plugins.Version do
     title: nil,
     icon: nil,
     widgets: [],
-    uses: [],
     hooks: [],
     offers: [],
     jobs: [],
@@ -440,7 +440,7 @@ defmodule OneCore.Plugins.Version do
       [plugin] ->
         description =
           for {function, none} <- @callbacks,
-              into: %{},
+              into: %{exports: exports(plugin)},
               do: {function, if(function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none)}
 
         services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
@@ -464,15 +464,30 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, uses/0, hooks/0, offers/0, jobs/0, essential/0, requires/0 or a service's " <>
+       "tools/0, apps/0, widgets/0, hooks/0, offers/0, jobs/0, essential/0, requires/0 or a service's " <>
          "needs/0 or called/0 raised: " <>
          Exception.message(error)}
+  end
+
+  # The functions a plugin's module provides other plugins, which run inside each plugin that requires it
+  # (`OneCore.Plugin`): its public ones besides the callbacks, as name/arity.
+  defp exports(plugin) do
+    callbacks = OneCore.Plugin.behaviour_info(:callbacks)
+
+    Enum.sort(
+      for {name, arity} <- plugin.__info__(:functions),
+          {name, arity} not in callbacks,
+          not String.starts_with?(Atom.to_string(name), "__"),
+          do: "#{name}/#{arity}"
+    )
   end
 
   # A version from what its plugin said of itself, if that's what a plugin says: `plugin` is its module, or nil for
   # an untrusted one, whose module is in its sandbox's VM.
   defp checked(under, plugin, description, services, rest) do
-    %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, uses: uses, hooks: hooks} = description
+    %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, exports: exports, hooks: hooks} =
+      description
+
     %{offers: offers, jobs: jobs, requires: requires} = description
 
     cond do
@@ -495,8 +510,8 @@ defmodule OneCore.Plugins.Version do
          "widgets/0 gives a list of %{name: ..., tool: ..., sizes: [...]}: one of this plugin's tools that only " <>
            "reads, and the sizes it comes in, of #{Enum.join(@sizes, ", ")}"}
 
-      not (is_list(uses) and Enum.all?(uses, &is_binary/1)) ->
-        {:error, "uses/0 gives a list of plugins' names"}
+      not (is_list(exports) and Enum.all?(exports, &is_binary/1)) ->
+        {:error, "Its module's functions are said as a list of names"}
 
       not (is_list(hooks) and Enum.all?(hooks, &Hooks.hook?/1) and
                (hooks == [] or plugin == nil or function_exported?(plugin, :hook, 3))) ->
@@ -532,7 +547,7 @@ defmodule OneCore.Plugins.Version do
                {:ok,
                 %{
                   version
-                  | uses: uses,
+                  | exports: exports,
                     hooks: Enum.uniq(hooks),
                     offers: offers,
                     jobs: jobs,
@@ -612,7 +627,7 @@ defmodule OneCore.Plugins.Version do
       title: List.first(for(app <- apps, do: app.name)),
       icon: if(is_map_key(rest, icon), do: data(icon, rest)),
       widgets: widgets,
-      uses: [],
+      exports: [],
       services: services,
       hooks: [],
       offers: [],

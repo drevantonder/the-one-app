@@ -158,7 +158,7 @@ defmodule OneCore.Plugins.Lifecycle do
   end
 
   @doc """
-  Installs a plugin the server ships for `owner`, where another they install uses it: at once, as it updates with
+  Installs a plugin the server ships for `owner`, where another they install requires it: at once, as it updates with
   the server. `:ok`, or `{:error, why}`.
   """
   def bring(owner, name, artifact) do
@@ -206,25 +206,16 @@ defmodule OneCore.Plugins.Lifecycle do
   @doc """
   Uninstalls a plugin for `owner`: it stops running for them, and waits in Recently Deleted, with what it keeps, for
   30 days. Where other plugins installed for them are required by it, it's refused saying so, unless whoever asked
-  `confirm`s that they go too: then they all go to Recently Deleted, as one. Refused where another plugin they have
-  uses its code, or it's the network's launcher. The plugins that observe `uninstalled` are told once, with each
+  `confirm`s that they go too: then they all go to Recently Deleted, as one. Refused where it's the network's launcher. The plugins that observe `uninstalled` are told once, with each
   that went (`with`), so one that keeps what's deleted takes what they kept and made for them along, as one item.
   `asked` is who asked.
   """
   def uninstall(owner, name, {actor, _subject}, confirm \\ false) do
-    # What uses it still finds it where it's installed for the network too.
-    after_it = Map.new(Plugins.versions(Plugins.chain(owner) -- [owner]))
     versions = Map.new(Plugins.versions([owner]))
-
-    used_by =
-      for {other, version} <- versions, name in version.uses, not is_map_key(after_it, name), do: other
 
     required_by = Requires.required_by(owner, name)
 
     cond do
-      used_by != [] ->
-        {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
-
       required_by != [] and confirm != true ->
         {:error, "#{removed_too(versions, name, required_by)}\n\nTo uninstall them all, uninstall #{name} again with confirm, once the person has said yes."}
 

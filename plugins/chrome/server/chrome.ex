@@ -71,7 +71,7 @@ defmodule Chrome do
   def icon, do: "icon.svg"
 
   @impl true
-  def uses, do: ["containers"]
+  def requires, do: %{"containers" => "to run each browser in a container"}
 
   @impl true
   def offers do

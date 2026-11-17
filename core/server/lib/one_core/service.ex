@@ -57,10 +57,10 @@ defmodule OneCore.Service do
   """
   def seen(server), do: Servers.seen(server)
 
-  # The plugin whose service it is: this call's, or one it uses, whose function this call is running.
-  defp whose(%Call{who: plugin, uses: uses}, service) do
+  # The plugin whose service it is: this call's, or one whose code runs inside it, whose function this call is running.
+  defp whose(%Call{who: plugin, loaded: loaded}, service) do
     under = Version.under(service)
-    Enum.find_value(uses, plugin, fn {_name, {used, module}} -> Version.under(module) == under && used end)
+    Enum.find_value(loaded, plugin, fn {_name, {other, module}} -> Version.under(module) == under && other end)
   end
 
   @doc """

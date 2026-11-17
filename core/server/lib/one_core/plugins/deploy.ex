@@ -6,8 +6,8 @@ defmodule OneCore.Plugins.Deploy do
 
   A server deploys each plugin it ships with for the network: its `:bundled` setting, each one's folder by its name.
   One that says it's essential (`OneCore.Plugin`) is installed for the network; the rest are only available, in the
-  App Store for anyone to add, until someone does. Deploying or adding a plugin installs the ones it uses that the
-  server ships with for whoever it's installed for, where they aren't there.
+  App Store for anyone to add, until someone does. Deploying or adding a plugin installs the ones it requires that
+  the server ships with for whoever it's installed for, where they aren't there.
   """
   require Logger
   alias OneCore.Call.State
@@ -454,12 +454,12 @@ defmodule OneCore.Plugins.Deploy do
     do: with(sources when is_list(sources) <- JSON.decode!(json), do: sources, else: (_ -> []))
 
   @doc """
-  Whether a plugin fits whoever it's installed for: the plugins it uses are there for them, and one with scheduled jobs
-  uses a plugin that keeps them. `:ok`, or `{:error, why}`.
+  Whether a plugin fits whoever it's installed for: the plugins it requires are there for them, and one with scheduled
+  jobs requires a plugin that keeps them. `:ok`, or `{:error, why}`.
   """
   def fits(owner, name, version) do
     with :ok <- launcher(owner, name, version),
-         :ok <- bring(owner, name, version.uses),
+         :ok <- bring(owner, name, Map.keys(version.requires)),
          do: scheduled(owner, name, version)
   end
 
@@ -491,15 +491,13 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # A plugin's scheduled jobs are kept by a plugin it uses.
+  # A plugin's scheduled jobs are kept by a plugin it requires.
   defp scheduled(_owner, _name, %Version{jobs: []}), do: :ok
 
   defp scheduled(owner, name, version) do
-    with {:ok, used} <- Plugins.used(owner, version.uses),
-         [_ | _] <- Calls.keepers(used) do
-      :ok
-    else
-      _ -> {:error, "#{name} has scheduled jobs, so it uses a plugin that keeps its schedule: one with schedule/3"}
+    case Calls.keepers(Plugins.required(owner, version)) do
+      [_ | _] -> :ok
+      [] -> {:error, "#{name} has scheduled jobs, so it requires a plugin that keeps its schedule: one with schedule/3"}
     end
   end
 
@@ -621,30 +619,32 @@ defmodule OneCore.Plugins.Deploy do
     |> Enum.all?(fn {_name, %{"build" => build}} -> count.(build) <= count.(Builds.build()) end)
   end
 
-  # The plugins a plugin uses are there before it is. One this server ships that's running from files a server
+  # The plugins a plugin requires are there before it is. One this server ships that's running from files a server
   # shipped before this one's is deployed again, by a server acting for the network, and one that's missing is
   # installed for `owner` from what the network has of it. Bundled plugins go by name, so a plugin can come before
-  # one it uses that's still to be shipped.
-  defp bring(owner, name, uses) do
-    for used <- uses,
-        Servers.here?(@network) and bundled(used) != %{} and deploy_bundled?(used, Version.code(bundled(used))),
-        do: deploy_bundled(used)
+  # one it requires that's still to be shipped.
+  defp bring(owner, name, requires) do
+    for required <- requires,
+        Servers.here?(@network) and bundled(required) != %{} and
+          deploy_bundled?(required, Version.code(bundled(required))),
+        do: deploy_bundled(required)
 
     there =
       &(is_map_key(Plugins.running(owner), &1) or
           (bundled(&1) != %{} and OneCore.Plugins.Lifecycle.bring(owner, &1, "#{@network}/plugins/#{&1}") == :ok))
 
-    case Enum.reject(uses, there) do
+    case Enum.reject(requires, there) do
       [] ->
         :ok
 
       [missing] ->
         {:error,
-         "#{name} uses #{missing}, which isn't installed for #{owner} or the network. Add it for them first, or deploy it."}
+         "#{name} requires #{missing}, which isn't installed for #{owner} or the network. Add it for them first, " <>
+           "or deploy it."}
 
       missing ->
         {:error,
-         "#{name} uses #{Enum.join(missing, ", ")}, which aren't installed for #{owner} or the network. " <>
+         "#{name} requires #{Enum.join(missing, ", ")}, which aren't installed for #{owner} or the network. " <>
            "Add them for them first, or deploy them."}
     end
   end

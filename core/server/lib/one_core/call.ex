@@ -18,7 +18,8 @@ defmodule OneCore.Call do
     called by a person, an app or an agent has none: `nil`.
 
   The rest is One Core's: the plugin's name where it was installed and the plugin as a who, what was asked of it, the
-  plugins it uses, whether another server passed it on, and the state it's in (`OneCore.Call.State`).
+  plugins it requires whose code runs inside it (`loaded`), whether another server passed it on, and the state it's in
+  (`OneCore.Call.State`).
 
   A call is passed between servers at most twice, so none goes round. A server that can't run it has one that can
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
@@ -28,7 +29,7 @@ defmodule OneCore.Call do
   alias OneCore.Call.State
   alias OneCore.Plugins.{Calls, Version}
 
-  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :uses, :forwarded]
+  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :loaded, :forwarded]
   defstruct [
     :own,
     :installed,
@@ -40,7 +41,7 @@ defmodule OneCore.Call do
     :plugin,
     :who,
     :request,
-    :uses,
+    :loaded,
     :forwarded,
     :state
   ]
@@ -48,15 +49,21 @@ defmodule OneCore.Call do
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
   @doc """
-  A plugin this call's plugin uses, or that one of those uses: its module, whose functions take this call and run
-  as this call's plugin, for whoever it runs for.
+  A plugin this call's plugin requires, or that one of those requires, whose module provides functions
+  (`OneCore.Plugin`): its module, whose functions take this call and run as this call's plugin, for whoever it runs
+  for.
 
       database = OneCore.Call.plugin(call, "database")
   """
-  def plugin(%__MODULE__{uses: uses, plugin: plugin}, name) do
-    case uses do
-      %{^name => {_artifact, module}} -> module
-      _ -> raise "#{plugin} doesn't say it uses #{name}. Its uses/0 names the plugins it uses."
+  def plugin(%__MODULE__{loaded: loaded, plugin: plugin}, name) do
+    case loaded do
+      %{^name => {_artifact, module}} ->
+        module
+
+      _ ->
+        raise "#{name}'s code doesn't run inside #{plugin}: it does where #{plugin} requires it (requires/0), it's " <>
+                "installed for whoever #{plugin} runs for, it's trusted, and its module provides functions. Otherwise call its " <>
+               "tools."
     end
   end
 
@@ -326,16 +333,16 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  A process that keeps running on this server between calls: the GenServer or `:gen_statem` `module`, which is one
-  of this call's plugin's or of a plugin it uses. There's one for each `key`, started when first asked for, with
-  `argument` given to its `init/1`, and found again by every call after. It carries on through its plugin's
+  A process that keeps running on this server between calls: the GenServer or `:gen_statem` `module`, which is one of
+  this call's plugin's or of a plugin whose code runs inside it. There's one for each `key`, started when first asked
+  for, with `argument` given to its `init/1`, and found again by every call after. It carries on through its plugin's
   updates as a service does, and one that stopped is started by the next call that asks for it.
 
       counter = OneCore.Call.process(call, Hello.Counter, call.subject, 0)
   """
-  def process(%__MODULE__{uses: uses, who: plugin}, module, key, argument) do
+  def process(%__MODULE__{loaded: loaded, who: plugin}, module, key, argument) do
     under = Version.under(module)
-    plugin = Enum.find_value(uses, plugin, fn {_name, {plugin, used}} -> Version.under(used) == under && plugin end)
+    plugin = Enum.find_value(loaded, plugin, fn {_name, {plugin, other}} -> Version.under(other) == under && plugin end)
 
     Plugins.Process.of(plugin, Version.own_name(module), key, argument) ||
       raise "#{inspect(module)} isn't a module of #{plugin} as it runs now"

@@ -52,7 +52,13 @@ defmodule Notifications do
   @shown 100
 
   @impl true
-  def uses, do: ["database", "encryption"]
+  def requires do
+    %{
+      "core" => "~> 0.18.0",
+      "database" => "to keep your inbox",
+      "encryption" => "to encrypt what's sent to your devices"
+    }
+  end
 
   @impl true
   def apps do

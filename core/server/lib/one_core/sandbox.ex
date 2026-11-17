@@ -6,19 +6,19 @@ defmodule OneCore.Sandbox do
   Core asks one thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it,
   no untrusted plugin runs, and a call to one says why.
 
-  There's one child for each version of an untrusted plugin on a server and each user, group or network it's
-  installed for, with the versions of the plugins it uses, which run inside it as it (`database` among them, its
-  SQLite too). So a child only ever runs one owner's calls, and what a stranger's plugin keeps from one person's call
-  isn't there in another's: its handles are its own, and a request for an artifact or a call that isn't its own is
-  refused. It's started by the first call, compiles the code itself, behind the wall, and stops after a minute
-  idle. One that stops, or is stopped, fails the calls it was running and nothing else; the next call starts
-  another. What the first child of a version compiled is kept on this machine, and every owner's next child loads it
-  read-only instead.
+  There's one child for each version of an untrusted plugin on a server and each user, group or network it's installed
+  for, with the versions of the plugins it requires whose code runs inside it, as it, where that code can run there
+  (`database` among them, its SQLite too). So a child only ever runs one owner's calls, and what a stranger's plugin
+  keeps from one person's call isn't there in another's: its handles are its own, and a request for an artifact or a
+  call that isn't its own is refused. It's started by the first call, compiles the code itself, behind the wall, and
+  stops after a minute idle. One that stops, or is stopped, fails the calls it was running and nothing else; the next
+  call starts another. What the first child of a version compiled is kept on this machine, and every owner's next child
+  loads it read-only instead.
 
   The protocol, over the child's standard input and output, each message a frame of a 4-byte length:
 
   - This server sends Erlang terms, which the child trusts: `{:load, sets, target}`, the plugins' files to compile,
-    those it uses first; `{:call, id, what, about}`, a tool, a hook heard, a schedule to run or what `server-debug`
+    those it requires first; `{:call, id, what, about}`, a tool, a hook heard, a schedule to run or what `server-debug`
     asks (`debug/5`), with who it's for;
     `{:reply, request, result}`; and `{:cancel, id}`.
   - The child sends JSON, which never reaches `binary_to_term`: `{"answer": id, "ok" | "raised": ...}`,
@@ -74,12 +74,12 @@ defmodule OneCore.Sandbox do
 
   @doc """
   Checks an untrusted plugin's version, from its `files` as the server keeps them, as it will run, with the plugins it
-  uses as `owner` finds them: `{:ok, warnings}`, or `{:error, why}` with each thing it uses that the sandbox doesn't
-  offer, a sentence each with its file and line.
+  requires whose code runs inside it as `owner` finds them: `{:ok, warnings}`, or `{:error, why}` with each thing it
+  uses that the sandbox doesn't offer, a sentence each with its file and line.
   """
   def check(owner, %Version{} = version, files) do
-    with {:ok, used} <- used(owner, version),
-         {:ok, %{"problems" => problems, "warnings" => warnings}} <- loaded(owner, version, used, files) do
+    with {:ok, %{"problems" => problems, "warnings" => warnings}} <-
+           loaded(owner, version, Plugins.required(owner, version), files) do
       case problems do
         [] ->
           {:ok, warnings}
@@ -87,16 +87,6 @@ defmodule OneCore.Sandbox do
         _ ->
           {:error, "Untrusted, #{Path.basename(version.artifact)} can't run as it is:\n" <> Enum.join(problems, "\n")}
       end
-    end
-  end
-
-  defp used(owner, version) do
-    case Plugins.used(owner, version.uses) do
-      {:ok, used} ->
-        {:ok, used}
-
-      {:absent, missing} ->
-        {:error, "#{Path.basename(version.artifact)} uses #{missing}, which isn't installed for #{owner}"}
     end
   end
 
@@ -155,13 +145,13 @@ defmodule OneCore.Sandbox do
 
     id = System.unique_integer([:positive])
 
-    used = Map.delete(versions, name)
+    required = Map.delete(versions, name)
 
-    if Registry.lookup(@registry, {call.installed, key(version, used)}) == [],
+    if Registry.lookup(@registry, {call.installed, key(version, required)}) == [],
       do: State.working(call.state, :waiting, "Starting its sandbox")
 
     {child, port, context} =
-      case child(call.installed, version, used, nil, {:begin, id}) do
+      case child(call.installed, version, required, nil, {:begin, id}) do
         {:ok, child, port, context} -> {child, port, context}
         {:error, why} -> raise why
       end
@@ -178,7 +168,7 @@ defmodule OneCore.Sandbox do
         "plugin" => call.plugin,
         "who" => call.who,
         "server" => call.server,
-        "uses" => Map.keys(versions) -- [name]
+        "loaded" => Map.keys(versions) -- [name]
       }
 
       command(port, {:call, id, what, about})
@@ -209,7 +199,7 @@ defmodule OneCore.Sandbox do
       plugin: name,
       who: version.artifact,
       request: nil,
-      uses: %{},
+      loaded: %{},
       forwarded: false
     }
 
@@ -379,11 +369,11 @@ defmodule OneCore.Sandbox do
     Port.command(port, [<<byte_size(frame)::32>>, frame])
   end
 
-  # The child of a version with the versions it uses, for whoever it's installed for, `owner`, started if there's
-  # none, asked `ask` once it has loaded: `:loaded`, or `{:begin, id}`, a call it runs from now on. Gives
+  # The child of a version with the versions whose code runs inside it, for whoever it's installed for, `owner`, started
+  # if there's none, asked `ask` once it has loaded: `:loaded`, or `{:begin, id}`, a call it runs from now on. Gives
   # `{:ok, child, port, context}`, or `{:error, why}` with why it couldn't start or load.
-  defp child(owner, version, used, files, ask) do
-    key = key(version, used)
+  defp child(owner, version, required, files, ask) do
+    key = key(version, required)
 
     case Registry.lookup(@registry, {owner, key}) do
       [{child, _}] ->
@@ -391,26 +381,27 @@ defmodule OneCore.Sandbox do
           :gen_statem.call(child, ask)
         catch
           # It stopped, idle, between being found and being asked, so it's another that's asked.
-          :exit, {stopped, _} when stopped in [:noproc, :normal] -> child(owner, version, used, files, ask)
+          :exit, {stopped, _} when stopped in [:noproc, :normal] -> child(owner, version, required, files, ask)
         end
 
       [] ->
-        sets = fn -> sets(version, used, files) end
+        sets = fn -> sets(version, required, files) end
         spec = {__MODULE__, {owner, key, Path.basename(version.artifact), sets, version}}
 
         case DynamicSupervisor.start_child(@supervisor, spec) do
           {:ok, child} -> :gen_statem.call(child, ask)
-          {:error, {:already_started, _child}} -> child(owner, version, used, files, ask)
+          {:error, {:already_started, _child}} -> child(owner, version, required, files, ask)
         end
     end
   catch
     :exit, _ -> {:error, "#{Path.basename(version.artifact)} stopped as it started"}
   end
 
-  # What tells a version's child from another's: its name and code, and those of the versions it uses. Two plugins
-  # of the same files are two plugins, each with its VM and what it compiled.
-  defp key(version, used),
-    do: {Path.basename(version.artifact), version.code, Enum.sort(for {name, used} <- used, do: {name, used.code})}
+  # What tells a version's child from another's: its name and code, and those of the versions whose code runs inside
+  # it. Two plugins of the same files are two plugins, each with its VM and what it compiled.
+  defp key(version, required),
+    do:
+      {Path.basename(version.artifact), version.code, Enum.sort(for {name, other} <- required, do: {name, other.code})}
 
   # A child that runs once, to say what a set of files is, and stops.
   defp once(key, name, sets) do
@@ -425,19 +416,19 @@ defmodule OneCore.Sandbox do
     :exit, _ -> {:error, "#{name} stopped as it started"}
   end
 
-  defp loaded(owner, version, used, files) do
-    case child(owner, version, used, files, :loaded) do
+  defp loaded(owner, version, required, files) do
+    case child(owner, version, required, files, :loaded) do
       {:ok, _child, _port, context} -> {:ok, context.description}
       {:error, why} -> {:error, why}
     end
   end
 
-  # The files of each plugin, those it uses first, from the bucket but the plugin's own where they're given: what
+  # The files of each plugin, those it requires first, from the bucket but the plugin's own where they're given: what
   # isn't in client/, and of its NIFs' libraries only this machine's.
-  defp sets(version, used, files) do
+  defp sets(version, required, files) do
     own = Path.basename(version.artifact)
 
-    for {name, %Version{artifact: artifact, code: code}} <- Enum.to_list(used) ++ [{own, version}] do
+    for {name, %Version{artifact: artifact, code: code}} <- Enum.to_list(required) ++ [{own, version}] do
       prefix = "#{artifact}/code/#{code}/"
 
       found =

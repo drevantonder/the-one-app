@@ -13,7 +13,7 @@ Notifications reach a person on their devices and stay in their inbox until they
   plugin whose app a tap opens; leave it out when nothing should open. It says who was notified, who silenced
   that app, and any phone that wasn't woken.
 - A plugin notifies with `OneCore.Call.plugin(call, "notifications").send(call, %{"title" => ...})`, after
-  `uses/0` names `notifications`. It's sent as that plugin's app.
+  `requires/0` names `notifications`. It's sent as that plugin's app.
 - Notify when something needs the person, or they asked to hear of it: a claim to approve, a long job done,
   something they're waiting on. Don't notify about what they just did, what they're looking at, routine work
   that went fine, or the same thing twice. If in doubt, don't: every one costs their attention.

@@ -80,7 +80,13 @@ defmodule Vault do
   @most 256 * 1024
 
   @impl true
-  def uses, do: ["encryption", "database"]
+  def requires do
+    %{
+      "core" => "~> 0.18.0",
+      "encryption" => "to keep your secrets from whoever runs the bucket",
+      "database" => "to keep your items"
+    }
+  end
 
   # The kinds of item other plugins keep here, which they register by answering `vault.types` (SKILL.md).
   @impl true
@@ -827,7 +833,7 @@ defmodule Vault do
     use_it =
       Enum.sort(
         for {name, version} <- Plugins.running(call.subject),
-            "vault" in version.uses or is_map_key(version.requires, "vault"),
+            is_map_key(version.requires, "vault"),
             do: name
       )
 

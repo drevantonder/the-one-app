@@ -23,14 +23,15 @@ defmodule OneCore.Plugin do
   machine's sandbox, never in the server's.
   Any of the network's servers runs it for anyone, so it needs no server of yours, and whatever its code tries, it
   reaches only what's offered it, as whoever it runs for. What's offered is this interface, each function a message
-  to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `uses/0`, `jobs/0` and
+  to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `jobs/0` and
   `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `plugins`, `deployed`, `process`,
-  `forward_to`, `stage` and `ask`; `OneCore.Plugin.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The plugins it uses
-  run in its VM too, as it, `database` among them. It has no services, no hooks it mutates or validates, no other
-  plugins' functions (it calls the tools of the plugins it requires), no programs, no network and no website, and no files but its `folder`,
-  which goes when the VM stops, a minute after its last call. Deploying an untrusted one that uses what isn't
-  offered says each, with its file and line, and what to do instead.
+  `forward_to`, `stage` and `ask`; `OneCore.Plugin.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The plugins
+  it requires whose code runs inside it run in its VM too, as it, `database` among them, where their code can run
+  there. It has no services, no hooks it mutates or validates, no other plugins' functions but those (it calls the
+  tools of the plugins it requires), no programs, no network and no website, and no files but its `folder`, which goes
+  when the VM stops, a minute after its last call. Deploying an untrusted one that uses what isn't offered says each,
+  with its file and line, and what to do instead.
 
   One module in the plugin, in a file of `server/` such as `server/hello.ex`, says `@behaviour OneCore.Plugin`, and
   gives the plugin's tools:
@@ -196,18 +197,13 @@ defmodule OneCore.Plugin do
     takes a `requestedSchema` for more (`%{message: ..., requestedSchema: %{type: "object", properties: ...}}`).
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
-  - `uses/0`, if the plugin has one, names the other plugins it uses, as they're installed for whoever it's installed for, or
-    for the network. Deploying it brings along the ones the server ships with, and `OneCore.Call.plugin(call,
-    "database")` gives one of them: its module, whose functions take the call and run as this plugin, for whoever it
-    runs for. A plugin that keeps more than a few blobs uses `database`, whose skill says how. What whoever
-    runs the bucket mustn't read it keeps with `encryption`, and an account at an outside service it uses through
-    `vault`: their skills say how, and which of a tool's inputs a device encrypts before it's sent.
   - `essential/0`, if a plugin The One App ships with gives `true`, says a network can't work without it: every
     server installs it for the network. One that doesn't is only available: deployed for the network, so it's in
-    the App Store, and installed for whoever adds it. Either way, the plugins it uses that the server ships with
-    are installed for whoever it's installed for, if they aren't there.
+    the App Store, and installed for whoever adds it. Either way, the plugins it requires that the server ships
+    with are installed for whoever it's installed for, if they aren't there.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
-    them. One that only provides functions leaves out `tools/0` and `call/3`.
+    them, and its code runs inside every plugin that requires it. One whose module has none runs only as itself,
+    and is called by its tools. One that only provides functions leaves out `tools/0` and `call/3`.
   - Those functions run as the plugin that calls them, with its own artifact and database. What has to be kept in a
     plugin's own, such as an inbox, is one of its tools, which any plugin calls as whoever its call runs for:
     `OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})` gives the answer, or raises
@@ -223,16 +219,22 @@ defmodule OneCore.Plugin do
     there's none.
     Left out, `users` is whoever asked. It answers about others only to a member of the network, as the plugins
     that validate `reach` say (`OneCore.Call.member?/2`), so a plugin learns no more than its person may.
-  - `requires/0`, if the plugin has one, names the other plugins it needs, whose tools it calls, which are its
-    requirements, each with why, as a person reads it after "Gmail uses Google Account":
+  - `requires/0`, if the plugin has one, names the other plugins it needs, which are its requirements, each with
+    why, as a person reads it after "Gmail uses Google Account":
     `def requires, do: %{"google-account" => "to reach your mail"}`. A requirement is there for whoever it's installed
-    for where it's installed for them or for the network (`OneCore.Plugins.Requires`). `deploy`, `install` and
-    `plugins` say them, and `plugins` says the other way, what each plugin is required by. An untrusted plugin calls
-    the tools of only the plugins it requires.
+    for where it's installed for them or for the network (`OneCore.Plugins.Requires`), and installing a plugin
+    installs its requirements. `deploy`, `install` and `plugins` say them, and `plugins` says the other way, what
+    each plugin is required by. An untrusted plugin calls the tools of only the plugins it requires.
     It names the platform too, as `"core"`, where it uses what's new in it: the versions it runs on, as an Elixir
     requirement, `%{"core" => "~> 0.16.0", ...}`. Before 1.0 a minor version is a breaking change, so `~> 0.16.0`
     is 0.16's, while `~> 0.16` would allow 0.17 too. It runs only on servers whose build that allows: deploying it
     to older ones is refused, saying so, and is done again once they're updated. `one builds` says their versions.
+  - A requirement whose module provides functions (below) runs inside the plugin that requires it:
+    `OneCore.Call.plugin(call, "database")` gives its module, whose functions take the call and run as this plugin,
+    for whoever it runs for. Any other is called by its tools. A plugin that keeps more than a few blobs requires
+    `database`, whose skill says how. What whoever runs the bucket mustn't read it keeps with `encryption`, and an
+    account at an outside service it uses through `vault`: their skills say how, and which of a tool's inputs a
+    device encrypts before it's sent.
   - `OneCore.Call.fetch(call, %{url: "https://api.example.com/x", method: "POST", headers: %{...}, body: "..."})`
     makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`. An
     untrusted plugin reaches no website.
@@ -273,7 +275,7 @@ defmodule OneCore.Plugin do
   A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
 
       @impl true
-      def uses, do: ["database"]
+      def requires, do: %{"database" => "to keep when each job last ran"}
 
       @impl true
       def jobs, do: [%{tool: "sweep", every: 3600}]
@@ -284,7 +286,7 @@ defmodule OneCore.Plugin do
   - The call is made on one server, for whoever the plugin was installed for, when a server is up: once for each of
     them, with `call.subject` the user, the group or the network, and `call.actor` nobody. Times that
     passed with none up are made up for with one call when one is back.
-  - A plugin with jobs uses `database`, which keeps when each last ran in the plugin's database, and has the
+  - A plugin with jobs requires `database`, which keeps when each last ran in the plugin's database, and has the
     server writing that database make the call. Its skill says what that promises a job's tool.
   - `schedule/3` is only for a plugin that keeps other plugins' schedules, as `database` does. It's called as
     the plugin whose jobs they are, on every server, each time one of them is due, with the jobs and a function
@@ -383,12 +385,12 @@ defmodule OneCore.Plugin do
         client/package.json  packages of its own, if it needs any, under "dependencies"
 
   - A plugin's client may export modules for another plugin's page to import, as a package does, in
-    `client/package.json`'s `exports` (`{"exports": {"./profile": "./profile.tsx"}}`), each built as
-    `client/<name>.js` with what it exports: a component another plugin draws, as the Vault draws an item of a type a
-    plugin registers. Solid, `@zag-js/solid` and `ui` are the one copy every page and every module it imports shares,
-    whichever plugin built it, so signals and context work across plugins; and every page is served with an import map
-    (`OneCore.MCP`) that names them and `<plugin>/`, the client of its own plugin and of each plugin it uses, for what
-    it imports by name as it runs.
+    `client/package.json`'s `exports` (`{"exports": {"./profile": "./profile.tsx"}}`), each built as `client/<name>.js`
+    with what it exports: a component another plugin draws, as the Vault draws an item of a type a plugin registers.
+    Solid, `@zag-js/solid` and `ui` are the one copy every page and every module it imports shares, whichever plugin
+    built it, so signals and context work across plugins; and every page is served with an import map (`OneCore.MCP`)
+    that names them and `<plugin>/`, the client of its own plugin and of each plugin it requires, for what it imports by
+    name as it runs.
 
   - The source is what's deployed, and the server builds it (`OneCore.App`): what a client is served at `client/` is
     what it built. A client keeps what a page loads, and reads a sourcemap only when something asks for it. The
@@ -506,7 +508,7 @@ defmodule OneCore.Plugin do
     running the call if the service runs there, and otherwise the first that's up. `OneCore.Service.server()`
     gives a service the key of its own, and `OneCore.Service.name(server)` what a server's machine is called,
     for a person to pick it by: its machine's own name unless it was started as another.
-  - A plugin that uses this one calls its functions with its own call, and they reach this plugin's services as
+  - A plugin that requires this one calls its functions with its own call, and they reach this plugin's services as
     they would from its own tools.
   - A service calls the plugin's functions with `OneCore.Service.plugin(self(), who, :rang, [4])`, which runs
     `Hello.rang(call, 4)` for `who`: one of `OneCore.Service.acts_for()`, which are who the plugin was installed for that
@@ -601,7 +603,6 @@ defmodule OneCore.Plugin do
   @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
   @callback apps() :: [%{name: String.t(), page: String.t()}]
   @callback widgets() :: [%{name: String.t(), tool: String.t(), sizes: [String.t()]}]
-  @callback uses() :: [String.t()]
   @callback hooks() :: [String.t()]
   @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
   @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate | :collect, description: String.t()}]
@@ -616,7 +617,6 @@ defmodule OneCore.Plugin do
                       call: 3,
                       apps: 0,
                       widgets: 0,
-                      uses: 0,
                       hooks: 0,
                       hook: 3,
                       offers: 0,

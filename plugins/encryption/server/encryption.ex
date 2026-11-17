@@ -18,6 +18,10 @@ defmodule Encryption do
   @impl true
   def icon, do: "icon.svg"
 
+  # It reads which plugins run inside a call as `call.loaded` names them.
+  @impl true
+  def requires, do: %{"core" => "~> 0.18.0"}
+
   @impl true
   def essential, do: true
 
@@ -130,7 +134,7 @@ defmodule Encryption do
 
   # Has each of `servers` look at what it's handed of an artifact now, so one that was taken off lets go of its
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
-  defp look(%Call{uses: %{"encryption" => {encryption, _module}}} = call, name, servers) do
+  defp look(%Call{loaded: %{"encryption" => {encryption, _module}}} = call, name, servers) do
     {at, plugin} = OneCore.Plugins.installed(call.subject, encryption)
     meta = %{actor: nil, subject: User.owner(name), forwarded: true}
     ask = %{installed: at, plugin: plugin, function: "looked", arguments: [name], _meta: meta}
