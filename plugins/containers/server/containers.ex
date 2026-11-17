@@ -26,15 +26,18 @@ defmodule Containers do
   }
   @key %{type: "string", contentEncoding: "base64", description: "The 32-byte key it's sealed with, made for this one blob"}
 
-  # A container, as `list` answers each.
+  # A container, as `list` answers each: on a machine that's off, only its name, its machine and when that was last on.
   @listed %{
     type: "object",
     properties: %{
       name: %{type: "string"},
       description: %{type: ["string", "null"], description: "What it's for"},
       image: %{type: "string"},
-      state: %{type: "string", description: "running, exited, created, ..."},
+      state: %{type: "string", description: "Podman's: created, running, exited, removing, or unknown while its machine is off"},
+      exit_code: %{type: "integer", description: "An exited one's, as its command ended"},
+      finished: %{type: "integer", description: "When an exited one did, in milliseconds since 1970"},
       machine: %{type: ["string", "null"]},
+      last_on: %{type: "integer", description: "When its machine, off now, was last on, in milliseconds since 1970"},
       size: %{type: ["string", "null"], description: "small, medium or large"},
       by: %{type: ["string", "null"], description: "Who created it"},
       created: %{type: "integer", description: "In milliseconds since 1970"},
@@ -50,7 +53,7 @@ defmodule Containers do
         }
       }
     },
-    required: ~w(name description image state machine size by created last_used ports)
+    required: ~w(name state machine)
   }
 
   @named %{type: "object", properties: %{container: %{type: "string"}}, required: ["container"]}
@@ -88,7 +91,7 @@ defmodule Containers do
         name: "list",
         read_only: true,
         description:
-          "The containers you can use, on every machine: each one's name, image, state (running, exited, created), machine, size, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback.",
+          "The containers you can use, on every machine: each one's name, image, state as Podman says it (created, running, exited, with its exit code and when, or removing), machine, size, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback. One on a machine that's off is unknown, with when its machine was last on.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{type: "object", properties: %{containers: %{type: "array", items: @listed}}, required: ["containers"]}
       },
@@ -147,7 +150,7 @@ defmodule Containers do
         name: "create",
         task_support: :optional,
         description:
-          "Create a Linux container, from a Docker image or `desktop`, and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. Creating from an image not on the machine pulls it first, and `desktop` is built there the first time (about 2 minutes); after that it's a second. Gives the container as `list` does.",
+          "Create a Linux container, from a Docker image or `desktop`, and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. It says each stage: pulling an image not on the machine, building `desktop` there the first time (a few minutes; after that it's rebuilt each week in the background), then starting. Gives the container as `list` does.",
         inputs: %{
           type: "object",
           required: ["image", "name", "description"],
@@ -446,6 +449,17 @@ defmodule Containers do
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
     artifact = Artifact.name(Call.make(call, id))
     take_name!(call, name, server)
+    machine = Service.name(server)
+
+    image =
+      Service.call(call, Podman, :image, [image], server) ||
+        if image == "desktop" do
+          Call.stage(call, "Building the desktop image on #{machine}, which takes a few minutes the first time")
+          Service.call(call, Podman, :build, [], server)
+        else
+          Call.stage(call, "Pulling #{image} on #{machine}")
+          Service.call(call, Podman, :pull, [image], server)
+        end
 
     spec = %{
       "id" => "#{name}-#{id}",
@@ -464,8 +478,7 @@ defmodule Containers do
       }
     }
 
-    building = if image == "desktop", do: ", building its desktop image if it's the first", else: ""
-    Call.stage(call, "Creating #{name} on #{Service.name(server)}#{building}")
+    Call.stage(call, "Starting #{name} on #{machine}")
     Service.call(call, Podman, :create, [spec], server)
     Enum.find(listed(call), &(&1.name == name))
   end
@@ -688,11 +701,29 @@ defmodule Containers do
     Service.call(call, Podman, function, [c.id | arguments], c.server)
   end
 
-  # The containers this call may use, as `list` answers them.
-  defp listed(call), do: Enum.map(containers(call), &Map.drop(&1, [:server, :artifact, :id]))
+  # The containers this call may use, as `list` answers them, and those on a machine that's off, unknown till it's on.
+  defp listed(call), do: Enum.map(containers(call), &Map.drop(&1, [:server, :artifact, :id])) ++ off(call)
 
-  defp container!(call, %{"container" => name}),
-    do: Enum.find(containers(call), &(&1.name == name)) || raise("You have no container called #{name}")
+  # A container on a machine that's off is known only by its name, kept with its machine: whoever may reach what this
+  # plugin made for whose it is sees it. Podman, which holds the rest, is on that machine.
+  defp off(call) do
+    off = for server <- Service.servers(call, Podman), at = Service.seen(server), is_integer(at), into: %{}, do: {server, at}
+
+    for record <- if(off == %{}, do: [], else: Artifact.list(call.own, "names/")),
+        {whose, [name]} = Enum.split(tl(String.split(record, "/")), -1),
+        Call.reaches?(call, Enum.join(whose ++ ["made", call.plugin], "/")),
+        {:ok, server, _tag} <- [Artifact.read(call.own, record)],
+        Map.has_key?(off, server),
+        do: %{name: name, machine: Service.name(server), state: "unknown", last_on: off[server]}
+  end
+
+  defp container!(call, %{"container" => name}) do
+    Enum.find(containers(call), &(&1.name == name)) ||
+      case Enum.find(off(call), &(&1.name == name)) do
+        nil -> raise "You have no container called #{name}"
+        c -> raise "#{name} is on #{c.machine}, which is off"
+      end
+  end
 
   # The containers this call may use, on every machine that's up.
   defp containers(call) do

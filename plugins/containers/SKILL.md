@@ -12,15 +12,17 @@ your own to install, build, run or break things in, instead of the user's device
 machines that run them.
 
 - `create` takes an `image`, a `name`, what it's for in a few words (`description`) and a `size` (small, medium,
-  large). A shell image such as `docker.io/library/ubuntu:24.04` keeps running with no command. It's started at
-  once: then `exec` runs commands in it, `read_file` and `write_file` move files up to 16 MB, and `logs` reads what
-  its own command printed. `list` shows yours and their state. A plugin's code moves a file of any size with `upload`
-  and `download`: to the bucket and back, sealed with a key it's given, a chunk at a time.
-- `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvnc, `DISPLAY=:99`, which `screen` resizes) with Openbox and Google
-  Chrome on it, downloaded from Google as each machine builds the image, and again each week. A running one is a
-  screen in Computer Use, called what the container is: look at it and act on it there. Chrome's DevTools Protocol
-  is on port 9222 inside it (`exec` with `curl -s 127.0.0.1:9222/json`), and `playwright-mcp` is Playwright's MCP
-  server, to start on it. The first desktop on a machine takes a few minutes to build.
+  large), and says each stage: pulling an image its machine hasn't got, building `desktop`, starting. A shell image
+  such as `docker.io/library/ubuntu:24.04` keeps running with no command. Then `exec` runs commands in it, `read_file`
+  and `write_file` move files up to 16 MB, and `logs` reads what its own command printed. `list` shows yours and their
+  state, Podman's (an exited one with its exit code); one on a machine that's off is `unknown`. A plugin's code moves
+  a file of any size with `upload` and `download`: to the bucket and back, sealed with a key it's given, a chunk at a
+  time.
+- `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvnc, `DISPLAY=:99`, which `screen` resizes) with Openbox
+  and Google Chrome on it, downloaded from Google as each machine builds the image, and again each week in the
+  background, so only a machine's first desktop waits minutes for it. A running one is a screen in Computer Use,
+  called what the container is: look at it and act on it there. Chrome's DevTools Protocol is on port 9222 inside it
+  (`exec` with `curl -s 127.0.0.1:9222/json`), and `playwright-mcp` is Playwright's MCP server, to start on it.
 - `commit` makes an image of a prepared container, and `create` from that image's name makes throwaway copies of
   it on the same machine. `remove_image` removes it.
 - A container reaches the internet but nothing of the machine's own: no files, no host network, no privileges.

@@ -33,10 +33,24 @@ defmodule Containers.Podman do
   @impl GenServer
   def init(_) do
     System.find_executable("podman") || raise "This machine has no podman to run containers with"
+    send(self(), :build)
     {:ok, nil}
   end
 
-  @doc "Every container The One App made on this machine, with its labels, state, ports and when it was last used."
+  # Builds the new week's desktop image once the week turns, and once its files change, on a machine that has one,
+  # so `create` uses the newest there is and never waits for it. Checked as the service starts and then each hour.
+  @impl GenServer
+  def handle_info(:build, state) do
+    service = self()
+    Task.start(fn -> if image(service, "desktop"), do: build(service) end)
+    Process.send_after(service, :build, 3_600_000)
+    {:noreply, state}
+  end
+
+  @doc """
+  Every container The One App made on this machine, with its labels, state, ports and when it was last used, and for
+  one that exited, its exit code and when it did, as Podman says them.
+  """
   def list(service) do
     used = used(service)
 
@@ -57,6 +71,7 @@ defmodule Containers.Podman do
         last_used: Map.get(used, podman_name, c["Created"] * 1000),
         ports: for(p <- c["Ports"] || [], do: %{port: p["container_port"], host_port: p["host_port"]})
       }
+      |> Map.merge(if c["State"] == "exited", do: %{exit_code: c["ExitCode"], finished: c["ExitedAt"] * 1000}, else: %{})
     end
   end
 
@@ -81,7 +96,36 @@ defmodule Containers.Podman do
   end
 
   @doc """
-  Creates a container and starts it. `spec` has its `id` and labels, the `image` (`desktop` for the plugin's own),
+  The image to create from, if it's on this machine: for `desktop`, the newest built here; or `image` as it's named.
+  `nil` where there's none, for `build/1` or `pull/2` to bring.
+  """
+  def image(service, "desktop"), do: List.first(desktops(service))
+
+  def image(service, image), do: if(run(service, ["image", "exists", image], 10).exit == 0, do: image)
+
+  def pull(service, image), do: podman!(service, ["pull", "--quiet", image], 900) && image
+
+  @doc """
+  Builds the plugin's own image, the desktop, from its Containerfile, for the week and the files it's built from,
+  unless it's here, and gives its name. It's built again from scratch each week for Google Chrome's security fixes,
+  which it downloads as it's built. It removes the ones this server built before it, but those a container still
+  uses, which Podman refuses to remove: a later build does.
+  """
+  def build(service) do
+    folder = OneCore.Service.folder(service, "server/desktop")
+    {year, week} = :calendar.iso_week_number()
+    image = "localhost/containers-desktop:#{Path.basename(folder)}-#{year}-#{week}"
+
+    if run(service, ["image", "exists", image], 10).exit != 0 do
+      podman!(service, ["build", "--pull=newer", "--no-cache", "--label", made_here(), "-t", image, folder], 900)
+      for before <- desktops(service), before != image, do: run(service, ["rmi", before], 60)
+    end
+
+    image
+  end
+
+  @doc """
+  Creates a container from an image on this machine and starts it. `spec` has its `id` and labels, the `image`,
   `size`, `ports` to publish on this machine's loopback, a `command`, `env` and `mounts`.
 
   Podman stops a container by sending its command SIGTERM and killing what's left once its stop timeout passes, which
@@ -102,9 +146,9 @@ defmodule Containers.Podman do
         Enum.flat_map(spec["ports"] || [], &["--publish", "127.0.0.1::#{&1}"]) ++
         Enum.flat_map(spec["env"] || %{}, fn {key, value} -> ["--env", "#{key}=#{value}"] end) ++
         Enum.flat_map(spec["mounts"] || [], &["--volume", mount(&1)]) ++
-        [image(service, spec["image"]) | spec["command"] || []]
+        [spec["image"] | spec["command"] || []]
 
-    podman!(service, args, 900)
+    podman!(service, args)
     podman!(service, ["start", spec["id"]])
     touch(service, spec["id"])
     :ok
@@ -306,26 +350,11 @@ defmodule Containers.Podman do
     }
   end
 
-  # The image to create from: the plugin's own `desktop`, built here from its Containerfile when it changed, and
-  # again each week from scratch, for Google Chrome's security fixes, which it downloads as it's built; or as it's
-  # named, which Podman pulls if it isn't here. A desktop's build removes the ones this server built before it, but
-  # those a container still uses, which Podman refuses to remove: a later build does.
-  defp image(service, "desktop") do
-    folder = OneCore.Service.folder(service, "server/desktop")
-    {year, week} = :calendar.iso_week_number()
-    image = "localhost/containers-desktop:#{Path.basename(folder)}-#{year}-#{week}"
-
-    if run(service, ["image", "exists", image], 10).exit != 0 do
-      podman!(service, ["build", "--pull=newer", "--no-cache", "--label", made_here(), "-t", image, folder], 900)
-      filters = ["--filter", "reference=localhost/containers-desktop", "--filter", "label=#{made_here()}"]
-      built = podman!(service, ["images", "--format", "{{.Repository}}:{{.Tag}}" | filters])
-      for before <- String.split(built, "\n", trim: true), before != image, do: run(service, ["rmi", before], 60)
-    end
-
-    image
+  # The desktop images this server built, newest first.
+  defp desktops(service) do
+    filters = ["--filter", "reference=localhost/containers-desktop", "--filter", "label=#{made_here()}"]
+    String.split(podman!(service, ["images", "--format", "{{.Repository}}:{{.Tag}}" | filters]), "\n", trim: true)
   end
-
-  defp image(_service, image), do: image
 
   # The label of what this server made.
   defp made_here, do: "one.server=#{OneCore.Service.server()}"

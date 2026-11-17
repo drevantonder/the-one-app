@@ -1,15 +1,16 @@
 // Containers: yours on every machine, each with what it's for and whether it's running, to stop or remove.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, leave, List, Menu, Problem, Row, Screen, Skeleton, toast } from "ui"
+import { Button, call, changed, confirm, Empty, leave, List, Menu, Problem, Row, Screen, seen, Skeleton, toast } from "ui"
 
-/** A container, as `containers_list` answers it. */
+/** A container, as `containers_list` answers it: on a machine that's off, unknown, with when that was last on. */
 interface Listed {
   name: string
   description: string
   state: string
   machine: string
   last_used: number
+  last_on: number
 }
 
 const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
@@ -34,9 +35,9 @@ function Container(props: { container: Listed }) {
   return (
     <Row
       heading={c().name}
-      text={`${c().description} · ${STATE[c().state] ?? c().state} · ${c().machine} · used ${since(c().last_used)}`}
+      text={c().state === "unknown" ? `${c().machine} · ${seen(c().last_on)}` : `${c().description} · ${STATE[c().state] ?? c().state} · ${c().machine} · used ${since(c().last_used)}`}
       end={
-        <Menu.Root onSelect={act}>
+        c().state !== "unknown" && <Menu.Root onSelect={act}>
           <Menu.Trigger aria-label={`More for ${c().name}`} />
           <Menu.Positioner>
             <Menu.Content>
