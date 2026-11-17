@@ -213,14 +213,18 @@ const on = (event) => shown.send(event)
 /// boundary, as an iPhone updates an app while it's closed and a web app loads its new version on the next
 /// navigation: once it's off screen (another app over it, the window hidden), or as it's opened again. On screen,
 /// it says so quietly, "Updated · Reload", and loads again only once its person presses Reload: nothing is reloaded
-/// under them. A page that doesn't draw has failed, with Try Again. The launcher's page is one too.
+/// under them. One that's showing an error loads again at once, as its old version meeting what's new is likely why,
+/// and there's nothing of theirs under it. A page that doesn't draw has failed, with Try Again. The launcher's page is one too.
 const pageMachine = setup({
-  types: /** @type {{ context: { view: View, why?: string }, input: View, events: Paged }} */ ({}),
+  types: /** @type {{ context: { view: View, why?: string, errored?: boolean }, input: View, events: Paged }} */ ({}),
   guards: {
     away: ({ context }) => !onScreen(context.view),
+    errored: ({ context }) => context.errored === true,
   },
   actions: {
     load: ({ context }) => reloadPage(context.view),
+    // Loaded again, it's shown no error yet.
+    clear: assign({ errored: false }),
     failed: ({ context }) => {
       const { view, why } = context
       // How long it took to open is told only of an open that ended with it drawn.
@@ -236,9 +240,14 @@ const pageMachine = setup({
   id: "page",
   initial: "loading",
   context: ({ input }) => ({ view: input }),
+  // What its page logs as an error, as an `<Errored>` boundary that's drawn its problem does, is what it shows: there's
+  // nothing of its person's to keep there.
+  on: { errored: { actions: assign({ errored: true }) } },
   states: {
+    // Loaded against what's gone before it's even drawn, as a kept launcher is when the list that's come since
+    // names a newer one, it loads again at once: there's nothing of its person's on it yet.
     loading: {
-      on: { drawn: "current" },
+      on: { drawn: "current", stale: "reloading" },
       after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
     },
     current: {
@@ -247,18 +256,21 @@ const pageMachine = setup({
     stale: {
       entry: "notes",
       exit: "notes",
-      always: { guard: "away", target: "reloading" },
-      on: { away: "reloading", opened: "reloading", reload: "reloading" },
+      always: [
+        { guard: "away", target: "reloading" },
+        { guard: "errored", target: "reloading" },
+      ],
+      on: { away: "reloading", opened: "reloading", reload: "reloading", errored: "reloading" },
     },
     reloading: {
-      entry: "load",
-      on: { drawn: "current" },
+      entry: ["clear", "load"],
+      on: { drawn: "current", stale: { target: "reloading", reenter: true } },
       after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
     },
     failed: {
       entry: "failed",
       exit: "notes",
-      on: { retry: { target: "loading", actions: "load" } },
+      on: { retry: { target: "loading", actions: ["clear", "load"] } },
     },
   },
 })
@@ -712,7 +724,10 @@ addEventListener("message", async ({ source, data }) => {
     // The launcher, loaded again, is told which app is showing.
     if (method === "ui/notifications/initialized" && view.entrypoint === launcher) layer(history.state)
     // An app's page logs its errors as an MCP App logs to its host, and they're its app's, whatever it says.
-    if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
+    if (method === "notifications/message" && params.level === "error") {
+      exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
+      page(view, { type: "errored" })
+    }
     return
   }
   try {

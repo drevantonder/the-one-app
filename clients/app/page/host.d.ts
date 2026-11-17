@@ -31,10 +31,11 @@ export interface View {
   page: import("xstate").AnyActorRef
 }
 
-/** What moves an open app's page (`client.js`): it drew, didn't, was loaded against a version that's gone, went off
- * screen, was opened again, or its person pressed Reload or Try Again. */
+/** What moves an open app's page (`client.js`): it drew, didn't, showed an error, was loaded against a version that's
+ * gone, went off screen, was opened again, or its person pressed Reload or Try Again. */
 export type Paged =
   | { type: "drawn" }
+  | { type: "errored" }
   | { type: "stale" }
   | { type: "away" }
   | { type: "opened" }
