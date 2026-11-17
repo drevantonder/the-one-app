@@ -585,6 +585,17 @@ async fn opens(app: AppHandle) {
     };
     eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
     client.service("app");
+    // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
+    // not the system still has the server to start (`cli::serving::settle`).
+    #[cfg(desktop)]
+    tauri::async_runtime::spawn({
+        let client = client.clone();
+        async move {
+            if let Err(error) = cli::serving::settle(&client).await {
+                eprintln!("{error:#}")
+            }
+        }
+    });
     app.manage(Views {
         client: client.clone(),
         app: app.clone(),

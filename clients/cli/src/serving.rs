@@ -3,7 +3,8 @@
 //! - `server_membership` (`ServerMembership`), whether it's a server: inactive, then joining (`one serve on`:
 //!   registering, downloading, installing, starting) until it answers by its key, then active, then leaving
 //!   (`one serve off`: draining, deregistering, uninstalling), then inactive again. Either that fails goes back to
-//!   where it started, undoing what it did, and says why.
+//!   where it started, undoing what it did, and says why, as does either that nothing is doing any more, as one the
+//!   machine went off during, whichever of this program's starts on the device comes first (`settle`).
 //! - `server_daemon_status`, the program the system keeps running (`one serve run`): starting until the server answers
 //!   by its key, running, stopping, stopped. Restarts and their back-off are the system's: a systemd user unit on
 //!   Linux, a LaunchAgent on a Mac, a scheduled task on Windows (`system`). This program only ends, non-zero where it
@@ -11,11 +12,13 @@
 //! - `server_update_status` (`ServerUpdateStatus`), while it's active: up to date, downloading the latest server
 //!   build and `one` together, verifying the pair, and up to date again, kept or gone back. Verifying is checking
 //!   the build starts and how it's taken (`UpdateMethod`), then loading it into the server while it runs, or starting
-//!   both in its place (`ServerUpdateStage`).
+//!   both in its place (`ServerUpdateStage`). A build is only ever run by the `one` the record pairs it with: a new
+//!   one is kept beside this one until its pair starts.
 //!
 //! Every start is the one way: a build is started and has `START` to say it's running and answer by its key. What
-//! each machine is at is one small record, `state.json` in the client's home's `server/`, beside `builds/<build>`,
-//! each build kept, `runtimes/<build>`, each runtime kept, `programs/<build>`, the `one` before an update, and `home`,
+//! each machine is at is one small record, `state.json` in the client's home's `server/`, which every program changes
+//! in one step under one lock (`Here::change`), beside `builds/<build>`, each build kept, `runtimes/<build>`, each
+//! runtime kept, `programs/<build>`, each `one` a pair names, and `home`,
 //! the server's own folder, its key among it. A build is put together from its runtime, as hard links, and its code
 //! (`Here::assemble`), so it's a whole Erlang release that any start starts. The server is told on its input what
 //! changes of it (`OneCore.Release`), and says it to the network, where it's ready once it's active and running. What
@@ -100,10 +103,19 @@ impl Record {
         })
     }
 
-    /// Where an update that didn't take went back to, and from.
-    fn back(&self) -> String {
+    /// The pair a start of the server runs: the one being verified, or the one it's on.
+    fn pair(&self) -> Option<Pair> {
+        if self.server_update_status == ServerUpdateStatus::Verifying { self.next.clone() } else { self.current.clone() }
+    }
+
+    /// Goes back from the pair being verified, which didn't take for `why`, to the one it's on, saying so until an
+    /// update takes. The `one` paired with it is put in place as it's started (`run`).
+    fn go_back(&mut self, why: impl std::fmt::Display) {
         let build = |pair: &Option<Pair>| pair.as_ref().map(|pair| pair.build.clone()).unwrap_or_default();
-        format!("Went back to {} from {}", build(&self.current), build(&self.next))
+        self.went(format!("Went back to {} from {}: {why}", build(&self.current), build(&self.next)));
+        self.next = None;
+        self.server_update_status = ServerUpdateStatus::UpToDate;
+        self.server_update_stage = None;
     }
 
     /// Says why the last update didn't take, which the server says until one does.
@@ -121,18 +133,17 @@ pub async fn on(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
     fs::create_dir_all(&here.folder)?;
     let lock = here.lock()?.context("This device is already becoming a server, or stopping being one.")?;
-    let mut record = here.read()?;
     let key = here.key()?;
     let who = who(client)?;
-    match record.server_membership {
+    match here.read()?.server_membership {
         ServerMembership::Active => return Ok(format!("This device is a server for {who} already. Its key: {key}")),
         ServerMembership::Leaving => {
-            undo_leaving(client, &here, &mut record, &key, true).await?;
+            undo_leaving(client, &here, &key, true).await?;
             return Ok(format!("This device is a server for {who} again. Its key: {key}"));
         }
         ServerMembership::Inactive | ServerMembership::Joining => {}
     }
-    if let Err(error) = join(client, &here, &mut record, &key, &who).await {
+    if let Err(error) = join(client, &here, &key, &who).await {
         drop(lock);
         let left = undo_joining(client, &here, &key).await;
         return Err(error.context(format!("This device isn't a server{left}")));
@@ -140,19 +151,24 @@ pub async fn on(client: &Client) -> Result<String> {
     Ok(format!("This device is a server for {who} now, and starts whenever it does. Its key: {key}\n{address}"))
 }
 
-async fn join(client: &Client, here: &Here, record: &mut Record, key: &str, who: &str) -> Result<()> {
-    record.server_membership = ServerMembership::Joining;
-    here.stage(record, ServerMembershipStage::Registering)?;
+async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> {
+    let joining = |stage| {
+        move |record: &mut Record| {
+            record.server_membership = ServerMembership::Joining;
+            record.server_membership_stage = Some(stage);
+        }
+    };
+    let record = here.change(joining(ServerMembershipStage::Registering))?;
     tool(client, "add_server", json!({"key": key})).await?;
-    here.stage(record, ServerMembershipStage::Downloading)?;
+    here.change(joining(ServerMembershipStage::Downloading))?;
     if record.current.is_none() {
         let builds = download(client).await?;
         let build = here.take(&builds, &record.told(ServerDaemonStatus::Starting)).await?;
-        record.current = Some(Pair { build, program: BUILD.to_owned() });
+        here.change(|record| record.current = Some(Pair { build, program: BUILD.to_owned() }))?;
     }
-    here.stage(record, ServerMembershipStage::Installing)?;
+    here.change(joining(ServerMembershipStage::Installing))?;
     system::install(here, key, &env::current_exe()?, &unit_env(who.to_owned(), None).await?)?;
-    here.stage(record, ServerMembershipStage::Starting)?;
+    here.change(joining(ServerMembershipStage::Starting))?;
     // The system starts `one serve run`, which makes it active once it answers by its key.
     system::start(here, key).await?;
     ensure!(here.read()?.server_membership == ServerMembership::Active, "It started, and didn't answer by its key");
@@ -168,6 +184,34 @@ async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
     listed.map(|why| format!(", though it's still on the list of servers: {why:#}")).unwrap_or_default()
 }
 
+/// Joining or leaving that nothing is doing any more, as one the machine went off during, goes back to where it
+/// started, whether or not the system still has `one serve run` to start: it's settled by whichever of this
+/// program's starts on this device comes first, `one serve run` as the system starts it, `one serve on`, `one serve
+/// off` and `one update`, and the app as it opens. Joining that got to starting, where the system has it, is that start
+/// of `one serve run`'s to decide.
+pub async fn settle(client: &Client) -> Result<()> {
+    settled(client, &Here::of(&client::home()?), true).await.map(|_| ())
+}
+
+/// Settles the move on this device that nothing is doing, if there's one, `start`ing the server where a leave goes
+/// back, unless this is the server's own start.
+async fn settled(client: &Client, here: &Here, start: bool) -> Result<Record> {
+    let record = here.read()?;
+    if !matches!(record.server_membership, ServerMembership::Joining | ServerMembership::Leaving) {
+        return Ok(record);
+    }
+    let Some(_lock) = here.lock()? else { return Ok(record) };
+    let record = here.read()?;
+    let key = here.key()?;
+    match (record.server_membership, record.server_membership_stage) {
+        (ServerMembership::Joining, Some(ServerMembershipStage::Starting)) if system::installed(here, &key)? => {}
+        (ServerMembership::Joining, _) => {
+            println!("Joining didn't finish, so this device isn't a server{}.", undo_joining(client, here, &key).await)
+        }
+        _ => undo_leaving(client, here, &key, start).await?,
+    }
+    here.read()
+}
 /// Who the server is for: whoever `ONE_SUBJECT` names, or this device's person.
 fn who(client: &Client) -> Result<String> {
     env::var("ONE_SUBJECT").or_else(|_| client.who().context("This device isn't signed in yet. Sign in on it first."))
@@ -229,45 +273,51 @@ pub async fn off(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
     ensure!(here.read()?.server_membership != ServerMembership::Inactive, "This device isn't a server.");
     let lock = here.lock()?.context("This device is already becoming a server, or stopping being one.")?;
-    let mut record = here.read()?;
     let key = here.key()?;
-    if record.server_membership == ServerMembership::Joining {
-        drop(lock);
-        let left = undo_joining(client, &here, &key).await;
-        return Ok(format!("This device stopped becoming a server{left}"));
+    match here.read()?.server_membership {
+        ServerMembership::Joining => {
+            drop(lock);
+            let left = undo_joining(client, &here, &key).await;
+            return Ok(format!("This device stopped becoming a server{left}"));
+        }
+        // A leave that was cut short goes back first, so every leave begins where it can be undone from: active, on
+        // the list and run by the system.
+        ServerMembership::Leaving => undo_leaving(client, &here, &key, true).await?,
+        ServerMembership::Active | ServerMembership::Inactive => {}
     }
-    if let Err(error) = leave(client, &here, &mut record, &key, lock).await {
-        undo_leaving(client, &here, &mut record, &key, true).await?;
+    if let Err(error) = leave(client, &here, &key, lock).await {
+        undo_leaving(client, &here, &key, true).await?;
         return Err(error.context("It's still a server"));
     }
     Ok(format!("This device is no longer a server, and nothing of it is left here: {key}"))
 }
 
-async fn leave(client: &Client, here: &Here, record: &mut Record, key: &str, lock: fs::File) -> Result<()> {
-    record.server_membership = ServerMembership::Leaving;
+async fn leave(client: &Client, here: &Here, key: &str, lock: fs::File) -> Result<()> {
+    let leaving = |stage| {
+        move |record: &mut Record| {
+            record.server_membership = ServerMembership::Leaving;
+            record.server_membership_stage = Some(stage);
+        }
+    };
     // The system stops `one serve run`, which reads that it's leaving and has the server drain as it stops.
-    here.stage(record, ServerMembershipStage::Draining)?;
+    here.change(leaving(ServerMembershipStage::Draining))?;
     system::stop(here, key)?;
-    here.stage(record, ServerMembershipStage::Deregistering)?;
+    here.change(leaving(ServerMembershipStage::Deregistering))?;
     tool(client, "remove_server", json!({"key": key})).await?;
-    here.stage(record, ServerMembershipStage::Uninstalling)?;
+    here.change(leaving(ServerMembershipStage::Uninstalling))?;
     system::remove(here, key)?;
     drop(lock);
     Ok(fs::remove_dir_all(&here.folder)?)
 }
 
-/// Takes back what leaving did, from wherever it got to: it's back on its owner's list where it may have come off,
-/// and active, and the system runs it again unless it's what's running this.
-async fn undo_leaving(client: &Client, here: &Here, record: &mut Record, key: &str, start: bool) -> Result<()> {
-    use ServerMembershipStage::*;
-    if matches!(record.server_membership_stage, Some(Deregistering | Uninstalling)) {
-        tool(client, "add_server", json!({"key": key}))
-            .await
-            .context("It couldn't be put back on the list of servers")?;
-    }
-    record.server_membership = ServerMembership::Active;
-    record.server_membership_stage = None;
-    here.write(record)?;
+/// Takes back what leaving did, from wherever it got to: it's back on its owner's list, as taking it off may have
+/// happened whatever the record says, and active, and the system runs it again unless it's what's running this.
+async fn undo_leaving(client: &Client, here: &Here, key: &str, start: bool) -> Result<()> {
+    tool(client, "add_server", json!({"key": key})).await.context("It couldn't be put back on the list of servers")?;
+    here.change(|record| {
+        record.server_membership = ServerMembership::Active;
+        record.server_membership_stage = None;
+    })?;
     if start {
         system::install(here, key, &env::current_exe()?, &unit_env(who(client)?, None).await?)?;
         system::start(here, key).await?;
@@ -279,7 +329,7 @@ async fn undo_leaving(client: &Client, here: &Here, record: &mut Record, key: &s
 /// program's own.
 pub async fn update(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
-    if here.read()?.server_membership != ServerMembership::Inactive {
+    if settled(client, &here, true).await?.server_membership != ServerMembership::Inactive {
         return tool(client, "update", json!({"server": here.key()?})).await;
     }
     let builds = download(client).await?;
@@ -322,24 +372,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     let key = here.key()?;
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
     let who = env::var("ONE_SUBJECT").context("ONE_SUBJECT says who the server is for")?;
-    let mut record = here.read()?;
-    // Joining or leaving that nothing is doing any more, as a device that was switched off part-way, goes back to
-    // where it started. Joining that got to starting is this start's to decide.
-    if let Some(_lock) = here.lock()? {
-        match (record.server_membership, record.server_membership_stage) {
-            (ServerMembership::Joining, Some(ServerMembershipStage::Starting)) => {}
-            (ServerMembership::Joining, _) => {
-                println!(
-                    "Joining didn't finish, so this device isn't a server{}.",
-                    undo_joining(&client, &here, &key).await
-                );
-                return Ok(());
-            }
-            (ServerMembership::Leaving, _) => undo_leaving(&client, &here, &mut record, &key, false).await?,
-            _ => {}
-        }
-    }
-    if record.server_membership == ServerMembership::Inactive {
+    if settled(&client, &here, false).await?.server_membership == ServerMembership::Inactive {
         println!("This device isn't a server: `one serve on` makes it one.");
         return Ok(());
     }
@@ -354,19 +387,34 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     // A download cut short, as this program or the server stopped, is one that failed: it's up to date again on what
     // it was on. A build being checked or loaded when they stopped wasn't kept, and the server starts on the one it
     // was on.
-    if record.server_update_status == ServerUpdateStatus::Downloading {
-        record.server_update_status = ServerUpdateStatus::UpToDate;
-    }
-    if record.server_update_status == ServerUpdateStatus::Verifying
-        && let Some(stage @ (ServerUpdateStage::Checking | ServerUpdateStage::Loading)) = record.server_update_stage
-    {
-        let doing = if stage == ServerUpdateStage::Checking { "checking it" } else { "loading it" };
-        record.went(format!("{}: it stopped while {doing}", record.back()));
-        here.went_back(&mut record, &program)?;
-    }
+    let mut record = here.change(|record| {
+        if record.server_update_status == ServerUpdateStatus::Downloading {
+            record.server_update_status = ServerUpdateStatus::UpToDate;
+        }
+        if record.server_update_status == ServerUpdateStatus::Verifying
+            && let Some(stage @ (ServerUpdateStage::Checking | ServerUpdateStage::Loading)) = record.server_update_stage
+        {
+            let doing = if stage == ServerUpdateStage::Checking { "checking it" } else { "loading it" };
+            record.go_back(format!("it stopped while {doing}"));
+        }
+    })?;
     let verifying = record.server_update_status == ServerUpdateStatus::Verifying;
-    let pair = if verifying { record.next.clone() } else { record.current.clone() };
-    let pair = pair.context("The record names no build to run")?;
+    let mut pair = record.pair().context("The record names no build to run")?;
+    // A build is run by the `one` it's paired with, whichever the system started: one put in place for a pair being
+    // verified, or the one before for a pair gone back from, has that one put in place, and started instead. Where
+    // that one isn't kept, as where a person put another `one` in place by hand, the one they put there runs it.
+    if pair.program != BUILD {
+        if here.folder.join("programs").join(&pair.program).exists() {
+            here.put_program(&pair.program, &program)?;
+            return Err(again(&program));
+        }
+        println!("The one the record pairs with {}, {}, isn't kept here, so {BUILD} runs it.", pair.build, pair.program);
+        pair.program = BUILD.to_owned();
+        record = here.change(|record| {
+            let paired = if verifying { &mut record.next } else { &mut record.current };
+            *paired = Some(pair.clone());
+        })?;
+    }
     let mut server = Command::from(command(release(&here.build(&pair.build))));
     server
         .args(["eval", "OneCore.Release.serve()"])
@@ -403,28 +451,28 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         let _ = server.kill().await;
         let why = format!("{why:#}. Its last lines: {}", Vec::from(last).join(" | "));
         ensure!(verifying, "The server on {} didn't start: {why}", pair.build);
-        record.went(format!("{}: {why}", record.back()));
-        here.went_back(&mut record, &program)?;
+        here.change(|record| record.go_back(why))?;
         return Err(again(&program));
     }
-    if verifying {
-        let was = record.current.replace(pair.clone());
-        record.previous = was.clone();
-        record.next = None;
-        record.went_back = None;
-        record.server_update_status = ServerUpdateStatus::UpToDate;
-        record.server_update_stage = None;
-        println!(
-            "The server is on the build {} now, from {}.",
-            pair.build,
-            was.map(|was| was.build).unwrap_or_default()
-        );
-    }
-    if record.server_membership == ServerMembership::Joining {
-        record.server_membership = ServerMembership::Active;
-        record.server_membership_stage = None;
-    }
-    here.write(&record)?;
+    record = here.change(|record| {
+        if verifying {
+            let was = record.current.replace(pair.clone());
+            record.previous = was.clone();
+            record.next = None;
+            record.went_back = None;
+            record.server_update_status = ServerUpdateStatus::UpToDate;
+            record.server_update_stage = None;
+            println!(
+                "The server is on the build {} now, from {}.",
+                pair.build,
+                was.map(|was| was.build).unwrap_or_default()
+            );
+        }
+        if record.server_membership == ServerMembership::Joining {
+            record.server_membership = ServerMembership::Active;
+            record.server_membership_stage = None;
+        }
+    })?;
     here.prune(&record)?;
     tell(&mut server, &record.told(ServerDaemonStatus::Running)).await;
     system::ready(&key)?;
@@ -549,10 +597,12 @@ async fn update_server(
     key: &str,
     program: &Path,
 ) -> Result<()> {
-    record.server_update_status = ServerUpdateStatus::Downloading;
-    record.server_update_stage = None;
-    record.update_method = None;
-    here.save(record, server).await?;
+    *record = here.save(server, |record| {
+        record.server_update_status = ServerUpdateStatus::Downloading;
+        record.server_update_stage = None;
+        record.update_method = None;
+    })
+    .await?;
     // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops where it was
     // told the device is nobody's, and its timer doesn't count while the machine sleeps.
     let now = Client::open(client::home()?, Vec::new()).await;
@@ -560,59 +610,70 @@ async fn update_server(
         Ok(now) => take(now, here, record, program).await,
         Err(error) => Err(anyhow::anyhow!("{error:#}")),
     };
-    record.server_update_status = ServerUpdateStatus::UpToDate;
     match taken {
         Ok(Some(next)) => {
-            record.next = Some(next.clone());
-            record.server_update_status = ServerUpdateStatus::Verifying;
-            record.server_update_stage = Some(ServerUpdateStage::Checking);
-            here.save(record, server).await?;
+            *record = here
+                .save(server, |record| {
+                    record.next = Some(next.clone());
+                    record.server_update_status = ServerUpdateStatus::Verifying;
+                    record.server_update_stage = Some(ServerUpdateStage::Checking);
+                })
+                .await?;
             let current = record.current.clone().context("a build it's on")?;
             let method = method(here, record, &current, &next);
             println!("Taking {} by {}", next.build, method.as_ref().err().map_or("a hot load", |why| why.as_str()));
             let (Ok(()), Ok(now)) = (&method, &now) else {
-                record.update_method = Some(UpdateMethod::Restart);
-                record.server_update_stage = Some(ServerUpdateStage::Starting);
-                here.write(record)?;
+                *record = here.change(|record| {
+                    record.update_method = Some(UpdateMethod::Restart);
+                    record.server_update_stage = Some(ServerUpdateStage::Starting);
+                })?;
                 stop(server, &record.told(ServerDaemonStatus::Stopping)).await?;
+                if next.program != BUILD {
+                    here.put_program(&next.program, program)?;
+                }
                 return Err(again(program));
             };
-            record.update_method = Some(UpdateMethod::HotLoad);
-            record.server_update_stage = Some(ServerUpdateStage::Loading);
-            here.save(record, server).await?;
+            *record = here
+                .save(server, |record| {
+                    record.update_method = Some(UpdateMethod::HotLoad);
+                    record.server_update_stage = Some(ServerUpdateStage::Loading);
+                })
+                .await?;
             let loaded = match load(server, said, &here.build(&next.build)).await {
                 Ok(()) => within("answer by its key", answers(now, key, &next.build)).await,
                 Err(why) => Err(why),
             };
             if let Err(why) = loaded {
-                record.went(format!("{}: {why:#}", record.back()));
+                *record = here.change(|record| record.go_back(format!("{why:#}")))?;
                 let back = match server.try_wait()? {
                     None => load(server, said, &here.build(&current.build)).await,
                     Some(_) => Err(anyhow::anyhow!("it stopped")),
                 };
                 if let Err(why) = back {
-                    here.went_back(record, program)?;
                     let _ = server.kill().await;
                     bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
                 }
             } else {
-                record.previous = record.current.replace(next.clone());
+                *record = here.change(|record| {
+                    record.previous = record.current.replace(next.clone());
+                    record.next = None;
+                    record.server_update_status = ServerUpdateStatus::UpToDate;
+                    record.server_update_stage = None;
+                })?;
                 println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
             }
-            record.next = None;
-            record.server_update_status = ServerUpdateStatus::UpToDate;
-            record.server_update_stage = None;
         }
         Ok(None) => println!("This device is on the latest builds already."),
         Err(error) => {
             let on = record.current.as_ref().map(|current| current.build.clone()).unwrap_or_default();
-            record.went(format!("Stayed on {on}: {error:#}"));
+            *record = here.change(|record| record.went(format!("Stayed on {on}: {error:#}")))?;
         }
     }
     if let Ok(now) = now {
         now.close().await;
     }
-    here.save(record, server).await
+    *record = here.save(server, |record| record.server_update_status = ServerUpdateStatus::UpToDate).await?;
+    Ok(())
 }
 
 /// How the build `next` is taken from `current`: `Ok` to load it into the server while it runs, or why it restarts.
@@ -629,7 +690,7 @@ fn method(here: &Here, record: &Record, current: &Pair, next: &Pair) -> Result<(
         .env("ONE_SERVER_STATUS", record.told(ServerDaemonStatus::Running).to_string())
         .output()
         .map_err(|error| format!("restart: checking couldn't start: {error}"))?;
-    match String::from_utf8_lossy(&output.stdout).lines().filter_map(Said::read).last() {
+    match String::from_utf8_lossy(&output.stdout).lines().rev().find_map(Said::read) {
         Some(Said::Compared { update_method: UpdateMethod::HotLoad, .. }) => Ok(()),
         Some(Said::Compared { why, .. }) => Err(format!("restart: {}", why.unwrap_or_default())),
         _ => Err(format!("restart: checking failed: {}", String::from_utf8_lossy(&output.stderr).trim())),
@@ -664,10 +725,12 @@ async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> 
     if let Some(one) = builds.get(PROGRAM)
         && one["build"] != BUILD
     {
-        fs::create_dir_all(here.folder.join("programs"))?;
-        fs::copy(program.canonicalize()?, here.folder.join("programs").join(BUILD))?;
-        take_program(one, program).await?;
+        // Both are kept beside this one, which they're put in place of only as the pair they're in starts (`run`).
         next.program = one["build"].as_str().context("a build says which it is")?.to_owned();
+        let programs = here.folder.join("programs");
+        fs::create_dir_all(&programs)?;
+        fs::copy(program.canonicalize()?, programs.join(BUILD))?;
+        fs::rename(fetched_program(one, program).await?, programs.join(&next.program))?;
     }
     Ok((next != Pair { program: BUILD.to_owned(), ..current }).then_some(next))
 }
@@ -679,9 +742,15 @@ fn latest(builds: &Map<String, Value>) -> Option<&str> {
 }
 
 /// Replaces the program `program` with the build `one`, once it has said it's that build. What runs now runs on, and
-/// the next start is the new one. It's the file a link to it names that's replaced, as on a Mac `~/.local/bin/one`
-/// is a link to the program in The One App's bundle.
+/// the next start is the new one.
 async fn take_program(one: &Value, program: &Path) -> Result<()> {
+    put(&fetched_program(one, program).await?, program)
+}
+
+/// Downloads the build `one` of the program `program` beside it, and gives where, once it has said it's that build.
+/// It's beside the file a link to it names, as on a Mac `~/.local/bin/one` is a link to the program in The One App's
+/// bundle.
+async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     let build = one["build"].as_str().context("a build says which it is")?;
     let packed = program.canonicalize()?.with_extension("new.gz");
     fetch(one, &packed).await?;
@@ -700,7 +769,7 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
         fs::remove_file(&new)?;
         bail!("The build {build} of one doesn't start here.")
     }
-    put(&new, program)
+    Ok(new)
 }
 
 /// Puts the program `new` in place of `program`, in one step. Windows replaces no program that's running, but lets
@@ -800,24 +869,26 @@ impl Here {
         }
     }
 
-    /// Writes the record in one step: a file beside it, renamed over it.
-    fn write(&self, record: &Record) -> Result<()> {
+    /// Changes the record as `change` does, and gives it as changed. It's read and written in one step, under a lock
+    /// every change holds while it does, so what another program changed meanwhile, as `one serve off` does while
+    /// `one serve run` updates the server, is kept: each changes only what it does of the record, never writes a copy
+    /// of it read before. A change where the server's folder has gone, as leaving removes it, fails.
+    fn change(&self, change: impl FnOnce(&mut Record)) -> Result<Record> {
+        let lock = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.folder.join("state.lock"))?;
+        lock.lock()?;
+        let mut record = self.read()?;
+        change(&mut record);
         let writing = self.folder.join("state.json.new");
-        fs::write(&writing, serde_json::to_vec_pretty(record)?)?;
-        Ok(fs::rename(writing, self.folder.join("state.json"))?)
+        fs::write(&writing, serde_json::to_vec_pretty(&record)?)?;
+        fs::rename(writing, self.folder.join("state.json"))?;
+        Ok(record)
     }
 
-    /// Writes the record, and tells the server what it says of it.
-    async fn save(&self, record: &Record, server: &mut Child) -> Result<()> {
-        self.write(record)?;
+    /// Changes the record, and tells the server, which is running, what it says of it.
+    async fn save(&self, server: &mut Child, change: impl FnOnce(&mut Record)) -> Result<Record> {
+        let record = self.change(change)?;
         tell(server, &record.told(ServerDaemonStatus::Running)).await;
-        Ok(())
-    }
-
-    /// Writes that joining or leaving is at `stage`.
-    fn stage(&self, record: &mut Record, stage: ServerMembershipStage) -> Result<()> {
-        record.server_membership_stage = Some(stage);
-        self.write(record)
+        Ok(record)
     }
 
     /// Holds the lock `one serve on` and `one serve off` hold while they run, if nothing else holds it.
@@ -830,22 +901,13 @@ impl Here {
         }
     }
 
-    /// A pair that didn't start goes: the program before it is put back, and it's up to date on what it was on.
-    fn went_back(&self, record: &mut Record, program: &Path) -> Result<()> {
-        let next = record.next.take();
-        if let Some(before) = record.current.as_ref().map(|current| &current.program)
-            && next.is_some_and(|next| &next.program != before)
-        {
-            let kept = self.folder.join("programs").join(before);
-            if kept.exists() {
-                let new = program.canonicalize()?.with_extension("new");
-                fs::copy(kept, &new)?;
-                put(&new, program)?;
-            }
-        }
-        record.server_update_status = ServerUpdateStatus::UpToDate;
-        record.server_update_stage = None;
-        self.write(record)
+    /// Puts the build `build` of the program, kept beside it since an update took it or the one before (`take`), in
+    /// place of `program`.
+    fn put_program(&self, build: &str, program: &Path) -> Result<()> {
+        let new = program.canonicalize()?.with_extension("new");
+        fs::copy(self.folder.join("programs").join(build), &new)
+            .with_context(|| format!("The build {build} of one, which the server's record pairs with its build, isn't kept here"))?;
+        put(&new, program)
     }
 
     /// The folder of the build `build`.
@@ -907,7 +969,7 @@ impl Here {
             .output()?;
         let (out, errors) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         // A build from before says which it is as the whole of its output.
-        let out = match out.lines().filter_map(Said::read).last() {
+        let out = match out.lines().rev().find_map(Said::read) {
             Some(Said::Checked { build }) => build,
             _ => out.trim().to_owned(),
         };
@@ -1023,6 +1085,11 @@ mod system {
         systemctl(&["stop", &name(key)])
     }
 
+    /// Whether systemd has the unit, to start `one serve run` at the next boot.
+    pub fn installed(_here: &Here, key: &str) -> Result<bool> {
+        Ok(loaded(key)?.is_some())
+    }
+
     /// Has systemd forget the unit: one in its own folder of units goes, and one in the server's folder goes with it.
     pub fn remove(_here: &Here, key: &str) -> Result<()> {
         let loaded = loaded(key)?;
@@ -1131,6 +1198,11 @@ mod system {
 
     pub fn stop(_here: &Here, key: &str) -> Result<()> {
         launchctl(&["bootout", &format!("{}/{}", domain()?, label(key))])
+    }
+
+    /// Whether the LaunchAgent is there, to start `one serve run` at the next login.
+    pub fn installed(_here: &Here, key: &str) -> Result<bool> {
+        Ok(agent(key)?.exists())
     }
 
     pub fn remove(here: &Here, key: &str) -> Result<()> {
@@ -1262,6 +1334,11 @@ mod system {
         schtasks(&["/end", "/tn", &name(key)])
     }
 
+    /// Whether Task Scheduler has the task, to start `one serve run` at the next login.
+    pub fn installed(_here: &Here, key: &str) -> Result<bool> {
+        Ok(command("schtasks").args(["/query", "/tn", &name(key)]).output()?.status.success())
+    }
+
     pub fn remove(here: &Here, key: &str) -> Result<()> {
         let _ = stop(here, key);
         schtasks(&["/delete", "/tn", &name(key), "/f"])
@@ -1350,6 +1427,7 @@ mod system {
     pub fn install(_: &Here, _: &str, _: &Path, _: &[(&str, String)]) -> Result<()> { bail!(NONE) }
     pub async fn start(_: &Here, _: &str) -> Result<()> { bail!(NONE) }
     pub fn stop(_: &Here, _: &str) -> Result<()> { bail!(NONE) }
+    pub fn installed(_: &Here, _: &str) -> Result<bool> { Ok(false) }
     pub fn remove(_: &Here, _: &str) -> Result<()> { bail!(NONE) }
     pub fn ready(_: &str) -> Result<()> { bail!(NONE) }
     pub fn bound(_: &Path) -> Result<()> { bail!(NONE) }
