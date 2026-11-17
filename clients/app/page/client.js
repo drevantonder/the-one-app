@@ -186,8 +186,9 @@ const machine = setup({
       entry: "openAppStore",
       on: { listed: "opening" },
     },
+    // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
     launcher_failed: {
-      on: { retry: "opening" },
+      on: { retry: "opening", drawn: "launcher" },
     },
     needs_updating: {
       on: { update: { guard: "updates", target: "updating" } },
@@ -217,7 +218,9 @@ const on = (event) => shown.send(event)
 /// navigation: once it's off screen (another app over it, the window hidden), or as it's opened again. On screen,
 /// it says so quietly, "Updated · Reload", and loads again only once its person presses Reload: nothing is reloaded
 /// under them. One that's showing an error loads again at once, as its old version meeting what's new is likely why,
-/// and there's nothing of theirs under it. A page that doesn't draw has failed, with Try Again. The launcher's page is one too.
+/// and there's nothing of theirs under it. A page that doesn't draw has failed, with Try Again, until it draws after
+/// all, as a page loaded again behind another app may only once it's shown, when it's current. The launcher's page is
+/// one too.
 const pageMachine = setup({
   types: /** @type {{ context: { view: View, why?: string, errored?: boolean }, input: View, events: Paged }} */ ({}),
   guards: {
@@ -273,7 +276,7 @@ const pageMachine = setup({
     failed: {
       entry: "failed",
       exit: "notes",
-      on: { retry: { target: "loading", actions: ["clear", "load"] } },
+      on: { drawn: "current", retry: { target: "loading", actions: ["clear", "load"] } },
     },
   },
 })
