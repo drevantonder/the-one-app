@@ -67,8 +67,8 @@ defmodule OneCore.Apps.Version.Checks do
       not (is_map(requires) and Enum.all?(requires, &requirement?/1)) ->
         {:error,
          "requires/0 gives the other apps it needs, each by its name with why, as a person reads it after " <>
-           "\"Gmail uses Google Account\", and \"core\" the versions of the platform it runs on, as an Elixir " <>
-           "requirement: %{\"core\" => \"~> 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
+           "\"Gmail uses Google Account\", and \"core\" the lowest version of the platform it runs on, as an Elixir " <>
+           "requirement: %{\"core\" => \">= 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
 
       true ->
         tools = Enum.map(tools, &Version.schemas/1)
@@ -91,7 +91,7 @@ defmodule OneCore.Apps.Version.Checks do
     end
   end
 
-  # The versions of the platform it runs on, as an Elixir requirement, or another app it requires, by its name,
+  # The lowest version of the platform it runs on, as an Elixir requirement, or another app it requires, by its name,
   # and why, which isn't left out.
   defp requirement?({"core", requirement}),
     do: is_binary(requirement) and match?({:ok, _}, Elixir.Version.parse_requirement(requirement))

@@ -28,12 +28,12 @@ defmodule OneCore.Apps.Version do
   where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the
   hooks it offers, each one's `name`, `kind` and `description`, and `jobs` lists its scheduled jobs: each one's `tool`,
   the `inputs` it's called with, and `every` how many seconds. `requires` names the other apps it needs, each with
-  why, and `core` the versions of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any,
-  both from its `requires/0` (`OneCore.App`). `exports` are the functions its module provides other apps, as name/arity, which run inside
+  why, and `core` the lowest version of the platform it runs on, as an Elixir requirement (`>= 0.15.0`), or `nil` for
+  any, both from its `requires/0` (`OneCore.App`). `exports` are the functions its module provides other apps, as name/arity, which run inside
   each app that requires it. `artifact` is the app it's a version of, which whatever loaded it says.
 
-  A version runs only on a server whose build its `core` allows (`platform/1`): one that doesn't is refused where it's
-  deployed, and where it's loaded runs nowhere here, as one that doesn't compile, until the server or it is updated.
+  A version runs only on a server on its `core` or newer (`platform/1`): one older is refused where it's deployed, and
+  where it's loaded runs nowhere here, as one that doesn't compile, until the server is updated.
 
   A server that doesn't run an app for whoever it's installed for never loads its code: it knows the version only
   by what it says of itself (`OneCore.Apps.Version.Description`).
@@ -129,20 +129,16 @@ defmodule OneCore.Apps.Version do
 
   @doc """
   Whether a version runs on this server, from its `core` and the server's build, worked out each time it's asked,
-  never kept: `:runs` where its `core` allows the server's build or it says none, `:waiting_for_server` where it
-  needs a newer platform, until the servers are updated, and `:waiting_for_app` where the server is newer than it
-  allows, until it's updated.
+  never kept: `:runs` where the server's build is its `core` or newer, or it says none, and `:waiting_for_server`
+  where it needs a newer platform, until the servers are updated. `core` is a minimum, as Android's `minSdkVersion`
+  is: a newer platform runs it, so a breaking release strands no app.
   """
   def platform(%__MODULE__{core: nil}), do: :runs
 
   def platform(%__MODULE__{core: core}) do
-    build = Builds.version(Builds.build())
-
-    cond do
-      Elixir.Version.match?(build, core) -> :runs
-      Elixir.Version.compare(build, lowest(core)) == :lt -> :waiting_for_server
-      true -> :waiting_for_app
-    end
+    if Elixir.Version.compare(Builds.version(Builds.build()), lowest(core)) == :lt,
+      do: :waiting_for_server,
+      else: :runs
   end
 
   @doc "Why the version `version` of the app `name` doesn't run on this server (`platform/1`), or `nil` where it does."
@@ -153,13 +149,11 @@ defmodule OneCore.Apps.Version do
 
       :waiting_for_server ->
         "#{name} waits for the servers' update: it requires core #{version.core}, and this server is on #{Builds.build()}"
-
-      :waiting_for_app ->
-        "#{name} needs an update for #{Builds.series_name(Builds.build())}: it requires core #{version.core}"
     end
   end
 
-  # The lowest version a requirement allows, the first it names: `~> 0.16.0` or `>= 0.16.0 and < 0.18.0`'s 0.16.0.
+  # The lowest version a requirement allows, the first it names: `>= 0.16.0`'s 0.16.0, and a ceiling an app said
+  # before `core` was a minimum, `~> 0.16.0`, is read as that too.
   defp lowest(core) do
     [named] = Regex.run(~r/\d+\.\d+(?:\.\d+)?/, core)
     Elixir.Version.parse!(if length(String.split(named, ".")) == 2, do: named <> ".0", else: named)

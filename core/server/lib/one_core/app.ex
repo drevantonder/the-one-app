@@ -221,12 +221,10 @@ defmodule OneCore.App do
     for where it's installed for them or for the network (`OneCore.Apps.Requires`), and installing an app
     installs its requirements. `deploy`, `install` and `apps` say them, and `apps` says the other way, what
     each app is required by. An untrusted app calls the tools of only the apps it requires.
-    It names the platform too, as `"core"`, where it uses what's new in it: the versions it runs on, as an Elixir
-    requirement, `%{"core" => "~> 0.16.0", ...}`. Before 1.0 a minor version is a breaking change, so `~> 0.16.0`
-    is 0.16's, while `~> 0.16` would allow 0.17 too. It runs only on servers whose build that allows: deploying it
-    to older ones is refused, saying so, and is done again once they're updated (`waiting_for_server`), and on a
-    server newer than it allows it waits for its own update (`waiting_for_app`, "gmail needs an update for 0.17").
-    `one apps` and `one builds` say which.
+    It names the platform too, as `"core"`, where it uses what's new in it: the lowest version it runs on, as an
+    Elixir requirement, `%{"core" => ">= 0.16.0", ...}`, as Android's `minSdkVersion` is. It runs on that and every
+    version after: deploying it to older servers is refused, saying so, and is done again once they're updated
+    (`waiting_for_server`), which `one apps` and `one builds` say.
   - A requirement whose module provides functions (below) runs inside the app that requires it:
     `OneCore.Call.app(call, "database")` gives its module, whose functions take the call and run as this app,
     for whoever it runs for. Any other is called by its tools. An app that keeps more than a few blobs requires

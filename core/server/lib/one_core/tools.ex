@@ -159,10 +159,10 @@ defmodule OneCore.Tools do
   @platform %{
     type: ["object", "null"],
     description:
-      "Whether its version runs on this server's platform, worked out from the two versions: runs, waiting_for_server (it needs a newer platform) or waiting_for_app (the server is newer than it allows), and why. Null where no server has described it",
+      "Whether its version runs on this server's platform, worked out from the two versions: runs or waiting_for_server (it needs a newer platform), and why. Null where no server has described it",
     properties: %{
-      state: %{type: "string", enum: ["runs", "waiting_for_server", "waiting_for_app"]},
-      why: %{type: ["string", "null"], description: "As a person reads it: gmail needs an update for 0.18"}
+      state: %{type: "string", enum: ["runs", "waiting_for_server"]},
+      why: %{type: ["string", "null"], description: "As a person reads it: gmail waits for the servers' update: it requires core >= 0.21.0, and this server is on 0.20.3"}
     }
   }
 
@@ -809,7 +809,7 @@ defmodule OneCore.Tools do
             type: "array",
             items: %{type: "object", properties: %{name: %{type: "string"}, state: %{type: "string"}, why: %{type: "string"}}},
             description:
-              "The apps installed for you whose version doesn't run on the server that answered: waiting_for_server or waiting_for_app, and why"
+              "The apps installed for you whose version doesn't run on the server that answered, waiting_for_server, and why"
           }
         },
         required: ["server", "build", "edge", "latest", "servers", "devices", "apps"]

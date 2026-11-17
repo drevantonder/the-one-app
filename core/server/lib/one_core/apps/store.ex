@@ -317,7 +317,7 @@ defmodule OneCore.Apps.Store do
 
   @doc """
   Whether the app `artifact`'s latest version runs on this server's platform, as `name`
-  (`OneCore.Apps.Version.platform/1`): `%{state: :runs | :waiting_for_server | :waiting_for_app, why: ...}`,
+  (`OneCore.Apps.Version.platform/1`): `%{state: :runs | :waiting_for_server, why: ...}`,
   from what it said of itself, or `nil` where no server has described it.
   """
   def platform(name, artifact) do

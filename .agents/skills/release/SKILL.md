@@ -26,10 +26,10 @@ Exactly two rules hold at runtime:
   calls only to servers on its own (`core/edge/relay/relay.ts`), apart from whether they're ready. What updates a
   part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
   server's `build`, the `edge`'s, and `why` one doesn't talk.
-- An app runs only on a server its `requires`' `"core" => "~> 0.16.0"` allows (`OneCore.Apps.Version.platform/1`,
-  worked out from the two versions, never kept): `runs`, `waiting_for_server` (deploying it to an older one is
-  refused, saying so) or `waiting_for_app` (a newer server: "gmail needs an update for 0.17"). `one apps`
-  and `one builds` say which, and a server that can't run one says why in telemetry.
+- An app runs on a server on its `requires`' `"core" => ">= 0.16.0"` or newer (`OneCore.Apps.Version.platform/1`,
+  worked out from the two versions, never kept): `runs`, or `waiting_for_server` on an older one (deploying it there
+  is refused, saying so). `one apps` and `one builds` say which, and a server that can't run one says why in
+  telemetry.
 
 ## Order
 
@@ -66,7 +66,7 @@ Windows' builds, `server/windows-x86_64` and `one-cli/windows-x86_64`, are made 
 built only for a network with a Windows server or device. They haven't yet run on a Windows PC: until
 one has been installed and updated as a server on one, a Windows PC isn't made a server of the live network.
 
-An app change that uses something new in `core/server/` says so in its `requires`, `"core" => "~> 0.16.0"`, and is
+An app change that uses something new in `core/server/` says so in its `requires`, `"core" => ">= 0.16.0"`, and is
 deployed once every server is on that version.
 
 A server release deploys no apps. This repo's apps are published as any author's are: deployed, each that
