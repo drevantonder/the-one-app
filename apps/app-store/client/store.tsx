@@ -466,7 +466,7 @@ function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
   return (
     <>
       <div class="under" hidden={covered()}>
-        <Screen heading="App Store" back={!!(view().category || props.onBack)} onBack={() => (view().category ? history.back() : props.onBack?.())} class="apps">
+        <Screen back={!!(view().category || props.onBack)} onBack={() => (view().category ? history.back() : props.onBack?.())} class="apps">
           <Marketplace market={props.market} />
         </Screen>
       </div>
@@ -513,8 +513,8 @@ export default function Store(props: { onBack?: () => void }) {
   )
   return (
     <div class="app-store">
-      <Errored fallback={(error) => <Screen heading="App Store" back={!!props.onBack} onBack={props.onBack}><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen heading="App Store" back={!!props.onBack} onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
+      <Errored fallback={(error) => <Screen back={!!props.onBack} onBack={props.onBack}><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
+        <Loading fallback={<Screen back={!!props.onBack} onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
           <AppStore market={market()} all={owners()} onBack={props.onBack} />
         </Loading>
       </Errored>
