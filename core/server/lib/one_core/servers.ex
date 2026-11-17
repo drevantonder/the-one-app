@@ -183,8 +183,9 @@ defmodule OneCore.Servers do
 
       case response.status do
         200 -> {:ok, response.body}
-        # An edge deployed before it had an updater, which takes its builds as it did then.
-        404 -> {:ok, nil}
+        # An edge deployed before it had an updater, whose relay refuses what isn't its WebSocket (17 Nov: publishing
+        # to one failed for it): its servers take builds as they did then.
+        status when status in [404, 426] -> {:ok, nil}
         status -> {:error, "the edge said #{status}: #{inspect(response.body)}"}
       end
     else
