@@ -15,6 +15,25 @@
 //!   both in its place (`ServerUpdateStage`). A build is only ever run by the `one` the record pairs it with: a new
 //!   one is kept beside this one until its pair starts.
 //!
+//! ```text
+//! server_membership:
+//!   inactive ─serve on─► joining (registering → downloading → installing → starting) ─answers─► active
+//!                          └─fails, or cut short─► inactive, off the list, nothing left (undo_joining)
+//!   active ─serve off─► leaving (draining → deregistering → uninstalling) ─► inactive, nothing left
+//!                          └─fails, or cut short─► active, back on the list, run by the system (undo_leaving)
+//!   cut short: settled by this program's first start on the device, unit or not (`settle`): `serve run`,
+//!   `serve on`, `serve off` (which then leaves again), `update`, the app; joining at starting is `serve run`'s
+//!
+//! server_update_status:
+//!   up to date ─asked─► downloading (the build, and `one` beside this one) ─► verifying: checking
+//!     ─hot load─► loading ─answers─► up to date on the new pair
+//!                           └─doesn't─► the build before loaded again ─► up to date, went back
+//!     ─restart─► starting (the new `one` put in place) ─answers─► up to date on the new pair
+//!                           └─doesn't─► up to date, went back
+//!   cut short: downloading ─► up to date · checking or loading ─► went back · starting ─► started again
+//!   every start of `serve run`: the `one` the record pairs with the build is put in place and started first
+//! ```
+//!
 //! Every start is the one way: a build is started and has `START` to say it's running and answer by its key. What
 //! each machine is at is one small record, `state.json` in the client's home's `server/`, which every program changes
 //! in one step under one lock (`Here::change`), beside `builds/<build>`, each build kept, `runtimes/<build>`, each
