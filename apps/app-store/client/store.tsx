@@ -1,5 +1,6 @@
-// App Store: every app the network can install, a row of each category. An app's page has a row for each owner, with
-// where its install is for them and what to do about it: managing what's installed is otherwise the App Library's. It's this app's page, and the
+// App Store: every app the network can install, a row of each category. An app's page has Get, which installs it, and
+// a row for each owner, with where its install is for them and what to do about it: managing what's installed is
+// otherwise the App Library's. It's this app's page, and the
 // launcher's page after the App Library, which imports it (package.json's `exports`): its look comes with it, under
 // `.app-store`, so the launcher's and its own don't meet.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
@@ -247,8 +248,44 @@ function Marketplace(props: { market: Market }) {
   )
 }
 
+/// Get, on an app's page: it installs the app for whoever it can still be installed for, and where that's more than one
+/// owner, asks who, in a menu under it. It's gone once there's nobody left you may install it for.
+function Get(props: { all: Owners; listed: Listed }) {
+  const left = () => props.all.owners.filter((owner) => !only(props.all, owner) && !owner.installs.some((install) => install.app === props.listed.app))
+  const busy = () => left().some((owner) => working() === `${owner.who}|${props.listed.app}|install`)
+  const [asking, setAsking] = createSignal(false)
+  let anchor!: HTMLSpanElement
+  const get = () => (left().length === 1 ? install(left()[0], props.listed) : setAsking(true))
+  return (
+    <Show when={left().length || busy()}>
+      <span class="get" ref={anchor}>
+        <Button loading={busy()} onClick={get}>
+          Get
+        </Button>
+      </span>
+      <Menu.Root
+        open={asking()}
+        onOpenChange={({ open }) => !open && setAsking(false)}
+        onSelect={({ value }) => (setAsking(false), install(left().find((owner) => owner.who === value)!, props.listed))}
+        positioning={{ getAnchorRect: () => anchor.getBoundingClientRect() }}
+      >
+        <Menu.Positioner>
+          <Menu.Content>
+            <Menu.ItemGroup id="get">
+              <Menu.ItemGroupLabel htmlFor="get">Install for</Menu.ItemGroupLabel>
+              <For each={left()} keyed={(owner) => owner.who}>
+                {(owner) => <Menu.Item value={owner().who}>{owner().name}</Menu.Item>}
+              </For>
+            </Menu.ItemGroup>
+          </Menu.Content>
+        </Menu.Positioner>
+      </Menu.Root>
+    </Show>
+  )
+}
+
 /// An app's place for one owner: where its install is for them, and what to do about it.
-function Where(props: { market: Market; all: Owners; owner: Owner; listed: Listed; first: boolean }) {
+function Where(props: { market: Market; all: Owners; owner: Owner; listed: Listed }) {
   const done = () => props.owner.installs.find((install) => install.app === props.listed.app)
   const busy = (what: string) => working() === `${props.owner.who}|${props.listed.app}|${what}`
   const state = () => done()?.state ?? null
@@ -256,15 +293,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
   const now = () => done()!
   const may = () => !only(props.all, props.owner)
   const end = (
-    <Switch
-      fallback={
-        <Show when={!only(props.all, props.owner) && state() !== "not_installed"}>
-          <Button variant={props.first ? "default" : "secondary"} loading={busy("install")} onClick={() => install(props.owner, props.listed)}>
-            Install
-          </Button>
-        </Show>
-      }
-    >
+    <Switch>
       <Match when={state() === "installing"}>
         <span class="busy"><Spinner /> Installing</span>
       </Match>
@@ -304,7 +333,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
     </Switch>
   )
   // Version numbers are the App Store's alone (DESIGN.md).
-  const text = () => (state() === "not_installed" ? "Couldn't install" : state() === "recently_deleted" ? "Recently Deleted" : state() === "installed" && now().version ? `Version ${now().version}` : !state() ? only(props.all, props.owner) : undefined)
+  const text = () => (state() === "not_installed" ? "Couldn't install" : state() === "recently_deleted" ? "Recently Deleted" : state() === "installed" && now().version ? `Version ${now().version}` : !state() ? (only(props.all, props.owner) ?? "Not installed") : undefined)
   return <Row heading={props.owner.name} text={text()} end={end} />
 }
 
@@ -335,8 +364,6 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
       }),
     ),
   ]
-  // The first owner it could be installed for has the one main button.
-  const first = () => props.all.owners.find((owner) => !only(props.all, owner) && !owner.installs.some((install) => install.app === props.listed.app))
   return (
     <div class="app-page">
       <div class="head">
@@ -349,11 +376,14 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
             <p>{props.listed.subtitle}</p>
           </Show>
         </div>
+        <Show when={props.listed.app}>
+          <Get all={props.all} listed={props.listed} />
+        </Show>
       </div>
       <Show when={props.listed.app} fallback={<p class="quiet">Ask your AI to check it and install it.</p>}>
         <List class="installs">
           <For each={props.all.owners} keyed={(owner) => owner.who}>
-            {(owner) => <Where market={props.market} all={props.all} owner={owner()} listed={props.listed} first={first() === owner()} />}
+            {(owner) => <Where market={props.market} all={props.all} owner={owner()} listed={props.listed} />}
           </For>
         </List>
         <For each={props.all.owners} keyed={(owner) => owner.who}>

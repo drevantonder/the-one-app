@@ -128,6 +128,10 @@
     align-items: center;
     gap: 1rem;
   }
+  /* Get sits at the end of the head, as an iPhone's App Store has it. */
+  .app-page .get {
+    margin-inline-start: auto;
+  }
   .app-page .icon {
     flex: none;
     width: 4.5rem;
