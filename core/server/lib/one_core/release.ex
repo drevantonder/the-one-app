@@ -3,8 +3,10 @@ defmodule OneCore.Release do
   A server installed on a machine, as the program that keeps it running starts it (`one serve run`, in
   `clients/cli/src/serving.rs`): `bin/one_core eval 'OneCore.Release.serve()'`. It says on its output when it's
   running, when it's asked to update and when it can reach the network again, and that program does the rest: it
-  takes the latest build and `one`, starts them to verify them, and goes back to the pair before if they don't start
-  and answer by their key.
+  takes the latest build and `one`, which this server reads for it (`latest`), starts them to verify them, and goes
+  back to the pair before if they don't start and answer by their key, which only this server is asked (MCP's
+  `ping`, `OneCore.Mcp`). Whether a build is good is about this server alone, as a readiness check is: no other
+  server, and none of the apps they run, is asked, so every server can take a build at once.
 
   What each says to the other is a line of JSON, one of the messages the `client` crate defines
   (`core/client/src/serve.rs`), which this reads and writes through its NIF (`OneCore.Iroh.told/1` and `said/1`).
@@ -61,9 +63,17 @@ defmodule OneCore.Release do
     case IO.read(:line) do
       line when is_binary(line) ->
         case told_in(line) do
-          {:ok, %{"load" => build}} -> load(build)
-          {:ok, said} -> told(said)
-          {:error, why} -> Logger.warning("The program keeping this server running said what it doesn't read (#{why}): #{line}")
+          {:ok, %{"load" => build}} ->
+            load(build)
+
+          {:ok, %{"latest" => target}} ->
+            latest(target)
+
+          {:ok, said} ->
+            told(said)
+
+          {:error, why} ->
+            Logger.warning("The program keeping this server running said what it doesn't read (#{why}): #{line}")
         end
 
         __MODULE__.read()
@@ -72,6 +82,15 @@ defmodule OneCore.Release do
         System.stop()
         Process.sleep(:infinity)
     end
+  end
+
+  # Says the latest builds for the kind of machine `target`, as the program keeping this server running asks before it
+  # takes them: read from the network's bucket by this server, so that taking a build asks no other server, and so
+  # none of their apps, which may be restarting in the same release.
+  defp latest(target) do
+    say(%{"latest" => %{"builds" => Builds.download(target)}})
+  rescue
+    error -> say(%{"no_latest" => %{"why" => Exception.message(error)}})
   end
 
   # Says `message`, the terms of one of the `client` crate's `Said` as JSON has them, to the program keeping this

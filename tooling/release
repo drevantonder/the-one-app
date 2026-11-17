@@ -120,10 +120,11 @@ refuse_under_way "$builds"
 
 roll_out() {
   # Each server takes it in turn, as `one update --server` answers once that server is ready on it or fails saying why.
-  # In turn, not at once: a server verifying a build asks apps whose lease another server holds (permissions), so a
-  # server restarting meanwhile makes it go back (17 Nov: linux and the Mac refused 0.19.68 while ptc restarted). The
-  # first that doesn't take it stops the rest, which stay on the old build, safe, and catch up when they start or
-  # reconnect. Run again, a release whose builds are published already takes the servers still behind on.
+  # A server checks a build against itself only (`clients/cli/src/serving.rs`), but each `one update --server` is a
+  # call, which the apps that validate calls (permissions) are asked about, whose lease a server restarting in the same
+  # step may hold (17 Nov: linux and the Mac refused 0.19.68 while ptc restarted). The first that doesn't take it stops
+  # the rest, which stay on the old build, safe, and catch up when they start or reconnect. Run again, a release whose
+  # builds are published already takes the servers still behind on.
   # A server the check above skips (asleep, not ready with no update under way, not installed) is named.
   echo "A device takes $build with \`one update\`."
   builds=$(one builds)

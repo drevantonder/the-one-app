@@ -26,7 +26,7 @@
 //!   `serve on`, `serve off` (which then leaves again), `update`, the app; joining at starting is `serve run`'s
 //!
 //! server_update_status:
-//!   up to date ─asked─► downloading (the build, and `one` beside this one) ─► verifying: checking
+//!   up to date ─asked─► downloading (the build, and `one` beside this one, as the server lists them) ─► verifying: checking
 //!     ─hot load─► loading ─answers─► up to date on the new pair, its `one` put in place
 //!                           └─doesn't─► the build before loaded again ─► up to date, went back
 //!     ─restart─► starting (the new `one` put in place) ─answers─► up to date on the new pair
@@ -35,6 +35,8 @@
 //!   every start of `serve run`: the `one` the record pairs with the build is put in place and started first
 //!   caught up: up to date ─started, or reconnected─► downloading as if asked, where the latest pair is newer;
 //!     not the pair it went back from until `AGAIN` after, and only once: then only when asked
+//!   answers: the server, pinged by its key, says it's the new build. Nothing else is asked, so no other server, or
+//!     an app it runs, has a say: every server can take a build at once
 //! ```
 //!
 //! A server that missed a release, as one asleep, away or gone back during it, catches up by itself: every time it
@@ -590,17 +592,14 @@ fn listen(server: &mut Child, log: PathBuf) -> Result<UnboundedReceiver<Heard>> 
     Ok(said)
 }
 
-/// Whether the server whose key is `key` answers by it, saying it's `build`. It's asked again until it does: the
-/// network's relay passes calls to a server that's just started only once it has seen it there.
+/// Whether the server whose key is `key` answers by it, saying it's `build`: it alone is asked, so whether a build is
+/// good is about this server, never another or an app one runs (`Client::ping`). It's asked again until it does: the
+/// relay at the network's address reaches a server that's just started only once it has connected there.
 async fn answers(client: &Client, key: &str, build: &str) -> Result<()> {
-    loop {
-        let response = tool(client, "builds", json!({"server": key})).await.ok();
-        let response = response.and_then(|response| serde_json::from_str::<Value>(&response).ok());
-        if response.is_some_and(|response| response["build"] == build) {
-            return Ok(());
-        }
+    while client.ping(key).await.ok().as_deref() != Some(build) {
         sleep(Duration::from_secs(2)).await;
     }
+    Ok(())
 }
 
 /// Whether the server whose key is `key` answers by it as `build` (`answers`), until it stops: one that stops first,
@@ -613,7 +612,7 @@ async fn answered(client: &Client, key: &str, build: &str, said: &mut UnboundedR
 }
 
 /// What the server does `doing`, given `START` to do it in.
-async fn within(doing: &str, done: impl Future<Output = Result<()>>) -> Result<()> {
+async fn within<T>(doing: &str, done: impl Future<Output = Result<T>>) -> Result<T> {
     timeout(START, done).await.unwrap_or_else(|_| bail!("it didn't {doing} within {} s", START.as_secs()))
 }
 
@@ -684,10 +683,7 @@ async fn update_server(
     // Asked with the token this device has now, renewed if it has ended: this one's own renewing stops where it was
     // told the device is nobody's, and its timer doesn't count while the machine sleeps.
     let now = Client::open(client::home()?, Vec::new()).await;
-    let builds = match &now {
-        Ok(now) => download(now).await,
-        Err(error) => Err(anyhow::anyhow!("{error:#}")),
-    };
+    let builds = latest_builds(server, said).await;
     if !asked {
         let next = builds
             .as_ref()
@@ -813,6 +809,24 @@ async fn load(server: &mut Child, said: &mut UnboundedReceiver<Heard>, folder: &
             }
         }
         bail!("it stopped while loading")
+    })
+    .await
+}
+
+/// The latest builds for this kind of machine, by what they are (`server-code`, `one`), each with a link to it, as the
+/// server reads them for it: so taking a build asks no other server, or an app one runs, which may be restarting in the
+/// same release.
+async fn latest_builds(server: &mut Child, said: &mut UnboundedReceiver<Heard>) -> Result<Map<String, Value>> {
+    tell(server, &Told::Latest { latest: target() }).await;
+    within("say the latest builds", async {
+        while let Some(heard) = said.recv().await {
+            match heard.said {
+                Some(Said::Latest { builds }) => return Ok(builds),
+                Some(Said::NoLatest { why }) => bail!("It couldn't read the latest builds: {why}"),
+                _ => {}
+            }
+        }
+        bail!("it stopped before it said the latest builds")
     })
     .await
 }

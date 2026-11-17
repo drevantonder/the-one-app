@@ -3,8 +3,10 @@
 //! server's Elixir through its NIF (`core/server/nif/one_core_iroh`).
 //!
 //! The program tells the server what it is (`Told`), as it starts it, in `ONE_SERVER_STATUS`, and on its input as that
-//! changes, and has it load a build. The server says on its output that it's running, that it's asked to update, that
-//! it can reach the network again, and whether it loaded a build, and a build being checked says which it is and how it's taken (`Said`).
+//! changes, asks it for the latest builds, and has it load one. The server says on its output that it's running, that
+//! it's asked to update, that it can reach the network again, the latest builds, and whether it loaded a build, and a
+//! build being checked says which it is and how it's taken (`Said`). Taking a build asks nothing of any other server:
+//! what to take is read by this one, and whether it answers is asked of it by its key.
 
 use std::path::PathBuf;
 
@@ -89,6 +91,8 @@ pub struct Status {
 pub enum Told {
     /// Load the build in this folder while it runs, and say whether it did (`Said::Loaded`, `Said::NotLoaded`).
     Load { load: PathBuf },
+    /// Say the latest builds for this kind of machine (`Said::Latest`, `Said::NoLatest`).
+    Latest { latest: String },
     /// What it is now.
     Status(Status),
 }
@@ -103,6 +107,11 @@ pub enum Said {
     UpdateAsked,
     /// It can reach the network again after it couldn't, as after the machine slept, so it may have missed a release.
     Reconnected,
+    /// The latest builds for the kind of machine it was asked, by what they are (`server-code`, `one`), each with a
+    /// link to download it by, as it read them from the network's bucket.
+    Latest { builds: serde_json::Map<String, serde_json::Value> },
+    /// It couldn't read the latest builds.
+    NoLatest { why: String },
     /// It loaded the build it was told to, and is that build now.
     Loaded { build: String },
     /// It couldn't load the build it was told to, and is on the code it had.

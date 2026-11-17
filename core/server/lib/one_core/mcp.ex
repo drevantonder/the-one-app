@@ -94,6 +94,16 @@ defmodule OneCore.Mcp do
   """
   def handle(message, from, ask \\ nil) do
     case JSON.decode(message) do
+      # MCP's ping is about this server and nobody else, so it's answered whoever asks, on whatever version, before
+      # anyone is asked who they are, saying which build it is: it's how the program keeping a server running tells
+      # a build it started answers by its key, asking nothing of any other server (`clients/cli/src/serving.rs`).
+      {:ok, %{"method" => "ping", "id" => id}} ->
+        JSON.encode!(%{
+          jsonrpc: "2.0",
+          id: id,
+          result: %{_meta: %{"io.modelcontextprotocol/serverInfo" => server_info()}}
+        })
+
       {:ok, %{"method" => method, "id" => id} = request} ->
         params = Map.get(request, "params", %{})
         # What a call it asks for is cancelled by, and where its progress is told.
@@ -111,9 +121,14 @@ defmodule OneCore.Mcp do
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
           else
-            {:error, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
-            {:error, code, why} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
-            {:error, code, why, data} -> JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why, data: data}})
+            {:error, why} ->
+              JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: why}})
+
+            {:error, code, why} ->
+              JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why}})
+
+            {:error, code, why, data} ->
+              JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: why, data: data}})
           end
         rescue
           error ->
@@ -167,7 +182,10 @@ defmodule OneCore.Mcp do
 
       # Another server saying where an app is in its life for someone moved, which this one's clients ask again.
       {:ok, %{"method" => "notifications/one/changed"} = notification} ->
-        Server.changed(for owner <- List.wrap(notification["params"]["owners"]), is_binary(owner), User.owner?(owner), do: owner)
+        Server.changed(
+          for owner <- List.wrap(notification["params"]["owners"]), is_binary(owner), User.owner?(owner), do: owner
+        )
+
         ""
 
       # A client cancelling a call it asked for that isn't a task, by the request's id, as only it may.
@@ -265,9 +283,17 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Calls.schedule(at, app, true) end)
   end
 
-  defp result("hooks/call", %{"installed" => at, "app" => app, "kind" => kind, "hook" => hook} = params, _from, principal, forwarded)
+  defp result(
+         "hooks/call",
+         %{"installed" => at, "app" => app, "kind" => kind, "hook" => hook} = params,
+         _from,
+         principal,
+         forwarded
+       )
        when kind in ["observe", "mutate", "validate", "collect"] do
-    between(forwarded, fn -> Calls.hook(at, app, String.to_existing_atom(kind), hook, params["about"], principal, true) end)
+    between(forwarded, fn ->
+      Calls.hook(at, app, String.to_existing_atom(kind), hook, params["about"], principal, true)
+    end)
   end
 
   # Which app called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
@@ -312,8 +338,6 @@ defmodule OneCore.Mcp do
        instructions: instructions(if(holder?(actor), do: :holder, else: mode(params)), subject)
      }}
   end
-
-  defp result("ping", _params, _from, _principal, _forwarded), do: {:ok, %{}}
 
   # A user's device asks for its token to the relay at the network's address, and for the next before that one
   # ends, and is told whose it is: the device a run of it proved here, or the edge did there. It says which
@@ -368,7 +392,8 @@ defmodule OneCore.Mcp do
     %{files: files, code: code} = Entrypoint.library()
 
     library =
-      for path <- Enum.sort(Map.keys(files)), Version.loaded?(path),
+      for path <- Enum.sort(Map.keys(files)),
+          Version.loaded?(path),
           do: %{uri: "ui://ui/#{code}/#{path}", name: path, mimeType: Version.kind(path)}
 
     resources =
@@ -388,7 +413,11 @@ defmodule OneCore.Mcp do
             Map.merge(resource, %{name: entrypoint.name, icons: [%{src: entrypoint.icon}]})
 
           entrypoint ->
-            Map.merge(resource, %{name: entrypoint.name, icons: [%{src: entrypoint.icon}], _meta: %{category: entrypoint.category}})
+            Map.merge(resource, %{
+              name: entrypoint.name,
+              icons: [%{src: entrypoint.icon}],
+              _meta: %{category: entrypoint.category}
+            })
         end
       end
 
