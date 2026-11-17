@@ -4,10 +4,10 @@ defmodule OneCore.Apps.Update do
   is a new commit at the git source it was deployed from. So its updates are the app's, not any install's:
 
       trusted:    up to date ─newer version─► updating ─► up to date
-                                                 └─fails─► old version keeps running (why · Try Again)
+                                                 └─fails, or its server stops─► old version keeps running (why · Try Again)
       untrusted:  up to date ─newer version─► update available ─Update─► updating ─► up to date
                                                  (an even newer one ─► update available, the newest)
-                                                                                └─fails─► old version keeps running (why · Try Again)
+                                                                                └─fails, or its server stops─► old version keeps running (why · Try Again)
 
   A trusted app updates by itself; an untrusted one waits for Update, once an agent has read what changed. Each
   is one blob in the app's artifact, `update`: none while it's up to date, then its `state`, `available`,

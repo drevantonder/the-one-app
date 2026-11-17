@@ -5,7 +5,8 @@ defmodule OneCore.Apps.Installed do
 
       not installed ─Install─► installing ─► installed ─Uninstall─► recently deleted ─30 days─► removed
                                                                     recently deleted ─Restore─► installed
-      installing ─fails─► not installed (why · Try Again)
+      installing ─fails, or its server stops─► not installed (why · Try Again)
+      not installed ─Deploy─► installed (whoever it's for deployed it, so it's theirs)
 
   with a `stage` inside installing: its `requirements` installed first, then `fetching` its code, `building` it and
   `starting` it. Whatever's installed runs the app's one version, the same everywhere it's installed: its updates
