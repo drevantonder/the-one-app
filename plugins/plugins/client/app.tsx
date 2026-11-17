@@ -188,7 +188,7 @@ function Shelf(props: { category: string; plugins: Listed[] }) {
       </header>
       <div class="shelf-row" ref={watch}>
         <For each={props.plugins} keyed={key}>
-          {(listed) => <Tile listed={listed()} onClick={() => to({ tab: "marketplace", plugin: key(listed()) })} />}
+          {(listed) => <Tile listed={listed()} onClick={() => to({ tab: "marketplace", category: view().category, plugin: key(listed()) })} />}
         </For>
       </div>
     </section>
@@ -200,7 +200,7 @@ function Grid(props: { plugins: Listed[] }) {
   return (
     <div class="grid">
       <For each={props.plugins} keyed={key}>
-        {(listed) => <Tile listed={listed()} onClick={() => to({ tab: "marketplace", plugin: key(listed()) })} />}
+        {(listed) => <Tile listed={listed()} onClick={() => to({ tab: "marketplace", category: view().category, plugin: key(listed()) })} />}
       </For>
     </div>
   )
@@ -545,24 +545,25 @@ function Plugins(props: { market: Market; all: Owners }) {
       </Tabs.List>
     </Tabs.Root>
   )
+  const covered = () => !!(view().plugin && opened())
+  // The Marketplace stays mounted, hidden, under a plugin's page, so going back shows it as it was, scroll and all, as
+  // a navigation stack keeps the screen before.
   return (
-    <Show
-      when={!(view().plugin && opened())}
-      fallback={
-        <Show when={view().details} fallback={<Screen back><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
-          <Details listed={opened()!} />
-        </Show>
-      }
-    >
-      <Show
-        when={view().tab === "installed"}
-        fallback={
+    <>
+      <Show when={view().tab === "marketplace"}>
+        <div class="under" hidden={covered()}>
           <Screen heading="Plugins" back onBack={() => (view().category ? history.back() : leave())} class="plugins">
             {top}
             <Marketplace market={props.market} />
           </Screen>
-        }
-      >
+        </div>
+      </Show>
+      <Show when={covered()}>
+        <Show when={view().details} fallback={<Screen back><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
+          <Details listed={opened()!} />
+        </Show>
+      </Show>
+      <Show when={view().tab === "installed" && !covered()}>
         <Split open={!!chosen()} onClose={() => setSelected()} detail={<Show when={chosen()} fallback={<Empty>Pick a plugin to see it.</Empty>}><Screen back><Page market={props.market} all={props.all} listed={chosen()!} /></Screen></Show>}>
           <Screen heading="Plugins" back onBack={leave} class="plugins">
             {top}
@@ -570,7 +571,7 @@ function Plugins(props: { market: Market; all: Owners }) {
           </Screen>
         </Split>
       </Show>
-    </Show>
+    </>
   )
 }
 

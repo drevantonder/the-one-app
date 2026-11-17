@@ -106,7 +106,7 @@ button.tile:focus-visible img {
 .shelf > header,
 .group > header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   min-height: var(--control);
 }
@@ -115,8 +115,13 @@ button.tile:focus-visible img {
   font-weight: var(--title-weight);
   letter-spacing: var(--title-tracking);
 }
-.shelf > header > .ui-button {
-  color: var(--muted-foreground);
+/* See All and Update All: a link at the row's end, smaller than the title, on its baseline, with no padding of its
+   own so its text ends where the row's content does. */
+:is(.shelf, .group) > header > .ui-button[data-variant="ghost"] {
+  padding-inline: 0;
+  background: none;
+  color: var(--foreground);
+  font-size: var(--text-sm);
 }
 /* Cut so the next icon shows: four and a half across a phone. */
 .shelf-row {
@@ -216,4 +221,9 @@ button.tile:focus-visible img {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 22.5%;
+}
+
+/* What the Marketplace is while a plugin's page is over it: still there, not drawn. */
+.under[hidden] {
+  display: none;
 }
