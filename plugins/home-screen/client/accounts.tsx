@@ -20,7 +20,7 @@ const withAccounts = createMemo(async () => {
 changed(() => refresh(withAccounts))
 
 /// Does what the person asked, and says what the server said if it wouldn't.
-const does = (what: () => Promise<unknown>) => what().catch((error) => toast(error.message))
+const does = (what: () => Promise<unknown>) => what().catch(toast)
 
 /// Signs an account in to a plugin, or with `account`, signs that one in again: on the plugin's own page for it, or
 /// at the web address its `sign_in` answers, in the device's browser.
@@ -50,7 +50,7 @@ function Accounts(props: { plugin: PluginWithAccounts }) {
         </span>
       }
     >
-      <Errored fallback={(error) => <Problem warn heading={`Can't list ${props.plugin.title} accounts`} text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem warn heading={`Can't list ${props.plugin.title} accounts`} text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={1} />}>
           <Show when={accounts().length}>
             <List>
@@ -104,7 +104,7 @@ render(
         .actions { display: flex; gap: 0.25rem; }
         .another { padding-block: 1rem; }
       `}</style>
-      <Errored fallback={(error) => <Problem heading="Can't show your accounts" text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show your accounts" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <All plugins={withAccounts()} />
         </Loading>

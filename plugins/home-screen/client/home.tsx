@@ -35,7 +35,7 @@ async function arrange(page: Page, items: Item[]) {
   try {
     await call("home-screen_arrange", { items: items.map(arrangement) }, { subject: page.subject })
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   }
   refresh(home)
 }
@@ -117,7 +117,7 @@ function Card(props: { item: WidgetItem; page: Page }) {
     try {
       await call(`${props.item.widget.split("/")[0]}_${name}`, inputs, { subject: props.page.subject })
     } catch (error) {
-      toast((error as Error).message)
+      toast(error as Error)
     }
     refresh(layout)
   }
@@ -322,7 +322,7 @@ function Offers() {
   const off = done(async () => {
     const plugin = item()!.app!.split("/")[0]
     if (!(await confirm({ heading: `Remove ${item()!.name} from ${page().name}?`, text: "What it kept stays, and comes back with it.", action: "Remove", destructive: true }))) return
-    await call("uninstall", { name: plugin }, { subject: page().subject }).catch((error) => toast(error.message))
+    await call("uninstall", { name: plugin }, { subject: page().subject }).catch(toast)
     refresh(home)
   })
   return (
@@ -456,7 +456,7 @@ function Home(props: { home: { pages: Page[]; settings: App[]; withAccounts: Plu
 
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your Home Screen pages" text={String((error() as Error).message ?? error())} />}>
+    <Errored fallback={(error) => <Problem heading="Can't show your Home Screen pages" text={error() as Error} />}>
       <Loading>
         <Home home={home()} />
       </Loading>

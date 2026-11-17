@@ -12,7 +12,7 @@ function Connect(props: { network: string }) {
     try {
       if ((await share(prompt())) === "copied") toast("Copied")
     } catch (error) {
-      toast((error as Error).message)
+      toast(error as Error)
     }
   }
   return (
@@ -28,7 +28,7 @@ function Connect(props: { network: string }) {
 render(
   () => (
     <Screen heading="Connect Your AI" back onBack={leave}>
-      <Errored fallback={(error) => <Problem heading="Can't show how to connect" text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show how to connect" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={1} />}>
           <Show when={network()} fallback={<Empty>This network has no address, so an AI elsewhere can't reach it.</Empty>}>
             <Connect network={network()!} />

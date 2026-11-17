@@ -86,7 +86,7 @@ async function does(tool: string, inputs: object, options?: { subject?: string }
     refresh(repos)
     return result || true
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
     return false
   }
 }
@@ -453,7 +453,7 @@ function App() {
         detail={
           <Show when={open()} fallback={<Show when={repos().length}><Empty>Pick a repo to see its code.</Empty></Show>}>
             {(repo) => (
-              <Errored fallback={(error) => <Problem heading="Can't show this repo" text={String((error() as Error).message ?? error())} />}>
+              <Errored fallback={(error) => <Problem heading="Can't show this repo" text={error() as Error} />}>
                 <Loading fallback={<Skeleton rows={6} />}>
                   <Repo repo={repo()} />
                 </Loading>
@@ -471,7 +471,7 @@ function App() {
 
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your repos" text={String((error() as Error).message ?? error())} />}>
+    <Errored fallback={(error) => <Problem heading="Can't show your repos" text={error() as Error} />}>
       <Loading fallback={<Skeleton rows={4} />}>
         <App />
       </Loading>

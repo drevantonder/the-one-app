@@ -2,7 +2,7 @@
 // host, in JSON-RPC messages posted to the frame's parent, so one page is an app here and an MCP App in an
 // assistant.
 import { configureClientErrors } from "solid-js"
-import { thrown } from "./shared.ts"
+import { readable } from "./shared.ts"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {
@@ -115,7 +115,7 @@ export async function call(tool: string, inputs: object = {}, { subject }: Subje
   await greet()
   const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
   const text = content.map(({ type, text, uri, data, mimeType, resource }) => text ?? (type === "resource_link" ? uri : `data:${mimeType ?? resource?.mimeType};base64,${data ?? resource?.blob}`)).join("\n")
-  if (isError) throw new Error(thrown(text), { cause: text })
+  if (isError) throw new Error(readable(text), { cause: text })
   return text
 }
 

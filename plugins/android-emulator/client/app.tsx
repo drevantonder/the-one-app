@@ -35,7 +35,7 @@ function Detail(props: { emulator: Emulator }) {
     setBusy(true)
     await call(`android-emulator_${value}`, { emulator: e().name })
       .then(() => value === "remove" && setOpen())
-      .catch((error) => toast(error.message))
+      .catch(toast)
       .finally(() => setBusy(false))
   }
   return (
@@ -74,7 +74,7 @@ function App() {
   changed(() => refresh(emulators))
   const opened = () => emulators().find((e) => e.name === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your emulators" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your emulators" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={emulators().length}><Empty>Pick an emulator to use it.</Empty></Show>}><Detail emulator={opened()!} /></Show>}>
           <Screen heading="Android Emulator" back onBack={leave}>

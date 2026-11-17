@@ -45,7 +45,7 @@ async function remove(person: Person, all: All) {
     ? { heading: `Remove ${all.named(person)}?`, text: "Their devices stop working at once. What they made stays.", action: "Remove" }
     : { heading: `Cancel ${all.named(person)}'s invitation?`, text: "The link they were sent stops working.", action: "Cancel Invitation" }
   if (!(await confirm({ ...question, destructive: true }))) return
-  await call("sign-in_remove_person", { who: person.who }).catch((error) => toast(error.message))
+  await call("sign-in_remove_person", { who: person.who }).catch(toast)
   refresh(people)
 }
 
@@ -107,7 +107,7 @@ function Invite(props: { open: boolean; onClose: () => void }) {
     try {
       if ((await share(link()!)) === "copied") toast("Link copied")
     } catch (thrown) {
-      toast((thrown as Error).message)
+      toast(thrown as Error)
     }
   }
   return (
@@ -185,7 +185,7 @@ function People(props: { all: All }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="People" back onBack={leave}><Problem heading="Can't show who's in your network" text={String((error() as Error).message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="People" back onBack={leave}><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
       <Loading fallback={<Screen heading="People" back onBack={leave}><Skeleton rows={3} /></Screen>}>
         <People all={people()} />
       </Loading>

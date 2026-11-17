@@ -35,7 +35,7 @@ function Detail(props: { simulator: Simulator }) {
     setBusy(true)
     await call(`iphone-simulator_${value}`, { simulator: e().name })
       .then(() => value === "remove" && setOpen())
-      .catch((error) => toast(error.message))
+      .catch(toast)
       .finally(() => setBusy(false))
   }
   return (
@@ -74,7 +74,7 @@ function App() {
   changed(() => refresh(simulators))
   const opened = () => simulators().find((e) => e.name === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your simulators" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your simulators" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={simulators().length}><Empty>Pick a simulator to use it.</Empty></Show>}><Detail simulator={opened()!} /></Show>}>
           <Screen heading="iPhone Simulator" back onBack={leave}>

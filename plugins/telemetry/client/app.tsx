@@ -161,7 +161,7 @@ function Trace(props: { id: string; where: string; names: Record<string, string>
   const servers = () => new Set(trace().spans.map((s) => s.server)).size
   return (
     <Screen heading={named(props.where, props.names)} back>
-      <Errored fallback={(error) => <Problem heading="Can't show this trace" text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show this trace" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <p class="hint">
             {took(total())}
@@ -320,7 +320,7 @@ function Telemetry(props: { all: Overview }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Telemetry" back onBack={leave}><Problem heading="Can't show Telemetry" text={String((error() as Error).message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Telemetry" back onBack={leave}><Problem heading="Can't show Telemetry" text={error() as Error} /></Screen>}>
       <Loading fallback={<Screen heading="Telemetry" back onBack={leave}><Skeleton rows={6} /></Screen>}>
         <Telemetry all={overview()} />
       </Loading>

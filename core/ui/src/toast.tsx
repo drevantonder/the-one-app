@@ -24,9 +24,9 @@ export function hold(where: HTMLElement = document.body): void {
 
 /// `toast("Deleted", { action: { label: "Undo", run: restore } })`: one line about what just happened, at the foot
 /// of the window for a few seconds, with one thing to do about it. What went well needs none: fine is silent.
-/// A `text` that's a tool's error, or the `message` of one `call` threw, says what a person reads of it
+/// An error, as `call` throws it (`.catch(toast)`), or a tool's error as text, says what a person reads of it
 /// (`readable`), and with no `action` of its own has Details, which shows the rest, to copy for an agent or for support.
-export async function toast(text: string, { action }: { action?: { label: string; run: () => void } } = {}): Promise<void> {
+export async function toast(text: string | Error, { action }: { action?: { label: string; run: () => void } } = {}): Promise<void> {
   const all = whole(text)
   if (all !== readable(all)) action ??= { label: messages.details, run: () => details(all) }
   zag ??= await import("./zag/toast.ts")

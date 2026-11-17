@@ -25,21 +25,9 @@ export const [messages, setMessages] = createStore({
 /// text is the model's: which tool to call next, or what went wrong inside a plugin.
 export const readable = (error: string): string => error.split(/\n\s*\n/, 1)[0]
 
-/// The whole of each tool error `call` threw of late, by its first paragraph: a screen hands `Problem` or `toast` an
-/// error's `message`, and they show the rest under Details. The last few are kept, as a screen shows one soon after.
-const errors = new Map<string, string>()
-
-/// What `call` throws of a tool's `error`: what a person reads of it, kept with the whole of it for `whole`.
-export function thrown(error: string): string {
-  const message = readable(error)
-  errors.delete(message)
-  errors.set(message, error)
-  if (errors.size > 20) errors.delete(errors.keys().next().value!)
-  return message
-}
-
-/// All there is of an error a screen shows: the whole tool error `text` is the first paragraph of, or `text` itself.
-export const whole = (text: string): string => errors.get(text) ?? text
+/// All of an error a screen shows: what a tool said, whole, where it's an `Error` `call` threw (its `cause`), or
+/// the text itself.
+export const whole = (error: string | Error): string => (error instanceof Error ? (typeof error.cause === "string" ? error.cause : error.message) : error)
 
 /// `words({ back: "Zurück", cancel: "Abbrechen", close: "Schließen" })`: says the UI library's own words in the user's
 /// language, once, for every component on the page. A word the UI library doesn't say throws the words it does.

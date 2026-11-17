@@ -18,7 +18,7 @@ changed(() => refresh(mine))
 
 async function remove(passkey: Passkey) {
   if (!(await confirm({ heading: `Remove ${passkey.name}?`, text: "You won't be able to sign in with it again.", action: "Remove", destructive: true }))) return
-  await call("sign-in_remove_passkey", { passkey: passkey.id }).catch((error) => toast(error.message))
+  await call("sign-in_remove_passkey", { passkey: passkey.id }).catch(toast)
   refresh(mine)
 }
 
@@ -26,14 +26,14 @@ async function add() {
   try {
     await open(JSON.parse(await call("sign-in_add_passkey")).link)
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   }
 }
 
 render(
   () => (
     <Screen heading="Passkeys" back onBack={leave} action={<Button onClick={add}>Add Passkey</Button>}>
-      <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={2} />}>
           <List>
             <For each={mine().passkeys} keyed={(passkey) => passkey.id}>

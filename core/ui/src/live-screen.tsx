@@ -2,7 +2,7 @@ import { createSignal, onSettled, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { assign, createActor, fromCallback, fromPromise, setup } from "xstate"
 import { Button, Icon } from "./button.tsx"
-import { messages, touch } from "./shared.ts"
+import { messages, touch, whole } from "./shared.ts"
 import { Problem, Status } from "./states.tsx"
 
 // Keys as the browser names them, as X does, which is how a screen is told them.
@@ -50,7 +50,7 @@ export function LiveScreen(props: { label: string; screen?: (inputs: ScreenInput
 }
 
 /** What happens to a live screen's connection, as its machine is told it. */
-type Happened = { type: "lost" } | { type: "looked" } | { type: "unseen"; why: string } | { type: "again" }
+type Happened = { type: "lost" } | { type: "looked" } | { type: "unseen"; why: string | Error } | { type: "again" }
 
 function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Promise<unknown>; watch?: boolean }) {
   // What it's of, for good: what's still on its way once it's gone goes to it.
@@ -105,7 +105,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
   /// The connection: video, connected to again when it's lost (as it is when the screen is resized), or else a
   /// picture each second while video is tried again, or else out of reach.
   const machine = setup({
-    types: {} as { context: { tries: number; unseen: number; why?: string }; events: Happened },
+    types: {} as { context: { tries: number; unseen: number; why?: string | Error }; events: Happened },
     actors: {
       connect: fromPromise(({ signal }) => connect(signal)),
       // A picture every `every` ms, while the page is seen: each one that comes, or doesn't, is told.
@@ -114,7 +114,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
           document.visibilityState === "visible" &&
           screen({ action: "screenshot" }).then(
             (data) => (setPicture(data as string), sendBack({ type: "looked" })),
-            (error) => sendBack({ type: "unseen", why: error.message }),
+            (error) => sendBack({ type: "unseen", why: error }),
           )
         take()
         const timer = setInterval(take, input.every)
@@ -122,7 +122,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       }),
     },
     // Why it isn't video: what went wrong connecting, or getting a picture.
-    actions: { why: assign({ why: ({ event }) => ("why" in event ? event.why : ((event as { error?: Error }).error?.message ?? "")) }) },
+    actions: { why: assign({ why: ({ event }) => ("why" in event ? event.why : ((event as { error?: Error }).error ?? "")) }) },
     delays: { retry: ({ context }) => RETRIES[Math.min(context.tries, RETRIES.length - 1)] },
     guards: { video: () => "RTCPeerConnection" in window, lasting: ({ context }) => context.unseen + 1 >= LASTING },
   }).createMachine({
@@ -384,7 +384,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       </div>
       <div class="bar">
         <Show when={state().matches("pictures")}>
-          <p class="note" title={state().context.why}>
+          <p class="note" title={state().context.why && whole(state().context.why!)}>
             Live video isn't connecting, so this updates each second.
           </p>
         </Show>

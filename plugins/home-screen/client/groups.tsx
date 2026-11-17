@@ -43,7 +43,7 @@ async function change(tool: string, inputs: object) {
     await call(tool, inputs)
     return true
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   } finally {
     refresh(groups)
   }
@@ -134,7 +134,7 @@ function Groups(props: { groups: Group[] & { people: Person[] } }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your groups" text={String((error() as Error).message ?? error())} />}>
+    <Errored fallback={(error) => <Problem heading="Can't show your groups" text={error() as Error} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Groups groups={groups()} />
       </Loading>

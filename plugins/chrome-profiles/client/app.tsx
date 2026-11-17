@@ -45,10 +45,10 @@ function Updating(props: { profile: Profile }) {
     setBusy(tool)
     await call(`chrome-profiles_${tool}`, { profile: p().profile })
       .then(() => toast(tool === "save" ? `Saved ${p().profile}` : `Closed ${p().profile} without saving`))
-      .catch((error) => toast(error.message))
+      .catch(toast)
     setBusy()
   }
-  const again = () => call("chrome-profiles_update", { profile: p().profile }).catch((error) => toast(error.message))
+  const again = () => call("chrome-profiles_update", { profile: p().profile }).catch(toast)
   const session = u().session
   // One function for as long as it's ready, so the list asked again doesn't connect to it again.
   const screen = (inputs: { action: string }) => call("chrome_screen", { session, ...inputs })
@@ -94,7 +94,7 @@ function Detail(props: { profile: Profile }) {
   const act = async ({ value }: { value: string }) => {
     if (value === "rename") return setAsking("rename")
     const yes = await confirm({ heading: `Delete ${p().profile}?`, text: "Every site signed in on it is signed out, for good.", action: "Delete", destructive: true })
-    if (yes) await call("chrome-profiles_remove", { profile: p().profile }).then(() => setOpen()).catch((error) => toast(error.message))
+    if (yes) await call("chrome-profiles_remove", { profile: p().profile }).then(() => setOpen()).catch(toast)
   }
   return (
     <Screen
@@ -135,7 +135,7 @@ function Update(props: { profile: string }) {
   const [busy, setBusy] = createSignal(false)
   const update = async () => {
     setBusy(true)
-    await call("chrome-profiles_update", { profile: props.profile }).catch((error) => toast(error.message))
+    await call("chrome-profiles_update", { profile: props.profile }).catch(toast)
     setBusy(false)
   }
   return (
@@ -153,7 +153,7 @@ function Ask() {
     setBusy(true)
     await call(`chrome-profiles_${tool}`, inputs)
       .then(() => (setOpen(typed), setAsking()))
-      .catch((error) => toast(error.message))
+      .catch(toast)
     setBusy(false)
   }
   return (
@@ -173,7 +173,7 @@ function App() {
   changed(() => refresh(profiles))
   const opened = () => profiles().find((p) => p.profile === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your profiles" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your profiles" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail profile={opened()!} /></Show>}>
           <Screen heading="Chrome Profiles" back onBack={leave} action={<Button variant="outline" onClick={() => setAsking("add")}>Add Profile</Button>}>

@@ -76,7 +76,7 @@ async function does(tool: string, inputs: object) {
     again()
     return true
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
     return false
   }
 }
@@ -408,7 +408,7 @@ function Vault() {
 
 render(
   () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your Vault" text={String((error() as Error).message ?? error())} />}>
+    <Errored fallback={(error) => <Problem heading="Can't show your Vault" text={error() as Error} />}>
       <Loading fallback={<Skeleton rows={4} />}>
         <Vault />
       </Loading>

@@ -59,7 +59,7 @@ function App() {
   changed(() => refresh(screens))
   const opened = () => screens().find((screen) => address(screen) === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your screens" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your screens" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={screens().length}><Empty>Pick a screen to watch it.</Empty></Show>}><Detail screen={opened()!} /></Show>}>
           <Screen heading="Computer Use" back onBack={leave}>

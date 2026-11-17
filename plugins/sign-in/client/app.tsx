@@ -134,7 +134,7 @@ async function doing(does: () => Promise<unknown>) {
     await does()
     return true
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   } finally {
     refresh(mine)
   }
@@ -287,7 +287,7 @@ function Devices(props: { all: All }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Devices" back onBack={leave}><Problem heading="Can't show your devices" text={String((error() as Error).message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Devices" back onBack={leave}><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
       <Loading fallback={<Screen heading="Devices" back onBack={leave}><Skeleton rows={3} /></Screen>}>
         <Devices all={mine()} />
       </Loading>

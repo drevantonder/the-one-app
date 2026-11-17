@@ -71,7 +71,7 @@ async function doing<T>(does: () => Promise<T>): Promise<T | true | false> {
     const result = await does()
     return result ?? true
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
     return false
   } finally {
     refresh(backups)
@@ -300,7 +300,7 @@ function Backups(props: { all: All }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Backups" back onBack={leave}><Problem heading="Can't show backups" text={String((error() as Error).message ?? error())} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Backups" back onBack={leave}><Problem heading="Can't show backups" text={error() as Error} /></Screen>}>
       <Loading fallback={<Screen heading="Backups" back onBack={leave}><Skeleton rows={3} /></Screen>}>
         <Backups all={backups()} />
       </Loading>

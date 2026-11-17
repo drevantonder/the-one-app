@@ -50,7 +50,7 @@ async function put(page: Page, plugin: Plugin, there: boolean) {
     else if (item?.put) await call("home-screen_remove", { plugin: plugin.plugin }, { subject: page.subject })
     else await call("uninstall", { name: item!.name }, { subject: page.subject })
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   }
   refresh(store)
 }
@@ -94,7 +94,7 @@ render(
   () => (
     <Screen heading="Apps" back onBack={leave}>
       <style>{".icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; } .about { margin: 0 0 1rem; }"}</style>
-      <Errored fallback={(error) => <Problem heading="Can't show the apps" text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show the apps" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <Store store={store()} />
         </Loading>

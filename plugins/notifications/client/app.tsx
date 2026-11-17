@@ -51,7 +51,7 @@ async function change(tool: string, input = {}) {
   try {
     await call(tool, input)
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   }
   refresh(inbox)
 }
@@ -61,7 +61,7 @@ async function tryPush() {
   try {
     await client({ push: true })
   } catch (error) {
-    toast((error as Error).message)
+    toast(error as Error)
   }
   refresh(inbox)
 }
@@ -113,7 +113,7 @@ const More = () => (
 render(
   () => (
     <Screen heading="Notifications" back onBack={leave} action={<Show when={inbox()?.notifications.length}><More /></Show>}>
-      <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={String((error() as Error).message ?? error())} />}>
+      <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <Show when={inbox().push}>{(push) => <PushState push={push()} />}</Show>
           <Section>

@@ -34,10 +34,11 @@ export function Skeleton(props: { rows?: number }) {
 /// `<Problem heading="Couldn't load notes" text="The server didn't answer." action={<Button>Try again</Button>} />`:
 /// a problem, shown on the thing it's about: a symbol, a short `heading`, one sentence of `text`, and the action
 /// that fixes it. Red, for what needs the user now; `warn` for what can wait. It's what `<Errored fallback>` shows.
-/// A `text` that's a tool's error, or the `message` of one `call` threw, shows what a person reads of it
-/// (`readable`), and the rest under Show Details, to copy for an agent or for support.
-export function Problem(props: { heading: JSX.Element; text?: JSX.Element; action?: JSX.Element; warn?: boolean }) {
-  const all = () => (typeof props.text === "string" ? whole(props.text) : undefined)
+/// A `text` that's an error, as `call` throws it (`<Errored fallback={(error) => <Problem text={error()} />}>`), or a
+/// tool's error as text, shows what a person reads of it (`readable`), and the rest under Show Details, to copy for an
+/// agent or for support.
+export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Error; action?: JSX.Element; warn?: boolean }) {
+  const all = () => (typeof props.text === "string" || props.text instanceof Error ? whole(props.text) : undefined)
   const [open, setOpen] = createSignal(false)
   return (
     <div class="ui-state" role="alert">
@@ -45,7 +46,7 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element; actio
         <Icon name="warning-circle" />
         <strong>{props.heading}</strong>
         <Show when={props.text}>
-          <p>{all() === undefined ? props.text : readable(all()!)}</p>
+          <p>{all() === undefined ? (props.text as JSX.Element) : readable(all()!)}</p>
         </Show>
         <Show when={all() && all() !== readable(all()!)}>
           <details onToggle={(event) => setOpen(event.currentTarget.open)}>

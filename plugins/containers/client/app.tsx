@@ -29,7 +29,7 @@ function Container(props: { container: Listed }) {
       const yes = await confirm({ heading: `Remove ${c().name}?`, text: "Its files go with it, for good.", action: "Remove", destructive: true })
       if (!yes) return
     }
-    await call(`containers_${value}`, { container: c().name }).catch((error) => toast(error.message))
+    await call(`containers_${value}`, { container: c().name }).catch(toast)
   }
   return (
     <Row
@@ -58,7 +58,7 @@ function App() {
   changed(() => refresh(containers))
   return (
     <Screen heading="Containers" back onBack={leave}>
-      <Errored fallback={(error, reset) => <Problem heading="Couldn't list your containers" text={(error() as Error).message} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+      <Errored fallback={(error, reset) => <Problem heading="Couldn't list your containers" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
         <Loading fallback={<Skeleton rows={3} />}>
           <Show when={containers().length} fallback={<Empty>No containers. Your agents create them as they need them.</Empty>}>
             <List>
