@@ -43,9 +43,22 @@
       <div id="problem-action" class="action"><button id="problem-button" class="ui-button press ring" data-variant="outline">Try Again</button></div>
     </div>
   </div>
+  <!-- Over the app that's showing, when its page didn't open: the UI library's Problem. -->
+  <div id="page-problem" class="ui-state middle" hidden>
+    <div class="problem" role="alert">
+      <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg>
+      <strong id="page-problem-heading"></strong>
+      <p>Try again in a moment.</p>
+      <details id="page-problem-details">
+        <summary class="ring"><svg class="ui-icon along" viewBox="0 0 256 256" aria-hidden="true"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></svg><span class="show">Show Details</span><span class="hide">Hide Details</span></summary>
+        <div class="ui-details"><pre id="page-problem-details-text"></pre></div>
+      </details>
+      <div class="action"><button id="page-problem-button" class="ui-button press ring" data-variant="outline">Try Again</button></div>
+    </div>
+  </div>
   <div id="passing">
     <div id="update" class="ui-toast" role="status" hidden>
-      <p>Update ready</p>
+      <p>Updated</p>
       <button id="reload" class="press ring">Reload</button>
     </div>
   </div>

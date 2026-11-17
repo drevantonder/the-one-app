@@ -9,7 +9,7 @@
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, invoke, listen, openLink, sandbox } from "./host.js"
-/** @import { Context, Moved, Told, View } from "./host.js" */
+/** @import { Context, Moved, Paged, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -43,6 +43,9 @@ const key = (app, subject) => `${subject ?? ""}|${app}`
 /// Each plugin's first app, by the plugin's name, among this user's: what a notification from it opens.
 /** @type {Map<string, string>} */
 let first = new Map()
+/// Each app's name, by its page, as this user's apps list them.
+/** @type {Map<string, string>} */
+let names = new Map()
 /// Who this client has listed files for: its user (`undefined`), and each group or the network an app was opened
 /// for.
 /** @type {Set<string | undefined>} */
@@ -205,6 +208,66 @@ const shown = createActor(machine)
 /** @param {Moved} event */
 const on = (event) => shown.send(event)
 
+/// Each open app's page, one state at a time, as its person's owner signed it off: loading, then current until its
+/// plugin or the UI library is updated under it, which makes it stale. A stale page loads again by itself only at a
+/// boundary, as an iPhone updates an app while it's closed and a web app loads its new version on the next
+/// navigation: once it's off screen (another app over it, the window hidden), or as it's opened again. On screen,
+/// it says so quietly, "Updated · Reload", and loads again only once its person presses Reload: nothing is reloaded
+/// under them. A page that doesn't draw has failed, with Try Again. The launcher's page is one too.
+const pageMachine = setup({
+  types: /** @type {{ context: { view: View, why?: string }, input: View, events: Paged }} */ ({}),
+  guards: {
+    away: ({ context }) => !onScreen(context.view),
+  },
+  actions: {
+    load: ({ context }) => reloadPage(context.view),
+    failed: ({ context }) => {
+      const { view, why } = context
+      // How long it took to open is told only of an open that ended with it drawn.
+      view.tapped = undefined
+      report("one.client.open", why ?? "", { "one.view": view.app.split("/")[0] })
+      // A launcher that never draws leaves nothing to show.
+      if (view.app === launcher) on({ type: "failed", why: why ?? "" })
+      notes()
+    },
+    notes: () => notes(),
+  },
+}).createMachine({
+  id: "page",
+  initial: "loading",
+  context: ({ input }) => ({ view: input }),
+  states: {
+    loading: {
+      on: { drawn: "current" },
+      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.app} didn't draw in ${NEVER / 1000} s.` }) } },
+    },
+    current: {
+      on: { stale: "stale" },
+    },
+    stale: {
+      entry: "notes",
+      exit: "notes",
+      always: { guard: "away", target: "reloading" },
+      on: { away: "reloading", opened: "reloading", reload: "reloading" },
+    },
+    reloading: {
+      entry: "load",
+      on: { drawn: "current" },
+      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.app} didn't draw in ${NEVER / 1000} s.` }) } },
+    },
+    failed: {
+      entry: "failed",
+      exit: "notes",
+      on: { retry: { target: "loading", actions: "load" } },
+    },
+  },
+})
+/** @param {View} view @param {Paged} event */
+const page = (view, event) => view.page.send(event)
+/// Whether an app's page is in front of its person: the one showing, in a window that's on screen.
+/** @param {View} view */
+const onScreen = (view) => !document.hidden && view === showing(history.state)
+
 /// What the window says as it opens: the steps it takes to its person's home, the first of which says whether its
 /// network answers. With a launcher kept from before, it's starting that alone.
 /** @param {Context} context @returns {{ steps: string[], at: number, text?: string }} */
@@ -324,7 +387,9 @@ async function list(subject) {
   listed.add(subject)
   try {
     let { resources, outdated } = await invoke("apps", { subject })
-    for (const view of open.values()) if (outdated.includes(view.host)) view.stale = true
+    // A screen runs its own plugin and the UI library, which every one of them runs.
+    const library = outdated.some((host) => host.split(".")[0] === "ui")
+    for (const view of open.values()) if (library || outdated.includes(view.host)) page(view, { type: "stale" })
     if (!subject) {
       if (!launcherIn(resources) && shown.getSnapshot().matches("opening")) {
         await invoke("refresh", { view: "client" })
@@ -338,7 +403,6 @@ async function list(subject) {
   } catch {
     // Nothing kept, and its network didn't answer: it's listed again once it does.
   }
-  reload()
 }
 
 /// The launcher's page among the files listed, and with them, which app each plugin opens first (`first`) and the
@@ -352,6 +416,7 @@ function launcherIn(resources) {
   }
   // The last one set for a plugin is the one kept: its first.
   first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
+  names = new Map(pages.map(({ uri, name }) => [named(uri), name ?? ""]))
   const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
   plugins = found("plugins") ? named(/** @type {string} */ (found("plugins"))) : ""
   return found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
@@ -379,24 +444,36 @@ async function only() {
   }
 }
 
-/// Loads again each open app that has a new version, as a web app picks up its own, unless its person may be in
-/// the middle of something there: it's the one showing, and has the keyboard. That one says an update is ready, and
-/// loads again once they press Reload, leave it, or put the window away. With `now`, every one does.
-async function reload(now = false) {
-  for (const view of open.values()) {
-    const busy = !document.hidden && view === showing(history.state) && document.activeElement === view.frame
-    if (!view.stale || (busy && !now)) continue
-    view.stale = false
-    post(view, { id: "teardown", method: "ui/resource-teardown", params: { reason: "A new version" } })
-    await invoke("close", { view: view.key })
-    view.drawn = false
-    // Loaded again in place, so the way back still leads out of the app.
-    const page = /** @type {Window} */ (view.frame.contentWindow)
-    page.location.replace(address(view))
-  }
-  byId("update").hidden = ![...open.values()].some(({ stale }) => stale)
+/// Loads an app's page again, in place, so the way back still leads out of the app: told first, as an MCP App is
+/// before its host takes it down, and what it was answered forgotten.
+/** @param {View} view */
+function reloadPage(view) {
+  post(view, { id: "teardown", method: "ui/resource-teardown", params: { reason: "A new version" } })
+  invoke("close", { view: view.key }).finally(() => /** @type {Window} */ (view.frame.contentWindow).location.replace(address(view)))
 }
-byId("reload").addEventListener("click", () => reload(true))
+
+/// Says over the app that's showing what its page needs of its person, if anything: that it's been updated, with
+/// Reload, or that it didn't open, with Try Again.
+function notes() {
+  const view = showing(history.state)
+  const now = view?.page.getSnapshot()
+  byId("update").hidden = !now?.matches("stale")
+  byId("page-problem").hidden = !now?.matches("failed")
+  if (view && now?.matches("failed")) {
+    byId("page-problem-heading").textContent = `${names.get(view.app) ?? "This app"} didn't open`
+    byId("page-problem-details-text").textContent = now.context.why ?? ""
+  }
+}
+byId("reload").addEventListener("click", () => {
+  const view = showing(history.state)
+  if (view) page(view, { type: "reload" })
+})
+byId("page-problem-button").addEventListener("click", () => {
+  const view = showing(history.state)
+  if (!view) return
+  view.tapped = performance.now()
+  page(view, { type: "retry" })
+})
 
 /// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown.
 /** @param {string} app @param {string} [subject] @returns {View} */
@@ -406,7 +483,12 @@ function load(app, subject) {
   if (opened) return opened
   if (!listed.has(subject)) list(subject)
   const place = { key: at, app, subject, host: host(app, subject) }
-  const view = { ...place, frame: Object.assign(document.createElement("iframe"), { src: address(place), inert: true }) }
+  const frame = Object.assign(document.createElement("iframe"), { src: address(place), inert: true })
+  /** @type {View} */
+  const view = Object.assign({ ...place, frame }, { page: /** @type {View["page"]} */ (/** @type {unknown} */ (undefined)) })
+  view.page = createActor(pageMachine, { input: view })
+  view.page.subscribe(() => notes())
+  view.page.start()
   view.frame.setAttribute("sandbox", sandbox)
   if (app === launcher) view.frame.className = "launcher"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`),
@@ -436,16 +518,12 @@ function move(change, back = false) {
 /** @param {string | null} at @param {number} tapped */
 function show(at, tapped) {
   const view = layer(at)
-  reload()
   if (!view) return
   view.tapped = tapped
-  setTimeout(() => {
-    if (view.tapped !== tapped || view.drawn) return
-    report("one.client.open", `Didn't open in ${NEVER / 1000} s`, { "one.view": view.app.split("/")[0] })
-    // A launcher that never draws leaves nothing to show: trying again loads it again.
-    if (view.app === launcher) on({ type: "failed", why: `${launcher} didn't draw in ${NEVER / 1000} s.` })
-  }, NEVER)
-  if (!view.drawn) return
+  // Opened again, a stale page loads its new version as it opens.
+  page(view, { type: "opened" })
+  notes()
+  if (!view.page.getSnapshot().matches("current")) return
   // Its user returned to it.
   invoke("refresh", { view: view.key })
   opened(view)
@@ -457,7 +535,10 @@ function show(at, tapped) {
 function layer(at) {
   const view = showing(at)
   const home = open.get(key(launcher))
-  for (const other of open.values()) other.frame.inert = other !== view
+  for (const other of open.values()) {
+    other.frame.inert = other !== view
+    if (other !== view) page(other, { type: "away" })
+  }
   if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, subject: view.subject } })
   gestures()
   return view
@@ -632,7 +713,8 @@ addEventListener("message", async ({ source, data }) => {
   }
   // It has what it draws from once the client has answered it something.
   if (method.startsWith("ui/") || method.startsWith("one/")) return
-  view.drawn = true
+  if (view.page.getSnapshot().matches("current")) return
+  page(view, { type: "drawn" })
   if (!view.frame.inert) opened(view)
 })
 
@@ -661,6 +743,11 @@ async function hearTaps() {
   await window.__TAURI__.core.addPluginListener("notifications", "notificationClicked", (tapped) => invoke("tapped", { tapped }))
   await invoke("plugin:notifications|set_click_listener_active", { active: true })
 }
+
+// A server says which open apps were loaded against a version that's gone.
+listen("stale", ({ payload: hosts }) => {
+  for (const view of open.values()) if (hosts.includes(view.host)) page(view, { type: "stale" })
+})
 
 listen("changed", ({ payload: view }) => {
   if (view === "client") for (const subject of listed) list(subject)
@@ -703,7 +790,8 @@ byId("open-plugins").addEventListener("click", () => on({ type: "openPlugins" })
 function returned() {
   if (!shown.getSnapshot().matches("launcher")) return
   invoke("visible", { onScreen: !document.hidden })
-  if (document.hidden) return void reload()
+  // Put away, the window's stale pages load their new versions.
+  if (document.hidden) return void open.forEach((view) => page(view, { type: "away" }))
   for (const subject of listed) list(subject)
   invoke("refresh", { view: key(launcher) })
   if (open.has(history.state)) invoke("refresh", { view: history.state })
@@ -714,7 +802,7 @@ addEventListener("focus", returned)
 /// Shows the launcher, once this user's files have listed one: loaded, or loaded again where it was open.
 function start() {
   const home = open.get(key(launcher))
-  if (home) /** @type {Window} */ (home.frame.contentWindow).location.replace(address(home))
+  if (home) page(home, { type: "retry" })
   else load(launcher)
   // The app that was showing when the page was loaded again is gone, so the launcher shows.
   if (history.state) history.replaceState(null, "")

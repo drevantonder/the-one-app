@@ -485,16 +485,18 @@ defmodule OneCore.Plugins.Lifecycle do
   defp installed?(artifact),
     do: Installed.installed_for(artifact) != [] or Plugins.plugin(Store.whose(artifact), Path.basename(artifact)) == artifact
 
-  # What runs for `owner` changed: it runs here, with what's loaded already, and their other servers look.
+  # What runs for `owner` changed: it runs here, with what's loaded already, its clients are told what each of their
+  # plugins runs at now, and their other servers look.
   defp ran(owner, loaded \\ []) do
     Plugins.sync(owner, loaded)
+    Server.changed([owner])
     Server.notify_servers([owner])
   end
 
   # Where a plugin's updates are moved, told to whoever has it installed, so their clients ask again.
   defp told(artifact, record \\ nil) do
     owners = Enum.uniq([Store.whose(artifact) | Installed.installed_for(artifact)])
-    Server.changed()
+    Server.changed(owners)
     Server.notify_servers(owners, "changed")
     record
   end
@@ -503,7 +505,7 @@ defmodule OneCore.Plugins.Lifecycle do
   # `nil`, or `{:error, why}`.
   defp move(owner, name, event) do
     with record when not is_tuple(record) <- Installed.change(owner, name, event) do
-      Server.changed()
+      Server.changed([owner])
       Server.notify_servers([owner], "changed")
       record
     end

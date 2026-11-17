@@ -15,9 +15,25 @@ defmodule OneCore.Server do
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc "Tells every client that's watching that something changed, so that it asks again. With no server started, nobody is told."
-  def changed do
-    GenServer.cast(__MODULE__, {:notify, JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed"})})
+  @doc """
+  Tells every client that's watching that something changed, so that it asks again. It says the UI library's build
+  (`library`), and for each of `owners` whose plugins moved, the version each of theirs runs at (`plugins`): an app's
+  screen loaded against another of either is stale, and its client loads it again. With no server started, nobody is
+  told. The versions are looked up apart from whoever says it, which may be what keeps them.
+  """
+  def changed(owners \\ []) do
+    Task.Supervisor.start_child(OneCore.Asks, fn ->
+      plugins =
+        Map.new(owners, fn owner ->
+          {owner, for({name, version} <- Plugins.versions([owner]), into: %{}, do: {name, version.code})}
+        end)
+
+      params = %{library: OneCore.App.library().code, plugins: plugins}
+      notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed", params: params})
+      GenServer.cast(__MODULE__, {:notify, notification})
+    end)
+
+    :ok
   end
 
   @doc """
@@ -190,7 +206,7 @@ defmodule OneCore.Server do
     Servers.reload(owner)
     OneCore.Plugins.Deploy.forget()
     if owner == "network", do: Hooks.invalidate(["device"])
-    if Plugins.sync(owner), do: changed()
+    if Plugins.sync(owner), do: changed([owner])
     # A plugin updated by a server elsewhere may require what isn't installed for them yet.
     if Servers.here?(owner), do: Task.start(fn -> OneCore.Plugins.Lifecycle.required(owner) end)
     :ok

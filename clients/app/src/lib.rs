@@ -119,8 +119,33 @@ impl Views {
         self.read(&resource).await
     }
 
-    /// The open apps for `subject` that loaded a file a server no longer lists: one of their plugins has a new version.
-    /// They have loaded nothing once this has named them.
+    /// The open apps loaded against a version of their plugin, or a build of the UI library, that `changed` says
+    /// isn't the one there is now, each as its address names it: a server says the UI library's build (`library`),
+    /// and the version each plugin of the owners whose plugins moved runs at (`plugins`, by owner). A version that's
+    /// still one of them is current, as an app opened for another owner may be on its own. Another plugin's files an
+    /// app shows, as the launcher shows every app's icon, aren't what it runs. They have loaded nothing once this has
+    /// named them.
+    fn stale(&self, changed: &Value) -> Vec<String> {
+        let gone = |plugin: &str, code: &str| {
+            if plugin == "ui" {
+                return changed["library"].as_str().is_some_and(|library| library != code);
+            }
+            let owners = changed["plugins"].as_object().into_iter().flat_map(|owners| owners.values());
+            let now: Vec<&str> = owners.filter_map(|plugins| plugins[plugin].as_str()).collect();
+            !now.is_empty() && !now.contains(&code)
+        };
+        let mut loaded = self.loaded.lock().expect("no view panics");
+        let stale: Vec<String> = loaded
+            .iter()
+            .filter(|(app, files)| runs(app, files).any(|(_, plugin, code)| gone(plugin, code)))
+            .map(|(app, _)| app.clone())
+            .collect();
+        loaded.retain(|app, _| !stale.contains(app));
+        stale
+    }
+
+    /// The open apps for `subject` that run a file a server no longer lists (`runs`): their plugin or the UI library has
+    /// a new version. They have loaded nothing once this has named them.
     fn outdated(&self, subject: Option<&str>, listed: &Value) -> Vec<String> {
         let listed: HashSet<&str> = resources(listed).collect();
         let whose = subject.map(|subject| subject.split('/').rev().collect::<Vec<_>>().join("."));
@@ -128,7 +153,7 @@ impl Views {
         let outdated: Vec<String> = loaded
             .iter()
             .filter(|(app, _)| app.split_once('.').map(|(_, whose)| whose) == whose.as_deref())
-            .filter(|(_, files)| files.iter().any(|file| !listed.contains(file.as_str())))
+            .filter(|(app, files)| runs(app, files).any(|(file, ..)| !listed.contains(file)))
             .map(|(app, _)| app.clone())
             .collect();
         loaded.retain(|app, _| !outdated.contains(app));
@@ -139,6 +164,14 @@ impl Views {
 /// The address of each file in a list of them.
 fn resources(listed: &Value) -> impl Iterator<Item = &str> {
     listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str())
+}
+
+/// What an open app, by its address's name, runs of the `files` it loaded: its own plugin's and the UI library's, each
+/// as its address, plugin and version's code. Another plugin's file it shows, as the launcher shows every app's
+/// icon, isn't what it runs.
+fn runs<'a>(app: &'a str, files: &'a HashSet<String>) -> impl Iterator<Item = (&'a str, &'a str, &'a str)> {
+    let own = app.split('.').next().unwrap_or(app);
+    files.iter().filter_map(|file| Some((file.as_str(), parts(file)?))).filter(move |(_, (plugin, ..))| [own, "ui"].contains(plugin)).map(|(file, (plugin, code, _))| (file, plugin, code))
 }
 
 /// A plugin's file by its address, `ui://<plugin>/<code>/<path>`: its plugin, the version's code, and its path.
@@ -528,8 +561,9 @@ async fn opens(app: AppHandle) {
         }
     });
 
-    // A server said something changed, so every view on screen asks again. Servers tell this client for as long as
-    // it runs, so a notification reaches it with its window hidden.
+    // A server said something changed, so every view on screen asks again, and the window is told which open apps
+    // were loaded against a version it says is gone (`stale`). Servers tell this client for as long as it runs, so a
+    // notification reaches it with its window hidden.
     let handle = app.clone();
     let mut notifications = client.notifications();
     tauri::async_runtime::spawn(async move {
@@ -537,6 +571,11 @@ async fn opens(app: AppHandle) {
             let views = handle.state::<Views>();
             if message["method"] != "notifications/one/changed" {
                 continue;
+            }
+            let stale = views.stale(&message["params"]);
+            if !stale.is_empty() {
+                eprintln!("a server said {stale:?} were loaded against what's gone");
+                drop(handle.emit("stale", &stale));
             }
             if views.on_screen.load(Ordering::Relaxed) {
                 eprintln!("a server said something changed");

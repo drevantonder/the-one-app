@@ -21,15 +21,25 @@ export interface View {
   host: string
   frame: HTMLIFrameElement
   tapped?: number
-  drawn?: boolean
   over?: boolean
-  /** Whether one of its plugins has a new version it hasn't loaded yet. */
-  stale?: boolean
+  /** Where its page is, one state at a time (`client.js`'s `pageMachine`). */
+  page: import("xstate").AnyActorRef
 }
+
+/** What moves an open app's page (`client.js`): it drew, didn't, was loaded against a version that's gone, went off
+ * screen, was opened again, or its person pressed Reload or Try Again. */
+export type Paged =
+  | { type: "drawn" }
+  | { type: "stale" }
+  | { type: "away" }
+  | { type: "opened" }
+  | { type: "reload" }
+  | { type: "retry" }
 
 /** A file a server lists for an app's page (MCP's `resources/list`). */
 export interface Resource {
   uri: string
+  name?: string
   mimeType?: string
   _meta?: { category?: string }
 }
@@ -125,6 +135,8 @@ export interface Events {
   changed: string
   /** Whether the client reaches its network, as it moves. */
   connection: Connection
+  /** The open apps loaded against a version of a plugin, or a build of the UI library, a server says is gone, as their addresses name them. */
+  stale: string[]
   /** Where the device is with its network, as it moves. */
   session: Told
 }

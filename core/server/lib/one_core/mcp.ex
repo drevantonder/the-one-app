@@ -155,8 +155,8 @@ defmodule OneCore.Mcp do
         ""
 
       # Another server saying where a plugin is in its life for someone moved, which this one's clients ask again.
-      {:ok, %{"method" => "notifications/one/changed"}} ->
-        Server.changed()
+      {:ok, %{"method" => "notifications/one/changed"} = notification} ->
+        Server.changed(for owner <- List.wrap(notification["params"]["owners"]), is_binary(owner), User.owner?(owner), do: owner)
         ""
 
       # A client cancelling a call it asked for that isn't a task, by the request's id, as only it may.

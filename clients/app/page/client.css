@@ -61,8 +61,20 @@ body {
 }
 /* Show Details says Hide Details once it's open, as the UI library's Problem does. */
 #problem-details:not([open]) .hide,
-#problem-details[open] .show {
+#problem-details[open] .show,
+#page-problem-details:not([open]) .hide,
+#page-problem-details[open] .show {
   display: none;
+}
+/* An app's page that didn't open: its problem fills the app's place, over its frame. */
+#page-problem {
+  z-index: 1;
+  grid-area: 2 / 1;
+  box-sizing: border-box;
+  background: var(--background);
+}
+#page-problem p {
+  margin: 0;
 }
 /* While its network doesn't answer, a thin banner across the top of the launcher, which moves it down by its height
    and covers none of it, as a mail or chat app's does. A moment's gap says nothing: it comes in only once it has
