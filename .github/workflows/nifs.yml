@@ -32,6 +32,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit }}
+      # tooling/nifs is bash 4's, which macOS doesn't have.
+      - run: brew install bash
       - run: rustup toolchain install "$RUST" --profile minimal --target aarch64-apple-darwin && rustup default "$RUST"
         env:
           RUST: ${{ inputs.rust }}
