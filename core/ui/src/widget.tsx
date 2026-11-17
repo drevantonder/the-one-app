@@ -222,7 +222,12 @@ export function Widget(props: {
   onOpen?: () => void
 }) {
   return (
-    <div class={["ui-widget", { opens: !!props.onOpen }]} data-size={props.size} onClick={() => props.onOpen?.()}>
+    <div class="ui-widget" data-size={props.size}>
+      {/* What opens the app is a button of its own, spread over the card, so a keyboard reaches it and a screen
+          reader names it; the widget's own buttons and switches sit above it (ui.css). */}
+      <Show when={props.onOpen}>
+        <button type="button" class="open" aria-label={props.name} onClick={() => props.onOpen?.()} />
+      </Show>
       <Show when={props.problem || props.layout?.title !== false}>
         <div class="name">{props.name}</div>
       </Show>

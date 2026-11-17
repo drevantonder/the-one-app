@@ -1824,8 +1824,25 @@ html:has(.ui-sign-in) {
     display: none;
   }
 }
-.ui-widget.opens {
+.ui-widget:has(> .open) {
+  position: relative;
+}
+.ui-widget > .open {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
   cursor: pointer;
+  outline: 0;
+}
+.ui-widget > .open:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--ring);
+}
+.ui-widget:has(> .open) :is(button:not(.open), label) {
+  position: relative;
+  z-index: 1;
 }
 .ui-widget > .name {
   flex: none;
