@@ -22,8 +22,9 @@ defmodule Database do
     lease = Lease.of(call)
     if lease == self(), do: raise("A transaction is already running here: use `query` inside it")
 
-    case :gen_statem.call(lease, {call.own.codec, {:transaction, schema, fun}}) do
+    case :gen_statem.call(lease, {call.own.codec, {:transaction, schema, fun, Lease.job()}}) do
       {:ok, result} ->
+        Lease.marked()
         result
 
       :codec_changed ->

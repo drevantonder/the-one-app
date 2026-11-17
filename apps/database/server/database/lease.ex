@@ -20,9 +20,11 @@ defmodule Database.Lease do
 
   The server holding the lease also makes the calls of the app's scheduled jobs. When each job last ran is a
   row of the database, in `database_scheduled`: the time it was due at. A job that's due is called in a process
-  of its own, and the first transaction that process commits marks it as run, in that same transaction. So the
-  mark and what the call wrote reach the log in one entry, or neither does, and a server that takes the lease
-  reads from the log whether the call is still to make. A call that made no transaction is marked when it ends.
+  of its own, whose transactions carry the job and that time (`job/0`), and the first that commits marks it as run,
+  in that same transaction, or is refused where it's marked already. So the mark and what the call wrote reach the
+  log in one entry, or neither does, whichever process keeps the database by then: a server that takes the lease, or
+  this one's started again, reads from the log whether the call is still to make, and a call it makes again meanwhile
+  writes nothing. A call that made no transaction is marked when it ends.
 
   A call says what wraps the artifact it has (`OneCore.Artifact`). If that isn't what this was opened with, the
   database closes, and the call opens it again: an encrypted artifact's keys are given anew to a server that was
@@ -73,6 +75,15 @@ defmodule Database.Lease do
   # whether it's `marked` as run yet. A field's default is what's safe for a database that was open under a version
   # of this module without it (`code_change/4`): never seen free, so it looks before it answers.
   defstruct [:artifact, :server, :folder, :db, :proved, :settled, number: 0, logged: 0, pages: 0, firing: %{}]
+
+  @doc """
+  The scheduled job this process is the call of, `{job, at}`, until a transaction it made has marked it as run
+  (`marked/0`), or `nil`.
+  """
+  def job, do: Process.get(__MODULE__)
+
+  @doc "This process's scheduled job is marked as run."
+  def marked, do: Process.delete(__MODULE__)
 
   @doc """
   The process for the database that is the calling app's own artifact, on the server running the call. It
@@ -137,13 +148,11 @@ defmodule Database.Lease do
       when elem(ask, 0) in [:transaction, :schedule],
       do: {:keep_state_and_data, {:reply, from, {:held_by, server}}}
 
-  def handle_event({:call, {caller, _tag}} = type, {_codec, {:transaction, schema, fun}} = content, state, data) do
-    firing = data.firing[caller]
-
+  def handle_event({:call, _from} = type, {_codec, {:transaction, schema, fun, job}} = content, state, data) do
     transact({type, content}, state, data, fn db ->
       migrate(db, schema)
       result = fun.(db)
-      if firing && not firing.marked, do: mark(db, firing)
+      if job, do: mark(db, job)
       result
     end)
   end
@@ -156,7 +165,7 @@ defmodule Database.Lease do
   def handle_event(:info, {:DOWN, _monitor, :process, caller, _why} = down, state, data) do
     case pop_in(data.firing[caller]) do
       {%{marked: false} = firing, data} when state in [:settling, :holding] ->
-        transact({:info, down}, state, data, &mark(&1, firing))
+        transact({:info, down}, state, data, &mark(&1, {firing.job, firing.at}))
 
       {_firing, data} ->
         {:keep_state, data}
@@ -218,8 +227,10 @@ defmodule Database.Lease do
   # job whose call made it is marked as run, and the jobs a schedule found due are called, each in a process of its
   # own. A call that has marked its job as run is done with it, even while its process is still ending. A database
   # is kept as a snapshot once its log is long enough.
-  defp done({{:call, {caller, _tag} = from}, {_codec, {:transaction, _schema, _fun}}}, ran, data) do
-    data = if data.firing[caller] && match?({:ok, _}, ran), do: put_in(data.firing[caller].marked, true), else: data
+  defp done({{:call, {caller, _tag} = from}, {_codec, {:transaction, _schema, _fun, job}}}, ran, data) do
+    data =
+      if job && data.firing[caller] && match?({:ok, _}, ran), do: put_in(data.firing[caller].marked, true), else: data
+
     {snapshot(data, ran), [{:reply, from, ran}]}
   end
 
@@ -228,7 +239,12 @@ defmodule Database.Lease do
 
     firing =
       for {job, at, called} <- due, job not in calling, into: data.firing do
-        {caller, _monitor} = spawn_monitor(fn -> fire.(called) end)
+        {caller, _monitor} =
+          spawn_monitor(fn ->
+            Process.put(__MODULE__, {job, at})
+            fire.(called)
+          end)
+
         {caller, %{job: job, at: at, marked: false}}
       end
 
@@ -302,7 +318,7 @@ defmodule Database.Lease do
 
   # Marks a job as run for the time it was due at. If it's marked already, a server that held the lease
   # meanwhile made the call, and this one's writes aren't kept.
-  defp mark(db, %{job: job, at: at}) do
+  defp mark(db, {job, at}) do
     marked = "update database_scheduled set fired = ? where job = ? and fired < ? returning job"
     if Database.query(db, marked, [at, job, at]) == [], do: raise("Another server made this scheduled call")
   end
