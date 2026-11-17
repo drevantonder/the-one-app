@@ -32,12 +32,13 @@ defmodule OneCore.Plugins.Version do
   both from its `requires/0` (`OneCore.Plugin`). `exports` are the functions its module provides other plugins, as name/arity, which run inside
   each plugin that requires it. `artifact` is the plugin it's a version of, which whatever loaded it says.
 
-  A version runs only on a server whose build its `core` allows: one that doesn't is refused where it's deployed, and
-  where it's loaded runs nowhere here, as one that doesn't compile, until the server is updated.
+  A version runs only on a server whose build its `core` allows (`platform/1`): one that doesn't is refused where it's
+  deployed, and where it's loaded runs nowhere here, as one that doesn't compile, until the server or it is updated.
 
   A server that doesn't run a plugin for whoever it's installed for never loads its code: it knows the version only
   by what it says of itself (`OneCore.Plugins.Version.Description`).
   """
+  alias OneCore.Builds
   alias OneCore.Plugins.LoadedVersion
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :services, :hooks, :offers, :jobs, :code]
@@ -127,6 +128,44 @@ defmodule OneCore.Plugins.Version do
 
   defp text(text) when is_binary(text), do: text
   defp text(_), do: nil
+
+  @doc """
+  Whether a version runs on this server, from its `core` and the server's build, worked out each time it's asked,
+  never kept: `:runs` where its `core` allows the server's build or it says none, `:waiting_for_server` where it
+  needs a newer platform, until the servers are updated, and `:waiting_for_plugin` where the server is newer than it
+  allows, until it's updated.
+  """
+  def platform(%__MODULE__{core: nil}), do: :runs
+
+  def platform(%__MODULE__{core: core}) do
+    build = Builds.version(Builds.build())
+
+    cond do
+      Elixir.Version.match?(build, core) -> :runs
+      Elixir.Version.compare(build, lowest(core)) == :lt -> :waiting_for_server
+      true -> :waiting_for_plugin
+    end
+  end
+
+  @doc "Why the version `version` of the plugin `name` doesn't run on this server (`platform/1`), or `nil` where it does."
+  def waiting(name, version) do
+    case platform(version) do
+      :runs ->
+        nil
+
+      :waiting_for_server ->
+        "#{name} waits for the servers' update: it requires core #{version.core}, and this server is on #{Builds.build()}"
+
+      :waiting_for_plugin ->
+        "#{name} needs an update for #{Builds.series_name(Builds.build())}: it requires core #{version.core}"
+    end
+  end
+
+  # The lowest version a requirement allows, the first it names: `~> 0.16.0` or `>= 0.16.0 and < 0.18.0`'s 0.16.0.
+  defp lowest(core) do
+    [named] = Regex.run(~r/\d+\.\d+(?:\.\d+)?/, core)
+    Elixir.Version.parse!(if length(String.split(named, ".")) == 2, do: named <> ".0", else: named)
+  end
 
   @doc "Whether a version is only described here, not loaded (`described/2`)."
   def described?(%__MODULE__{under: under}), do: is_tuple(under)

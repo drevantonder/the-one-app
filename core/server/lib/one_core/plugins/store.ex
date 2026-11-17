@@ -206,7 +206,7 @@ defmodule OneCore.Plugins.Store do
   described, as the server that deployed it described it in its sandbox. `{:ok, version}`, or `:error`.
   """
   def version(artifact, code, _load, false) do
-    with {:ok, version} <- held(artifact, code), do: {:ok, %{version | trusted: false}}
+    with {:ok, version} <- held(artifact, code), :ok <- runs(version), do: {:ok, %{version | trusted: false}}
   end
 
   def version(artifact, code, true, true), do: loaded(artifact, code)
@@ -253,6 +253,29 @@ defmodule OneCore.Plugins.Store do
     :ok
   end
 
+  # A version this server can't run, for its `core`, is let go of and said in telemetry (`OneCore.Plugins.Version.platform/1`).
+  defp runs(version) do
+    if why = Version.waiting(Path.basename(version.artifact), version) do
+      Logger.warning(why)
+      LoadedVersion.release([version])
+      :error
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Whether the plugin `artifact`'s latest version runs on this server's platform, as `name`
+  (`OneCore.Plugins.Version.platform/1`): `%{state: :runs | :waiting_for_server | :waiting_for_plugin, why: ...}`,
+  from what it said of itself, or `nil` where no server has described it.
+  """
+  def platform(name, artifact) do
+    with %{"code" => code} <- about(artifact),
+         {:ok, version} <- described(artifact, code),
+         do: %{state: Version.platform(version), why: Version.waiting(name, version)},
+         else: (_ -> nil)
+  end
+
   @doc """
   A set of files of a plugin, by their paths: the files the server keeps, or with `"source"` the ones they were
   built from. Read at once: a bucket at an address is asked for each over the internet.
@@ -276,7 +299,7 @@ defmodule OneCore.Plugins.Store do
     case LoadedVersion.load(artifact, code, &Compile.compile(artifact, files(artifact, code), &1)) do
       {:ok, version, _warnings} ->
         describe(version)
-        {:ok, version}
+        with :ok <- runs(version), do: {:ok, version}
 
       {:error, why} ->
         Logger.error("#{artifact} isn't updated here, because its latest version doesn't load:\n#{why}")

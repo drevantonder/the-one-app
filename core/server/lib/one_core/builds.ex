@@ -15,7 +15,7 @@ defmodule OneCore.Builds do
   `devices/<key>`, which it says as it renews its pass (`seen/3`).
   """
   alias OneCore.{Bucket, Server, Servers}
-  alias OneCore.Plugins.Store
+  alias OneCore.Plugins.{Installed, Store}
 
   @builds "network/builds/"
   @latest @builds <> "latest"
@@ -55,6 +55,14 @@ defmodule OneCore.Builds do
 
   defp series(%Version{major: 0, minor: minor}), do: {0, minor}
   defp series(%Version{major: major}), do: major
+
+  @doc "The versions the build `build` talks with, as a person reads them: `0.16`, or from 1.0 `1`."
+  def series_name(build) do
+    case series(version(build)) do
+      {0, minor} -> "0.#{minor}"
+      major -> "#{major}"
+    end
+  end
 
   @doc "Whether the build `a` is a version before `b`'s."
   def older?(a, b), do: Version.compare(version(a), version(b)) == :lt
@@ -200,8 +208,20 @@ defmodule OneCore.Builds do
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
       devices: devices,
-      plugins: OneCore.Plugins.synced()
+      plugins: OneCore.Plugins.synced(),
+      waiting: waiting(owner)
     }
+  end
+
+  # The plugins installed for `owner` whose version doesn't run on this server's platform, and why
+  # (`OneCore.Plugins.Version.platform/1`). Only one not running here is read from what it said of itself.
+  defp waiting(owner) do
+    running = OneCore.Plugins.running(owner)
+
+    for {name, %{"plugin" => plugin}} <- Installed.read(owner),
+        is_binary(plugin) and not is_map_key(running, name),
+        %{state: state, why: why} when state != :runs <- [Store.platform(name, plugin)],
+        do: %{name: name, state: state, why: why}
   end
 
   # Why `server` doesn't talk with this one or the edge, for being on a version that doesn't talk with theirs, or

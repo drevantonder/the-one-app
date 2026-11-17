@@ -123,6 +123,17 @@ defmodule OneCore.Tools do
   }
 
   # What a tool that moves an install or a plugin answers: where it is now, for whoever it's installed for.
+  @platform %{
+    type: ["object", "null"],
+    description:
+      "Whether its version runs on this server's platform, worked out from the two versions: runs, waiting_for_server (it needs a newer platform) or waiting_for_plugin (the server is newer than it allows), and why. Null where no server has described it",
+    properties: %{
+      state: %{type: "string", enum: ["runs", "waiting_for_server", "waiting_for_plugin"]},
+      why: %{type: ["string", "null"], description: "As a person reads it: gmail needs an update for 0.18"}
+    }
+  }
+
+  # What a tool that moves an install or a plugin answers: where it is now, for whoever it's installed for.
   @moved %{
     type: "object",
     properties: %{
@@ -141,6 +152,7 @@ defmodule OneCore.Tools do
       trusted: %{type: ["boolean", "null"], description: "Whether the plugin is trusted, or runs in a sandbox"},
       update: @plugin_update,
       requires: @requires,
+      platform: @platform,
       also: %{
         type: "array",
         items: %{type: "string"},
@@ -611,6 +623,12 @@ defmodule OneCore.Tools do
             type: "string",
             enum: ["synced", "syncing"],
             description: "Whether what runs on it is what's installed for everyone it runs plugins for, or it's syncing them"
+          },
+          waiting: %{
+            type: "array",
+            items: %{type: "object", properties: %{name: %{type: "string"}, state: %{type: "string"}, why: %{type: "string"}}},
+            description:
+              "The plugins installed for you whose version doesn't run on the server that answered: waiting_for_server or waiting_for_plugin, and why"
           }
         },
         required: ["server", "build", "edge", "latest", "servers", "devices", "plugins"]
@@ -1038,8 +1056,17 @@ defmodule OneCore.Tools do
             commits: update["commits"] || [],
             why: update["why"]
           },
-      requires: requires(Plugins.running(owner)[name])
+      requires: requires(Plugins.running(owner)[name]),
+      platform: platform(owner, name, plugin)
     }
+  end
+
+  # Whether a plugin's version runs on this server's platform: one running here does, and only one that doesn't is
+  # read from what it said of itself.
+  defp platform(_owner, _name, nil), do: nil
+
+  defp platform(owner, name, plugin) do
+    if is_map_key(Plugins.running(owner), name), do: %{state: :runs, why: nil}, else: Store.platform(name, plugin)
   end
 
   # What failed is an error for whoever asked, as it is where it was asked: the record says so too, until it's tried

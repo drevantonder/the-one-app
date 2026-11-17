@@ -63,7 +63,8 @@ defmodule OneCore.Plugins.Deploy do
       try do
         install = install?.(version)
 
-        with :ok <- outputs(version),
+        with :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
+             :ok <- outputs(version),
              :ok <- categorized(version),
              :ok <- icon(name, version),
              :ok <- if(install, do: fits(owner, name, version), else: :ok),

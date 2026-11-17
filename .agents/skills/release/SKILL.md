@@ -26,9 +26,10 @@ Exactly two rules hold at runtime:
   calls only to servers on its own (`core/edge/relay/relay.ts`), apart from whether they're ready. What updates a
   part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
   server's `build`, the `edge`'s, and `why` one doesn't talk.
-- A plugin runs only on a server its `requires`' `"core" => "~> 0.16.0"` allows (`OneCore.Plugins.Version`):
-  deploying it to an older one is refused, saying so, and a server that loads it runs the plugin nowhere until it's
-  updated.
+- A plugin runs only on a server its `requires`' `"core" => "~> 0.16.0"` allows (`OneCore.Plugins.Version.platform/1`,
+  worked out from the two versions, never kept): `runs`, `waiting_for_server` (deploying it to an older one is
+  refused, saying so) or `waiting_for_plugin` (a newer server: "gmail needs an update for 0.17"). `one plugins`
+  and `one builds` say which, and a server that can't run one says why in telemetry.
 
 ## Order
 

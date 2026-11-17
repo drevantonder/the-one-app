@@ -4,7 +4,7 @@ defmodule OneCore.Plugins.Version.Checks do
   (`OneCore.Plugins.Version.Compile`) and for an untrusted one, whose code said it in its sandbox
   (`OneCore.Plugins.Version.Description`).
   """
-  alias OneCore.{Builds, Hooks}
+  alias OneCore.Hooks
   alias OneCore.Plugins.Version
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
@@ -62,10 +62,6 @@ defmodule OneCore.Plugins.Version.Checks do
            "\"Gmail uses Google Account\", and \"core\" the versions of the platform it runs on, as an Elixir " <>
            "requirement: %{\"core\" => \"~> 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
 
-      not runs_here?(requires["core"]) ->
-        {:error,
-         "It requires core #{requires["core"]}, and this server is on #{Builds.build()}, which that doesn't allow: " <>
-           "it runs on servers updated to a version it allows (`one builds`)"}
 
       true ->
         tools = Enum.map(tools, &Version.schemas/1)
@@ -98,9 +94,6 @@ defmodule OneCore.Plugins.Version.Checks do
 
   defp requirement?(_requirement), do: false
 
-  # Whether this server's build is one of the versions of the platform `core` says a plugin runs on, where it says.
-  defp runs_here?(nil), do: true
-  defp runs_here?(core), do: Elixir.Version.match?(Builds.version(Builds.build()), core)
 
   defp offer?(%{name: name, kind: kind, description: description}),
     do:
