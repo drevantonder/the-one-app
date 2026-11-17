@@ -269,6 +269,12 @@ defmodule OneCore.Plugin do
   - A plugin brings a program the same way, from its source in a folder of `server/bin/`, built for each kind of
     machine as `<kind>` beside it, which its code reads with `file/2` and writes out to run: the plugin `sandbox`
     brings its wall on Windows, `server/bin/wall/windows-x86_64`.
+  - A git repo keeps a NIF's or program's source, not its builds: those are published as files at URLs, as Elixir's
+    rustler_precompiled publishes a library's (a GitHub Release's files, say), and `server/checksums.json` names
+    each by its path with its `url` and `sha256`, so the commit a plugin is installed or updated from pins exactly
+    which builds are trusted. A deploy that lacks a build named there, as one from git does, downloads it and checks
+    it, and fails saying which if it's missing or isn't that build, and the version before runs on. A build a deploy
+    brings, from a checkout, is deployed as it is. This repo's plugins publish theirs with `tooling/publish-nifs`.
 
   A scheduled job is a tool call made by the clock. `jobs/0`, if the plugin has one, lists them:
 

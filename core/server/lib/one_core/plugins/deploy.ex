@@ -1,6 +1,7 @@
 defmodule OneCore.Plugins.Deploy do
   @moduledoc """
-  Deploying a plugin: a new one, or a new version of one. Its app, if it has one, is built first (`OneCore.App`),
+  Deploying a plugin: a new one, or a new version of one. The builds of its NIFs and programs it lacks are downloaded
+  (`OneCore.Plugins.Precompiled`), its app, if it has one, is built (`OneCore.App`),
   its Elixir is compiled and loaded (`OneCore.Plugins.Version`), and it's kept in the bucket
   (`OneCore.Plugins.Store`) and runs at once.
   """
@@ -8,7 +9,7 @@ defmodule OneCore.Plugins.Deploy do
   alias OneCore.Call.State
   alias OneCore.{App, Bucket, Builds, Sandbox, Server, Servers}
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Installed, Calls, LoadedVersion, Store, Version}
+  alias OneCore.Plugins.{Installed, Calls, LoadedVersion, Precompiled, Store, Version}
   alias OneCore.Plugins.Version.Compile
 
   @network "network"
@@ -55,6 +56,7 @@ defmodule OneCore.Plugins.Deploy do
     stage = &State.stage(State.id(), &1)
 
     with :ok <- check(name, files),
+         {:ok, files} <- Precompiled.fill(files),
          _ = stage.("Building its app"),
          {:ok, built} <- built(owner, name, files, trusted),
          _ = stage.(if(trusted, do: "Compiling its code", else: "Compiling its code in its sandbox")),
@@ -209,7 +211,8 @@ defmodule OneCore.Plugins.Deploy do
   defp icon(_name, _version), do: :ok
 
   # A version's code, compiled and loaded here, or for an untrusted plugin only described, by its sandbox's VM.
-  defp loaded(artifact, built, true), do: LoadedVersion.load(artifact, Version.code(built), &Compile.compile(artifact, built, &1))
+  defp loaded(artifact, built, true),
+    do: LoadedVersion.load(artifact, Version.code(built), &Compile.compile(artifact, built, &1))
 
   defp loaded(artifact, built, false) do
     with {:ok, version} <- Sandbox.describe(artifact, built), do: {:ok, version, ""}

@@ -242,9 +242,14 @@ fn requires(plugin: &Path) -> Vec<String> {
 }
 
 /// Stops with what to build, where a plugin brings a NIF that isn't built for every kind of machine the network's
-/// servers run on: its source is never deployed, only the library built from it (`OneCore.Plugin`), so the agent
-/// installing it builds it, as `tooling/nifs` does for the plugins The One App ships with.
+/// servers run on, here or published where its `server/checksums.json` says, which the server downloads
+/// (`OneCore.Plugins.Precompiled`): its source is never deployed, only the library built from it (`OneCore.Plugin`),
+/// so the agent installing it builds it, as `tooling/nifs` does for the plugins The One App ships with.
 async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<()> {
+    let published: Value = fs::read_to_string(plugin.join("server/checksums.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
     let builds: Value = serde_json::from_str(&call(client, Some(of), "builds", json!({})).await?)?;
     let mut kinds: Vec<String> = builds["servers"]
         .as_array()
@@ -259,8 +264,14 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
         if !crate_folder.join("Cargo.toml").exists() {
             continue;
         }
-        let missing: Vec<&String> =
-            kinds.iter().filter(|kind| !crate_folder.join(format!("{kind}.so")).exists()).collect();
+        let crate_name = crate_folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let missing: Vec<&String> = kinds
+            .iter()
+            .filter(|kind| {
+                !crate_folder.join(format!("{kind}.so")).exists()
+                    && published.get(format!("server/nif/{crate_name}/{kind}.so")).is_none()
+            })
+            .collect();
         if missing.is_empty() {
             continue;
         }
