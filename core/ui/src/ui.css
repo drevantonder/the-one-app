@@ -25,6 +25,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
+  /* A word with nowhere to break, as an email or a link is, breaks where it reaches the edge. */
+  overflow-wrap: break-word;
 }
 *, ::before, ::after {
   box-sizing: border-box;
@@ -43,6 +45,7 @@ b, strong {
 /* A form's fields, one under another. */
 form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--gap);
 }
 /* The page under an open sheet stays where it is. */
@@ -1106,6 +1109,8 @@ button.ui-box {
 }
 .ui-screen > main {
   display: grid;
+  /* What's in it is as wide as the screen at most, whatever it holds with nowhere to break. */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--gap);
   padding: 0.5rem calc(var(--gutter) + var(--safe-right)) calc(var(--gutter) + var(--safe-bottom)) calc(var(--gutter) + var(--safe-left));
@@ -1114,6 +1119,7 @@ button.ui-box {
 }
 .ui-section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
   min-width: 0;
 }
@@ -1385,6 +1391,7 @@ button.ui-box {
 }
 .ui-dialog .body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--gap);
   padding: 0.25rem var(--gutter) calc(var(--gutter) + var(--safe-bottom));
   overflow-y: auto;
@@ -1461,6 +1468,7 @@ button.ui-box {
 /* An empty screen, what's coming, and a problem. */
 .ui-state {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: start;
   gap: 1rem;
   max-width: var(--readable);
@@ -1510,7 +1518,7 @@ button.ui-box {
 }
 .ui-state .problem {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   justify-self: stretch;
   gap: 0.125rem 0.625rem;
   padding: 0.75rem 1rem;
@@ -1570,7 +1578,7 @@ button.ui-box {
 }
 .ui-state .steps li {
   display: grid;
-  grid-template-columns: var(--icon) auto;
+  grid-template-columns: var(--icon) minmax(0, 1fr);
   gap: 0.625rem;
   color: var(--muted-foreground);
 }
