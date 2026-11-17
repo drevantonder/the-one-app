@@ -29,6 +29,9 @@ defmodule OneCore.Application do
       children = [
         {Registry, keys: :duplicate, name: OneCore.Waiting},
         {Task.Supervisor, name: OneCore.Asks},
+        # It's starting at the network's edge from before it's reached there until it's ready, its apps started
+        # and answering by its key, so nobody asks it what it would answer only once they have: another server's
+        # lease it held before it stopped among them. `Servers.Report` says so as it starts, before them.
         Servers.Report,
         Apps,
         Server,
@@ -36,11 +39,6 @@ defmodule OneCore.Application do
         Jobs,
         OneCore.Apps.Lifecycle
       ]
-
-      # It's starting at the network's edge from before it's reached there until it's ready, its apps started
-      # and answering by its key, so nobody asks it what it would answer only once they have: another server's lease
-      # it held before it stopped among them.
-      Servers.report()
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do

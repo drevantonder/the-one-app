@@ -206,9 +206,13 @@ defmodule OneCore.Servers do
 
     def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-    # Its state is how long it waits before it tries again, or `nil` while there's nothing to say again.
+    # Its state is how long it waits before it tries again, or `nil` while there's nothing to say again. It says the
+    # status first as it starts, by its name already, so a first that fails is said again too.
     @impl true
-    def init(nil), do: {:ok, nil}
+    def init(nil) do
+      OneCore.Servers.report()
+      {:ok, nil}
+    end
 
     @impl true
     def handle_info(:failed, nil), do: {:noreply, again(@first)}
