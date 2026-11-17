@@ -287,6 +287,9 @@ defmodule Notifications do
          ])}
       end)
 
+    # Said as Notifications' change: one sent from a job, a service or another app's call is otherwise told as
+    # nobody's, or that app's, and a device asks its inbox again only for Notifications'.
+    if sent != [], do: Call.changed(call)
     %{sent: sent, muted: quiet, unwoken: push(call, devices, %{title: title, text: inputs["text"], app: app})}
   end
 
