@@ -16,12 +16,18 @@ defmodule OneCore.Apps.Lifecycle do
   required by takes them to Recently Deleted with it, as one, once whoever asked confirms it; restoring any of them
   brings them all back. Uninstalling one that only requires others leaves them installed.
 
-  It's a GenServer only for the clock: once a day it looks for newer versions, and removes for good what's been in
-  Recently Deleted for 30 days, for whoever this server acts for.
+  Each install and update is the MCP task that runs it (`OneCore.Tasks.within/3`), which its record names: however
+  the task ends, it moves the record. Done or failed, the run moves it itself; where its server stopped, or started
+  again, which loses what it ran, whoever finds the task over moves it (`settle/0`): this server as it starts, and
+  each time the network's edge says a server came or went, and Try Again.
+
+  It's a GenServer only for the clock and for that: once a day it looks for newer versions, and removes for good
+  what's been in Recently Deleted for 30 days, for whoever this server acts for; and it settles what lost its task as
+  it starts and as servers come and go.
   """
   use GenServer
   require Logger
-  alias OneCore.{Bucket, Hooks, Server, Servers}
+  alias OneCore.{Bucket, Hooks, Server, Servers, Tasks}
   alias OneCore.Call.State
   alias OneCore.Apps
   alias OneCore.Apps.{Deploy, Git, Installed, LoadedVersion, Requires, Store, Update}
@@ -29,18 +35,28 @@ defmodule OneCore.Apps.Lifecycle do
   @network "network"
   @day :timer.hours(24)
   @kept :timer.hours(24 * 30)
-  # What an install cut short says.
-  @stopped "It stopped partway, as the server installing it did. Try again."
+  # What an install or update whose task ended before it did says, where its task doesn't say why.
+  @stopped "It stopped partway. Try again."
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   @impl true
   def init(nil) do
     Process.send_after(self(), :daily, :timer.minutes(5))
-    {:ok, nil}
+    Registry.register(OneCore.Waiting, :seen, nil)
+    {:ok, nil, {:continue, :settle}}
+  end
+
+  # Starting, what this server ran before is lost, and a server that came or went may have lost what it ran.
+  @impl true
+  def handle_continue(:settle, state) do
+    Task.start(&settle/0)
+    {:noreply, state}
   end
 
   @impl true
+  def handle_info(:seen, state), do: handle_continue(:settle, state)
+
   def handle_info(:daily, state) do
     Process.send_after(self(), :daily, @day)
 
@@ -114,10 +130,10 @@ defmodule OneCore.Apps.Lifecycle do
   or `{:error, why}` for a move that isn't in the machine.
   """
   def install(owner, name, artifact, by) do
-    doing({:install, owner, name}, fn ->
+    doing({:install, owner, name}, owner, "install", fn task ->
       with :ok <- Installed.named(name),
            {_number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no app #{artifact}"},
-           %{} <- move(owner, name, {:install, artifact, by, Server.key()}) do
+           %{} <- move(owner, name, {:install, artifact, by, task}) do
         case requirements(owner, name, artifact, by) do
           {:ok, also} -> with %{} = record <- installing(owner, name, artifact), do: Map.put(record, "also", also)
           {:error, why} -> failed(owner, name, why)
@@ -250,19 +266,13 @@ defmodule OneCore.Apps.Lifecycle do
   record of their install, or `{:error, why}`.
   """
   def retry(owner, name) do
-    case Installed.read(owner)[name] do
+    # One whose task is over has failed, and is tried again; one that's still installing is refused, saying so.
+    case settled(owner, name, Installed.read(owner)[name]) do
       %{"state" => "not_installed", "app" => artifact} = record ->
         install(owner, name, artifact, record["by"])
 
-      # One that nothing installs any more has failed, as the daily check would find, and is tried again; one that's
-      # still installing is refused, saying so.
       %{"state" => "installing", "app" => artifact} = record ->
-        if partway?({:install, owner, name}, record["server"]) do
-          failed(owner, name, @stopped)
-          install(owner, name, artifact, record["by"])
-        else
-          move(owner, name, {:install, artifact, record["by"], Server.key()})
-        end
+        move(owner, name, {:install, artifact, record["by"], record["task"]})
 
       %{"app" => artifact} = record ->
         case settled(artifact) do
@@ -275,33 +285,42 @@ defmodule OneCore.Apps.Lifecycle do
     end
   end
 
-  # Whether an install or update its record says is under way stopped partway: nothing does it any more on the
-  # server its record names. That server knows by its lock (`doing/2`); another, by the network's edge saying that
-  # server has stopped, or is starting again, which loses what it was doing. A record from before records named
-  # their server stopped partway once that server stopped, which it has for every server since.
-  defp partway?(_what, nil), do: true
+  # The task an install or update's record names, as it was kept once it ended, or `nil` while it runs. A record from
+  # before records named their task was cut short by the restart that updated its server.
+  defp over(nil), do: %{}
+  defp over(task), do: Tasks.over(task)
 
-  defp partway?(what, server) do
-    if server == Server.key(),
-      do: stopped?(what),
-      else: Servers.presence(server)["server_daemon_status"] in ["starting", "stopped"]
-  end
+  # Why a task ended before what it ran did: what it says where it failed or was cancelled.
+  defp why(%{"status" => status, "statusMessage" => why}) when status in ["failed", "cancelled"], do: why
+  defp why(_task), do: @stopped
 
-  # Installing or updating holds a lock on what it does, on this server, while it does it: it goes with its
-  # process, however that ends. `{:error, why}` where a process here holds it already.
-  defp doing(what, fun) do
-    case :global.trans({{__MODULE__, what}, self()}, fun, [node()], 0) do
-      :aborted -> {:error, "It's being installed or updated here already. Wait until it's done."}
-      done -> done
+  # An install's record, with one that's installing once its task is over failed, saying why.
+  defp settled(owner, name, %{"state" => "installing"} = record) do
+    case over(record["task"]) do
+      nil -> record
+      task -> with {:error, _why} <- failed(owner, name, why(task)), do: Installed.read(owner)[name]
     end
   end
 
-  # Whether nothing on this server does `what` any more: its lock is free.
-  defp stopped?(what) do
-    lock = {{__MODULE__, what}, self()}
-    free = :global.set_lock(lock, [node()], 0)
-    if free, do: :global.del_lock(lock, [node()])
-    free
+  defp settled(_owner, _name, record), do: record
+
+  @doc """
+  Settles every install and update whose task is over, for whoever this server acts for: as it starts, which loses
+  what it ran before, and when a server came or went.
+  """
+  def settle do
+    for owner <- Servers.acts_for(Server.key()), {name, record} <- Installed.read(owner), do: settled(owner, name, record)
+    for %{app: artifact} <- Deploy.deployed(), takes?(artifact), do: settled(artifact)
+    :ok
+  end
+
+  # Installing or updating holds a lock on what it does, on this server, while it does it, and is a task for
+  # `subject` as the tool `tool`, which `fun` is given. `{:error, why}` where a process here holds it already.
+  defp doing(what, subject, tool, fun) do
+    case :global.trans({{__MODULE__, what}, self()}, fn -> Tasks.within(subject, tool, fun) end, [node()], 0) do
+      :aborted -> {:error, "It's being installed or updated here already. Wait until it's done."}
+      done -> done
+    end
   end
 
   @doc """
@@ -403,8 +422,8 @@ defmodule OneCore.Apps.Lifecycle do
 
   @doc """
   Moves on what's installed for `owner` that the clock moves, as a server acting for them does once a day: one in
-  Recently Deleted for 30 days is removed for good, with what it kept, one installing for longer than it could
-  has failed, and one that failed isn't in use for them.
+  Recently Deleted for 30 days is removed for good, with what it kept, one whose task is over has failed, and one
+  that failed isn't in use for them.
   """
   def reconcile(owner) do
     now = System.system_time(:millisecond)
@@ -416,7 +435,7 @@ defmodule OneCore.Apps.Lifecycle do
                do: Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
 
         %{"state" => "installing"} ->
-          if partway?({:install, owner, name}, record["server"]), do: failed(owner, name, @stopped)
+          settled(owner, name, record)
 
         # Its server may have stopped between its failing and saying so in its artifact.
         %{"state" => "not_installed", "app" => artifact} ->
@@ -446,8 +465,8 @@ defmodule OneCore.Apps.Lifecycle do
              false <- from["dirty"] == true,
              {:ok, offer} when offer != nil <- newer(source, from["ref"], commit, Path.basename(artifact)),
              %{} = record <-
-               doing({:update, artifact}, fn ->
-                 with %{} = record <- Update.change(artifact, {:newer, offer, Store.trusted?(about), Server.key()}) do
+               doing({:update, artifact}, Store.whose(artifact), "apps_update", fn task ->
+                 with %{} = record <- Update.change(artifact, {:newer, offer, Store.trusted?(about), Server.key(), task}) do
                    told(artifact)
                    if mine?(record), do: updating(artifact, record), else: record
                  end
@@ -464,20 +483,18 @@ defmodule OneCore.Apps.Lifecycle do
     end
   end
 
-  # Where the app's updates are, with one that stopped partway (`partway?/2`) ended: done where the version it took
-  # went live before its server stopped, and failed where it didn't.
+  # Where the app's updates are, with one whose task is over ended: done where the version it took went live before
+  # its task ended, and failed, saying why, where it didn't.
   defp settled(artifact) do
     record = Update.read(artifact)
 
-    cond do
-      not match?(%{"state" => "updating"}, record) or not partway?({:update, artifact}, record["by"]) ->
-        record
-
-      (Store.about(artifact)["from"] || %{})["commit"] == record["commit"] ->
-        told(artifact, Update.change(artifact, :done))
-
-      true ->
-        told(artifact, Update.change(artifact, {:fail, "It stopped partway, as the server updating it did. Try again."}))
+    with %{"state" => "updating"} <- record,
+         %{} = task <- over(record["task"]) do
+      if (Store.about(artifact)["from"] || %{})["commit"] == record["commit"],
+        do: told(artifact, Update.change(artifact, :done)),
+        else: told(artifact, Update.change(artifact, {:fail, why(task)}))
+    else
+      _ -> record
     end
   end
 
@@ -510,8 +527,8 @@ defmodule OneCore.Apps.Lifecycle do
   who has it. Gives where its updates are once done: `nil` for up to date, or `{:error, why}`.
   """
   def update(artifact) do
-    doing({:update, artifact}, fn ->
-      with %{} = record <- Update.change(artifact, {:update, Server.key()}) do
+    doing({:update, artifact}, Store.whose(artifact), "apps_update", fn task ->
+      with %{} = record <- Update.change(artifact, {:update, Server.key(), task}) do
         told(artifact)
         updating(artifact, record)
       end

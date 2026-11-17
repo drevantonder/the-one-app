@@ -5,7 +5,7 @@ defmodule OneCore.Apps.Installed do
 
       not installed ─Install─► installing ─► installed ─Uninstall─► recently deleted ─30 days─► removed
                                                                     recently deleted ─Restore─► installed
-      installing ─fails, or its server stops─► not installed (why · Try Again)
+      installing ─fails, or its task ends first, as its server stopping ends it─► not installed (why · Try Again)
       not installed ─Deploy─► installed (whoever it's for deployed it, so it's theirs)
 
   with a `stage` inside installing: its `requirements` installed first, then `fetching` its code, `building` it and
@@ -14,7 +14,8 @@ defmodule OneCore.Apps.Installed do
 
   Each owner's are one blob, `<owner>/installs`, with each app's record by the name it's installed by: the
   `app` it is, its `state`, its `stage`, `why` it isn't installed where it failed to be, when it was `deleted`, who
-  installed it (`by`), and the `server` installing it. A record lives for years and every server and client reads it, while no one process lives
+  installed it (`by`), and the `task` installing it, the MCP task whose end, however it ends, ends installing
+  (`OneCore.Apps.Lifecycle`). A record lives for years and every server and client reads it, while no one process lives
   that long, so the machine is the transition table `move/3` over records, each move made with
   `OneCore.Artifact.update/3`: two servers moving one record at once each see the other's move first, and a move the
   table doesn't have is refused, saying why. A record keeps what it held that this doesn't read.
@@ -116,7 +117,7 @@ defmodule OneCore.Apps.Installed do
   `{:ok, nil}` for not installed any more, or `{:error, why}` for a move that isn't in it. `at` is whose and which
   app, for what it says.
 
-  Events, as the machine names them: `{:install, app, by, server}` (Install, and Try Again on one that failed to),
+  Events, as the machine names them: `{:install, app, by, task}` (Install, and Try Again on one that failed to),
   `{:stage, stage}`, `:done`, `{:fail, why}`, `{:uninstall, group}`, `:restore` and `:purge` (30 days on), where
   `group` says what went to Recently Deleted together, as one: `%{"with" => names}` on the one uninstalled, and
   `%{"deleted_with" => name}` on each app that required it; and
@@ -124,9 +125,14 @@ defmodule OneCore.Apps.Installed do
   """
   def move(record, event, at)
 
-  def move(record, {:install, app, by, server}, _at)
+  def move(record, {:install, app, by, task}, _at)
       when record == nil or :erlang.map_get("state", record) == "not_installed",
-      do: {:ok, (record || %{}) |> Map.merge(%{"app" => app, "by" => by, "server" => server}) |> moved("installing", "requirements")}
+      do:
+        {:ok,
+         (record || %{})
+         |> Map.delete("server")
+         |> Map.merge(%{"app" => app, "by" => by, "task" => task})
+         |> moved("installing", "requirements")}
 
   def move(%{"state" => "installing"} = record, {:stage, stage}, _at) when stage in ~w(requirements fetching building starting),
     do: {:ok, moved(record, "installing", stage)}

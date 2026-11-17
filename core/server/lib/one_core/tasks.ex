@@ -15,6 +15,11 @@ defmodule OneCore.Tasks do
   server finds it: when it's made, and once it ends, for an hour after. While it runs, the server running it answers
   for it, and one that has stopped meanwhile, or whose run ended without returning, is taken to have failed it. Only
   whoever started a task gets it, answers it or cancels it: to anyone else, it isn't there.
+
+  What must be known to have ended however its run does, an app's install or update (`OneCore.Apps.Lifecycle`), is a
+  task whoever runs it (`within/3`): the one its caller asked for, or else one kept for it, which nobody is answered.
+  Its record names the task, and is moved by how the task ended (`over/1`), its server stopping included: so the one
+  thing that says a run on a server was lost is here.
   """
   alias OneCore.{Artifact, Call, Server, Servers, Trace, User}
   alias OneCore.Call.State
@@ -134,6 +139,70 @@ defmodule OneCore.Tasks do
     :ok = Artifact.write(artifact(subject), name, JSON.encode!(record))
     Task.Supervisor.start_child(OneCore.Asks, fn -> swept(subject) end)
     task
+  end
+
+  @doc """
+  Runs `run` as a task for `subject`, given its id, and gives what it gives: the task this process's call is, or
+  else one kept for it now, as the tool `tool`, which ends as `run` does, `{:error, why}` an error. Whoever its record
+  names this task by knows it ended however it did (`over/1`), as its server stopping.
+  """
+  def within(subject, tool, run) do
+    case State.current() do
+      {_id, %{task: task}} when is_binary(task) ->
+        run.(task)
+
+      current ->
+        {call, own} = if current, do: {elem(current, 0), false}, else: {State.begin(), true}
+        actor = with %{principal: {actor, _subject}} <- State.get(call), do: actor, else: (_ -> nil)
+        task = made(%{principal: {actor, subject}, tool: tool, created: System.system_time(:millisecond)})["taskId"]
+        State.tasked(call, task)
+        {:ok, subject, name} = named(task)
+
+        try do
+          outcome = run.(task)
+          text = with {:error, why} <- outcome, do: why, else: (_ -> "Done.")
+          ended(subject, name, %{"status" => "completed", "result" => result(text, match?({:error, _}, outcome))})
+          outcome
+        rescue
+          error ->
+            ended(subject, name, failed(-32603, Exception.message(OneCore.Redact.redact(error))))
+            reraise error, __STACKTRACE__
+        after
+          if own, do: State.finish(call), else: State.tasked(call, nil)
+        end
+    end
+  end
+
+  defp result(text, error), do: %{"content" => [%{"type" => "text", "text" => text}], "isError" => error}
+
+  @doc """
+  The task `id` as it was kept once it ended, from any server, or `nil` while it runs: one whose server stopped, or
+  started again, which loses what it ran, has failed, and is kept so now. One no longer kept ended over an hour ago.
+  """
+  def over(id) do
+    with {:ok, subject, name} <- named(id),
+         {:ok, data, _tag} <- Artifact.read(artifact(subject), name) do
+      record = JSON.decode!(data)
+
+      cond do
+        final?(record) -> record
+        lost?(record) -> gone(subject, name, record["server"])
+        true -> nil
+      end
+    else
+      _ -> %{"status" => "failed", "statusMessage" => "It ended over an hour ago."}
+    end
+  rescue
+    # A server that doesn't act for whoever the task is for may not read it: the one that ran it does.
+    OneCore.Bucket.Refused -> nil
+  end
+
+  # Whether the server running a task that isn't over has lost it: this one, that no call here is it any more; another,
+  # that the network's edge says it has stopped, or is starting again.
+  defp lost?(%{"server" => server, "taskId" => id}) do
+    if server == Server.key(),
+      do: State.task(id) == nil,
+      else: Servers.presence(server)["server_daemon_status"] in ["starting", "stopped"]
   end
 
   @doc """
@@ -330,21 +399,10 @@ defmodule OneCore.Tasks do
       record = JSON.decode!(data)
 
       cond do
-        expired?(record) ->
-          Artifact.remove(artifact(subject), name)
-
-        final?(record) ->
-          :ok
-
-        record["server"] == Server.key() and State.task(record["taskId"]) == nil ->
-          gone(subject, name, Server.key())
-
-        record["server"] != Server.key() and
-            Servers.presence(record["server"])["server_daemon_status"] in ["starting", "stopped"] ->
-          gone(subject, name, record["server"])
-
-        true ->
-          :ok
+        expired?(record) -> Artifact.remove(artifact(subject), name)
+        final?(record) -> :ok
+        lost?(record) -> gone(subject, name, record["server"])
+        true -> :ok
       end
     end
   end

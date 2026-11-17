@@ -223,6 +223,12 @@ defmodule OneCore.Call.State do
   end
 
   @doc """
+  The call `id` is the MCP task `task` from now on, kept for it though its caller didn't ask for one
+  (`OneCore.Tasks.within/3`), or with `nil`, no longer is.
+  """
+  def tasked(id, task), do: changed(id, fn row -> {:ok, %{row | task: task}} end)
+
+  @doc """
   Says what the call `id` is doing, for a state of working: `routing` to the server it's passed on to, `waiting` for
   something to be ready, and `running` once it runs again, with what the app last said.
   """
