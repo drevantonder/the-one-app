@@ -23,12 +23,17 @@ defmodule OneCore.MixProject do
       # It runs with no distribution (`rel/env.sh.eex`, `rel/env.bat.eex`): nothing reaches it as an Erlang node, so no cookie guards
       # anything, and the one Mix puts on its command line, where every user of the machine sees it, is a word
       # rather than a secret.
+      # Its version is the build it is, as `tooling/version` names the commit, which it says it is (`config/runtime.exs`),
+      # read only as it's released, so nothing is compiled again for a new commit.
       releases: [
-        one_core: [
-          include_executables_for: [:unix, :windows],
-          include_erts: System.get_env("ONE_ERTS") || true,
-          cookie: "no-distribution"
-        ]
+        one_core: fn ->
+          [
+            version: String.trim(elem(System.cmd(Path.expand("../../tooling/version", __DIR__), []), 0)),
+            include_executables_for: [:unix, :windows],
+            include_erts: System.get_env("ONE_ERTS") || true,
+            cookie: "no-distribution"
+          ]
+        end
       ]
     ]
   end

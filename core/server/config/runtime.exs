@@ -1,5 +1,10 @@
 import Config
 
+# The build this is: a release's own version, which `tooling/release` names it, or for `mix network` the commit checked
+# out, as `tooling/version` names it.
+config :one_core,
+  build: System.get_env("RELEASE_VSN") || String.trim(elem(System.cmd(Path.expand("../../../tooling/version", __DIR__), []), 0))
+
 # A server installed on a machine is told where it is by the program that keeps it running (`one serve run`, in
 # `clients/cli/src/serving.rs`): its home, its network's address, and who it's for. The rest is the release's own: the
 # UI library's build, in `ui/`, and the Bun it builds apps with, which it fetches the first time (`OneCore.App`).

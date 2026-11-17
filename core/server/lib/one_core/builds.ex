@@ -21,21 +21,8 @@ defmodule OneCore.Builds do
   @latest @builds <> "latest"
   @plugin ~r{^((?:network|(?:users|groups)/[^/]+)/plugins/[^/]+)/latest$}
 
-  # The build this is, as `tooling/version` names the commit it's built from: compiled in, and again whenever the
-  # commit changes, as git's HEAD or the branch it's on says, as a client's is (`core/client/build.rs`), and not when
-  # a `git fetch` in any worktree rewrites `packed-refs`. Its `.dirty` is what was uncommitted when the commit last
-  # changed.
-  @root Path.expand("../../../..", __DIR__)
-  git = fn args -> String.trim(elem(System.cmd("git", args, cd: @root, stderr_to_stdout: true), 0)) end
-  branch = git.(["symbolic-ref", "-q", "HEAD"])
-
-  for watched <- ["HEAD", branch], watched != "",
-      do: @external_resource(git.(["rev-parse", "--path-format=absolute", "--git-path", watched]))
-
-  @build String.trim(elem(System.cmd("sh", [Path.join(@root, "tooling/version")]), 0))
-
   @doc "The build this server is, as `tooling/version` names its commit: `0.15.2+2974.febd37350abc`."
-  def build, do: @build
+  def build, do: Application.fetch_env!(:one_core, :build)
 
   @doc """
   The version a build is, Semantic Versioning's. A build from before builds had versions, named `<count>-<commit>`,
