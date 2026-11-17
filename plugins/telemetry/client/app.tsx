@@ -18,6 +18,7 @@ interface Slowest {
   p99: number
   count: number
   failed?: number
+  should_be_task?: boolean
   over_time: (number | null)[]
 }
 
@@ -299,7 +300,7 @@ function Telemetry(props: { all: Overview }) {
                 {(slow) => (
                   <Row
                     heading={slowName(slow())}
-                    text={`p95 ${took(slow().p95)} · ${slow().view ? `opened ${many(slow().count, "time")}` : many(slow().count, "call")}`}
+                    text={`p95 ${took(slow().p95)} · ${slow().view ? `opened ${many(slow().count, "time")}` : many(slow().count, "call")}${slow().should_be_task ? " · should be a task" : ""}`}
                     end={<Show when={slow().over_time.filter((v) => v != null).length > 1}><Spark values={slow().over_time} /></Show>}
                     current={open()?.slow?.key === slow().key}
                     onClick={() => setOpen({ slow: slow() })}

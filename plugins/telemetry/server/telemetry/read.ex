@@ -109,7 +109,7 @@ defmodule Telemetry.Read do
   its failures, its 50th, 95th and 99th percentiles in milliseconds, and its 95th over time, about 24 steps from
   `from` to `to`. `names` is what a person calls each plugin.
   """
-  def slowest(batches, from, to, names) do
+  def slowest(batches, from, to, names, tasks) do
     points = Enum.flat_map(batches, & &1["metrics"])
     step = max(div(to - from, 24), 60_000_000_000)
 
@@ -117,11 +117,15 @@ defmodule Telemetry.Read do
       for {{plugin, tool}, points} <- Enum.group_by(Enum.filter(points, &(&1["name"] == "one.tool.duration")), &tool/1) do
         failed = for p <- points, p["attributes"]["one.outcome"] == "error", reduce: 0, do: (sum -> sum + p["count"])
 
-        Map.merge(quantiles(added(points)), %{
+        quantiles = quantiles(added(points))
+
+        Map.merge(quantiles, %{
           plugin: plugin,
           tool: tool,
           called: Map.get(names, plugin, plugin),
           failed: failed,
+          # A tool that keeps its caller waiting this long should let them carry on meanwhile.
+          should_be_task: plugin != nil and quantiles.p95 > 10_000 and not MapSet.member?(tasks, {plugin, tool}),
           over_time: over_time(points, from, to, step)
         })
       end

@@ -74,6 +74,10 @@ defmodule Telemetry do
           view: %{type: "string"},
           called: %{type: "string", description: "What a person calls its plugin"},
           failed: %{type: "integer"},
+          should_be_task: %{
+            type: "boolean",
+            description: "A tool whose 95th percentile is over 10 seconds and whose plugin doesn't make it an MCP task"
+          },
           over_time: %{type: "array", items: %{type: ["number", "null"]}, description: "Its 95th percentile per step"}
         }),
       required: ["called", "failed", "over_time", "count", "p50", "p95", "p99"]
@@ -324,7 +328,7 @@ defmodule Telemetry do
       from: div(from, 1_000_000),
       to: div(to, 1_000_000),
       failing: Read.errors(batches, shown(call)) |> Enum.take(20),
-      slowest: Read.slowest(batches, from, to, names(call)) |> Enum.take(12),
+      slowest: Read.slowest(batches, from, to, names(call), tasks(call)) |> Enum.take(12),
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
@@ -339,7 +343,7 @@ defmodule Telemetry do
 
   def call("slowest", inputs, call) do
     {batches, from, to} = read(call, inputs["hours"] || 24)
-    %{slowest: Read.slowest(batches, from, to, names(call))}
+    %{slowest: Read.slowest(batches, from, to, names(call), tasks(call))}
   end
 
   def call("trace", %{"id" => id} = inputs, call) do
@@ -388,6 +392,11 @@ defmodule Telemetry do
   end
 
   # What a person calls each plugin: its first app's name, where it has one.
+  # The tools whose plugins make them MCP tasks, by the plugin's name and the tool's.
+  defp tasks(call) do
+    MapSet.new(for %{name: plugin, tools: tools} <- Call.plugins(call), %{name: tool, task_support: _} <- tools, do: {plugin, tool})
+  end
+
   defp names(call) do
     for %{name: name, apps: [%{name: app} | _]} <- Call.plugins(call), into: %{}, do: {name, app}
   end
