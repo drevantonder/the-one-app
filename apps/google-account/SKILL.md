@@ -4,7 +4,7 @@ description: Read before signing a Google account in to Gmail, Google Calendar, 
 metadata:
   subtitle: "Sign in to Google once"
   about: "Signs your Google accounts in to Gmail, Google Calendar, Drive, Docs and Sheets, and out again. Each account you add is yours alone."
-  category: Productivity
+  category: Connectors
 ---
 
 Each Google app (gmail, google-calendar, google-drive, google-docs, google-sheets) uses its person's Google

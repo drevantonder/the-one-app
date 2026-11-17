@@ -4,7 +4,7 @@ description: Read before reading the person's Google Sheets, or adding rows, cha
 metadata:
   subtitle: "Your Google Sheets"
   about: "Your AI reads your spreadsheets, adds rows, changes cells and makes new ones."
-  category: Productivity
+  category: Connectors
 ---
 
 Google Sheets is the person's spreadsheets. Signing in is the skill `google-account`'s.
