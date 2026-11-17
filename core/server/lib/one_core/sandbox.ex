@@ -36,7 +36,7 @@ defmodule OneCore.Sandbox do
   What it may call of other plugins, and where it may send data, are its permissions (`OneCore.Plugin`): a tool
   call or a fetch outside them is refused.
   """
-  use GenServer, restart: :temporary
+  @behaviour :gen_statem
   require Logger
   alias OneCore.{Artifact, Bucket, Builds, Call, Plugins, Server}
   alias OneCore.Plugins.{Calls, Version}
@@ -153,14 +153,13 @@ defmodule OneCore.Sandbox do
   def call(versions, name, what, %Call{} = call) do
     version = versions[name]
 
+    id = System.unique_integer([:positive])
+
     {child, port, context} =
-      case child(call.installed, version, Map.delete(versions, name)) do
+      case child(call.installed, version, Map.delete(versions, name), nil, {:begin, id}) do
         {:ok, child, port, context} -> {child, port, context}
         {:error, why} -> raise why
       end
-
-    id = System.unique_integer([:positive])
-    :ok = GenServer.call(child, {:begin, id})
 
     try do
       about = %{
@@ -178,7 +177,7 @@ defmodule OneCore.Sandbox do
       command(port, {:call, id, what, about})
       waited(child, port, id, call, context)
     after
-      GenServer.cast(child, {:ended, id})
+      :gen_statem.cast(child, {:ended, id})
     end
   end
 
@@ -223,7 +222,7 @@ defmodule OneCore.Sandbox do
         raise "#{context.name} stopped while it ran this call: #{why}"
     after
       @silent ->
-        GenServer.cast(child, {:cancel, id})
+        :gen_statem.cast(child, {:cancel, id})
         raise "#{context.name} said nothing for #{div(@silent, 1000)} seconds, so its call was stopped"
     end
   end
@@ -406,26 +405,29 @@ defmodule OneCore.Sandbox do
   end
 
   # The child of a version with the versions it uses, for whoever it's installed for, `owner`, started if there's
-  # none: `{:ok, child, port, context}`, or `{:error, why}` with why it couldn't start or load.
-  defp child(owner, version, used, files \\ nil) do
+  # none, asked `ask` once it has loaded: `:loaded`, or `{:begin, id}`, a call it runs from now on. Gives
+  # `{:ok, child, port, context}`, or `{:error, why}` with why it couldn't start or load.
+  defp child(owner, version, used, files, ask) do
     key = key(version, used)
 
-    child =
-      case Registry.lookup(@registry, {owner, key}) do
-        [{child, _}] ->
-          child
+    case Registry.lookup(@registry, {owner, key}) do
+      [{child, _}] ->
+        try do
+          :gen_statem.call(child, ask)
+        catch
+          # It stopped, idle, between being found and being asked, so it's another that's asked.
+          :exit, {stopped, _} when stopped in [:noproc, :normal] -> child(owner, version, used, files, ask)
+        end
 
-        [] ->
-          sets = fn -> sets(version, used, files) end
-          spec = {__MODULE__, {owner, key, Path.basename(version.artifact), sets, version}}
+      [] ->
+        sets = fn -> sets(version, used, files) end
+        spec = {__MODULE__, {owner, key, Path.basename(version.artifact), sets, version}}
 
-          case DynamicSupervisor.start_child(@supervisor, spec) do
-            {:ok, child} -> child
-            {:error, {:already_started, child}} -> child
-          end
-      end
-
-    GenServer.call(child, :loaded, :infinity)
+        case DynamicSupervisor.start_child(@supervisor, spec) do
+          {:ok, child} -> :gen_statem.call(child, ask)
+          {:error, {:already_started, _child}} -> child(owner, version, used, files, ask)
+        end
+    end
   catch
     :exit, _ -> {:error, "#{Path.basename(version.artifact)} stopped as it started"}
   end
@@ -440,7 +442,7 @@ defmodule OneCore.Sandbox do
     {:ok, child} = DynamicSupervisor.start_child(@supervisor, {__MODULE__, {nil, key, name, fn -> sets end, nil}})
 
     try do
-      with {:ok, _child, _port, context} <- GenServer.call(child, :loaded, :infinity), do: {:ok, context.description}
+      with {:ok, _child, _port, context} <- :gen_statem.call(child, :loaded), do: {:ok, context.description}
     after
       DynamicSupervisor.terminate_child(@supervisor, child)
     end
@@ -449,7 +451,7 @@ defmodule OneCore.Sandbox do
   end
 
   defp loaded(owner, version, used, files) do
-    case child(owner, version, used, files) do
+    case child(owner, version, used, files, :loaded) do
       {:ok, _child, _port, context} -> {:ok, context.description}
       {:error, why} -> {:error, why}
     end
@@ -488,8 +490,17 @@ defmodule OneCore.Sandbox do
     end
   end
 
+  def child_spec(started),
+    do: %{id: __MODULE__, start: {__MODULE__, :start_link, [started]}, restart: :temporary}
+
   def start_link({owner, key, _name, _sets, _version} = started),
-    do: GenServer.start_link(__MODULE__, started, name: {:via, Registry, {@registry, {owner, key}}})
+    do: :gen_statem.start_link({:via, Registry, {@registry, {owner, key}}}, __MODULE__, started, [])
+
+  # A child is `:loading` while its VM starts and compiles the code, until it says what it is. Then it's `:ready`,
+  # running no call, or `:busy`, running some. One that couldn't start or load is `{:failed, why}`: it tells
+  # whatever asked meanwhile why, and stops. A ready one stops after a minute, which a call cancels by making it busy.
+  @impl true
+  def callback_mode, do: [:handle_event_function, :state_enter]
 
   @impl true
   def init({owner, key, name, sets, version}) do
@@ -511,15 +522,21 @@ defmodule OneCore.Sandbox do
       description: nil
     }
 
-    state = %{context: context, port: nil, buffer: "", loaded: nil, waiting: [], calls: %{}, requests: 0, logged: {0, 0}}
-    {:ok, state, {:continue, {:start, sets}}}
+    data = %{context: context, port: nil, buffer: "", calls: %{}, requests: 0, logged: {0, 0}}
+    {:ok, :loading, data, [{:next_event, :internal, {:start, sets}}]}
   end
 
   @impl true
-  def handle_continue({:start, sets}, state) do
+  def handle_event(:enter, _was, :loading, _data), do: {:keep_state_and_data, [{:state_timeout, @silent, :loading}]}
+  def handle_event(:enter, _was, :ready, _data), do: {:keep_state_and_data, [{:state_timeout, @idle, :idle}]}
+  def handle_event(:enter, _was, :busy, _data), do: :keep_state_and_data
+  # What was asked while it loaded is answered first.
+  def handle_event(:enter, _was, {:failed, _why}, _data), do: {:keep_state_and_data, [{:state_timeout, 0, :failed}]}
+
+  def handle_event(:internal, {:start, sets}, :loading, data) do
     # A VM started from what's kept marks it as in use.
     cached =
-      with path when is_binary(path) <- state.context.cache,
+      with path when is_binary(path) <- data.context.cache,
            {:ok, description} <- File.read(Path.join(path, "modules")) do
         File.touch(path)
         JSON.decode!(description)
@@ -527,19 +544,64 @@ defmodule OneCore.Sandbox do
         _ -> nil
       end
 
-    case started(cached && state.context.cache) do
+    case started(cached && data.context.cache) do
       {:ok, port} ->
-        cache = cached && %{"ebin" => state.context.cache, "modules" => cached}
+        cache = cached && %{"ebin" => data.context.cache, "modules" => cached}
         command(port, {:load, sets.(), Builds.target(), cache})
-        Process.send_after(self(), :loading, @silent)
         # Only a VM that compiled the code itself, before any call, has what it compiled kept.
-        context = if cached, do: %{state.context | cache: nil}, else: state.context
-        {:noreply, %{state | port: port, context: context}}
+        context = if cached, do: %{data.context | cache: nil}, else: data.context
+        {:keep_state, %{data | port: port, context: context}}
 
       {:error, why} ->
-        {:stop, :normal, reply_loaded(state, {:error, why})}
+        {:next_state, {:failed, why}, data}
     end
   end
+
+  def handle_event(:state_timeout, :loading, :loading, data),
+    do: stop(:loading, data, "it didn't load within #{div(@silent, 1000)} seconds")
+
+  def handle_event(:state_timeout, :idle, :ready, _data), do: {:stop, :normal}
+  def handle_event(:state_timeout, :failed, {:failed, _why}, _data), do: {:stop, :normal}
+
+  def handle_event({:call, _from}, _ask, :loading, _data), do: {:keep_state_and_data, [:postpone]}
+
+  def handle_event({:call, from}, _ask, {:failed, why}, _data),
+    do: {:keep_state_and_data, [{:reply, from, {:error, why}}]}
+
+  def handle_event({:call, from}, :loaded, _state, data), do: {:keep_state_and_data, [{:reply, from, loaded(data)}]}
+
+  def handle_event({:call, {caller, _} = from}, {:begin, id}, _state, data) do
+    calls = Map.put(data.calls, id, {caller, Process.monitor(caller)})
+    {:next_state, :busy, %{data | calls: calls}, [{:reply, from, loaded(data)}]}
+  end
+
+  def handle_event(:cast, {:ended, id}, state, data), do: ended(state, data, id, false)
+  def handle_event(:cast, {:cancel, id}, state, data), do: ended(state, data, id, true)
+
+  def handle_event(:info, {port, {:data, received}}, state, %{port: port} = data),
+    do: frames(state, %{data | buffer: data.buffer <> received})
+
+  def handle_event(:info, {port, {:exit_status, status}}, state, %{port: port} = data),
+    do: stop(state, data, "its VM ended with status #{status}")
+
+  def handle_event(:info, {:DOWN, monitor, :process, _caller, _why}, state, data) do
+    case Enum.find(data.calls, fn {_id, {_caller, watched}} -> watched == monitor end) do
+      {id, _} -> ended(state, data, id, true)
+      nil -> :keep_state_and_data
+    end
+  end
+
+  def handle_event(:info, :replied, _state, data), do: {:keep_state, %{data | requests: data.requests - 1}}
+
+  @impl true
+  def terminate(_why, _state, %{port: port}) when is_port(port) do
+    kill(port)
+    Port.close(port)
+  catch
+    _, _ -> :ok
+  end
+
+  def terminate(_why, _state, _data), do: :ok
 
   # The program the child is: this server's own Erlang VM and Elixir, read-only, with the child's side of One Core.
   defp started(cache) do
@@ -601,155 +663,115 @@ defmodule OneCore.Sandbox do
     walled(Path.join(erts, vm), arguments, policy)
   end
 
-  @impl true
-  def handle_call(:loaded, from, %{loaded: nil} = state), do: {:noreply, %{state | waiting: [from | state.waiting]}}
-  def handle_call(:loaded, _from, state), do: {:reply, state.loaded, state}
+  defp loaded(data), do: {:ok, self(), data.port, data.context}
 
-  def handle_call({:begin, id}, {caller, _}, state) do
-    monitor = Process.monitor(caller)
-    {:reply, :ok, %{state | calls: Map.put(state.calls, id, {caller, monitor})}}
-  end
-
-  @impl true
-  def handle_cast({:ended, id}, state), do: {:noreply, ended(state, id, false)}
-  def handle_cast({:cancel, id}, state), do: {:noreply, ended(state, id, true)}
-
-  @impl true
-  def handle_info({port, {:data, data}}, %{port: port} = state), do: frames(%{state | buffer: state.buffer <> data})
-
-  def handle_info({port, {:exit_status, status}}, %{port: port} = state),
-    do: {:stop, :normal, stopped(state, "its VM ended with status #{status}")}
-
-  def handle_info({:DOWN, monitor, :process, _caller, _why}, state) do
-    case Enum.find(state.calls, fn {_id, {_caller, watched}} -> watched == monitor end) do
-      {id, _} -> {:noreply, ended(state, id, true)}
-      nil -> {:noreply, state}
-    end
-  end
-
-  def handle_info(:idle, %{calls: calls} = state) when calls == %{}, do: {:stop, :normal, state}
-  def handle_info(:idle, state), do: {:noreply, state}
-
-  def handle_info(:loading, %{loaded: nil} = state),
-    do: {:stop, :normal, stopped(state, "it didn't load within #{div(@silent, 1000)} seconds")}
-
-  def handle_info(:loading, state), do: {:noreply, state}
-  def handle_info(:replied, state), do: {:noreply, %{state | requests: state.requests - 1}}
-
-  @impl true
-  def terminate(_why, %{port: port}) when is_port(port) do
-    kill(port)
-    Port.close(port)
-  catch
-    _, _ -> :ok
-  end
-
-  def terminate(_why, _state), do: :ok
-
-  # A call ended, here or in the child: one the child may still be running is cancelled there. A child with none
-  # left stops after a while.
-  defp ended(state, id, cancel) do
-    case Map.pop(state.calls, id) do
+  # A call ended, here or in the child: one the child may still be running is cancelled there. A child running none
+  # is ready again.
+  defp ended(state, data, id, cancel) do
+    case Map.pop(data.calls, id) do
       {{_caller, monitor}, calls} ->
         Process.demonitor(monitor, [:flush])
-        if cancel, do: command(state.port, {:cancel, id})
-        if calls == %{}, do: Process.send_after(self(), :idle, @idle)
-        %{state | calls: calls}
+        if cancel, do: command(data.port, {:cancel, id})
+        {:next_state, if(calls == %{}, do: :ready, else: state), %{data | calls: calls}}
 
       {nil, _calls} ->
-        state
+        :keep_state_and_data
     end
+  end
+
+  # Its VM stopped, or is stopped: the calls it was running fail, and one still loading fails whatever waits on it.
+  defp stop(state, data, why) do
+    Logger.warning("#{data.context.name}'s sandbox stopped: #{why}")
+    for {_id, {caller, _monitor}} <- data.calls, do: send(caller, {__MODULE__, :stopped, self(), why})
+
+    if state == :loading,
+      do: {:next_state, {:failed, "#{data.context.name} stopped as it loaded: #{why}"}, data},
+      else: {:stop, :normal, data}
   end
 
   # Its VM's own words, such as that it ran out of memory, aren't a frame either.
-  defp frames(%{buffer: <<size::32, _::binary>>} = state) when size > @largest,
-    do:
-      {:stop, :normal,
-       stopped(state, "it wrote what isn't the protocol: #{inspect(String.slice(state.buffer, 0, 200))}")}
+  defp frames(state, %{buffer: <<size::32, _::binary>>} = data) when size > @largest,
+    do: stop(state, data, "it wrote what isn't the protocol: #{inspect(String.slice(data.buffer, 0, 200))}")
 
-  defp frames(%{buffer: <<size::32, frame::binary-size(size), rest::binary>>} = state) do
+  defp frames(state, %{buffer: <<size::32, frame::binary-size(size), rest::binary>>} = data) do
     case JSON.decode(frame) do
       {:ok, message} ->
-        case received(message, %{state | buffer: rest}) do
-          {:ok, state} -> frames(state)
-          {:stop, why, state} -> {:stop, :normal, stopped(state, why)}
+        case received(message, state, %{data | buffer: rest}) do
+          {:ok, state, data} -> frames(state, data)
+          {:stop, why, data} -> stop(state, data, why)
         end
 
       {:error, _} ->
-        {:stop, :normal, stopped(state, "it sent what isn't the protocol: #{inspect(String.slice(frame, 0, 200))}")}
+        stop(state, data, "it sent what isn't the protocol: #{inspect(String.slice(frame, 0, 200))}")
     end
   end
 
-  defp frames(state), do: {:noreply, state}
+  defp frames(state, data), do: {:next_state, state, data}
 
-  # It answers what it is once, before any call, so what it compiled holds nothing of anyone's.
-  defp received(%{"answer" => "load"}, %{loaded: loaded} = state) when loaded != nil,
-    do: {:stop, "it said what it is again", state}
+  # It answers what it is once, as it loads, before any call, so what it compiled holds nothing of anyone's.
+  defp received(%{"answer" => "load"} = reply, :loading, data) do
+    case reply do
+      %{"ok" => description} when is_map(description) ->
+        {beams, description} = Map.pop(description, "beams")
+        if beams && data.context.cache, do: keep(data.context.cache, beams)
+        {:ok, :ready, %{data | context: %{data.context | description: description}}}
 
-  defp received(%{"answer" => "load"} = reply, state) do
-    loaded =
-      case reply do
-        %{"ok" => description} when is_map(description) ->
-          {beams, description} = Map.pop(description, "beams")
-          if beams && state.context.cache, do: keep(state.context.cache, beams)
-          context = %{state.context | description: description}
-          {:ok, self(), state.port, context}
+      _ ->
+        Logger.warning("#{data.context.name}'s sandbox stopped: it didn't load")
 
-        %{"raised" => why} when is_binary(why) ->
-          {:error, why}
+        why =
+          if is_binary(reply["raised"]), do: reply["raised"], else: "#{data.context.name} said what isn't what it is"
 
-        _ ->
-          {:error, "#{state.context.name} said what isn't what it is"}
-      end
-
-    state = reply_loaded(state, loaded)
-    state = with {:ok, _, _, context} <- loaded, do: %{state | context: context}
-    if match?({:error, _}, loaded), do: {:stop, "it didn't load", state}, else: {:ok, state}
+        {:ok, {:failed, why}, data}
+    end
   end
 
-  defp received(%{"answer" => id} = reply, state) when is_integer(id) do
-    with %{^id => {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :reply, id, reply})
-    {:ok, state}
+  defp received(%{"answer" => "load"}, _state, data), do: {:stop, "it said what it is again", data}
+
+  defp received(%{"answer" => id} = reply, state, data) when is_integer(id) do
+    with %{^id => {caller, _monitor}} <- data.calls, do: send(caller, {__MODULE__, :reply, id, reply})
+    {:ok, state, data}
   end
 
   # A request within a call is run by the process running the call, and any other alongside, a few at once.
-  defp received(%{"request" => request, "call" => call, "op" => op} = message, state)
+  defp received(%{"request" => request, "call" => call, "op" => op} = message, state, data)
        when is_integer(request) and is_binary(op) do
     cond do
-      is_map_key(state.calls, call) ->
-        {caller, _monitor} = state.calls[call]
+      is_map_key(data.calls, call) ->
+        {caller, _monitor} = data.calls[call]
         send(caller, {__MODULE__, :request, call, message})
-        {:ok, state}
+        {:ok, state, data}
 
-      state.requests >= @at_once ->
-        {:stop, "it asked for more than #{@at_once} things at once outside a call", state}
+      data.requests >= @at_once ->
+        {:stop, "it asked for more than #{@at_once} things at once outside a call", data}
 
       true ->
-        {port, context, child} = {state.port, state.context, self()}
+        {port, context, child} = {data.port, data.context, self()}
 
         Task.start(fn ->
           command(port, {:reply, request, handled(message, nil, context)})
           send(child, :replied)
         end)
 
-        {:ok, %{state | requests: state.requests + 1}}
+        {:ok, state, %{data | requests: data.requests + 1}}
     end
   end
 
   # What it logs past its share of a minute is dropped.
-  defp received(%{"log" => level, "text" => text}, state)
+  defp received(%{"log" => level, "text" => text}, state, data)
        when level in ["warning", "error", "critical", "alert", "emergency"] and is_binary(text) do
     minute = div(System.monotonic_time(:second), 60)
-    {at, logged} = state.logged
+    {at, logged} = data.logged
     logged = if at == minute, do: logged + 1, else: 1
 
     if logged <= @logs,
-      do: Logger.log(String.to_existing_atom(level), "#{state.context.name}: #{String.slice(text, 0, 4000)}")
+      do: Logger.log(String.to_existing_atom(level), "#{data.context.name}: #{String.slice(text, 0, 4000)}")
 
-    {:ok, %{state | logged: {minute, logged}}}
+    {:ok, state, %{data | logged: {minute, logged}}}
   end
 
-  defp received(message, state), do: {:stop, "it sent what isn't the protocol: #{inspect(message, limit: 5)}", state}
+  defp received(message, _state, data),
+    do: {:stop, "it sent what isn't the protocol: #{inspect(message, limit: 5)}", data}
 
   # Keeps what a VM compiled, each module by its name, for the next VM of the same version. It's written aside and
   # moved into place, so a VM never loads half of it, and what another VM kept first stays.
@@ -780,19 +802,5 @@ defmodule OneCore.Sandbox do
         do: File.rm_rf!(folder)
   rescue
     error -> Logger.warning("What a plugin's VM compiled wasn't kept: #{Exception.message(error)}")
-  end
-
-  defp reply_loaded(state, loaded) do
-    for from <- state.waiting, do: GenServer.reply(from, loaded)
-    %{state | loaded: loaded, waiting: []}
-  end
-
-  defp stopped(state, why) do
-    Logger.warning("#{state.context.name}'s sandbox stopped: #{why}")
-    for {_id, {caller, _monitor}} <- state.calls, do: send(caller, {__MODULE__, :stopped, self(), why})
-
-    if state.loaded == nil,
-      do: reply_loaded(state, {:error, "#{state.context.name} stopped as it loaded: #{why}"}),
-      else: state
   end
 end
