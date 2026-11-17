@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 since=6ab2c6a02
 # Commits marked breaking that weren't, read as what they are: main is shared, so a pushed commit's message can't be
 # changed.
-mismarked="4b6c917ff2581cc84a6fd3c81c40d5f713ff1360"
+mismarked="4b6c917ff2581cc84a6fd3c81c40d5f713ff1360 9c43d976a8f93e432e89f99cefa07f93b878089b"
 version=$(git log --reverse --format='%H%n%s%n%b%x1e' "$since..HEAD" | awk -v version=0.15.0 -v mismarked="$mismarked" '
   BEGIN { RS = "\036"; split(version, v, "."); major = v[1]; minor = v[2]; patch = v[3] }
   {
