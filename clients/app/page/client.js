@@ -31,9 +31,6 @@ const NEVER = 15000
 const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
 /// The launcher's page, as this user's apps list it, once they're listed: `<plugin>/<page>`.
 let launcher = ""
-/// The room the launcher keeps along the start of its frame beside the app that's showing, which that app's frame
-/// leaves clear: a CSS length, as the launcher says (`notifications/one/beside`), or none.
-let room = ""
 /// The apps that are open, by who each is for and what it is: `{ key, app, subject, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
@@ -41,8 +38,7 @@ let room = ""
 const open = new Map()
 /** @param {string} app @param {string} [subject] */
 const key = (app, subject) => `${subject ?? ""}|${app}`
-/// Each plugin's first app, by the plugin's name, among this user's, and one that isn't a part of Settings if it
-/// has one: what a notification from it opens.
+/// Each plugin's first app, by the plugin's name, among this user's: what a notification from it opens.
 /** @type {Map<string, string>} */
 let first = new Map()
 /// Who this client has listed files for: its user (`undefined`), and each group or the network an app was opened
@@ -58,7 +54,7 @@ const host = (app, subject) => [app.split("/")[0], ...(subject ? subject.split("
 /// `start` says.
 let phone = false
 
-/// Light or dark, as Settings › Appearance has it on this device, or as the device is.
+/// Light or dark, as Colour Mode has it on this device, or as the device is.
 const scheme = matchMedia("(prefers-color-scheme: dark)")
 const chosen = () => localStorage.getItem("theme")
 const theme = () => chosen() ?? (scheme.matches ? "dark" : "light")
@@ -266,9 +262,8 @@ async function list(subject) {
         const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
         return `${plugin}/${page.join("/")}`
       }
-      // The last one set for a plugin is the one kept: its first, and one with no category before one with one.
-      const order = pages.toReversed().sort((a, b) => Number(Boolean(b._meta?.category)) - Number(Boolean(a._meta?.category)))
-      first = new Map(order.map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
+      // The last one set for a plugin is the one kept: its first.
+      first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
       const found = pages.find(({ _meta }) => _meta?.category === "launcher")
       if (found) launcher = named(found.uri)
       if (launcher) on({ type: "listed" })
@@ -328,8 +323,7 @@ let shownByDevice = false
 /** @param {() => void} change */
 function move(change, back = false) {
   const plain = !globalThis.ViewTransition || !("types" in ViewTransition.prototype) || matchMedia("(prefers-reduced-motion: reduce)").matches
-  // Beside the launcher's sidebar, an app takes the place of the last, as a sidebar's apps do.
-  if (plain || shownByDevice || room) return void change()
+  if (plain || shownByDevice) return void change()
   document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
 }
 
@@ -353,13 +347,13 @@ function show(at, tapped) {
   opened(view)
 }
 
-/// Has the app that's open as `at` showing, or with none there, the launcher, and the launcher told which, for what it
-/// keeps beside every app where it keeps room. → the one showing.
+/// Has the app that's open as `at` showing, or with none there, the launcher, and the launcher told which, so it
+/// knows whether it's showing. → the one showing.
 /** @param {string | null} at */
 function layer(at) {
   const view = showing(at)
   const home = open.get(key(launcher))
-  for (const other of open.values()) other.frame.inert = other !== view && !(other === home && room)
+  for (const other of open.values()) other.frame.inert = other !== view
   if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, subject: view.subject } })
   gestures()
   return view
@@ -504,15 +498,8 @@ addEventListener("message", async ({ source, data }) => {
       view.over = params.over === true
       gestures()
     }
-    // The launcher, loaded again, is told which app is showing beside it.
+    // The launcher, loaded again, is told which app is showing.
     if (method === "ui/notifications/initialized" && view.app === launcher) layer(history.state)
-    // The launcher says how much room it keeps beside other apps, as the window's size changes.
-    if (method === "notifications/one/beside" && view.app === launcher) {
-      room = typeof params.width === "string" ? params.width : ""
-      document.body.style.setProperty("--beside", room || "0px")
-      document.body.toggleAttribute("data-beside", Boolean(room))
-      layer(history.state)
-    }
     // An app's page logs its errors as an MCP App logs to its host, and they're its plugin's, whatever it says.
     if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.app.split("/")[0])
     return

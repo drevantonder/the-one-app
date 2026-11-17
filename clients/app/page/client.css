@@ -86,13 +86,6 @@ iframe {
   border: 0;
   background: var(--background);
 }
-/* Where the launcher keeps room beside other apps (client.js's `room`, which it says), an app shows beside it, over
-   the launcher's frame, which WebKitGTK otherwise draws on top of it. */
-body[data-beside] iframe:not(.launcher) {
-  justify-self: end;
-  width: calc(100% - var(--beside));
-  z-index: 1;
-}
 /* An app behind the one that's showing stays laid out, so it's back in one frame. */
 iframe[inert] {
   visibility: hidden;
