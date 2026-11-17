@@ -760,14 +760,10 @@ async fn take(client: &Client, here: &Here, record: &Record, program: &Path) -> 
     Ok((next != Pair { program: Some(BUILD.to_owned()), ..current }).then_some(next))
 }
 
-/// The latest server build among the network's `builds`: its code's, which goes with the runtime for this kind of
-/// machine, or a whole one's from before builds came in two.
+/// The latest server build among the network's `builds`: its code's, where there's a runtime for this kind of machine
+/// to go with it.
 fn latest(builds: &Map<String, Value>) -> Option<&str> {
-    match (builds.get("server-code"), builds.get("server-runtime"), builds.get("server")) {
-        (Some(code), Some(_runtime), _) => code["build"].as_str(),
-        (_, _, Some(server)) => server["build"].as_str(),
-        _ => None,
-    }
+    builds.get("server-runtime").and(builds.get("server-code")).and_then(|code| code["build"].as_str())
 }
 
 /// Replaces the program `program` with the build `one`, once it has said it's that build. What runs now runs on, and
@@ -1003,7 +999,7 @@ impl Here {
     }
 
     /// Takes the latest server build among the network's `builds` (`latest`), put together from its runtime and
-    /// its code, or a whole one from before builds came in two, and has it say which it is, which starts its VM and
+    /// its code, and has it say which it is, which starts its VM and
     /// loads its NIFs: a build that can't do that here goes. Gives its name. One that's here already is taken as it
     /// is.
     async fn take(&self, builds: &Map<String, Value>) -> Result<String> {
@@ -1015,13 +1011,9 @@ impl Here {
         let unpacking = self.folder.join("builds").join(format!("{name}.unpacking"));
         let _ = fs::remove_dir_all(&unpacking);
         fs::create_dir_all(&unpacking)?;
-        if let (Some(code), Some(runtime)) = (builds.get("server-code"), builds.get("server-runtime")) {
-            let kept = self.runtime(runtime).await?;
-            linked(&kept, &unpacking).with_context(|| format!("the build {name} couldn't be put together"))?;
-            unpack(code, &unpacking).await?;
-        } else {
-            unpack(&builds["server"], &unpacking).await?;
-        }
+        let kept = self.runtime(&builds["server-runtime"]).await?;
+        linked(&kept, &unpacking).with_context(|| format!("the build {name} couldn't be put together"))?;
+        unpack(&builds["server-code"], &unpacking).await?;
         let output = command(release(&unpacking)).args(["eval", "OneCore.Release.check()"]).output()?;
         let (out, errors) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         let out = out.trim();

@@ -28,8 +28,8 @@
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
 # target/builds/<build>.
 #
-# A server is published whole, `server/<kind>`, and in two parts, which a machine puts together (`one serve run`):
-# `server-code`, One Core's own code, its release's `releases/` and the UI library, the same for every kind of
+# A server for a kind of machine, `server/<kind>`, is published in two parts, which a machine puts together (`one
+# serve run`): `server-code`, One Core's own code, its release's `releases/` and the UI library, the same for every kind of
 # machine, and `server-runtime/<kind>`, the rest. A runtime is told by the SHA-256 of what it's built from, which the
 # network keeps with it as its `inputs`, and published only when that changed, under the build that first had it,
 # which its file `runtime` names. It's what it's built from, not its files, since those name the folders they were
@@ -86,7 +86,8 @@ done
 mine=() mac=()
 for name in "${names[@]}"; do
   kind=${name#*/}
-  if [[ $(jq -r --arg n "$name" '.latest[$n].build // ""' <<<"$builds") == "$build" ]]; then
+  # A server is published as its code, which is the same for every kind.
+  if [[ $(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds") == "$build" ]]; then
     echo "$name  $build is published already"
   elif [[ $name == server/* && $here != linux-* ]]; then
     echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
@@ -251,8 +252,6 @@ for kind in "${servers[@]}"; do
   fi
   [[ -e $out/server-code.tar.gz ]] ||
     tar -czf "$out/server-code.tar.gz" -C "$release" --exclude='./lib/one_core-*/priv/native' ./releases ./ui $(cd "$release" && echo ./lib/one_core-*)
-
-  tar -czf "$out/server-$kind.tar.gz" -C "$release" .
 done
 
 for client in "${clients[@]}"; do wait "$client" || { echo "A client wasn't built." >&2 && exit 1; }; done

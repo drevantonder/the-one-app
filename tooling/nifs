@@ -73,7 +73,7 @@ for kind in "${kinds[@]}"; do
       fi
     done
 
-    published=$(one download --target "$kind" | jq -c '.server // empty')
+    published=$(one download --target "$kind" | jq -c '.["server-runtime"] // empty')
     if [[ -n $(changed) && -n $published ]]; then
       unpacked=$(mktemp -d -p "$target")
       mapfile -t headers < <(jq -r '.link.headers | to_entries[] | "-H", "\(.key): \(.value)"' <<<"$published")

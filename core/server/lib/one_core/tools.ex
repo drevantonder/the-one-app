@@ -589,7 +589,7 @@ defmodule OneCore.Tools do
           server: %{type: "string", description: "The key of the server that answered"},
           build: %{type: "string", description: "Its build: <version>+<count>.<commit>"},
           edge: %{type: ["string", "null"], description: "The build the network's edge is, if it says"},
-          latest: %{type: "object", description: "The latest build of each kind of machine, by its name: server/linux-x86_64"},
+          latest: %{type: "object", description: "The latest build of each kind of machine, by its name: server-runtime/linux-x86_64"},
           servers: %{
             type: "array",
             items: %{
@@ -688,14 +688,14 @@ defmodule OneCore.Tools do
           builds: %{
             type: "array",
             description:
-              "Each build: its name (server/<target>, server-runtime/<target>, server-code, one/<target> or " <>
+              "Each build: its name (server-runtime/<target>, server-code, one/<target> or " <>
                 "one-cli/<target>), build, sha256 and size, and a runtime's inputs, the SHA-256 of what it's built from",
             items: %{
               type: "object",
               properties: %{
                 name: %{
                   type: "string",
-                  pattern: "^((server|server-runtime|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+|server-code)$"
+                  pattern: "^((server-runtime|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+|server-code)$"
                 },
                 build: %{type: "string"},
                 inputs: %{type: "string", pattern: "^[0-9a-f]{64}$"},

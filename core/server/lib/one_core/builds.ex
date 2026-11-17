@@ -3,8 +3,8 @@ defmodule OneCore.Builds do
   Which build each machine runs, and the latest, which a machine takes when it's asked to update.
 
   A build is named by the version it is, its commit's (`build/0`), and is made for a kind of machine (`target/0`):
-  `server/<target>`, an installed server, `one/<target>`, the program `one`, and `one-cli/<target>`, `one` without its
-  window. A server is also in two parts, which a machine puts together (`clients/cli/src/serving.rs`):
+  `one/<target>`, the program `one`, and `one-cli/<target>`, `one` without its window, and an installed server, in two
+  parts, which a machine puts together (`clients/cli/src/serving.rs`):
   `server-runtime/<target>`, the VM, Elixir, the deps, One Core's NIFs and its config, named by the build that last
   changed them and made only then, and `server-code`, One Core's own code and the UI library, the same for every kind
   of machine and made every time. `tooling/release` makes them and publishes them (`publish/1`): each is a blob under the network's `builds/`, named
@@ -107,7 +107,7 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  The latest builds for a kind of machine, each with a link to download it by: `%{\"one\" => ..., \"server\" => ...,
+  The latest builds for a kind of machine, each with a link to download it by: `%{\"one\" => ...,
   \"server-runtime\" => ..., \"server-code\" => ...}`, with whichever there's one of.
   """
   def download(target) do

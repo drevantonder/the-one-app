@@ -442,9 +442,10 @@ defmodule OneCore.Plugins.Deploy do
            else: (_ -> 0)
     end
 
-    Builds.latest()
-    |> Enum.filter(fn {name, _} -> name == "server-code" or String.starts_with?(name, "server/") end)
-    |> Enum.all?(fn {_name, %{"build" => build}} -> count.(build) <= count.(Builds.build()) end)
+    case Builds.latest()["server-code"] do
+      %{"build" => build} -> count.(build) <= count.(Builds.build())
+      nil -> true
+    end
   end
 
   # The plugins a plugin requires are there before it is: installed for `owner`, or for the network.
