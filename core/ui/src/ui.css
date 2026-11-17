@@ -467,14 +467,16 @@ button.ui-box {
   height: calc(var(--box) * 0.75);
   background: var(--primary-foreground);
   mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z" stroke="black" stroke-width="16"/></svg>') center / contain no-repeat;
-  scale: 0;
-  transition: scale var(--move-quick) var(--ease-quick);
+  opacity: 0;
+  scale: 0.5;
+  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
 }
 .ui-choice input:checked {
   border-color: var(--primary);
   background: var(--primary);
 }
 .ui-choice input:checked::before {
+  opacity: 1;
   scale: 1;
 }
 /* A switch: the same control, drawn as a track with a thumb, at the end of its label. */
@@ -527,10 +529,12 @@ button.ui-box {
   height: calc(var(--box) * 0.5);
   border-radius: 50%;
   background: var(--primary-foreground);
-  scale: 0;
-  transition: scale var(--move-quick) var(--ease-quick);
+  opacity: 0;
+  scale: 0.5;
+  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
 }
 .ui-choice input[type="radio"]:checked::before {
+  opacity: 1;
   scale: 1;
 }
 
