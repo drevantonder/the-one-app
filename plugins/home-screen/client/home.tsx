@@ -101,7 +101,8 @@ function Tile(props: { name: string; onPress?: (behind?: boolean) => void; child
 type Cell = { item: Item; index: number }
 
 /// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a touch held still is a hold, as is
-/// a right-click; a press that moves while editing, or once held, lifts it. `held` says what it is, as it is then.
+/// a right-click; a press that moves while editing, or once held, lifts it. `held` says what it is, as it is then. A
+/// hold on a page's empty space has nothing to lift or offer, so it edits the page at once, as a phone's does.
 function holds(held: () => Held | undefined, arranges: () => boolean) {
   return (element: HTMLElement) => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -118,11 +119,16 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
       // The Home Screen keeps the finger from here on, whatever's drawn again under it.
       document.querySelector<HTMLElement>(".home")?.setPointerCapture(event.pointerId)
     }
+    const hold = () => {
+      const what = held()
+      if (!arranges() || !what || !state().matches("nothing")) return
+      if (what.item) home.send({ type: "hold", held: { ...what, rect: rect() } })
+      else if (pending?.()) home.send({ type: "edit", editing: pending()! })
+    }
     element.addEventListener("contextmenu", (event) => {
       event.preventDefault()
       event.stopPropagation()
-      const what = held()
-      if (arranges() && what && state().matches("nothing")) home.send({ type: "hold", held: { ...what, rect: rect() } })
+      hold()
     })
     element.addEventListener("pointerdown", (event) => {
       if (event.button || !arranges()) return
@@ -130,11 +136,7 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
       // Editing, a press that moves lifts at once, wherever the pointer goes first; otherwise a finger held still is a
       // hold.
       if (state().matches({ editing: "still" }) && held()?.item) element.setPointerCapture(event.pointerId)
-      else if (!state().matches("editing") && event.pointerType !== "mouse")
-        timer = setTimeout(() => {
-          const what = held()
-          if (what && state().matches("nothing")) home.send({ type: "hold", held: { ...what, rect: rect() } })
-        }, HOLD)
+      else if (!state().matches("editing") && event.pointerType !== "mouse") timer = setTimeout(hold, HOLD)
     })
     element.addEventListener("pointermove", (event) => {
       if (!start) return

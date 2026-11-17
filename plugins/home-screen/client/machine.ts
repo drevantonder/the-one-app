@@ -145,7 +145,7 @@ export type Event =
   | { type: "home" }
   /** A finger stayed on an item or on empty space, or a mouse right-clicked it, for its menu, by whoever arranges it. */
   | { type: "hold"; held: Held }
-  /** Edit Home Screen, from that menu: the owner's pages, as they are, to edit. */
+  /** Edit Home Screen, from that menu, or a hold on a page's empty space: the owner's pages, as they are, to edit. */
   | { type: "edit"; editing: Editing }
   /** An item, or an app from the App Library with the owner's pages to edit, lifted to be moved. */
   | { type: "lift"; held: Held; editing?: Editing }
@@ -316,6 +316,8 @@ export const machine = setup({
         list: "listing",
         open: { target: "category", actions: "open" },
         hold: { target: "holding", actions: "hold" },
+        // A finger held on a page's empty space edits it at once, as a phone's does.
+        edit: { target: "editing", actions: "edit" },
       },
     },
     // The owner switcher's list of every owner.
