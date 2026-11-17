@@ -39,8 +39,9 @@ use cache::write;
 /// The build this program is: the commit it was built from, as `build.rs` says.
 pub const BUILD: &str = env!("ONE_BUILD");
 
-/// The kind of machine this is, as builds are named, the same as a server names it (`OneCore.Builds`):
-/// `linux-x86_64`, `macos-aarch64`.
+/// The kind of machine this build is for, as builds are named, the same as a server names it (`OneCore.Builds`):
+/// `linux-x86_64`, `macos-aarch64`. It's the target it was compiled for, so the x64 build an ARM PC runs emulated says
+/// `windows-x86_64`.
 pub fn target() -> String {
     format!("{}-{}", env::consts::OS, env::consts::ARCH)
 }
