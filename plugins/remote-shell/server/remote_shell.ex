@@ -7,6 +7,9 @@ defmodule RemoteShell do
   alias RemoteShell.Runner
 
   @impl true
+  def title, do: "Remote Shell"
+
+  @impl true
   def icon, do: "icon.svg"
 
   @impl true

@@ -6,6 +6,9 @@ defmodule Database do
   @behaviour OneCore.Plugin
 
   @impl true
+  def title, do: "Database"
+
+  @impl true
   def icon, do: "icon.svg"
 
   alias Database.Lease

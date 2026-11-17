@@ -68,6 +68,9 @@ defmodule Chrome do
   }
 
   @impl true
+  def title, do: "Chrome"
+
+  @impl true
   def icon, do: "icon.svg"
 
   @impl true

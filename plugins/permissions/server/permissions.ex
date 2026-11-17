@@ -10,6 +10,9 @@ defmodule Permissions do
 
   # One Core asks it who may reach what: without it, only the network's first owner reaches anything.
   @impl true
+  def title, do: "Permissions"
+
+  @impl true
   def icon, do: "icon.svg"
 
   # An owner is an editor, and an editor is a viewer: what each relation is enough for. An installer adds plugins

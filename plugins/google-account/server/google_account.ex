@@ -33,7 +33,7 @@ defmodule GoogleAccount do
 
   # It has no app, and its Google accounts are listed in the Vault, so it names and draws itself.
   @impl true
-  def title, do: "Google"
+  def title, do: "Google Account"
 
   @impl true
   def icon, do: "icon.png"

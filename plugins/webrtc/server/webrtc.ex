@@ -19,6 +19,9 @@ defmodule WebRTC do
   @ttl 4 * 3600
 
   @impl true
+  def title, do: "WebRTC"
+
+  @impl true
   def icon, do: "icon.svg"
 
   @impl true

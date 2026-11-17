@@ -18,6 +18,9 @@ defmodule Sandbox do
   # Without it no untrusted plugin runs, and a network's members with no server of their own can run only untrusted
   # plugins.
   @impl true
+  def title, do: "Sandbox"
+
+  @impl true
   def icon, do: "icon.svg"
 
   @doc """

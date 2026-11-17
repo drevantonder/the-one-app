@@ -16,6 +16,9 @@ defmodule Encryption do
 
   # Every device's key is kept with it, and the Vault and notifications use it.
   @impl true
+  def title, do: "Encryption"
+
+  @impl true
   def icon, do: "icon.svg"
 
   # It reads which plugins run inside a call as `call.loaded` names them.
