@@ -62,7 +62,7 @@ defmodule SoftDelete do
   def own, do: :installed
 
   @impl true
-  def requires, do: %{"core" => ">= 0.21.0", "database" => "to keep what you deleted for 30 days"}
+  def requires, do: %{"core" => ">= 0.22.4", "database" => "to keep what you deleted for 30 days"}
 
   @impl true
   def hooks, do: ["uninstalled"]
@@ -251,18 +251,16 @@ defmodule SoftDelete do
   def move(%{"state" => state}, event), do: {:error, "An item that's #{state} can't be moved by #{inspect(event)}."}
 
   @impl true
-  # The apps that required it went with it (`with`), and are one item with it: Restore brings them all back.
+  # The apps that required it went with it (`with`), and are one item with it: Restore brings them all back. What they
+  # kept and made that goes with them, One Core says (`artifacts`).
   def hook("uninstalled", %{"for" => owner, "name" => name, "app" => app} = about, call) do
     # It's heard where the app was uninstalled, and its items are kept by a server acting for the network.
     if not Servers.here?(call.installed), do: Call.forward(call, call.installed)
     went = for %{"name" => other, "app" => artifact} <- List.wrap(about["with"]), do: %{"name" => other, "artifact" => artifact}
 
-    artifacts =
-      for each <- [name | Enum.map(went, & &1["name"])], artifact <- kept(owner, each), uniq: true, do: artifact
-
     record = %{
       "owner" => owner,
-      "artifacts" => artifacts,
+      "artifacts" => about["artifacts"],
       "app" => %{"name" => name, "artifact" => app},
       "with" => went,
       "title" => title(call, Path.basename(app)),
@@ -275,18 +273,6 @@ defmodule SoftDelete do
     # Moving an app's data can take longer than an observer is given, and it's finished later if it's cut short.
     Task.start(fn -> aside(call, id) end)
     :ok
-  end
-
-  # What an app kept and made for `owner`: its own artifact, if it kept anything, and each it made.
-  defp kept(owner, name) do
-    made =
-      for blob <- Bucket.list("#{owner}/made/#{name}/"),
-          [artifact] <- [Regex.run(~r{^[^/]+(?:/[^/]+)?/made/[^/]+/[^/]+}, blob)],
-          uniq: true,
-          do: artifact
-
-    own = "#{owner}/own/#{name}"
-    made ++ if(Bucket.list(own <> "/") != [], do: [own], else: [])
   end
 
   # Restores an item: each artifact at its name, or beside something new there since, and an uninstalled app before
