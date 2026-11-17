@@ -53,6 +53,12 @@ defmodule Vault do
       state text primary key, verifier text not null, service text not null, plugin text not null,
       item text not null, at integer not null
     ) without rowid
+    """,
+    """
+    create table contents (
+      item text not null, name text not null, blob text not null, key text not null, size integer not null,
+      at integer not null, primary key (item, name)
+    ) without rowid
     """
   ]
 
@@ -514,15 +520,108 @@ defmodule Vault do
     artifact = reached(call)
 
     quietly("Removing #{item}", fn ->
-      transaction(call, artifact, fn db ->
-        if item(db, item) do
-          %{"id" => id} = allowed!(db, item, {:plugin, call.who})
-          for table <- ~w(fields uses), do: query(db, "delete from #{table} where item = ?", [id])
-          query(db, "delete from items where id = ?", [id])
-        end
+      blobs =
+        transaction(call, artifact, fn db ->
+          if item(db, item) do
+            %{"id" => id} = allowed!(db, item, {:plugin, call.who})
+            deleted(db, id)
+          else
+            []
+          end
+        end)
 
+      if blobs != [], do: Enum.each(blobs, &Artifact.remove(contents!(call), &1))
+      :ok
+    end)
+  end
+
+  @doc """
+  Renames the item `item` to `to`, for the plugin that calls this, which it's switched on for. Its fields, its
+  contents and whatever it's switched on for go with it.
+  """
+  def rename(%Call{} = call, item, to) do
+    artifact = reached(call)
+
+    quietly("Renaming #{item}", fn ->
+      transaction(call, artifact, fn db ->
+        %{"id" => id} = stored = allowed!(db, item, {:plugin, call.who})
+        if String.trim(to) == "", do: raise("An item has a name.")
+        if match?(%{"id" => other} when other != id, item(db, to)), do: raise("There's an item named #{to} already.")
+        query(db, "update items set name = ? where id = ?", [to, id])
+        touch(db, stored)
         :ok
       end)
+    end)
+  end
+
+  @doc """
+  The fields of the item `item`, by their names, for the plugin that calls this, which it's switched on for: as
+  `value/3` gives each.
+  """
+  def values(%Call{} = call, item) do
+    artifact = reached(call)
+
+    quietly("Reading #{item}", fn ->
+      transaction(call, artifact, fn db -> fields(db, allowed!(db, item, {:plugin, call.who})) end)
+    end)
+  end
+
+  @doc """
+  Keeps the contents `name` of the item `item`, for the plugin that calls this, which it's switched on for: what's
+  too large for a field, like a Chrome profile's hundreds of MB, kept as 1Password keeps a file. They're a blob of the
+  Vault's in the bucket, sealed under a key made for that blob alone, which only the item holds.
+
+  `send` is given where they go, `%{"link" => link, "key" => key}`: a short-lived link that writes one blob, and the
+  key, base64. It hands them to whatever holds the bytes, which seals them a chunk at a time and sends them, as
+  Containers' `upload` does, so they never pass through a tool's result whatever their size, and gives how many bytes
+  it sent. The item holds them once it has, and only then do the contents they replace go, so a write that fails
+  leaves the last one whole. Gives the size.
+  """
+  def write_contents(%Call{} = call, item, name, send) when is_function(send, 1) do
+    artifact = reached(call)
+    {blob, key} = {Base.encode16(:crypto.strong_rand_bytes(16), case: :lower), Base.encode64(:crypto.strong_rand_bytes(32))}
+
+    quietly("Keeping #{name} of #{item}", fn ->
+      transaction(call, artifact, &allowed!(&1, item, {:plugin, call.who}))
+      contents = contents!(call)
+      size = send.(%{"link" => link(contents, blob, :write), "key" => key})
+
+      replaced =
+        transaction(call, artifact, fn db ->
+          %{"id" => id} = stored = allowed!(db, item, {:plugin, call.who})
+          was = query(db, "select blob from contents where item = ? and name = ?", [id, name])
+
+          upsert =
+            "insert into contents (item, name, blob, key, size, at) values (?, ?, ?, ?, ?, ?) on conflict (item, name) do update set blob = excluded.blob, key = excluded.key, size = excluded.size, at = excluded.at"
+
+          query(db, upsert, [id, name, blob, key, size, now()])
+          touch(db, stored)
+          for %{"blob" => old} <- was, do: old
+        end)
+
+      for old <- replaced, do: Artifact.remove(contents, old)
+      size
+    end)
+  end
+
+  @doc """
+  Reads the contents `name` of the item `item`, for the plugin that calls this, which it's switched on for:
+  `receive` is given where they are, `%{"link" => link, "key" => key, "size" => size}`, a short-lived link that reads
+  the blob and its key, to hand to whatever takes the bytes, which fetches and opens them a chunk at a time, as
+  Containers' `download` does. Gives what `receive` gives, or `nil` where the item has no such contents yet.
+  """
+  def read_contents(%Call{} = call, item, name, receive) when is_function(receive, 1) do
+    artifact = reached(call)
+
+    quietly("Reading #{name} of #{item}", fn ->
+      stored =
+        transaction(call, artifact, fn db ->
+          %{"id" => id} = allowed!(db, item, {:plugin, call.who})
+          List.first(query(db, "select blob, key, size from contents where item = ? and name = ?", [id, name]))
+        end)
+
+      if stored,
+        do: receive.(%{"link" => link(contents!(call), stored["blob"], :read), "key" => stored["key"], "size" => stored["size"]})
     end)
   end
 
@@ -729,19 +828,19 @@ defmodule Vault do
             plugins =
               for %{"plugin" => plugin} <- query(db, "select plugin from uses where item = ?", [item["id"]]), do: plugin
 
-            for table <- ~w(fields uses), do: query(db, "delete from #{table} where item = ?", [item["id"]])
-            query(db, "delete from items where id = ?", [item["id"]])
-            {nil, Enum.reject(plugins, &used?(db, &1))}
+            blobs = deleted(db, item["id"])
+            {nil, Enum.reject(plugins, &used?(db, &1)), blobs}
 
           field ->
             removed = query(db, "delete from fields where item = ? and name = ? returning name", [item["id"], field])
             if removed == [], do: raise("#{name} has no field named #{field}.")
             touch(db, item)
-            {field, []}
+            {field, [], []}
         end
       end)
 
-    {field, unused} = removed
+    {field, unused, blobs} = removed
+    for blob <- blobs, do: Artifact.remove(Call.make(mine!(call), "contents"), blob)
     for plugin <- unused, do: share(call, "unshare", Artifact.name(items_artifact(call)), plugin)
     %{item: name, field: field}
   end
@@ -1088,6 +1187,17 @@ defmodule Vault do
 
   defp used?(db, plugin), do: query(db, "select 1 from uses where plugin = ? limit 1", [plugin]) != []
 
+  # Deletes an item and what's kept of it, and gives the blobs its contents were, for whoever deletes it to remove.
+  defp deleted(db, id) do
+    blobs = for %{"blob" => blob} <- query(db, "select blob from contents where item = ?", [id]), do: blob
+    for table <- ~w(fields uses contents), do: query(db, "delete from #{table} where item = ?", [id])
+    query(db, "delete from items where id = ?", [id])
+    blobs
+  end
+
+  # A short-lived link to one blob of an item's contents, as what's handed on takes it: JSON's keys.
+  defp link(contents, blob, mode), do: contents |> Artifact.link(blob, mode) |> JSON.encode!() |> JSON.decode!()
+
   defp field!(name) do
     if is_binary(name) and name =~ ~r/^[A-Za-z0-9_]+$/,
       do: name,
@@ -1153,6 +1263,16 @@ defmodule Vault do
 
   # It reaches the Vault as an editor, which a tuple says once anything of the Vault's is switched on for it.
   defp reached(call), do: encryption(call).encrypted(call, Call.reach(call, theirs(call), "editor"))
+
+  # Where the contents of someone's items are, each a blob sealed under a key its item holds: an artifact made for
+  # them, which a plugin reaches as an editor as it does their Vault. The bucket holds only what's sealed.
+  defp contents(call), do: "#{mine!(call).subject}/made/vault/contents"
+
+  # That artifact, reached by a plugin switched on for one of their items, which a tuple then lets it.
+  defp contents!(call) do
+    share(call, "share", contents(call), call.who)
+    Call.reach(call, contents(call), "editor")
+  end
 
   defp encryption(call), do: Call.plugin(call, "encryption")
 

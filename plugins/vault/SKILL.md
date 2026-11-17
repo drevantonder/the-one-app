@@ -87,4 +87,12 @@ A plugin trusted with a secret itself, whose service hands it to a program, uses
   key a session it holds is encrypted with, in an item it makes, switched on for it. `remove(call, item)` removes
   one, as when that account is signed out. `items(call)` lists what's switched on for it.
 - `value` raises unless the item is switched on for the plugin, which its person does in the Vault's app or
-  with `use`, or which `keep` did.
+  with `use`, or which `keep` did. `values(call, item)` gives all its fields at once, and `rename(call, item, to)`
+  renames it, its fields and contents with it.
+- An item's contents are what's too large for a field, like a Chrome profile, kept as 1Password keeps a file: a
+  blob of the Vault's, sealed under a key made for it alone, which only the item holds. `write_contents(call, item,
+  name, send)` gives `send` a link that writes one blob and that key, for whatever holds the bytes to seal and send
+  them a chunk at a time (Containers' `upload` does), and keeps them once it gives their size; what they replace goes
+  then. `read_contents(call, item, name, receive)` gives `receive` a link that reads them and the key, for
+  Containers' `download`, or gives `nil` where there are none yet. Neither ever passes the bytes through a tool's
+  result, whatever their size. Removing the item removes its contents.

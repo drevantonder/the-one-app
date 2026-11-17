@@ -12,6 +12,7 @@ defmodule Containers.Podman do
   """
   use GenServer
   @behaviour OneCore.Service
+  alias Containers.Sealed
 
   # The most of each of what a command prints that's given back: the end of it, where errors usually are.
   @max_bytes 64 * 1024
@@ -163,6 +164,37 @@ defmodule Containers.Podman do
       File.write!(file, Base.decode64!(data))
       podman!(service, ["cp", file, "#{id}:#{path}"])
       :ok
+    end)
+  end
+
+  @doc """
+  Sends a file of the container to the bucket, sealed with `key` (base64), by `link`, which writes one blob: copied out
+  by `podman cp`, which reads a stopped container's too, and sent a chunk at a time (`Containers.Sealed`), so a file
+  of any size is sent and none is ever whole in memory. Gives its size in bytes.
+  """
+  def upload(service, id, path, link, key) do
+    touch(service, id)
+
+    within(service, fn folder ->
+      podman!(service, ["cp", "#{id}:#{path}", folder], 600)
+      file = Path.join(folder, Path.basename(path))
+      if File.dir?(file), do: raise("#{path} is a folder.\n\n`exec` with tar packs one into a file.")
+      Sealed.put(file, Base.decode64!(key), link)
+    end)
+  end
+
+  @doc """
+  Writes a file into the container from a blob `upload/5` sent, by `link`, which reads it, opened with `key`
+  (base64), a chunk at a time. Its folder must be there. Gives its size in bytes.
+  """
+  def download(service, id, path, link, key) do
+    touch(service, id)
+
+    within(service, fn folder ->
+      file = Path.join(folder, "file")
+      size = Sealed.get(link, Base.decode64!(key), file)
+      podman!(service, ["cp", file, "#{id}:#{path}"], 600)
+      size
     end)
   end
 

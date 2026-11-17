@@ -19,8 +19,9 @@ defmodule Chrome do
 
   A browser's profile is its user data dir, `/root/.chromium` in its container. As one is created it offers
   `chrome.starting`, for a plugin to hand it a user data dir to start from, and as it closes `chrome.closing`, with
-  the one it closed with, for that plugin to keep: each a gzipped tarball in its container, which the plugin writes
-  or reads with Containers' tools, so no hook carries a profile's bytes.
+  the one it closed with, for that plugin to keep: each a gzipped tarball in its container, which the plugin sends
+  to the bucket or fetches from it with Containers' `upload` and `download`, so no hook or tool's result carries a
+  profile's bytes.
 
   A running browser is a screen in Computer Use, as every container with a display is, and `screen` acts on it for an
   app that lets its person use the browser: to sign in, or to get an agent past a captcha.
@@ -79,7 +80,7 @@ defmodule Chrome do
           "A browser is about to start for the first time, for whoever the call is for: its `session`, `description`, " <>
             "the `url` it opens, its `container`, as Containers' tools name it, and `user_data`, nil. A plugin that has " <>
             "a user data dir for it writes it into that container as a gzipped tarball of the folder's contents " <>
-            "(Containers' `write_file`, at #{@tarball}), and answers %{\"user_data\" => \"#{@tarball}\"}: the browser " <>
+            "(Containers' `download`, at #{@tarball}), and answers %{\"user_data\" => \"#{@tarball}\"}: the browser " <>
             "starts from it."
       },
       %{
@@ -88,7 +89,7 @@ defmodule Chrome do
         description:
           "A browser is being closed with `close`, and Chrome has quit: its `session`, `description`, `container`, " <>
             "and `user_data`, the path in that container of a gzipped tarball of its user data dir as it closed, " <>
-            "without caches, for a plugin to read now (Containers' `read_file`), before the container is removed. " <>
+            "without caches, for a plugin to send to the bucket now (Containers' `upload`), before the container is removed. " <>
             "A plugin refuses when it couldn't keep what it needed of it: the browser then stays, its Chrome " <>
             "stopped, and `close` says why."
       }
@@ -460,8 +461,15 @@ defmodule Chrome do
     # One a try before this made holds nothing the old one doesn't.
     if Enum.any?(containers(call), &(&1["name"] == to)), do: on(call, "remove", to)
     make(call, session, inputs)
-    {:blob, _type, user_data} = on(call, "read_file", from, %{"path" => @tarball})
-    on(call, "write_file", to, %{"path" => @tarball, "data" => Base.encode64(user_data)})
+    # The user data dir goes by the bucket, sealed under a key made for it here that only this call holds, a chunk
+    # at a time, so one of any size moves and none passes through a tool's result. The blob goes once it's in.
+    blob = "moving/#{call.subject}/#{session}"
+    key = Base.encode64(:crypto.strong_rand_bytes(32))
+    link = &(call.own |> Artifact.link(blob, &1) |> JSON.encode!() |> JSON.decode!())
+    Artifact.remove(call.own, blob)
+    on(call, "upload", from, %{"path" => @tarball, "link" => link.(:write), "key" => key})
+    on(call, "download", to, %{"path" => @tarball, "link" => link.(:read), "key" => key})
+    Artifact.remove(call.own, blob)
     unpack!(call, session, @tarball)
     carry(call, inputs, %{record | "state" => "starting"})
   end

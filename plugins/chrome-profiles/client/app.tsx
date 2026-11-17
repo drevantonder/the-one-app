@@ -1,5 +1,5 @@
-// Chrome Profiles: your profiles, the sites each was used on, and updating one yourself: its browser, drawn here, which
-// you click and type on as you would Chrome, then save.
+// Chrome Profiles: your profiles, the extensions installed in each and the pages it visited last, as it was last saved,
+// and updating one yourself: its browser, drawn here, which you click and type on as you would Chrome, then save.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Field, Input, leave, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Skeleton, Split, Status, Steps, toast } from "ui"
@@ -8,7 +8,8 @@ import "./app.css"
 /** A profile, as `chrome-profiles_list` answers it. */
 interface Profile {
   profile: string
-  sites: { site: string; used: number }[]
+  history: { url: string; title: string; visited: number }[]
+  extensions: { id: string; name: string; icon: string | null }[]
   saved?: number
   updating?: { session: string; until: number; state: State; why?: string }
 }
@@ -27,10 +28,9 @@ function since(at: number) {
   return ago.format(Math.round(minutes / (24 * 60)), "day")
 }
 const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
-const summary = (p: Profile) =>
-  p.updating
-    ? SAYS[p.updating.state]
-    : [p.sites.length ? p.sites.map((s) => s.site).join(", ") : "No sites yet", p.saved && `Saved ${since(p.saved)}`].filter(Boolean).join(" · ")
+/// A page's site, as its address bar shows it: "github.com".
+const site = (url: string) => URL.parse(url)?.hostname.replace(/^www\./, "") ?? url
+const summary = (p: Profile) => (p.updating ? SAYS[p.updating.state] : p.saved ? `Saved ${since(p.saved)}` : "Not saved yet")
 
 const [open, setOpen] = createSignal<string>()
 const [asking, setAsking] = createSignal<"add" | "rename">()
@@ -117,11 +117,20 @@ function Detail(props: { profile: Profile }) {
       <Show when={p().updating?.session} keyed fallback={<Update profile={p().profile} />}>
         <Updating profile={p()} />
       </Show>
-      <Section heading="Sites">
-        <Show when={p().sites.length} fallback={<Empty>Not used on any sites yet.</Empty>}>
+      <Section heading="Extensions">
+        <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
           <List>
-            <For each={p().sites} keyed={(s) => s.site}>
-              {(s) => <Row heading={s().site} text={`Used ${since(s().used)}`} />}
+            <For each={p().extensions} keyed={(e) => e.id}>
+              {(e) => <Row start={<img class="icon" src={e().icon ?? ""} alt="" />} heading={e().name} />}
+            </For>
+          </List>
+        </Show>
+      </Section>
+      <Section heading="History">
+        <Show when={p().history.length} fallback={<Empty>Nothing visited yet.</Empty>}>
+          <List>
+            <For each={p().history} keyed={(h) => `${h.url} ${h.visited}`}>
+              {(h) => <Row heading={h().title || site(h().url)} text={`${site(h().url)} · ${since(h().visited)}`} />}
             </For>
           </List>
         </Show>

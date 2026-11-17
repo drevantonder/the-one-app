@@ -3,13 +3,14 @@ defmodule ChromeProfiles do
   Chrome Profiles: browser profiles, like Personal and Work, that a Chrome browser starts from, signed in to what its
   person signed in to.
 
-  A profile is Chrome's whole user data dir, as Chrome hands it over: a gzipped tarball without caches. It's kept
-  as a blob of an artifact this plugin makes for its person (`profiles`), named at random, encrypted with AES-256-GCM
-  under a key made for that save. The key, the blob's name, the sites it was used on with when, and when it was last saved
-  are an item in the person's own Vault, `Chrome profile: <name>`, which this plugin keeps (`keep/4`), each a secret
-  field: so only the servers its person chose for their Vault open a profile, and the bucket holds only what's
-  encrypted. Nothing answers with a profile or its key: they go only into the person's own browser, as
-  `chrome.starting` is answered.
+  A profile is an item in its person's own Vault, `Chrome profile: <name>`, which this plugin keeps (`keep/4`). Its
+  contents are Chrome's whole user data dir as Chrome hands it over, a gzipped tarball without caches, which the
+  Vault keeps as 1Password keeps a file (`write_contents/4`): a blob sealed under a key made for that save, which
+  only the item holds. The tarball goes from the browser's container to the bucket, and back into another, by
+  Containers' `upload` and `download`, a chunk at a time, so a profile of any size is saved and never passes through
+  a tool's result. Nothing answers with a profile or its key. Beside it the item keeps when it was last saved, and
+  what it shows of itself, read from the profile as it's saved: the pages it visited last, from its History, and the
+  extensions installed in it, from its Extensions and Preferences, each with its name and icon.
 
   Which browser is on which profile is a note in the plugin's own artifact, `browsers/<whose>/<session>`, written as
   `open` or `update` opens it: Chrome hands a browser that's starting the note's profile, and as it closes
@@ -21,7 +22,8 @@ defmodule ChromeProfiles do
   pulling its image), `opening` (the profile going in), `ready`, then `saving` or `discarding`, and the note is gone
   once it's closed. `failed`, with `why`, is one that couldn't start. Each call is one step from the state it finds,
   so a step that isn't one (Save while it's starting, Update while it's saving) is refused, and one a server left
-  half done is carried on by the next call or `save_updates`.
+  half done is carried on by the next call or `save_updates`. A save that fails leaves the browser and its container
+  as they were, with why, so nothing in it is lost.
   """
   @behaviour OneCore.Plugin
   alias OneCore.{Artifact, Call}
@@ -31,6 +33,48 @@ defmodule ChromeProfiles do
   # Where a profile is handed over in a browser's container, as Chrome's hooks say.
   @tarball "/tmp/user-data.tar.gz"
   @profile %{type: "string", description: "the profile, by its name, like Personal or Work"}
+  # What a profile shows of itself, read from it in its container once Chrome has quit, as it's saved, into @shown as
+  # JSON: the 50 pages it visited last, from its History (Chrome counts in microseconds since 1601), and the
+  # extensions installed in it, those its Preferences name that are in its Extensions, with their names (a name a
+  # manifest gives as __MSG_<key>__ is in its default locale's messages) and icons, 32 px or the nearest larger.
+  @shown "/tmp/profile.json"
+  @show ~S"""
+  cd /tmp && rm -f history.* && cp /root/.chromium/Default/History history.db 2>/dev/null
+  cp /root/.chromium/Default/History-wal history.db-wal 2>/dev/null
+  sqlite3 -json history.db "select url, title, last_visit_time / 1000 - 11644473600000 as visited from urls where url like 'http%' and hidden = 0 order by last_visit_time desc limit 50" > history.json 2>/dev/null
+  node - > profile.json <<'JS'
+  const fs = require("fs")
+  const at = "/root/.chromium/Default"
+  const json = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8")) } catch { return undefined } }
+  const settings = { ...json(`${at}/Preferences`)?.extensions?.settings, ...json(`${at}/Secure Preferences`)?.extensions?.settings }
+  const extensions = []
+  for (const [id, setting] of Object.entries(settings)) {
+    const folder = `${at}/Extensions/${setting.path}`
+    const manifest = typeof setting.path === "string" && json(`${folder}/manifest.json`)
+    if (!manifest) continue
+    let name = String(manifest.name ?? id)
+    const message = name.match(/^__MSG_(.+)__$/)
+    if (message) {
+      const messages = json(`${folder}/_locales/${manifest.default_locale ?? "en"}/messages.json`) ?? {}
+      const key = Object.keys(messages).find((key) => key.toLowerCase() === message[1].toLowerCase())
+      name = messages[key]?.message ?? name
+    }
+    const icons = manifest.icons ?? {}
+    const sizes = Object.keys(icons).map(Number).sort((a, b) => a - b)
+    const size = sizes.find((size) => size >= 32) ?? sizes.at(-1)
+    const file = size && `${folder}/${icons[size]}`.replace(/\/+/g, "/")
+    let icon = null
+    if (file && fs.existsSync(file) && fs.statSync(file).size < 65536)
+      icon = `data:image/${file.endsWith(".svg") ? "svg+xml" : "png"};base64,${fs.readFileSync(file).toString("base64")}`
+    extensions.push({ id, name, icon })
+  }
+  extensions.sort((a, b) => a.name.localeCompare(b.name))
+  console.log(JSON.stringify({ history: json("/tmp/history.json") ?? [], extensions }))
+  JS
+  status=$?
+  rm -f history.*
+  exit $status
+  """
 
   # An update's states, by the state it's in and what happens, as the moduledoc says. `update` is `update` on a
   # browser that's ready, `start` on any other, and `expire` is `save_updates`.
@@ -78,7 +122,7 @@ defmodule ChromeProfiles do
         name: "list",
         read_only: true,
         description:
-          "Your profiles: each one's name, the sites it was used on with when (ms since 1970), newest first, when it was last saved, and, while your person is updating it, its browser's session and when that ends. Never what's signed in itself.",
+          "Your profiles: each one's name, the pages it visited last and the extensions installed in it, as it was last saved, when that was (ms since 1970), and, while your person is updating it, its browser's session and when that ends. Never what's signed in itself.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -89,13 +133,30 @@ defmodule ChromeProfiles do
                 type: "object",
                 properties: %{
                   profile: %{type: "string"},
-                  sites: %{
+                  history: %{
                     type: "array",
-                    description: "The sites it was used on, newest first",
+                    description: "The pages it visited last, as it was last saved, newest first",
                     items: %{
                       type: "object",
-                      properties: %{site: %{type: "string"}, used: %{type: "integer", description: "When, in milliseconds since 1970"}},
-                      required: ["site", "used"]
+                      properties: %{
+                        url: %{type: "string"},
+                        title: %{type: "string"},
+                        visited: %{type: "integer", description: "When, in milliseconds since 1970"}
+                      },
+                      required: ["url", "title", "visited"]
+                    }
+                  },
+                  extensions: %{
+                    type: "array",
+                    description: "The extensions installed in it, as it was last saved",
+                    items: %{
+                      type: "object",
+                      properties: %{
+                        id: %{type: "string"},
+                        name: %{type: "string"},
+                        icon: %{type: ["string", "null"], description: "A data: address"}
+                      },
+                      required: ["id", "name", "icon"]
                     }
                   },
                   saved: %{type: ["integer", "null"], description: "When it was last saved, in milliseconds since 1970"},
@@ -112,7 +173,7 @@ defmodule ChromeProfiles do
                     required: ["session", "until", "state", "why"]
                   }
                 },
-                required: ["profile", "sites", "saved", "updating"]
+                required: ["profile", "history", "extensions", "saved", "updating"]
               }
             }
           },
@@ -221,13 +282,14 @@ defmodule ChromeProfiles do
 
     profiles =
       for name <- profiles(call) do
-        sites = JSON.decode!(value(call, name, "sites"))
-        saved = value(call, name, "saved")
+        fields = vault(call).values(call, @item <> name)
 
+        # One never saved has nothing to show yet.
         %{
           profile: name,
-          sites: sites |> Enum.sort_by(fn {_site, used} -> -used end) |> Enum.map(fn {site, used} -> %{site: site, used: used} end),
-          saved: if(saved == "", do: nil, else: String.to_integer(saved)),
+          history: JSON.decode!(fields["history"] || "[]"),
+          extensions: JSON.decode!(fields["extensions"] || "[]"),
+          saved: if(fields["saved"] in [nil, ""], do: nil, else: String.to_integer(fields["saved"])),
           updating: updating[name]
         }
       end
@@ -239,7 +301,7 @@ defmodule ChromeProfiles do
     name = String.trim(name)
     if name == "", do: raise("A profile has a name")
     if Enum.any?(profiles(call), &(String.downcase(&1) == String.downcase(name))), do: raise("You have a profile called #{name} already")
-    vault(call).keep(call, @item <> name, %{"sites" => "{}", "saved" => ""})
+    vault(call).keep(call, @item <> name, %{})
     %{profile: name}
   end
 
@@ -247,19 +309,14 @@ defmodule ChromeProfiles do
     from = profile!(call, from)
     to = String.trim(to)
     if Enum.any?(profiles(call), &(String.downcase(&1) == String.downcase(to) and &1 != from)), do: raise("You have a profile called #{to} already")
-    names = if value(call, from, "saved") == "", do: ~w(sites saved), else: ~w(key blob sites saved)
-    fields = Map.new(names, &{&1, value(call, from, &1)})
-    vault(call).keep(call, @item <> to, fields)
-    vault(call).remove(call, @item <> from)
+    vault(call).rename(call, @item <> from, @item <> to)
     for {session, %{"profile" => ^from}} <- notes(call), do: note(call, session, &%{&1 | "profile" => to})
     %{profile: to, was: from}
   end
 
   def call("remove", %{"profile" => name}, call) do
     name = profile!(call, name)
-    blob = if value(call, name, "saved") != "", do: value(call, name, "blob")
     vault(call).remove(call, @item <> name)
-    if blob, do: Artifact.remove(saved(call), blob)
     %{profile: name}
   end
 
@@ -335,22 +392,18 @@ defmodule ChromeProfiles do
 
     with %{"profile" => name} <- note(call, session),
          true <- name in profiles(call),
-         saved when saved != "" <- value(call, name, "saved") do
-      {:ok, sealed, _tag} = Artifact.read(saved(call), value(call, name, "blob"))
-      tarball = unseal(Base.decode64!(value(call, name, "key")), sealed)
-      Call.tool(call, "containers", "write_file", %{"container" => container, "path" => @tarball, "data" => Base.encode64(tarball)})
+         %{} <- vault(call).read_contents(call, @item <> name, "profile", &containers(call, "download", container, &1)) do
       %{"user_data" => @tarball}
     else
       _ -> %{}
     end
   end
 
-  # A browser on a profile is closing: what it closed with is saved to the profile, unless it was opened not to be.
-  # A save that fails refuses the close, so the browser and what's in it stay.
+  # A browser on a profile is closing: what it closed with is saved to it, unless it was opened not to be. A save
+  # that fails refuses the close, so the browser and what's in it stay.
   def hook("chrome.closing", %{"session" => session, "container" => container, "user_data" => tarball}, call) do
     with %{"profile" => name, "save" => true} <- note(call, session), true <- name in profiles(call) do
-      {:blob, _type, data} = Call.tool(call, "containers", "read_file", %{"container" => container, "path" => tarball})
-      save(call, name, data, sites(call, container))
+      save(call, name, container, tarball)
     end
 
     forget(call, session)
@@ -359,65 +412,24 @@ defmodule ChromeProfiles do
     e -> {:refuse, "Couldn't save the profile: #{Exception.message(e)}"}
   end
 
-  # Saves a profile: its tarball, encrypted under a new key, as a new blob, which the Vault item then names with its
-  # key, and the last save's blob is removed. So the last to save is what's kept, and a save that fails halfway
-  # leaves the last whole one.
-  defp save(call, name, tarball, sites) do
-    now = System.system_time(:millisecond)
-    {key, blob} = {:crypto.strong_rand_bytes(32), Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}
-    :ok = Artifact.write(saved(call), blob, seal(key, tarball))
-    was = if value(call, name, "saved") != "", do: value(call, name, "blob")
-    fields = %{"key" => Base.encode64(key), "blob" => blob, "sites" => JSON.encode!(sites), "saved" => Integer.to_string(now)}
-    vault(call).keep(call, @item <> name, fields)
-    if was, do: Artifact.remove(saved(call), was)
+  # Saves a profile: its tarball, as its contents in the Vault, which keeps the last save until this one is whole,
+  # then when it was saved and what it shows of itself.
+  defp save(call, name, container, tarball) do
+    vault(call).write_contents(call, @item <> name, "profile", &containers(call, "upload", container, &1, tarball)["size"])
+    ran = Call.tool(call, "containers", "exec", %{"container" => container, "command" => @show, "timeout" => 60})
+    if ran["exit"] != 0, do: raise("Couldn't read its history and extensions: #{String.trim(ran["stderr"])}")
+    shown = JSON.decode!(Call.tool(call, "containers", "read_file", %{"container" => container, "path" => @shown})["text"])
+
+    vault(call).keep(call, @item <> name, %{
+      "saved" => Integer.to_string(System.system_time(:millisecond)),
+      "history" => JSON.encode!(shown["history"]),
+      "extensions" => JSON.encode!(shown["extensions"])
+    })
   end
 
-  # The sites a profile was used on, from its History, newest first, at most 30: each one's registrable domain
-  # (github.com, example.com.au) with when it was last visited, in ms since 1970. Chrome counts in microseconds
-  # since 1601. A short list of second-level labels stands in for the public suffix list.
-  @second ~w(com co org net gov edu ac id asn)
-  defp sites(call, container) do
-    query = "select url, last_visit_time / 1000 - 11644473600000 from urls where url like 'http%'"
-    # Chrome leaves what it wrote last in History's write-ahead log, which a copy of both opens with.
-    copy = "cp /root/.chromium/Default/History /tmp/history && cp /root/.chromium/Default/History-wal /tmp/history-wal"
-    command = ~s{(#{copy}; sqlite3 -separator ' ' /tmp/history "#{query}"; rm -f /tmp/history*) 2>/dev/null}
-    %{"stdout" => out} = Call.tool(call, "containers", "exec", %{"container" => container, "command" => command})
-
-    for line <- String.split(out, "\n", trim: true), [url, at] <- [String.split(line, " ")], site = site(url), reduce: %{} do
-      sites -> Map.update(sites, site, String.to_integer(at), &max(&1, String.to_integer(at)))
-    end
-    |> Enum.sort_by(fn {_site, at} -> -at end)
-    |> Enum.take(30)
-    |> Map.new()
-  end
-
-  defp site(url) do
-    host = (URI.parse(url).host || "") |> String.downcase()
-    labels = String.split(host, ".", trim: true)
-
-    cond do
-      host =~ ~r/^[\d.]+$/ or length(labels) < 2 -> if(host == "", do: nil, else: host)
-      length(labels) > 2 and String.length(List.last(labels)) == 2 and Enum.at(labels, -2) in @second -> Enum.join(Enum.take(labels, -3), ".")
-      true -> Enum.join(Enum.take(labels, -2), ".")
-    end
-  end
-
-  @aad "chrome-profiles/1"
-  defp seal(key, plain) do
-    iv = :crypto.strong_rand_bytes(12)
-    {sealed, tag} = :crypto.crypto_one_time_aead(:aes_256_gcm, key, iv, plain, @aad, true)
-    iv <> tag <> sealed
-  end
-
-  defp unseal(key, <<iv::binary-12, tag::binary-16, sealed::binary>>) do
-    case :crypto.crypto_one_time_aead(:aes_256_gcm, key, iv, sealed, @aad, tag, false) do
-      :error -> raise "The profile's last save doesn't open with its key"
-      plain -> plain
-    end
-  end
-
-  # Where each of whoever this call is for's profiles is saved: an artifact made for them.
-  defp saved(call), do: Call.make(call, "profiles")
+  # Containers' `upload` or `download` of a profile's tarball, in a container, by what the Vault hands over.
+  defp containers(call, tool, container, %{"link" => link, "key" => key}, path \\ @tarball),
+    do: Call.tool(call, "containers", tool, %{"container" => container, "path" => path, "link" => link, "key" => key})
 
   # The browser a person updates a profile in.
   defp update_session(name), do: "update-" <> (name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "-") |> String.trim("-"))
@@ -484,7 +496,6 @@ defmodule ChromeProfiles do
       raise "You have no profile called #{name}.\n\n`list` shows yours, and `create` makes one."
   end
 
-  defp value(call, name, field), do: vault(call).value(call, @item <> name, field)
   defp vault(call), do: Call.plugin(call, "vault")
 
   # Which profile each of whoever this call is for's browsers is on, by its session.

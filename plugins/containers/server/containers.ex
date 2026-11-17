@@ -17,6 +17,14 @@ defmodule Containers do
 
   @idle_hours 4
   @container %{type: "string", description: "the container, by its name"}
+  # Where `upload` and `download` send a file or fetch it, and what it's sealed with (`Containers.Sealed`).
+  @link %{
+    type: "object",
+    description: "A short-lived link to one blob, as OneCore.Artifact.link/3 gives it",
+    properties: %{method: %{type: "string"}, url: %{type: "string"}, headers: %{type: "object", additionalProperties: %{type: "string"}}},
+    required: ["method", "url", "headers"]
+  }
+  @key %{type: "string", contentEncoding: "base64", description: "The 32-byte key it's sealed with, made for this one blob"}
 
   # A container, as `list` answers each.
   @listed %{
@@ -251,6 +259,28 @@ defmodule Containers do
         outputs: %{type: "object", properties: %{path: %{type: "string"}}, required: ["path"]}
       },
       %{
+        name: "upload",
+        description:
+          "For a plugin's code: send a file of a container, running or stopped, to the bucket by `link`, which writes one blob, sealed with `key`. A file of any size, a chunk at a time, never through a tool's result. `download` brings it back.",
+        inputs: one(%{path: %{type: "string", description: "its absolute path in the container"}, link: @link, key: @key}, ["path", "link", "key"]),
+        outputs: %{
+          type: "object",
+          properties: %{path: %{type: "string"}, size: %{type: "integer", description: "Its size in bytes"}},
+          required: ["path", "size"]
+        }
+      },
+      %{
+        name: "download",
+        description:
+          "For a plugin's code: write a file into a container from a blob `upload` sent, by `link`, which reads it, opened with `key`. Its folder must be there already.",
+        inputs: one(%{path: %{type: "string", description: "its absolute path in the container"}, link: @link, key: @key}, ["path", "link", "key"]),
+        outputs: %{
+          type: "object",
+          properties: %{path: %{type: "string"}, size: %{type: "integer", description: "Its size in bytes"}},
+          required: ["path", "size"]
+        }
+      },
+      %{
         name: "commit",
         description:
           "Make an image of a container as it is now: its files, not what's running. `create` makes throwaway copies from it, on the same machine.",
@@ -382,6 +412,9 @@ defmodule Containers do
   end
 
   @impl true
+  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(upload download),
+    do: raise("containers_#{tool} is for a plugin's code, which says where the file goes and what it's sealed with.")
+
   def call("list", _inputs, call), do: %{containers: listed(call)}
 
   def call("machines", _inputs, call) do
@@ -469,6 +502,9 @@ defmodule Containers do
     on(call, inputs, :write_file, [path, data])
     %{path: path}
   end
+
+  def call(tool, %{"path" => path, "link" => link, "key" => key} = inputs, call) when tool in ~w(upload download),
+    do: %{path: path, size: on(call, inputs, String.to_existing_atom(tool), [path, link, key])}
 
   def call("commit", %{"name" => name} = inputs, call) do
     if Enum.any?(images(call), &(&1.artifact && &1.name == name)), do: raise("You have an image called #{name} already")

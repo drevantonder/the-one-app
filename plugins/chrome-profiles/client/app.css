@@ -5,3 +5,9 @@
   display: flex;
   gap: 0.5rem;
 }
+/* An extension's own icon, as Chrome's extensions page shows it. */
+.icon {
+  display: block;
+  width: 1.5rem;
+  height: 1.5rem;
+}
