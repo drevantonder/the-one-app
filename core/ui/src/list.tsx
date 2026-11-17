@@ -144,12 +144,15 @@ const SLOP = 10
 /// A press on a row with a menu: held, or a right-click, it opens the menu where it was, as Zag's context menu does
 /// (`getContextTriggerProps`). With a `destructive` item, a finger swiping the row toward its start moves it aside
 /// to show that item, which stays shown past half its width and is done when swiped most of the way. A press on the
-/// row while it's aside, anywhere but that item, puts it back. Presses on the menu's own button, or the row's
+/// row while it's aside, anywhere but that item, puts it back. Let go, it goes where it was heading: a flick toward the
+/// start shows the item and one back hides it, however short. Presses on the menu's own button, or the row's
 /// `control` or `action`, are theirs. → what stops it.
 function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
   let start: { x: number; y: number; at: number } | undefined
   let swiping = false
   let swiped = 0
+  // Where the row was over the last moves, for how fast it was going as it was let go.
+  let moves: { time: number; value: number }[] = []
   // When a press last swiped the row, or put it back: the click its lifting makes isn't a press on the row.
   let moved = 0
   const toward = () => (getComputedStyle(row).direction === "rtl" ? -1 : 1)
@@ -168,6 +171,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
     if (swiped) return void ((moved = event.timeStamp), aside(0, true))
     start = { x: event.clientX, y: event.clientY, at: swiped }
     swiping = false
+    moves = []
     context()?.onPointerDown(event)
   }
   const move = (event: PointerEvent) => {
@@ -182,6 +186,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
       row.setPointerCapture(event.pointerId)
     }
     aside(start.at + dx)
+    moves = [...moves.slice(-31), { time: event.timeStamp, value: swiped }]
   }
   const up = (event: PointerEvent) => {
     if (!start) return
@@ -194,7 +199,14 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
       aside(row.offsetWidth, true)
       menu()?.select(item.dataset.value!)
       setTimeout(() => aside(0, true), 400)
-    } else aside(swiped > shown() / 2 ? shown() : 0, true)
+    } else {
+      // Its speed as it was let go, in px a millisecond toward the start, from the last move at least 80 ms back, carried
+      // on as a phone's scrolling slows (its 0.998 a millisecond) to where it would stop.
+      const last = moves.at(-1)
+      const from = moves.findLast((move) => last!.time - move.time >= 80) ?? moves[0]
+      const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.value - from.value) / Math.max(1, last.time - from.time)
+      aside(swiped + (speed * 0.998) / (1 - 0.998) > shown() / 2 ? shown() : 0, true)
+    }
   }
   const cancel = (event: PointerEvent) => {
     context()?.onPointerCancel(event)
