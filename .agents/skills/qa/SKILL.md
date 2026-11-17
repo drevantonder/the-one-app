@@ -17,26 +17,40 @@ guess you haven't reproduced.
 
 ## Screens
 
-UI work is shown with real pictures of the real app, before and after, never described. A phone-sized desktop window (390×844) shows
-most screen changes in a minute; build for a phone or simulator only when the change is about that platform. Save pictures in your harness's scratch
-folder, never in the repo, and embed them in your reply. Screen wording and look follow `DESIGN.md`: read the
-section of the screen you change first.
+UI work is shown with real pictures of the real app, never described. Pictures are for checking your own change:
+take the few that check it, not every size and theme, a before only where judging it needs one, and a recording
+only where motion is what changed. A change that goes live in seconds, as an app deploy does, is seen live.
+A phone-sized desktop window (390×844) shows most screen changes; build for a phone or simulator only when the change
+is about that platform. Save pictures in your harness's scratch folder, never in the repo, and look at each before
+you show it. Screen wording and look follow `DESIGN.md`: read the section of the screen you change first.
 
-### Desktop (Linux)
+### Desktop (Linux), by WebDriver
 
-Start a network (`local-network`), then the app as its owner, on a screen of its own:
+Tauri's WebDriver drives the app: `tauri-driver` (`cargo install tauri-driver --locked`) in front of WebKitGTK's
+`WebKitWebDriver` (`webkit2gtk-driver`), with any WebDriver client. Start a network (`local-network`), then:
 
-    ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
-      target/debug/one >"$0/app.log" 2>&1 & app=$!
-      grep -q -m1 "^home-screen opened" <(tail -F --pid=$app -n +1 "$0/app.log")
-      window=$(xdotool search --sync --onlyvisible --name "The One App" | head -1)
-      # xdotool mousemove --window "$window" <x> <y> click 1, xdotool type ...
-      import -window root "$0/<name>.png"
-      kill $app' <scratch folder>
+    ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x900x24" bash -c '
+      tauri-driver >"$0/driver.log" 2>&1 & driver=$!
+      uv run -q --with selenium python3 <your script>
+      kill $driver' <scratch folder>
 
-Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. The app logs `the client opened`, then `home-screen opened` once
-the Home Screen is up, though its opening mark is still fading then: take the picture after the press that shows your change.
-`xdotool` presses and types; `import` (ImageMagick) takes the picture. Look at every picture before you show it.
+Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. The session's capabilities are
+`{"browserName": "wry", "tauri:options": {"application": "<repo>/target/debug/one", "args": ["<link>"]}}`, then
+`set_window_size(390, 844)`; the app's log is `driver.log`. One app runs per desktop session: a second start,
+`target/debug/one <link>`, hands its link to it, as a desktop's link handler does.
+
+- Open the screen by its link, the same one a person's link or notification opens: `one:<app>` (its first page),
+  `one:<app>/<page>` (a page by its file, `one:sign-in/client/security.html`), and a fragment the app follows,
+  `one:home-screen#library`. Click only for what the change is about.
+- Wait for state, never a time: the window is ready once `body:not([aria-busy]) iframe:not([inert]):not([aria-busy])`
+  is there (the app showing has drawn), and still once
+  `Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !== Infinity).map(a => a.finished))`
+  has settled, in the window and in the app's frame (`switch_to.frame`).
+- An app's elements are in its frame: switch to it to find, click or wait, and back to the window for the picture
+  (`save_screenshot`). An element's own screenshot inside a frame comes out black.
+- A hold is `click_and_hold(…).pause(1).release()`; WebKit's driver's right-click opens no menu.
+- What every page says to its console, Solid's dev warnings too, is in `driver.log` as `CONSOLE WARN …` (a debug
+  build only). WebKitGTK here has no WebDriver BiDi, so `log.entryAdded` isn't there.
 
 ### Android
 
