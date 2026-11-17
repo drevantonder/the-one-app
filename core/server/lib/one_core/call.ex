@@ -353,7 +353,7 @@ defmodule OneCore.Call do
   too.
 
   With servers' keys in `owner`'s place, it's one of those that runs it, for an app that knows which can: the
-  ones that hold a key, say. `:no_answer` then means none of them ran it.
+  ones that hold a key, say. `:no_response` then means none of them ran it.
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
     for server <- servers -- [Server.key()], do: asks(call.request, {call.actor, call.subject}, server, "to")
@@ -391,18 +391,29 @@ defmodule OneCore.Call do
     raise "No server acting for #{owner} answered" <> if(why == "", do: "", else: ": " <> why)
   end
 
+  @doc """
+  Has the server whose key is `server` run what was asked of this one, `ask`, for `principal`, as `forward/4` has
+  one acting for an owner: a tool asked of a particular server. It ends here with that server's answer, and raises
+  why where it couldn't be asked. `ready: :any` asks it while it isn't ready too, as long as it runs: one that's
+  stuck is how it's updated.
+  """
+  def run_on(ask, principal, server, opts \\ []) do
+    elsewhere(ask, principal, [server], opts)
+    raise Server.error_message(:unreachable, server)
+  end
+
   # Asks each of `servers` in turn to run it, and, if none did, the first that's back of those that were starting or
   # stopping.
-  defp elsewhere(ask, principal, servers) do
-    for server <- servers, do: asks(ask, principal, server, "to")
-    if back = Servers.back(servers), do: asks(ask, principal, back, "to")
+  defp elsewhere(ask, principal, servers, opts \\ []) do
+    for server <- servers, do: asks(ask, principal, server, "to", :infinity, opts)
+    if back = Servers.back(servers), do: asks(ask, principal, back, "to", :infinity, opts)
   end
 
   @doc """
   Asks another server to run this call instead, for when what it needs is there. If that server runs it, the call
   ends here with its answer, and nothing after `forward_to` runs.
 
-  If it didn't run there, `:no_answer` means that server couldn't be reached just now, or went away after it was
+  If it didn't run there, `:no_response` means that server couldn't be reached just now, or went away after it was
   asked something that's safe to ask again; and `:forwarding_loop` that it answered, saying it would pass it on in
   turn. A server that stops answering after it was asked anything else raises, since it may have run.
 
@@ -418,7 +429,7 @@ defmodule OneCore.Call do
 
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
-  defp asks({method, params}, {actor, subject}, server, forwarded, within \\ :infinity) do
+  defp asks({method, params}, {actor, subject}, server, forwarded, within \\ :infinity, opts \\ []) do
     forwarding_loop = Server.forwarding_loop()
 
     meta = %{forwarded: forwarded, actor: actor, subject: subject}
@@ -429,7 +440,7 @@ defmodule OneCore.Call do
     response =
       if within != :infinity and again?(method, params, subject),
         do: request_within(server, method, params, within),
-        else: Server.request(server, method, params)
+        else: Server.request(server, method, params, opts)
 
     case response do
       {:ok, result} ->

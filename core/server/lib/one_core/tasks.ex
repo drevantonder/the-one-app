@@ -215,7 +215,7 @@ defmodule OneCore.Tasks do
     error -> {:error, -32603, Exception.message(error)}
   catch
     :throw, {Call, {:forwarded, result}} -> {:forwarded, result}
-    :throw, {Call, :forwarding_loop} -> {:error, Server.forwarding_loop(), "This server would pass that on in turn"}
+    :throw, {Call, :forwarding_loop} -> Server.forwarding_loop("that")
   end
 
   # What a task's id names: whoever it runs for, and its record's name among theirs.

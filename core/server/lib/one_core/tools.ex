@@ -1417,26 +1417,9 @@ defmodule OneCore.Tools do
   # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked, which
   # ends the call here with its answer. One that isn't ready is asked too, since only it can answer: a build starting
   # is asked its build this way before it's ready. One that's starting or stopping is waited for.
-  defp on(server, tool, inputs, {actor, subject}, here) do
-    if server in [nil, Server.key()] do
-      here.()
-    else
-      ask = fn ->
-        meta = %{actor: actor, subject: subject}
-        Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: meta}, ready: :any)
-      end
-
-      answered =
-        case ask.() do
-          :unreachable -> if Servers.back([server]), do: ask.(), else: :unreachable
-          answered -> answered
-        end
-
-      case answered do
-        {:ok, result} -> throw({Call, {:forwarded, result}})
-        {:error, _code, why} -> raise why
-        down -> raise Server.error_message(down, server)
-      end
-    end
+  defp on(server, tool, inputs, principal, here) do
+    if server in [nil, Server.key()],
+      do: here.(),
+      else: Call.run_on({"tools/call", %{name: tool, arguments: inputs}}, principal, server, ready: :any)
   end
 end

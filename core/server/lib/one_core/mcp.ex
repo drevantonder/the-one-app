@@ -463,7 +463,7 @@ defmodule OneCore.Mcp do
       {:ok, result} -> {:ok, %{answer: result}}
       {:error, why} -> {:error, -32000, why}
       {:forwarded, result} -> {:ok, result}
-      :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass that on in turn"}
+      :forwarding_loop -> Server.forwarding_loop("that")
     end
   end
 
@@ -570,7 +570,7 @@ defmodule OneCore.Mcp do
       # Another server ran it, and told its own clients.
       {:forwarded, %{"isError" => true} = result} -> {:ok, result}
       {:forwarded, result} -> changed(name, result, principal)
-      :forwarding_loop -> {:error, Server.forwarding_loop(), "This server would pass #{name} on in turn"}
+      :forwarding_loop -> Server.forwarding_loop(name)
     end
   end
 

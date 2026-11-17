@@ -72,6 +72,9 @@ defmodule OneCore.Server do
   @doc "The JSON-RPC error a server answers a call that was passed on to it and that it would pass on in turn."
   def forwarding_loop, do: -32001
 
+  @doc "The JSON-RPC error a server answers where it would pass `what` it was asked on in turn."
+  def forwarding_loop(what), do: {:error, forwarding_loop(), "This server would pass #{what} on in turn"}
+
   @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
   `:unreachable` if it couldn't be reached, isn't ready, or is on a version before this
