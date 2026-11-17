@@ -221,7 +221,7 @@ defmodule OneCore.Release do
   code can't be swapped under: a runtime built from anything else (`runtime-inputs`, which `tooling/release` writes:
   the VM, Elixir, Bun, the deps, One Core's config and `rel/`), messages to and from the `one` running the server
   other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), a breaking change
-  (another 0.minor, which doesn't talk with the build before), an `.app` that changed beyond its modules, and among
+  (another 0.minor), an `.app` that changed beyond its modules, and among
   the modules that changed, `OneCore.Application`, a supervisor, a module with `-on_load`, a struct and a macro. A
   supervisor is one by its behaviour or by the child spec it gives (`child_spec/1`), whose children differ. A macro's
   own code can't be told apart from the rest of its module's, so any change to a module with macros restarts.
@@ -243,7 +243,7 @@ defmodule OneCore.Release do
       System.get_env("ONE_PROTOCOL") != Iroh.protocol() ->
         "it speaks other messages than the one running the server (client::serve)"
 
-      not Builds.talk?(was, now) ->
+      Builds.apart(was, now) > 0 ->
         "#{now} is a breaking change from #{was}"
 
       not same_app?(apps) ->

@@ -224,8 +224,8 @@ defmodule OneCore.Mcp do
   defp speaks(version),
     do: {:error, -32022, "Unsupported protocol version", %{supported: @versions, requested: version}}
 
-  # Parts of the platform talk only on versions that talk with each other (`OneCore.Builds.talk?/2`): a server, a
-  # client and the edge each say their build as `_meta.version`, and what one of another says is refused before
+  # Parts of the platform talk across one breaking release and no more (`OneCore.Builds.talk?/2`): a server, a
+  # client and the edge each say their build as `_meta.version`, and what one two or more away says is refused before
   # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022). One that says none is from
   # before builds had versions, 0.15's. What updates a part that's behind, the builds it downloads and a server's
   # update, is answered whatever it's on, since that's how it catches up, and so are the list of tools a client
@@ -245,8 +245,9 @@ defmodule OneCore.Mcp do
       why =
         if Builds.older?(theirs, Builds.build()),
           do:
-            "#{here} is on #{Builds.build()}, and what asked on #{theirs}, which doesn't talk with it until it's updated (`one update`)",
-          else: "#{here} is on #{Builds.build()}, behind what asked on #{theirs}: it's asked once it's updated"
+            "#{here} is on #{Builds.build()}, and what asked on #{theirs}, more than one breaking release behind, which doesn't talk with it until it's updated (`one update`)",
+          else:
+            "#{here} is on #{Builds.build()}, more than one breaking release behind what asked on #{theirs}: it's asked once it's updated"
 
       {:error, -32022, why, %{version: Builds.build(), requested: theirs}}
     end

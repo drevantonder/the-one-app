@@ -1428,7 +1428,7 @@ impl Client {
 
     /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its attestation for the run's key,
     /// and what the environment says, unless the request says otherwise, as one of a device's own does. It says this
-    /// build too, which a server talks with only on its own 0.minor, refusing another with why (`OneCore.Mcp`).
+    /// build too, which a server talks with across one 0.minor, refusing one further with why (`OneCore.Mcp`).
     fn say(&self, request: &mut Value) {
         for (says, value) in [("device", self.key.public().to_string()), ("attestation", self.link().attestation)] {
             request["params"]["_meta"][says] = json!(value);

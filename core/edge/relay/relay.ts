@@ -21,9 +21,9 @@
 // ready once it's active and running, and connected, and only a ready server is sent calls. Servers are told when
 // one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 //
-// Parts of the platform talk only on the same 0.minor (`OneCore.Builds.talk?/2`): a server says its build as it says
-// what it is. A call from outside goes only to a server that talks with the edge, and says the edge's build: a rule
-// apart from being ready.
+// Parts of the platform talk across one 0.minor and no more (`OneCore.Builds.talk?/2`): a server says its build as it
+// says what it is. A call from outside goes only to a server that talks with the edge, and says the edge's build: a
+// rule apart from being ready.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
@@ -71,14 +71,19 @@ const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
  */
 const SWITCH = 12_000;
 /**
- * The versions a build talks with, as Semantic Versioning's 0.x reads at Cargo, npm and Hex: its 0.minor, or from
- * 1.0 its major. A server from before builds had versions says none, and is 0.15.0.
+ * A build's breaking release, as Semantic Versioning's 0.x reads at Cargo, npm and Hex: its 0.minor, or from 1.0 its
+ * major. A server from before builds had versions says none, and is 0.15.0.
  */
 function series(version = "0.15.0"): [number, number] {
   const [major, minor] = version.split(".").map(Number);
   return major === 0 ? [0, minor] : [major, 0];
 }
-const talk = (a?: string, b?: string) => series(a).join() === series(b).join();
+/** Whether two builds talk: one breaking release apart at most, as `OneCore.Builds.talk?/2` says. */
+const talk = (a?: string, b?: string) => {
+  const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
+  if (major === 0 && otherMajor === 0) return Math.abs(minor - otherMinor) <= 1;
+  return major > 0 && otherMajor > 0 && Math.abs(major - otherMajor) <= 1;
+};
 const before = (a?: string, b?: string) => {
   const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
   return major < otherMajor || (major === otherMajor && minor < otherMinor);
@@ -301,7 +306,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
         : undefined;
       const now = await this.relay((relay) => relay.report(key, version, status));
       const behind = !talk(version, this.env.VERSION) && before(version, this.env.VERSION);
-      const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
+      const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, more than one breaking release before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
       const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
       console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes, error } }));
       if (!status) return refuse(400, `A server says what it is with {"server_membership": ${MEMBERSHIPS.join("|")}, "server_daemon_status": ${SAID.join("|")}}`);

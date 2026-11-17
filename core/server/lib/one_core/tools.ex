@@ -781,7 +781,7 @@ defmodule OneCore.Tools do
                 },
                 why: %{
                   type: "string",
-                  description: "Why it doesn't talk with the server that answered or the edge, being on another 0.minor"
+                  description: "Why it doesn't talk with the server that answered or the edge, being more than one 0.minor apart"
                 },
                 server_update_status: @server_update_status,
                 server_update_stage: @server_update_stage,

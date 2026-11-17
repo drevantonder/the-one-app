@@ -38,10 +38,21 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  Whether the builds `a` and `b` talk: parts of the platform (servers, the edge, clients) talk only on the same
-  0.minor, or from 1.0 the same major, as Cargo, npm and Hex read a version, where a breaking change takes the next.
+  Whether the builds `a` and `b` talk: parts of the platform (servers, the edge, clients) talk across one breaking
+  release, a 0.minor or from 1.0 a major, as Cargo, npm and Hex read a version, and refuse two or more, as Kubernetes'
+  version skew policy does. So a release reaches each part in turn with nothing split, and a change that would break
+  talking across one stays compatible for one release.
   """
-  def talk?(a, b), do: series(version(a)) == series(version(b))
+  def talk?(a, b), do: apart(a, b) <= 1
+
+  @doc "How many breaking releases apart the builds `a` and `b` are: 0.19 and 0.21 are 2, and 0.21 and 1.0 any number."
+  def apart(a, b) do
+    case {series(version(a)), series(version(b))} do
+      {{0, a}, {0, b}} -> abs(a - b)
+      {a, b} when is_integer(a) and is_integer(b) -> abs(a - b)
+      _ -> :infinity
+    end
+  end
 
   defp series(%Version{major: 0, minor: minor}), do: {0, minor}
   defp series(%Version{major: major}), do: major
@@ -228,15 +239,15 @@ defmodule OneCore.Builds do
         do: %{name: name, state: state, why: why}
   end
 
-  # Why `server` doesn't talk with this one or the edge, for being on a version that doesn't talk with theirs, or
-  # `nil` where it does. The edge sends one on a version before its own nothing until it's updated.
+  # Why `server` doesn't talk with this one or the edge, for being two or more breaking releases from theirs, or
+  # `nil` where it does. The edge sends one that far behind its own nothing until it's updated.
   defp why(%{"build" => theirs, "name" => name}, edge) do
     cond do
       not talk?(theirs, build()) ->
-        "It's on #{theirs} and #{Servers.name(Server.key()) || "this server"} on #{build()}, so they don't talk until both are on one"
+        "It's on #{theirs} and #{Servers.name(Server.key()) || "this server"} on #{build()}, more than one breaking release apart, so they don't talk until one is updated"
 
       edge != nil and not talk?(theirs, edge) and older?(theirs, edge) ->
-        "It's on #{theirs}, before the edge's #{edge}, so the edge sends #{name || "it"} nothing until it's updated"
+        "It's on #{theirs}, more than one breaking release before the edge's #{edge}, so the edge sends #{name || "it"} nothing until it's updated"
 
       true ->
         nil

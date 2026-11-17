@@ -80,15 +80,14 @@ defmodule OneCore.Server do
 
   @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
-  `:unreachable` if it couldn't be reached, isn't ready, or is on a version before this
-  server's that doesn't talk with it (`OneCore.Builds.talk?/2`), so it was asked nothing; or `:stopped` if it stopped
-  answering after it was asked, so it may have done what was asked. One on a newer version that doesn't talk with this
-  server refuses, saying this one is behind.
+  `:unreachable` if it couldn't be reached, isn't ready, or is more than one breaking release behind this server's,
+  so they don't talk (`OneCore.Builds.talk?/2`) and it was asked nothing; or `:stopped` if it stopped answering after
+  it was asked, so it may have done what was asked. One that far ahead refuses, saying this one is behind.
 
-  Every request says this server's build, as `_meta.version`, and one of a version that doesn't talk with the server
-  asked is refused before anything of it is read (`OneCore.Mcp`). So while a release with a breaking change puts it on
-  each server in turn, a server asks only those that talk with it: one behind is skipped, as if it were off, and one
-  ahead refuses what this one asks.
+  Every request says this server's build, as `_meta.version`, and one more than a breaking release from the server
+  asked is refused before anything of it is read (`OneCore.Mcp`). Servers one breaking release apart talk, so a
+  release reaches each in turn with the network whole; one further behind is skipped, as if it were off, and one
+  further ahead refuses what this one asks.
 
   Only a server that's ready (`OneCore.Servers.presence/1`), or isn't known not to be, is asked. With `ready: :any`
   one that isn't is asked too, unless it's stopped, for what only it can answer: a server that's starting answers
@@ -125,14 +124,14 @@ defmodule OneCore.Server do
   defp passed("tools/call", server, id, ask), do: State.forwarding(server, id, ask)
   defp passed(_method, _server, _id, ask), do: ask.()
 
-  # A server on a version that doesn't talk with this one was asked nothing. One that's behind is updated in its
+  # A server more than one breaking release from this one was asked nothing. One that's behind is updated in its
   # turn, which a release does next: it's as if it were off, so whoever asked asks another. One that's ahead was
   # updated first, and this one is the one behind.
   defp refused(server, theirs) do
     Servers.build_again(server)
 
     why =
-      "#{named(server)} is on #{theirs} and #{named(key())} on #{Builds.build()}, so they don't talk until both are on one"
+      "#{named(server)} is on #{theirs} and #{named(key())} on #{Builds.build()}, more than one breaking release apart, so they don't talk until one is updated"
 
     Logger.warning(why)
 
@@ -158,7 +157,7 @@ defmodule OneCore.Server do
 
     cond do
       not Builds.talk?(Servers.build(server), Builds.build()) ->
-        "#{named(server)} is on #{Servers.build(server)} and #{named(key())} on #{Builds.build()}, so it's asked nothing until it's updated"
+        "#{named(server)} is on #{Servers.build(server)} and #{named(key())} on #{Builds.build()}, more than one breaking release apart, so it's asked nothing until it's updated"
 
       presence["last_seen"] ->
         "#{named(server)} was last seen #{Servers.ago(presence["last_seen"])}"
