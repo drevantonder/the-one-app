@@ -7,6 +7,7 @@
 // passkeys, the page shows the device's code and its button opens the page in the device's browser instead.
 import { createSignal } from "solid-js"
 import { render } from "@solidjs/web"
+import mark from "../../../../icons/Logo.png"
 import { Field, Input, SignIn } from "ui"
 import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
@@ -210,7 +211,7 @@ begin()
 render(
   () => (
     <SignIn
-      mark={<img src="./mark.png" alt="" />}
+      mark={<img src={mark} alt="" />}
       heading={shows().heading}
       note={shows().note}
       code={shows().code}

@@ -2,7 +2,7 @@ import { createSignal, Show } from "solid-js"
 import { Button, Icon, Spinner } from "./button.tsx"
 import type { JSX } from "@solidjs/web"
 
-/// `<SignIn mark={<img src="mark.png" alt="" />} heading="Sign in" button="Sign in" onSignIn={passkey} />`: the one
+/// `<SignIn mark={<img src={mark} alt="" />} heading="Sign in" button="Sign in" onSignIn={passkey} />`: the one
 /// screen someone signs in on, wherever it's shown: the `mark` of whose it is, a `heading` and one `button`.
 /// `onSignIn` asks them, and what it throws is shown above the button to try again, as a `problem` given is. A
 /// `code` is shown big, under a grey `note` that says what to do with it. A `warning` says who will act as them if

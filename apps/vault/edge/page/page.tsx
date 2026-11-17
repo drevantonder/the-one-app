@@ -3,6 +3,7 @@
 // on a device of theirs, which is the only place a secret is typed.
 import { createSignal } from "solid-js"
 import { render } from "@solidjs/web"
+import mark from "../../../../icons/Logo.png"
 import { SignIn } from "ui"
 
 const callback = location.pathname === "/vault/callback"
@@ -16,7 +17,7 @@ if (callback)
 render(
   () => (
     <SignIn
-      mark={<img src="./mark.png" alt="" />}
+      mark={<img src={mark} alt="" />}
       heading={!callback ? "Open Vault" : result()?.done ? "Signed in" : result()?.problem ? "Not signed in" : "Signing in"}
       done={callback ? result()?.done : "Requests for your keys and sign-ins are answered in Vault, on a device of yours."}
       problem={result()?.problem}

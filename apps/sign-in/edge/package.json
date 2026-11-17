@@ -9,7 +9,7 @@
   ],
   "who": true,
   "scripts": {
-    "build": "bun ../../../core/ui/app.js \"$PWD/page\" \"$PWD/files/sign-in\" && cp ../../../icons/Logo.png files/sign-in/mark.png",
+    "build": "bun ../../../core/ui/app.js \"$PWD/page\" \"$PWD/files/sign-in\"",
     "typecheck": "tsc && tsc -p page"
   },
   "dependencies": {

@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "@internationalized/date": "3.12.4",
-    "@solidjs/vite-plugin": "3.0.0-next.35",
-    "@solidjs/web": "2.0.0-rc.21",
+    "@solidjs/vite-plugin": "3.0.0",
+    "@solidjs/web": "2.0.0",
     "@zag-js/collection": "2.0.0-next.4",
     "@zag-js/date-picker": "2.0.0-next.4",
     "@zag-js/menu": "2.0.0-next.4",
@@ -18,7 +18,7 @@
     "@zag-js/solid": "2.0.0-next.4",
     "@zag-js/tabs": "2.0.0-next.4",
     "@zag-js/toast": "2.0.0-next.4",
-    "solid-js": "2.0.0-rc.21",
+    "solid-js": "2.0.0",
     "vite": "8.3.8",
     "xstate": "5.33.3"
   },
