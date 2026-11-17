@@ -18,7 +18,10 @@ defmodule Kept do
   @behaviour OneCore.Plugin
 
   @impl true
-  def apps, do: [%{name: "Kept", page: "client/app.html", icon: "client/icon.svg"}]
+  def icon, do: "client/icon.svg"
+
+  @impl true
+  def apps, do: [%{name: "Kept", page: "client/app.html"}]
 end
 PLUGIN
 cat >"$folder/kept/client/app.html" <<'PAGE'
@@ -34,7 +37,10 @@ defmodule Prober do
   @behaviour OneCore.Plugin
 
   @impl true
-  def apps, do: [%{name: "Prober", page: "client/app.html", icon: "client/icon.svg"}]
+  def icon, do: "client/icon.svg"
+
+  @impl true
+  def apps, do: [%{name: "Prober", page: "client/app.html"}]
 
   @impl true
   def tools do
