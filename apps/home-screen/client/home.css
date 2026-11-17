@@ -635,7 +635,8 @@ body {
   width: 100%;
   border-radius: 22.5%;
 }
-.hold-menu[hidden] {
+.hold-menu[hidden],
+.hold-menu[popover]:not(:popover-open) {
   display: none;
 }
 .holding .lifted-copy {
@@ -645,6 +646,12 @@ body {
 }
 .hold-menu {
   position: fixed;
+  z-index: 21;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
   display: grid;
   width: 15rem;
   overflow: hidden;

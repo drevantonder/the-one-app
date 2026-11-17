@@ -519,7 +519,8 @@ const springy = `linear(${Array.from({ length: 41 }, (_, step) => {
 /// What a finger holds, lifted over the blurred Home Screen, as a phone's is, with its menu beside it, which grows out
 /// of it with a spring and shrinks back into it: Edit Home Screen and Remove App on a Home page, Add to Home Screen and
 /// Remove App in the App Library. Moving the finger, or on a Home page holding it a while longer, carries it into
-/// editing; anywhere else, Escape or the device's own back puts it down.
+/// editing; anywhere else, Escape, a tap beside it or the device's own back puts it down. The menu is a popover, in the
+/// top layer, which the browser closes on Escape or a tap beside it; the arrow keys move between its items.
 function Holding(props: { owner: Owner; index: number; held: Held }) {
   let veil!: HTMLDivElement
   let menu!: HTMLDivElement
@@ -580,6 +581,9 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   }
   onSettled(() => {
     haptic("medium")
+    menu.showPopover()
+    // It has the keys, so the arrow keys reach its items, with none of them picked out until they're used.
+    menu.focus({ preventScroll: true })
     const fade = paced("quick")
     veil.animate([{ opacity: 0 }, {}], paced("settle"))
     menu.animate([{ opacity: 0 }, {}], fade)
@@ -588,11 +592,8 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
       copy?.animate([{ scale: "1" }, {}], { duration: 450, easing: springy })
     }
     const shut = covers(dismiss)
-    const escape = (event: KeyboardEvent) => event.key === "Escape" && dismiss()
-    addEventListener("keydown", escape)
     return () => {
       shut()
-      removeEventListener("keydown", escape)
       close()
     }
   })
@@ -607,17 +608,32 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
     ghost.style.pointerEvents = "none"
     document.querySelector(".home")?.append(ghost)
     const [ghostMenu, ghostCopy] = [ghost.querySelector<HTMLElement>(".hold-menu")!, ghost.querySelector<HTMLElement>(".lifted-copy")]
+    // Its copy shrinks back where it was drawn, over the rest, at its own size: not as a popover, which a copy isn't
+    // shown as, and not in what's held, which is drawn larger on a wide window.
+    ghostMenu.removeAttribute("popover")
+    ghost.after(ghostMenu)
     if (home.getSnapshot().matches({ editing: "dragging" })) ghostCopy?.remove()
     ghost.animate([{ opacity: now(veil)?.opacity ?? 1 }, { opacity: 0 }], settling).finished.finally(() => ghost.remove())
-    ghostMenu.animate([{ opacity: menuNow?.opacity ?? 1, scale: menuNow?.scale ?? "1" }, { opacity: 0, scale: still.matches ? "1" : "0.25" }], settling)
+    ghostMenu.animate([{ opacity: menuNow?.opacity ?? 1, scale: menuNow?.scale ?? "1" }, { opacity: 0, scale: still.matches ? "1" : "0.25" }], settling).finished.finally(() => ghostMenu.remove())
     if (!still.matches) ghostCopy?.animate([{ scale: copyNow?.scale ?? "1.06" }, { scale: "1" }], settling)
   }
-  // Where it is, in the points of the layer it's lifted onto, which is drawn as much larger as the pages are.
-  const [width, height] = [innerWidth / scale, innerHeight / scale]
-  const held = props.held.rect
-  const rect = held ? { x: held.x / scale, y: held.y / scale, width: held.width / scale, height: held.height / scale } : { x: width / 2, y: height / 2, width: 0, height: 0 }
-  const below = rect.y + rect.height < height * 0.6
-  const left = Math.max(12, Math.min(width - 252, rect.x))
+  // Where it is in the window, which its menu is under, or over where there's no room under it; and in the points of
+  // the layer it's lifted onto, which is drawn as much larger as the pages are. The menu's in the top layer, at its
+  // own size.
+  const held = props.held.rect ?? { x: 0, y: 0, width: 0, height: 0 }
+  const rect = { x: held.x / scale, y: held.y / scale, width: held.width / scale, height: held.height / scale }
+  const [width, height] = [document.documentElement.clientWidth, document.documentElement.clientHeight]
+  const below = held.y + held.height < height * 0.6
+  const left = Math.max(12, Math.min(width - 252, held.x))
+  // Up and down move between what can be done, as a menu's keys do, and Home and End to the first and the last.
+  const keys = (event: KeyboardEvent) => {
+    const items = [...menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")]
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    const to = { ArrowDown: at + 1, ArrowUp: at < 0 ? items.length - 1 : at - 1, Home: 0, End: items.length - 1 }[event.key]
+    if (to === undefined || !items.length) return
+    event.preventDefault()
+    items[(to + items.length) % items.length].focus()
+  }
   const item = props.held.item
   // An app of the App Library that's on a page already has no Add to Home Screen.
   const added = !!item && props.owner.pages.some((page) => page.items.some((other) => other.entrypoint === item.entrypoint))
@@ -636,8 +652,13 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
       <div
         class="hold-menu"
         role="menu"
+        aria-label={(item ?? props.held.listed)?.name}
+        popover="auto"
+        tabindex="-1"
         ref={menu}
-        style={{ left: `${left}px`, "transform-origin": `${rect.x + rect.width / 2 - left}px ${below ? "0" : "100%"}`, ...(below ? { top: `${rect.y + rect.height + 12}px` } : { bottom: `${height - rect.y + 12}px` }) }}
+        onToggle={(event) => event.newState === "closed" && dismiss()}
+        onKeyDown={keys}
+        style={{ left: `${left}px`, "transform-origin": `${held.x + held.width / 2 - left}px ${below ? "0" : "100%"}`, ...(below ? { top: `${held.y + held.height + 12}px` } : { bottom: `${height - held.y + 12}px` }) }}
       >
         <Show when={!library}>
           <button type="button" role="menuitem" onClick={edit}>
