@@ -796,11 +796,13 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (performance.now() - swiped < 350) (event.stopPropagation(), event.preventDefault())
   }
 
+  // Each effect below is driven by a memo, which changes only when whether it's so does: given the snapshot itself, an
+  // effect runs again on every event, and the drag's would put what's carried down and lift it again at each move.
   /// What's carried, while it's dragged: a copy that lifts larger with a shadow and follows the finger one to one, and
   /// over what it would go before. Held at a page's edge a moment, it goes on to the next page, or the one before. Let
   /// go, it springs into its place from where it was, at the speed it was moving.
   createEffect(
-    () => state().matches({ editing: "dragging" }),
+    createMemo(() => state().matches({ editing: "dragging" })),
     (dragging) => {
       if (!dragging) return
       const held = home.getSnapshot().context.held!
@@ -972,14 +974,14 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own.
   createEffect(
-    () => state().matches("editing"),
+    createMemo(() => state().matches("editing")),
     (now) => {
       if (now && home.getSnapshot().matches({ editing: "still" })) haptic("selection")
     },
   )
   // While pages are edited, the device's own back ends editing, as Done does.
   createEffect(
-    () => state().matches({ editing: "still" }),
+    createMemo(() => state().matches({ editing: "still" })),
     (now) => (now ? covers(() => home.send({ type: "done" })) : undefined),
   )
 
