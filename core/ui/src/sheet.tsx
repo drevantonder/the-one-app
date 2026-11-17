@@ -2,7 +2,7 @@ import { createEffect, createSignal, onSettled, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { covers } from "./bridge.ts"
 import { Button, Icon } from "./button.tsx"
-import { messages, readable } from "./shared.ts"
+import { messages, readable, reduced } from "./shared.ts"
 import { Details } from "./states.tsx"
 import { hold } from "./toast.tsx"
 import type { JSX } from "@solidjs/web"
@@ -85,48 +85,67 @@ function Dialog(props: {
 /// `open` false. `autofocus` on a field in it brings up a phone's keyboard as it opens.
 export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: () => void; children?: JSX.Element }) {
   let dialog!: HTMLDialogElement
-  let pulling: { x: number; y: number; down: number; speed: number; at?: number; ours?: boolean } | null = null
+  let pulling: { x: number; y: number; down: number; moves: { time: number; value: number }[]; started?: number; fade?: Animation } | null = null
   const id = `ui-sheet-${Math.random().toString(36).slice(2)}`
 
   /// A sheet at the foot of the window goes down with the finger that pulls it, and on letting go closes if it was
   /// pulled far or flicked, and comes back if not. A finger that's scrolling what's in the sheet isn't pulling it:
-  /// only one that goes down with nothing above left to scroll to.
+  /// only one that goes down with nothing above left to scroll to. Only the sheet's own `translate` changes as it
+  /// goes, and the backdrop's fade is held at how far down it is: nothing inside the sheet is restyled.
   const pull = (event: TouchEvent) => {
     const finger = event.touches[0] ?? event.changedTouches[0]
     if (event.type === "touchstart") {
       const under = event.composedPath()
       const scrolled = (under.slice(0, under.indexOf(dialog)) as Element[]).some((element) => element.scrollTop > 0)
-      pulling = wide.matches || scrolled || event.touches.length > 1 ? null : { x: finger.clientX, y: finger.clientY, down: 0, speed: 0 }
+      pulling = wide.matches || scrolled || event.touches.length > 1 ? null : { x: finger.clientX, y: finger.clientY, down: 0, moves: [] }
       return
     }
     const was = pulling
     if (!was) return
     const down = finger.clientY - was.y
     if (event.type === "touchmove") {
-      if (!was.ours) {
+      if (was.started === undefined) {
         const across = Math.abs(finger.clientX - was.x)
         // Not far enough yet to tell which way it's going.
         if (Math.hypot(across, down) < 4) return
         // Going up or sideways, or the device has already started scrolling: it's not a pull.
         if (down < across || !event.cancelable) return void (pulling = null)
-        was.ours = true
+        was.started = event.timeStamp
         dialog.setAttribute("data-pulled", "")
+        was.fade = dialog.animate([{ opacity: 1 }, { opacity: 0 }], { pseudoElement: "::backdrop", duration: 1000, fill: "both" })
+        was.fade.pause()
       }
       event.preventDefault()
-      was.speed = (down - was.down) / Math.max(1, event.timeStamp - (was.at ?? 0))
       was.down = down
-      was.at = event.timeStamp
-      dialog.style.setProperty("--pulled", `${Math.max(0, down)}px`)
-      dialog.style.setProperty("--pulled-part", String(Math.min(1, Math.max(0, down) / dialog.offsetHeight)))
+      was.moves = [...was.moves.slice(-31), { time: event.timeStamp, value: down }]
+      dialog.style.translate = `0 ${Math.max(0, down)}px`
+      was.fade!.currentTime = 1000 * Math.min(1, Math.max(0, down) / dialog.offsetHeight)
       return
     }
     pulling = null
-    if (!was.ours) return
+    if (was.started === undefined) return
+    was.fade!.cancel()
     dialog.removeAttribute("data-pulled")
-    dialog.style.removeProperty("--pulled")
-    dialog.style.removeProperty("--pulled-part")
-    // Let go a third of the way down, or on the way down at a flick's speed (in px a millisecond).
-    if (event.type === "touchend" && (down > dialog.offsetHeight / 3 || was.speed > 0.5)) dialog.close()
+    // How fast it was going down as it was let go, in px a millisecond, from the last move at least 80 ms before the
+    // last, as a slow device's moves come further apart: none if it had stopped.
+    const last = was.moves.at(-1)
+    const from = was.moves.findLast((move) => last!.time - move.time >= 80) ?? was.moves[0]
+    const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.value - from.value) / Math.max(1, last.time - from.time)
+    // Let go a third of the way down, or flicked: still going down, and fast enough on average since it was taken.
+    const flicked = speed > 0 && was.down / Math.max(1, event.timeStamp - was.started) > 0.11
+    if (event.type !== "touchend" || !(was.down > dialog.offsetHeight / 3 || flicked)) return void dialog.style.removeProperty("translate")
+    // For whoever asked for less motion it fades where it was let go. Otherwise it goes on down, no slower than the
+    // finger took it.
+    if (!reduced.matches) {
+      dialog.style.removeProperty("translate")
+      if (flicked) dialog.style.transitionDuration = `${Math.max(120, Math.min(200, (dialog.offsetHeight - was.down) / speed))}ms`
+    }
+    dialog.close()
+    // Reading the transitions starts them, at that pace; what was set for them goes once they've ended.
+    Promise.allSettled(dialog.getAnimations().map((move) => move.finished)).then(() => {
+      dialog.style.removeProperty("translate")
+      dialog.style.removeProperty("transition-duration")
+    })
   }
   const touched = (element: HTMLDialogElement) => {
     for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) element.addEventListener(type, pull, { passive: false })

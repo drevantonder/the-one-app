@@ -1336,13 +1336,8 @@ button.ui-box {
     translate: 0 100%;
   }
 }
-/* While a finger pulls it down it's where the finger is, and what's under it shows through as it goes. */
-.ui-dialog.sheet[data-pulled] {
-  translate: 0 var(--pulled);
-  transition: none;
-}
-.ui-dialog.sheet[data-pulled]::backdrop {
-  opacity: calc(1 - var(--pulled-part));
+/* While a finger pulls it down it's where the finger is, and what's under it shows through as it goes (sheet.tsx). */
+.ui-dialog.sheet[data-pulled], .ui-dialog.sheet[data-pulled]::backdrop {
   transition: none;
 }
 /* Under a finger it says it can be pulled, as a phone's own sheets do. */
