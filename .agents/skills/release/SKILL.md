@@ -25,7 +25,8 @@ Exactly two rules hold at runtime:
   of one that far off (`OneCore.Mcp`), which says why; a server asks one that far behind it nothing, as if it were
   off; the relay passes the edge's calls only to servers within one of its own (`core/edge/relay/relay.ts`), apart
   from whether they're ready. What updates a
-  part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
+  part that's behind, `tools/list`, `builds`, `download`, `update` and its task's `tasks/get`, is answered whatever
+  it's on, so a client of any version can always update. `one builds` says each
   server's `build`, the `edge`'s, and `why` one doesn't talk.
 - An app runs on a server on its `requires`' `"core" => ">= 0.16.0"` or newer (`OneCore.Apps.Version.platform/1`,
   worked out from the two versions, never kept): `runs`, or `waiting_for_server` on an older one (deploying it there
@@ -45,8 +46,9 @@ forward.
 
 Any release mixes with what's live, a breaking one too, since parts one 0.minor apart talk. Release the servers
 first, then the edge from the commit they run, then the clients; an app that requires the new platform is deployed
-once every server is on it. Release the next breaking change only once every part is on this one: two apart don't
-talk.
+once every server is on it. `tooling/release` refuses a build on the next 0.minor while any server or the edge isn't on the
+network's current one, naming which: two apart don't talk. Devices aren't waited for, since their people update
+them, whatever they're on.
 
 | Changed | Release |
 | --- | --- |
