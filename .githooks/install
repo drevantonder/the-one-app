@@ -1,0 +1,15 @@
+#!/bin/sh
+# Once per clone: `sh .githooks/install`. Git runs a hook from the checkout a command runs in, so a `git worktree
+# add` run from a checkout that's behind would run that checkout's hooks, or none, rather than the new worktree's own
+# (17 Nov: no new worktree got its build copied). So each hook git runs is a line that runs the hook of the worktree
+# it runs in, as it is at that commit. Run it again after adding a hook here.
+set -e
+hooks=$(git rev-parse --git-common-dir)/hooks
+mkdir -p "$hooks"
+for hook in "$(dirname "$0")"/*; do
+  name=$(basename "$hook")
+  [ "$name" = install ] && continue
+  printf '#!/bin/sh\nhook="$(git rev-parse --show-toplevel)/.githooks/%s"\n[ ! -x "$hook" ] || exec "$hook" "$@"\n' "$name" >"$hooks/$name"
+  chmod +x "$hooks/$name"
+done
+git config --unset core.hooksPath || true
