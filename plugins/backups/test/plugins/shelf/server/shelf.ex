@@ -4,6 +4,10 @@ defmodule Shelf do
   backups (`plugins/backups/test/backups.sh`): what a person's or a group's data is, in the least a plugin does to keep it.
   """
   @behaviour OneCore.Plugin
+
+  @impl true
+  def icon, do: "icon.svg"
+
   alias OneCore.{Artifact, Call}
 
   @schema ["create table notes (id integer primary key, text text not null)"]

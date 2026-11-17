@@ -360,10 +360,15 @@ defmodule Ticker do
   end
 end
 EOF
+# Each has an icon of its own, as every plugin does.
+for plugin in notes reader gate approvals ticker diary stuck lost boxed spy chores; do
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>' >"$folder/$plugin/icon.svg"
+  sed -i 's/^  @behaviour OneCore.Plugin$/&\n  @impl true\n  def icon, do: "icon.svg"/' "$folder/$plugin"/server/*.ex
+done
 # Each says what it's for, as every plugin does; spy2 and recipes are copies of spy and notes, under their names.
 cp -r "$folder/spy" "$folder/spy2"
 cp -r "$folder/notes" "$folder/recipes"
-for plugin in notes reader gate approvals ticker stuck lost boxed spy spy2 recipes; do
+for plugin in notes reader gate approvals ticker stuck lost boxed spy spy2 recipes chores; do
   printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' $plugin $plugin >"$folder/$plugin/SKILL.md"
 done
 # They're deployed for the network, so they're everyone's.
