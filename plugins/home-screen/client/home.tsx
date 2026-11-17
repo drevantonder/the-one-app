@@ -215,7 +215,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
   const arranges = () => props.owner.arranges && !props.small
   // ⊖ asks first, as an iPhone's does: an app stays in the App Library, and a widget's app and data stay.
   const removing = async (item: Item, index: number) => {
-    const question = item.widget ? { heading: "Remove Widget?", action: "Remove", destructive: true } : { heading: `Remove “${item.name}” from Home Screen?`, text: "It stays in your App Library.", action: "Remove" }
+    const question = item.widget ? { heading: "Remove Widget?", action: "Remove", destructive: true } : { heading: `Remove “${item.name}” from Home Screen?`, text: "It stays in your App Library.", action: "Remove from Home Screen" }
     if (await confirm(question)) home.send({ type: "remove", page: props.page, index })
   }
   return (
