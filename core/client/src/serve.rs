@@ -9,6 +9,14 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+/// Which messages these are: the SHA-256 of this file, which defines them, and which `one serve run` and the server's
+/// NIF are each built from. A server loads a build while it runs only where that build reads and writes the messages
+/// the `one` running it does (`OneCore.Release.compare/2`); otherwise it restarts, run by the `one` paired with it.
+pub fn protocol() -> String {
+    crate::hex(&Sha256::digest(include_str!("serve.rs")))
+}
 
 /// Whether the device is one of its network's servers: joining while `one serve on` makes it one, until it answers
 /// by its key, active, and leaving while `one serve off` drains it.
@@ -53,7 +61,7 @@ pub enum ServerUpdateStage {
 }
 
 /// How a build is taken, as checking chose (`OneCore.Release.compare/2`): loaded into the server while it runs, as
-/// a build that changed only One Core's code is, or started in its place, with `one` if that changed too.
+/// a build that changed only One Core's code is, or started in its place, by the `one` paired with it.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateMethod {

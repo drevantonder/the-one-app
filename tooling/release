@@ -34,7 +34,8 @@
 # network keeps with it as its `inputs`, and published only when that changed, under the build that first had it,
 # which its file `runtime` names. It's what it's built from, not its files, since those name the folders they were
 # built in.
-# A machine on the same runtime loads new code into its server while it runs (`OneCore.Release.compare/2`).
+# A machine loads new code and NIFs into its server while it runs, unless the rest of its runtime changed
+# (`OneCore.Release.compare/2`).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -315,11 +316,17 @@ for kind in "${servers[@]}"; do
 
   # The runtime is everything but One Core's own code. What it's built from says which it is: the one published, if
   # that's the same, and otherwise a new one, this build's. That's the VM, Elixir and Bun, the deps, One Core's config
-  # and release settings, its NIFs, as each is named for what it's built from (`tooling/input-hash`), and this.
-  inputs=$({
+  # and release settings and this loop, which puts them together, kept in the runtime's file `runtime-inputs`, which a
+  # server on another runtime restarts for (`OneCore.Release.compare/2`); and One Core's NIFs, as each is named for
+  # what it's built from (`tooling/input-hash`), which a running server loads beside the ones it has.
+  runtime_inputs=$({
     echo "$kind $otp $(elixir --version | tail -1)" && cat "$release/bun" &&
-      (cd core/server && sha256sum mix.exs mix.lock config/* rel/*) && sha256sum tooling/release &&
-      for crate in core/server/nif/*/; do tooling/input-hash "$crate" "$triple"; done
+      (cd core/server && sha256sum mix.exs mix.lock config/* rel/*) &&
+      sed -n '/^for kind in "${servers\[@\]}"; do$/,/^done$/p' tooling/release
+  } | sha256sum | cut -d' ' -f1)
+  echo "$runtime_inputs" >"$release/runtime-inputs"
+  inputs=$({
+    echo "$runtime_inputs" && for crate in core/server/nif/*/; do tooling/input-hash "$crate" "$triple"; done
   } | sha256sum | cut -d' ' -f1)
   runtime=$(jq -r --arg n "server-runtime/$kind" --arg i "$inputs" '.latest[$n] | select(.inputs == $i) | .build' <<<"$builds")
   echo "${runtime:-$build}" >"$release/runtime"

@@ -198,13 +198,14 @@ defmodule OneCore.Release do
   gives `nil` for a hot load, or why it restarts. It's run in a fresh VM of `new`, which nothing else runs in: to tell what changed,
   it loads the code of `old` there too.
 
-  A hot load replaces only One Core's own code (`load/1`), so it restarts for anything else, and for what its code
-  can't be swapped under: another runtime (`server-runtime/<kind>`: the VM, Elixir, the deps, One Core's NIFs, its
-  config and `rel/`), a breaking change (another 0.minor, which doesn't talk with the build before), an `.app` that
-  changed beyond its modules, and among the modules that changed, `OneCore.Application`, a supervisor, a module with
-  `-on_load` or one of One Core's NIFs (`use OneCore.Nif`), a struct and a macro. A supervisor is one by its behaviour
-  or by the child spec it gives (`child_spec/1`), whose children differ. A macro's own code can't be told apart from
-  the rest of its module's, so any change to a module with macros restarts.
+  A hot load replaces only One Core's own code and NIFs (`load/1`), so it restarts for anything else, and for what its
+  code can't be swapped under: a runtime built from anything else (`runtime-inputs`, which `tooling/release` writes:
+  the VM, Elixir, Bun, the deps, One Core's config and `rel/`), messages to and from the `one` running the server
+  other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), a breaking change
+  (another 0.minor, which doesn't talk with the build before), an `.app` that changed beyond its modules, and among
+  the modules that changed, `OneCore.Application`, a supervisor, a module with `-on_load`, a struct and a macro. A
+  supervisor is one by its behaviour or by the child spec it gives (`child_spec/1`), whose children differ. A macro's
+  own code can't be told apart from the rest of its module's, so any change to a module with macros restarts.
   """
   def compare(old, new) do
     why = restart(old, new)
@@ -217,8 +218,11 @@ defmodule OneCore.Release do
     [was, now] = Enum.map([old, new], &named/1)
 
     cond do
-      runtime(old) == nil or runtime(old) != runtime(new) ->
-        "its runtime is #{runtime(new)}, and the server's #{runtime(old) || "a whole build's"}"
+      inputs(old) == nil or inputs(old) != inputs(new) ->
+        "its runtime is #{runtime(new)}, built from other than the server's #{runtime(old) || "whole build"}"
+
+      System.get_env("ONE_PROTOCOL") != Iroh.protocol() ->
+        "it speaks other messages than the one running the server (client::serve)"
 
       not Builds.talk?(was, now) ->
         "#{now} is a breaking change from #{was}"
@@ -258,9 +262,6 @@ defmodule OneCore.Release do
           a[:on_load] || b[:on_load] ->
             "#{inspect(module)} has -on_load"
 
-          a[:nif] || b[:nif] ->
-            "#{inspect(module)} is One Core's NIF"
-
           a[:supervisor] || b[:supervisor] ->
             "#{inspect(module)} is a supervisor"
 
@@ -280,11 +281,15 @@ defmodule OneCore.Release do
     end
   end
 
-  # The runtime a build was put together from, as `tooling/release` names it in the build's file `runtime`: `nil` for a
-  # build from before there were runtimes.
-  defp runtime(build) do
-    case File.read(Path.join(build, "runtime")) do
-      {:ok, runtime} -> String.trim(runtime)
+  # The runtime a build was put together from, as `tooling/release` names it in the build's file `runtime`, and what
+  # that's built from but One Core's NIFs, in its file `runtime-inputs`, which a running server loads beside the ones
+  # it has (`swap/3`): `nil` for a build from before either.
+  defp runtime(build), do: kept(build, "runtime")
+  defp inputs(build), do: kept(build, "runtime-inputs")
+
+  defp kept(build, file) do
+    case File.read(Path.join(build, file)) do
+      {:ok, kept} -> String.trim(kept)
       {:error, _} -> nil
     end
   end
@@ -316,7 +321,8 @@ defmodule OneCore.Release do
 
   # One Core's modules that differ from `old` to `new`, with its consolidated protocols: those only `old` has, those
   # only `new` has, and those both have whose code differs, by its MD5 (`:beam_lib.md5/1`), which leaves out the
-  # attributes a build in another folder says otherwise, as `@external_resource`'s path.
+  # attributes a build in another folder says otherwise, as `@external_resource`'s path, or, for one of One Core's
+  # NIFs, whose library differs.
   defp changes(old, new) do
     [{removed, added, changed}, {gone, new_protocols, protocols}] =
       for dir <- [&ebin/1, &consolidated/1] do
@@ -326,7 +332,46 @@ defmodule OneCore.Release do
          for({module, md5} <- now, Map.has_key?(was, module), was[module] != md5, do: module)}
       end
 
-    {removed ++ gone, added ++ new_protocols, changed ++ protocols}
+    {removed ++ gone, added ++ new_protocols, Enum.uniq(changed ++ protocols ++ nifs(old, new))}
+  end
+
+  # One Core's NIFs whose library, built for this machine, differs from `old` to `new`: their modules.
+  defp nifs(old, new) do
+    for module <- Application.spec(:one_core, :modules) || [],
+        nif?(module),
+        {library, _source} = module.__nif__(),
+        native(old, library) != native(new, library),
+        do: module
+  end
+
+  defp nif?(module), do: Code.ensure_loaded?(module) and function_exported?(module, :__nif__, 0)
+
+  # A NIF's library as the build `build` has it, or `nil` for a developer's `_build`, whose NIFs are built apart.
+  defp native(%{}, _library), do: nil
+
+  defp native(build, library) do
+    case Path.wildcard(Path.join(build, "lib/one_core-*/priv/native/#{library}.{so,dll}")) do
+      [file] -> File.read!(file)
+      [] -> nil
+    end
+  end
+
+  @doc """
+  Says the calling process keeps what the NIF `nif` (a module that says `use OneCore.Nif`) opened, as
+  `OneCore.Server` keeps its endpoint: a hot load that loads another build of it starts the process again on that
+  build (`load/1`), as what one build opened can't be used with another.
+  """
+  def holds(nif), do: Process.put({__MODULE__, :holds, nif}, true)
+
+  # The modules of the processes in the supervision tree that keep what one of `nifs` opened (`holds/1`).
+  defp holders([]), do: []
+
+  defp holders(nifs) do
+    for {_supervisor, _id, pid} <- tree(OneCore.Supervisor),
+        {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+        Enum.any?(nifs, &List.keymember?(dictionary, {__MODULE__, :holds, &1}, 0)),
+        {module, _function, _arity} = :proc_lib.translate_initial_call(pid),
+        do: module
   end
 
   defp md5s(dir) do
@@ -364,8 +409,6 @@ defmodule OneCore.Release do
            on_load: :erlang.has_prepared_code_on_load(:erlang.prepare_loading(module, binary)),
            supervisor: Enum.any?(behaviours, &(&1 in [Supervisor, :supervisor, DynamicSupervisor])),
            macros: Enum.any?(exports, fn {name, _arity} -> String.starts_with?(Atom.to_string(name), "MACRO-") end),
-           # Its Elixir is compiled into the NIF's build as that loads (`OneCore.Nif`), once for each build.
-           nif: {:__nif__, 0} in exports,
            exports: exports
          }}
       end
@@ -402,7 +445,10 @@ defmodule OneCore.Release do
   supervisor's children are started whenever they're next asked for, as they are at any start.
 
   Then the code path, the `.app` and the UI library are the new build's, and the apps built against another UI library
-  are built again, as at a start. The VM goes on running from the build it started from, whose runtime is this one's.
+  are built again, as at a start. The VM goes on running from the build it started from, whose runtime is built from
+  what this one's is, but One Core's NIFs: one whose library changed is loaded beside the one before (`OneCore.Nif`),
+  and each process that keeps what the one before opened (`holds/1`) is started again on it. A call that began
+  before it ends on the new build, so what it was asked over the endpoint before can't be answered.
   """
   def load(build) do
     case loaded(build) do
@@ -427,14 +473,15 @@ defmodule OneCore.Release do
   `{:error, why}`.
   """
   def swap({removed, added, changed}, build, then \\ fn -> :ok end) do
-    stop(MapSet.new(removed ++ changed))
+    nifs = Enum.filter(changed, &nif?/1)
+    stop(MapSet.new(removed ++ changed ++ holders(nifs)))
     for module <- changed, do: :code.purge(module)
 
     loaded =
       case :code.atomic_load(files(added ++ changed, build)) do
         :ok ->
           for module <- removed, do: {:code.purge(module), :code.delete(module)}
-          then.()
+          with :ok <- then.(), do: nifs_loaded(nifs)
 
         {:error, why} ->
           {:error, "its code didn't load: #{inspect(why)}"}
@@ -452,6 +499,22 @@ defmodule OneCore.Release do
     end
   rescue
     error -> {:error, Exception.message(error)}
+  end
+
+  # Loads the build of each of One Core's NIFs `nifs` that's in its code path now, beside the one loaded, as the one
+  # its calls go to from now on.
+  defp nifs_loaded(nifs) do
+    folder = Path.join(:code.priv_dir(:one_core), "native")
+
+    Enum.reduce_while(nifs, :ok, fn module, :ok ->
+      {library, source} = module.__nif__()
+      [file] = Path.wildcard(Path.join(folder, "#{library}.{so,dll}"))
+
+      case OneCore.Nif.load(source, File.read!(file), :one_core, folder) do
+        {:ok, _name, _build} -> {:cont, :ok}
+        {:error, why} -> {:halt, {:error, "#{inspect(module)}'s NIF didn't load: #{why}"}}
+      end
+    end)
   end
 
   # Why a process didn't start, as what it raised says it, or as OTP gives it.

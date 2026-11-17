@@ -270,6 +270,7 @@ defmodule OneCore.Server do
   def init(nil) do
     network = if at = Application.get_env(:one_core, :address), do: {at, Edge.token()}
     {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
+    OneCore.Release.holds(Iroh)
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, endpoint})
     {:ok, machine} = :inet.gethostname()
