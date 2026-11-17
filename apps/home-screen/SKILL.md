@@ -3,7 +3,7 @@ name: home-screen
 description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, or giving an app's entrypoint a category or the user it's about.
 metadata:
   subtitle: "Your pages of apps"
-  about: "Your Home Screen, everyone's and your groups': pages of apps and widgets, arranged your way, and an App Library of every app you have, by category."
+  about: "Your Home Screen, everyone's and your groups': pages of apps and widgets, arranged your way, and an App Library of every app you can reach, by category."
   category: Utilities
 ---
 
@@ -14,17 +14,18 @@ Home Screen. Apps are installed with the App Store, whose `app-store_marketplace
 
 Its words:
 
-- **Home Screen**: an owner's pages, then their App Library, then the App Store. Its owner is a user, a group, or the network, which a
-  person reads as Everyone. A user sees theirs, everyone's and their groups', and moves between them with the owner
-  switcher.
+- **Home Screen**: every owner's pages, then the App Library and the App Store, one each for everyone you can reach.
+  An owner is a user, a group, or the network, which a person reads as Everyone. A user sees their pages, everyone's
+  and their groups', and moves between them with the owner switcher.
 - **Page**: a fixed grid of apps and widgets, four across and six down, which never scrolls: what doesn't fit goes on
   the next. It holds only what was put there. A page can be hidden, kept but not shown, and a page with nothing on it
   goes. An owner's pages are one layout, so arranging everyone's or a group's arranges it for everyone who sees it.
   The user themselves arranges theirs, and a group's or the network's `owner`s theirs (`arranges`).
-- **App Library**: every app that runs for an owner, by category, after their pages: what's installed for them and
-  for each broader owner they're within. A user's shows theirs, their groups' and everyone's; a group's, its own and
-  everyone's; everyone's, only everyone's. Each app is there once, as the narrowest install's, and a group's opens
-  for the group. An app installed lands there, not on a page.
+- **App Library**: every app that runs for an owner, by category: what's installed for them and for each broader
+  owner they're within. A user's, the one a person sees, shows theirs, their groups' and everyone's; asked for a group
+  (`pages`), its own and everyone's; for everyone, only everyone's. Each app is there once, as the narrowest
+  install's, and a group's opens for the group. An app installed lands there, not on a page. An app goes on an
+  owner's pages only where it opens for them, installed for them or for everyone (`pages`' `apps`).
 - One about whoever opens it (`subject: "user"`) is only in a user's App Library, wherever it's installed, and opens
   for them.
 - Installing an app puts its code on a server, so for the network only its owners and those they let (`installer`,

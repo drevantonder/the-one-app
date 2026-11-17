@@ -39,7 +39,8 @@ export interface Category {
   entrypoints: Listed[]
 }
 
-/** A Home Screen, as `home-screen_pages` answers it: whose it is, its pages, each what's on it and whether it's hidden, its App Library, and the App Store after it, by its app's name. */
+/** A Home Screen, as `home-screen_pages` answers it: whose it is, its pages, each what's on it and whether it's hidden,
+ * its App Library, the App Store after it, by its app's name, and the apps that open on its pages. */
 export interface Pages {
   who: string
   arranges: boolean
@@ -47,4 +48,5 @@ export interface Pages {
   library: Category[]
   widgets: Widget[]
   store: string | null
+  apps: { app: string; name: string }[]
 }

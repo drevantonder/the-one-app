@@ -1,25 +1,26 @@
-// The Home Screen's one state machine: where it is, `{ owner, screen }`, what's open on top of it, one thing at a time,
-// and editing an owner's Home pages, as a phone's Home Screen is edited. home.tsx keeps its snapshot as one signal and
-// draws from it, tells it what happened, and does what it says: moves the pages (`slide`), and keeps what was edited
-// (`arrange`).
+// The Home Screen's one state machine: where it is, what's open on top of it, one thing at a time, and editing owners'
+// Home pages, as a phone's Home Screen is edited. home.tsx keeps its snapshot as one signal and draws from it, tells it
+// what happened, and does what it says: moves the pages (`slide`), and keeps what was edited (`arrange`).
+//
+//   where it is: home { owner, screen } | library | store
+//     step(screen): Home's screenfuls, then the App Library, then the App Store
+//     step(owner): on Home only.   list ─pick─► another owner: on Home only
+//   open ─► category (App Library), as now
+//   holding (an app in the App Library) ─lift─► editing.dragging, with Home brought forward on the last owner
+//   editing.dragging: over · flip(page ±1) · flip(owner ±1) · drop ─► still | asking | refused
+//   asking ─install─► installing ─installed─► still (placed) · ─failed─► still (back, saying why) · ─cancel─► still (back)
+//   refused ─dismiss─► still (back)
+//
+// Only Home is an owner's: you, everyone and each of your groups have Home pages, one owner above another. The App
+// Library and the App Store come after Home's screenfuls, and are one each for everyone you can reach.
 import { assign, emit, setup } from "xstate"
 import type { Item, Listed } from "./types.ts"
 
-/// The sections of a Home Screen, in order. Every owner (you, everyone, each of your groups) has Home, their pages, then
-/// their App Library, then the App Store. Each is a screenful or more, never less: as many of its pages side by side as
-/// fit on the screen it's on (one on a phone), and a swipe moves one screenful. Each section says how it behaves:
-/// whether it scrolls up and down itself, which keeps a vertical swipe on it rather than moving between owners; and
-/// whether picking another owner from it lands on that owner's first screenful of it rather than where they were last.
-export const kinds = {
-  /** Home: fixed grids of apps and widgets, as a phone's Home Screen pages. */
-  home: { scrolls: false, one: false },
-  /** The App Library: every app installed for them, by category. */
-  library: { scrolls: false, one: true },
-  /** The App Store: its screen, which scrolls. */
-  store: { scrolls: true, one: true },
-} as const
+/// The sections, in order: Home, fixed grids of apps and widgets, as a phone's Home Screen pages, a screenful or more,
+/// as many of its pages side by side as fit (one on a phone); then the App Library and the App Store, a screenful
+/// each, which scroll up and down themselves.
+export type Kind = "home" | "library" | "store"
 
-export type Kind = keyof typeof kinds
 
 /// A Home page's grid: four across and six down, as a phone's, whatever room it has.
 export const COLUMNS = 4
@@ -87,16 +88,18 @@ export const shown = (pages: Page[]) => pages.flatMap((page, index) => (page.hid
 
 const same = (a: Item, b: Item) => (a.widget ?? a.entrypoint) === (b.widget ?? b.entrypoint) && a.size === b.size
 
-/** Where the Home Screen is: an owner, and a screenful of theirs. */
+/** An owner's pages as they're edited, the hidden ones among them. */
+export interface Editing {
+  owner: number
+  pages: Page[]
+}
+
+/** Where the Home Screen is: on Home, an owner and a screenful of their pages; past them, the App Library or the App
+ * Store, the same for every owner, with `owner` the one Home goes back to. `screen` counts on from Home's screenfuls
+ * through the App Library and the App Store, so a step is one along. */
 export interface At {
   owner: number
   screen: number
-}
-
-/** A category of an owner's App Library, opened: whose, and its name there. */
-export interface Opened {
-  owner: number
-  name: string
 }
 
 /** What a finger holds: an item of a Home page, by the page shown and where it is on it, or empty space there, or an
@@ -110,23 +113,27 @@ export interface Held {
   rect?: { x: number; y: number; width: number; height: number }
 }
 
-/** An owner's Home pages as they're edited, the hidden ones among them. */
-export interface Editing {
-  owner: number
-  pages: Page[]
-}
+/** Where what's carried was dropped: on an owner it's installed for (`place`), on one it isn't but who you may
+ * install for (`ask`), or on one whose pages you may not change (`refuse`). */
+export type Drop = "place" | "ask" | "refuse"
 
 interface Context {
-  /** Each owner's screenfuls, each by its section, in order. */
+  /** Each owner's screenfuls, each by its section, in order: Home's, then the App Library and the App Store. */
   screens: Kind[][]
   /** How many Home pages a screenful has side by side. */
   fit: number
   at: At
   /** The screenful each owner was last on, which moving to them lands on. */
   last: number[]
-  category?: Opened
+  /** The App Library's category that's open, by its name. */
+  category?: string
   held?: Held
+  /** The pages of the owner being edited, the one shown. */
   editing?: Editing
+  /** Every other owner's pages edited since editing began, as they're kept on Done. */
+  drafts: Editing[]
+  /** Each owner's pages as they were when what's carried was lifted, which it goes back to. */
+  before: Editing[]
 }
 
 export type Event =
@@ -146,8 +153,8 @@ export type Event =
   | { type: "list" }
   | { type: "pick"; owner: number }
   | { type: "dismiss" }
-  /** A category was tapped in an App Library, or closed. */
-  | { type: "open"; category: Opened }
+  /** A category was tapped in the App Library, or closed. */
+  | { type: "open"; category: string }
   | { type: "close" }
   /** An opened category has grown out of its place, or shrunk back into it: its animations have finished. */
   | { type: "zoomed" }
@@ -162,10 +169,18 @@ export type Event =
   | { type: "lift"; held: Held; editing?: Editing }
   /** What's lifted is over a place: on the page shown, before the item at `index`, or last. */
   | { type: "over"; page: number; index: number }
-  /** What's lifted was held at the edge of the screen: it goes to the page past it, on the next screenful or the
-   * previous, a new one past the last. */
+  /** What's lifted was held at the side of the screen: it goes to the page past it, on the next screenful or the
+   * previous, a new one past the last. Or at its top or bottom: it goes to the previous or the next owner's pages,
+   * `editing` as they're kept. */
   | { type: "flip"; by: 1 | -1 }
-  | { type: "drop" }
+  | { type: "flip"; owner: 1 | -1; editing: Editing }
+  /** It was let go, and where it landed says what follows. */
+  | { type: "drop"; to: Drop }
+  /** The question an app dropped where it isn't installed asks: Install, and how that went, or Cancel. */
+  | { type: "install" }
+  | { type: "installed" }
+  | { type: "failed" }
+  | { type: "cancel" }
   /** An item's ⊖: off the page, still in the App Library. */
   | { type: "remove"; page: number; index: number }
   /** + opens the widget gallery; a widget picked in a size goes first on the screenful shown. */
@@ -180,10 +195,12 @@ export type Event =
   | { type: "done" }
 
 /** What the machine asks of the page: to be at `at`, gliding there, or at once where it's only laid out again; and to
- * keep an owner's pages as they were edited. */
-export type Emitted = { type: "slide"; at: At; smooth: boolean } | { type: "arrange"; editing: Editing }
+ * keep owners' pages as they were edited, each that changed. */
+export type Emitted = { type: "slide"; at: At; smooth: boolean } | { type: "arrange"; edited: Editing[] }
 
 const within = (number: number, length: number) => Math.max(0, Math.min(length - 1, number))
+/// How many of an owner's screenfuls are Home's.
+const homes = (screens: Kind[]) => Math.max(1, screens.filter((kind) => kind === "home").length)
 
 /** Where a step leads from `at`: the next or previous screenful, or the one the next or previous owner was last on. */
 function stepped({ screens, at, last }: Context, event: Extract<Event, { type: "step" }>): At {
@@ -191,6 +208,9 @@ function stepped({ screens, at, last }: Context, event: Extract<Event, { type: "
   const owner = within(at.owner + event.owner, screens.length)
   return { owner, screen: last[owner] ?? 0 }
 }
+
+/// Whether `at` is on Home.
+const onHome = ({ screens, at }: Context) => (screens[at.owner]?.[at.screen] ?? "home") === "home"
 
 /// The pages being edited with what's held put at `index` of the page shown at `page`, from wherever it was.
 function put(editing: Editing, held: Held, page: number, index: number): { editing: Editing; held: Held } {
@@ -205,24 +225,38 @@ function put(editing: Editing, held: Held, page: number, index: number): { editi
   return { editing: { ...editing, pages: fit }, held: { ...held, page: shown(fit).indexOf(now), index: fit[now].items.findIndex((other) => same(other, item)), from: "page" } }
 }
 
+/// Every owner's pages being edited: the one shown, and the rest.
+const everyone = ({ editing, drafts }: Context) => (editing ? [editing, ...drafts] : drafts)
+
 export const machine = setup({
   types: {} as { context: Context; events: Event; emitted: Emitted },
   guards: {
-    // A step goes somewhere, and a vertical one moves between owners only from a page that doesn't scroll itself.
+    // A step goes somewhere, and a vertical one only on Home: the App Library and the App Store scroll themselves.
     moves: ({ context, event }) => {
       const step = event as Extract<Event, { type: "step" }>
       const to = stepped(context, step)
-      const here = context.screens[context.at.owner]?.[context.at.screen] ?? "home"
-      return (to.owner !== context.at.owner || to.screen !== context.at.screen) && ("screen" in step || !kinds[here].scrolls)
+      return (to.owner !== context.at.owner || to.screen !== context.at.screen) && ("screen" in step || onHome(context))
     },
+    home: ({ context }) => onHome(context),
     // A page is deleted only once it's hidden, as a phone's is.
     hidden: ({ context, event }) => !!context.editing?.pages[(event as Extract<Event, { type: "delete" }>).page]?.hidden,
+    // An app goes to another owner's pages, not a widget, which is its app's for the owner it's on.
+    another: ({ context, event }) => {
+      const { owner } = event as Extract<Event, { type: "flip"; owner: 1 | -1 }>
+      return !context.held?.item?.widget && within(context.at.owner + owner, context.screens.length) !== context.at.owner
+    },
+    ask: ({ event }) => (event as Extract<Event, { type: "drop" }>).to === "ask",
+    refuse: ({ event }) => (event as Extract<Event, { type: "drop" }>).to === "refuse",
   },
   actions: {
-    // Every owner keeps the screenful they were on, as far as they still have it.
+    // Every owner keeps the screenful they were on, as far as they still have it: in the App Library or the App Store,
+    // still there, however many of Home's come before it.
     lay: assign(({ context, event }) => {
       const { screens, fit } = event as Extract<Event, { type: "laid" }>
-      const last = screens.map((kinds, owner) => within(context.last[owner] ?? 0, kinds.length))
+      const last = screens.map((kinds, owner) => {
+        const was = context.screens[owner]?.[context.last[owner] ?? 0] ?? "home"
+        return was === "home" ? within(context.last[owner] ?? 0, homes(kinds)) : Math.max(0, kinds.indexOf(was))
+      })
       const owner = within(context.at.owner, screens.length)
       return { screens, fit, last, at: { owner, screen: last[owner] ?? 0 } }
     }),
@@ -239,11 +273,10 @@ export const machine = setup({
       const screen = within((event as Extract<Event, { type: "go" | "link" }>).screen, screens[at.owner]?.length ?? 1)
       return { at: { ...at, screen }, last: last.with(at.owner, screen) }
     }),
-    pick: assign(({ context: { at, last, screens }, event }) => {
+    // Another owner's Home, where they were last.
+    pick: assign(({ context: { last, screens }, event }) => {
       const owner = within((event as Extract<Event, { type: "pick" }>).owner, screens.length)
-      const here = screens[at.owner]?.[at.screen] ?? "home"
-      const theirs = kinds[here].one ? screens[owner]?.indexOf(here) ?? -1 : -1
-      return { at: { owner, screen: theirs >= 0 ? theirs : (last[owner] ?? 0) } }
+      return { at: { owner, screen: last[owner] ?? 0 } }
     }),
     glide: emit(({ context: { at } }) => ({ type: "slide" as const, at, smooth: true })),
     jump: emit(({ context: { at } }) => ({ type: "slide" as const, at, smooth: false })),
@@ -252,14 +285,15 @@ export const machine = setup({
     hold: assign({ held: ({ event }) => (event as Extract<Event, { type: "hold" }>).held }),
     let: assign({ held: undefined }),
     edit: assign({ editing: ({ event }) => (event as Extract<Event, { type: "edit" }>).editing }),
-    // Lifted from the App Library, it's on the owner's last Home page to start with, whose screenful is shown.
+    // Lifted from the App Library, it's on the last owner's last Home page to start with, whose screenful is shown.
     lift: assign(({ context, event }) => {
       const { held, editing = context.editing! } = event as Extract<Event, { type: "lift" }>
-      if (held.from === "page") return { held, editing }
+      const before = [editing, ...context.drafts]
+      if (held.from === "page") return { held, editing, before }
       const page = Math.max(0, shown(editing.pages).length - 1)
       const moved = put(editing, held, page, Infinity)
       const screen = Math.floor(moved.held.page / context.fit)
-      return { ...moved, at: { owner: editing.owner, screen }, last: context.last.with(editing.owner, screen) }
+      return { ...moved, before, at: { owner: editing.owner, screen }, last: context.last.with(editing.owner, screen) }
     }),
     over: assign(({ context, event }) => {
       const { page, index } = event as Extract<Event, { type: "over" }>
@@ -267,12 +301,32 @@ export const machine = setup({
     }),
     // To the page just past the screen's edge it was held at: the next screenful's first, or the previous one's last.
     flip: assign(({ context, event }) => {
-      const { by } = event as Extract<Event, { type: "flip" }>
+      const { by } = event as Extract<Event, { type: "flip"; by: 1 | -1 }>
       const { fit, at } = context
       const page = Math.max(0, by > 0 ? (at.screen + 1) * fit : at.screen * fit - 1)
       const moved = put(context.editing!, context.held!, page, Infinity)
       const screen = Math.floor(moved.held.page / fit)
       return { ...moved, at: { ...at, screen }, last: context.last.with(at.owner, screen) }
+    }),
+    // To the previous or the next owner's pages, as they're kept or already edited, on the first page of the screenful
+    // they were last on: it leaves the pages it was on.
+    turn: assign(({ context, event }) => {
+      const { owner: by, editing: kept } = event as Extract<Event, { type: "flip"; owner: 1 | -1 }>
+      const { at, fit, held, editing, screens, last } = context
+      const owner = within(at.owner + by, screens.length)
+      const left = { ...editing!, pages: editing!.pages.map((page) => ({ ...page, items: page.items.filter((item) => !same(item, held!.item!)) })) }
+      const theirs = context.drafts.find((one) => one.owner === owner) ?? kept
+      const drafts = [...context.drafts.filter((one) => one.owner !== owner), left]
+      const before = context.before.some((one) => one.owner === owner) ? context.before : [...context.before, kept]
+      const moved = put(theirs, held!, within(last[owner] ?? 0, homes(screens[owner] ?? [])) * fit, Infinity)
+      const screen = Math.floor(moved.held.page / fit)
+      return { ...moved, drafts, before, at: { owner, screen }, last: last.with(owner, screen) }
+    }),
+    // Every owner's pages as they were when it was lifted: it's back where it came from, and off the pages it was put
+    // on, in the App Library, where it came from there.
+    back: assign(({ context: { before, at } }) => {
+      const editing = before.find((one) => one.owner === at.owner) ?? before[0]
+      return { editing, drafts: before.filter((one) => one !== editing) }
     }),
     remove: assign(({ context, event }) => {
       const { page, index } = event as Extract<Event, { type: "remove" }>
@@ -305,20 +359,18 @@ export const machine = setup({
       pages.splice(to, 0, context.editing!.pages[from])
       return { editing: { ...context.editing!, pages } }
     }),
-    // What was edited is kept, without the pages left empty, as a phone's go.
-    keep: emit(({ context }) => ({ type: "arrange" as const, editing: { ...context.editing!, pages: context.editing!.pages.filter((page) => page.items.length) } })),
-    stop: assign({ editing: undefined, held: undefined }),
+    // What was edited is kept, every owner's, without the pages left empty, as a phone's go.
+    keep: emit(({ context }) => ({ type: "arrange" as const, edited: everyone(context).map((one) => ({ ...one, pages: one.pages.filter((page) => page.items.length) })) })),
+    stop: assign({ editing: undefined, held: undefined, drafts: [], before: [] }),
   },
 }).createMachine({
   id: "home",
-  context: { screens: [], fit: 1, at: { owner: 0, screen: 0 }, last: [] },
+  context: { screens: [], fit: 1, at: { owner: 0, screen: 0 }, last: [], drafts: [], before: [] },
   initial: "nothing",
   on: {
     // Where it is follows the pages, whatever's open.
     laid: { actions: ["lay", "jump"] },
     settled: { actions: "be" },
-    // Picking an owner ends the list, in whichever order its menu tells of the two.
-    pick: { target: ".nothing", actions: ["pick", "glide"] },
     // An app shown over the Home Screen, as by a notification, closes what was open, and keeps what was edited.
     launch: ".app",
     link: { target: ".nothing", actions: ["go", "jump"] },
@@ -328,16 +380,20 @@ export const machine = setup({
       on: {
         step: { guard: "moves", actions: ["step", "glide"] },
         go: { actions: ["go", "glide"] },
-        list: "listing",
+        list: { guard: "home", target: "listing" },
         open: { target: "category", actions: "open" },
         hold: { target: "holding", actions: "hold" },
         // A finger held on a page's empty space edits it at once, as a phone's does.
         edit: { target: "editing", actions: "edit" },
       },
     },
-    // The owner switcher's list of every owner.
+    // The owner switcher's list of every owner, on Home. Picking one ends it, in whichever order its menu tells of the
+    // two.
     listing: {
-      on: { dismiss: "nothing" },
+      on: {
+        dismiss: "nothing",
+        pick: { target: "nothing", actions: ["pick", "glide"] },
+      },
     },
     // A category, grown out of its place in the App Library as an iPhone's folder does: its apps are let be until
     // it's open, and it shrinks back into its place as it closes. Either can be changed midway, as a finger changes its
@@ -353,6 +409,7 @@ export const machine = setup({
       },
     },
     // What a finger holds, lifted over the blurred Home Screen, with its menu: Edit Home Screen, and taking it off.
+    // Carried from the App Library, it brings Home forward, on the owner it was last on.
     holding: {
       exit: "let",
       on: {
@@ -361,13 +418,14 @@ export const machine = setup({
         lift: { target: "editing.dragging", actions: ["lift", "glide"] },
       },
     },
-    // An owner's Home pages, edited: everything jiggles, each item with its ⊖, + at the top for a widget and Done.
+    // Owners' Home pages, edited: everything jiggles, each item with its ⊖, + at the top for a widget and Done.
     editing: {
       initial: "still",
       exit: ["keep", "stop"],
       on: { done: "nothing" },
       states: {
         still: {
+          entry: "let",
           on: {
             lift: { target: "dragging", actions: "lift" },
             remove: { actions: "remove" },
@@ -375,13 +433,39 @@ export const machine = setup({
             overview: "overview",
           },
         },
-        // What's lifted follows the finger, and the rest make room where it's over.
+        // What's lifted follows the finger, and the rest make room where it's over. Held at a side it turns the page,
+        // and at the top or the bottom, the owner.
         dragging: {
-          exit: "let",
           on: {
             over: { actions: "over" },
-            flip: { actions: ["flip", "glide"] },
-            drop: "still",
+            flip: [
+              { guard: ({ event }) => "by" in event, actions: ["flip", "glide"] },
+              { guard: "another", actions: ["turn", "glide"] },
+            ],
+            drop: [{ guard: "ask", target: "asking" }, { guard: "refuse", target: "refused" }, { target: "still" }],
+          },
+        },
+        // Dropped on an owner it isn't installed for: Install it for them? It waits where it was dropped.
+        asking: {
+          on: {
+            install: "installing",
+            cancel: { target: "still", actions: "back" },
+            done: {},
+          },
+        },
+        // It's installing for them, where it was dropped, until that's done, or it's back in the App Library.
+        installing: {
+          on: {
+            installed: "still",
+            failed: { target: "still", actions: "back" },
+            done: {},
+          },
+        },
+        // Dropped on an owner whose pages are someone else's to change: it goes back once that's been said.
+        refused: {
+          on: {
+            dismiss: { target: "still", actions: "back" },
+            done: {},
           },
         },
         // The widget gallery: a widget, in a size, to place.

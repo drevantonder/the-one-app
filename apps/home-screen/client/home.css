@@ -1,9 +1,10 @@
-/* The Home Screen: owners one above another, and in each, its sections' screenfuls side by side (Home's, the App
-   Library's, the App Store), each a screen wide, moved by hand as a finger swipes them (pager.ts), not scrolled: the
-   browser has every touch on them but the up and down of a page that scrolls. The owner switcher and the sections'
-   icons and dots float at the bottom in the middle, in one bar.
-   On a wide window (`.wide`) a screenful shows a phone's pages, each drawn `--pages-scale` times larger to suit the
-   window's height, side by side, as many whole ones as fit (`--pages`), with `--pages-side` beside them and
+/* The Home Screen: three sections side by side, each a screen wide, Home, the App Library and the App Store, moved
+   by hand as a finger swipes them (pager.ts), not scrolled. In Home, owners one above another, each a row of its
+   screenfuls of pages. The App Library and the App Store scroll up and down; the browser has every other touch on
+   them. The sections' icons, with the owner switcher and the page dots on Home, float at the bottom in the middle, in
+   one bar.
+   On a wide window (`.wide`) a Home screenful shows a phone's pages, each drawn `--pages-scale` times larger to suit
+   the window's height, side by side, as many whole ones as fit (`--pages`), with `--pages-side` beside them and
    `--pages-gap` between: home.tsx's `measure`; a screenful with fewer has them in its middle. */
 html,
 body {
@@ -24,6 +25,19 @@ body {
 }
 .home img {
   -webkit-user-drag: none;
+}
+.sections {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  will-change: translate;
+}
+.home-section {
+  position: relative;
+  flex: 0 0 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
 }
 .owners {
   position: absolute;
@@ -204,28 +218,61 @@ body {
   letter-spacing: var(--title-tracking);
 }
 
-/* An App Library page: its categories two across and three down, each its icons in a square with its name under it,
-   or a wide one across the page, its icons four across. An icon has its app's name under it, and is as big as the
-   square leaves room for once the name is in; the square's padding and gaps follow its width. Three rows of squares
-   fit the page's height above the bar. */
-.categories {
+/* The App Library: one page, which scrolls, its search at the top and its categories under it, as many across as fit
+   at an iPhone's size, so a wide window has more of them. Each is its icons in a square with its name under it. An
+   icon has its app's name under it, and is as big as the square leaves room for once the name is in; the square's
+   padding and gaps follow its width. */
+.page.library {
+  padding-inline: 1.25rem;
+  padding-bottom: 6rem;
+}
+.home.wide .page.library {
+  padding-inline: var(--pages-side);
+}
+.library .shelf {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
   gap: 1.25rem;
-  max-width: calc((100cqh - 12.5rem) * 2 / 3 + 1.25rem);
+  width: 100%;
+  max-width: 90rem;
   margin-inline: auto;
 }
-.category.wide {
-  grid-column: span 2;
+.categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(9.5rem, 40%), 1fr));
+  align-content: start;
+  gap: 1.25rem;
 }
-.category.wide .place {
-  grid-template: repeat(2, minmax(0, 1fr)) / repeat(4, minmax(0, 1fr));
-  gap: 1.8cqi 3cqi;
-  aspect-ratio: auto;
-  height: calc(50cqi - 0.625rem);
-  padding: 3.6cqi 3.3cqi 2.7cqi;
-  --icon: calc((50cqi - 8.1cqi) / 2 - 0.6875rem * 1.2 - 0.25rem);
+/* Searched, the apps that match, as a Home page has them. */
+.library .found {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.75rem, 1fr));
+  gap: 1rem 0.75rem;
+  --icon: 3.75rem;
+}
+.library .found .app {
+  display: grid;
+  justify-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.library .found .app img {
+  width: var(--icon);
+  height: var(--icon);
+  border-radius: 22.5%;
+}
+.library .found .app span {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .category {
   display: grid;
@@ -362,9 +409,10 @@ body {
   gap: 1rem 0.75rem;
 }
 
-/* The owner switcher and the page dots, one capsule floating at the bottom in the middle over every page, as iOS 26's
-   floating bars are: a material the pages blur through, with a rim of light. The launcher's frame ends above the home
-   indicator, so it never meets the swipe home. Each half is a window onto a strip with a row for every owner, which
+/* The bar: one small capsule floating at the bottom in the middle over every page, as iOS 26's floating bars are: a
+   material the pages blur through, with a rim of light. The launcher's frame ends above the home indicator, so it
+   never meets the swipe home. It has the three sections' icons, the one shown in a pill of its own; on Home the owner's
+   name and page dots unfold out of the house. Each of those is a window onto a strip with a row for every owner, which
    rolls as the owners move, and is as wide as the row it shows (home.tsx's `roll`). */
 .toolbar {
   --bar: 2.5rem;
@@ -391,6 +439,65 @@ body {
 }
 .home.wide .toolbar {
   bottom: 1.5rem;
+}
+.toolbar .group {
+  display: flex;
+  align-items: center;
+  height: calc(var(--bar) - 0.375rem);
+  border-radius: 999px;
+  transition: background-color var(--move-settle) var(--ease-settle);
+}
+.toolbar .group.active {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.toolbar .group + .group {
+  margin-inline-start: 0.125rem;
+}
+.toolbar .section {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.toolbar .active .section,
+.toolbar .section.active {
+  color: var(--foreground);
+}
+.toolbar .section .ui-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+.toolbar .section:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* What follows the house on Home: it opens out of it as Home is reached, and folds back into it as it's left. What's in
+   it keeps its own width, the owner's name and dots each as wide as the row they show. */
+.toolbar .unfolds {
+  display: flex;
+  height: 100%;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width var(--move-settle) var(--ease-settle), opacity var(--move-settle) var(--ease-settle);
+}
+.toolbar .unfolds.open {
+  max-width: 20rem;
+  opacity: 1;
+}
+.toolbar .unfolds > div {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.toolbar .unfolds > div > * {
+  flex: none;
 }
 .toolbar .roll {
   display: flex;
@@ -428,12 +535,14 @@ body {
 .toolbar .dots:empty {
   padding: 0;
 }
-/* Editing, there's no owner to switch to: it's the dots alone, which open the page overview. */
-.toolbar.editing .switch {
+/* Editing, there's no owner to switch to and nowhere else to go: it's the house and the dots, which open the page
+   overview. */
+.toolbar.editing .switch,
+.toolbar.editing > .group:not(.home) {
   display: none;
 }
-.toolbar.editing .dots {
-  padding-inline: 0.5rem;
+.toolbar.editing .group.active {
+  background: none;
 }
 .dots button {
   display: grid;
@@ -445,31 +554,6 @@ body {
   color: var(--muted-foreground);
   font-size: 1rem;
   cursor: pointer;
-}
-.dots .section {
-  padding: 0 0.5rem;
-}
-.dots .section .ui-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-}
-/* A section's dots after its icon, there only while it's the one shown: they open out of it and fold back. */
-.dots .more {
-  display: grid;
-  grid-template-columns: 0fr;
-  height: 100%;
-  opacity: 0;
-  transition: grid-template-columns var(--move-settle) var(--ease-settle), opacity var(--move-settle) var(--ease-settle);
-}
-.dots .more.open {
-  grid-template-columns: 1fr;
-  opacity: 1;
-}
-.dots .more > span {
-  display: flex;
-  min-width: 0;
-  overflow: hidden;
-  margin-inline-start: -0.25rem;
 }
 .dots button[aria-current] {
   color: var(--foreground);
@@ -500,8 +584,8 @@ body {
   .dots button {
     padding: 0 0.125rem;
   }
-  .dots .section {
-    padding: 0 0.625rem;
+  .toolbar .section {
+    padding: 0 0.875rem;
   }
 }
 @media (hover: hover) and (pointer: fine) {
@@ -514,7 +598,7 @@ body {
 .home .switch {
   gap: 0.25rem;
   height: calc(var(--bar) - 0.5rem);
-  padding: 0 0.375rem 0 0.75rem;
+  padding: 0 0.375rem 0 0.125rem;
   border-radius: 999px;
   background: none;
   color: var(--foreground);
@@ -565,6 +649,23 @@ body {
   to {
     rotate: 1.4deg;
   }
+}
+/* An app dropped where it isn't installed waits dimmed, and shows its progress over its icon as it installs. */
+.cell.waiting .tile img {
+  opacity: 0.45;
+}
+.cell .progress {
+  position: absolute;
+  top: calc(var(--tile, 3.75rem) / 2);
+  left: 50%;
+  translate: -50% -50%;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: oklch(0 0 0 / 0.55);
+  color: white;
 }
 .cell.lifted {
   visibility: hidden;
@@ -689,6 +790,14 @@ body {
   background: color-mix(in oklab, var(--popover) 88%, transparent);
   color: var(--popover-foreground);
   box-shadow: var(--shadow-lg);
+}
+/* Who an app of the App Library is installed for, above what can be done with it. */
+.hold-menu .hold-for {
+  margin: 0;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
 }
 .hold-menu button {
   display: flex;
@@ -916,4 +1025,25 @@ body {
   overscroll-behavior: contain;
   background: var(--background);
   --screen-height: 100%;
+}
+
+/* The question an app dropped on another owner asks, and what's said where it can't go: its icon, a line, and what to
+   do, one above another. */
+.asking {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  text-align: center;
+}
+.asking img {
+  width: 4rem;
+  height: 4rem;
+  border-radius: 22.5%;
+}
+.asking p {
+  margin: 0 0 0.5rem;
+  color: var(--muted-foreground);
+}
+.asking .ui-button {
+  justify-self: stretch;
 }

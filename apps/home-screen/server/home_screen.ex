@@ -108,8 +108,9 @@ defmodule HomeScreen do
         description: """
         Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
         Library, every app that runs for you by category, yours, your groups' and everyone's (`library`), the widgets
-        that could be put on a page (`widgets`), the App Store, whose page comes after the App Library (`store`), and
-        whether you may arrange it. Asked for a group or for the network, it's theirs.
+        that could be put on a page (`widgets`), the App Store, whose screen comes after the App Library (`store`), the
+        apps that open on its pages (`apps`), and whether you may arrange it. Asked for a group or for the network, it's
+        theirs.
         """,
         inputs: none,
         outputs: %{
@@ -150,10 +151,19 @@ defmodule HomeScreen do
             widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"},
             store: %{
               type: ["string", "null"],
-              description: "The App Store, by the name it's installed by, whose screen is the page after the App Library"
+              description: "The App Store, by the name it's installed by, whose screen comes after the App Library"
+            },
+            apps: %{
+              type: "array",
+              description: "The apps that open on its pages: theirs and the network's, each by its artifact and its name",
+              items: %{
+                type: "object",
+                properties: %{app: %{type: "string"}, name: %{type: "string"}},
+                required: ["app", "name"]
+              }
             }
           },
-          required: ["who", "arranges", "pages", "library", "widgets", "store"]
+          required: ["who", "arranges", "pages", "library", "widgets", "store", "apps"]
         }
       },
       %{
@@ -267,7 +277,8 @@ defmodule HomeScreen do
       pages: pages,
       library: library,
       widgets: widgets,
-      store: Enum.find_value(apps, &(Enum.any?(&1.entrypoints, fn entrypoint -> entrypoint.category == "app-store" end) && &1.name))
+      store: Enum.find_value(apps, &(Enum.any?(&1.entrypoints, fn entrypoint -> entrypoint.category == "app-store" end) && &1.name)),
+      apps: for(app <- apps, do: %{app: app.app, name: app.name})
     }
   end
 
