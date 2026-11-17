@@ -65,6 +65,37 @@ function dress() {
 }
 scheme.addEventListener("change", dress)
 
+/// How far in from each edge of the window what the device keeps for itself reaches (an iPhone's status bar, home
+/// indicator and notch), which only this page is told: Android's window is already clear of its own.
+const safeArea = Object.assign(document.createElement("div"), { id: "safe-area" })
+document.body.append(safeArea)
+/// What of that an app's frame reaches, as MCP Apps tell an app (`safeAreaInsets`): its screen keeps clear of it,
+/// and what scrolls in it passes under it. The launcher's frame is kept clear of it, so it's told none.
+/** @param {HTMLIFrameElement} frame */
+function insets(frame) {
+  const safe = getComputedStyle(safeArea)
+  const style = getComputedStyle(frame)
+  const at = frame.getBoundingClientRect()
+  const inside = (/** @type {string} */ edge) => parseFloat(style.getPropertyValue(`padding-${edge}`)) + parseFloat(style.getPropertyValue(`border-${edge}-width`))
+  const reach = (/** @type {string} */ edge, /** @type {number} */ from) => Math.max(0, Math.round(parseFloat(safe.getPropertyValue(`padding-${edge}`)) - from - inside(edge)))
+  return { top: reach("top", at.top), right: reach("right", innerWidth - at.right), bottom: reach("bottom", innerHeight - at.bottom), left: reach("left", at.left) }
+}
+/// Each app is told again as the window turns or its frame moves.
+function placed() {
+  for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { safeAreaInsets: insets(view.frame) } })
+}
+addEventListener("resize", placed)
+
+/// An iPhone's keyboard covers the window rather than making it smaller, as Android's does: while it's up, the
+/// window's apps end above it, so a sheet sits on it and what's typed in can be scrolled to. Pinched in, the window
+/// is as it was.
+function keyboard() {
+  const { height = innerHeight, scale = 1 } = visualViewport ?? {}
+  document.body.style.height = scale === 1 && height < innerHeight ? `${height}px` : ""
+  placed()
+}
+visualViewport?.addEventListener("resize", keyboard)
+
 /// What the window shows of itself, one state at a time, which only `on` moves: while its device's session opens,
 /// the steps it takes to its person's home; their home, once the launcher has drawn; or why it can't show, and an
 /// update under way. While the device isn't in its network, the window is on the network's own sign-in page
@@ -363,10 +394,18 @@ function layer(at) {
 /// They go through this window's history, so they're off while something is open over the app that's showing, as a
 /// phone's are under a sheet, and its Back or Escape shuts that first.
 let swiping = true
+/// Whether back has anything to go back from: an app over the launcher, or something open over the app that's
+/// showing. Where it hasn't, Android shows going home as its back gesture is made (`MainActivity`).
+/** @type {boolean | undefined} */
+let backs
 function gestures() {
-  const on = !showing(history.state)?.over
+  const view = showing(history.state)
+  const on = !view?.over
   if (on !== swiping) invoke("navigation_gestures", { on })
   swiping = on
+  const back = !on || (!!view && view.app !== launcher)
+  if (back !== backs) globalThis.androidBack?.postMessage(String(back))
+  backs = back
 }
 /// The app that's open as `at`, or with none there, the launcher.
 /** @param {string | null} at */
@@ -442,7 +481,7 @@ async function respond(view, method, params) {
         locale: navigator.language,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches },
-        safeAreaInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        safeAreaInsets: insets(view.frame),
       },
     }
   }
@@ -555,6 +594,12 @@ window.back = () => {
   if (!view?.over || view.frame.inert) return false
   post(view, { method: "notifications/one/back" })
   return true
+}
+
+/// A tap on an iPhone's status bar (the app's window there calls this): the app that's showing scrolls to its top.
+window.scrollToTop = () => {
+  const view = showing(history.state)
+  if (view) post(view, { method: "notifications/one/scroll-to-top" })
 }
 
 // The device's own way back, and this page's, both end here.

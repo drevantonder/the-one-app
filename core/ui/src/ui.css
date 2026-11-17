@@ -10,9 +10,11 @@ html {
      device's: a trackpad's two-finger swipe goes back, as it does in a browser. */
   overscroll-behavior-y: none;
 }
-/* What's scrolled to (a field the keyboard reached, a part a link names) stops below a screen's bar, not under it. */
+/* What's scrolled to (a field the keyboard reached, a part a link names) stops below a screen's bar, not under it.
+   An app's screen bounces past its ends, as a phone's and a Mac's lists do, and takes the window nowhere. */
 html:has(.ui-screen) {
-  scroll-padding-top: calc(var(--control) + 1.25rem);
+  scroll-padding-top: calc(var(--control) + 1.25rem + var(--safe-top));
+  overscroll-behavior-y: contain;
 }
 body {
   margin: 0;
@@ -954,6 +956,48 @@ button.ui-box {
     background: color-mix(in oklab, var(--accent) 50%, transparent);
   }
 }
+/* A row with a menu opens it on a long press or a right-click too, so pressing it long selects nothing and opens no
+   preview of a link. */
+.ui-row[data-menu] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* A row whose menu deletes or removes it moves aside under a finger swiping it toward its start, and shows that
+   at its end, in red, as a phone's lists do: pressed, or swiped all the way, it's done. */
+.ui-row[data-swipe] {
+  position: relative;
+  touch-action: pan-y;
+}
+.ui-row[data-swipe] > :not(.swipe) {
+  translate: calc(var(--swiped, 0px) * -1) 0;
+}
+.ui-row[data-swipe]:dir(rtl) > :not(.swipe) {
+  translate: var(--swiped, 0px) 0;
+}
+.ui-row > .swipe {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--swiped, 0px);
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: var(--destructive);
+  color: white;
+  font: inherit;
+  font-weight: var(--label-weight);
+  white-space: nowrap;
+}
+.ui-row > .swipe > span {
+  flex: none;
+}
+.ui-row[data-settling] > * {
+  transition: translate var(--move-settle) var(--ease-settle), width var(--move-settle) var(--ease-settle);
+}
 /* The one that's open beside the list. Where it's pushed over the list instead, nothing is (the split's). */
 .ui-row[data-current] > .row {
   background: var(--row-current, var(--accent));
@@ -990,9 +1034,9 @@ button.ui-box {
   font-variant-numeric: tabular-nums;
 }
 
-/* A whole view of an app: a bar that stays as it scrolls, then what's in it. A screen is always in the app's frame,
-   which the app's page already keeps clear of the device's safe area (`clients/app/page/client.css`), so it keeps
-   none of its own: iOS tells a frame the window's safe area too, and keeping it twice left a gap above the bar. */
+/* A whole view of an app: a bar that stays as it scrolls, then what's in it, which passes under the bar and under
+   what the device keeps for itself (`--safe-top`), as a phone's lists do. The bar and the end of what's in it keep
+   clear of that. */
 .ui-screen {
   display: block;
   /* As tall as the window, or as what it's in says (a split's side). */
@@ -1005,9 +1049,19 @@ button.ui-box {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  min-height: calc(var(--control) + 0.75rem);
-  padding: 0 var(--gutter);
-  background: var(--background);
+  min-height: calc(var(--control) + 0.75rem + var(--safe-top));
+  padding: var(--safe-top) calc(var(--gutter) + var(--safe-right)) 0 calc(var(--gutter) + var(--safe-left));
+}
+/* What scrolls under the bar shows through it, blurred, as it does under a phone's. Behind the bar, not on it: a
+   blur on it would be where a menu in it is placed from. */
+.ui-screen > header::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: color-mix(in oklab, var(--background) 80%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
 }
 .ui-screen > header > h1 {
   flex: 1;
@@ -1043,7 +1097,7 @@ button.ui-box {
   display: grid;
   align-content: start;
   gap: var(--gap);
-  padding: 0.5rem var(--gutter) var(--gutter);
+  padding: 0.5rem calc(var(--gutter) + var(--safe-right)) calc(var(--gutter) + var(--safe-bottom)) calc(var(--gutter) + var(--safe-left));
   /* Each part sizes itself by the room it has here, not by the window. */
   container-type: inline-size;
 }
@@ -1115,8 +1169,8 @@ button.ui-box {
 }
 .ui-live-screen > .view > .leave {
   position: absolute;
-  inset-block-start: max(0.5rem, env(safe-area-inset-top));
-  inset-inline-end: max(0.5rem, env(safe-area-inset-right));
+  inset-block-start: max(0.5rem, var(--safe-top));
+  inset-inline-end: max(0.5rem, var(--safe-right));
   opacity: 0.85;
 }
 .ui-live-screen > .view > video[hidden] {
@@ -1321,7 +1375,7 @@ button.ui-box {
 .ui-dialog .body {
   display: grid;
   gap: var(--gap);
-  padding: 0.25rem var(--gutter) calc(var(--gutter) + env(safe-area-inset-bottom));
+  padding: 0.25rem var(--gutter) calc(var(--gutter) + var(--safe-bottom));
   overflow-y: auto;
   overscroll-behavior: contain;
 }

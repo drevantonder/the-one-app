@@ -155,9 +155,18 @@ export function Checkbox(props: ChoiceProps) {
 export function Switch(props: ChoiceProps) {
   return (
     <Field error={props.error} disabled={!!props.disabled}>
-      <Choice {...props} type="checkbox" role="switch" />
+      <Choice {...props} type="checkbox" role="switch" switch />
     </Field>
   )
+}
+
+declare module "@solidjs/web" {
+  namespace JSX {
+    interface InputHTMLAttributes<T> {
+      /** Safari's own switch (`<input switch>`), which an iPhone taps under the finger as it flips, drawn as ours. */
+      switch?: boolean
+    }
+  }
 }
 
 /** A `Checkbox`'s or a `Switch`'s props: an `<input type="checkbox">`'s, what it says, and its problem. */

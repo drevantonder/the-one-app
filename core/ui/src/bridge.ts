@@ -2,7 +2,7 @@
 // host, in JSON-RPC messages posted to the frame's parent, so one page is an app here and an MCP App in an
 // assistant.
 import { configureClientErrors } from "solid-js"
-import { readable } from "./shared.ts"
+import { readable, reduced } from "./shared.ts"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {
@@ -11,9 +11,11 @@ interface JsonRpcResponse {
   error?: { message: string }
 }
 
-/** Light or dark, as the client says it. */
+/** What the client says of where the page is shown: light or dark, and how far in from each edge what the device
+ * keeps for itself reaches. */
 interface HostContext {
   theme?: "light" | "dark" | null
+  safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
 }
 
 /** Who a call or an app is for, its subject: a group (`groups/family`), or `network`. Whoever the app is for, unless said. */
@@ -31,6 +33,8 @@ addEventListener("message", ({ source, data }) => {
   else if (data?.method === "ui/notifications/host-context-changed") dress(data.params)
   // The device's own back, where a device has one and something is open over the page: the last opened shuts.
   else if (data?.method === "notifications/one/back") over.at(-1)?.()
+  // A tap on an iPhone's status bar: what scrolls goes back to its top.
+  else if (data?.method === "notifications/one/scroll-to-top") toTop()
   else waiting.get(data?.id)?.(data)
 })
 
@@ -61,11 +65,25 @@ const ask = <Result>(method: string, params: object = {}) => new Promise<Result>
 })
 
 /// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
-/// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css).
+/// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css). And what the
+/// device keeps for itself at each edge, as `--safe-top` and the rest.
 function dress(context: HostContext | undefined) {
+  const root = document.documentElement
+  if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
   if (!context || !("theme" in context)) return
-  document.documentElement.style.colorScheme = context.theme ?? ""
-  for (const name of ["light", "dark"]) document.documentElement.classList.toggle(name, context.theme === name)
+  root.style.colorScheme = context.theme ?? ""
+  for (const name of ["light", "dark"]) root.classList.toggle(name, context.theme === name)
+}
+
+// A field the page has the keyboard in stays in sight as the page is made smaller for the keyboard.
+addEventListener("resize", () => {
+  if (document.activeElement?.matches("input, textarea, select, [contenteditable]")) document.activeElement.scrollIntoView({ block: "nearest" })
+})
+
+/// Scrolls the page, and each side of a split, back to its top.
+function toTop() {
+  const behavior = reduced.matches ? "instant" : "smooth"
+  for (const scrolled of [document.scrollingElement, ...document.querySelectorAll(".ui-split > .panes > *")]) scrolled?.scrollTo({ top: 0, behavior })
 }
 
 /// A client answers a page once the page has said what it is, which it does before the first thing it asks.

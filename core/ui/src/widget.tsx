@@ -150,7 +150,7 @@ function Flip(props: { part: Layout; onCall?: OnCall }) {
   return (
     <label class="ui-choice switch" onClick={(event) => event.stopPropagation()}>
       <span>{props.part.label}</span>
-      <input type="checkbox" role="switch" checked={!!props.part.on} disabled={busy()} onChange={(event) => act({ ...(props.part.inputs ?? {}), on: event.currentTarget.checked })} />
+      <input type="checkbox" role="switch" switch checked={!!props.part.on} disabled={busy()} onChange={(event) => act({ ...(props.part.inputs ?? {}), on: event.currentTarget.checked })} />
     </label>
   )
 }

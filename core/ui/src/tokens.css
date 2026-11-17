@@ -101,6 +101,13 @@
   --gutter: 1rem;
   --gap: 1rem;
   --readable: 42rem;
+  /* How far in from each edge of the page what the device keeps for itself reaches (its status bar, home indicator,
+     a notch): a screen's bar and its end keep clear of it, and what scrolls passes under it. A client says it
+     (`hostContext.safeAreaInsets`, which the bridge puts here). */
+  --safe-top: 0px;
+  --safe-right: 0px;
+  --safe-bottom: 0px;
+  --safe-left: 0px;
 
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 5%);
   --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 10%), 0 2px 4px -2px oklch(0 0 0 / 10%);
@@ -135,5 +142,23 @@
     --text-lg: 1.0625rem;
     --control: 2.75rem;
     --icon: 1.125rem;
+  }
+}
+
+/* An iPhone's or iPad's text is the size its person chose in Settings › Display & Brightness › Text Size (Dynamic
+   Type): `-apple-system-body` is that body size, 17px unless they changed it, so every rem follows it. The type styles
+   are iOS's own at the default size: body and headline 17, subheadline 15, title 28; what's pressed grows with its
+   text from 44px, and a screen's gutters and gaps stay put. (`-webkit-touch-callout` is known only to iOS.) */
+@supports (-webkit-touch-callout: none) and (font: -apple-system-body) {
+  :root {
+    font: -apple-system-body;
+    --text-sm: calc(15 / 17 * 1rem);
+    --text-base: 1rem;
+    --text-lg: 1rem;
+    --text-title: calc(28 / 17 * 1rem);
+    --control: calc(44 / 17 * 1rem);
+    --icon: calc(19 / 17 * 1rem);
+    --gutter: 16px;
+    --gap: 16px;
   }
 }

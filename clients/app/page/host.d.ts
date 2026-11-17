@@ -134,5 +134,9 @@ declare global {
     }
     /** The device's own back (`client.js`). */
     back: () => boolean
+    /** A tap on an iPhone's status bar (`client.js`). */
+    scrollToTop: () => void
   }
+  /** Where Android's app hears whether something is open over the app that's showing (`MainActivity`). */
+  var androidBack: { postMessage(message: string): void } | undefined
 }
