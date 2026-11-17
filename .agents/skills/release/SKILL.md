@@ -91,6 +91,11 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 ## Mistakes already made
 
+- A breaking release that apps' code can't run on (the plugin-to-app rename, 17 Nov) leaves sign-in not running on
+  each server it reaches, so nobody is signed in there and nothing can be deployed to it: keep sign-in's new version
+  first with the new build's own `OneCore.Apps.Store.keep/6` on a server's machine (as the bucket is reached without
+  the node) and restart that server. The installed `one` can't publish to servers on the new 0.minor either: publish
+  the clients with the `one-cli` just built (`target/builds/<build>/`), first on PATH, and the Mac's by its file.
 - Releasing everything when one app changed. A server release is minutes and restarts every server; an app is
   seconds.
 - Releasing a server build onto storage whose stored names it had renamed. A rename of anything kept (a blob prefix,
