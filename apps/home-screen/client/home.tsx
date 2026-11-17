@@ -928,14 +928,15 @@ function EditBar() {
   )
 }
 
-/// Whether the window is wide, how much larger its pages are drawn (`scale`), the gaps beside and between them, and
-/// how many whole pages fit side by side at a phone's width: the window's, as it changes.
-function measure() {
+/// Whether the Home Screen is wide, how much larger its pages are drawn (`scale`), the gaps beside and between them,
+/// and how many whole pages fit side by side at a phone's width, in the room it's given, `width` by `height`. Its
+/// pages are laid out by CSS from these; the pager needs how many fit, to know where each stop is.
+function measure(width: number, height: number) {
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-  const wide = innerWidth >= 34 * rem
-  scale = wide ? Math.max(1, Math.min(2, innerHeight / 900)) : 1
+  const wide = width >= 34 * rem
+  scale = wide ? Math.max(1, Math.min(2, height / 900)) : 1
   const [side, gap] = [2 * rem * scale, 3 * rem * Math.min(scale, 1.6)]
-  const fit = wide ? Math.max(1, Math.floor((innerWidth - 2 * side + gap) / (390 * scale + gap))) : 1
+  const fit = wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (390 * scale + gap))) : 1
   return { wide, fit, scale, side, gap }
 }
 
@@ -944,7 +945,8 @@ function HomeScreen(props: { owners: Owner[] }) {
   let main!: HTMLElement
   const strips: HTMLElement[] = []
   const places = new Map<string, HTMLElement>()
-  const [room, setRoom] = createSignal(measure())
+  // A phone's until the Home Screen has been measured, which it is before it's first drawn.
+  const [room, setRoom] = createSignal({ wide: false, fit: 1, scale: 1, side: 0, gap: 0 })
 
 
   /// Each owner's Home pages as they're drawn: the ones they keep shown, or while they're edited, as they're edited,
@@ -985,11 +987,11 @@ function HomeScreen(props: { owners: Owner[] }) {
   }
   /// Each owner's pages, across: `strips` are the windows onto them, and `tracks` the rows that move in them.
   const tracks: HTMLElement[] = []
-  const height = () => main.clientHeight || innerHeight
+  const height = () => main.clientHeight || root.clientHeight
   /// How far apart an owner's pages are, and how far along their row can go before its last page's end shows.
   const pitch = (owner: number) => {
     const [first, second] = tracks[owner]?.children ?? []
-    return Math.abs((second as HTMLElement)?.offsetLeft - (first as HTMLElement)?.offsetLeft) || strips[owner]?.clientWidth || innerWidth
+    return Math.abs((second as HTMLElement)?.offsetLeft - (first as HTMLElement)?.offsetLeft) || strips[owner]?.clientWidth || root.clientWidth
   }
   const furthest = (owner: number) => {
     const track = tracks[owner]
@@ -1209,17 +1211,19 @@ function HomeScreen(props: { owners: Owner[] }) {
   onSettled(() => {
     const sliding = home.on("slide", ({ at, smooth }) => slide(at, smooth))
     const arranging = home.on("arrange", ({ editing }) => keep(editing, props.owners[editing.owner]))
-    // The window may have changed since this was first drawn, and every owner's pages stay on the page they were.
+    // The room it's given may have changed since it was first drawn, and every owner's pages stay on the page they
+    // were. It's laid out for the new size first, so where the pages are is measured from what's drawn.
     const resized = () => {
-      setRoom(measure())
+      setRoom(measure(root.clientWidth, root.clientHeight))
+      flush()
       // Once it's drawn again for the new size, where each cell is is where it is.
       requestAnimationFrame(() => reflow(cells(), false))
       const { at, last } = home.getSnapshot().context
       props.owners.forEach((_, owner) => jump(sideways(owner), Math.min(furthest(owner), (owner === at.owner ? at.page : (last[owner] ?? 0)) * pitch(owner))))
       jump(down, at.owner * height())
     }
-    resized()
-    addEventListener("resize", resized)
+    const watched = new ResizeObserver(resized)
+    watched.observe(root)
 
     // A trackpad or a wheel: one gesture is one page or one owner, read here, since a browser snaps a trackpad's small
     // scroll back where it started. Up and down on a page that scrolls itself is that page's. A gesture's momentum
@@ -1272,7 +1276,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       home.send({ type: "step", ...to })
     }
     addEventListener("keydown", keys)
-    return () => (sliding.unsubscribe(), arranging.unsubscribe(), removeEventListener("resize", resized), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
+    return () => (sliding.unsubscribe(), arranging.unsubscribe(), watched.disconnect(), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
   })
 
   // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own. While it lasts, the
