@@ -238,9 +238,13 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
 /// it has updated. Gives what it says, which it gives only where it isn't starting again (a restart never returns):
 /// the window then asks its network whether it's still behind. On a device that's also a server, the program keeping its server running
 /// takes them, this program's among them, and says where that is in `builds`: this starts again once its file is a
-/// newer build than it runs.
+/// newer build than it runs. An iPhone's app from TestFlight (`testflight`) opens TestFlight instead, which updates it.
 #[tauri::command]
 async fn update(app: AppHandle, views: State<'_, Views>) -> Result<String, String> {
+    if testflight() {
+        app.opener().open_url("itms-beta://", None::<&str>).map_err(|error| error.to_string())?;
+        return Ok(String::new());
+    }
     let message = cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))?;
     if cli::serving::server().is_none() || cli::serving::replaced() {
         app.restart()
@@ -325,6 +329,7 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     let (seq, session) = session.wait_for(Option::is_some).await.map_err(drop)?.clone().expect("it waited for one");
     let mut told = told(seq, &session);
     told["taps"] = json!(cfg!(mobile));
+    told["testflight"] = json!(testflight());
     let connection = app.try_state::<Views>().map(|views| *views.client.connection().borrow());
     told["connection"] = json!(connection.unwrap_or(Connection::Offline));
     #[cfg(desktop)]
@@ -334,6 +339,25 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
         told["open"] = json!(started.iter().find_map(link));
     }
     Ok(told)
+}
+
+/// Whether this is an iPhone's app installed from TestFlight, which updates it, as Apple tells it: its App Store
+/// receipt is the sandbox's. A build installed from a Mac has none, and an App Store one is `receipt`.
+fn testflight() -> bool {
+    #[cfg(target_os = "ios")]
+    unsafe {
+        use objc2::runtime::AnyObject;
+        let bundle: *mut AnyObject = objc2::msg_send![objc2::class!(NSBundle), mainBundle];
+        let url: *mut AnyObject = objc2::msg_send![bundle, appStoreReceiptURL];
+        if url.is_null() {
+            return false;
+        }
+        let name: *mut AnyObject = objc2::msg_send![url, lastPathComponent];
+        let utf8: *const std::ffi::c_char = objc2::msg_send![name, UTF8String];
+        return !utf8.is_null() && std::ffi::CStr::from_ptr(utf8).to_bytes() == b"sandboxReceipt";
+    }
+    #[cfg(not(target_os = "ios"))]
+    false
 }
 
 /// What a `one:` link opens, as the window's page opens it (`go`): `<app>[/<page>][#<fragment>]`, an app, or a page

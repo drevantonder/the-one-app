@@ -58,6 +58,8 @@ const host = (entrypoint, subject) => [entrypoint.split("/")[0], ...(subject ? s
 /// A phone's app is its network's, which its owner builds and updates, and a computer's updates itself: what
 /// `start` says.
 let phone = false
+/// Whether this is an iPhone's app from TestFlight, whose Update opens TestFlight.
+let testflight = false
 
 /// Light or dark, as Colour Mode has it on this device, or as the device is.
 const scheme = matchMedia("(prefers-color-scheme: dark)")
@@ -250,8 +252,9 @@ const machine = setup({
     waiting: ({ context }) => !context.starting,
     updateReady: ({ context }) => context.updateReady,
     behind: ({ context }) => context.behind === true,
-    // A phone's app is its network's, which its owner builds and updates.
-    updates: () => !phone,
+    // A phone's app is its network's, which its owner builds and updates, unless it came from TestFlight, which
+    // updates it.
+    updates: () => !phone || testflight,
     appStore: () => Boolean(appStore),
     launcher: ({ event }) => (event.type === "drawn" || event.type === "failed") && event.key === key(launcher),
   },
@@ -459,10 +462,12 @@ function draw() {
   byId("empty-text").hidden = !byId("empty-text").textContent
   byId("open-app-store").hidden = Boolean(context.only) || !appStore
   // Being behind isn't a problem: it's an alert, as iOS's Update Required, which always has a way on. A computer's
-  // app updates itself, with Update; a phone's is updated by its network's owner, so there it has Try Again.
+  // app updates itself, with Update; a phone's is updated by its network's owner, so there it has Try Again, and
+  // Update too where it came from TestFlight, which opens TestFlight.
   const required = /** @type {HTMLDialogElement} */ (byId("update-required"))
-  byId("update-button").hidden = phone
-  byId("update-owner").hidden = byId("try-again-button").hidden = !phone
+  byId("update-button").hidden = phone && !testflight
+  byId("update-owner").hidden = !phone || testflight
+  byId("try-again-button").hidden = !phone
   byId("try-again-button").toggleAttribute("disabled", now.matches("checking"))
   byId("try-again-button").ariaBusy = now.matches("checking") ? "true" : null
   if (behind && !required.open) required.showModal()
@@ -1071,8 +1076,9 @@ await listen("session", ({ payload }) => hear(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
-const { taps, connection, open: link, ...told } = await invoke("start")
+const { taps, testflight: fromTestflight, connection, open: link, ...told } = await invoke("start")
 phone = Boolean(taps)
+testflight = Boolean(fromTestflight)
 on({ type: "connection", connection })
 if (link) on({ type: "link", link })
 hear(told)

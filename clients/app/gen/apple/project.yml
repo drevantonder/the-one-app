@@ -67,6 +67,8 @@ targets:
         # The folder the app keeps its client in, which its notification extension reads its key from
         # (Sources/app/main.mm).
         AppGroup: group.$(PRODUCT_BUNDLE_IDENTIFIER)
+        # Export compliance, answered for TestFlight and the App Store: only the standard encryption the system gives.
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: app_iOS/app_iOS.entitlements
       properties:
