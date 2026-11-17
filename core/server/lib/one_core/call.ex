@@ -279,7 +279,7 @@ defmodule OneCore.Call do
 
       OneCore.Call.changed(call)
   """
-  def changed(%__MODULE__{}), do: OneCore.Server.changed()
+  def changed(%__MODULE__{app: app}), do: OneCore.Server.changed([], app)
 
   @doc """
   Says what the call is doing, a stage of the app's own, such as `"Copying 3 of 12"`: an MCP task's

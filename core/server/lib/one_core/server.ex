@@ -19,9 +19,11 @@ defmodule OneCore.Server do
   Tells every client that's watching that something changed, so that it asks again. It says the UI library's build
   (`library`), and for each of `owners` whose apps moved, the version each of theirs runs at (`apps`): an app's
   screen loaded against another of either is stale, and its client loads it again. With no server started, nobody is
-  told. The versions are looked up apart from whoever says it, which may be what keeps them.
+  told. The versions are looked up apart from whoever says it, which may be what keeps them. Where it's an app's
+  call that changed something, it says that app (`app`), so a client asks only what's that app's again; left
+  out, it may be anything.
   """
-  def changed(owners \\ []) do
+  def changed(owners \\ [], app \\ nil) do
     Task.Supervisor.start_child(OneCore.Asks, fn ->
       apps =
         Map.new(owners, fn owner ->
@@ -29,6 +31,7 @@ defmodule OneCore.Server do
         end)
 
       params = %{library: OneCore.Entrypoint.library().code, apps: apps}
+      params = if app, do: Map.put(params, :app, app), else: params
       notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed", params: params})
       GenServer.cast(__MODULE__, {:notify, notification})
     end)

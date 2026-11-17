@@ -630,10 +630,15 @@ defmodule OneCore.Mcp do
     [%{type: "resource_link", uri: Artifact.link(artifact, blob, :read).url, name: prefix <> blob, mimeType: kind}]
   end
 
-  # After a tool that doesn't only read, every client connected here is told that something changed.
+  # After a tool that doesn't only read, every client connected here is told that something changed: the tool's
+  # app, or anything for One Core's own.
   defp changed(name, result, {_actor, subject}) do
-    if not reads?(name, subject), do: Server.changed()
+    if not reads?(name, subject), do: Server.changed([], app(name))
     {:ok, result}
+  end
+
+  defp app(name) do
+    if not Enum.any?(Tools.tools(), &(&1.name == name)), do: hd(String.split(name, "_", parts: 2))
   end
 
   @doc "Whether calling the tool `name` for `who`, the one a call runs (`tool/2`), only reads: it says so."
