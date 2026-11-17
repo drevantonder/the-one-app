@@ -36,8 +36,7 @@ defmodule OneCore.MixProject do
   def application do
     [
       mod: {OneCore.Application, []},
-      extra_applications: [:logger, :crypto, :inets, :xmerl],
-      env: [build: build()]
+      extra_applications: [:logger, :crypto, :inets, :xmerl]
     ]
   end
 
@@ -87,10 +86,5 @@ defmodule OneCore.MixProject do
       File.rm(put)
       File.cp!("#{target}/release/lib#{Path.basename(crate)}.#{extension}", put)
     end
-  end
-
-  # The build this is, as `tooling/version` names it from the commit it's built from, as a client's is.
-  defp build do
-    elem(System.cmd(Path.expand("../../tooling/version", __DIR__), []), 0) |> String.trim()
   end
 end
