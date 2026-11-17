@@ -53,7 +53,8 @@ defmodule OneCore.MixProject do
   defp elixirc_paths(_env), do: ["lib", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
 
   # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` runs it: built as one, it
-  # has one set of features, so nothing in it is built twice or again for nothing. Each is named for its build, as
+  # has one set of features, so nothing in it is built twice or again for nothing. It's the debug build, as a
+  # developer's is (`Cargo.toml`). Each is named for its build, as
   # `tooling/nifs` names it (`OneCore.Nif`). One Core's go where the server loads them (`priv/native`), and those of this
   # repo's plugins beside their source, where a plugin brings them (`OneCore.Plugin`): here, its
   # folder is what's deployed. `tooling/release` and `tooling/nifs` build them for every kind of machine, as a server
@@ -85,11 +86,11 @@ defmodule OneCore.MixProject do
         {"NIF_BUILD_" <> String.upcase(Path.basename(crate)), String.trim(hash)}
       end
 
-    {_, 0} = System.cmd("cargo", ["build", "--release"], cd: root, env: builds)
+    {_, 0} = System.cmd("cargo", ["build"], cd: root, env: builds)
 
     for {crate, put} <- built ++ bundled do
       File.rm(put)
-      File.cp!("#{target}/release/lib#{Path.basename(crate)}.#{extension}", put)
+      File.cp!("#{target}/debug/lib#{Path.basename(crate)}.#{extension}", put)
     end
   end
 end

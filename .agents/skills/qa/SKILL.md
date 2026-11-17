@@ -26,7 +26,7 @@ section of the screen you change first.
 Start a network (`local-network`), then the app as its owner, on a screen of its own:
 
     ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
-      target/release/one >"$0/app.log" 2>&1 & app=$!
+      target/debug/one >"$0/app.log" 2>&1 & app=$!
       grep -q -m1 "^home-screen opened" <(tail -F --pid=$app -n +1 "$0/app.log")
       window=$(xdotool search --sync --onlyvisible --name "The One App" | head -1)
       # xdotool mousemove --window "$window" <x> <y> click 1, xdotool type ...
