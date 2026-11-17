@@ -16,7 +16,23 @@ defmodule OneCore.Tools do
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
   """
-  alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Apps, Release, Server, Servers, Services, User}
+  alias OneCore.{
+    Artifact,
+    Bucket,
+    Builds,
+    Call,
+    CodeMode,
+    Hooks,
+    Apps,
+    Release,
+    Search,
+    Server,
+    Servers,
+    Services,
+    Skills,
+    User
+  }
+
   alias OneCore.Call.State
   alias OneCore.Apps.{Installed, Calls, Deploy, Lifecycle, Requires, Store, Update, Version}
 
@@ -186,7 +202,152 @@ defmodule OneCore.Tools do
     required: ["name"]
   }
 
+  # One of code mode's calls, as `call` takes it.
+  @code_call %{
+    type: "object",
+    properties: %{
+      path: %{type: "string", description: "The tool's path, exactly as search gives it: tools.gmail.search"},
+      input: %{type: "object", description: "Its inputs, as its signature says"}
+    },
+    required: ["path"]
+  }
+
+  # Code mode lists only `search`, `execute`, `call` and `skills`, and lists every tool but those three otherwise
+  # (`listed`): a client that runs scripts finds the rest by searching.
   @tools [
+    %{
+      listed: :always,
+      name: "skills",
+      description: """
+      Lists the skills you have and reads one. A skill says when and how to use an app's tools, and One Core's own \
+      say how to make an app (building-apps), install one (installing-apps) and write its app (ui). {} lists \
+      every skill, each with its app, name, what it's for and its other files; { app: "gmail" } lists one \
+      app's; { app: "gmail", name: "gmail" } reads that skill, and { name: "building-apps" } one of One \
+      Core's own; add file to read one of its other files.\
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{
+          app: %{type: "string", description: "The app the skill is in, by the name its tools start with"},
+          name: %{
+            type: "string",
+            description: "The skill's name, as its list gives it: an app's own is named as the app"
+          },
+          file: %{type: "string", description: "One of the skill's other files, by its path in the skill's folder"}
+        },
+        dependentRequired: %{file: ["name"]}
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          skills: %{
+            type: "array",
+            description: "With no name: the skills, each with its app, name, what it's for and its other files",
+            items: %{
+              type: "object",
+              properties: %{
+                app: %{type: "string", description: "The app it's in, or none for One Core's own"},
+                name: %{type: "string"},
+                description: %{type: "string"},
+                files: %{type: "array", items: %{type: "string"}, description: "Its other files, by their paths"}
+              },
+              required: ["name", "description"]
+            }
+          },
+          text: %{type: "string", description: "With a name: the skill's SKILL.md, or the file asked for"}
+        }
+      },
+      read_only: true
+    },
+    %{
+      listed: :code,
+      name: "search",
+      description: """
+      Finds the tools for a task across every app: give a few words, like "unread email" or "add an event". \
+      Answers the best matches, each with its exact call and what it does, then each one's app's skill, and \
+      the apps you could install that do it. Search before guessing, to learn an app, and before saying you \
+      can't.\
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{
+          query: %{type: "string", description: "A few words for the task, or an app's name"},
+          limit: %{type: "integer", description: "How many tools at most, 8 if left out"}
+        },
+        required: ["query"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{text: %{type: "string", description: "The matches, their skills and what you could install"}},
+        required: ["text"]
+      },
+      read_only: true
+    },
+    %{
+      listed: :code,
+      name: "execute",
+      description: """
+      Runs a short script that calls tools, and gives back what it returns. It's JavaScript without imports, timers \
+      or network: call a tool as `await tools.<app>.<tool>({ ... })`, or One Core's own as `await \
+      tools.<tool>({ ... })` (search gives each exact call, and `search({ query })` in the script finds them too), use \
+      plain JavaScript between calls, and `return` what you want back; what it logs comes back too. Use it where one \
+      call's answer feeds another, or to cut a large answer down; for one call or a few that don't depend on each \
+      other, use call. Each call runs as you, as any tool does, so what sends or can't be undone waits for the \
+      person's yes, as always. It runs until it's done or cancelled, and gives back up to 60 KB; one that takes long \
+      can run as a task. Never put a password, key or token in a script: for one the person pasted or must give, \
+      call vault.request, which has them type it on their own device.\
+      """,
+      task_support: :optional,
+      inputs: %{
+        type: "object",
+        properties: %{code: %{type: "string", description: "The script"}},
+        required: ["code"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{text: %{type: "string", description: "What it returned, or what went wrong, with what it logged"}},
+        required: ["text"]
+      },
+      read_only: false
+    },
+    %{
+      listed: :code,
+      name: "call",
+      description: """
+      Calls tools without a script: give one { path, input }, or several in a list, which run at once. Each path is \
+      exactly as search gives it, like tools.gmail.search. Answers each in the same order, with ok and its value or \
+      its error; a picture comes back as one. Use execute instead where one call's answer feeds another, or to cut a \
+      large answer down before it reaches you. Each call runs as you, as any tool does, so what sends or can't be \
+      undone waits for the person's yes, as always. Never put a password, key or token in an input: for one the \
+      person pasted or must give, call vault.request, which has them type it on their own device.\
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{calls: %{anyOf: [@code_call, %{type: "array", items: @code_call, minItems: 1}]}},
+        required: ["calls"]
+      },
+      outputs: %{
+        type: "object",
+        properties: %{
+          calls: %{
+            type: "array",
+            description: "Each call's answer, in the order asked",
+            items: %{
+              type: "object",
+              properties: %{
+                path: %{type: "string"},
+                ok: %{type: "boolean"},
+                value: %{description: "What it answered, as its signature says"},
+                error: %{type: "string", description: "Why it failed, where it did"}
+              },
+              required: ["path", "ok"]
+            }
+          }
+        },
+        required: ["calls"]
+      },
+      read_only: false
+    },
     %{
       name: "deploy",
       task_support: :optional,
@@ -761,10 +922,13 @@ defmodule OneCore.Tools do
   def tools, do: @taking
 
   @doc """
-  Calls one of One Core's own tools for `asked`, who asked and who for. Gives what `OneCore.Apps.Calls.call/5` does,
+  Calls one of One Core's own tools for `asked`, who asked and who for, as an app's tool is called
+  (`OneCore.Apps.Calls.tool/6`), hooks and all. `request` is how it was asked: its `mode` (`:mcp`, `:code` or
+  `:cli`), `tools`, a function giving the tools a script has, as MCP lists them, and `call`, a function that calls
+  one of them by its name and inputs as MCP would, for code mode's own. Gives what `OneCore.Apps.Calls.call/5` does,
   or `:none` if `name` isn't one.
   """
-  def call(name, inputs, principal, forwarded \\ false) do
+  def call(name, inputs, principal, forwarded, request) do
     case Enum.find(@taking, &(&1.name == name)) do
       nil ->
         :none
@@ -782,7 +946,7 @@ defmodule OneCore.Tools do
         # An app has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in @apart, do: {User.owner(elem(principal, 1)), inputs["name"]}
 
-        State.run(fn -> Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward), apart) end)
+        State.run(fn -> Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward, request), apart) end)
     end
   end
 
@@ -814,10 +978,66 @@ defmodule OneCore.Tools do
     end
   end
 
+  defp run("skills", inputs, {_actor, subject}, _forward, _request) do
+    with {:error, why} <- Skills.run(inputs, subject), do: raise(why), else: ({:ok, read} -> read)
+  end
+
+  # What anyone has deployed is read from the bucket, meanwhile.
+  defp run("search", %{"query" => query} = inputs, {_actor, subject}, _forward, request) do
+    deployed = Task.async(&Deploy.deployed/0)
+    tools = request.tools.()
+
+    %{
+      text:
+        Search.run(
+          query,
+          Map.get(inputs, "limit", 8),
+          tools,
+          Apps.running(subject),
+          Task.await(deployed, 30_000),
+          request.mode
+        )
+    }
+  end
+
+  # A script's calls are each answered here as that call of the tool would be, for whoever asked, and so are
+  # `call`'s. An app's tools in a script are in a namespace of its name, which says what the app is for.
+  defp run("execute", %{"code" => code}, {_actor, subject}, _forward, request) do
+    tools =
+      for tool <- request.tools.(),
+          do: %{
+            name: tool.name,
+            app: tool[:_meta][:app],
+            description: tool.description,
+            input: tool.inputSchema,
+            output: tool[:outputSchema]
+          }
+
+    namespaces = Map.new(Apps.running(subject), fn {name, version} -> {name, Search.described(version)} end)
+
+    case CodeMode.run(code, tools, namespaces, request.call) do
+      {:ok, text} -> %{text: text}
+      {:error, text} -> raise text
+    end
+  end
+
+  defp run("call", %{"calls" => calls}, _principal, _forward, request) do
+    # A path as search gives it, or without its `tools.`, as a script's `search()` gives it.
+    named =
+      Map.new(
+        for tool <- request.tools.(),
+            dotted = CodeMode.path(tool),
+            path <- [Search.path(dotted), dotted],
+            do: {path, tool.name}
+      )
+
+    CodeMode.calls(calls, named, request.call)
+  end
+
   # An app is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
   # deployed for. Either way it's loaded where it will run.
   # An untrusted app runs on any server acting for whoever it's for, the network's among them.
-  defp run("deploy", %{"name" => name, "files" => files} = inputs, {_actor, subject} = principal, forward) do
+  defp run("deploy", %{"name" => name, "files" => files} = inputs, {_actor, subject} = principal, forward, _request) do
     app = Apps.app(subject, name)
     trusted = Map.get(inputs, "trusted", app == nil or Store.trusted?(app))
     runs(subject, trusted, forward)
@@ -845,7 +1065,7 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("code", %{"name" => name}, {_actor, subject} = principal, _pass) do
+  defp run("code", %{"name" => name}, {_actor, subject} = principal, _pass, _request) do
     case Apps.running(subject) do
       %{^name => version} ->
         opens!(principal, version.artifact)
@@ -856,7 +1076,7 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("apps", _inputs, {_actor, subject}, _pass) do
+  defp run("apps", _inputs, {_actor, subject}, _pass, _request) do
     owner = User.owner(subject)
 
     installed =
@@ -868,7 +1088,7 @@ defmodule OneCore.Tools do
     %{for: owner, apps: listed(installed)}
   end
 
-  defp run("install", %{"app" => app} = inputs, {actor, subject} = principal, forward) do
+  defp run("install", %{"app" => app} = inputs, {actor, subject} = principal, forward, _request) do
     name = Map.get(inputs, "name", Path.basename(app))
     runs(subject, Store.trusted?(app), forward)
     opens!(principal, app)
@@ -876,21 +1096,21 @@ defmodule OneCore.Tools do
     moved!(subject, name, Lifecycle.install(subject, name, app, actor))
   end
 
-  defp run("uninstall", %{"name" => name} = inputs, {_actor, subject} = principal, forward) do
+  defp run("uninstall", %{"name" => name} = inputs, {_actor, subject} = principal, forward, _request) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
     moved!(subject, name, Lifecycle.uninstall(subject, name, principal, inputs["confirm"] == true))
   end
 
   # Restoring is undoing an uninstall, which is an owner's.
-  defp run("apps_restore", %{"name" => name}, {_actor, subject} = principal, forward) do
+  defp run("apps_restore", %{"name" => name}, {_actor, subject} = principal, forward, _request) do
     record = record!(subject, name)
     runs(subject, Store.trusted?(record["app"]), forward)
     reaches!(principal, subject, "owner")
     moved!(subject, name, Lifecycle.restore(subject, name, principal))
   end
 
-  defp run("apps_update", %{"name" => name}, {_actor, subject} = principal, forward) do
+  defp run("apps_update", %{"name" => name}, {_actor, subject} = principal, forward, _request) do
     app = updates!(principal, subject, name, forward)
 
     case Lifecycle.update(app) do
@@ -901,7 +1121,7 @@ defmodule OneCore.Tools do
   end
 
   # Try Again: installing it, where that failed, or its app's update.
-  defp run("apps_retry", %{"name" => name}, {_actor, subject} = principal, forward) do
+  defp run("apps_retry", %{"name" => name}, {_actor, subject} = principal, forward, request) do
     case record!(subject, name) do
       %{"state" => "not_installed", "app" => app} ->
         runs(subject, Store.trusted?(app), forward)
@@ -909,12 +1129,12 @@ defmodule OneCore.Tools do
         moved!(subject, name, Lifecycle.retry(subject, name))
 
       _ ->
-        run("apps_update", %{"name" => name}, principal, forward)
+        run("apps_update", %{"name" => name}, principal, forward, request)
     end
   end
 
   # An app's trust is its owner's to switch, for everyone who has it, where it's deployed again.
-  defp run("apps_trust", %{"name" => name, "trusted" => trusted}, {_actor, subject} = principal, forward) do
+  defp run("apps_trust", %{"name" => name, "trusted" => trusted}, {_actor, subject} = principal, forward, _request) do
     app = record!(subject, name)["app"]
     whose = Store.whose(app)
     runs(whose, trusted, forward)
@@ -923,7 +1143,7 @@ defmodule OneCore.Tools do
     moved!(subject, name, Installed.read(subject)[name])
   end
 
-  defp run("apps_check", _inputs, {_actor, subject}, _pass) do
+  defp run("apps_check", _inputs, {_actor, subject}, _pass, _request) do
     owner = User.owner(subject) || "network"
     records = Installed.read(owner)
 
@@ -935,7 +1155,7 @@ defmodule OneCore.Tools do
 
   # A file sent this way lands in the app's own artifact, for whoever it was installed for, under a name nobody
   # could guess.
-  defp run("upload", %{"app" => app}, {_actor, subject}, forward) do
+  defp run("upload", %{"app" => app}, {_actor, subject}, forward, _request) do
     with %{^app => version} <- Apps.running(subject),
          {installed, ^app} <- Apps.installed(subject, version.artifact) do
       at(installed, forward)
@@ -949,7 +1169,7 @@ defmodule OneCore.Tools do
 
   # Whoever a server acts for put it on their list, and its owner chose them. A server with no members yet is a
   # new one, which whoever adds it first is bringing.
-  defp run("add_server", %{"key" => key}, {_actor, subject} = principal, forward) do
+  defp run("add_server", %{"key" => key}, {_actor, subject} = principal, forward, _request) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
 
@@ -966,7 +1186,7 @@ defmodule OneCore.Tools do
   end
 
   # The server taken off is told too, so that it stops acting for them at once.
-  defp run("remove_server", %{"key" => key}, {_actor, subject} = principal, forward) do
+  defp run("remove_server", %{"key" => key}, {_actor, subject} = principal, forward, _request) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
     acting = Servers.acting(subject)
@@ -975,7 +1195,7 @@ defmodule OneCore.Tools do
     %{server: key, for: subject}
   end
 
-  defp run("add_member", %{"who" => member} = inputs, principal, _pass) do
+  defp run("add_member", %{"who" => member} = inputs, principal, _pass, _request) do
     on(inputs["server"], "add_member", inputs, principal, fn ->
       if not User.owner?(member),
         do: raise("A server acts for a user, a group or the network: users/<name>, groups/<name> or network")
@@ -987,13 +1207,19 @@ defmodule OneCore.Tools do
     end)
   end
 
-  defp run("services", _inputs, {_actor, subject}, _pass) do
+  defp run("services", _inputs, {_actor, subject}, _pass, _request) do
     servers = Servers.acting(User.owner(subject) || "network")
     names = Map.new(servers, &{&1, Servers.name(&1)})
     %{server: Server.key(), servers: servers, names: names, services: Services.list(subject)}
   end
 
-  defp run("install_service", %{"app" => name, "service" => service} = inputs, {_, subject} = principal, _pass) do
+  defp run(
+         "install_service",
+         %{"app" => name, "service" => service} = inputs,
+         {_, subject} = principal,
+         _pass,
+         _request
+       ) do
     on(inputs["server"], "install_service", inputs, principal, fn ->
       reaches!(principal, owner(), "owner")
       with {:error, why} <- Services.install(app(subject, name), service), do: raise(why)
@@ -1005,7 +1231,8 @@ defmodule OneCore.Tools do
          "uninstall_service",
          %{"app" => name, "service" => service} = inputs,
          {_actor, subject} = principal,
-         _pass
+         _pass,
+         _request
        ) do
     on(inputs["server"], "uninstall_service", inputs, principal, fn ->
       reaches!(principal, owner(), "owner")
@@ -1014,16 +1241,16 @@ defmodule OneCore.Tools do
     end)
   end
 
-  defp run("builds", inputs, {actor, subject} = principal, _pass) do
+  defp run("builds", inputs, {actor, subject} = principal, _pass, _request) do
     on(inputs["server"], "builds", inputs, principal, fn ->
       Builds.list(actor, User.owner(subject) || "network")
     end)
   end
 
-  defp run("download", %{"target" => target}, _principal, _pass), do: Builds.download(target)
+  defp run("download", %{"target" => target}, _principal, _pass, _request), do: Builds.download(target)
 
   # What the network's servers run is the network's.
-  defp run("publish", %{"builds" => builds}, principal, forward) do
+  defp run("publish", %{"builds" => builds}, principal, forward, _request) do
     at("network", forward)
     reaches!(principal, "network", "owner")
 
@@ -1034,7 +1261,7 @@ defmodule OneCore.Tools do
   end
 
   # What takes the latest builds is the program that keeps an installed server running, which hears this said.
-  defp run("update", inputs, principal, _pass) do
+  defp run("update", inputs, principal, _pass, _request) do
     on(inputs["server"], "update", inputs, principal, fn ->
       reaches!(principal, owner(), "owner")
 

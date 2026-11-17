@@ -127,6 +127,9 @@ defmodule OneCore.Apps.Calls do
   (`mimeType`), and for one inside the answer its `size` in bytes.
   """
   def structured({:blob, kind, data}), do: %{"mimeType" => kind, "size" => byte_size(data)}
+
+  # One Core's own answer with MCP content after it, as code mode's `call` gives what its calls showed (`OneCore.CodeMode`).
+  def structured({:content, answer, _parts}), do: structured(answer)
   def structured({:file, kind, %Artifact{}, _name}), do: %{"mimeType" => kind}
   def structured(answer), do: JSON.decode!(JSON.encode!(answer))
 

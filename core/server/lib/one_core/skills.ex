@@ -160,53 +160,6 @@ defmodule OneCore.Skills do
     end)
   end
 
-  @doc "The tool, as MCP lists it, for a client that reads no skills of its own (`skills/list`, `resources/read`)."
-  def tool do
-    %{
-      name: "skills",
-      description: """
-      Lists the skills you have and reads one. A skill says when and how to use an app's tools, and One Core's own \
-      say how to make an app (building-apps), install one (installing-apps) and write its app (ui). {} lists \
-      every skill, each with its app, name, what it's for and its other files; { app: "gmail" } lists one \
-      app's; { app: "gmail", name: "gmail" } reads that skill, and { name: "building-apps" } one of One \
-      Core's own; add file to read one of its other files.\
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{
-          app: %{type: "string", description: "The app the skill is in, by the name its tools start with"},
-          name: %{
-            type: "string",
-            description: "The skill's name, as its list gives it: an app's own is named as the app"
-          },
-          file: %{type: "string", description: "One of the skill's other files, by its path in the skill's folder"}
-        },
-        dependentRequired: %{file: ["name"]}
-      },
-      outputSchema: %{
-        type: "object",
-        properties: %{
-          skills: %{
-            type: "array",
-            description: "With no name: the skills, each with its app, name, what it's for and its other files",
-            items: %{
-              type: "object",
-              properties: %{
-                app: %{type: "string", description: "The app it's in, or none for One Core's own"},
-                name: %{type: "string"},
-                description: %{type: "string"},
-                files: %{type: "array", items: %{type: "string"}, description: "Its other files, by their paths"}
-              },
-              required: ["name", "description"]
-            }
-          },
-          text: %{type: "string", description: "With a name: the skill's SKILL.md, or the file asked for"}
-        }
-      },
-      annotations: %{readOnlyHint: true}
-    }
-  end
-
   @doc """
   The answer to `skills` for `who`: the skills they have, or one app's (`%{skills: ...}`), or a skill's file
   (`%{text: ...}`). Gives `{:ok, answer}` or `{:error, why}`.

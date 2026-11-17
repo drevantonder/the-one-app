@@ -38,11 +38,9 @@ defmodule OneCore.Mcp do
     Entrypoint,
     Artifact,
     Builds,
-    CodeMode,
     Edge,
     Hooks,
     Apps,
-    Search,
     Server,
     Servers,
     Services,
@@ -54,7 +52,7 @@ defmodule OneCore.Mcp do
   }
 
   alias OneCore.Call.State
-  alias OneCore.Apps.{Calls, Deploy, Store, Version}
+  alias OneCore.Apps.{Calls, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
   @external_resource Path.expand("../../priv/rules.md", __DIR__)
@@ -275,35 +273,14 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Calls.hook(at, app, String.to_existing_atom(kind), hook, params["about"], principal, true) end)
   end
 
-  # `search`, `execute`, `call` and `skills` are this server's own, and a sharing link's holder has only the tools
-  # it's given.
-  defp result("tools/call", %{"name" => name} = params, from, {actor, _subject} = principal, forwarded)
-       when name in ["search", "execute", "call", "skills"] do
-    tool = Enum.find([Search.tool(), Skills.tool() | CodeMode.tools()], &(&1.name == name))
-    inputs = Map.get(params, "arguments") || %{}
-
-    cond do
-      holder?(actor) ->
-        {:error, -32602, "There's no tool #{name} for a sharing link's holder"}
-
-      not ExJsonSchema.Validator.valid?(
-        ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(tool.inputSchema))),
-        inputs
-      ) ->
-        {:ok, %{content: [%{type: "text", text: "#{name} takes #{JSON.encode!(tool.inputSchema)}"}], isError: true}}
-
-      true ->
-        asked(tool, name, fn -> own(name, inputs, params, from, principal, forwarded) end, params, principal, nil)
-    end
-  end
-
   # Which app called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
   # asks for (a request that says its `actor`). A client calls as nobody's app.
-  defp result("tools/call", %{"name" => name} = params, _from, {_actor, subject} = principal, forwarded) do
+  defp result("tools/call", %{"name" => name} = params, from, {_actor, subject} = principal, forwarded) do
     caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
+    request = %{mode: mode(params), tools: fn -> scripted(subject) end, call: called(from, principal, forwarded)}
 
     run = fn ->
-      rendered(name, call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller), principal)
+      rendered(name, call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller, request), principal)
     end
 
     asked(tool(name, subject), name, run, params, principal, caller)
@@ -358,18 +335,7 @@ defmodule OneCore.Mcp do
 
   # A sharing link's holder is told of the tools they may call, and of nothing else that's in the network.
   defp result("tools/list", params, _from, {actor, subject}, _forwarded) do
-    listed = listed(subject, holder?(actor))
-
-    tools =
-      cond do
-        holder?(actor) -> listed
-        # Whether one may be a task is this server's to know (`OneCore.Tasks`), as an app's is.
-        mode(params) == :code ->
-          for tool <- [Search.tool() | CodeMode.tools()] ++ [Skills.tool()], do: Map.delete(tool, :task_support)
-        true -> [Skills.tool() | listed]
-      end
-
-    {:ok, %{tools: tools}}
+    {:ok, %{tools: listed(subject, holder?(actor), mode(params))}}
   end
 
   defp result("skills/list", _params, _from, principal, _forwarded),
@@ -503,73 +469,16 @@ defmodule OneCore.Mcp do
 
   defp between(_forwarded, _run), do: {:error, -32000, "Only a server acting for whoever it asks for may ask that"}
 
-  # What anyone has deployed is read from the bucket, meanwhile.
-  defp own("search", %{"query" => query} = inputs, params, _from, {_actor, subject}, _forwarded) do
-    deployed = Task.async(&Deploy.deployed/0)
-    tools = scripted(subject)
-    deployed = Task.await(deployed, 30_000)
-    text = Search.run(query, Map.get(inputs, "limit", 8), tools, Apps.running(subject), deployed, mode(params))
-    {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}}}
-  end
-
-  defp own("skills", inputs, _params, _from, {_actor, subject}, _forwarded) do
-    case Skills.run(inputs, subject) do
-      {:ok, %{text: text} = read} -> {:ok, %{content: [%{type: "text", text: text}], structuredContent: read}}
-      {:ok, listed} -> {:ok, %{content: [%{type: "text", text: JSON.encode!(listed)}], structuredContent: listed}}
-      {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
-    end
-  end
-
-  # A script's calls are each answered here as that call of the tool would be, for whoever asked, and so are
-  # `call`'s. An app's tools in a script are in a namespace of its name, which says what the app is for.
-  defp own("execute", %{"code" => code}, _params, from, {_actor, subject} = principal, forwarded) do
-    tools =
-      for tool <- scripted(subject),
-          do: %{
-            name: tool.name,
-            app: tool[:_meta][:app],
-            description: tool.description,
-            input: tool.inputSchema,
-            output: tool[:outputSchema]
-          }
-
-    namespaces = Map.new(Apps.running(subject), fn {name, version} -> {name, Search.described(version)} end)
-
-    # It's accepted once it's asked: a caller that asked for a task is answered it now, and the script runs.
-    State.run(fn ->
-      State.accepted(State.id(), &Tasks.made/1)
-      {done, text} = CodeMode.run(code, tools, namespaces, called(from, principal, forwarded))
-      {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}, isError: done == :error}}
-    end)
-  end
-
-  defp own("call", %{"calls" => calls}, _params, from, {_actor, subject} = principal, forwarded) do
-    # A path as search gives it, or without its `tools.`, as a script's `search()` gives it.
-    named =
-      Map.new(
-        for tool <- scripted(subject),
-            dotted = dotted(tool),
-            path <- [Search.path(dotted), dotted],
-            do: {path, tool.name}
-      )
-
-    {:ok, CodeMode.calls(calls, named, called(from, principal, forwarded))}
-  end
-
   # A script waits on each call it makes, so none is a task.
   defp called(from, principal, forwarded),
     do: fn name, inputs ->
       result("tools/call", %{"name" => name, "arguments" => inputs, script: true}, from, principal, forwarded)
     end
 
-  # A tool's path in a script, `gmail.search` or `deploy`.
-  defp dotted(%{_meta: %{app: app}} = tool), do: app <> "." <> String.replace_prefix(tool.name, app <> "_", "")
-  defp dotted(tool), do: tool.name
-
   # The tools a script has, and that `search` finds among: those every client is listed but code mode's own, and but
   # those a device fills in with what only it holds, its own key or its copy of its owner's, which a script on a server
   # has none of. An agent calls those as plain tools on the device (`one mcp`, `one encryption …`).
-  defp scripted(who), do: [Skills.tool() | Enum.reject(listed(who, false), &on_device?/1)]
+  defp scripted(who), do: Enum.reject(listed(who, false, :mcp), &on_device?/1)
 
   @on_device ~w(device device-name owner-key artifact-keys)
 
@@ -585,9 +494,10 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # Every tool there is for `who`, One Core's own first, or only those a sharing link's holder may call. An app's
-  # says whose it is, and one with a page of its own names it as an MCP App's tool names its UI.
-  defp listed(who, holder) do
+  # Every tool there is for `who` as `mode` lists them, One Core's own first, or only those a sharing link's holder may
+  # call. Code mode lists only One Core's that say so (`OneCore.Tools`). An app's says whose it is, and one with a page
+  # of its own names it as an MCP App's tool names its UI.
+  defp listed(who, holder, mode) do
     open = fn tools -> if holder, do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
 
     listed = fn name, tool ->
@@ -601,10 +511,13 @@ defmodule OneCore.Mcp do
       if tool[:outputs], do: Map.put(listed, :outputSchema, tool.outputs), else: listed
     end
 
-    own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
+    own =
+      for tool <- open.(Tools.tools()),
+          holder or if(mode == :code, do: tool[:listed] in [:code, :always], else: tool[:listed] != :code),
+          do: listed.(tool.name, tool)
 
     apps =
-      for {app, version} <- Enum.sort(Apps.running(who)), tool <- open.(version.tools) do
+      for {app, version} <- Enum.sort(Apps.running(who)), holder or mode != :code, tool <- open.(version.tools) do
         ui = if tool[:ui], do: %{ui: %{resourceUri: "ui://#{app}/#{version.code}/#{tool.ui}"}}, else: %{}
         Map.put(listed.("#{app}_#{tool.name}", tool), :_meta, Map.put(ui, :app, app))
       end
@@ -673,8 +586,8 @@ defmodule OneCore.Mcp do
   end
 
   # A tool is one of One Core's own, or an app's by its name and the app's.
-  defp call(name, inputs, principal, forwarded, caller) do
-    with :none <- Tools.call(name, inputs, principal, forwarded),
+  defp call(name, inputs, principal, forwarded, caller, request) do
+    with :none <- Tools.call(name, inputs, principal, forwarded, request),
          [app, tool] <- String.split(name, "_", parts: 2),
          {:ok, result} <- Calls.call(app, tool, inputs, principal, forwarded, caller) do
       {:ok, result}
@@ -689,7 +602,17 @@ defmodule OneCore.Mcp do
   # tool of a version from before tools said what they answer may answer text, which is only text.
   defp answer(_name, text) when is_binary(text), do: %{content: [%{type: "text", text: text}]}
 
-  defp answer(name, file) when is_tuple(file), do: %{content: file(name, file), structuredContent: Calls.structured(file)}
+  # An answer that's only text is read as that text, which JSON would put on one line.
+  defp answer(_name, %{text: text} = answer) when map_size(answer) == 1,
+    do: %{content: [%{type: "text", text: text}], structuredContent: answer}
+
+  defp answer(name, {:content, answer, parts}) do
+    answered = answer(name, answer)
+    %{answered | content: answered.content ++ parts}
+  end
+
+  defp answer(name, file) when is_tuple(file),
+    do: %{content: file(name, file), structuredContent: Calls.structured(file)}
 
   defp answer(_name, answer) do
     structured = Calls.structured(answer)

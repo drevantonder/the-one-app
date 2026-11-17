@@ -14,33 +14,6 @@ defmodule OneCore.Search do
   """
   alias OneCore.Apps.{Store, Version}
 
-  @doc "The tool, as MCP lists it."
-  def tool do
-    %{
-      name: "search",
-      description: """
-      Finds the tools for a task across every app: give a few words, like "unread email" or "add an event". \
-      Answers the best matches, each with its exact call and what it does, then each one's app's skill, and \
-      the apps you could install that do it. Search before guessing, to learn an app, and before saying you \
-      can't.\
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{
-          query: %{type: "string", description: "A few words for the task, or an app's name"},
-          limit: %{type: "integer", description: "How many tools at most, 8 if left out"}
-        },
-        required: ["query"]
-      },
-      outputSchema: %{
-        type: "object",
-        properties: %{text: %{type: "string", description: "The matches, their skills and what you could install"}},
-        required: ["text"]
-      },
-      annotations: %{readOnlyHint: true}
-    }
-  end
-
   # About how much of an answer the matches may take, in characters, before their descriptions are cut short, and
   # how much their apps' skills may, best match's first, before the rest are only named.
   @matches 6_000

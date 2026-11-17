@@ -29,91 +29,11 @@ defmodule OneCore.CodeMode do
   @external_resource Path.join(@runner, "run.js")
   @files Map.new(~w(package.json bun.lock run.js), &{&1, File.read!(Path.join(@runner, &1))})
 
-  @doc "`execute` and `call`, as MCP lists them."
-  def tools, do: [execute(), call()]
-
-  defp execute do
-    %{
-      name: "execute",
-      description: """
-      Runs a short script that calls tools, and gives back what it returns. It's JavaScript without imports, timers \
-      or network: call a tool as `await tools.<app>.<tool>({ ... })`, or One Core's own as `await \
-      tools.<tool>({ ... })` (search gives each exact call, and `search({ query })` in the script finds them too), use \
-      plain JavaScript between calls, and `return` what you want back; what it logs comes back too. Use it where one \
-      call's answer feeds another, or to cut a large answer down; for one call or a few that don't depend on each \
-      other, use call. Each call runs as you, as any tool does, so what sends or can't be undone waits for the \
-      person's yes, as always. It runs until it's done or cancelled, and gives back up to 60 KB; one that takes long \
-      can run as a task. Never put a password, key or token in a script: for one the person pasted or must give, \
-      call vault.request, which has them type it on their own device.\
-      """,
-      task_support: :optional,
-      inputSchema: %{
-        type: "object",
-        properties: %{code: %{type: "string", description: "The script"}},
-        required: ["code"]
-      },
-      outputSchema: %{
-        type: "object",
-        properties: %{text: %{type: "string", description: "What it returned, or what went wrong, with what it logged"}},
-        required: ["text"]
-      },
-      annotations: %{readOnlyHint: false}
-    }
-  end
-
-  defp call do
-    request = %{
-      type: "object",
-      properties: %{
-        path: %{type: "string", description: "The tool's path, exactly as search gives it: tools.gmail.search"},
-        input: %{type: "object", description: "Its inputs, as its signature says"}
-      },
-      required: ["path"]
-    }
-
-    %{
-      name: "call",
-      description: """
-      Calls tools without a script: give one { path, input }, or several in a list, which run at once. Each path is \
-      exactly as search gives it, like tools.gmail.search. Answers each in the same order, with ok and its value or \
-      its error; a picture comes back as one. Use execute instead where one call's answer feeds another, or to cut a \
-      large answer down before it reaches you. Each call runs as you, as any tool does, so what sends or can't be \
-      undone waits for the person's yes, as always. Never put a password, key or token in an input: for one the \
-      person pasted or must give, call vault.request, which has them type it on their own device.\
-      """,
-      inputSchema: %{
-        type: "object",
-        properties: %{calls: %{anyOf: [request, %{type: "array", items: request, minItems: 1}]}},
-        required: ["calls"]
-      },
-      outputSchema: %{
-        type: "object",
-        properties: %{
-          calls: %{
-            type: "array",
-            description: "Each call's answer, in the order asked",
-            items: %{
-              type: "object",
-              properties: %{
-                path: %{type: "string"},
-                ok: %{type: "boolean"},
-                value: %{description: "What it answered, as its signature says"},
-                error: %{type: "string", description: "Why it failed, where it did"}
-              },
-              required: ["path", "ok"]
-            }
-          }
-        },
-        required: ["calls"]
-      },
-      annotations: %{readOnlyHint: false}
-    }
-  end
-
   @doc """
-  `call`'s answer, as MCP's result: each of `calls` run at once by `call`, given a tool's name and inputs as `run/4`'s
-  is, `named` giving the name of the tool at each path a script reaches. Each answers, in order, with its `path`,
-  `ok`, and its `value` or `error`, and what isn't text of its answer, such as a picture, comes after.
+  `call`'s answer: each of `calls` run at once by `call`, given a tool's name and inputs as `run/4`'s is, `named`
+  giving the name of the tool at each path a script reaches. Each answers, in order, with its `path`, `ok`, and its
+  `value` or `error`, and what isn't text of its answer, such as a picture, is MCP's content after it
+  (`{:content, answer, parts}`, `OneCore.Apps.Calls.structured/1`). Raises with them all where every one failed.
   """
   def calls(calls, named, call) do
     calls
@@ -143,13 +63,15 @@ defmodule OneCore.CodeMode do
       # What isn't text of an answer, as a picture is, stays MCP's content, for whoever called to see.
       files = for {_path, {:ok, result}} <- answers, part <- result["content"], part["type"] != "text", do: part
 
-      %{
-        content: [%{type: "text", text: JSON.encode!(%{calls: calls})} | files],
-        structuredContent: %{calls: calls},
-        isError: Enum.all?(answers, &match?({_, {:error, _}}, &1))
-      }
+      if Enum.all?(answers, &match?({_, {:error, _}}, &1)),
+        do: raise(JSON.encode!(%{calls: calls})),
+        else: {:content, %{calls: calls}, files}
     end)
   end
+
+  @doc "A tool's path in a script, as MCP lists it: `gmail.search`, or One Core's own by its name, `deploy`."
+  def path(%{_meta: %{app: app}} = tool), do: app <> "." <> String.replace_prefix(tool.name, app <> "_", "")
+  def path(tool), do: tool.name
 
   @doc """
   Runs `code` with `tools`, each `%{name, app, description, input, output}`, and `namespaces`, what each app is for by
