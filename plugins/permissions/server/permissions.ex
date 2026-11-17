@@ -217,22 +217,11 @@ defmodule Permissions do
   end
 
   @impl true
-  def hooks, do: ["reach", "owner", "renamed"]
-
-  # A renamed plugin's tuples follow it, as who and as an artifact: a plugin deployed by its old name later is
-  # another, given nothing of this one's.
-  @impl true
-  def hook("renamed", %{"was" => was, "is" => is}, call) do
-    transaction(call, fn db ->
-      for column <- ~w(artifact who) do
-        query(db, "update or ignore tuples set #{column} = ? where #{column} = ?", [is, was])
-        query(db, "delete from tuples where #{column} = ?", [was])
-      end
-    end)
-  end
+  def hooks, do: ["reach", "owner"]
 
   # The network is the top parent of every artifact, and its first owner's tuple is the one nobody shares: it's
   # written as One Core makes them.
+  @impl true
   def hook("owner", %{"who" => who}, call) do
     transaction(call, fn db ->
       query(db, "insert or ignore into tuples (artifact, relation, who) values ('network', 'owner', ?)", [who])

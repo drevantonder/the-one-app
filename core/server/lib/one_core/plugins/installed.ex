@@ -75,8 +75,8 @@ defmodule OneCore.Plugins.Installed do
     end
   end
 
-  @doc "A record of a plugin installed at `number`."
-  def record(plugin, number, trusted),
+  # A record of a plugin installed at `number`.
+  defp record(plugin, number, trusted),
     do: %{"plugin" => plugin, "version" => number, "trusted" => trusted, "state" => "installed"}
 
   @doc """
@@ -115,23 +115,6 @@ defmodule OneCore.Plugins.Installed do
     record
   catch
     {__MODULE__, why} -> {:error, why}
-  end
-
-  @doc """
-  Changes `owner`'s records as `change` says of them, by name, for what isn't a move in any plugin's life: a plugin
-  renamed is the same plugin, by another name, for everyone who has it (`OneCore.Plugins.Rename`). Each plugin's
-  artifact is told which version they have.
-  """
-  def edit(owner, change) do
-    changed =
-      Artifact.update(%Artifact{prefix: "#{owner}/"}, @blob, fn was ->
-        kept = if was, do: JSON.decode!(was), else: %{"plugins" => elem(read(owner), 0)}
-        JSON.encode!(Map.put(kept, "plugins", change.(kept["plugins"] || %{})))
-      end)
-
-    for {_name, record} <- JSON.decode!(changed)["plugins"], do: marked(owner, record)
-
-    :ok
   end
 
   @doc "Turns `owner`'s automatic updates on or off."

@@ -18,7 +18,7 @@ defmodule OneCore.Tools do
   """
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Call.State
-  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Requires, Store, Version}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Requires, Store, Version}
 
   # The other plugins a plugin needs, as `requires/0` says them.
   @requires %{
@@ -334,29 +334,6 @@ defmodule OneCore.Tools do
         required: ["plugin"]
       },
       outputs: @moved
-    },
-    %{
-      name: "rename",
-      description: """
-      Renames a plugin of yours, as `git mv` does a file: asked for a group or for the network, theirs. Its history,
-      what it keeps and where it's installed, for everyone who has it, all go to the new name, and the plugins that
-      keep something of a plugin's follow it, such as a Home Screen page's places. The old name then names nothing.
-      An owner of the plugin renames it. One whose services are installed, or that makes artifacts for people, or
-      that another plugin names in its code, isn't renamed, and it says why.
-      """,
-      inputs: %{
-        type: "object",
-        properties: %{
-          name: %{type: "string", description: "The plugin's name"},
-          to: %{type: "string", description: "Its new name: lowercase letters, digits and hyphens"}
-        },
-        required: ["name", "to"]
-      },
-      outputs: %{
-        type: "object",
-        properties: %{from: %{type: "string"}, to: %{type: "string"}},
-        required: ["from", "to"]
-      }
     },
     %{
       name: "uninstall",
@@ -758,7 +735,7 @@ defmodule OneCore.Tools do
   @taking Enum.map(@tools, &OneCore.Plugins.Version.schemas/1)
 
   # The tools a plugin has no say in for itself: how one that breaks is undone.
-  @apart ~w(deploy uninstall rename plugins_restore plugins_update plugins_decline plugins_retry plugins_dismiss plugins_trust)
+  @apart ~w(deploy uninstall plugins_restore plugins_update plugins_decline plugins_retry plugins_dismiss plugins_trust)
 
   @doc "One Core's own tools, each as a plugin says one of its own."
   def tools, do: @taking
@@ -890,15 +867,6 @@ defmodule OneCore.Tools do
     opens!(principal, plugin)
     reaches!(principal, subject, "installer")
     moved!(subject, name, Lifecycle.install(subject, name, plugin, trusted))
-  end
-
-  # It's renamed where it runs, which is where it's deployed again.
-  defp run("rename", %{"name" => name, "to" => to}, {_actor, subject} = principal, forward) do
-    plugin = "#{subject}/plugins/#{name}"
-    if Store.about(plugin)["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
-    reaches!(principal, plugin, "owner")
-    with {:error, why} <- Rename.rename(subject, name, to, principal), do: raise(why)
-    %{from: name, to: to}
   end
 
   defp run("uninstall", %{"name" => name}, {_actor, subject} = principal, forward) do

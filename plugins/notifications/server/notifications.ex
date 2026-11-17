@@ -256,22 +256,6 @@ defmodule Notifications do
   end
 
   @impl true
-  def hooks, do: ["renamed"]
-
-  # A renamed plugin's notifications, and whether each person muted it, follow its new name: for whoever it was
-  # installed for, which is everyone where that's the network or a group.
-  @impl true
-  def hook("renamed", %{"for" => at, "from" => from, "to" => to}, call) do
-    {whose, people} = if String.starts_with?(at, "users/"), do: {" and user = ?", [at]}, else: {"", []}
-
-    transaction(call, fn db ->
-      query(db, "update notifications set app = ? where app = ?#{whose}", [to, from | people])
-      query(db, "update or ignore quiet set app = ? where app = ?#{whose}", [to, from | people])
-      query(db, "delete from quiet where app = ?#{whose}", [from | people])
-    end)
-  end
-
-  @impl true
   def call("send", %{"title" => title} = inputs, call) do
     to = Map.get(inputs, "to", call.subject)
     app = inputs["app"]

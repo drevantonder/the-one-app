@@ -251,29 +251,6 @@ defmodule HomeScreen do
   end
 
   @impl true
-  def hooks, do: ["renamed"]
-
-  # The apps and widgets of a renamed plugin stay where they were on the pages of whoever it's renamed for.
-  @impl true
-  def hook("renamed", %{"from" => from, "to" => to}, call) do
-    stored = stored(call)
-
-    renamed =
-      for page <- stored do
-        Map.update!(page, "items", fn items ->
-          for item <- items do
-            Map.new(item, fn
-              {kind, ^from <> "/" <> part} when kind in ["app", "widget"] -> {kind, "#{to}/#{part}"}
-              other -> other
-            end)
-          end
-        end)
-      end
-
-    if renamed != stored, do: store(call, fn _ -> renamed end)
-  end
-
-  @impl true
   def call("pages", _inputs, call) do
     plugins = Call.plugins(call)
     stored = stored(call)
