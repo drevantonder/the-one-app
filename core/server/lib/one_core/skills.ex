@@ -89,6 +89,14 @@ defmodule OneCore.Skills do
 
   @own "building-apps"
 
+  # What One Core's own skills say of themselves, read as this module compiles, since it never changes. YamlElixir
+  # asks the application controller to start yamerl as it reads, which exits while the server stops: read as they're
+  # listed, they'd fail every listing made while it drains.
+  @frontmatter Map.new([{@own, OneCore.App.skill(%{})}, {"installing-apps", @installing}], fn {name, text} ->
+                 [_, yaml] = Regex.run(~r/\A---\r?\n(.*?)\r?\n---/s, text)
+                 {name, YamlElixir.read_from_string!(yaml)}
+               end)
+
   @doc """
   Reads the skill of whatever is named `name` from its `SKILL.md`. Gives `{:ok, skill}`: its `frontmatter` as JSON
   holds it, and the file's `digest` and `size`. `{:error, why}` says how to put right a file that isn't one.
@@ -237,8 +245,7 @@ defmodule OneCore.Skills do
 
   # Each skill by its path, with where its files are: One Core's own, then the apps' by the names they're installed by.
   defp found(who) do
-    {:ok, own} = read(@own, App.skill(Apps.running(who)))
-    {:ok, installing} = read("installing-apps", @installing)
+    own = App.skill(Apps.running(who))
 
     apps =
       for {installed, version} <- Enum.sort(Apps.running(who)), skill <- Version.skills(version) do
@@ -249,11 +256,14 @@ defmodule OneCore.Skills do
     ui = for skill <- Entrypoint.library().skills, do: {Enum.join(["ui" | Path.split(skill.at)], "/"), skill, :ui}
 
     [
-      {@own, Map.merge(own, %{at: "", files: []}), :own},
-      {"installing-apps", Map.merge(installing, %{at: "", files: []}), {:own, @installing}}
+      {@own, own(@own, own), :own},
+      {"installing-apps", own("installing-apps", @installing), {:own, @installing}}
       | ui ++ apps
     ]
   end
+
+  defp own(name, text),
+    do: %{frontmatter: @frontmatter[name], digest: digest(text), size: byte_size(text), at: "", files: []}
 
   defp listed(path, skill) do
     uri = "skill://#{path}/SKILL.md"
