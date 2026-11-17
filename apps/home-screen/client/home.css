@@ -1,6 +1,6 @@
-/* The Home Screen: owners one above another, and in each, its pages and then its App Library side by side, moved by
-   hand as a finger swipes them (pager.ts), not scrolled: the browser has every touch on them but the App Library's up
-   and down, which it scrolls. The owner switcher and the page dots float at the bottom in the middle, in one bar.
+/* The Home Screen: owners one above another, and in each, its pages and then its App Library's side by side, moved by
+   hand as a finger swipes them (pager.ts), not scrolled: the browser has every touch on them but the up and down of a
+   page that scrolls. The owner switcher and the page dots float at the bottom in the middle, in one bar.
    A wide window (`.wide`) shows whole pages of 23rem side by side, as many as fit, up to as many as
    the owner has (`--pages`). */
 html,
@@ -154,14 +154,28 @@ body {
   text-align: center;
 }
 
-/* The App Library: its categories two across, each its icons in a square with its name under it. An icon has its
-   app's name under it, and is as big as the square leaves room for once the name is in; the square's padding and gaps
-   follow its width. */
+/* An App Library page: its categories two across and three down, each its icons in a square with its name under it,
+   or a wide one across the page, its icons four across. An icon has its app's name under it, and is as big as the
+   square leaves room for once the name is in; the square's padding and gaps follow its width. Three rows of squares
+   fit the page's height above the bar. */
 .categories {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-content: start;
   gap: 1.25rem;
+  max-width: calc((100cqh - 12.5rem) * 2 / 3 + 1.25rem);
+  margin-inline: auto;
+}
+.category.wide {
+  grid-column: span 2;
+}
+.category.wide .place {
+  grid-template: repeat(2, minmax(0, 1fr)) / repeat(4, minmax(0, 1fr));
+  gap: 1.8cqi 3cqi;
+  aspect-ratio: auto;
+  height: calc(50cqi - 0.625rem);
+  padding: 3.6cqi 3.3cqi 2.7cqi;
+  --icon: calc((50cqi - 8.1cqi) / 2 - 0.6875rem * 1.2 - 0.25rem);
 }
 .category {
   display: grid;
@@ -285,8 +299,7 @@ body {
 /* The owner switcher and the page dots, one capsule floating at the bottom in the middle over every page, as iOS 26's
    floating bars are: a material the pages blur through, with a rim of light. The launcher's frame ends above the home
    indicator, so it never meets the swipe home. Each half is a window onto a strip with a row for every owner, which
-   rolls as the owners move, and is as wide as the row it shows (home.tsx's `roll`). It goes where the page has no
-   dots (the App Library). */
+   rolls as the owners move, and is as wide as the row it shows (home.tsx's `roll`). */
 .toolbar {
   --bar: 2.5rem;
   position: absolute;
@@ -312,11 +325,6 @@ body {
 }
 .home.wide .toolbar {
   bottom: 1.5rem;
-}
-.toolbar[data-hidden] {
-  opacity: 0;
-  scale: 0.96;
-  pointer-events: none;
 }
 .toolbar .roll {
   display: flex;

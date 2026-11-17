@@ -1,6 +1,6 @@
 // The Home Screen: yours, everyone's, then each of your groups', one owner above another, each a row of pages and then
-// their App Library. Left and right moves between an owner's pages, as a phone's do, and up and down between owners,
-// unless a page scrolls itself, as the App Library does. The pages move by hand, as a phone's do (pager.ts). The
+// their App Library's pages. Left and right moves between an owner's pages, as a phone's do, and up and down between
+// owners, unless a page scrolls itself. The pages move by hand, as a phone's do (pager.ts). The
 // owner's name, in the bar at the bottom beside their page dots, opens a list of every owner. A page never scrolls:
 // it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole pages of an owner's
 // side by side as fit, one to three. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
@@ -285,33 +285,65 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
   )
 }
 
-/// An owner's App Library: a category for each kind of app they have, two across, each its first four apps' icons
-/// with their names, or its first three and the rest smaller in the fourth's place. Tapping an icon opens its app; tapping anywhere
-/// else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
-function Library(props: { owner: Owner; index: number; places: Map<string, HTMLElement> }) {
+/** A category as an App Library page shows it: in a square of four, or wide, across the page, in one of eight. */
+type Folder = { category: Category; wide: boolean }
+
+/// An App Library's pages: its categories in order, six to a page, two across and three down. A category of more than
+/// four apps spans the page's width and shows eight, where the library needs more than one page anyway and that adds
+/// none: the largest first, as many as fit. A row a wide one leaves half empty takes the next small one.
+function shelve(library: Category[]): Folder[][] {
+  const paged = (wide: Set<Category>) => {
+    const rows: Folder[][] = []
+    let half: Folder[] | undefined
+    for (const category of library) {
+      if (wide.has(category)) rows.push([{ category, wide: true }])
+      else if (half) (half.push({ category, wide: false }), (half = undefined))
+      else rows.push((half = [{ category, wide: false }]))
+    }
+    return Array.from({ length: Math.max(1, Math.ceil(rows.length / 3)) }, (_, page) => rows.slice(page * 3, page * 3 + 3).flat())
+  }
+  const wide = new Set<Category>()
+  const fewest = paged(wide).length
+  if (fewest > 1)
+    for (const category of library.filter((category) => category.entrypoints.length > 4).sort((a, b) => b.entrypoints.length - a.entrypoints.length)) {
+      wide.add(category)
+      if (paged(wide).length > fewest) wide.delete(category)
+    }
+  return paged(wide)
+}
+
+/// An App Library page: its categories, each its first four apps' icons with their names, or wide, its first eight,
+/// or with more than that, all but the last and the rest smaller in the last's place. Tapping an icon opens its app;
+/// tapping anywhere else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
+function Library(props: { owner: Owner; index: number; folders: Folder[]; places: Map<string, HTMLElement> }) {
   const opening = (category: Category) => () => state().matches("nothing") && home.send({ type: "open", category: { owner: props.index, name: category.category } })
   return (
-    <section class="page library scrolls" aria-label={`${props.owner.name}'s App Library`}>
-      <Show when={props.owner.library.length} fallback={<Empty>No apps yet.</Empty>}>
+    <section class="page library" aria-label={`${props.owner.name}'s App Library`}>
+      <Show when={props.folders.length} fallback={<Empty>No apps yet.</Empty>}>
         <div class="categories">
-          <For each={props.owner.library} keyed={(category) => category.category}>
-            {(category) => (
-              <div class="category">
-                <div class="place" ref={(place) => props.places.set(`${props.index}:${category().category}`, place)} onClick={opening(category())}>
-                  <For each={category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints} keyed={(entrypoint) => entrypoint.entrypoint}>
-                    {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} index={props.index} />}
-                  </For>
-                  <Show when={category().entrypoints.length > 4}>
-                    <button type="button" class="more" aria-label={`All of ${category().category}`}>
-                      <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint}>
-                        {(entrypoint) => <img src={entrypoint().icon} alt="" />}
-                      </For>
-                    </button>
-                  </Show>
+          <For each={props.folders} keyed={({ category }) => category.category}>
+            {(folder) => {
+              const room = () => (folder().wide ? 8 : 4)
+              const category = () => folder().category
+              const shown = () => (category().entrypoints.length > room() ? category().entrypoints.slice(0, room() - 1) : category().entrypoints)
+              return (
+                <div class={["category", { wide: folder().wide }]}>
+                  <div class="place" ref={(place) => props.places.set(`${props.index}:${category().category}`, place)} onClick={opening(category())}>
+                    <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint}>
+                      {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} index={props.index} />}
+                    </For>
+                    <Show when={category().entrypoints.length > room()}>
+                      <button type="button" class="more" aria-label={`All of ${category().category}`}>
+                        <For each={category().entrypoints.slice(room() - 1, room() + 3)} keyed={(entrypoint) => entrypoint.entrypoint}>
+                          {(entrypoint) => <img src={entrypoint().icon} alt="" />}
+                        </For>
+                      </button>
+                    </Show>
+                  </div>
+                  <button type="button" class="name" onClick={opening(category())}>{category().category}</button>
                 </div>
-                <button type="button" class="name" onClick={opening(category())}>{category().category}</button>
-              </div>
-            )}
+              )
+            }}
           </For>
         </div>
       </Show>
@@ -620,7 +652,8 @@ function Overview(props: { owner: Owner; index: number }) {
   )
 }
 
-/// An owner's page dots: one for each Home page and the App Library's mark last, the one shown current. Tapping one
+/// An owner's page dots: one for each Home page, then the App Library's mark for its first page and a dot for each
+/// of the rest, the one shown current. Tapping one
 /// goes there, and so does sliding a finger along them, a page for every 28 points with a tick at each, as a phone's do. While the owner's
 /// pages are edited, they open the page overview.
 function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
@@ -648,6 +681,9 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
     dots.addEventListener("pointerup", up, { once: true })
     dots.addEventListener("pointercancel", up, { once: true })
   }
+  // The App Library's first page has its mark, and the rest of its pages are dots.
+  const glyph = (page: number) => props.kinds[page] === "library" && props.kinds.indexOf("library") === page
+  const label = (page: number) => (props.kinds[page] === "library" ? `App Library, page ${page - props.kinds.indexOf("library") + 1}` : `Page ${page + 1}`)
   const press = (page: number) => () => {
     if (editingOwner(props.index)) return home.send({ type: "overview" })
     if (Date.now() > quiet) home.send({ type: "go", page })
@@ -656,9 +692,9 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
     <nav class="dots" ref={(nav) => sized.observe(nav)} aria-label={`${props.owner.name}'s pages`} inert={seen().owner !== props.index || undefined} onPointerDown={slide}>
       <For each={props.kinds}>
         {(kind, page) => (
-          <Show when={!(editingOwner(props.index) && kind === "library")}>
-            <button type="button" class={kind === "library" ? "library" : "dot"} aria-label={kind === "library" ? "App Library" : `Page ${page() + 1}`} aria-current={current() === page() ? "page" : undefined} onClick={press(page())}>
-              <Show when={kind === "library"} fallback={<i />}>
+          <Show when={!(editingOwner(props.index) && kind !== "home")}>
+            <button type="button" class={glyph(page()) ? "library" : "dot"} aria-label={label(page())} aria-current={current() === page() ? "page" : undefined} onClick={press(page())}>
+              <Show when={glyph(page())} fallback={<i />}>
                 <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
                   <path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z" />
                 </svg>
@@ -673,13 +709,13 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
 
 /// The owner switcher and the page dots, one capsule floating at the bottom in the middle, as iOS 26's floating bars
 /// are: the owner's name on the left, which opens the list of every owner, the current one ticked, and their dots on
-/// the right. Both roll as the owners move. It goes where the page shown has no dots (the App Library), and while
-/// pages are edited it's their dots alone. Its dots are only there for an owner whose pages don't all show at once.
-function Toolbar(props: { owners: Owner[]; laid: Kind[][]; fit: number; kindOf: (owner: number) => Kind }) {
+/// the right. Both roll as the owners move. While pages are edited it's their dots alone. Its dots are only there for
+/// an owner whose pages don't all show at once.
+function Toolbar(props: { owners: Owner[]; laid: Kind[][]; fit: number }) {
   const at = () => state().context.at.owner
   let button!: HTMLButtonElement
   return (
-    <div class={["toolbar", { editing: state().matches("editing") }]} data-hidden={!state().matches("editing") && !kinds[props.kindOf(seen().owner)].dots ? "" : undefined}>
+    <div class={["toolbar", { editing: state().matches("editing") }]}>
       <button type="button" class="switch ui-button press ring" data-variant="ghost" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
         <span class="roll" aria-hidden="true" ref={rolling}>
           <span class="names">
@@ -754,7 +790,9 @@ function HomeScreen(props: { owners: Owner[] }) {
       return cells.flatMap((page) => (editingOwner(index) ? [pack(page, (cell) => spans(cell.item)).flat()] : pack(page, (cell) => spans(cell.item))))
     }),
   )
-  const laid = createMemo(() => pages().map((homes) => [...homes.map((): Kind => "home"), "library" as Kind]), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
+  /// Each owner's App Library, in its pages.
+  const shelves = createMemo(() => props.owners.map((owner) => shelve(owner.library)))
+  const laid = createMemo(() => pages().map((homes, owner) => [...homes.map((): Kind => "home"), ...shelves()[owner].map((): Kind => "library")]), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
   // What was just kept shows until the Home Screen has been asked again.
   createEffect(
     () => props.owners,
@@ -1092,14 +1130,16 @@ function HomeScreen(props: { owners: Owner[] }) {
                   <For each={pages()[index()] ?? [[]]} keyed={false}>
                     {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
                   </For>
-                  <Library owner={owner()} index={index()} places={places} />
+                  <For each={shelves()[index()]} keyed={false}>
+                    {(folders) => <Library owner={owner()} index={index()} folders={folders()} places={places} />}
+                  </For>
                 </div>
               </div>
             </section>
           )}
         </For>
       </main>
-      <Toolbar owners={props.owners} laid={laid()} fit={room().fit} kindOf={kindOf} />
+      <Toolbar owners={props.owners} laid={laid()} fit={room().fit} />
       <Show when={state().matches("editing")}>
         <EditBar />
       </Show>

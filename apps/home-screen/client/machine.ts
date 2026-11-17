@@ -7,13 +7,13 @@ import type { Item } from "./types.ts"
 
 /// What a page is. Every owner (you, everyone, each of your groups) has a list of pages, each of a kind, and each kind
 /// says how it behaves: whether it scrolls up and down itself, which keeps a vertical swipe on it rather than moving
-/// between owners; whether the page dots show over it; and whether every owner has just one, so that picking another
-/// owner from it lands on theirs rather than on the page they were last on. The owner switcher shows over every kind.
+/// between owners; and whether picking another owner from it lands on that owner's first of its kind rather than on
+/// the page they were last on. The owner switcher and the page dots show over every kind.
 export const kinds = {
   /** A fixed grid of apps and widgets, as a phone's Home Screen page. */
-  home: { scrolls: false, dots: true, one: false },
-  /** The App Library, an owner's last page: every app installed for them, by category. */
-  library: { scrolls: true, dots: false, one: true },
+  home: { scrolls: false, one: false },
+  /** A page of the App Library, after the Home pages: every app installed for them, by category. */
+  library: { scrolls: false, one: true },
 } as const
 
 export type Kind = keyof typeof kinds
