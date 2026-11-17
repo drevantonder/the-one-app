@@ -44,6 +44,13 @@ addEventListener("message", ({ source, data }) => {
   if (source === parent && data?.method === "notifications/one/showing") home.send({ type: data.params?.app === HOME ? "home" : "launch" })
 })
 
+/// The owner and page nearest where the pages are as they move, which the dots follow during a swipe, as a phone's do,
+/// rather than once it ends.
+const [seen, setSeen] = createSignal<At>({ owner: 0, page: 0 }, { equals: (a, b) => a.owner === b.owner && a.page === b.page })
+/// The owner switcher's names, which roll with the owners as they move: `owners` is where they are, in owners.
+let names: HTMLElement | undefined
+const roll = (owners: number) => names && (names.style.translate = `0 ${-owners * 1.25}rem`)
+
 const still = matchMedia("(prefers-reduced-motion: reduce)")
 const rtl = () => (document.dir === "rtl" ? -1 : 1)
 const editing = () => state().context.editing
@@ -493,7 +500,7 @@ function Overview(props: { owner: Owner; index: number }) {
 /// mark last, the one shown current. Tapping one goes there, and so does sliding a finger along them, a page for every
 /// 28 points, as a phone's do. While the owner's pages are edited, they're a capsule that opens the page overview.
 function Dots(props: { owner: Owner; index: number; kinds: Kind[]; hidden: boolean }) {
-  const current = () => (state().context.at.owner === props.index ? state().context.at.page : (state().context.last[props.index] ?? 0))
+  const current = () => (seen().owner === props.index ? seen().page : (state().context.last[props.index] ?? 0))
   let quiet = 0
   const slide = (down: PointerEvent & { currentTarget: HTMLElement }) => {
     if (editingOwner(props.index)) return
@@ -559,7 +566,7 @@ function Switcher(props: { owners: Owner[] }) {
       >
         <button type="button" class="switch ui-button press ring" data-variant="ghost" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
           <span class="roll" aria-hidden="true">
-            <span class="names">
+            <span class="names" ref={(element) => ((names = element), roll(seen().owner))}>
               <For each={props.owners}>{(owner) => <span>{owner.name}</span>}</For>
             </span>
           </span>
@@ -623,14 +630,22 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   /// The kind of the page an owner is on: the one shown, for whoever's shown.
   const kindOf = (owner: number) => {
-    const { at, last, pages } = state().context
-    return pages[owner]?.[owner === at.owner ? at.page : (last[owner] ?? 0)] ?? "home"
+    const { last, pages } = state().context
+    return pages[owner]?.[owner === seen().owner ? seen().page : (last[owner] ?? 0)] ?? "home"
   }
   const step = (strip: HTMLElement) => (strip.firstElementChild as HTMLElement | null)?.offsetWidth ?? strip.clientWidth
   const gap = (strip: HTMLElement) => parseFloat(getComputedStyle(strip).columnGap) || 0
 
-  /// The owner's name rolls as the owners move.
-  const moved = () => root.style.setProperty("--f", String(main.scrollTop / Math.max(1, main.getBoundingClientRect().height)))
+  /// The owner's name rolls as the owners move, and the dots follow the page nearest.
+  const moved = () => {
+    const owners = main.scrollTop / Math.max(1, main.getBoundingClientRect().height)
+    roll(owners)
+    look(Math.round(owners))
+  }
+  const look = (owner: number) => {
+    const strip = strips[owner]
+    setSeen({ owner, page: strip ? Math.round(Math.abs(strip.scrollLeft) / (step(strip) + gap(strip))) : 0 })
+  }
   /// Where the pages came to rest, told to the machine when it's somewhere new, and the name exactly that owner's,
   /// whatever fraction of a pixel the scroll stopped short by. Nothing waits for it: a swipe while they move is the
   /// browser's, and a step goes on from where the machine last sent them.
@@ -640,7 +655,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     const page = strip ? Math.round(Math.abs(strip.scrollLeft) / (step(strip) + gap(strip))) : 0
     const { at } = home.getSnapshot().context
     if (at.owner !== owner || at.page !== page) home.send({ type: "settled", at: { owner, page } })
-    root.style.setProperty("--f", String(owner))
+    roll(owner)
   }
 
   /// Moves the pages to `at`, as the machine says.
@@ -774,7 +789,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (
             <section class="owner" aria-label={owner().name}>
-              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }} onScrollEnd={rested}>
+              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }} onScroll={() => seen().owner === index() && look(index())} onScrollEnd={rested}>
                 <For each={pages()[index()] ?? [[]]} keyed={false}>
                   {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
                 </For>

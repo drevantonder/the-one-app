@@ -394,7 +394,6 @@ body {
   display: grid;
   grid-auto-rows: 1.25rem;
   justify-items: center;
-  translate: 0 calc(var(--f, 0) * -1.25rem);
   will-change: transform;
 }
 /* Its list ticks the owner shown. */
