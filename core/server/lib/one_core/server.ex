@@ -36,6 +36,30 @@ defmodule OneCore.Server do
   @doc "This server's key, or `nil` where no server is running."
   def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
 
+  @doc """
+  Whether this server is up: reached by its key, and not stopping. A build being tried isn't up until it has
+  answered by its key, which the program keeping it running says by ending its `starting` stage
+  (`OneCore.Release`), and a server stopping, to start again or for good, isn't up any more. One that isn't up
+  takes on nothing that others then go to it for, such as a database's lease or building every app for them
+  (`OneCore.Plugins.Deploy.rebuild/0`): it still runs what it's asked, and asks for the rest.
+  """
+  def up? do
+    OneCore.Builds.update() not in ["starting", "restarting"] and not Application.get_env(:one_core, :stopping, false)
+  end
+
+  @doc "Returns once this server is up (`up?/0`). A server that's stopping isn't up again."
+  def await_up do
+    Registry.register(OneCore.Waiting, :update, nil)
+    awaiting_up()
+  after
+    Registry.unregister(OneCore.Waiting, :update)
+  end
+
+  defp awaiting_up do
+    if not up?(), do: receive(do: ({:update, _stage} -> awaiting_up()))
+    :ok
+  end
+
   @doc "The JSON-RPC error a server answers a call that was passed on to it and that it would pass on in turn."
   def forwarding_loop, do: -32001
 

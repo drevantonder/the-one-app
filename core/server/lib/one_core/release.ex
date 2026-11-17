@@ -14,7 +14,8 @@ defmodule OneCore.Release do
     servers wait for it rather than take it for off, and its input closes.
   - `starting`: the new build is starting, which it's told as it starts (`ONE_UPDATE`). It's taken once it's running
     and answers by its key, and then there's no stage. One that doesn't, within three minutes, is stopped and the one
-    before starts again, saying why in `went_back`.
+    before starts again, saying why in `went_back`. Being reached is part of being up: until then it isn't
+    (`OneCore.Server.up?/0`), so a build that can't be reached takes on nothing the others would then wait on it for.
 
   With no stage, no update is under way: none was asked, the server was on the latest builds already, or one took.
   """
