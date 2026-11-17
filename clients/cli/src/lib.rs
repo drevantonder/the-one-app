@@ -111,6 +111,7 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
             ExitCode::SUCCESS
         }
         ["update"] => printed(serving::update(&client).await?),
+        ["update", "--server", key] => printed(serving::rollout(&client, key).await?),
         ["task", id] => tasks::show(&client, id, false).await?,
         ["task", id, "--result"] => tasks::show(&client, id, true).await?,
         // An app from a git repo, as `npx skills add` adds a skill; with no repo, the app is the network's own.

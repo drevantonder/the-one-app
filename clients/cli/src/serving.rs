@@ -75,6 +75,9 @@ use client::{BUILD, Client, target};
 const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// How long every start of a build has to say it's running and answer by its key.
 const START: Duration = Duration::from_secs(180);
+/// How long `one update --server` waits for a server to be ready on the build it takes: `START`, and a minute more
+/// for it to stop first.
+const READY: Duration = Duration::from_secs(START.as_secs() + 60);
 /// How long a server is given to stop: longer than it takes to answer what it took (`OneCore.Application`).
 const STOP: Duration = Duration::from_secs(20);
 /// How many of the last lines a build said are kept to say why it didn't start.
@@ -398,7 +401,7 @@ async fn undo_leaving(client: &Client, here: &Here, key: &str, start: bool) -> R
 pub async fn update(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
     if settled(client, &here, true).await?.server_membership != ServerMembership::Inactive {
-        return tool(client, "update", json!({"server": here.key()?})).await;
+        return rollout(client, &here.key()?).await;
     }
     let builds = download(client).await?;
     let one =
@@ -408,6 +411,56 @@ pub async fn update(client: &Client) -> Result<String> {
     }
     take_program(one, &env::current_exe()?).await?;
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
+}
+
+/// Has the server whose key is `key` take the latest builds, and answers once `builds` says it's ready on them, as
+/// `kubectl rollout status` does, so whoever updates servers one at a time knows when to go on to the next. One that
+/// goes back, or isn't ready on them within `READY`, fails, saying why.
+pub async fn rollout(client: &Client, key: &str) -> Result<String> {
+    let listed = |builds: &Value| {
+        builds["servers"].as_array().into_iter().flatten().find(|server| server["server"] == key).cloned()
+    };
+    let now = builds(client).await?;
+    let server = listed(&now).with_context(|| format!("None of your servers has the key {key}."))?;
+    let name = server["name"].as_str().unwrap_or(key).to_owned();
+    // The build it takes, as it takes it (`latest`): the latest server's, where there's a runtime for its kind of
+    // machine, and otherwise the one it's on.
+    let runtime = format!("server-runtime/{}", server["target"].as_str().unwrap_or_default());
+    let latest = if now["latest"][&runtime].is_object() { &now["latest"]["server-code"] } else { &server };
+    let build = latest["build"].as_str().unwrap_or_default().to_owned();
+    // A server that restarts to take them may stop before it answers; then what `builds` says decides.
+    let asked = tool(client, "update", json!({"server": key})).await.err();
+    let until = tokio::time::Instant::now() + READY;
+    loop {
+        let server = builds(client).await.ok().as_ref().and_then(listed);
+        if let Some(server) = &server
+            && server["server_ready"] == true
+            && server["server_update_status"] == "up_to_date"
+        {
+            if let Some(why) = server["went_back"].as_str() {
+                bail!("{name} didn't take {build}: {why}")
+            }
+            if server["build"] == build.as_str() {
+                return Ok(format!("{name} is ready on {build}."));
+            }
+            // It didn't begin, for what it said when asked.
+            if let Some(why) = asked {
+                bail!("{name} didn't take {build}: {why:#}")
+            }
+        }
+        if tokio::time::Instant::now() >= until {
+            let now = server.map_or("not listed".to_owned(), |server| {
+                format!("on {}, {}, ready: {}", server["build"], server["server_update_status"], server["server_ready"])
+            });
+            bail!("{name} isn't ready on {build} after {} s: it's {now}.", READY.as_secs())
+        }
+        sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// What `builds` says: each server's build and whether it's ready, and the latest.
+async fn builds(client: &Client) -> Result<Value> {
+    Ok(serde_json::from_str(&tool(client, "builds", json!({})).await?)?)
 }
 
 /// Whether this program's file is another build than the one running: an update of this device's server takes the

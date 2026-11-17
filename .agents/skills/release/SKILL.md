@@ -55,7 +55,7 @@ is split only for minutes:
 | An app's native code (`server/nif/`, `server/bin/`) | Also `tooling/publish-nifs` once it's on `main`: it publishes the new builds to a GitHub Release and pushes their `server/checksums.json`, from which every network updating the app from git gets them. A Mac's are built on GitHub's macOS runner when the Mac is busy |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, an app's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
-| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <first>` for one server, and once it answers `up_to_date` on the new build, `one update --server <key>` for each of the rest at once. A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, seconds, answered once done, except where `OneCore.Server`, which holds its connections, changed: that answers that it went away, and `one builds` says how it went); one with a new runtime, `one`, 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, as before) |
+| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <first>` for one server, then `one update --server <key>` for each of the rest at once. `one update --server` answers once `one builds` says that server is ready on the new build, or fails saying why it went back (within the 180 s a start has, and a minute). A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, seconds); one with a new runtime, `one`, 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, as before) |
 | The desktop app or CLI (`core/client/`, `clients/`, an app's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, `tooling/`, `.agents/` | Nothing |
@@ -73,8 +73,8 @@ network's own trusted apps, so every install of them takes the new version at on
 whoever makes it (`tooling/network`).
 
 On a device that is also a server, `one update` asks the program keeping that server running (`one serve run`) to
-take the latest builds, the program's among them, and answers before it has. What it did is in that program's log,
-`journalctl --user -u one-server-<key's first 12>` on Linux: `one --version` then says the new build.
+take the latest builds, the program's among them, and answers as `one update --server` does. What it did is in that
+program's log, `journalctl --user -u one-server-<key's first 12>` on Linux.
 
 Run an edge deploy only while no release publishes on the machine, which `tooling/release` keeps as a pid file:
 `! { read -r pid _ <"${XDG_RUNTIME_DIR:-/tmp}/one-release.pid" && kill -0 "$pid"; } 2>/dev/null && bun edge.js deploy <address>`. The network's address and
