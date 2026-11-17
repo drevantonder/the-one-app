@@ -50,8 +50,11 @@ defmodule OneCore.Skills do
 
   - What it requires. Its `requires/0` names the other plugins whose tools it calls, each with why, and untrusted
     they're all it calls. Ask whether each makes sense for what it does:
-    a notes app that requires `gmail` needs a reason you can see in its code. Trusted, it reaches the network as its
-    server does: read where it sends data.
+    a notes app that requires `gmail` needs a reason you can see in its code. Installing it installs what it requires
+    too, so a requirement that reaches the person's devices, secrets or accounts (`remote-shell`, `computer-use`,
+    `vault`, `chrome-profiles`, sending email or messages) is something they're handing it: name each one to them, and
+    what it lets the plugin do, before they say yes. Trusted, it reaches the network as its server does: read where it
+    sends data.
   - What the code does with it. Read every file of `server/`: each tool, what it does with its inputs, what it keeps
     and where it sends it. Code that's obfuscated, encoded, or does more than its `SKILL.md` says is a reason to
     stop. So is code that downloads and runs more code, or builds a module or a call from text.
