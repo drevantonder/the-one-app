@@ -1,8 +1,8 @@
 /* The Home Screen: three sections side by side, each a screen wide, Home, the App Library and the App Store, moved
    by hand as a finger swipes them (pager.ts), not scrolled. In Home, owners one above another, each a row of its
    screenfuls of pages. The App Library and the App Store scroll up and down; the browser has every other touch on
-   them. The sections' icons, with the owner switcher and the page dots on Home, float at the bottom in the middle, in
-   one bar.
+   them. The sections' icons float at the bottom in the middle, in one bar; on Home, the owner pill floats at the top in
+   the middle and the dots pill just above the bar.
    On a wide window (`.wide`) a Home screenful shows a phone's pages, each drawn `--pages-scale` times larger to suit
    the window's height, side by side, as many whole ones as fit (`--pages`), with `--pages-side` beside them and
    `--pages-gap` between: home.tsx's `measure`; a screenful with fewer has them in its middle. */
@@ -64,19 +64,25 @@ body {
 .page::-webkit-scrollbar {
   display: none;
 }
-/* A page has no title at its top, and keeps the gap a phone's own home screen has under the status bar, which the
-   Home Screen runs under (`--safe-top`). It never scrolls, so a vertical swipe on it moves between owners. While it's
-   edited it stays where it is: + and Done take the status bar's place, as an iPhone's do, or where there's none, the
-   strip above the page's first row, which is tall enough for them (`--edit-bar`). */
+/* A page has no title at its top. Under the status bar, which the Home Screen runs under (`--safe-top`), is the row
+   with the owner pill, or the App Library's or the App Store's search (`--top-row`), and the page starts under it. It
+   never scrolls, so a vertical swipe on it moves between owners. While it's edited it stays where it is: + and Done
+   are in that row. The bar is `--bar` tall, `--bar-bottom` from the foot, and the dots pill `--dots`. */
 .home {
-  --edit-bar: max(var(--safe-top, 0px), 2.75rem);
+  --bar: 2.5rem;
+  --dots: 1.75rem;
+  --bar-bottom: 1rem;
+  --top-row: calc(var(--bar) + 1rem);
+}
+.home.wide {
+  --bar-bottom: 1.5rem;
 }
 .page {
   box-sizing: border-box;
   flex: 0 0 100%;
   height: 100%;
   min-width: 0;
-  padding: calc(1rem + var(--edit-bar)) 1.25rem 0;
+  padding: calc(var(--safe-top, 0px) + var(--top-row) + 0.5rem) 1.25rem 0;
   overflow: hidden;
   container-type: size;
   touch-action: none;
@@ -124,8 +130,8 @@ body {
   transform-origin: 100% 0;
 }
 /* What's over the pages is as much larger as they are, scaled as they are: `zoom` would size a page's container
-   units, and anything in rem, differently in WebKit and Chromium. The bar grows from its foot, + and Done from their
-   top, an opened category from the middle, and what's held from the window's corner, where it's placed in the
+   units, and anything in rem, differently in WebKit and Chromium. The bar and the dots pill grow from their foot,
+   the top row from its middle, an opened category from the middle, and what's held from the window's corner, where it's placed in the
    points it's drawn in (home.tsx's `Holding`). + and Done grow from their corners, over the pages shown. */
 .home.wide .toolbar {
   scale: var(--pages-scale);
@@ -141,7 +147,8 @@ body {
 /* A Home page is a fixed grid: four across and as many rows as its height has room for. An app takes one cell, and a
    widget a phone's own sizes, 2×2, 4×2 and 4×4, each where it was placed. */
 .page .grid {
-  --row: min(5.5rem, (100cqh - 4rem - 5rem) / 6);
+  /* Six rows and their gaps, above the dots pill and the bar. */
+  --row: min(5.5rem, (100cqh - 5rem - 6.5rem) / 6);
   --tile: min(3.75rem, var(--row) - 1.75rem);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -207,15 +214,62 @@ body {
   text-align: center;
 }
 
-/* The App Store's page: its screen, from its own top, with a title as big as a page's, scrolling under the bar. */
+/* The App Store's page: its screen, from its own top, scrolling under the bar. It has no title: its search is in
+   the top row, and its Back, where a category is chosen, at the row's start, in the same glass. */
 .page.store {
   padding: 0 0 5rem;
   --screen-height: 100%;
 }
+.page.store .ui-screen > header {
+  min-height: 0;
+  height: 0;
+  padding: 0;
+  z-index: 3;
+}
+.page.store .ui-screen > header::before,
 .page.store .ui-screen > header > h1 {
-  font-size: var(--text-title);
-  font-weight: var(--title-weight);
-  letter-spacing: var(--title-tracking);
+  display: none;
+}
+.page.store .ui-screen > header > .back {
+  position: absolute;
+  top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2);
+  inset-inline-start: calc(var(--gutter) + var(--safe-left, 0px));
+  width: var(--bar);
+  height: var(--bar);
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--popover) 66%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent), inset 0 1px 0 color-mix(in oklab, white 30%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
+}
+.page.store .ui-screen > main {
+  padding-top: 0;
+}
+
+/* The App Library's and the App Store's search, in the top row as the owner pill is on Home, as tall and in the same
+   glass, and staying there as what's under it scrolls. */
+.page :is(.shelf, .ui-screen > main) > .ui-search:first-child {
+  position: sticky;
+  z-index: 2;
+  top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2);
+  width: min(100% - 2 * var(--bar) - 1rem, 24rem);
+  max-width: none;
+  margin: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2) auto calc((var(--top-row) - var(--bar)) / 2 - var(--gap, 1.25rem) + 0.5rem);
+}
+.home.wide .page :is(.shelf, .ui-screen > main) > .ui-search:first-child {
+  scale: var(--pages-scale);
+  transform-origin: 50% 0;
+  margin-bottom: calc((var(--top-row) * var(--pages-scale) - var(--bar)) - (var(--top-row) - var(--bar)) / 2 - var(--gap, 1.25rem) + 0.5rem);
+}
+.page .ui-search > .ui-box {
+  height: var(--bar);
+  font-size: var(--text-sm);
+}
+/* Its magnifier is over the glass. */
+.page .ui-search > .ui-icon {
+  z-index: 1;
 }
 
 /* The App Library: one page, which scrolls, its search at the top and its categories under it, as many across as fit
@@ -223,8 +277,7 @@ body {
    icon has its app's name under it, and is as big as the square leaves room for once the name is in; the square's
    padding and gaps follow its width. */
 .page.library {
-  padding-inline: 1.25rem;
-  padding-bottom: 6rem;
+  padding: 0 1.25rem 6rem;
 }
 .home.wide .page.library {
   padding-inline: var(--pages-side);
@@ -409,24 +462,13 @@ body {
   gap: 1rem 0.75rem;
 }
 
-/* The bar: one small capsule floating at the bottom in the middle over every page, as iOS 26's floating bars are: a
-   material the pages blur through, with a rim of light. The launcher's frame ends above the home indicator, so it
-   never meets the swipe home. It has the three sections' icons, the one shown in a pill of its own; on Home the owner's
-   name and page dots unfold out of the house. Each of those is a window onto a strip with a row for every owner, which
-   rolls as the owners move, and is as wide as the row it shows (home.tsx's `roll`). */
-.toolbar {
-  --bar: 2.5rem;
-  position: absolute;
-  z-index: 6;
-  bottom: 1rem;
-  left: 50%;
-  translate: -50% 0;
-  display: flex;
-  align-items: center;
-  max-width: calc(100% - 2rem);
-  height: var(--bar);
-  padding-inline: 0.25rem;
-  overflow: hidden;
+/* The bar, the owner pill and the dots pill are one material, iOS 26's Liquid Glass: the pages blur through it, with
+   a rim of light. They're as tall as each other (`--bar`), a fingertip under a finger. */
+.pill,
+.toolbar,
+.top .edit-bar > .ui-button,
+.page .ui-search > .ui-box {
+  border: 0;
   border-radius: 999px;
   background: color-mix(in oklab, var(--popover) 66%, transparent);
   box-shadow:
@@ -435,39 +477,44 @@ body {
     0 8px 24px -10px oklch(0 0 0 / 0.3);
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   backdrop-filter: blur(20px) saturate(1.8);
-  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
 }
-.home.wide .toolbar {
-  bottom: 1.5rem;
-}
-.toolbar .group {
+
+/* The bar: one small capsule floating at the bottom in the middle over every page, as iOS 26's tab bars are, the
+   three sections' icons and no words, the one shown in a pill of its own. The launcher's frame ends above the home
+   indicator, so it never meets the swipe home. */
+.toolbar {
+  position: absolute;
+  z-index: 6;
+  bottom: var(--bar-bottom);
+  left: 50%;
+  translate: -50% 0;
   display: flex;
   align-items: center;
-  height: calc(var(--bar) - 0.375rem);
-  border-radius: 999px;
-  transition: background-color var(--move-settle) var(--ease-settle);
-}
-.toolbar .group.active {
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-}
-.toolbar .group + .group {
-  margin-inline-start: 0.125rem;
+  gap: 0.125rem;
+  height: var(--bar);
+  padding-inline: 0.1875rem;
 }
 .toolbar .section {
   display: grid;
   place-items: center;
-  height: 100%;
-  padding: 0 0.75rem;
+  height: calc(var(--bar) - 0.375rem);
+  padding: 0 1rem;
   border: 0;
   border-radius: 999px;
   background: none;
   color: var(--muted-foreground);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  transition: background-color var(--move-settle) var(--ease-settle), opacity var(--move-quick) var(--ease-quick);
 }
-.toolbar .active .section,
 .toolbar .section.active {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
   color: var(--foreground);
+}
+/* Editing, the App Library and the App Store are there, so nothing moves, but go nowhere. */
+.toolbar .section[aria-disabled] {
+  opacity: 0.35;
+  cursor: default;
 }
 .toolbar .section .ui-icon {
   width: 1.25rem;
@@ -477,72 +524,128 @@ body {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
-/* What follows the house on Home: it opens out of it as Home is reached, and folds back into it as it's left. What's in
-   it keeps its own width, the owner's name and dots each as wide as the row they show. */
-.toolbar .unfolds {
+
+/* The row at the top of Home, the App Library and the App Store, under the status bar: the owner pill, with + and
+   Done either side of it while pages are edited, or a search field. A wide window draws it as much larger as the
+   pages, from its middle. */
+.top-row {
+  position: absolute;
+  z-index: 6;
+  top: var(--safe-top, 0px);
+  inset-inline: 0;
   display: flex;
-  height: 100%;
-  max-width: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-width var(--move-settle) var(--ease-settle), opacity var(--move-settle) var(--ease-settle);
-}
-.toolbar .unfolds.open {
-  max-width: 20rem;
-  opacity: 1;
-}
-.toolbar .unfolds > div {
-  display: flex;
-  flex: none;
-  align-items: center;
-}
-.toolbar .unfolds > div > * {
-  flex: none;
-}
-.toolbar .roll {
-  display: flex;
-  align-items: flex-start;
   justify-content: center;
-  height: var(--bar);
-  overflow: hidden;
-}
-/* The rows move on a layer of their own. Moved in place, WebKit (an iPhone's, a Mac's) leaves what it last painted of
-   a neighbour in the sliver where the window's edge falls between two of the screen's pixels, as it does at most text
-   sizes. */
-.toolbar .names,
-.toolbar .rows {
-  flex: none;
-  display: grid;
-  grid-auto-rows: var(--bar);
-  justify-items: center;
   align-items: center;
-  will-change: transform;
+  height: var(--top-row);
+  pointer-events: none;
 }
-/* A long name is cut short. */
-.toolbar .names > span {
+.home.wide .top-row {
+  height: calc(var(--top-row) * var(--pages-scale));
+}
+.home.wide .top-row > * {
+  scale: var(--pages-scale);
+}
+.top-row > * {
+  pointer-events: auto;
+}
+/* The owner pill: the owner's name and a caret, "You ⌄". A long name is cut short. */
+.owner-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  height: var(--bar);
+  padding: 0 0.875rem 0 1rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--title-weight);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.owner-pill:active:not([aria-disabled]),
+.owner-pill[aria-expanded="true"] {
+  background: color-mix(in oklab, var(--popover) 66%, var(--accent));
+}
+.owner-pill[aria-disabled] {
+  cursor: default;
+}
+.owner-pill:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.owner-pill > .ui-icon {
+  width: 0.75rem;
+  height: 0.75rem;
+  color: var(--muted-foreground);
+}
+.owner-pill .names > span {
   max-width: 9rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.toolbar .dots {
+/* Its list ticks the owner shown. */
+.home [data-menu-item] > .ui-icon {
+  visibility: hidden;
+  color: var(--foreground);
+}
+.home [data-menu-item][data-current] > .ui-icon {
+  visibility: visible;
+}
+
+/* The dots pill, just above the bar on Home, as iOS 26's page dots float above the Dock. It stays where it is as the
+   owners move, as wide as their dots, and fades away for an owner with one page. */
+.dots-pill {
+  position: absolute;
+  z-index: 6;
+  bottom: calc(var(--bar-bottom) + (var(--bar) + 0.5rem) * var(--pages-scale));
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  height: var(--dots);
+  padding-inline: 0.25rem;
+  overflow: hidden;
+  transition: opacity var(--move-quick) var(--ease-quick);
+}
+.home.wide .dots-pill {
+  scale: var(--pages-scale);
+  transform-origin: 50% 100%;
+}
+.dots-pill.alone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The owner pill's name and the dots pill's dots each are a window onto a strip with a row for every owner, which
+   rolls as the owners move, and is as wide as the row it shows (home.tsx's `roll`). The rows move on a layer of their
+   own. Moved in place, WebKit (an iPhone's, a Mac's) leaves what it last painted of a neighbour in the sliver where the
+   window's edge falls between two of the screen's pixels, as it does at most text sizes. */
+.pill .roll {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  overflow: hidden;
+}
+.pill :is(.names, .rows) {
+  flex: none;
+  display: grid;
+  grid-auto-rows: var(--row-height);
+  justify-items: center;
+  align-items: center;
+  will-change: transform;
+}
+.owner-pill {
+  --row-height: var(--bar);
+}
+.dots-pill {
+  --row-height: var(--dots);
+}
+.dots {
   display: flex;
   align-items: center;
-  height: var(--bar);
-  padding-inline: 0.25rem 0.375rem;
+  height: var(--dots);
   touch-action: none;
-}
-.toolbar .dots:empty {
-  padding: 0;
-}
-/* Editing, there's no owner to switch to and nowhere else to go: it's the house and the dots, which open the page
-   overview. */
-.toolbar.editing .switch,
-.toolbar.editing > .group:not(.home) {
-  display: none;
-}
-.toolbar.editing .group.active {
-  background: none;
 }
 .dots button {
   display: grid;
@@ -578,55 +681,23 @@ body {
 }
 /* Under a finger the bar is a fingertip tall. */
 @media (pointer: coarse) {
-  .toolbar {
+  .home {
     --bar: 2.75rem;
+    --dots: 2rem;
   }
   .dots button {
     padding: 0 0.125rem;
   }
   .toolbar .section {
-    padding: 0 0.875rem;
+    padding: 0 1.125rem;
   }
 }
 @media (hover: hover) and (pointer: fine) {
   .dots button:hover {
     color: var(--foreground);
   }
-}
-
-/* The owner switcher, the bar's left half: the owner's name and its chevron. */
-.home .switch {
-  gap: 0.25rem;
-  height: calc(var(--bar) - 0.5rem);
-  padding: 0 0.375rem 0 0.125rem;
-  border-radius: 999px;
-  background: none;
-  color: var(--foreground);
-  font-size: var(--text-sm);
-  font-weight: var(--title-weight);
-  -webkit-tap-highlight-color: transparent;
-}
-.home .switch:active,
-.home .switch[aria-expanded="true"] {
-  background: var(--accent);
-}
-.home .switch > .ui-icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  color: var(--muted-foreground);
-}
-/* Its list ticks the owner shown. */
-.home [data-menu-item] > .ui-icon {
-  visibility: hidden;
-  color: var(--foreground);
-}
-.home [data-menu-item][data-current] > .ui-icon {
-  visibility: visible;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .toolbar {
-    transition-property: opacity;
+  .owner-pill:not([aria-disabled]):hover {
+    background: color-mix(in oklab, var(--popover) 66%, var(--accent));
   }
 }
 
@@ -710,18 +781,18 @@ body {
 .carried .ui-widget {
   height: 100%;
 }
-/* + and Done, floating at the top over the pages, + on the left and Done on the right, as on a phone. They fade in
-   as editing begins, and go at once. On a wide window they're over the corners of the pages shown, as large as
-   they are. */
+/* + and Done, floating at the top over the pages, in the owner pill's row, + on the left and Done on the right, as
+   on a phone. They fade in as editing begins, and go at once. On a wide window they're over the corners of the pages
+   shown, as large as they are. */
 .top {
   position: absolute;
-  z-index: 6;
-  top: 0;
+  z-index: 7;
+  top: var(--safe-top, 0px);
   inset-inline: 0;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: var(--edit-bar);
+  height: var(--top-row);
   pointer-events: none;
   transition: opacity var(--move-settle) var(--ease-settle);
 }
@@ -731,11 +802,22 @@ body {
   }
 }
 .home.wide .top {
-  height: calc(var(--edit-bar) * var(--pages-scale));
+  height: calc(var(--top-row) * var(--pages-scale));
+}
+/* + and Done are as tall as the owner pill, in its glass: + round, Done a capsule. */
+.top .edit-bar > .ui-button {
+  height: var(--bar);
+  min-width: var(--bar);
+  padding-inline: 1rem;
+  color: var(--foreground);
+}
+.top .edit-bar > .ui-button[aria-label] {
+  padding: 0;
 }
 .top .edit-bar {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   width: 100%;
   max-width: calc(var(--pages, 1) * 26rem);
   padding-inline: 1rem;
@@ -865,12 +947,13 @@ body {
   backdrop-filter: blur(18px) saturate(1.2);
   animation: appear var(--move-settle) var(--ease-settle);
 }
-/* Done is where editing's is, in the status bar's place or the strip above the pages. */
+/* Done is where editing's is, in the row under the status bar. */
 .overview .bar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  height: var(--edit-bar);
+  margin-top: var(--safe-top, 0px);
+  height: var(--top-row);
   padding: 0 1rem;
 }
 .overview .thumbnails {

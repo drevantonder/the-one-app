@@ -4,8 +4,9 @@
 // where there are fewer. The App Library, every app you can reach, by category, and the App Store are one page each,
 // for everyone, a screen wide, that scroll up and down. Left and right moves a screenful, as a phone's pages do,
 // through Home's screenfuls and on to the App Library and the App Store; up and down on Home moves between owners. The
-// pages move by hand, as a phone's do (pager.ts). In the bar at the bottom, a house, ⊞ and a store stand for the
-// sections; on Home, the owner's name, which opens a list of every owner, and their page dots follow the house. A page
+// pages move by hand, as a phone's do (pager.ts). The bar at the bottom is the three sections' icons, a house, ⊞
+// and a store, and nothing else. On Home, a small pill at the top in the middle says whose pages they are and opens
+// a list of every owner, and another just above the bar has the owner's page dots. A page
 // never scrolls: it's a fixed grid, and what doesn't fit goes on to the next. Whoever arranges an owner's pages edits
 // them as a phone's Home Screen is edited: touch and hold an app or a widget (press and hold it, or right-click it,
 // with a mouse), then Edit Home Screen, or hold it a while longer, or touch and hold a page's empty space. An app held
@@ -14,7 +15,7 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { Dynamic, render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
-import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
+import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
@@ -59,9 +60,9 @@ const [seen, setSeen] = createSignal<At>({ owner: 0, screen: 0 }, { equals: (a, 
 /// height, twice at most, so a bigger screen shows more pages rather than larger icons. Set by `measure`.
 let scale = 1
 
-/// The owner switcher's names and the owners' sections, which roll together as the owners move: each a window onto a
+/// The owner pill's names and the dots pill's rows, which roll together as the owners move: each a window onto a
 /// strip with a row for every owner. `at` is where the owners are, in owners. Each window is as wide as the row it
-/// shows, or between two rows' widths as the owners pass, so the bar fits whoever's shown, and a row fades as it
+/// shows, or between two rows' widths as the owners pass, so each pill fits whoever's shown, and a row fades as it
 /// rolls away, as a picker's do.
 const rolls = new Set<HTMLElement>()
 const widths = new WeakMap<HTMLElement, number[]>()
@@ -79,11 +80,11 @@ function roll(at = rolled) {
     window.style.width = `${sizes[low] + (sizes[high] - sizes[low]) * (near - low)}px`
   }
 }
-/// Each row's own width, measured whenever one changes, in the bar's own points: it's drawn larger on a wide window,
+/// Each row's own width, measured whenever one changes, in its pill's own points: it's drawn larger on a wide window,
 /// perhaps still on its way there.
 const sized = new ResizeObserver(() => {
   for (const window of rolls) {
-    const bar = window.closest<HTMLElement>(".toolbar")!
+    const bar = window.closest<HTMLElement>(".pill")!
     const drawn = bar.getBoundingClientRect().height / bar.offsetHeight || 1
     widths.set(window, [...window.firstElementChild!.children].map((row) => row.getBoundingClientRect().width / drawn))
   }
@@ -896,10 +897,9 @@ const SECTIONS: Record<Kind, { name: string; path: string }> = {
   },
 }
 
-/// An owner's page dots, in the bar after the owner's name: one for each of their Home screenfuls, where there's more
-/// than one, the one shown lit. The house before them goes to the first. Tapping one goes to its screenful, and sliding a finger along them moves a screenful
-/// for every 28 points with a tick at each, as a phone's dots do. While the owner's pages are edited, they open the
-/// page overview.
+/// An owner's page dots, a row of the dots pill: one for each of their Home screenfuls, where there's more than one,
+/// the one shown lit. Tapping one goes to its screenful, and sliding a finger along them moves a screenful for every 28
+/// points with a tick at each, as a phone's dots do. While the owner's pages are edited, they open the page overview.
 function Dots(props: { owner: Owner; index: number; count: number }) {
   const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
   let quiet = 0
@@ -942,53 +942,28 @@ function Dots(props: { owner: Owner; index: number; count: number }) {
   )
 }
 
-/// The bar: one capsule floating at the bottom in the middle, as iOS 26's floating bars are, with the three sections'
-/// icons, the one shown in a pill of its own. On Home, the owner's name, which opens the list of every owner, the
-/// current one ticked, and their page dots open out of the house, between it and ⊞, so the App Library reads as what's
-/// to the right; on the App Library or the App Store they fold back into it. The name and the dots roll as the owners
-/// move. Each icon goes to the start of its section. While pages are edited it's the house and the dots alone, which
-/// open the page overview.
-function Toolbar(props: { owners: Owner[]; laid: Kind[][] }) {
+/// The caret under the owner's name, Phosphor's caret-down.
+const CARET = "M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"
+
+/// The owner pill, at the top of Home in the middle, in the bar's glass: whose pages they are, "You ⌄", which opens the
+/// list of every owner, the current one ticked. Its name rolls as the owners move. While pages are edited, + and Done
+/// are either side of it, and it opens nothing.
+function OwnerPill(props: { owners: Owner[] }) {
   const at = () => state().context.at.owner
-  const section = () => props.laid[seen().owner]?.[seen().screen] ?? "home"
-  const go = (kind: Kind) => () => {
-    if (kind === "home" && state().matches("editing")) return home.send({ type: "overview" })
-    const screen = props.laid[at()]?.indexOf(kind) ?? 0
-    if (screen >= 0) home.send({ type: "go", screen })
-  }
-  const mark = (kind: Kind) => (
-    <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
-      <path d={SECTIONS[kind].path} />
-    </svg>
-  )
   let button!: HTMLButtonElement
   return (
-    <div class={["toolbar", { editing: state().matches("editing") }]}>
-      <div class={["group", "home", { active: section() === "home" }]}>
-        <button type="button" class="section" aria-label={SECTIONS.home.name} aria-current={section() === "home" ? "page" : undefined} onClick={go("home")}>
-          {mark("home")}
-        </button>
-        <div class={["unfolds", { open: section() === "home" }]} inert={section() !== "home" || undefined}>
-          <div>
-            <button type="button" class="switch ui-button press ring" data-variant="ghost" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
-              <span class="roll" aria-hidden="true" ref={rolling}>
-                <span class="names">
-                  <For each={props.owners}>{(owner) => <span ref={(name) => sized.observe(name)}>{owner.name}</span>}</For>
-                </span>
-              </span>
-              <Icon name="caret-up-down" />
-            </button>
-            <div class="roll" ref={rolling}>
-              <div class="rows">
-                <For each={props.owners} keyed={(owner) => owner.key}>
-                  {(owner, index) => <Dots owner={owner()} index={index()} count={(props.laid[index()] ?? []).filter((kind) => kind === "home").length} />}
-                </For>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <Menu.Root open={state().matches("listing")} onOpenChange={({ open }) => !open && home.send({ type: "dismiss" })} onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })} positioning={{ placement: "top", getAnchorRect: () => button.getBoundingClientRect() }}>
+    <div class="top-row">
+      <button type="button" class="owner-pill pill" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} aria-disabled={state().matches("editing") || undefined} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
+        <span class="roll" aria-hidden="true" ref={rolling}>
+          <span class="names">
+            <For each={props.owners}>{(owner) => <span ref={(name) => sized.observe(name)}>{owner.name}</span>}</For>
+          </span>
+        </span>
+        <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
+          <path d={CARET} />
+        </svg>
+      </button>
+      <Menu.Root open={state().matches("listing")} onOpenChange={({ open }) => !open && home.send({ type: "dismiss" })} onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })} positioning={{ placement: "bottom", getAnchorRect: () => button.getBoundingClientRect() }}>
         <Menu.Positioner>
           <Menu.Content>
             <For each={props.owners}>
@@ -1002,16 +977,53 @@ function Toolbar(props: { owners: Owner[]; laid: Kind[][] }) {
           </Menu.Content>
         </Menu.Positioner>
       </Menu.Root>
-      <For each={["library", "store"] as Kind[]}>
+    </div>
+  )
+}
+
+/// The dots pill, just above the bar on Home, in the bar's glass, as iOS 26's page dots float above the Dock: the dots
+/// of the owner shown. It stays where it is as the owners move, its dots rolling to the next owner's, and it's gone
+/// for an owner with one page.
+function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
+  const count = (owner: number) => (props.laid[owner] ?? []).filter((kind) => kind === "home").length
+  return (
+    <div class={["dots-pill", "pill", { alone: count(seen().owner) < 2 }]}>
+      <div class="roll" ref={rolling}>
+        <div class="rows">
+          <For each={props.owners} keyed={(owner) => owner.key}>
+            {(owner, index) => <Dots owner={owner()} index={index()} count={count(index())} />}
+          </For>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/// The bar: one capsule floating at the bottom in the middle, as iOS 26's tab bars are, with the three sections'
+/// icons and no words, the one shown in a pill of its own. Each goes to the start of its section. While pages are
+/// edited the App Library and the App Store stay, dimmed, and go nowhere.
+function Toolbar(props: { laid: Kind[][] }) {
+  const at = () => state().context.at.owner
+  const section = () => props.laid[seen().owner]?.[seen().screen] ?? "home"
+  const go = (kind: Kind) => () => {
+    if (state().matches("editing")) return
+    const screen = props.laid[at()]?.indexOf(kind) ?? 0
+    if (screen >= 0) home.send({ type: "go", screen })
+  }
+  return (
+    <nav class="toolbar" aria-label="Sections">
+      <For each={["home", "library", "store"] as Kind[]}>
         {(kind) => (
-          <Show when={props.laid[at()]?.includes(kind)}>
-            <button type="button" class={["group", "section", { active: section() === kind }]} aria-label={SECTIONS[kind].name} aria-current={section() === kind ? "page" : undefined} onClick={go(kind)}>
-              {mark(kind)}
+          <Show when={kind === "home" || props.laid[at()]?.includes(kind)}>
+            <button type="button" class={["section", { active: section() === kind }]} aria-label={SECTIONS[kind].name} aria-current={section() === kind ? "page" : undefined} aria-disabled={(kind !== "home" && state().matches("editing")) || undefined} onClick={go(kind)}>
+              <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
+                <path d={SECTIONS[kind].path} />
+              </svg>
             </button>
           </Show>
         )}
       </For>
-    </div>
+    </nav>
   )
 }
 
@@ -1077,7 +1089,8 @@ function Refused(props: { owner: Owner; held: Held }) {
   )
 }
 
-/// While pages are edited, + and Done float at the top, over the pages, which stay where they are, as on a phone.
+/// While pages are edited, + and Done float at the top, either side of the owner pill, over the pages, which stay
+/// where they are, as on a phone.
 function EditBar() {
   return (
     <div class="top">
@@ -1198,7 +1211,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (owner === shownOwner()) sections.style.translate = `${-Math.max(0, x - homeEnd(owner)) * rtl()}px 0`
       look()
     }))
-  /// The owner and screenful nearest where they are, which the bar follows.
+  /// The owner and screenful nearest where they are, which the bar and the pills follow.
   const look = () => {
     const owner = shownOwner()
     setSeen({ owner, screen: Math.round(sideways(owner).value / pitch()) })
@@ -1219,7 +1232,8 @@ function HomeScreen(props: { owners: Owner[] }) {
   let swiped = 0
   const press = (event: PointerEvent) => {
     const on = event.target as Element
-    if (event.pointerType === "mouse" || event.button || !on.closest(".sections")) return
+    // The pills over Home are their own: the owner's list, and the dots, which a finger slides along.
+    if (event.pointerType === "mouse" || event.button || !on.closest(".sections") || on.closest(".pill")) return
     // A category shrinking back into its place lets the pages under it have the finger.
     if (!state().matches("nothing") && !state().matches({ category: "closing" }) && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
     const owner = shownOwner()
@@ -1476,14 +1490,10 @@ function HomeScreen(props: { owners: Owner[] }) {
     return () => (sliding.unsubscribe(), arranging.unsubscribe(), watched.disconnect(), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
   })
 
-  // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own. While it lasts, the
-  // device's status bar is hidden, and + and Done are where it was.
+  // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own.
   createEffect(
     createMemo(() => state().matches("editing")),
-    (now) => {
-      if (now && home.getSnapshot().matches({ editing: "still" })) haptic("selection")
-      client({ statusBar: !now }).catch(() => {})
-    },
+    (now) => void (now && home.getSnapshot().matches({ editing: "still" }) && haptic("selection")),
     { defer: true },
   )
   // While pages are edited, the device's own back ends editing, as Done does.
@@ -1502,7 +1512,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .pill, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <div class="sections" ref={sections}>
         <main class="home-section" aria-label="Home">
           <div class="owners" ref={main}>
@@ -1526,11 +1536,13 @@ function HomeScreen(props: { owners: Owner[] }) {
               )}
             </For>
           </div>
+          <OwnerPill owners={props.owners} />
+          <DotsPill owners={props.owners} laid={laid().screens} />
         </main>
         <Library owner={props.owners[0]} places={places} />
         <Show when={props.owners[0].store}>{(name) => <StorePage name={name()} shown={near()} />}</Show>
       </div>
-      <Toolbar owners={props.owners} laid={laid().screens} />
+      <Toolbar laid={laid().screens} />
       <Show when={state().matches("editing")}>
         <EditBar />
       </Show>
