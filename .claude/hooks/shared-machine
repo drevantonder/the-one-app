@@ -18,7 +18,8 @@ while read -r ps; do
   [[ -z $all || -z $lines ]] ||
     refuse "This lists every process with its command line, which holds other agents' work and secrets. Look at your own by PID (\`ps -o pid,stat,etime,comm -p <pid>\`), or every process by name only (\`ps -eo pid,comm\`)."
 done < <(grep -oE '(^|[^[:alnum:]_-])ps([[:space:]][^|;&]*)?' <<<"$command")
-grep -qE '/proc/[^[:space:]/]*\*|(^|[^[:alnum:]_-])h?top[^|;&]*[[:space:]]-[[:alpha:]]*c' <<<"$command" &&
+{ grep -qE '/proc/[^[:space:]/]*\*' <<<"$command" && grep -qE 'cmdline|environ' <<<"$command" ||
+  grep -qE '(^|[^[:alnum:]_-])h?top[^|;&]*[[:space:]]-[[:alpha:]]*c' <<<"$command"; } &&
   refuse "This reads every process's command line, which holds other agents' work and secrets. Look at your own by PID."
 
 # The Mac is the owner's, and shared: two simulators at once took its load to 300 (17 Nov).
