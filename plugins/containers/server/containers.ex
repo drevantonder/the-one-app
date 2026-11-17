@@ -39,6 +39,7 @@ defmodule Containers do
       machine: %{type: ["string", "null"]},
       last_on: %{type: "integer", description: "When its machine, off now, was last on, in milliseconds since 1970"},
       size: %{type: ["string", "null"], description: "small, medium or large"},
+      restart: %{type: "string", enum: ~w(no on-failure always), description: "Its restart policy"},
       by: %{type: ["string", "null"], description: "Who created it"},
       created: %{type: "integer", description: "In milliseconds since 1970"},
       last_used: %{type: "integer", description: "In milliseconds since 1970"},
@@ -97,7 +98,7 @@ defmodule Containers do
         name: "list",
         read_only: true,
         description:
-          "The containers you can use, on every machine: each one's name, image, state as Podman says it (created, running, exited, with its exit code and when, or removing), machine, size, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback. One on a machine that's off is unknown, with when its machine was last on.",
+          "The containers you can use, on every machine: each one's name, image, state as Podman says it (created, running, exited, with its exit code and when, or removing), machine, size, restart policy, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback. One on a machine that's off is unknown, with when its machine was last on.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{type: "object", properties: %{containers: %{type: "array", items: @listed}}, required: ["containers"]}
       },
@@ -172,6 +173,12 @@ defmodule Containers do
               type: "string",
               enum: ["small", "medium", "large"],
               description: "small is 1 CPU and 1 GB of memory (the default), medium 2 and 4 GB, large 4 and 8 GB"
+            },
+            restart: %{
+              type: "string",
+              enum: ~w(no on-failure always),
+              description:
+                "whether it starts again, as Docker's --restart: no (the default) leaves it stopped once its command ends; on-failure starts it again when its command fails; always starts it again whenever its command ends, and after the machine reboots. One stopped by hand, or for going unused, stays stopped until the machine reboots"
             },
             machine: %{type: "string", description: "the machine to run it on, as `machines` names it; default the first"},
             ports: %{
@@ -471,6 +478,7 @@ defmodule Containers do
       "id" => "#{name}-#{id}",
       "image" => image,
       "size" => inputs["size"] || "small",
+      "restart" => inputs["restart"] || "no",
       "ports" => inputs["ports"],
       "command" => inputs["command"],
       "env" => inputs["env"],
@@ -480,6 +488,7 @@ defmodule Containers do
         "name" => name,
         "description" => inputs["description"],
         "size" => inputs["size"] || "small",
+        "restart" => inputs["restart"] || "no",
         "by" => call.actor || call.subject
       }
     }

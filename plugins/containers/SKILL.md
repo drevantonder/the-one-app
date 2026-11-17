@@ -18,6 +18,9 @@ machines that run them.
   state, Podman's (an exited one with its exit code); one on a machine that's off is `unknown`. A plugin's code moves
   a file of any size with `upload` and `download`: to the bucket and back, sealed with a key it's given, a chunk at a
   time.
+- `restart` at `create` is Docker's restart policy, which `list` shows: `no` (the default) leaves it stopped once its
+  command ends, `on-failure` starts it again when that fails, and `always` whenever it ends and after the machine
+  reboots. One stopped by hand, or for going unused, stays stopped until the next reboot. There's no `unless-stopped`.
 - `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvnc, `DISPLAY=:99`, which `screen` resizes) with Openbox
   and Google Chrome on it, downloaded from Google as each machine builds the image, and again each week in the
   background, so only a machine's first desktop waits minutes for it. A running one is a screen in Computer Use,

@@ -2,7 +2,7 @@ defmodule Containers.Podman do
   @moduledoc """
   Runs containers on its machine with Podman, through its own CLI, as the user this server runs as: rootless where
   that's how Podman is set up. Each container The One App made carries labels saying whose it is (`one.artifact`),
-  what it's called (`one.name`), what it's for (`one.description`), its size and who asked for it, and each image
+  what it's called (`one.name`), what it's for (`one.description`), its size, its restart policy and who asked for it, and each image
   made with `commit` its own `one.artifact` and `one.name`. When a container was last used is a file's time in the
   service's folder, `used/<its name in Podman>`.
 
@@ -27,7 +27,9 @@ defmodule Containers.Podman do
   def needs do
     "A Linux machine with Podman (rootless is best), which pulls images and runs containers as the user this " <>
       "server runs as, for everyone this server acts for. Containers get no host files, no host network and no " <>
-      "privileges unless someone asks for a folder of this machine by name."
+      "privileges unless someone asks for a folder of this machine by name. A container that starts again after a " <>
+      "reboot (restart: always) needs Podman's podman-restart user service enabled and the user lingering, which " <>
+      "creating one enables: systemctl --user enable podman-restart.service and loginctl enable-linger."
   end
 
   @impl GenServer
@@ -64,6 +66,7 @@ defmodule Containers.Podman do
         artifact: labels["one.artifact"],
         description: labels["one.description"],
         size: labels["one.size"],
+        restart: labels["one.restart"] || "no",
         by: labels["one.by"],
         image: c["Image"],
         state: c["State"],
@@ -126,13 +129,18 @@ defmodule Containers.Podman do
 
   @doc """
   Creates a container from an image on this machine and starts it. `spec` has its `id` and labels, the `image`,
-  `size`, `ports` to publish on this machine's loopback, a `command`, `env` and `mounts`.
+  `size`, its `restart` policy, `ports` to publish on this machine's loopback, a `command`, `env` and `mounts`.
+
+  Podman starts a container again by its policy as its command ends; after a reboot, only Podman's `podman-restart`
+  user service starts one, those whose policy is `always`, so creating one enables that service first. Stopping one
+  by hand keeps it stopped until the next reboot.
 
   Podman stops a container by sending its command SIGTERM and killing what's left once its stop timeout passes, which
   is long enough here for a desktop's Chrome to write its profile down and quit.
   """
   def create(service, spec) do
     {cpus, memory} = Map.fetch!(@sizes, spec["size"])
+    if spec["restart"] == "always", do: start_after_reboot!()
 
     labels =
       for {key, value} <- spec["labels"], value != nil, do: ["--label", "one.#{key}=#{value}"]
@@ -141,7 +149,7 @@ defmodule Containers.Podman do
 
     args =
       ["create", "--name", spec["id"], "--init", "--tty", "--interactive", "--cpus", cpus, "--memory", memory] ++
-        ["--pids-limit", "4096", "--shm-size", "1g", "--stop-timeout", "30"] ++
+        ["--pids-limit", "4096", "--shm-size", "1g", "--stop-timeout", "30", "--restart", spec["restart"]] ++
         List.flatten(labels) ++
         Enum.flat_map(spec["ports"] || [], &["--publish", "127.0.0.1::#{&1}"]) ++
         Enum.flat_map(spec["env"] || %{}, fn {key, value} -> ["--env", "#{key}=#{value}"] end) ++
@@ -348,6 +356,20 @@ defmodule Containers.Podman do
       headers: Map.new(response.headers, fn {key, values} -> {key, Enum.join(values, ", ")} end),
       body: clip(response.body, @largest)
     }
+  end
+
+  # Enables Podman's `podman-restart` user service, which starts containers whose policy is `always` as the machine
+  # starts, and lingering, so the user's services start with the machine rather than once they sign in.
+  defp start_after_reboot! do
+    with {_, 0} <- System.cmd("systemctl", ["--user", "enable", "podman-restart.service"], stderr_to_stdout: true),
+         {_, 0} <- System.cmd("loginctl", ["enable-linger"], stderr_to_stdout: true) do
+      :ok
+    else
+      {why, _} ->
+        raise "This machine can't start a container again after a reboot: #{String.trim(why)}\n\n" <>
+                "It needs Podman's podman-restart user service enabled (systemctl --user enable podman-restart.service) " <>
+                "and the user lingering (loginctl enable-linger)."
+    end
   end
 
   # The desktop images this server built, newest first.
