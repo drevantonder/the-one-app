@@ -1,6 +1,6 @@
 [package]
 name = "cli"
-description = "The CLI and MCP, on One Core in a client, with the native code of the plugins The One App ships with."
+description = "The CLI and MCP, on One Core in a client, with the native code of the apps The One App ships with."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -19,10 +19,10 @@ sha2 = "0.11"
 # Ctrl+C cancels the call it's waiting on.
 tokio = { workspace = true, features = ["signal"] }
 
-# The native code of the plugins it ships with, which is never deployed (`client::files`).
-backups_client = { path = "../../plugins/backups/client/native" }
-encryption_client = { path = "../../plugins/encryption/client/native" }
-git_repos_client = { path = "../../plugins/git-repos/client/native" }
+# The native code of the apps it ships with, which is never deployed (`client::files`).
+backups_client = { path = "../../apps/backups/client/native" }
+encryption_client = { path = "../../apps/encryption/client/native" }
+git_repos_client = { path = "../../apps/git-repos/client/native" }
 
 # Who's running this, and their login shell (`serving`).
 [target.'cfg(unix)'.dependencies]

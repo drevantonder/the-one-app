@@ -9,7 +9,7 @@
 /// what's its own with its own CSS, from the UI library's custom properties (`--foreground`, `--muted-foreground`,
 /// `--border`, `--warning`, `--radius`, `--gap`), with any hover of its own behind `@media (hover: hover) and
 /// (pointer: fine)`, as the UI library's is: a touch screen leaves what was tapped looking hovered. A page shows pictures only from `data:` addresses and its
-/// plugin's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
+/// app's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
 /// (ark-ui.com/llms-solid.txt); the rest are the UI library's own. An app may be TypeScript (`.tsx`, `.ts`) as well as
 /// JavaScript: the UI library's types are its `types/` (`one code --name ui`), which the app's `tsconfig.json` names
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them.

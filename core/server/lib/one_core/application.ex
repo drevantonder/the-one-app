@@ -1,27 +1,27 @@
 defmodule OneCore.Application do
   @moduledoc false
   use Application
-  alias OneCore.{Iroh, Jobs, Plugins, Release, Server, Servers, Services}
-  alias OneCore.Plugins.Deploy
+  alias OneCore.{Iroh, Jobs, Apps, Release, Server, Servers, Services}
+  alias OneCore.Apps.Deploy
 
   # A server is started for its owner, its `:owner` setting: a user, a group or the network. One that isn't on
   # their list doesn't start: `{:not_joined, key}` says so, with its key. Once it's up (`OneCore.Server.up?/0`), one
   # server builds again the apps built against another UI library than the one it ships with, for everyone
-  # (`OneCore.Plugins.Deploy.rebuild/0`).
+  # (`OneCore.Apps.Deploy.rebuild/0`).
 
   @impl true
   def start(_type, _args) do
     # What a crash reports holds what it was working with, which may be a person's tokens: none of it reaches the log.
     OneCore.Redact.install()
     OneCore.Bucket.Fuse.install()
-    # Plugins tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
+    # Apps tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
     {:ok, key} = Iroh.key(Server.key_file())
 
     if Servers.joined?(key, Application.get_env(:one_core, :owner, "network")) do
       # What state each call is in, which this process, the application's, keeps.
       OneCore.Call.State.table()
-      # What everyone has deployed (`OneCore.Plugins.Deploy.deployed/0`), which this process keeps too.
+      # What everyone has deployed (`OneCore.Apps.Deploy.deployed/0`), which this process keeps too.
       Deploy.table()
 
       # `OneCore.Waiting` is who waits for something to happen, by what: `:seen`, another server coming or going
@@ -30,14 +30,14 @@ defmodule OneCore.Application do
         {Registry, keys: :duplicate, name: OneCore.Waiting},
         {Task.Supervisor, name: OneCore.Asks},
         Servers.Report,
-        Plugins,
+        Apps,
         Server,
         Services,
         Jobs,
-        OneCore.Plugins.Lifecycle
+        OneCore.Apps.Lifecycle
       ]
 
-      # It's starting at the network's edge from before it's reached there until it's ready, its plugins started
+      # It's starting at the network's edge from before it's reached there until it's ready, its apps started
       # and answering by its key, so nobody asks it what it would answer only once they have: another server's lease
       # it held before it stopped among them.
       Servers.report()
@@ -51,7 +51,7 @@ defmodule OneCore.Application do
 
         # A server nothing keeps running, as a network being built runs one, has nothing to answer by its key to.
         up = fn ->
-          Plugins.started()
+          Apps.started()
           if not Application.get_env(:one_core, :installed, false), do: Release.told(%{"server_daemon_status" => "running"})
         end
 

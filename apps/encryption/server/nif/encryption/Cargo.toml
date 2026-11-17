@@ -1,0 +1,20 @@
+[package]
+name = "encryption"
+description = "The encryption app's NIF, `Cipher`: encryption for a server's apps, built into none of the server."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# A NIF has no tests of its own: it's only whole inside the VM that loads it, where the server's tests use it.
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+# What's encrypted is the app's client-side code's to say (`encryption_client::cipher`), so a server and a device do the
+# same thing. Without its feature `client`, which a device's needs, it's built for every kind of server from one
+# machine (`tooling/release`).
+encryption_client = { path = "../../../client/native", default-features = false }
+iroh-base = { version = "1.4", default-features = false, features = ["key"] }
+rustler = "0.39"

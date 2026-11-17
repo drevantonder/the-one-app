@@ -6,19 +6,19 @@ node_modules/
 erl_crash.dump
 .DS_Store
 # One Core's Rust NIFs as they're built for the server to load and for each kind of machine beside their source, a
-# plugin's NIFs and programs as they're built beside their source
+# app's NIFs and programs as they're built beside their source
 /core/server/priv/native/
 /core/server/nif/*/*.so
-/plugins/*/server/nif/*/*.so
-/plugins/*/server/bin/*/linux-*
-/plugins/*/server/bin/*/macos-*
-/plugins/*/server/bin/*/windows-*
+/apps/*/server/nif/*/*.so
+/apps/*/server/bin/*/linux-*
+/apps/*/server/bin/*/macos-*
+/apps/*/server/bin/*/windows-*
 # What Tauri writes as it builds
 /clients/app/gen/schemas/
-# What `wrangler dev` keeps, the secrets of the presigner and of a plugin's edge function as whoever deploys an
-# edge writes them, and the web client as it's built (each plugin's edge function is built in target/)
+# What `wrangler dev` keeps, the secrets of the presigner and of an app's edge function as whoever deploys an
+# edge writes them, and the web client as it's built (each app's edge function is built in target/)
 .wrangler/
 /core/edge/presigner/secrets
-/plugins/*/edge/secrets
+/apps/*/edge/secrets
 /clients/web/dist/
-/www/plugin-directory/seed.sql
+/www/app-directory/seed.sql

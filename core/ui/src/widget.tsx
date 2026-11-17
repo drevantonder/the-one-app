@@ -1,8 +1,8 @@
 import { createSignal, For, Match, Show, Switch as Which } from "solid-js"
 import { Spinner } from "./button.tsx"
 
-/** A widget's layout, as its tool answers it (the skill `building-plugins` lists its parts): one part, which may hold
- * others. It's what a plugin said, so what's a number is read as one where it's used. */
+/** A widget's layout, as its tool answers it (the skill `building-apps` lists its parts): one part, which may hold
+ * others. It's what an app said, so what's a number is read as one where it's used. */
 export interface Layout {
   part?: string
   parts?: Layout[]
@@ -38,7 +38,7 @@ export interface Layout {
   on?: boolean
 }
 
-/** What a widget's button or switch calls: its plugin's tool, with its inputs. */
+/** What a widget's button or switch calls: its app's tool, with its inputs. */
 type OnCall = (tool: string | undefined, inputs: Record<string, unknown>) => unknown
 
 /// A number from a layout, or `or` where it isn't one.
@@ -122,7 +122,7 @@ function Gauge(props: { part: Layout }) {
   )
 }
 
-/// A button or a switch calls its plugin's tool, and shows that it's under way until the widget is drawn again.
+/// A button or a switch calls its app's tool, and shows that it's under way until the widget is drawn again.
 function acts(props: { part: Layout; onCall?: OnCall }) {
   const [busy, setBusy] = createSignal(false)
   const act = async (inputs: Record<string, unknown>) => {
@@ -208,8 +208,8 @@ function Part(props: { part: Layout; onCall?: OnCall }) {
 }
 
 /// `<Widget name="Weather" size="2x2" layout={layout()} onCall={(tool, inputs) => call(tool, inputs)} onOpen={open} />`:
-/// a plugin's widget, as a card: the `layout` its tool answered, drawn from the parts a layout is made of (the
-/// skill `building-plugins` lists them), under its `name`, at a `size` of `2x2`, `4x2` or `4x4`. A button or a
+/// an app's widget, as a card: the `layout` its tool answered, drawn from the parts a layout is made of (the
+/// skill `building-apps` lists them), under its `name`, at a `size` of `2x2`, `4x2` or `4x4`. A button or a
 /// switch in it calls `onCall` with its tool and inputs, and pressing the card anywhere else calls `onOpen`. With a
 /// `problem` it says the widget stopped working, and why. With no layout yet it's a grey card.
 export function Widget(props: {

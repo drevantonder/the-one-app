@@ -40,7 +40,7 @@ async fn connect(network: &Network, key: &SecretKey, handler: &LocalPid) -> Resu
     let (socket, _) = timeout(EVERY, connect_async(request)).await??;
     // What the network's servers and the pieces of the edge told this one while it wasn't there, it didn't hear.
     // So it looks again, as a server that comes back does (`OneCore.Server.reconnected/0`), meanwhile answering
-    // what it's asked here: looking again reads the bucket and starts plugins, which can take minutes.
+    // what it's asked here: looking again reads the bucket and starts apps, which can take minutes.
     let reload = *handler;
     tokio::spawn(async move {
         crate::ask(&reload, None, br#"{"jsonrpc":"2.0","method":"notifications/one/reload"}"#, Default::default()).await

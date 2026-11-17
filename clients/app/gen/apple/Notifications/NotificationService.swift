@@ -4,7 +4,7 @@ import UserNotifications
 
 /// The app's notification extension. What APNs carries is the notification encrypted to this iPhone (`n`), with a
 /// fixed line for Apple to see; this opens it before it shows, with the key the app keeps in the folder it shares
-/// with this extension, its App Group. It's `plugins/encryption/client/native/src/cipher.rs` (`open_notification`), as CryptoKit does it:
+/// with this extension, its App Group. It's `apps/encryption/client/native/src/cipher.rs` (`open_notification`), as CryptoKit does it:
 ///
 /// - The notification key is HKDF-SHA256 of the device's key (the 32 bytes of `key`), for
 ///   `one/notifications/1/key`, and is an Ed25519 key as the device's is.

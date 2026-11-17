@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds every NIF and program a server needs, One Core's and those of this repo's plugins, for each kind of machine
+# Builds every NIF and program a server needs, One Core's and those of this repo's apps, for each kind of machine
 # a server runs on, or the kinds given, each beside its source: `core/server/nif/<crate>/<kind>.so`,
-# which `tooling/release` puts in a server, and as a plugin brings them (`OneCore.Plugin`),
-# `plugins/<name>/server/nif/<crate>/<kind>.so` and `plugins/<name>/server/bin/<crate>/<kind>`. A plugin is the same
+# which `tooling/release` puts in a server, and as an app brings them (`OneCore.App`),
+# `apps/<name>/server/nif/<crate>/<kind>.so` and `apps/<name>/server/bin/<crate>/<kind>`. An app is the same
 # files on every server of a network, so it's deployed with all of them:
 #
-#     tooling/nifs [kind...] && ONE_SUBJECT=network one deploy --name <name> --files-from plugins/<name>
+#     tooling/nifs [kind...] && ONE_SUBJECT=network one deploy --name <name> --files-from apps/<name>
 #
-# Each kind is built in one place, so every build of a commit is the same bytes, and a plugin deployed again from
+# Each kind is built in one place, so every build of a commit is the same bytes, and an app deployed again from
 # an unchanged folder is unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM
 # (`tooling/release`) and Windows' with cargo-xwin, as a DLL, which is kept under the same kind of name,
 # `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. From Linux, a Mac's are built on the Mac `ssh
@@ -15,7 +15,7 @@
 # committed. The Mac sleeps, so only one whose inputs changed is built there: one that hasn't is the one built before,
 # from this machine's cache, or One Core's from the latest server published for a Mac, whose `nifs` lists what each
 # NIF was built from, as `$target/nifs/<kind>` does for the ones here, which `tooling/release` puts in a server, and
-# a plugin's from where its `server/checksums.json` says it's published (`tooling/publish-nifs`).
+# an app's from where its `server/checksums.json` says it's published (`tooling/publish-nifs`).
 #
 # Each NIF is named for its build, what it's built from (`tooling/input-hash`), so a server loads a changed one beside
 # the one before (`OneCore.Nif`). The Mac is given the names this machine worked out, in NIF_BUILD_<CRATE>, so a
@@ -30,7 +30,7 @@ cd "$root"
 kinds=("$@")
 ((${#kinds[@]})) || kinds=(linux-x86_64 linux-aarch64 windows-x86_64 macos-aarch64)
 here=$(uname -s)
-crates=($(dirname core/server/nif/*/Cargo.toml plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml))
+crates=($(dirname core/server/nif/*/Cargo.toml apps/*/server/nif/*/Cargo.toml apps/*/server/bin/*/Cargo.toml))
 target=${CARGO_TARGET_DIR:-$root/target}
 
 declare -A sums=()
@@ -59,12 +59,12 @@ for kind in "${kinds[@]}"; do
     for file in "${files[@]}"; do echo "${sums[$file]} $file"; done | sort -k2 >"$target/nifs/$kind"
     changed() { for file in "${files[@]}"; do cp "$cache/${sums[$file]}" "$file" 2>/dev/null || echo "$file"; done; }
 
-    # A plugin's published build, named for what it's built from, checked against the SHA-256 published with it.
+    # An app's published build, named for what it's built from, checked against the SHA-256 published with it.
     for file in $(changed); do
-      [[ $file == plugins/* ]] || continue
-      plugin=${file#plugins/} && plugin=${plugin%%/*}
-      read -r url sha256 < <(jq -r --arg path "${file#plugins/"$plugin"/}" '.[$path] // empty | "\(.url) \(.sha256)"' \
-        "plugins/$plugin/server/checksums.json" 2>/dev/null) || continue
+      [[ $file == apps/* ]] || continue
+      app=${file#apps/} && app=${app%%/*}
+      read -r url sha256 < <(jq -r --arg path "${file#apps/"$app"/}" '.[$path] // empty | "\(.url) \(.sha256)"' \
+        "apps/$app/server/checksums.json" 2>/dev/null) || continue
       [[ ${url##*/} == *-"${sums[$file]}"-* ]] && curl -fsSL -o "$cache/${sums[$file]}.new" "$url" || continue
       if [[ $(sha256sum "$cache/${sums[$file]}.new" | cut -d' ' -f1) == "$sha256" ]]; then
         mv "$cache/${sums[$file]}.new" "$cache/${sums[$file]}"

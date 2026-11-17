@@ -12,14 +12,14 @@ defmodule CodeReloader do
   - One Core's code is compiled here and loaded into every server while it runs (`OneCore.Release.swap/3`), unless
     it's what a running server can't load (`OneCore.Release.modules/2`, the rule a hot load follows): then the request
     is refused, saying why and that the network starts again for it.
-  - A plugin of this repo whose files changed is deployed for the network again, as `one deploy --files-from` deploys
+  - An app of this repo whose files changed is deployed for the network again, as `one deploy --files-from` deploys
     it. A request is refused with why it didn't deploy.
 
   Rust, the deps and the config are built as the network starts again. Its compiler's output is its log.
   """
   use GenServer
   alias OneCore.{Folder, Release}
-  alias OneCore.Plugins.Deploy
+  alias OneCore.Apps.Deploy
 
   @root Path.expand("..", __DIR__)
   @build Path.expand("../core/server/_build/dev/lib/one_core", __DIR__)
@@ -33,20 +33,20 @@ defmodule CodeReloader do
   def reload(server), do: GenServer.call(__MODULE__, {:reload, server}, :infinity)
 
   @impl GenServer
-  def init(copy), do: {:ok, %{copy: copy, servers: [], core: nil, plugins: nil}}
+  def init(copy), do: {:ok, %{copy: copy, servers: [], core: nil, apps: nil}}
 
   # What the servers run is what's compiled when the first starts, so that's what a change is told from.
   @impl GenServer
   def handle_call({:serving, server}, _from, %{core: nil} = state) do
     copy(state)
-    handle_call({:serving, server}, nil, %{state | core: core(), plugins: plugins()})
+    handle_call({:serving, server}, nil, %{state | core: core(), apps: apps()})
   end
 
   def handle_call({:serving, server}, _from, state), do: {:reply, :ok, %{state | servers: [server | state.servers]}}
 
   # What failed is the request's answer, and the next request tries again.
   def handle_call({:reload, server}, _from, state) do
-    with {:ok, state} <- reloaded(core(), state), {:ok, state} <- deployed(plugins(), server, state) do
+    with {:ok, state} <- reloaded(core(), state), {:ok, state} <- deployed(apps(), server, state) do
       {:reply, :ok, state}
     else
       {:error, why, state} -> {:reply, {:error, why}, state}
@@ -106,22 +106,22 @@ defmodule CodeReloader do
     end
   end
 
-  defp deployed(plugins, server, state) do
-    changed = for {name, files} <- plugins, state.plugins[name] != files, do: name
+  defp deployed(apps, server, state) do
+    changed = for {name, files} <- apps, state.apps[name] != files, do: name
 
     case for(name <- changed, (why = deploy(server, name)) != :ok, do: "#{name}: #{why}") do
       [] ->
         if changed != [], do: Mix.shell().info("Deployed #{Enum.join(changed, ", ")}")
-        {:ok, %{state | plugins: plugins}}
+        {:ok, %{state | apps: apps}}
 
       failed ->
-        {:error, "A plugin didn't deploy: #{Enum.join(failed, "; ")}", state}
+        {:error, "An app didn't deploy: #{Enum.join(failed, "; ")}", state}
     end
   end
 
-  # As `one deploy --name <name> --files-from plugins/<name>` deploys it for the network.
+  # As `one deploy --name <name> --files-from apps/<name>` deploys it for the network.
   defp deploy(server, name) do
-    folder = Path.join([@root, "plugins", name])
+    folder = Path.join([@root, "apps", name])
     {:ok, paths} = Folder.files(folder)
     files = Map.new(paths, &{&1, File.read!(Path.join(folder, &1))})
 
@@ -139,12 +139,12 @@ defmodule CodeReloader do
   defp line({line, _column}), do: line
   defp line(line), do: line
 
-  # What One Core's code is compiled from, and what each plugin is deployed from, by each file's contents: a file's
+  # What One Core's code is compiled from, and what each app is deployed from, by each file's contents: a file's
   # time is only to the second, and hashing them all takes no longer than reading their times.
   defp core, do: hashes(Path.wildcard(Path.join(@root, "core/server/lib/**/*.ex")))
 
-  defp plugins do
-    for folder <- Path.wildcard(Path.join(@root, "plugins/*")), {:ok, paths} <- [Folder.files(folder)], into: %{} do
+  defp apps do
+    for folder <- Path.wildcard(Path.join(@root, "apps/*")), {:ok, paths} <- [Folder.files(folder)], into: %{} do
       {Path.basename(folder), hashes(Enum.map(paths, &Path.join(folder, &1)))}
     end
   end

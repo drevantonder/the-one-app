@@ -193,20 +193,20 @@ async function refresh(view) {
   if (changed) emit("changed", view)
 }
 
-/// The version of each plugin a server last listed, by the subject it's listed for.
+/// The version of each app a server last listed, by the subject it's listed for.
 /** @type {Map<string | undefined, Map<string, string>>} */
 const versions = new Map()
-/// The open apps for `subject` whose plugins have a new version since the last list, each as its address names it
-/// (`<plugin>[.<subject, last part first>]`).
+/// The open apps for `subject` whose apps have a new version since the last list, each as its address names it
+/// (`<app>[.<subject, last part first>]`).
 /** @param {string | undefined} subject @param {{ uri: string }[]} resources */
 function outdated(subject, resources) {
   const now = new Map(resources.map(({ uri }) => /** @type {[string, string]} */ (uri.slice("ui://".length).split("/", 2))))
   const was = versions.get(subject)
   versions.set(subject, now)
   if (!was) return []
-  const changed = [...now].filter(([plugin, version]) => was.has(plugin) && was.get(plugin) !== version).map(([plugin]) => plugin)
+  const changed = [...now].filter(([app, version]) => was.has(app) && was.get(app) !== version).map(([app]) => app)
   const whose = subject ? `.${subject.split("/").reverse().join(".")}` : ""
-  return changed.map((plugin) => plugin + whose)
+  return changed.map((app) => app + whose)
 }
 
 /// How many moves of its session this browser has told the page of.
@@ -270,8 +270,8 @@ const commands = {
   close: ({ view }) => void views.delete(view),
   client: () => ({ device, network: location.origin }),
   /// A file too large to go in a call goes where the network keeps it, by the link a server gives for it.
-  async upload(file, { headers: { plugin } }) {
-    const { content, isError } = await mcp("tools/call", { name: "upload", arguments: { plugin } })
+  async upload(file, { headers: { app } }) {
+    const { content, isError } = await mcp("tools/call", { name: "upload", arguments: { app } })
     if (isError) throw new Error(content[0].text)
     const to = JSON.parse(content[0].text)
     const sent = await fetch(to.url, { method: to.method, headers: to.headers, body: file })
@@ -300,9 +300,9 @@ export const invoke = (command, ...args) => {
 }
 
 /// Where an app's page is: the edge's, under where this browser's apps' files are, by what names its address
-/// (`<plugin>[.<subject, last part first>]`), as the app has its own address for each.
+/// (`<app>[.<subject, last part first>]`), as the app has its own address for each.
 /** @type {typeof import("../app/page/host.js").address} */
-export const address = (view) => `${apps}/${view.host}/${view.app}`
+export const address = (view) => `${apps}/${view.host}/${view.entrypoint}`
 
 /// What an app's frame may do. Its address is this page's, so it's given an origin of its own, which reaches
 /// nothing here: not this page, not another app, and not what this browser is signed in with.

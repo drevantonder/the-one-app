@@ -1,14 +1,14 @@
 defmodule OneCore.Sandbox do
   @moduledoc """
-  The sandbox an untrusted plugin runs in: its version's code runs in an Erlang VM of its own, a child of this
+  The sandbox an untrusted app runs in: its version's code runs in an Erlang VM of its own, a child of this
   server's, behind this machine's process sandbox, never in this server's VM. Any of the network's servers runs one
-  for anyone, since what it reaches is only what this server hands it. The wall is the plugin `sandbox`, which One
+  for anyone, since what it reaches is only what this server hands it. The wall is the app `sandbox`, which One
   Core asks one thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it,
-  no untrusted plugin runs, and a call to one says why.
+  no untrusted app runs, and a call to one says why.
 
-  There's one child for each version of an untrusted plugin on a server and each user, group or network it's installed
-  for, with the versions of the plugins it requires whose code runs inside it, as it, where that code can run there
-  (`database` among them, its SQLite too). So a child only ever runs one owner's calls, and what a stranger's plugin
+  There's one child for each version of an untrusted app on a server and each user, group or network it's installed
+  for, with the versions of the apps it requires whose code runs inside it, as it, where that code can run there
+  (`database` among them, its SQLite too). So a child only ever runs one owner's calls, and what a stranger's app
   keeps from one person's call isn't there in another's: its handles are its own, and a request for an artifact or a
   call that isn't its own is refused. It's started by the first call, compiles the code itself, behind the wall, and
   stops after a minute idle. One that stops, or is stopped, fails the calls it was running and nothing else; the next
@@ -17,7 +17,7 @@ defmodule OneCore.Sandbox do
 
   The protocol, over the child's standard input and output, each message a frame of a 4-byte length:
 
-  - This server sends Erlang terms, which the child trusts: `{:load, sets, target}`, the plugins' files to compile,
+  - This server sends Erlang terms, which the child trusts: `{:load, sets, target}`, the apps' files to compile,
     those it requires first; `{:call, id, what, about}`, a tool, a hook heard, a schedule to run or what `server-debug`
     asks (`debug/5`), with who it's for;
     `{:reply, request, result}`; and `{:cancel, id}`.
@@ -25,22 +25,22 @@ defmodule OneCore.Sandbox do
     `{"request": n, "call": id, "op": ..., ...}`, one of the functions below, and `{"log": level, "text": ...}`.
     A frame over 64 MB, or that isn't one of these, stops it.
 
-  What it's offered is what the plugin interface offers, as messages: `OneCore.Artifact`'s read, read_all, write,
-  replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, plugins,
-  deployed, process (its own VM's), forward_to, stage and ask; `OneCore.Plugin.file/2` and `nif/2`; and Logger. An
+  What it's offered is what the app interface offers, as messages: `OneCore.Artifact`'s read, read_all, write,
+  replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, apps,
+  deployed, process (its own VM's), forward_to, stage and ask; `OneCore.App.file/2` and `nif/2`; and Logger. An
   artifact it's given is a handle this server looks up, never a prefix
   it could rewrite, and a call is one this server is running, never a subject, actor or caller it could name. It hooks
-  only into what it observes: a mutate, validate or collect hook asks it nothing. It has no services, no other plugins'
+  only into what it observes: a mutate, validate or collect hook asks it nothing. It has no services, no other apps'
   functions, no network, no website it reaches, no programs, and no files but a folder of its own that goes when it
   stops.
 
-  It calls the tools of only the plugins it requires (`OneCore.Plugin`): a call to any other's is refused.
+  It calls the tools of only the apps it requires (`OneCore.App`): a call to any other's is refused.
   """
   @behaviour :gen_statem
   require Logger
-  alias OneCore.{Artifact, Bucket, Builds, Call, Plugins, Server}
+  alias OneCore.{Artifact, Bucket, Builds, Call, Apps, Server}
   alias OneCore.Call.State
-  alias OneCore.Plugins.{Calls, Version}
+  alias OneCore.Apps.{Calls, Version}
 
   @registry __MODULE__.Children
   @supervisor __MODULE__.Supervisor
@@ -61,8 +61,8 @@ defmodule OneCore.Sandbox do
   def children, do: [{Registry, keys: :unique, name: @registry}, {DynamicSupervisor, name: @supervisor}]
 
   @doc """
-  What a set of an untrusted plugin's files says of itself, from a child that compiles only them: `{:ok, version}`
-  of the plugin `artifact`, or `{:error, why}`. The files are as the server keeps them.
+  What a set of an untrusted app's files says of itself, from a child that compiles only them: `{:ok, version}`
+  of the app `artifact`, or `{:error, why}`. The files are as the server keeps them.
   """
   def describe(artifact, files) do
     name = Path.basename(artifact)
@@ -73,13 +73,13 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
-  Checks an untrusted plugin's version, from its `files` as the server keeps them, as it will run, with the plugins it
+  Checks an untrusted app's version, from its `files` as the server keeps them, as it will run, with the apps it
   requires whose code runs inside it as `owner` finds them: `{:ok, warnings}`, or `{:error, why}` with each thing it
   uses that the sandbox doesn't offer, a sentence each with its file and line.
   """
   def check(owner, %Version{} = version, files) do
     with {:ok, %{"problems" => problems, "warnings" => warnings}} <-
-           loaded(owner, version, Plugins.required(owner, version), files) do
+           loaded(owner, version, Apps.required(owner, version), files) do
       case problems do
         [] ->
           {:ok, warnings}
@@ -91,8 +91,8 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
-  Runs `program` with `arguments` to its end behind this machine's sandbox, under `policy` as the plugin `sandbox`
-  takes it: what an untrusted plugin's app is built with, say. Gives `{output, status}`, or `{:error, why}` where it
+  Runs `program` with `arguments` to its end behind this machine's sandbox, under `policy` as the app `sandbox`
+  takes it: what an untrusted app's entrypoint is built with, say. Gives `{output, status}`, or `{:error, why}` where it
   couldn't start. One that runs longer than five minutes is stopped.
   """
   def run(program, arguments, policy) do
@@ -120,16 +120,16 @@ defmodule OneCore.Sandbox do
     end
   end
 
-  # Starts a program behind the wall, which the plugin `sandbox` is, with its pipes as a port this process owns.
+  # Starts a program behind the wall, which the app `sandbox` is, with its pipes as a port this process owns.
   defp walled(program, arguments, policy) do
-    case Plugins.run(["network"], "sandbox", fn _at, versions ->
-           versions["sandbox"].plugin.start(program, arguments, policy)
+    case Apps.run(["network"], "sandbox", fn _at, versions ->
+           versions["sandbox"].app.start(program, arguments, policy)
          end) do
       {:ok, port} ->
         {:ok, port}
 
-      {:error, "There's no plugin named sandbox"} ->
-        {:error, "An untrusted plugin runs in a sandbox, which needs the plugin sandbox installed for the network"}
+      {:error, "There's no app named sandbox"} ->
+        {:error, "An untrusted app runs in a sandbox, which needs the app sandbox installed for the network"}
 
       {:error, why} ->
         {:error, why}
@@ -137,8 +137,8 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
-  Runs `what` of the plugin `name` among `versions` in its child: `{:tool, tool, inputs}`, `{:hook, hook, about}` or
-  `{:schedule, jobs}`, for `call`. Gives what the plugin answered, or raises with why it didn't.
+  Runs `what` of the app `name` among `versions` in its child: `{:tool, tool, inputs}`, `{:hook, hook, about}` or
+  `{:schedule, jobs}`, for `call`. Gives what the app answered, or raises with why it didn't.
   """
   def call(versions, name, what, %Call{} = call) do
     version = versions[name]
@@ -165,7 +165,7 @@ defmodule OneCore.Sandbox do
         "subject" => call.subject,
         "actor" => call.actor,
         "caller" => call.caller,
-        "plugin" => call.plugin,
+        "app" => call.app,
         "who" => call.who,
         "server" => call.server,
         "loaded" => Map.keys(versions) -- [name]
@@ -179,7 +179,7 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
-  Asks the VM of the plugin `name` among `versions`, the one for `owner`, what the plugin `server-debug` asks of it:
+  Asks the VM of the app `name` among `versions`, the one for `owner`, what the app `server-debug` asks of it:
   `request`, a map JSON holds, which its side of One Core answers (`OneCore.Sandbox.Child.Debug`). Gives what it
   answered, or raises with why it didn't. Only a VM that's running is asked, unless `start` says to start one.
   """
@@ -196,7 +196,7 @@ defmodule OneCore.Sandbox do
       server: Server.key(),
       subject: owner,
       actor: nil,
-      plugin: name,
+      app: name,
       who: version.artifact,
       request: nil,
       loaded: %{},
@@ -271,17 +271,17 @@ defmodule OneCore.Sandbox do
   defp op("fire", request, _call, context), do: fire(request, context)
   defp op(op, _request, nil, _context), do: raise("#{op} is asked within a call, and that call has ended")
 
-  defp op("tool", %{"plugin" => plugin, "tool" => tool, "inputs" => inputs} = request, call, context)
-       when is_binary(plugin) and is_binary(tool) and is_map(inputs) do
-    if not is_map_key(context.requires, plugin),
+  defp op("tool", %{"app" => app, "tool" => tool, "inputs" => inputs} = request, call, context)
+       when is_binary(app) and is_binary(tool) and is_map(inputs) do
+    if not is_map_key(context.requires, app),
       do:
         raise(
-          "#{context.name} may not call #{plugin}_#{tool}: its requires/0 doesn't name #{plugin}. An untrusted " <>
-            "plugin calls the tools of only the plugins it requires."
+          "#{context.name} may not call #{app}_#{tool}: its requires/0 doesn't name #{app}. An untrusted " <>
+            "app calls the tools of only the apps it requires."
         )
 
     options = if is_map_key(request, "on_behalf_of"), do: [on_behalf_of: request["on_behalf_of"]], else: []
-    Call.tool(call, plugin, tool, inputs, options)
+    Call.tool(call, app, tool, inputs, options)
   end
 
   defp op("make", %{"id" => id}, call, context), do: named(context, Call.make(call, id))
@@ -294,12 +294,12 @@ defmodule OneCore.Sandbox do
 
   defp op("member", %{"of" => of}, call, _context) when is_binary(of), do: Call.member?(call, of)
   defp op("owns", _request, call, _context), do: Call.owns?(call)
-  defp op("plugins", _request, call, _context), do: Call.plugins(call)
+  defp op("apps", _request, call, _context), do: Call.apps(call)
   defp op("deployed", _request, call, _context), do: Call.deployed(call)
   defp op("forward_to", %{"server" => server}, call, _context) when is_binary(server), do: Call.forward_to(call, server)
   defp op("stage", %{"text" => text}, call, _context) when is_binary(text), do: Call.stage(call, text)
   defp op("ask", %{"question" => question}, call, _context), do: Call.ask(call, question)
-  defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered to an untrusted plugin")
+  defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered to an untrusted app")
 
   defp named(context, artifact), do: [handle(context, artifact), Artifact.name(artifact)]
 
@@ -324,11 +324,11 @@ defmodule OneCore.Sandbox do
   defp relation!(relation) when relation in ["viewer", "editor", "owner"], do: relation
   defp relation!(_), do: raise(ArgumentError, "a relation is viewer, editor or owner")
 
-  # A scheduled job's call, which the plugin's schedule keeper in the child makes as the clock, for whoever it's
-  # installed for, as One Core would: only one of the plugin's own jobs, for the owner whose child it is.
-  defp fire(%{"installed" => at, "plugin" => name, "tool" => tool, "inputs" => inputs}, context) do
+  # A scheduled job's call, which the app's schedule keeper in the child makes as the clock, for whoever it's
+  # installed for, as One Core would: only one of the app's own jobs, for the owner whose child it is.
+  defp fire(%{"installed" => at, "app" => name, "tool" => tool, "inputs" => inputs}, context) do
     with true <- at == context.owner,
-         %{^name => %Version{artifact: artifact}} <- Plugins.versions([at]),
+         %{^name => %Version{artifact: artifact}} <- Apps.versions([at]),
          true <- artifact == context.artifact,
          %{} <- Enum.find(context.jobs, &(&1.tool == tool and &1.inputs == inputs)) do
       with {:error, why} <- Calls.call(name, tool, inputs, {nil, at}, true),
@@ -358,11 +358,11 @@ defmodule OneCore.Sandbox do
   defp artifact!(context, handle) when is_integer(handle) do
     case :ets.lookup(context.handles, handle) do
       [{^handle, artifact}] -> artifact
-      [] -> raise "That isn't an artifact this plugin was given"
+      [] -> raise "That isn't an artifact this app was given"
     end
   end
 
-  defp artifact!(_context, _handle), do: raise("That isn't an artifact this plugin was given")
+  defp artifact!(_context, _handle), do: raise("That isn't an artifact this app was given")
 
   defp command(port, term) do
     frame = :erlang.term_to_binary(term)
@@ -398,7 +398,7 @@ defmodule OneCore.Sandbox do
   end
 
   # What tells a version's child from another's: its name and code, and those of the versions whose code runs inside
-  # it. Two plugins of the same files are two plugins, each with its VM and what it compiled.
+  # it. Two apps of the same files are two apps, each with its VM and what it compiled.
   defp key(version, required),
     do:
       {Path.basename(version.artifact), version.code, Enum.sort(for {name, other} <- required, do: {name, other.code})}
@@ -423,7 +423,7 @@ defmodule OneCore.Sandbox do
     end
   end
 
-  # The files of each plugin, those it requires first, from the bucket but the plugin's own where they're given: what
+  # The files of each app, those it requires first, from the bucket but the app's own where they're given: what
   # isn't in client/, and of its NIFs' libraries only this machine's.
   defp sets(version, required, files) do
     own = Path.basename(version.artifact)
@@ -588,7 +588,7 @@ defmodule OneCore.Sandbox do
 
     # Erlang's and Elixir's applications, and the server's libraries, but not the server's own code, which an
     # installed server's release keeps beside them.
-    # Recon, which a plugin is debugged with (`debug/5`), is among them in a release, and is added where it isn't.
+    # Recon, which an app is debugged with (`debug/5`), is among them in a release, and is added where it isn't.
     apps =
       for ebin <- Enum.uniq(Path.wildcard(Path.join(root, "lib/*/ebin")) ++ Path.wildcard(Path.join(elixir, "*/ebin"))),
           not String.starts_with?(Path.basename(Path.dirname(ebin)), "one_core-"),
@@ -769,6 +769,6 @@ defmodule OneCore.Sandbox do
         used < month_ago,
         do: File.rm_rf!(folder)
   rescue
-    error -> Logger.warning("What a plugin's VM compiled wasn't kept: #{Exception.message(error)}")
+    error -> Logger.warning("What an app's VM compiled wasn't kept: #{Exception.message(error)}")
   end
 end

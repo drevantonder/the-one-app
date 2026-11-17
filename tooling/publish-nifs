@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Publishes the builds of this repo's plugins' NIFs and programs, as Elixir's rustler_precompiled publishes a
-# library's, so a server installing or updating one from git has them (`OneCore.Plugins.Precompiled`): each build
+# Publishes the builds of this repo's apps' NIFs and programs, as Elixir's rustler_precompiled publishes a
+# library's, so a server installing or updating one from git has them (`OneCore.Apps.Precompiled`): each build
 # whose inputs changed (`tooling/input-hash`) is built (`tooling/nifs`) and uploaded as a file of the GitHub Release
-# `nifs-<commit>`, named `<crate>-<input hash>-<kind>`, and its plugin's `server/checksums.json` names it by its path
-# in the plugin, with its URL and SHA-256. This commits that and pushes it to main, so main pins exactly which builds
-# are trusted. Run it on Linux, from a commit on main, once a plugin's native code changed there:
+# `nifs-<commit>`, named `<crate>-<input hash>-<kind>`, and its app's `server/checksums.json` names it by its path
+# in the app, with its URL and SHA-256. This commits that and pushes it to main, so main pins exactly which builds
+# are trusted. Run it on Linux, from a commit on main, once an app's native code changed there:
 #
 #     tooling/publish-nifs
 #
@@ -24,12 +24,12 @@ git merge-base --is-ancestor "$commit" origin/main || { echo "Push $commit to ma
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 release=nifs-${commit:0:12}
 
-# Each build of each plugin's crates, by its path, with its name in a Release, and those not published yet.
+# Each build of each app's crates, by its path, with its name in a Release, and those not published yet.
 declare -A named=() kinds=() uploaded=()
-files=() plugins=() unpublished=()
-for crate in $(dirname plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml); do
-  plugin=${crate#plugins/} && plugin=${plugin%%/*}
-  [[ " ${plugins[*]} " == *" $plugin "* ]] || plugins+=("$plugin")
+files=() apps=() unpublished=()
+for crate in $(dirname apps/*/server/nif/*/Cargo.toml apps/*/server/bin/*/Cargo.toml); do
+  app=${crate#apps/} && app=${app%%/*}
+  [[ " ${apps[*]} " == *" $app "* ]] || apps+=("$app")
   for kind in linux-x86_64 linux-aarch64 windows-x86_64 macos-aarch64; do
     case $kind in
       linux-*) triple=${kind#*-}-unknown-linux-gnu ;;
@@ -40,7 +40,7 @@ for crate in $(dirname plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/
     file=$crate/$kind$extension
     named[$file]=$(basename "$crate")-$(tooling/input-hash "$crate" "$triple")-$kind$extension
     files+=("$file")
-    url=$(jq -r --arg path "${file#plugins/"$plugin"/}" '.[$path].url // empty' "plugins/$plugin/server/checksums.json" 2>/dev/null || true)
+    url=$(jq -r --arg path "${file#apps/"$app"/}" '.[$path].url // empty' "apps/$app/server/checksums.json" 2>/dev/null || true)
     [[ ${url##*/} == "${named[$file]}" ]] || { unpublished+=("$file") && kinds[$kind]=1; }
   done
 done
@@ -49,7 +49,7 @@ echo "Publishing ${unpublished[*]} to $release" >&2
 
 gh release view "$release" >/dev/null 2>&1 ||
   gh release create "$release" --target "$commit" --prerelease --title "NIFs at ${commit:0:12}" \
-    --notes "Builds of plugins' NIFs and programs at $commit, which each plugin's server/checksums.json names."
+    --notes "Builds of apps' NIFs and programs at $commit, which each app's server/checksums.json names."
 
 linux=() && for kind in linux-x86_64 linux-aarch64 windows-x86_64; do [[ -z ${kinds[$kind]-} ]] || linux+=("$kind"); done
 ((${#linux[@]} == 0)) || tooling/nifs "${linux[@]}"
@@ -83,12 +83,12 @@ trap 'rm -r "$upload"' EXIT
 for file in "${unpublished[@]}"; do [[ -n ${uploaded[$file]-} ]] || cp "$file" "$upload/${named[$file]}"; done
 [[ -z $(ls "$upload") ]] || gh release upload "$release" --clobber "$upload"/*
 
-# Each plugin's checksums: its builds just published, and the rest as they were.
-for plugin in "${plugins[@]}"; do
-  checksums=plugins/$plugin/server/checksums.json
+# Each app's checksums: its builds just published, and the rest as they were.
+for app in "${apps[@]}"; do
+  checksums=apps/$app/server/checksums.json
   for file in "${files[@]}"; do
-    [[ $file == plugins/$plugin/* ]] || continue
-    path=${file#plugins/"$plugin"/}
+    [[ $file == apps/$app/* ]] || continue
+    path=${file#apps/"$app"/}
     if [[ " ${unpublished[*]} " == *" $file "* ]]; then
       jq -nc --arg path "$path" --arg url "https://github.com/$repo/releases/download/$release/${named[$file]}" \
         --arg sha256 "$(sha256sum "$file" | cut -d' ' -f1)" '{($path): {url: $url, sha256: $sha256}}'
@@ -99,7 +99,7 @@ for plugin in "${plugins[@]}"; do
   mv "$checksums.new" "$checksums"
 done
 
-git add plugins/*/server/checksums.json
-git commit -qm "chore: publish the builds of plugins' NIFs and programs at ${commit:0:12}, in the Release $release"
+git add apps/*/server/checksums.json
+git commit -qm "chore: publish the builds of apps' NIFs and programs at ${commit:0:12}, in the Release $release"
 git fetch -q && git rebase -q origin/main && git push -q origin HEAD:main
 echo "Published to https://github.com/$repo/releases/tag/$release, and pushed $(git rev-parse --short HEAD)."

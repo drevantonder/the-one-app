@@ -1,7 +1,7 @@
-//! One Core in a client: what every client and every plugin's client-side code stands on. It holds the device's key,
+//! One Core in a client: what every client and every app's client-side code stands on. It holds the device's key,
 //! reaches a server by its key and asks it, keeps what servers answered (`kept`), and answers what an app's page asks
 //! through its bridge (`Subscription`). The clients are programs on it (`clients/`): the CLI and MCP, and the app, a window
-//! on it. A program is built with the native code of the plugins it ships with, which fills in what a device does of
+//! on it. A program is built with the native code of the apps it ships with, which fills in what a device does of
 //! a tool's inputs (`resolve`).
 //!
 //! A client asks a server in MCP's JSON-RPC: one message on a stream of its own, and the answer back on that stream.
@@ -53,7 +53,7 @@ fn device_info() -> Value {
 
 /// What servers and clients speak.
 pub const ALPN: &[u8] = b"one/mcp/1";
-/// The most one message may carry: a plugin's files fit.
+/// The most one message may carry: an app's files fit.
 pub const LIMIT: usize = 64 << 20;
 /// How long reaching a server may take: long enough for a phone to find the relay and be let in, and for a first
 /// packet that's lost to be sent again.
@@ -450,7 +450,7 @@ pub fn name() -> String {
 
 /// Why a device isn't in its network now, where it says: its person stopped it where they signed in, its code ended
 /// first, or it was in and was removed since. The app says it on the sign-in page it shows the next code on, told it
-/// as `why`, in these same words (`plugins/sign-in/edge/page`).
+/// as `why`, in these same words (`apps/sign-in/edge/page`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NotApproved {
@@ -903,7 +903,7 @@ pub struct Client {
     watching: AtomicBool,
     /// Whether its network answers, which only `connection_moved` changes.
     connection: watch::Sender<Connection>,
-    /// What the native code of the plugins the program ships with fills in of a tool's inputs (`resolve`).
+    /// What the native code of the apps the program ships with fills in of a tool's inputs (`resolve`).
     resolvers: Vec<Arc<dyn InputResolver>>,
     /// What this client knows of each tool, as a server last listed them (`resolve`).
     listed: std::sync::Mutex<Option<Arc<resolve::Listed>>>,
@@ -1156,7 +1156,7 @@ impl Client {
         self.key.public().to_string()
     }
 
-    /// This device's own key, for the native code of the plugins the program ships with: what's encrypted to the
+    /// This device's own key, for the native code of the apps the program ships with: what's encrypted to the
     /// device opens with it. No app's page and no server is handed it.
     pub fn device_key(&self) -> &SecretKey {
         &self.key
@@ -1507,7 +1507,7 @@ impl Client {
         }
     }
 
-    /// Tells a server, in one batch, what this device's clients reported and kept (`report`), for the plugins that
+    /// Tells a server, in one batch, what this device's clients reported and kept (`report`), for the apps that
     /// hear `measured`. What it can't tell is kept again for next time. Telling reports nothing itself.
     async fn send_reports(&self) {
         let _one = self.sending.lock().await;
@@ -1676,7 +1676,7 @@ const AGAIN: Duration = Duration::from_secs(60);
 const REPORTS: &str = "reports";
 const REPORTS_MOST: u64 = 128 * 1024;
 
-/// What a client tells a server of what it reported, for the plugins that hear `measured`.
+/// What a client tells a server of what it reported, for the apps that hear `measured`.
 const MEASURED: &str = "notifications/one/measured";
 
 /// How long a request takes before it's reported though it was answered.
@@ -1880,12 +1880,12 @@ async fn receive_notifications(connection: iroh::endpoint::Connection, notificat
     }
 }
 
-/// The files of `folder`, by their paths in it, as a plugin's folder is deployed: names starting with a dot are left
+/// The files of `folder`, by their paths in it, as an app's folder is deployed: names starting with a dot are left
 /// out, and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not.
-/// So is a plugin's native code but what a server loads: the clients are built with its `client/native/`, and the
+/// So is an app's native code but what a server loads: the clients are built with its `client/native/`, and the
 /// source of a NIF or a program, a folder of its `server/nif/` or `server/bin/`, stays here, but for what's built from
 /// it for each kind of machine, `<kind>.so` or `<kind>` there, which is deployed though git ignores it as built
-/// (`OneCore.Plugin`). A server reads a plugin's folder this way too (`core/server/nif/folder`).
+/// (`OneCore.App`). A server reads an app's folder this way too (`core/server/nif/folder`).
 pub fn files(folder: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
     let root = folder.to_owned();

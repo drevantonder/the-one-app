@@ -7,14 +7,14 @@
 // DNS record and certificate, if the name is on a zone of the same account. Without one it answers only at
 // workers.dev.
 //
-// That's the pieces in this folder, the web client's files (`clients/web`), and each plugin's edge function: a plugin
-// that has one holds an ordinary Worker in the folder `edge` of its own (`plugins/<name>/edge`), with a
+// That's the pieces in this folder, the web client's files (`clients/web`), and each app's edge function: an app
+// that has one holds an ordinary Worker in the folder `edge` of its own (`apps/<name>/edge`), with a
 // `wrangler.jsonc` and a `package.json` that names the first part of each path it answers (`"paths": ["mcp"]`).
 // The gateway's list of paths is made here from those. A part is built in `target/edge/<name>`, a copy as deep in
-// the repo as the folder it's of, so nothing that building leaves behind is among its plugin's files, and what it
+// the repo as the folder it's of, so nothing that building leaves behind is among its app's files, and what it
 // reaches in the repo by a path from itself it still reaches. It's given three bindings beside its own:
 //
-// - `OWN` writes and removes blobs of its plugin's own artifact for the network, where its plugin's servers read.
+// - `OWN` writes and removes blobs of its app's own artifact for the network, where its app's servers read.
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
 // - `RELAY` passes a call to a server and gives its answer, or tells every server something.
 //
@@ -74,28 +74,28 @@ const paths = { ...PIECES };
 const parts = [];
 const workers = [];
 let who = null;
-for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/plugins`)) {
-  const plugin = config.split("/")[0];
-  const part = `${built}/${plugin}`;
-  cpSync(`${root}/plugins/${dirname(config)}`, part, { recursive: true });
+for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/apps`)) {
+  const app = config.split("/")[0];
+  const part = `${built}/${app}`;
+  cpSync(`${root}/apps/${dirname(config)}`, part, { recursive: true });
   const about = await Bun.file(`${part}/package.json`).json();
   await $`bun install --frozen-lockfile`.cwd(part).quiet();
   if (about.scripts?.build) await $`bun run build`.cwd(part).quiet();
 
   const worker = (await import(`${part}/wrangler.jsonc`)).default;
-  const binding = `PART_${plugin.toUpperCase().replace(/-/g, "_")}`;
+  const binding = `PART_${app.toUpperCase().replace(/-/g, "_")}`;
   for (const path of about.paths ?? []) {
-    if (paths[path]) throw new Error(`${plugin} answers /${path}, which ${paths[path]} answers already`);
+    if (paths[path]) throw new Error(`${app} answers /${path}, which ${paths[path]} answers already`);
     paths[path] = binding;
   }
   if (about.who) {
-    if (who) throw new Error(`${plugin} says who a request is from, which ${who.plugin} says already`);
-    who = { plugin, binding: "WHO", service: worker.name, entrypoint: "Who" };
+    if (who) throw new Error(`${app} says who a request is from, which ${who.app} says already`);
+    who = { app, binding: "WHO", service: worker.name, entrypoint: "Who" };
   }
   services.push({ binding, service: worker.name });
   worker.services = [
     ...(worker.services ?? []),
-    { binding: "OWN", service: "network-presigner", entrypoint: "Own", props: { plugin } },
+    { binding: "OWN", service: "network-presigner", entrypoint: "Own", props: { app } },
     { binding: "NETWORK", service: "network-presigner", entrypoint: "Network" },
     { binding: "RELAY", service: "network-relay" },
   ];
@@ -143,7 +143,7 @@ if (what === "dev") {
   process.exit(await wrangler("dev", ...[gatewayConfig, ...pieces, ...parts].flatMap((config) => ["-c", config]), ...rest));
 }
 // A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
-// its `wrangler.jsonc`, which only it holds, such as the presigner's and a plugin's part's keys to an outside service.
+// its `wrangler.jsonc`, which only it holds, such as the presigner's and an app's part's keys to an outside service.
 // The tail parts come first among the parts, before whatever names them.
 const [tailParts, otherParts] = [parts.slice(0, tails.length), parts.slice(tails.length)];
 for (const deployed of [config.web, config.presigner, ...tailParts, config.relay, ...otherParts, config.mcp, gatewayConfig]) {

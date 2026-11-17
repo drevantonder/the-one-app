@@ -34,7 +34,7 @@ An app is a network's: the commands that build it are in that repo's `app/README
   profile's `com.apple.security.application-groups` is empty, the app keeps its client in its own folder, and the
   notification extension can't be signed.
 - A development profile's `aps-environment` is `development`, so the phone's APNs token is the sandbox's, which the
-  network's edge reaches only with `APNS_SANDBOX=1` (`plugins/notifications/edge/README.md`).
+  network's edge reaches only with `APNS_SANDBOX=1` (`apps/notifications/edge/README.md`).
 - The phone is paired with the Mac: `xcrun devicectl list devices` names it.
 
 ## Building and signing

@@ -1,7 +1,7 @@
 defmodule OneCore.Call.State do
   @moduledoc """
-  The state every tool call is in, whatever started it: an MCP client, `one <plugin> <tool>`, a code mode script, a
-  plugin calling a tool (`OneCore.Call.tool/5`) or a scheduled job.
+  The state every tool call is in, whatever started it: an MCP client, `one <app> <tool>`, a code mode script, a
+  app calling a tool (`OneCore.Call.tool/5`) or a scheduled job.
 
       asked ─► checking (its inputs, who may, the hooks that mutate and validate it)
                  ├─► refused ─► an MCP protocol error to a caller that asked for a task, and no task is made
@@ -11,7 +11,7 @@ defmodule OneCore.Call.State do
       running ⇄ input_required                    (`OneCore.Call.ask/2`, then its answer)
 
   Working is one of three: `routing`, passed on to the server that runs it; `waiting`, for where it runs to be ready
-  (a server starting, a sandbox's VM loading), its message saying for what; and `running`, its message the plugin's
+  (a server starting, a sandbox's VM loading), its message saying for what; and `running`, its message the app's
   last `OneCore.Call.stage/2`. An MCP task's `status` is `working` for all three, and its `statusMessage` the message.
 
   A tool that raised, or answered what its outputs don't say, is `completed`, its answer an error (`isError`), as MCP
@@ -95,7 +95,7 @@ defmodule OneCore.Call.State do
 
   @doc """
   Runs a tool call's `fun` in its state: the one this process began for it, still `asked`, or one of its own, as for a
-  call another plugin made. Moves it to `checking`, and once `fun` gives what `OneCore.Plugins.Calls.call/6` does, to
+  call another app made. Moves it to `checking`, and once `fun` gives what `OneCore.Apps.Calls.call/6` does, to
   where that ends it. Gives what `fun` gave.
   """
   def run(fun) do
@@ -210,7 +210,7 @@ defmodule OneCore.Call.State do
 
   @doc """
   Says what the call `id` is doing, for a state of working: `routing` to the server it's passed on to, `waiting` for
-  something to be ready, and `running` once it runs again, with what the plugin last said.
+  something to be ready, and `running` once it runs again, with what the app last said.
   """
   def working(nil, _to, _message), do: :ok
 
@@ -221,7 +221,7 @@ defmodule OneCore.Call.State do
   end
 
   @doc """
-  Says what the plugin running the call `id` is doing (`OneCore.Call.stage/2`), as its task's `statusMessage` and the
+  Says what the app running the call `id` is doing (`OneCore.Call.stage/2`), as its task's `statusMessage` and the
   progress its caller is told. A call that was cancelled raises here instead, so what it began cleans up after it.
   """
   def stage(nil, _text), do: :ok
@@ -238,7 +238,7 @@ defmodule OneCore.Call.State do
   end
 
   # What a call is doing, which its caller is told in its progress: what it said in the state it's in, or the
-  # plugin's last stage while it runs.
+  # app's last stage while it runs.
   @doc false
   def message(%{state: :running, stage: stage}), do: stage
   def message(%{message: message}), do: message

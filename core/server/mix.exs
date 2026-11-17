@@ -47,7 +47,7 @@ defmodule OneCore.MixProject do
 
   # The program is One Core. On a developer's machine it's also `mix network`, which `tooling/network` runs, at the repo's
   # root.
-  # `OneCore.Redact` and `OneCore.Nif` are compiled by an untrusted plugin's VM too, which has none of the server's
+  # `OneCore.Redact` and `OneCore.Nif` are compiled by an untrusted app's VM too, which has none of the server's
   # code, so it's where that VM finds them, in `priv/sandbox`.
   defp elixirc_paths(:dev), do: elixirc_paths(:prod) ++ [Path.expand("../../tooling/network.ex", __DIR__)]
   defp elixirc_paths(_env), do: ["lib", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
@@ -56,7 +56,7 @@ defmodule OneCore.MixProject do
   # has one set of features, so nothing in it is built twice or again for nothing. It's the debug build, as a
   # developer's is (`Cargo.toml`). Each is named for its build, as
   # `tooling/nifs` names it (`OneCore.Nif`). One Core's go where the server loads them (`priv/native`), and those of this
-  # repo's plugins beside their source, where a plugin brings them (`OneCore.Plugin`): here, its
+  # repo's apps beside their source, where an app brings them (`OneCore.App`): here, its
   # folder is what's deployed. `tooling/release` and `tooling/nifs` build them for every kind of machine, as a server
   # built for one is. A crash in a Rust NIF ends the VM: Rust panics are caught, and what's left is rare. Each is
   # removed before it's put there again, since a server running from this checkout has it loaded.
@@ -76,7 +76,7 @@ defmodule OneCore.MixProject do
           do: {crate, Path.join(__DIR__, "priv/native/#{Path.basename(crate)}.so")}
 
     bundled =
-      for toml <- Path.wildcard("#{root}/plugins/*/server/nif/*/Cargo.toml"),
+      for toml <- Path.wildcard("#{root}/apps/*/server/nif/*/Cargo.toml"),
           crate = Path.dirname(toml),
           do: {crate, "#{crate}/#{os}-#{arch}.so"}
 

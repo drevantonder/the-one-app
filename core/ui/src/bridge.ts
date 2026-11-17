@@ -161,7 +161,7 @@ export async function call(tool: string, inputs: object = {}, { subject }: Subje
 
 /// `await call("notes_attach", { note: 4, name: file.name, type: file.type, upload: await upload(file) })`:
 /// sends a file that's too large to go in a call straight to where the network keeps it, for a tool of this app's
-/// plugin. → the name that tool takes for it, in the input its plugin says is an upload.
+/// app. → the name that tool takes for it, in the input its app says is an upload.
 export const upload = (file: File | Blob): Promise<string> => greet().then(() => ask<{ upload: string }>("one/upload", { file })).then(({ upload }) => upload)
 
 /// `await showRecoveryKey()`: has the client show its person their recovery key, over the app. The app is told
@@ -196,8 +196,8 @@ export function changed(listener: () => void): () => void {
 /// first screen.
 export const leave = () => greet().then(() => notify("ui/notifications/request-teardown"))
 
-/// `open("claims")`: shows another app over this one, by its plugin's name, as tapping its icon or a notification
-/// from it does. `open("notes/client/index.html", { subject: "groups/family" })` names a page of the plugin's that isn't
+/// `open("claims")`: shows another app over this one, by its app's name, as tapping its icon or a notification
+/// from it does. `open("notes/client/index.html", { subject: "groups/family" })` names a page of the app's that isn't
 /// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a Home Screen page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
 /// without. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an

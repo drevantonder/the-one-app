@@ -4,11 +4,11 @@ defmodule OneCore.Tasks do
   starts, carries on from, checks back on with `tasks/get`, answers with `tasks/update` when it asks something, and
   cancels with `tasks/cancel`.
 
-  A tool is made a task by its plugin, which says `task_support: :optional` or `:required` beside its name. A client
+  A tool is made a task by its app, which says `task_support: :optional` or `:required` beside its name. A client
   that says it takes tasks, in its request's `_meta` (`io.modelcontextprotocol/clientCapabilities`), is answered a task
   for a call of one of those once the call is accepted (`OneCore.Call.State`); one that doesn't is answered as it
   always was, and a call of one that's `:required` is refused (`-32021`). A call is never a task for whoever
-  calls with no person behind them, as a plugin, a script or the clock does, which waits on its answer.
+  calls with no person behind them, as an app, a script or the clock does, which waits on its answer.
 
   A task is its call, running on the server that runs it, in a process of its own, so it carries on whatever its
   caller does. What it is is kept in the bucket, `<whoever it runs for>/tasks/<id>`, which is its `taskId` too, so any
@@ -49,7 +49,7 @@ defmodule OneCore.Tasks do
     end
   end
 
-  @doc "How a tool's plugin says it's made a task, `:optional` or `:required`, or `nil` for never."
+  @doc "How a tool's app says it's made a task, `:optional` or `:required`, or `nil` for never."
   def support(tool), do: tool[:task_support]
 
   @doc """

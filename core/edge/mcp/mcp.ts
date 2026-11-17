@@ -4,12 +4,12 @@
 // which device that is and decides whose it is itself.
 //
 // One of the network's own devices signs what it asks with its key, which is checked here. Anyone else has signed in,
-// and who they are is the plugin's to say that signs people in: it's bound here as WHO, by `edge.js`, and asked
-// `who(request)` (`plugins/sign-in/edge/worker.ts`). With no such plugin, only devices signing with their key come in.
+// and who they are is the app's to say that signs people in: it's bound here as WHO, by `edge.js`, and asked
+// `who(request)` (`apps/sign-in/edge/worker.ts`). With no such app, only devices signing with their key come in.
 import { verifiedKey } from "../ask.ts";
 import rules from "../../server/priv/rules.md";
 
-/** Who a request is from, as the plugin that signs people in says. */
+/** Who a request is from, as the app that signs people in says. */
 interface Who {
   /** The device it is to a server. */
   device: string;
@@ -24,7 +24,7 @@ interface Who {
 }
 
 type Env = McpEnv & {
-  /** The plugin that signs people in: who a request is from, or the answer for one from nobody signed in. */
+  /** The app that signs people in: who a request is from, or the answer for one from nobody signed in. */
   WHO?: { who(request: Request): Promise<Who | { refused: Response }> };
 };
 
@@ -57,12 +57,12 @@ export default {
 
 /**
  * What an assistant reads to come into the network at `origin`, as llmstxt.org has it. Anyone may read it, so it
- * says nothing of what a network has: which plugins, and their skills, are for whoever signed in.
+ * says nothing of what a network has: which apps, and their skills, are for whoever signed in.
  */
 const llms = (origin: string) => `# ${new URL(origin).host}
 
 > A One App network: a person's, a family's or a workplace's email, messages, calendar, files, devices and more,
-> each a plugin. An assistant comes in as the person who lets it in, and does what they can, through MCP or the
+> each an app. An assistant comes in as the person who lets it in, and does what they can, through MCP or the
 > \`one\` command.
 
 ## Rules
@@ -95,22 +95,22 @@ There are two ways in, and you choose the one that fits you, or tell the person 
 
 ## Finding your way
 
-- Each plugin has a skill that says when and how to use its tools: read it before them. The \`skills\` tool lists
-  and reads them, as do MCP's \`skills/list\` and \`resources/read\`, under \`skill://\`, and \`one <plugin>\` prints one
+- Each app has a skill that says when and how to use its tools: read it before them. The \`skills\` tool lists
+  and reads them, as do MCP's \`skills/list\` and \`resources/read\`, under \`skill://\`, and \`one <app>\` prints one
   with its tools. Whoever signed in reads them at \`${origin}/skills/<path>\` too, as
-  \`${origin}/skills/building-plugins/SKILL.md\`.
-- \`one search "<words>"\`, and code mode's \`search\`, find the tools for a task across every plugin, each with how to
-  call it and its plugin's skill. Before saying you can't, search: a plugin they haven't installed yet may do it, and
+  \`${origin}/skills/building-apps/SKILL.md\`.
+- \`one search "<words>"\`, and code mode's \`search\`, find the tools for a task across every app, each with how to
+  call it and its app's skill. Before saying you can't, search: an app they haven't installed yet may do it, and
   search offers it.
 - Every MCP tool is also a command: \`gmail_search\` is \`one gmail search\`. \`one run <file>\` runs a script as
   \`execute\` does.
-- When the person asks for an app, tracker or tool, make it here as a plugin, where it's on all their devices: the
-  skill building-plugins says how.
+- When the person asks for an app, tracker or tool, make it here as an app, where it's on all their devices: the
+  skill building-apps says how.
 `;
 
 /**
  * A file of a skill, `/skills/<path>/<file>` for `skill://<path>/<file>`, for whoever signed in or one of the
- * network's own devices, as a server reads it for them. Skills say what plugins someone has, so nobody else reads one.
+ * network's own devices, as a server reads it for them. Skills say what apps someone has, so nobody else reads one.
  */
 async function skill(request: Request, env: Env, url: URL) {
   if (request.method !== "GET") return new Response(null, { status: 405, headers: { allow: "GET" } });
@@ -132,7 +132,7 @@ async function skill(request: Request, env: Env, url: URL) {
   return new Response(text, { headers: { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-store" } });
 }
 
-/** Who signed in, as the plugin that signs people in says from what `request` carries, its body left here. */
+/** Who signed in, as the app that signs people in says from what `request` carries, its body left here. */
 async function signedIn(request: Request, env: Env) {
   if (!env.WHO) return { refused: refuse(401, NO_SIGN_IN) };
   return env.WHO.who(new Request(request.url, { method: request.method, headers: request.headers }));
@@ -283,7 +283,7 @@ function mismatched(headers: Headers, call: Call) {
 /**
  * The `traceparent` of this request's span, as W3C's Trace Context has it: under `parent`, the client's, which it
  * sends in `_meta` as MCP has it or as a header, if any. It's said in a line Telemetry's Tail Worker reads
- * (`plugins/telemetry/edge/worker.ts`), and carried to the server.
+ * (`apps/telemetry/edge/worker.ts`), and carried to the server.
  */
 function traced(parent: unknown) {
   const random = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -315,16 +315,16 @@ async function apps(request: Request, env: Env) {
 }
 
 /**
- * What an app's page loads in the web client: `/apps/<session, signed>/<app>/<plugin>/<path>` is `path` among the
- * latest files of `plugin` that a server lists for that session's person, as the app's client has them at its own
+ * What an app's page loads in the web client: `/apps/<session, signed>/<app>/<app>/<path>` is `path` among the
+ * latest files of `app` that a server lists for that session's person, as the app's client has them at its own
  * address for each app (`clients/app/src/lib.rs`). An app opened for a group or the network says so after its name,
  * last part first (`notes.family.groups`).
  */
 async function file(request: Request, env: Env, url: URL) {
-  const [, app, plugin, ...path] = url.pathname.slice("/apps/".length).split("/");
+  const [, host, app, ...path] = url.pathname.slice("/apps/".length).split("/");
   const who = await signedIn(request, env);
   if ("refused" in who) return new Response("Sign in again", { status: 401 });
-  const [, ...whose] = app.split(".");
+  const [, ...whose] = host.split(".");
   const meta = whose.length ? { _meta: { subject: whose.reverse().join("/") } } : {};
   const ask = async <Result,>(method: string, params: object): Promise<Result | null> => {
     const answer = await forward(env, JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, ...meta } }), { device: who.device }, [`${who.who}/`, NETWORK]);
@@ -332,8 +332,8 @@ async function file(request: Request, env: Env, url: URL) {
     return (await answer.json<{ result: Result }>()).result;
   };
   const listed = await ask<{ resources: { uri: string }[] }>("resources/list", {});
-  const version = listed?.resources.map(({ uri }) => uri.split("/")).find(([scheme, , of]) => scheme === "ui:" && of === plugin)?.[3];
-  const read = version ? await ask<{ contents: { blob?: string; text?: string; mimeType: string }[] }>("resources/read", { uri: `ui://${plugin}/${version}/${path.join("/")}` }) : null;
+  const version = listed?.resources.map(({ uri }) => uri.split("/")).find(([scheme, , of]) => scheme === "ui:" && of === app)?.[3];
+  const read = version ? await ask<{ contents: { blob?: string; text?: string; mimeType: string }[] }>("resources/read", { uri: `ui://${app}/${version}/${path.join("/")}` }) : null;
   const found = read?.contents?.[0];
   if (!found) return new Response(`There's nothing at ${url.pathname}`, { status: 404 });
   const body = found.blob ? Uint8Array.from(atob(found.blob), (char) => char.charCodeAt(0)) : found.text;
@@ -341,7 +341,7 @@ async function file(request: Request, env: Env, url: URL) {
     headers: {
       "content-type": found.mimeType.replace(";profile=mcp-app", ""),
       // What an app's page may load, which is what an MCP App may by default and what the app lets one
-      // (`APP_MAY_LOAD` in `clients/app/src/lib.rs`): its own plugin's files and the UI library, which are all
+      // (`APP_MAY_LOAD` in `clients/app/src/lib.rs`): its own app's files and the UI library, which are all
       // here, and nothing from anywhere else.
       "content-security-policy": `default-src 'none'; script-src ${url.origin} 'unsafe-inline'; style-src ${url.origin} 'unsafe-inline'; img-src ${url.origin} data:; media-src ${url.origin} data:; font-src ${url.origin} data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri ${url.origin}`,
       // The page's origin is its own, so what it loads from here is from elsewhere to it.

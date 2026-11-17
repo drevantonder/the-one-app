@@ -22,7 +22,7 @@ defmodule Mix.Tasks.Network do
       mix network <folder> <server> --name <name>
 
   calls the server that name, where it would otherwise be called what its machine is: a server says so to the
-  others, and plugins name a machine by it. Two servers on one machine each need one.
+  others, and apps name a machine by it. Two servers on one machine each need one.
 
       mix network <folder> --address <address> --first <secret>
 
@@ -33,14 +33,14 @@ defmodule Mix.Tasks.Network do
       mix network <folder> --owner <name>
 
   makes the user of that name the network's first owner, which a network gets once (`OneCore.User`), and where
-  people sign in, says where they join. Before it has one, every plugin of this repo is deployed for the network, as
+  people sign in, says where they join. Before it has one, every app of this repo is deployed for the network, as
   their author publishes them, so it has them to install: making its first owner installs the ones a network starts
-  with. After that, a plugin changed here is deployed into it as any is (`one deploy`).
+  with. After that, an app changed here is deployed into it as any is (`one deploy`).
 
       mix network <folder> --development
 
   starts a server of a network being built: nobody signs in, a request says which user it's from, and where no
-  plugin decides who may do what, everything is let through (`OneCore.User`, `OneCore.Hooks`). No network anyone
+  app decides who may do what, everything is let through (`OneCore.User`, `OneCore.Hooks`). No network anyone
   relies on is started with it.
 
       mix network <folder> --reloader <node>
@@ -48,11 +48,11 @@ defmodule Mix.Tasks.Network do
   has the server ask the code reloader running as that node, by its short name, before it answers a client's request,
   which loads what changed in this checkout into it (`tooling/code_reloader.exs`).
 
-      mix network <folder> <server> --without <plugin>
+      mix network <folder> <server> --without <app>
 
-  starts a server after removing that plugin from what's installed for whoever the server is for. It's the way back
-  for whoever runs one of their servers, when a plugin that decides who may do what has broken and so refuses
-  its own removal: nothing is asked of any plugin. With none left deciding, nobody does anything but the
+  starts a server after removing that app from what's installed for whoever the server is for. It's the way back
+  for whoever runs one of their servers, when an app that decides who may do what has broken and so refuses
+  its own removal: nothing is asked of any app. With none left deciding, nobody does anything but the
   network's first owner, who puts it back.
 
   `tooling/network`, at the root, starts a whole network with this.
@@ -60,7 +60,7 @@ defmodule Mix.Tasks.Network do
   use Mix.Task
   require Logger
   alias OneCore.{Edge, Folder, Iroh, Server, Servers, User}
-  alias OneCore.Plugins.Deploy
+  alias OneCore.Apps.Deploy
 
   @root Path.expand("..", __DIR__)
 
@@ -86,10 +86,10 @@ defmodule Mix.Tasks.Network do
     end
   end
 
-  # Deploys each of this repo's plugins for the network from its folder, as `one deploy --files-from` sends it,
+  # Deploys each of this repo's apps for the network from its folder, as `one deploy --files-from` sends it,
   # installing none: each is the network's to install.
   defp publish do
-    for folder <- Enum.sort(Path.wildcard(Path.join(@root, "plugins/*"))),
+    for folder <- Enum.sort(Path.wildcard(Path.join(@root, "apps/*"))),
         name = Path.basename(folder),
         {:ok, paths} <- [Folder.files(folder)] do
       files = Map.new(paths, &{&1, File.read!(Path.join(folder, &1))})
@@ -130,7 +130,7 @@ defmodule Mix.Tasks.Network do
     if without = options[:without] do
       owner = options[:subject] || "network"
 
-      case OneCore.Plugins.Lifecycle.uninstall(owner, without, {nil, owner}) do
+      case OneCore.Apps.Lifecycle.uninstall(owner, without, {nil, owner}) do
         %{} ->
           Mix.shell().info("#{without} is removed from what's installed for #{options[:subject] || "the network"}.")
 

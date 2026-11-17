@@ -36,30 +36,30 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   Solid 2.0 removed, so it doesn't build on Solid 2.0 yet (tried 14 November 2026). The UI library's Zag components are
   in its shape until it does.
 - **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
-  aside: it's compiled, so a plugin's app couldn't arrive from a server, and its widgets are each platform's own look.
+  aside: it's compiled, so an app's entrypoint couldn't arrive from a server, and its widgets are each platform's own look.
 
-## Plugin systems to learn from
+## App systems to learn from
 
-None of these is chosen. All three run plugins inside the host with its full access. On 14 November 2026 this redesign
-chose the same: a plugin's code on a server is free, and which servers act for whom is what keeps users apart.
+None of these is chosen. All three run apps inside the host with its full access. On 14 November 2026 this redesign
+chose the same: an app's code on a server is free, and which servers act for whom is what keeps users apart.
 
 - **Nuxt modules** (Nuxt 4): pages, components and imports are modules on the same list as anyone's, but five core
   ones are exempt from being switched off. One kind of hook: handlers run in the order they registered and change what
   they're handed, with no way to refuse and no record of who changed what. Order between modules is the standing
   complaint. Nuxt 4.1 added dependencies a module declares, with versions, resolved before any module runs.
-- **OpenCode's plugins, version 2** (`@opencode/plugin`, 2.0 in September 2026): about sixty of its own features, every
-  tool and provider among them, are plugins on the public interface. Three separate things where version 1 had one:
-  registering what a plugin provides, hooks that change a running operation, and events that are only heard. A plugin
-  has a stable id, storage of its own, and a typed contract between its parts. The plugin's context is the public
-  client plus a little. Version 1 plugins all broke at once.
+- **OpenCode's apps, version 2** (`@opencode/app`, 2.0 in September 2026): about sixty of its own features, every
+  tool and provider among them, are apps on the public interface. Three separate things where version 1 had one:
+  registering what an app provides, hooks that change a running operation, and events that are only heard. An app
+  has a stable id, storage of its own, and a typed contract between its parts. The app's context is the public
+  client plus a little. Version 1 apps all broke at once.
 - **DeepSeek Harness** (`dsh`, developer preview, built on Cordis): "no privileged core"; the agent loop and tool
-  registry are plugins. A plugin provides a service under a key and others ask for the key, never the plugin, so one
+  registry are apps. An app provides a service under a key and others ask for the key, never the app, so one
   can be swapped. Each hook's contract says how it's called: observed, mutated, or validated by the first to answer.
   Its most reported trap is a wrapping hook that forgets to pass the call on and so blocks it silently.
 
 ## Not checked yet
 
-- That celld can load many plugins inside its one application.
+- That celld can load many apps inside its one application.
 
 ## Looked at and set aside
 
@@ -73,14 +73,14 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   unreleased or archived. **iroh-blobs and iroh-docs**: a way to copy blobs between devices, not a store.
 - **Jazz**: its encrypted design is frozen and its makers wrote up why they left it; Jazz 2 is rows a server is
   trusted with, in alpha.
-- **What a plugin's server-side code could run in**, weighed on 14 November 2026 before Elixir was chosen:
-  - **QuickJS-NG inside the server**: smallest, with limits per plugin, but no Web APIs of its own and no way to reach
+- **What an app's server-side code could run in**, weighed on 14 November 2026 before Elixir was chosen:
+  - **QuickJS-NG inside the server**: smallest, with limits per app, but no Web APIs of its own and no way to reach
     the machine, so services would stay a separate thing.
   - **V8 inside the server** (`deno_core`): fast, but it leans on Deno's crates, whose team moved to Cloudflare.
   - **workerd beside the server**: a second program to run, loading code at run time behind an experimental flag, and
     every database call crossing a socket.
   - **Wasm components**: any language, but the heaviest path for JavaScript and a compile step on the server.
-  - **Each plugin as its own process**: any language and every package, at 20 to 60 MB each.
+  - **Each app as its own process**: any language and every package, at 20 to 60 MB each.
 - **Elixir WebRTC** for reaching by key: browsers would reach a home server directly and shells would need no
   networking code. Set aside: reaching by key would be ours to add, its relay can't be a Worker, the first connection
   is slower, and large transfers over data channels are its weak spot.
@@ -100,7 +100,7 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   each tool's path, description and labels, and the `search()` inside an `execute` script ranks the same; `call`
   makes one call or several at once with no script. Chosen on 16 November 2026 as how agents find and call tools
   here: code mode is `search`, `call`, `execute` and `skills` as it has them, and `search` ranks as OpenCode's
-  `search()` in a script does, with a plugin's description as its namespace's, so the two agree. MCP without code
+  `search()` in a script does, with an app's description as its namespace's, so the two agree. MCP without code
   mode lists every tool and `skills`, since clients there search tools themselves. Left out: `describe`, as our
   `search` gives each tool's whole signature, and `resume`, as nothing of ours pauses a script for a person to
   answer. Its index of tools kept as rows in a database neither: a network has hundreds of tools, not thousands, so
@@ -115,10 +115,10 @@ chose the same: a plugin's code on a server is free, and which servers act for w
   November 2026 the choice moved to E: every server and client is reached by its key.
 - **"Without needing the internet"** in the vision means two devices on one local network can reach each other. It
   never meant a network works with its bucket unreachable.
-- **Trust.** A network is trusted, and its users aren't assumed to be malicious. Keeping plugins apart is wise, but it's
-  a bonus: other things decide what plugins run in first. A plugin's code on a server is free, and nothing checks it.
+- **Trust.** A network is trusted, and its users aren't assumed to be malicious. Keeping apps apart is wise, but it's
+  a bonus: other things decide what apps run in first. An app's code on a server is free, and nothing checks it.
   Agents are intelligent, and a network is trusted. Letting a computer be a server for a user or a group means
-  trusting the plugins they add with that computer.
+  trusting the apps they add with that computer.
 - **Encryption.** Encrypting everything ourselves isn't built: a mistake there would lose everything, where a mistake
   with an encrypted artifact loses something small.
 - **Signing in.** Signing in only says who a user is. No key comes from it, so how a network signs in can change.

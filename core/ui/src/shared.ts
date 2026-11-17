@@ -22,7 +22,7 @@ export const [messages, setMessages] = createStore({
 })
 
 /// What a person reads of a tool's error: its first paragraph. What follows a blank line is for an agent, as MCP's
-/// text is the model's: which tool to call next, or what went wrong inside a plugin.
+/// text is the model's: which tool to call next, or what went wrong inside an app.
 export const readable = (error: string): string => error.split(/\n\s*\n/, 1)[0]
 
 /// All of an error a screen shows: what a tool said, whole, where it's an `Error` `call` threw (its `cause`), or

@@ -1,7 +1,7 @@
 //! What a device fills in of a tool's inputs. A tool says which of its inputs a device fills in, by the input's
 //! `format` in the tool's schema, and whatever calls the tool through this client (an app, the CLI, an agent over
 //! MCP) gets them filled in the same way. One Core fills in `device` and `device-name`, this device's key and its
-//! name, where none is given. Every other format is filled in by the native code of a plugin the program ships
+//! name, where none is given. Every other format is filled in by the native code of an app the program ships
 //! with, an `InputResolver` it hands `Client::open`.
 
 use std::collections::{HashMap, HashSet};
@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 
 use crate::Client;
 
-/// What a plugin's native code fills in on this device: inputs of the formats it names.
+/// What an app's native code fills in on this device: inputs of the formats it names.
 pub trait InputResolver: Send + Sync {
     /// The formats it fills in, in the order it does.
     fn formats(&self) -> &'static [&'static str];
@@ -22,10 +22,10 @@ pub trait InputResolver: Send + Sync {
     fn resolve<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>>;
 }
 
-/// One input to fill in, of a call of a tool of `plugin`: its `format`, what its schema `says`, what was given for
+/// One input to fill in, of a call of a tool of `app`: its `format`, what its schema `says`, what was given for
 /// it (`typed`), the call's other inputs, and whoever the call is for (`subject`), if it says.
 pub struct Input<'a> {
-    pub plugin: &'a str,
+    pub app: &'a str,
     pub format: &'a str,
     pub says: &'a Value,
     pub typed: Option<&'a str>,
@@ -102,7 +102,7 @@ impl Client {
         };
         let (tool, listed) = (tool.to_owned(), self.listed().await?);
         let Some(fills) = listed.fills.get(&tool) else { return Ok(()) };
-        let plugin = tool.split('_').next().unwrap_or_default();
+        let app = tool.split('_').next().unwrap_or_default();
         // What the device asks to fill these in is for whoever the call is.
         let subject = request["params"]["_meta"]["subject"].as_str().map(str::to_owned);
         let subject = subject.as_deref();
@@ -118,7 +118,7 @@ impl Client {
                 ("device-name", None) => Some(crate::name()),
                 _ => match self.resolvers.iter().find(|resolver| resolver.formats().contains(&format)) {
                     Some(resolver) => {
-                        let input = Input { plugin, format, says, typed, inputs, subject };
+                        let input = Input { app, format, says, typed, inputs, subject };
                         resolver.resolve(self, input).await?
                     }
                     None => None,

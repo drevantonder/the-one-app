@@ -8,7 +8,7 @@ tool on a local network (`local-network`), open the screen (Screens, below), or 
 in `core/server/`.
 
 Work out what your change touches, or could touch, including things that look unrelated, and check those too. If
-that includes secrets, who may do what, a plugin's app reaching another's, or data kept and restored, try to break
+that includes secrets, who may do what, an app's entrypoint reaching another's, or data kept and restored, try to break
 it yourself on a local network. You decide the attacks; there is no fixed list.
 
 A failing check is chased until you know why, and reported. Never skip it, loosen it, or commit "a small fix" on a

@@ -1,22 +1,22 @@
 defmodule OneCore.Service do
   @moduledoc """
-  The interface a plugin's service is written against. `OneCore.Plugin` says how to write one.
+  The interface an app's service is written against. `OneCore.App` says how to write one.
 
-  A service is a module of its plugin that says `@behaviour OneCore.Service`, and `use GenServer` or, when it has
+  A service is a module of its app that says `@behaviour OneCore.Service`, and `use GenServer` or, when it has
   stages, `@behaviour :gen_statem`. Its process runs on each server whose owner installed it, and its public
-  functions are what the rest of its plugin calls there.
+  functions are what the rest of its app calls there.
   """
-  alias OneCore.{Call, Plugins, Server, Servers, Services}
-  alias OneCore.Plugins.{Calls, Store, Version}
+  alias OneCore.{Call, Apps, Server, Servers, Services}
+  alias OneCore.Apps.{Calls, Store, Version}
 
   @doc "What the service needs of a machine, for its owner to read before installing it."
   @callback needs() :: String.t()
 
-  @doc "What the service is called, in words its owner reads: its plugin's name, and what it is of it."
+  @doc "What the service is called, in words its owner reads: its app's name, and what it is of it."
   @callback called() :: String.t()
 
   @doc """
-  Calls a function of a service of this call's plugin, on a machine that runs it, and gives its answer. The
+  Calls a function of a service of this call's app, on a machine that runs it, and gives its answer. The
   function is called with the service's process and then `arguments`. Arguments and answer are what JSON can hold,
   as they arrive wherever the service runs.
 
@@ -26,16 +26,16 @@ defmodule OneCore.Service do
   Raises with what went wrong: the function raised, no server runs the service, or the one that does isn't up.
   """
   def call(%Call{} = call, service, function, arguments \\ [], server \\ nil) when is_list(arguments) do
-    plugin = whose(call, service)
+    app = whose(call, service)
     service = Version.own_name(service)
-    servers = if server, do: [server], else: Services.servers(plugin, service, call.subject)
+    servers = if server, do: [server], else: Services.servers(app, service, call.subject)
 
     if servers == [] do
       raise "None of your network's computers can do this yet. Ask your network's admin to set one up.\n\nNo server runs #{service}: `services` says what it needs, and `install_service` runs it on one."
     end
 
     meta = %{actor: call.actor, subject: call.subject, forwarded: true}
-    ask = %{plugin: plugin, service: service, function: "#{function}", arguments: json(arguments), _meta: meta}
+    ask = %{app: app, service: service, function: "#{function}", arguments: json(arguments), _meta: meta}
 
     case ask(servers, call.server, ask) do
       {:ok, response} -> response
@@ -43,7 +43,7 @@ defmodule OneCore.Service do
     end
   end
 
-  @doc "The keys of the servers that run a service of this call's plugin, for a plugin that chooses which to call."
+  @doc "The keys of the servers that run a service of this call's app, for an app that chooses which to call."
   def servers(%Call{subject: subject} = call, service),
     do: Services.servers(whose(call, service), Version.own_name(service), subject)
 
@@ -57,23 +57,23 @@ defmodule OneCore.Service do
   """
   def seen(server), do: (Servers.presence(server) || %{})["last_seen"]
 
-  # The plugin whose service it is: this call's, or one whose code runs inside it, whose function this call is running.
-  defp whose(%Call{who: plugin, loaded: loaded}, service) do
+  # The app whose service it is: this call's, or one whose code runs inside it, whose function this call is running.
+  defp whose(%Call{who: app, loaded: loaded}, service) do
     under = Version.under(service)
-    Enum.find_value(loaded, plugin, fn {_name, {other, module}} -> Version.under(module) == under && other end)
+    Enum.find_value(loaded, app, fn {_name, {other, module}} -> Version.under(module) == under && other end)
   end
 
   @doc """
-  Calls a function of the service's plugin, for the user or group `who`, asked by nobody, and gives its answer.
+  Calls a function of the service's app, for the user or group `who`, asked by nobody, and gives its answer.
   `service` is the
   service's process: `self()` in its callbacks, and what its functions are called with. The function is called
-  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for whoever the plugin was installed for.
+  with an `OneCore.Call` for `who` and then `arguments`, on a server acting for whoever the app was installed for.
   """
-  def plugin(service, who, function, arguments \\ []) when is_pid(service) and is_list(arguments) do
-    {plugin, _name, _version} = which(service)
+  def app(service, who, function, arguments \\ []) when is_pid(service) and is_list(arguments) do
+    {app, _name, _version} = which(service)
 
     {installed, name} =
-      Plugins.installed(who, plugin) || raise "#{plugin} isn't installed for #{who}, or for the network"
+      Apps.installed(who, app) || raise "#{app} isn't installed for #{who}, or for the network"
 
     response =
       case Calls.function(installed, name, "#{function}", json(arguments), {nil, who}) do
@@ -87,16 +87,16 @@ defmodule OneCore.Service do
   end
 
   @doc """
-  Who the service that asks runs for on its server, each as `plugin/4` takes it: everyone its plugin was installed
-  for, a user, a group or the network, whose plugins its server runs (`OneCore.Servers.runs?/1`). Whoever the server is for comes first, as its
+  Who the service that asks runs for on its server, each as `app/4` takes it: everyone its app was installed
+  for, a user, a group or the network, whose apps its server runs (`OneCore.Servers.runs?/1`). Whoever the server is for comes first, as its
   owner chose them, so a service that's for one of them at a time, its machine's person, takes the first.
   """
   def acts_for do
-    {plugin, _name, _version} = which(self())
+    {app, _name, _version} = which(self())
     members = Servers.members(Server.key())
 
     Enum.sort_by(
-      Enum.filter(Plugins.installed_for(plugin), &Servers.runs?/1),
+      Enum.filter(Apps.installed_for(app), &Servers.runs?/1),
       &(Enum.find_index(members, fn member -> member == &1 end) || length(members))
     )
   end
@@ -106,18 +106,18 @@ defmodule OneCore.Service do
 
   @doc """
   A folder on this machine that is the service's own, for what it keeps there. It stays for as long as the service
-  is installed on this server, through its plugin's updates, and goes when it's removed. It also holds the folders
+  is installed on this server, through its app's updates, and goes when it's removed. It also holds the folders
   `folder/2` gives, each named after its path.
   """
   def folder(service) when is_pid(service) do
-    {plugin, name, _version} = which(service)
-    folder = Services.folder(plugin, name)
+    {app, name, _version} = which(service)
+    folder = Services.folder(app, name)
     File.mkdir_p!(folder)
     folder
   end
 
   @doc """
-  A folder on this machine holding the plugin's files under `path`, by their paths within it, for a program the
+  A folder on this machine holding the app's files under `path`, by their paths within it, for a program the
   service brings. It's the service's own to build in, and to start the program from.
 
   The folder stays the same for as long as those files do. Once they change it's a new one, and the one before is
@@ -125,14 +125,14 @@ defmodule OneCore.Service do
   the program changed.
   """
   def folder(service, path) when is_pid(service) do
-    {plugin, name, version} = which(service)
+    {app, name, version} = which(service)
 
     files =
       Enum.sort(for {file, hash} <- Version.hashes(version), String.starts_with?(file, path <> "/"), do: {file, hash})
 
-    if files == [], do: raise("#{plugin} has no files under #{path}/")
+    if files == [], do: raise("#{app} has no files under #{path}/")
 
-    within = Path.join(Services.folder(plugin, name), path)
+    within = Path.join(Services.folder(app, name), path)
     folder = Path.join(within, binary_part(Version.code(files), 0, 16))
 
     # The files are written beside the folder and moved in whole, so a folder that's there has all of them.
@@ -141,7 +141,7 @@ defmodule OneCore.Service do
       File.rm_rf!(writing)
 
       for {file, _hash} <- files do
-        {:ok, text} = Store.file(plugin, version.code, file)
+        {:ok, text} = Store.file(app, version.code, file)
         written = Path.join(writing, Path.relative_to(file, path))
         File.mkdir_p!(Path.dirname(written))
         File.write!(written, text)
@@ -155,7 +155,7 @@ defmodule OneCore.Service do
   end
 
   defp which(service) do
-    Plugins.Process.which(service) || raise ArgumentError, "#{inspect(service)} isn't a service's process"
+    Apps.Process.which(service) || raise ArgumentError, "#{inspect(service)} isn't a service's process"
   end
 
   # What arrives after going through JSON, which is how it reaches another server.
@@ -165,19 +165,19 @@ defmodule OneCore.Service do
   # stopping. A server that couldn't be reached was asked nothing.
   defp ask(servers, here, ask, down \\ [])
 
-  defp ask([], here, %{plugin: plugin, service: service} = ask, down) do
+  defp ask([], here, %{app: app, service: service} = ask, down) do
     case Servers.back(down) do
       nil ->
         why = Enum.map_join(down, ", ", &Server.error_message(:unreachable, &1))
-        {:error, "No server that runs #{plugin}'s #{service} is up: " <> why}
+        {:error, "No server that runs #{app}'s #{service} is up: " <> why}
 
       back ->
         ask([back], here, ask, down -- [back])
     end
   end
 
-  defp ask([here | _], here, %{plugin: plugin, service: service, function: function, arguments: arguments}, _down) do
-    with {:ok, response} <- Services.run(plugin, service, function, arguments), do: {:ok, json(response)}
+  defp ask([here | _], here, %{app: app, service: service, function: function, arguments: arguments}, _down) do
+    with {:ok, response} <- Services.run(app, service, function, arguments), do: {:ok, json(response)}
   end
 
   defp ask([server | servers], here, ask, down) do

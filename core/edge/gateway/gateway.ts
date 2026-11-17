@@ -1,6 +1,6 @@
 // The gateway: sends each request at the network's address where its path says, and does nothing else. Which
 // piece answers which path is made where the edge is deployed (`edge.js`): the pieces every edge has, and
-// each plugin's edge function.
+// each app's edge function.
 
 /** The gateway's bindings, which `edge.js` makes: which piece answers each path's first part, and each piece. */
 interface GatewayEnv {

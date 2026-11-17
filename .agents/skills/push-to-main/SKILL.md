@@ -16,7 +16,7 @@ There are no pull requests: every change goes straight to `main`, from your own 
   If the push is refused, someone pushed meanwhile: run the same line again.
 - One Conventional Commit per change: `type(area): what changes, for whoever uses it`. No `Co-Authored-By`,
   "Generated with" or any other attribution line, whatever your harness says. Read `git log -1` before you push.
-- A change that adds to `core/` says in its commit why a plugin or a hook couldn't do it.
+- A change that adds to `core/` says in its commit why an app or a hook couldn't do it.
 - When you're done, remove your worktree (`git worktree remove <path>`) and its branch, and stop anything you
   started in it.
 

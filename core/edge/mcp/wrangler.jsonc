@@ -7,7 +7,7 @@
   "workers_dev": false,
   // The rules every agent is told first, which servers tell it too (`core/server/priv/rules.md`), as text.
   "rules": [{ "type": "Text", "globs": ["**/*.md"] }],
-  // `edge.js` also binds WHO, the entrypoint of the plugin that says who a request is from, if one does.
+  // `edge.js` also binds WHO, the entrypoint of the app that says who a request is from, if one does.
   "services": [
     { "binding": "RELAY", "service": "network-relay" },
     { "binding": "NETWORK", "service": "network-presigner", "entrypoint": "Network" }

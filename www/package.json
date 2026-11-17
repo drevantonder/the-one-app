@@ -1,6 +1,6 @@
 {
   "name": "www",
-  "description": "The One App's own website at one.drevan.me: the gateway, the marketing page and the plugin directory, each a Worker.",
+  "description": "The One App's own website at one.drevan.me: the gateway, the marketing page and the app directory, each a Worker.",
   "private": true,
   "type": "module",
   "devDependencies": {
@@ -9,7 +9,7 @@
     "wrangler": "^4.160.0"
   },
   "scripts": {
-    "types": "wrangler types -c gateway/wrangler.jsonc gateway/worker-configuration.d.ts --include-runtime=false && wrangler types -c plugin-directory/wrangler.jsonc plugin-directory/worker-configuration.d.ts --include-runtime=false",
-    "typecheck": "tsc -p gateway && tsc -p plugin-directory"
+    "types": "wrangler types -c gateway/wrangler.jsonc gateway/worker-configuration.d.ts --include-runtime=false && wrangler types -c app-directory/wrangler.jsonc app-directory/worker-configuration.d.ts --include-runtime=false",
+    "typecheck": "tsc -p gateway && tsc -p app-directory"
   }
 }

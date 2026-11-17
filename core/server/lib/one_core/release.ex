@@ -19,7 +19,7 @@ defmodule OneCore.Release do
   It's ready once it's active and running (`OneCore.Server.up?/0`), which it says at the network's edge
   (`OneCore.Servers.report/0`), so only a ready server is sent calls, and only a ready one takes on what others then
   go to it for. A server nothing keeps running, as a network being built runs one, is active and running once its
-  plugins have started.
+  apps have started.
   """
   require Logger
   alias OneCore.{Builds, Server, Servers}
@@ -501,8 +501,8 @@ defmodule OneCore.Release do
 
     Application.put_env(:one_core, :build, named(build))
     Application.put_env(:one_core, :ui, Path.join(build, "ui"))
-    :persistent_term.erase({OneCore.App, :library})
-    Task.Supervisor.start_child(OneCore.Asks, &OneCore.Plugins.Deploy.rebuild/0)
+    :persistent_term.erase({OneCore.Entrypoint, :library})
+    Task.Supervisor.start_child(OneCore.Asks, &OneCore.Apps.Deploy.rebuild/0)
     :ok
   end
 end

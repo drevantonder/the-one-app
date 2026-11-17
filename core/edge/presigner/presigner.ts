@@ -4,8 +4,8 @@
 // then to the bucket, and no signed request to keep for later. It never signs a write without a condition
 // (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
 // signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
-// are, for the other pieces here and for a client (`Network`), and keeps the blobs a plugin's edge function
-// writes for its plugin's servers (`Own`). It keeps nothing itself and runs no plugin code. Another Worker is
+// are, for the other pieces here and for a client (`Network`), and keeps the blobs an app's edge function
+// writes for its app's servers (`Own`). It keeps nothing itself and runs no app code. Another Worker is
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
@@ -21,23 +21,22 @@ const NETWORK = "network/";
  */
 const SERVER = /^servers\/([0-9a-f]{64})\//;
 /**
- * What every server of the network reads, whoever's it is: a plugin's code, which is open to everyone in the
+ * What every server of the network reads, whoever's it is: an app's code, which is open to everyone in the
  * network, what's installed for whom, which servers act for whom, who the network's first owner is, the builds its
- * machines take, and what each owner has deployed. That's how a server runs a plugin someone else deployed, finds
- * the server to pass a call on to, knows who may do anything where no plugin decides who may, updates, and lists
+ * machines take, and what each owner has deployed. That's how a server runs an app someone else deployed, finds
+ * the server to pass a call on to, knows who may do anything where no app decides who may, updates, and lists
  * every app there is.
  */
-// Under `plugins/` as well as `apps/` while the servers move to `apps/` (its old name), one at a time.
-const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:(?:plugins|apps)\/.*|installs|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
+const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:apps\/.*|installs|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
 /**
- * That a user, a group or the network installed a plugin is a blob under the plugin, `installed/<who>`, which a server
- * acting for them writes and removes, whoever's the plugin is: a deploy of it tells their servers.
+ * That a user, a group or the network installed an app is a blob under the app, `installed/<who>`, which a server
+ * acting for them writes and removes, whoever's the app is: a deploy of it tells their servers.
  */
-const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins|apps)\/[^/]+\/installed\/((?:users|groups)\/[^/]+|network)$/;
+const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)apps\/[^/]+\/installed\/((?:users|groups)\/[^/]+|network)$/;
 /**
- * That a user, a group or the network deployed a plugin is a blob of the network's, `deployed/<who>/<name>`, naming
- * the plugin, which a server acting for them writes as it deploys: so every app there is is listed in one place,
- * whichever pages it's on, as the plugin's `latest` describes it.
+ * That a user, a group or the network deployed an app is a blob of the network's, `deployed/<who>/<name>`, naming
+ * the app, which a server acting for them writes as it deploys: so every app there is is listed in one place,
+ * whichever pages it's on, as the app's `latest` describes it.
  */
 const DEPLOYED = /^network\/deployed\/((?:users|groups)\/[^/]+|network)\/[^/]+$/;
 /** A blob's key says whose it is by how it starts: a user's or a group's prefix, or the network's. */
@@ -118,11 +117,11 @@ export class Network extends WorkerEntrypoint<PresignerEnv> {
 }
 
 /**
- * A plugin's edge function keeps blobs in its plugin's own artifact for the network, which is where its
- * plugin's servers read them, and reaches nothing else in the bucket. Which plugin is said by the binding it was
+ * An app's edge function keeps blobs in its app's own artifact for the network, which is where its
+ * app's servers read them, and reaches nothing else in the bucket. Which app is said by the binding it was
  * given (`props`), which only whoever deploys the edge sets.
  */
-export class Own extends WorkerEntrypoint<PresignerEnv, { plugin: string }> {
+export class Own extends WorkerEntrypoint<PresignerEnv, { app: string }> {
   /** Writes the blob `name`, only if there's none. Gives whether it wrote it. */
   async write(name: string, data: BodyInit): Promise<boolean> {
     const wrote = await bucket(this.env).fetch(this.blob(name), { method: "PUT", body: data, headers: { "if-none-match": "*" } });
@@ -159,7 +158,7 @@ export class Own extends WorkerEntrypoint<PresignerEnv, { plugin: string }> {
 
   blob(name: string) {
     if (!isBlob(name)) throw new Error("That isn't a blob's name");
-    return blob(this.env, `${NETWORK}own/${this.ctx.props.plugin}/${name}`);
+    return blob(this.env, `${NETWORK}own/${this.ctx.props.app}/${name}`);
   }
 }
 

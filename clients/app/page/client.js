@@ -1,11 +1,11 @@
 // The window's own page: the frames apps are drawn in, and the bridge between each and the client.
 //
-// An app is a page of its plugin's, in a frame at an address of its own, so it reaches no other app and nothing
+// An app is a page of its app's, in a frame at an address of its own, so it reaches no other app and nothing
 // here. It speaks to this page as an MCP App speaks to its host: JSON-RPC messages, posted. What it asks goes to
 // where the page runs (`host.js`): the app's Rust half, or in a browser, the network's edge (`clients/web/host.js`),
 // which answers what only reads from what it kept and says when that has changed.
 //
-// The launcher is an app too, which reaches this client from a server as every plugin's does: the app in the category
+// The launcher is an app too, which reaches this client from a server as every app's does: the app in the category
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, haptic, invoke, listen, openLink, sandbox } from "./host.js"
@@ -18,10 +18,10 @@ import { address, haptic, invoke, listen, openLink, sandbox } from "./host.js"
 const report = (name, error, attributes = {}) => invoke("report", { record: { name, error, attributes } }).catch(() => {})
 /// An error as OpenTelemetry's `exception` says one: its message, and the file and line it was thrown at, by its
 /// path alone, which leaves out anything a query had in it.
-/** @param {unknown} message @param {unknown} [file] @param {unknown} [line] @param {string} [plugin] */
-function exception(message, file, line, plugin) {
+/** @param {unknown} message @param {unknown} [file] @param {unknown} [line] @param {string} [app] */
+function exception(message, file, line, app) {
   const path = typeof file === "string" && URL.canParse(file) ? new URL(file).pathname : undefined
-  report("exception", String(message).slice(0, 500), { "code.file.path": path, "code.line.number": typeof line === "number" ? line : undefined, "one.plugin": plugin })
+  report("exception", String(message).slice(0, 500), { "code.file.path": path, "code.line.number": typeof line === "number" ? line : undefined, "one.app": app })
 }
 addEventListener("error", ({ message, filename, lineno }) => exception(message, filename, lineno))
 addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message ?? reason))
@@ -29,18 +29,18 @@ addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message
 const NEVER = 15000
 /** An element of the page's own, which is there. @param {string} id */
 const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
-/// The launcher's page, as this user's apps list it, once they're listed: `<plugin>/<page>`. And the Plugins app's,
-/// which installs one where there's none: the app in the category `plugins`, if there is one.
+/// The launcher's page, as this user's apps list it, once they're listed: `<app>/<page>`. And the App Store's,
+/// which installs one where there's none: the app in the category `app-store`, if there is one.
 let launcher = ""
-let plugins = ""
-/// The apps that are open, by who each is for and what it is: `{ key, app, subject, host, frame, tapped, drawn, over }`.
+let appStore = ""
+/// The apps that are open, by who each is for and what it is: `{ key, entrypoint, subject, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
 /** @type {Map<string, View>} */
 const open = new Map()
-/** @param {string} app @param {string} [subject] */
-const key = (app, subject) => `${subject ?? ""}|${app}`
-/// Each plugin's first app, by the plugin's name, among this user's: what a notification from it opens.
+/** @param {string} entrypoint @param {string} [subject] */
+const key = (entrypoint, subject) => `${subject ?? ""}|${entrypoint}`
+/// Each app's first app, by the app's name, among this user's: what a notification from it opens.
 /** @type {Map<string, string>} */
 let first = new Map()
 /// Each app's name, by its page, as this user's apps list them.
@@ -51,9 +51,9 @@ let names = new Map()
 /** @type {Set<string | undefined>} */
 const listed = new Set()
 
-/// What an app's address is named by: its plugin's name, then who it's for (its subject) if that isn't its user, last part first.
-/** @param {string} app @param {string} [subject] */
-const host = (app, subject) => [app.split("/")[0], ...(subject ? subject.split("/").reverse() : [])].join(".")
+/// What an app's address is named by: its app's name, then who it's for (its subject) if that isn't its user, last part first.
+/** @param {string} entrypoint @param {string} [subject] */
+const host = (entrypoint, subject) => [entrypoint.split("/")[0], ...(subject ? subject.split("/").reverse() : [])].join(".")
 
 /// A phone's app is its network's, which its owner builds and updates, and a computer's updates itself: what
 /// `start` says.
@@ -105,7 +105,7 @@ visualViewport?.addEventListener("resize", keyboard)
 
 /// What the window shows of itself, one state at a time: while it opens, until it can start the launcher; the
 /// launcher, once it has drawn; signing in, where the device isn't in its network; why there's no launcher to show,
-/// with Plugins to install one; and an update. Only `on` moves it, by the moves `machine` has, and a move that isn't
+/// with Apps to install one; and an update. Only `on` moves it, by the moves `machine` has, and a move that isn't
 /// there is refused. Whether its network answers is the client's (`Connection` in core/client), which the
 /// window follows and never decides: it says it as it opens, and as a banner over the launcher.
 const { assign, createActor, fromPromise, setup } = XState
@@ -122,7 +122,7 @@ const machine = setup({
     updateReady: ({ context }) => context.updateReady,
     // A phone's app is its network's, which its owner builds and updates.
     updates: () => !phone,
-    plugins: () => Boolean(plugins),
+    appStore: () => Boolean(appStore),
   },
   actions: {
     told: assign({ told: ({ event, context }) => (event.type === "session" ? event.told : context.told) }),
@@ -142,7 +142,7 @@ const machine = setup({
     signIn: ({ context }) => void (context.told?.link && location.replace(context.told.link)),
     // The device hears its person's notifications once they see their home.
     listen: () => void invoke("listen"),
-    openPlugins: () => openPlugins(),
+    openAppStore: () => openAppStore(),
   },
 }).createMachine({
   id: "window",
@@ -176,11 +176,11 @@ const machine = setup({
       on: { update: { guard: "updateReady", target: "updating" } },
     },
     no_launcher: {
-      on: { openPlugins: { guard: "plugins", target: "plugins" } },
+      on: { openAppStore: { guard: "appStore", target: "app_store" } },
     },
-    // The Plugins app, shown with no launcher under it, until a launcher is installed.
-    plugins: {
-      entry: "openPlugins",
+    // The App Store, shown with no launcher under it, until a launcher is installed.
+    app_store: {
+      entry: "openAppStore",
       on: { listed: "opening" },
     },
     launcher_failed: {
@@ -209,7 +209,7 @@ const shown = createActor(machine)
 const on = (event) => shown.send(event)
 
 /// Each open app's page, one state at a time, as its person's owner signed it off: loading, then current until its
-/// plugin or the UI library is updated under it, which makes it stale. A stale page loads again by itself only at a
+/// app or the UI library is updated under it, which makes it stale. A stale page loads again by itself only at a
 /// boundary, as an iPhone updates an app while it's closed and a web app loads its new version on the next
 /// navigation: once it's off screen (another app over it, the window hidden), or as it's opened again. On screen,
 /// it says so quietly, "Updated · Reload", and loads again only once its person presses Reload: nothing is reloaded
@@ -225,9 +225,9 @@ const pageMachine = setup({
       const { view, why } = context
       // How long it took to open is told only of an open that ended with it drawn.
       view.tapped = undefined
-      report("one.client.open", why ?? "", { "one.view": view.app.split("/")[0] })
+      report("one.client.open", why ?? "", { "one.view": view.entrypoint.split("/")[0] })
       // A launcher that never draws leaves nothing to show.
-      if (view.app === launcher) on({ type: "failed", why: why ?? "" })
+      if (view.entrypoint === launcher) on({ type: "failed", why: why ?? "" })
       notes()
     },
     notes: () => notes(),
@@ -239,7 +239,7 @@ const pageMachine = setup({
   states: {
     loading: {
       on: { drawn: "current" },
-      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.app} didn't draw in ${NEVER / 1000} s.` }) } },
+      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
     },
     current: {
       on: { stale: "stale" },
@@ -253,7 +253,7 @@ const pageMachine = setup({
     reloading: {
       entry: "load",
       on: { drawn: "current" },
-      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.app} didn't draw in ${NEVER / 1000} s.` }) } },
+      after: { [NEVER]: { target: "failed", actions: assign({ why: ({ context }) => `${context.view.entrypoint} didn't draw in ${NEVER / 1000} s.` }) } },
     },
     failed: {
       entry: "failed",
@@ -295,7 +295,7 @@ let lastProblem
 function draw() {
   const now = shown.getSnapshot()
   const { context } = now
-  byId("state").hidden = now.matches("launcher") || now.matches("plugins") || now.matches("sign_in")
+  byId("state").hidden = now.matches("launcher") || now.matches("app_store") || now.matches("sign_in")
   const opening = now.matches("opening")
   byId("mark").hidden = byId("steps").hidden = !opening
   const opened = steps(context)
@@ -316,9 +316,9 @@ function draw() {
   byId("status-text").textContent = context.message ?? ""
   byId("status-text").hidden = !(now.matches("updating") && context.message)
   byId("empty").hidden = !now.matches("no_launcher")
-  byId("empty-text").textContent = context.only ?? (plugins ? "" : "Ask your AI to install a Home Screen")
+  byId("empty-text").textContent = context.only ?? (appStore ? "" : "Ask your AI to install a Home Screen")
   byId("empty-text").hidden = !byId("empty-text").textContent
-  byId("open-plugins").hidden = Boolean(context.only) || !plugins
+  byId("open-app-store").hidden = Boolean(context.only) || !appStore
   const problem = problemOf(now)
   byId("problem").hidden = !problem
   if (problem) {
@@ -377,7 +377,7 @@ async function behind() {
 }
 
 /// Lists the files a server has for `subject`, which the client keeps, so an app opens with no server up. An open app
-/// whose plugins have a new version loads again. This user's own list has the launcher in it, which starts, or none:
+/// whose apps have a new version loads again. This user's own list has the launcher in it, which starts, or none:
 /// which is a server's word, so a list kept from before is asked for again first, and while its network doesn't
 /// answer, the window waits. With none, this app needs updating where its network says an update is ready for it
 /// (`behind`): otherwise it's the network that has none right now. A launcher missing from a later list, as during a
@@ -387,7 +387,7 @@ async function list(subject) {
   listed.add(subject)
   try {
     let { resources, outdated } = await invoke("apps", { subject })
-    // A screen runs its own plugin and the UI library, which every one of them runs.
+    // A screen runs its own app and the UI library, which every one of them runs.
     const library = outdated.some((host) => host.split(".")[0] === "ui")
     for (const view of open.values()) if (library || outdated.includes(view.host)) page(view, { type: "stale" })
     if (!subject) {
@@ -405,25 +405,25 @@ async function list(subject) {
   }
 }
 
-/// The launcher's page among the files listed, and with them, which app each plugin opens first (`first`) and the
-/// Plugins app's page (`plugins`). An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
+/// The launcher's page among the files listed, and with them, which app each app opens first (`first`) and the
+/// App Store's page (`appStore`). An app is a page of an MCP App's kind, at ui://<app>/<version>/<page>.
 /** @param {import("./host.js").Resource[]} resources */
 function launcherIn(resources) {
   const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
   const named = (/** @type {string} */ uri) => {
-    const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
-    return `${plugin}/${page.join("/")}`
+    const [app, _version, ...page] = uri.slice("ui://".length).split("/")
+    return `${app}/${page.join("/")}`
   }
-  // The last one set for a plugin is the one kept: its first.
+  // The last one set for an app is the one kept: its first.
   first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
   names = new Map(pages.map(({ uri, name }) => [named(uri), name ?? ""]))
   const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
-  plugins = found("plugins") ? named(/** @type {string} */ (found("plugins"))) : ""
+  appStore = found("app-store") ? named(/** @type {string} */ (found("app-store"))) : ""
   return found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
 }
 
 /// Who may install for everyone, if not this person, who then can't install a Home Screen: "Only Andre can install a
-/// Home Screen for Everyone", by the names they go by, as the Plugins app says it. Nothing where they can, or where
+/// Home Screen for Everyone", by the names they go by, as the App Store says it. Nothing where they can, or where
 /// the network can't say.
 async function only() {
   /** @param {string} name @param {Record<string, unknown>} [inputs] @returns {Promise<any>} */
@@ -460,7 +460,7 @@ function notes() {
   byId("update").hidden = !now?.matches("stale")
   byId("page-problem").hidden = !now?.matches("failed")
   if (view && now?.matches("failed")) {
-    byId("page-problem-heading").textContent = `${names.get(view.app) ?? "This app"} didn't open`
+    byId("page-problem-heading").textContent = `${names.get(view.entrypoint) ?? "This app"} didn't open`
     byId("page-problem-details-text").textContent = now.context.why ?? ""
   }
 }
@@ -476,13 +476,13 @@ byId("page-problem-button").addEventListener("click", () => {
 })
 
 /// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown.
-/** @param {string} app @param {string} [subject] @returns {View} */
-function load(app, subject) {
-  const at = key(app, subject)
+/** @param {string} entrypoint @param {string} [subject] @returns {View} */
+function load(entrypoint, subject) {
+  const at = key(entrypoint, subject)
   const opened = open.get(at)
   if (opened) return opened
   if (!listed.has(subject)) list(subject)
-  const place = { key: at, app, subject, host: host(app, subject) }
+  const place = { key: at, entrypoint, subject, host: host(entrypoint, subject) }
   const frame = Object.assign(document.createElement("iframe"), { src: address(place), inert: true })
   /** @type {View} */
   const view = Object.assign({ ...place, frame }, { page: /** @type {View["page"]} */ (/** @type {unknown} */ (undefined)) })
@@ -490,7 +490,7 @@ function load(app, subject) {
   view.page.subscribe(() => notes())
   view.page.start()
   view.frame.setAttribute("sandbox", sandbox)
-  if (app === launcher) view.frame.className = "launcher"
+  if (entrypoint === launcher) view.frame.className = "launcher"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`),
   // and shows a part of itself full screen (a live screen's Full Screen).
   view.frame.allow = "clipboard-write; web-share; fullscreen"
@@ -539,7 +539,7 @@ function layer(at) {
     other.frame.inert = other !== view
     if (other !== view) page(other, { type: "away" })
   }
-  if (home && view) post(home, { method: "notifications/one/showing", params: { app: view.app, subject: view.subject } })
+  if (home && view) post(home, { method: "notifications/one/showing", params: { entrypoint: view.entrypoint, subject: view.subject } })
   gestures()
   return view
 }
@@ -557,14 +557,14 @@ function gestures() {
   const on = !view?.over
   if (on !== swiping) invoke("navigation_gestures", { on })
   swiping = on
-  const back = !on || (!!view && view.app !== launcher)
+  const back = !on || (!!view && view.entrypoint !== launcher)
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
 }
 /// The app that's open as `at`, or with none there, the one under every other: the launcher, or while there's none,
-/// the Plugins app.
+/// the App Store.
 /** @param {string | null} at */
-const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().matches("plugins") ? plugins : launcher))
+const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().matches("app_store") ? appStore : launcher))
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
 /// showing with what it drew from. The launcher's time is from when this page began to load.
@@ -574,11 +574,11 @@ function opened(view) {
   const tapped = view.tapped
   view.tapped = undefined
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    const name = view.app.split("/")[0]
+    const name = view.entrypoint.split("/")[0]
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
     // Their home has drawn over the steps.
-    if (view.app === launcher) on({ type: "drawn" })
+    if (view.entrypoint === launcher) on({ type: "drawn" })
   }))
 }
 
@@ -646,12 +646,12 @@ async function respond(view, method, params) {
   }
   if (method === "ping") return {}
   if (method === "ui/request-display-mode") return { mode: "fullscreen" }
-  // A file too large to go in a call: the client sends it where the network keeps it, for a tool of the app's plugin.
-  if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { plugin: view.app.split("/")[0] } })
+  // A file too large to go in a call: the client sends it where the network keeps it, for a tool of that app.
+  if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { app: view.entrypoint.split("/")[0] } })
   // A person's recovery key is shown and typed on this page, which is the client's own: no app's page is handed one.
   if (method === "one/recovery-key") return recoveryKey(params.typed === true, params.subject ?? view.subject)
-  // Another app, shown over this one, as tapping its icon or a notification from it does: by its plugin's name,
-  // and its page if it isn't the plugin's first app, for whoever this one is for unless it says. `behind` starts
+  // Another app, shown over this one, as tapping its icon or a notification from it does: by its app's name,
+  // and its page if it isn't the app's first app, for whoever this one is for unless it says. `behind` starts
   // it as a finger lands on its icon, and it shows as the finger lifts.
   if (method === "ui/open-link" && params.url?.startsWith("one:")) {
     if (!go(params.url.slice("one:".length), params.subject ?? view.subject, params.behind)) throw new Error("That app isn't on this device")
@@ -710,9 +710,9 @@ addEventListener("message", async ({ source, data }) => {
       gestures()
     }
     // The launcher, loaded again, is told which app is showing.
-    if (method === "ui/notifications/initialized" && view.app === launcher) layer(history.state)
-    // An app's page logs its errors as an MCP App logs to its host, and they're its plugin's, whatever it says.
-    if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.app.split("/")[0])
+    if (method === "ui/notifications/initialized" && view.entrypoint === launcher) layer(history.state)
+    // An app's page logs its errors as an MCP App logs to its host, and they're its app's, whatever it says.
+    if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
     return
   }
   try {
@@ -728,11 +728,11 @@ addEventListener("message", async ({ source, data }) => {
   if (!view.frame.inert) opened(view)
 })
 
-/// Shows an app over whatever's showing: by its plugin's name, and its page if it isn't the plugin's first app,
+/// Shows an app over whatever's showing: by its app's name, and its page if it isn't the app's first app,
 /// for `subject`. With `behind` it only starts. → whether there is one here.
-/** @param {string} app @param {string} [subject] @param {boolean} [behind] */
-function go(app, subject, behind) {
-  const page = app.includes("/") ? app : first.get(app)
+/** @param {string} entrypoint @param {string} [subject] @param {boolean} [behind] */
+function go(entrypoint, subject, behind) {
+  const page = entrypoint.includes("/") ? entrypoint : first.get(entrypoint)
   if (!page) return false
   const tapped = performance.now()
   const next = load(page, subject)
@@ -746,7 +746,7 @@ function go(app, subject, behind) {
 }
 
 // A notification from an app was tapped.
-listen("open", ({ payload: plugin }) => go(plugin))
+listen("open", ({ payload: app }) => go(app))
 /// A phone's push plugin says a notification was tapped, even the tap that started the app, once this page hears
 /// it, which is once there are apps to open.
 async function hearTaps() {
@@ -793,7 +793,7 @@ listen("connection", ({ payload }) => on({ type: "connection", connection: paylo
 // Its network is tried again now, rather than when it next would be.
 for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry"))
 byId("problem-button").addEventListener("click", () => on({ type: shown.getSnapshot().matches("needs_updating") ? "update" : "retry" }))
-byId("open-plugins").addEventListener("click", () => on({ type: "openPlugins" }))
+byId("open-app-store").addEventListener("click", () => on({ type: "openAppStore" }))
 
 /// The user returned to the window, so what's showing asks again, and its apps' files are listed again, for a new
 /// version of any. While the window is on screen, what's showing asks again when a server says something changed.
@@ -819,10 +819,10 @@ function start() {
   show(null, 0)
 }
 
-/// Shows the Plugins app with no launcher under it, which its person installs one with. There's nothing to go back
+/// Shows the App Store with no launcher under it, which its person installs one with. There's nothing to go back
 /// to from it.
-function openPlugins() {
-  const view = load(plugins)
+function openAppStore() {
+  const view = load(appStore)
   if (history.state) history.replaceState(null, "")
   show(view.key, performance.now())
 }

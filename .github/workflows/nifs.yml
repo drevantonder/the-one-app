@@ -1,5 +1,5 @@
 # Builds this repo's NIFs and programs for a Mac on GitHub's macOS runner, as `tooling/nifs macos-aarch64` builds them
-# on the Mac, and uploads the plugins' to a Release: what `tooling/publish-nifs` asks for when that Mac is busy or
+# on the Mac, and uploads the apps' to a Release: what `tooling/publish-nifs` asks for when that Mac is busy or
 # asleep. Each input is as `tooling/publish-nifs` gives it.
 name: Mac NIFs
 

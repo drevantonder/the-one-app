@@ -2,7 +2,7 @@
 //! device's session, whether its network answers, and what's under way or wrong with it: it holds the frames. The
 //! window always opens there, and follows the client's session (`Session`) and connection (`Connection`): a device
 //! that isn't in its network is sent on to the network's sign-in page, with the code it's let in by, until its person
-//! has let it in. Each app is a page of its plugin's, drawn in a frame of its own, which
+//! has let it in. Each app is a page of its app's, drawn in a frame of its own, which
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The launcher
 //! is an app too, the one a network lists in the category `launcher`, which the window shows first and under every other.
 
@@ -26,8 +26,8 @@ use notifications_client as notifications;
 
 pub mod phone;
 
-/// What an app's page may load, which is what an MCP App may by default: its own plugin's files and the files of
-/// the plugins it uses, which are all at its own address, and nothing from anywhere else.
+/// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
+/// the apps it uses, which are all at its own address, and nothing from anywhere else.
 const APP_MAY_LOAD: &str = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
                             img-src 'self' data:; media-src 'self' data:; font-src 'self' data:; connect-src 'none'; \
                             frame-src 'none'; object-src 'none'; base-uri 'self'";
@@ -68,7 +68,7 @@ impl Views {
         }
     }
 
-    /// The files of every plugin a server lists for `subject`, a group or the network, or for this client's user, as MCP
+    /// The files of every app a server lists for `subject`, a group or the network, or for this client's user, as MCP
     /// lists resources.
     async fn listed(&self, subject: Option<&str>) -> anyhow::Result<Value> {
         let request = subject.map_or(json!({}), |subject| json!({"_meta": {"subject": subject}}));
@@ -76,7 +76,7 @@ impl Views {
     }
 
     /// One file a server listed: what kind it is, and what's in it, which is its text or, for a picture or a font,
-    /// base64 as MCP's `blob`. A set of a plugin's files never changes, so a file that's kept is never asked for
+    /// base64 as MCP's `blob`. A set of an app's files never changes, so a file that's kept is never asked for
     /// again.
     async fn read(&self, resource: &str) -> anyhow::Result<(String, Vec<u8>)> {
         let request = json!({"uri": resource});
@@ -92,8 +92,8 @@ impl Views {
         }
     }
 
-    /// One file for an app's page: `oneapp://<app>.localhost/<plugin>/<path>` is `path` among the latest files of
-    /// `plugin` this client knows of. An app opened for a group or the network says so after its name, last part
+    /// One file for an app's page: `oneapp://<app>.localhost/<app>/<path>` is `path` among the latest files of
+    /// `app` this client knows of. An app opened for a group or the network says so after its name, last part
     /// first (`notes.family.groups.localhost`), and its files are the ones listed for them. One a server didn't
     /// list, as a page loads none of them (a sourcemap), is read by name from the same version.
     async fn file(&self, address: &Uri) -> anyhow::Result<(String, Vec<u8>)> {
@@ -102,49 +102,49 @@ impl Views {
         if let Some(path) = file.strip_prefix(".file/") {
             return self.client.file(path).ok_or_else(|| anyhow::anyhow!("this client keeps no such file"));
         }
-        let none = || anyhow::anyhow!("no plugin here has {file}");
-        let (plugin, path) = file.split_once('/').ok_or_else(none)?;
+        let none = || anyhow::anyhow!("no app here has {file}");
+        let (name, path) = file.split_once('/').ok_or_else(none)?;
         let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
         // Android's and Windows' web views name the app after the scheme, in a host's name.
         let app = app.strip_prefix("oneapp.").unwrap_or(app);
         let subject: Vec<&str> = app.split('.').skip(1).collect();
         let subject = (!subject.is_empty()).then(|| subject.into_iter().rev().collect::<Vec<_>>().join("/"));
         let listed = self.listed(subject.as_deref()).await?;
-        let mut versions = resources(&listed).filter_map(parts).filter(|(of, ..)| *of == plugin);
+        let mut versions = resources(&listed).filter_map(parts).filter(|(of, ..)| *of == name);
         let (_, code, _) = versions.next().ok_or_else(none)?;
-        let resource = format!("ui://{plugin}/{code}/{path}");
+        let resource = format!("ui://{name}/{code}/{path}");
         if resources(&listed).any(|listed| listed == resource) {
             self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.clone());
         }
         self.read(&resource).await
     }
 
-    /// The open apps loaded against a version of their plugin, or a build of the UI library, that `changed` says
+    /// The open apps loaded against a version of their app, or a build of the UI library, that `changed` says
     /// isn't the one there is now, each as its address names it: a server says the UI library's build (`library`),
-    /// and the version each plugin of the owners whose plugins moved runs at (`plugins`, by owner). A version that's
-    /// still one of them is current, as an app opened for another owner may be on its own. Another plugin's files an
+    /// and the version each app of the owners whose apps moved runs at (`apps`, by owner). A version that's
+    /// still one of them is current, as an app opened for another owner may be on its own. Another app's files an
     /// app shows, as the launcher shows every app's icon, aren't what it runs. They have loaded nothing once this has
     /// named them.
     fn stale(&self, changed: &Value) -> Vec<String> {
-        let gone = |plugin: &str, code: &str| {
-            if plugin == "ui" {
+        let gone = |name: &str, code: &str| {
+            if name == "ui" {
                 return changed["library"].as_str().is_some_and(|library| library != code);
             }
-            let owners = changed["plugins"].as_object().into_iter().flat_map(|owners| owners.values());
-            let now: Vec<&str> = owners.filter_map(|plugins| plugins[plugin].as_str()).collect();
+            let owners = changed["apps"].as_object().into_iter().flat_map(|owners| owners.values());
+            let now: Vec<&str> = owners.filter_map(|apps| apps[name].as_str()).collect();
             !now.is_empty() && !now.contains(&code)
         };
         let mut loaded = self.loaded.lock().expect("no view panics");
         let stale: Vec<String> = loaded
             .iter()
-            .filter(|(app, files)| runs(app, files).any(|(_, plugin, code)| gone(plugin, code)))
+            .filter(|(app, files)| runs(app, files).any(|(_, name, code)| gone(name, code)))
             .map(|(app, _)| app.clone())
             .collect();
         loaded.retain(|app, _| !stale.contains(app));
         stale
     }
 
-    /// The open apps for `subject` that run a file a server no longer lists (`runs`): their plugin or the UI library has
+    /// The open apps for `subject` that run a file a server no longer lists (`runs`): their app or the UI library has
     /// a new version. They have loaded nothing once this has named them.
     fn outdated(&self, subject: Option<&str>, listed: &Value) -> Vec<String> {
         let listed: HashSet<&str> = resources(listed).collect();
@@ -166,15 +166,15 @@ fn resources(listed: &Value) -> impl Iterator<Item = &str> {
     listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str())
 }
 
-/// What an open app, by its address's name, runs of the `files` it loaded: its own plugin's and the UI library's, each
-/// as its address, plugin and version's code. Another plugin's file it shows, as the launcher shows every app's
+/// What an open app, by its address's name, runs of the `files` it loaded: its own app's and the UI library's, each
+/// as its address, app and version's code. Another app's file it shows, as the launcher shows every app's
 /// icon, isn't what it runs.
 fn runs<'a>(app: &'a str, files: &'a HashSet<String>) -> impl Iterator<Item = (&'a str, &'a str, &'a str)> {
     let own = app.split('.').next().unwrap_or(app);
-    files.iter().filter_map(|file| Some((file.as_str(), parts(file)?))).filter(move |(_, (plugin, ..))| [own, "ui"].contains(plugin)).map(|(file, (plugin, code, _))| (file, plugin, code))
+    files.iter().filter_map(|file| Some((file.as_str(), parts(file)?))).filter(move |(_, (name, ..))| [own, "ui"].contains(name)).map(|(file, (name, code, _))| (file, name, code))
 }
 
-/// A plugin's file by its address, `ui://<plugin>/<code>/<path>`: its plugin, the version's code, and its path.
+/// An app's file by its address, `ui://<app>/<code>/<path>`: its app, the version's code, and its path.
 fn parts(resource: &str) -> Option<(&str, &str, &str)> {
     let mut parts = resource.strip_prefix("ui://")?.splitn(3, '/');
     Some((parts.next()?, parts.next()?, parts.next()?))
@@ -182,7 +182,7 @@ fn parts(resource: &str) -> Option<(&str, &str, &str)> {
 
 /// The files a server lists for `subject`, a group or the network, or for this client's user, and with them the open
 /// apps that are `outdated` and load again, each as its address names it. Every file listed is kept behind this, so
-/// with no server up an app opens whole, even one that was never opened, or whose plugins have changed since.
+/// with no server up an app opens whole, even one that was never opened, or whose apps have changed since.
 #[tauri::command]
 async fn apps(app: AppHandle, views: State<'_, Views>, subject: Option<String>) -> Result<Value, String> {
     // A person is told what went wrong, and not what was behind it.
@@ -259,17 +259,17 @@ async fn visible(views: State<'_, Views>, on_screen: bool) -> Result<(), ()> {
 }
 
 /// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
-/// the app's plugin. Gives the name that tool takes for it.
+/// the app's app. Gives the name that tool takes for it.
 #[tauri::command]
 async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, String> {
-    let plugin = request.headers().get("plugin").and_then(|plugin| plugin.to_str().ok()).unwrap_or_default().to_owned();
+    let app = request.headers().get("app").and_then(|app| app.to_str().ok()).unwrap_or_default().to_owned();
     let file = match request.body() {
         InvokeBody::Raw(file) => file.clone(),
         // Android's web view shows nothing a request's body, so there the file comes as a list of its bytes.
         InvokeBody::Json(Value::Array(bytes)) => bytes.iter().filter_map(|byte| Some(byte.as_u64()? as u8)).collect(),
         InvokeBody::Json(_) => return Err("An upload is a file".into()),
     };
-    let sent = views.client.upload(&plugin, file).await;
+    let sent = views.client.upload(&app, file).await;
     sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
 }
 
@@ -364,8 +364,8 @@ fn listen(app: AppHandle, views: State<'_, Views>) {
 /// the window opens the app it's from, as a tap on a computer's does.
 #[tauri::command]
 fn tapped(app: AppHandle, tapped: Value) {
-    if let Some(plugin) = notifications::opens(&tapped) {
-        drop(app.emit("open", plugin));
+    if let Some(name) = notifications::opens(&tapped) {
+        drop(app.emit("open", name));
     }
 }
 
@@ -665,7 +665,7 @@ const WINDOW_STATE: tauri_plugin_window_state::StateFlags = tauri_plugin_window_
     .union(tauri_plugin_window_state::StateFlags::FULLSCREEN);
 
 /// Opens the window as it was when the app last quit, on the display it was on. If where it was is on no display now
-/// (one that's been unplugged), it opens in the middle of one, at the size it was: the plugin leaves a position it
+/// (one that's been unplugged), it opens in the middle of one, at the size it was: the app leaves a position it
 /// can't show where it is, so the window is centred at its own size between the two.
 #[cfg(desktop)]
 fn opens_as_it_was(window: &tauri::WebviewWindow) -> tauri::Result<()> {

@@ -9,13 +9,13 @@ anything you build, use a network of your own (`local-network`).
 
 ## You may
 
-- Read: `one builds`, `one --help`, `ONE_SUBJECT=network one code --name <plugin>`, a plugin's read-only tools.
+- Read: `one builds`, `one --help`, `ONE_SUBJECT=network one code --name <app>`, an app's read-only tools.
 - Release your own change, once it's on `main`, by the smallest path (`release`).
 
 ## You may not, without the owner saying so
 
 - Delete or rewrite anything stored: blobs, databases, Recently Deleted, backups.
-- Remove a plugin, a server, a device or a person.
+- Remove an app, a server, a device or a person.
 - Touch the Vault: no `vault set`, `use`, `grant` or `remove`, and never read a secret.
 - Send anything outside: email, messages, notifications to people.
 

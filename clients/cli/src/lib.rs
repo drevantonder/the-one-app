@@ -1,6 +1,6 @@
-//! The CLI, a client on One Core in a client (`core/client`) and the native code of the plugins it ships with. Every
+//! The CLI, a client on One Core in a client (`core/client`) and the native code of the apps it ships with. Every
 //! tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
-//! `one notes add --text milk` calls `notes_add`. `one notes` shows the plugin's skill and its tools, and
+//! `one notes add --text milk` calls `notes_add`. `one notes` shows the app's skill and its tools, and
 //! `one mcp` serves MCP over stdio instead, or with `--code`, in code mode. `one search <words>` finds the tools for
 //! a task, and `one run <file>` runs a script that calls them, as code mode's `execute`. What isn't a tool is in `COMMANDS`.
 
@@ -20,7 +20,7 @@ use client::{Client, Connection, InputResolver, NotApproved, Session};
 use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
-/// What the native code of the plugins this program ships with fills in of a tool's inputs, which every client it
+/// What the native code of the apps this program ships with fills in of a tool's inputs, which every client it
 /// opens hands each call (`client::InputResolver`).
 pub fn resolvers() -> Vec<Arc<dyn InputResolver>> {
     vec![Arc::new(encryption_client::Encrypts)]
@@ -105,10 +105,10 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         ["update"] => printed(serving::update(&client).await?),
         ["task", id] => tasks::show(&client, id, false).await?,
         ["task", id, "--result"] => tasks::show(&client, id, true).await?,
-        // A plugin from a git repo, as `npx skills add` adds a skill; with no repo, the plugin is the network's own.
+        // An app from a git repo, as `npx skills add` adds a skill; with no repo, the app is the network's own.
         ["install", repo, ..] if !repo.starts_with("--") => install::install(&client, &args[1..]).await?,
-        ["install"] if std::path::Path::new("plugins.lock").exists() => install::locked(&client).await?,
-        ["uninstall", "--name", name] if std::path::Path::new("plugins.lock").exists() => {
+        ["install"] if std::path::Path::new("apps.lock").exists() => install::locked(&client).await?,
+        ["uninstall", "--name", name] if std::path::Path::new("apps.lock").exists() => {
             install::uninstall(&client, name).await?
         }
         ["deploy", ..] if words.contains(&"--files-from") => install::deploy_folder(&client, &args).await?,
@@ -203,10 +203,10 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
                 Ok(()) => client.fresh(method, &params).await.ok(),
                 Err(_) => client.cached(method, &params),
             };
-            // A plugin with no tools can still have a skill: the UI library's says how an app is written with it. It's
-            // read as any skill is, and what's printed of it is what follows its name and description. A plugin's
-            // own skill is named here by the plugin's name, as it's added, and One Core's by its name. Where both
-            // are, the plugin's is shown with its tools.
+            // An app with no tools can still have a skill: the UI library's says how an app is written with it. It's
+            // read as any skill is, and what's printed of it is what follows its name and description. An app's
+            // own skill is named here by the app's name, as it's added, and One Core's by its name. Where both
+            // are, the app's is shown with its tools.
             let skills = says("skills/list", json!({})).await.unwrap_or_default();
             let skills = skills["skills"].as_array().map(Vec::as_slice).unwrap_or_default();
             let uri = skills.iter().filter_map(|skill| skill["uri"].as_str()).rfind(|uri| uri_words(uri) == words);
@@ -218,7 +218,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
             let skill = skill.map(|skill| skill.split_once("\n---\n").map_or(skill, |(_, text)| text).trim());
             if within.is_empty() && skill.is_none() {
                 listed_result?;
-                bail!("There's no tool, plugin or skill named `{}`. `one --help` lists them.", words.join(" "));
+                bail!("There's no tool, app or skill named `{}`. `one --help` lists them.", words.join(" "));
             }
             if listed_result.is_err() {
                 eprintln!("No server is answering, so this is what one last listed.\n");
@@ -238,7 +238,7 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
             println!("\n`one <tool> --help` shows a tool's inputs.");
             if name.is_empty() {
                 println!("\n{COMMANDS}");
-                println!("\nA skill says when and how to use a plugin's tools, and `one <skill>` shows one:\n");
+                println!("\nA skill says when and how to use an app's tools, and `one <skill>` shows one:\n");
                 for skill in skills {
                     let words = uri_words(skill["uri"].as_str().unwrap_or_default()).join(" ");
                     let about = skill["frontmatter"]["description"].as_str().unwrap_or_default();
@@ -250,14 +250,14 @@ pub(crate) async fn command(client: &Client, args: &[String]) -> Result<ExitCode
     Ok(ExitCode::SUCCESS)
 }
 
-/// The words that show a skill, from its address (`OneCore.Skills`): a plugin's own, `skill://<plugin>/<its own
-/// name>/SKILL.md`, by the plugin's name; one of its `skills/` by the plugin's name and the skill's; and One Core's
+/// The words that show a skill, from its address (`OneCore.Skills`): an app's own, `skill://<app>/<its own
+/// name>/SKILL.md`, by the app's name; one of its `skills/` by the app's name and the skill's; and One Core's
 /// own, `skill://<name>/SKILL.md`, by its name.
 fn uri_words(uri: &str) -> Vec<&str> {
     let path = uri.strip_prefix("skill://").and_then(|uri| uri.strip_suffix("/SKILL.md")).unwrap_or_default();
     match path.split('/').collect::<Vec<_>>().as_slice() {
-        [plugin, _own] => vec![plugin],
-        [plugin, .., name] => vec![plugin, name],
+        [app, _own] => vec![app],
+        [app, .., name] => vec![app, name],
         parts => parts.to_vec(),
     }
 }
@@ -295,8 +295,8 @@ async fn inputs(client: &Client, tool: &Value, flags: &[String]) -> Result<Value
             None => bail!("--{name} needs {}", takes(schema)),
             Some(path) if from_file && schema["format"] == "upload" => {
                 let file = fs::read(path).with_context(|| format!("couldn't read {path}"))?;
-                let plugin = tool["name"].as_str().and_then(|tool| tool.split('_').next()).unwrap_or_default();
-                Value::String(client.upload(plugin, file).await?)
+                let app = tool["name"].as_str().and_then(|tool| tool.split('_').next()).unwrap_or_default();
+                Value::String(client.upload(app, file).await?)
             }
             Some(path) if from_file => read(Path::new(path), schema["contentEncoding"] == "base64")?,
             // A list's items are the words up to the next input, unless it's written as JSON.
@@ -370,7 +370,7 @@ fn takes(schema: &Value) -> String {
 }
 
 /// A file's text, or a folder as its files by their paths in it, as `client::files` reads a folder: each one's text,
-/// or `{"base64": ...}` for one that isn't text, as `deploy` takes a plugin's files. A file for an input that says
+/// or `{"base64": ...}` for one that isn't text, as `deploy` takes an app's files. A file for an input that says
 /// it's base64 (its schema's `contentEncoding`) is read as it is and written as that.
 pub(crate) fn read(path: &Path, base64: bool) -> Result<Value> {
     let couldnt = || format!("couldn't read {}", path.display());

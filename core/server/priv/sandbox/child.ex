@@ -1,4 +1,4 @@
-# One Core inside an untrusted plugin's VM, in its sandbox (`OneCore.Sandbox`, which says the protocol). The plugin is
+# One Core inside an untrusted app's VM, in its sandbox (`OneCore.Sandbox`, which says the protocol). The app is
 # compiled against these modules, which have the names and functions of the server's own, and each of their
 # functions is a message to the server. This file is compiled by the VM it runs in, behind the wall.
 
@@ -8,22 +8,22 @@ defmodule OneCore.Call do
   # the server. `id` is the call's, which the server knows it by: a call that has ended asks nothing more.
   alias OneCore.Sandbox.Child
 
-  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :plugin, :who, :loaded]
+  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :app, :who, :loaded]
 
-  def plugin(%__MODULE__{loaded: loaded, plugin: plugin}, name) do
+  def app(%__MODULE__{loaded: loaded, app: app}, name) do
     case loaded do
       %{^name => module} ->
         module
 
       _ ->
-        raise "#{name}'s code doesn't run inside #{plugin}: it does where #{plugin} requires it (requires/0), it's " <>
-                "installed for whoever #{plugin} runs for, its module provides functions, and its code can run in a " <>
+        raise "#{name}'s code doesn't run inside #{app}: it does where #{app} requires it (requires/0), it's " <>
+                "installed for whoever #{app} runs for, its module provides functions, and its code can run in a " <>
                 "sandbox. Otherwise call its tools."
     end
   end
 
-  def tool(%__MODULE__{id: id}, plugin, tool, inputs, options \\ []) do
-    request = %{"plugin" => plugin, "tool" => tool, "inputs" => inputs}
+  def tool(%__MODULE__{id: id}, app, tool, inputs, options \\ []) do
+    request = %{"app" => app, "tool" => tool, "inputs" => inputs}
 
     request =
       if Keyword.has_key?(options, :on_behalf_of),
@@ -46,7 +46,7 @@ defmodule OneCore.Call do
 
   def member?(%__MODULE__{id: id}, of), do: Child.request("member", %{"of" => of}, id)
   def owns?(%__MODULE__{id: id}), do: Child.request("owns", %{}, id)
-  def plugins(%__MODULE__{id: id}), do: Child.request("plugins", %{}, id)
+  def apps(%__MODULE__{id: id}), do: Child.request("apps", %{}, id)
   def deployed(%__MODULE__{id: id}), do: Child.request("deployed", %{}, id)
 
   @doc "Says what the call is doing, as the server's own does."
@@ -80,7 +80,7 @@ end
 
 defmodule OneCore.Artifact do
   @moduledoc false
-  # An artifact as an untrusted plugin holds it: a handle the server gave, which it looks up, and its name.
+  # An artifact as an untrusted app holds it: a handle the server gave, which it looks up, and its name.
   alias OneCore.Sandbox.Child
 
   defstruct [:handle, :prefix, :codec]
@@ -104,22 +104,22 @@ defmodule OneCore.Artifact do
     do: Child.request("list", %{"handle" => handle, "starting" => starting})
 end
 
-defmodule OneCore.Plugin do
+defmodule OneCore.App do
   @moduledoc false
-  # The interface a plugin is written against (the server's `OneCore.Plugin` says it all).
+  # The interface an app is written against (the server's `OneCore.App` says it all).
 
   def file(module, path) do
     {name, _out, files} =
-      :persistent_term.get({OneCore.Sandbox.Child, :files, module}, nil) || raise "#{inspect(module)} is no plugin's"
+      :persistent_term.get({OneCore.Sandbox.Child, :files, module}, nil) || raise "#{inspect(module)} is no app's"
 
     if String.ends_with?(path, ".ex") or path == "SKILL.md" or String.starts_with?(path, ["client/", "skills/"]),
-      do: raise("#{name}'s plugin has no file #{path} outside client/"),
-      else: files[path] || raise("#{name}'s plugin has no file #{path} outside client/")
+      do: raise("#{name}'s app has no file #{path} outside client/"),
+      else: files[path] || raise("#{name}'s app has no file #{path} outside client/")
   end
 
   @callback tools() :: [map]
   @callback call(String.t(), map, struct) :: term
-  @callback apps() :: [map]
+  @callback entrypoints() :: [map]
   @callback widgets() :: [map]
   @callback title() :: String.t()
   @callback icon() :: String.t()
@@ -132,7 +132,7 @@ defmodule OneCore.Plugin do
   @callback sensitive() :: boolean
   @optional_callbacks tools: 0,
                       call: 3,
-                      apps: 0,
+                      entrypoints: 0,
                       widgets: 0,
                       title: 0,
                       icon: 0,
@@ -159,7 +159,7 @@ defmodule OneCore.Sandbox.Child do
   def main do
     Process.register(self(), __MODULE__)
     sink = spawn(&sink/0)
-    # Whatever the plugin writes as output or errors would land in the protocol: it's dropped.
+    # Whatever the app writes as output or errors would land in the protocol: it's dropped.
     Process.group_leader(self(), sink)
     with pid when is_pid(pid) <- Process.whereis(:standard_error), do: Process.unregister(:standard_error)
     Process.register(sink, :standard_error)
@@ -246,7 +246,7 @@ defmodule OneCore.Sandbox.Child do
   # A call runs in a process of its own, which answers it. `server-debug` traces this function to hear one begin.
   defp called(id, what, about) do
     Process.put(:"$one_call", id)
-    # Whose call it is, as a server's process running one says (`OneCore.Plugins.Calls`).
+    # Whose call it is, as a server's process running one says (`OneCore.Apps.Calls`).
     Logger.metadata(installed: about["installed"], subject: about["subject"])
 
     result =
@@ -254,7 +254,7 @@ defmodule OneCore.Sandbox.Child do
         call = call(id, about)
         {:returned, encoded(run(what, call))}
       rescue
-        # What it raised is redacted (`OneCore.Redact`), as a call on the server is (`OneCore.Plugins.held/2`).
+        # What it raised is redacted (`OneCore.Redact`), as a call on the server is (`OneCore.Apps.held/2`).
         error -> {:raised, Exception.message(OneCore.Redact.redact(error))}
       catch
         kind, reason -> {:raised, Exception.format_banner(kind, OneCore.Redact.redact(reason))}
@@ -266,14 +266,14 @@ defmodule OneCore.Sandbox.Child do
   defp reply_body({:returned, result}), do: %{"ok" => result}
   defp reply_body({:raised, why}), do: %{"raised" => why}
 
-  defp run({:tool, tool, inputs}, call), do: plugin().call(tool, inputs, call)
-  defp run({:hook, hook, about}, call), do: plugin().hook(hook, about, call)
+  defp run({:tool, tool, inputs}, call), do: app().call(tool, inputs, call)
+  defp run({:hook, hook, about}, call), do: app().hook(hook, about, call)
 
-  # What `server-debug` asks: its own code to run here, and what to ask it, as it would run on a server for a plugin
-  # there. A call here runs for whoever it says, and the plugin's processes kept between calls are its own. A plugin
+  # What `server-debug` asks: its own code to run here, and what to ask it, as it would run on a server for an app
+  # there. A call here runs for whoever it says, and the app's processes kept between calls are its own. An app
   # that says it's sensitive is never looked into.
   defp run({:debug, %{"source" => source, "request" => request, "scope" => scope}}, _call) do
-    if function_exported?(plugin(), :sensitive, 0) and plugin().sensitive(),
+    if function_exported?(app(), :sensitive, 0) and app().sensitive(),
       do: raise("It's sensitive: what it's given and keeps are secrets, so nothing looks into it as it runs")
 
     probe =
@@ -310,12 +310,12 @@ defmodule OneCore.Sandbox.Child do
     })
   end
 
-  # A job is called by the server, as the clock: whichever plugin it requires keeps its schedule.
+  # A job is called by the server, as the clock: whichever app it requires keeps its schedule.
   defp run({:schedule, jobs}, call) do
     fire = fn job ->
       request(
         "fire",
-        %{"installed" => call.installed, "plugin" => call.plugin, "tool" => job.tool, "inputs" => job.inputs},
+        %{"installed" => call.installed, "app" => call.app, "tool" => job.tool, "inputs" => job.inputs},
         nil
       )
     end
@@ -329,17 +329,17 @@ defmodule OneCore.Sandbox.Child do
       id: id,
       own: artifact(about["own"]),
       installed: about["installed"],
-      folder: Path.join([System.tmp_dir!(), "own", about["installed"], about["plugin"]]),
+      folder: Path.join([System.tmp_dir!(), "own", about["installed"], about["app"]]),
       server: about["server"],
       subject: about["subject"],
       actor: about["actor"],
       caller: about["caller"],
-      plugin: about["plugin"],
+      app: about["app"],
       who: about["who"],
       loaded:
         for(
           name <- about["loaded"],
-          module = :persistent_term.get({__MODULE__, :plugin, name}, nil),
+          module = :persistent_term.get({__MODULE__, :app, name}, nil),
           into: %{},
           do: {name, module}
         )
@@ -355,11 +355,11 @@ defmodule OneCore.Sandbox.Child do
   defp encoded(text) when is_binary(text), do: %{"text" => text}
   defp encoded(result), do: %{"json" => JSON.decode!(JSON.encode!(result))}
 
-  defp plugin, do: :persistent_term.get({__MODULE__, :main})
+  defp app, do: :persistent_term.get({__MODULE__, :main})
 
-  # Compiles each set of files in turn, the plugins it requires before the plugin, and says what the plugin is. What
+  # Compiles each set of files in turn, the apps it requires before the app, and says what the app is. What
   # it requires runs here as it, as it would run as it on a server, where its code can run here: what can't, the
-  # plugin calls by its tools. A VM of the same version that ran before compiled them
+  # app calls by its tools. A VM of the same version that ran before compiled them
   # already, and the server kept what it compiled in `cache`, where they're loaded from instead. Otherwise what was
   # compiled is answered with, its own side of One Core among it, for the server to keep.
   defp loaded(sets, target, cache) do
@@ -370,22 +370,22 @@ defmodule OneCore.Sandbox.Child do
         modules -> Map.put(modules, name, compiled(name, files, target, cache))
       end
 
-    plugins = for {name, mods} <- modules, module <- mods, OneCore.Plugin in behaviours(module), do: {name, module}
+    apps = for {name, mods} <- modules, module <- mods, OneCore.App in behaviours(module), do: {name, module}
 
-    case for {^main, module} <- plugins, do: module do
-      [plugin] ->
+    case for {^main, module} <- apps, do: module do
+      [app] ->
         runs = OneCore.Sandbox.Check.runs(Map.keys(modules) -- [main])
 
-        for {name, module} <- plugins,
+        for {name, module} <- apps,
             name == main or name in runs,
-            do: :persistent_term.put({__MODULE__, :plugin, name}, module)
+            do: :persistent_term.put({__MODULE__, :app, name}, module)
 
-        :persistent_term.put({__MODULE__, :main}, plugin)
-        described = described(plugin, main, modules[main], runs)
+        :persistent_term.put({__MODULE__, :main}, app)
+        described = described(app, main, modules[main], runs)
         {:returned, if(cache, do: described, else: Map.put(described, "beams", beams(modules)))}
 
       found ->
-        raise "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"
+        raise "One module of an app says `@behaviour OneCore.App`, and #{length(found)} do"
     end
   rescue
     error -> {:raised, Exception.message(error)}
@@ -401,16 +401,16 @@ defmodule OneCore.Sandbox.Child do
   end
 
   defp beam(name, module) do
-    out = if name == "runtime", do: "runtime", else: Path.join(["plugins", name, "ebin"])
+    out = if name == "runtime", do: "runtime", else: Path.join(["apps", name, "ebin"])
     File.read!(Path.join([System.tmp_dir!(), out, "#{module}.beam"]))
   end
 
   defp compiled(name, files, target, cache) do
-    folder = Path.join([System.tmp_dir!(), "plugins", name])
+    folder = Path.join([System.tmp_dir!(), "apps", name])
     out = if cache, do: cache["ebin"], else: Path.join(folder, "ebin")
     File.mkdir_p!(folder)
 
-    # A NIF loads as its build, which the plugin's code reaches under its name (`OneCore.Nif`).
+    # A NIF loads as its build, which the app's code reaches under its name (`OneCore.Nif`).
     for {path, text} <- files, Path.dirname(path) == "server/nif", Path.extname(path) == ".ex" do
       library = files[Path.rootname(path) <> "/#{target}.so"] || raise "#{path} has no build for this kind of machine"
 
@@ -468,10 +468,10 @@ defmodule OneCore.Sandbox.Child do
   @doc "The behaviours a module says it follows, one `behaviour` attribute each."
   def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
-  # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what an untrusted plugin isn't offered.
-  defp described(plugin, main, modules, runs) do
+  # What the app says of itself, as `OneCore.Apps.Version` takes it, with what an untrusted app isn't offered.
+  defp described(app, main, modules, runs) do
     value = fn function, none ->
-      if function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none
+      if function_exported?(app, function, 0), do: apply(app, function, []), else: none
     end
 
     hooks = value.(:hooks, [])
@@ -480,28 +480,28 @@ defmodule OneCore.Sandbox.Child do
 
     %{
       "tools" => value.(:tools, []),
-      "apps" => value.(:apps, []),
+      "entrypoints" => value.(:entrypoints, []),
       "title" => value.(:title, nil),
       "icon" => value.(:icon, nil),
       "offers" => offers,
       "widgets" => value.(:widgets, []),
-      "exports" => exports(plugin),
+      "exports" => exports(app),
       "hooks" => hooks,
       "jobs" => value.(:jobs, []),
       "requires" => value.(:requires, %{}),
       "warnings" => Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
-      "problems" => OneCore.Sandbox.Check.problems(plugin, modules, runs, hooks, offers, services)
+      "problems" => OneCore.Sandbox.Check.problems(app, modules, runs, hooks, offers, services)
     }
     |> JSON.encode!()
     |> JSON.decode!()
   end
 
-  # The functions its module provides other plugins, as `OneCore.Plugins.Version` says them.
-  defp exports(plugin) do
-    callbacks = OneCore.Plugin.behaviour_info(:callbacks)
+  # The functions its module provides other apps, as `OneCore.Apps.Version` says them.
+  defp exports(app) do
+    callbacks = OneCore.App.behaviour_info(:callbacks)
 
     Enum.sort(
-      for {name, arity} <- plugin.__info__(:functions),
+      for {name, arity} <- app.__info__(:functions),
           {name, arity} not in callbacks,
           not String.starts_with?(Atom.to_string(name), "__"),
           do: "#{name}/#{arity}"
@@ -520,7 +520,7 @@ defmodule OneCore.Sandbox.Child do
 
   defmodule Logged do
     @moduledoc false
-    # A warning or an error said to Logger goes to the server's log, as the plugin's: a report as Elixir translated it,
+    # A warning or an error said to Logger goes to the server's log, as the app's: a report as Elixir translated it,
     # redacted (`OneCore.Redact`).
     def log(%{level: level} = event, _config) do
       text = IO.chardata_to_string(:logger_formatter.format(event, %{template: [:msg], single_line: false}))
@@ -532,32 +532,32 @@ end
 
 defmodule OneCore.Sandbox.Check do
   @moduledoc false
-  # What a plugin's modules use that an untrusted plugin isn't offered, a sentence each with its file and line and what
+  # What an app's modules use that an untrusted app isn't offered, a sentence each with its file and line and what
   # to do instead. It reads the compiled code, after every macro, so it sees what will run. It's a check for the
   # author, not the wall: the wall is the sandbox this VM runs in.
 
   @offered %{
     OneCore.Call =>
-      ~w(plugin tool make reach reaches? member? owns? plugins deployed process forward_to stage ask __struct__)a,
+      ~w(app tool make reach reaches? member? owns? apps deployed process forward_to stage ask __struct__)a,
     OneCore.Artifact => ~w(name read read_all write replace remove size list __struct__)a,
-    OneCore.Plugin => ~w(file behaviour_info)a
+    OneCore.App => ~w(file behaviour_info)a
   }
 
   @programs [{System, :cmd}, {System, :shell}, {Port, :open}, {:os, :cmd}, {:erlang, :open_port}]
   @network [:gen_tcp, :gen_udp, :gen_sctp, :ssl, :httpc, :socket, Req, Finch, Mint.HTTP, HTTPoison, Tesla]
 
-  # Core's hooks that mutate or validate what happens, which only a plugin on a server of its owner's may.
+  # Core's hooks that mutate or validate what happens, which only an app on a server of its owner's may.
   @deciding ~w(inputs call reach device owner)
 
-  # Which of the plugins it requires, by their names, run in its VM as it: those whose code can run there. One that
+  # Which of the apps it requires, by their names, run in its VM as it: those whose code can run there. One that
   # can't, as most of the network's own can't, is called by its tools instead.
   def runs(required) do
     loaded = MapSet.new(Enum.flat_map(required, &modules_of/1))
     for name <- required, calls(modules_of(name), loaded) == [], do: name
   end
 
-  # `runs` are the plugins it requires that run in its VM, whose modules it may call.
-  def problems(plugin, modules, runs, hooks, offers, services) do
+  # `runs` are the apps it requires that run in its VM, whose modules it may call.
+  def problems(app, modules, runs, hooks, offers, services) do
     loaded = MapSet.new(modules ++ Enum.flat_map(runs, &modules_of/1))
     calls = calls(modules, loaded)
 
@@ -565,21 +565,21 @@ defmodule OneCore.Sandbox.Check do
       for hook <- hooks,
           hook in @deciding,
           do:
-            "#{where(plugin)}: hooks/0 names `#{hook}`, which changes or decides what happens. An untrusted " <>
-              "plugin only observes: hook `called` or `changed` instead, or run it trusted, on a server of its owner's."
+            "#{where(app)}: hooks/0 names `#{hook}`, which changes or decides what happens. An untrusted " <>
+              "app only observes: hook `called` or `changed` instead, or run it trusted, on a server of its owner's."
 
     offering =
       if offers == [],
         do: [],
         else: [
-          "#{where(plugin)}: offers/0 offers hooks, which an untrusted plugin doesn't: run it trusted, on a server " <>
+          "#{where(app)}: offers/0 offers hooks, which an untrusted app doesn't: run it trusted, on a server " <>
             "of its owner's."
         ]
 
     serving =
       for service <- services,
           do:
-            "#{service} is a service, which runs on particular machines: an untrusted plugin has none. A plugin " <>
+            "#{service} is a service, which runs on particular machines: an untrusted app has none. An app " <>
               "with one runs trusted, on a server of its owner's."
 
     calls ++ hooking ++ offering ++ serving
@@ -649,41 +649,41 @@ defmodule OneCore.Sandbox.Check do
         nil
 
       Map.has_key?(@offered, m) ->
-        if f not in @offered[m], do: "#{name} isn't offered to an untrusted plugin. #{instead(m, f)}"
+        if f not in @offered[m], do: "#{name} isn't offered to an untrusted app. #{instead(m, f)}"
 
       m == OneCore.Service ->
-        "#{name} reaches a service, which an untrusted plugin has none of: a plugin with one runs trusted, on a " <>
+        "#{name} reaches a service, which an untrusted app has none of: an app with one runs trusted, on a " <>
           "server of its owner's."
 
       String.starts_with?(inspect(m), "OneCore.") ->
-        "#{name} is One Core's own, which a plugin doesn't call."
+        "#{name} is One Core's own, which an app doesn't call."
 
       {m, f} in @programs ->
-        "#{name} starts a program, which an untrusted plugin doesn't: it has none to start."
+        "#{name} starts a program, which an untrusted app doesn't: it has none to start."
 
       m in @network ->
-        "#{name} reaches the network, which an untrusted plugin doesn't, nor any website: run it trusted, on a " <>
+        "#{name} reaches the network, which an untrusted app doesn't, nor any website: run it trusted, on a " <>
           "server of its owner's."
 
       m == Jason ->
         "#{name} is a package that isn't here. Elixir's own `JSON` encodes and decodes."
 
       not match?({:module, _}, Code.ensure_loaded(m)) ->
-        plugin = m |> inspect() |> String.split(".") |> hd() |> Macro.underscore() |> String.replace("_", "-")
+        app = m |> inspect() |> String.split(".") |> hd() |> Macro.underscore() |> String.replace("_", "-")
 
-        "#{name} is another plugin's function, or a package that isn't here. An untrusted plugin calls " <>
-          "another by its tool, as whoever the call runs for: `OneCore.Call.tool(call, \"#{plugin}\", \"#{f}\", " <>
-          "%{...})`, naming #{plugin} in requires/0."
+        "#{name} is another app's function, or a package that isn't here. An untrusted app calls " <>
+          "another by its tool, as whoever the call runs for: `OneCore.Call.tool(call, \"#{app}\", \"#{f}\", " <>
+          "%{...})`, naming #{app} in requires/0."
 
       true ->
         nil
     end
   end
 
-  defp instead(OneCore.Call, :run_hook), do: "An untrusted plugin offers no hooks."
+  defp instead(OneCore.Call, :run_hook), do: "An untrusted app offers no hooks."
 
   defp instead(OneCore.Call, :fetch),
-    do: "An untrusted plugin reaches no website: run it trusted, on a server of its owner's."
+    do: "An untrusted app reaches no website: run it trusted, on a server of its owner's."
 
   defp instead(OneCore.Call, f) when f in [:forward, :run_elsewhere, :refused], do: "One Core does that itself."
   defp instead(OneCore.Artifact, :link), do: "Answer a blob as `{:file, kind, artifact, name}` instead."

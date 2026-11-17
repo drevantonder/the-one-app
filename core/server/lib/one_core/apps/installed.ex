@@ -1,0 +1,206 @@
+defmodule OneCore.Apps.Installed do
+  @moduledoc """
+  What's installed for an owner, a user, a group or the network: one install per app per owner, each one explicit
+  state machine.
+
+      not installed ─Install─► installing ─► installed ─Uninstall─► recently deleted ─30 days─► removed
+                                                                    recently deleted ─Restore─► installed
+      installing ─fails─► not installed (why · Try Again)
+
+  with a `stage` inside installing: its `requirements` installed first, then `fetching` its code, `building` it and
+  `starting` it. Whatever's installed runs the app's one version, the same everywhere it's installed: its updates
+  and whether it's trusted are the app's (`OneCore.Apps.Update`).
+
+  Each owner's are one blob, `<owner>/installs`, with each app's record by the name it's installed by: the
+  `app` it is, its `state`, its `stage`, `why` it isn't installed where it failed to be, when it was `deleted`, and
+  who installed it (`by`). A record lives for years and every server and client reads it, while no one process lives
+  that long, so the machine is the transition table `move/3` over records, each move made with
+  `OneCore.Artifact.update/3`: two servers moving one record at once each see the other's move first, and a move the
+  table doesn't have is refused, saying why. A record keeps what it held that this doesn't read.
+
+  That someone installed an app is kept with the app too, as the blob `installed/<who>` in its artifact, which
+  ends `deleted` while it's in their Recently Deleted: so a deploy tells their servers, and it's in use for them only
+  while it isn't deleted.
+  """
+  alias OneCore.{Artifact, Bucket}
+
+  @blob "installs"
+
+  @doc "Each app's record, as `<owner>/installs` keeps it, by the name it's installed by."
+  def read(owner) do
+    case Bucket.read("#{owner}/#{@blob}") do
+      {:ok, json, _tag} -> JSON.decode!(json)["apps"] || %{}
+      :absent -> copied(owner)
+    end
+  end
+
+  # What a server from before installs had state kept, `<owner>/installed`: each app's name with its artifact.
+  # It's copied once to the shape it has now, and the blob it was is left as it is.
+  defp copied(owner) do
+    case Bucket.read("#{owner}/installed") do
+      {:ok, json, _tag} ->
+        records = Map.new(JSON.decode!(json), fn {name, app} -> {name, %{"app" => app, "state" => "installed"}} end)
+
+        # Only a server acting for them writes what's theirs; another reads it as it is until one has.
+        if OneCore.Servers.here?(owner) do
+          Bucket.write("#{owner}/#{@blob}", JSON.encode!(%{apps: records}))
+          for {_name, record} <- records, do: marked(owner, record)
+        end
+
+        records
+
+      :absent ->
+        %{}
+    end
+  end
+
+  @doc """
+  The apps that run for `owner`, by the name each is installed by, with its artifact: what's installed, and what's
+  installing once it's starting.
+  """
+  def running(owner) do
+    for {name, %{"app" => app} = record} <- read(owner), runs?(record), into: %{}, do: {name, app}
+  end
+
+  defp runs?(%{"state" => "installed"}), do: true
+  defp runs?(%{"state" => "installing", "stage" => "starting"}), do: true
+  defp runs?(_record), do: false
+
+  @doc """
+  Moves the record of the app `name` for `owner` by `event`, as `move/3` says, and gives the record it's at
+  now, `nil` for none, or `{:error, why}` where the table hasn't that move. The app's artifact is told.
+  """
+  def change(owner, name, event) do
+    changed =
+      Artifact.update(%Artifact{prefix: "#{owner}/"}, @blob, fn was ->
+        kept = if was, do: JSON.decode!(was), else: %{"apps" => read(owner)}
+        records = kept["apps"] || %{}
+
+        case move(records[name], event, {owner, name}) do
+          {:ok, nil} -> JSON.encode!(Map.put(kept, "apps", Map.delete(records, name)))
+          {:ok, record} -> JSON.encode!(Map.put(kept, "apps", Map.put(records, name, record)))
+          {:error, why} -> throw({__MODULE__, why})
+        end
+      end)
+
+    record = JSON.decode!(changed)["apps"][name]
+    if record, do: marked(owner, record)
+    record
+  catch
+    {__MODULE__, why} -> {:error, why}
+  end
+
+  # The app's artifact says it's installed for `owner`, and whether it's in their Recently Deleted.
+  defp marked(owner, %{"app" => app, "state" => state}) when state in ~w(installing installed recently_deleted) do
+    blob = "#{app}/installed/#{owner}"
+    data = if state == "recently_deleted", do: "deleted", else: ""
+
+    case Bucket.read(blob) do
+      {:ok, ^data, _tag} -> :ok
+      {:ok, _was, tag} -> Bucket.replace(blob, data, tag)
+      :absent -> Bucket.write(blob, data)
+    end
+  end
+
+  defp marked(_owner, _record), do: :ok
+
+  @doc "Says the app `artifact` is no longer installed for `owner`, unless they have it by another name."
+  def unmarked(artifact, owner) do
+    if not Enum.any?(read(owner), fn {_name, record} -> record["app"] == artifact end),
+      do: Bucket.remove("#{artifact}/installed/#{owner}")
+  end
+
+  @doc """
+  The transition table: where a record goes on `event`, from where it is (`nil` for not installed). `{:ok, record}`,
+  `{:ok, nil}` for not installed any more, or `{:error, why}` for a move that isn't in it. `at` is whose and which
+  app, for what it says.
+
+  Events, as the machine names them: `{:install, app, by}` (Install, and Try Again on one that failed to),
+  `{:stage, stage}`, `:done`, `{:fail, why}`, `{:uninstall, group}`, `:restore` and `:purge` (30 days on), where
+  `group` says what went to Recently Deleted together, as one: `%{"with" => names}` on the one uninstalled, and
+  `%{"deleted_with" => name}` on each app that required it; and
+  `{:deployed, app, by}`, where whoever it's installed for deployed it, which is theirs, installed at once.
+  """
+  def move(record, event, at)
+
+  def move(record, {:install, app, by}, _at) when record == nil or :erlang.map_get("state", record) == "not_installed",
+    do: {:ok, (record || %{}) |> Map.merge(%{"app" => app, "by" => by}) |> moved("installing", "requirements")}
+
+  def move(%{"state" => "installing"} = record, {:stage, stage}, _at) when stage in ~w(requirements fetching building starting),
+    do: {:ok, moved(record, "installing", stage)}
+
+  def move(%{"state" => "installing"} = record, :done, _at), do: {:ok, moved(record, "installed")}
+
+  def move(%{"state" => "installing"} = record, {:fail, why}, _at),
+    do: {:ok, record |> moved("not_installed") |> Map.put("why", why)}
+
+  def move(%{"state" => "installed"} = record, {:uninstall, group}, _at),
+    do: {:ok, record |> moved("recently_deleted") |> Map.merge(Map.put(group, "deleted", now()))}
+
+  def move(%{"state" => "recently_deleted"} = record, :restore, _at),
+    do: {:ok, record |> Map.drop(["deleted", "with", "deleted_with"]) |> moved("installed")}
+
+  def move(%{"state" => "recently_deleted"}, :purge, _at), do: {:ok, nil}
+
+  def move(record, {:deployed, app, by}, _at)
+      when record == nil or :erlang.map_get("state", record) in ["installed", "not_installed"] do
+    if record && record["state"] == "installed",
+      do: {:ok, %{record | "app" => app}},
+      else: {:ok, (record || %{}) |> Map.merge(%{"app" => app, "by" => by}) |> moved("installed")}
+  end
+
+  def move(record, event, {owner, name}), do: {:error, refused(record, event, name, owner)}
+
+  # A record in `state`, at `stage` within it if it has one, since now.
+  defp moved(record, state, stage \\ nil) do
+    record
+    |> Map.merge(%{"state" => state, "at" => now()})
+    |> Map.drop(["stage", "why"])
+    |> then(&if(stage, do: Map.put(&1, "stage", stage), else: &1))
+  end
+
+  # What a refused move says: where it is, and what it can do from there.
+  defp refused(nil, _event, name, owner), do: "#{name} isn't installed for #{owner}."
+
+  defp refused(%{"state" => "not_installed", "why" => why}, _event, name, owner),
+    do: "#{name} isn't installed for #{owner}: #{why}\n\nTry again (apps_retry)."
+
+  defp refused(%{"state" => "recently_deleted"}, _event, name, owner),
+    do: "#{name} is in Recently Deleted for #{owner}. Restore it (apps_restore) to use it again."
+
+  defp refused(%{"state" => "installing", "stage" => stage}, _event, name, _owner),
+    do: "#{name} is installing (#{stage}). Wait until it's done."
+
+  defp refused(%{"state" => "installed"}, {:install, _, _}, name, owner), do: "#{name} is installed for #{owner} already."
+  defp refused(_record, _event, name, owner), do: "That doesn't apply to #{name} for #{owner} as it is."
+
+  defp now, do: System.system_time(:millisecond)
+
+  @doc "Who the app `artifact` is installed for, as its artifact says, besides whoever's it is: in their Recently Deleted too."
+  def installed_for(artifact) do
+    for blob <- Bucket.list("#{artifact}/installed/"), do: String.replace_prefix(blob, "#{artifact}/installed/", "")
+  end
+
+  @doc "Who the app `artifact` is in use for, as its artifact says: installed for them, and not in their Recently Deleted."
+  def in_use_for(artifact) do
+    blobs = Bucket.list("#{artifact}/installed/")
+
+    for {blob, {:ok, marked, _tag}} <- Enum.zip(blobs, Bucket.read_all(blobs)), not String.ends_with?(marked, "deleted"),
+        do: String.replace_prefix(blob, "#{artifact}/installed/", "")
+  end
+
+  @doc "Whether `name` is one an app is installed by: `:ok`, or `{:error, why}`."
+  def named(name) do
+    cond do
+      not (is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/) ->
+        {:error, "An app's name is lowercase letters, digits and hyphens, starting with a letter"}
+
+      # A client finds the UI library where it finds an app's files, by this name (`OneCore.MCP`).
+      name == "ui" ->
+        {:error, "ui is the UI library's, which is One Core's own: name the app something else"}
+
+      true ->
+        :ok
+    end
+  end
+end

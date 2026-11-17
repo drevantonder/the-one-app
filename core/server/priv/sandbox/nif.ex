@@ -1,19 +1,19 @@
 defmodule OneCore.Nif do
   @moduledoc """
-  A NIF: native code a server runs, in Rust. One Core has its own (`core/server/nif/`), and a plugin brings its own
-  (`server/nif/`, `OneCore.Plugin`).
+  A NIF: native code a server runs, in Rust. One Core has its own (`core/server/nif/`), and an app brings its own
+  (`server/nif/`, `OneCore.App`).
 
   The VM loads a NIF's library into a module once, and Rustler has no `upgrade` to load another build of it beside
   the first. So each build is a module of its own, `OneCore.Nifs.B<build>`, named for what it's built from
-  (`tooling/input-hash`), and a changed NIF is a new module, loaded beside the one before, as a plugin's new version
-  is (`OneCore.Plugins.Version`):
+  (`tooling/input-hash`), and a changed NIF is a new module, loaded beside the one before, as an app's new version
+  is (`OneCore.Apps.Version`):
 
       built, by its input hash (tooling/nifs) ─► loaded, beside any other build ─► unloaded, once nothing that loaded it does
-      loading ─fails─► what brought it doesn't load: a plugin's version doesn't deploy, and the one before runs on
+      loading ─fails─► what brought it doesn't load: an app's version doesn't deploy, and the one before runs on
 
   Its Elixir says `use OneCore.Nif`, with each function `:erlang.nif_error(:nif_not_loaded)` as Rustler has it, and
   is compiled under the build's name as the build loads (`load/4`). Under its own name it hands each call to the
-  newest build loaded, which is how One Core's code and other plugins reach it. A plugin's own code reaches the build
+  newest build loaded, which is how One Core's code and other apps reach it. An app's own code reaches the build
   its version brought, so what it opened with a build it uses with that build.
   """
 
@@ -72,7 +72,7 @@ defmodule OneCore.Nif do
             end
 
           nil ->
-            raise "#{inspect(name)} isn't loaded here: no plugin running here brings it"
+            raise "#{inspect(name)} isn't loaded here: no app running here brings it"
         end
     end
   end
@@ -168,7 +168,7 @@ defmodule OneCore.Nif do
     end
   end
 
-  # One Core's NIFs are its own, and a plugin's can't take the name of anything else the server has.
+  # One Core's NIFs are its own, and an app's can't take the name of anything else the server has.
   defp own(name, user) do
     case :code.ensure_loaded(name) do
       {:error, _} -> :ok
@@ -204,7 +204,7 @@ defmodule OneCore.Nif do
     end
   end
 
-  # A plugin's NIF under its own name, compiled from its source with each function handing on to the newest build,
+  # An app's NIF under its own name, compiled from its source with each function handing on to the newest build,
   # once, and again if a build has other functions. One Core's is compiled with One Core.
   defp forwards(name, quoted, build) do
     functions = Enum.sort(build.__info__(:functions) -- [__load__: 0])

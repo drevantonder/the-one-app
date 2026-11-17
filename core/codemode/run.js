@@ -3,7 +3,7 @@
 // started this, the CLI (`clients/cli/src/codemode.rs`) or a server (`OneCore.CodeMode`), which runs it as the person,
 // as any MCP call; this side only asks. Its limits and how its result reads are here, so both say the same.
 //
-// stdin: first { code, tools: [{ name, plugin, description, input, output }], namespaces: { <plugin>: what it's for } }, then
+// stdin: first { code, tools: [{ name, app, description, input, output }], namespaces: { <app>: what it's for } }, then
 // { reply, ok | error } for each call. stdout: { call, name, input } for each call, then { done: { ok, text } }.
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
@@ -49,10 +49,10 @@ const call = (name, input) =>
     say({ call: id, name, input })
   })
 
-// A plugin's tool is tools.<plugin>.<tool>, in a namespace that says what the plugin is for, which the script's
+// An app's tool is tools.<app>.<tool>, in a namespace that says what the app is for, which the script's
 // `search()` ranks by as One Core's `search` does (`OneCore.Search`), and One Core's own is tools.<name>.
 const tools = {}
-const plugins = {}
+const apps = {}
 for (const t of list) {
   const tool = Tool.make({
     description: t.description ?? "",
@@ -61,11 +61,11 @@ for (const t of list) {
     output: t.output ?? {},
     execute: (input) => Effect.tryPromise({ try: () => call(t.name, input), catch: (e) => toolError(String(e)) }),
   })
-  if (t.plugin) (plugins[t.plugin] ??= {})[t.name.slice(t.plugin.length + 1)] = tool
+  if (t.app) (apps[t.app] ??= {})[t.name.slice(t.app.length + 1)] = tool
   else tools[t.name] = tool
 }
-for (const [plugin, its] of Object.entries(plugins))
-  tools[plugin] = Namespace.make({ description: namespaces[plugin] ?? "", tools: its })
+for (const [app, its] of Object.entries(apps))
+  tools[app] = Namespace.make({ description: namespaces[app] ?? "", tools: its })
 
 const result = await Effect.runPromise(CodeMode.make({ tools, limits }).execute(code))
 

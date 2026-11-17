@@ -56,10 +56,10 @@ tauri = { version = "2", features = ["custom-protocol"], optional = true }
 # Opens the sign-in page in the device's own browser, where a passkey works.
 tauri-plugin-opener = { version = "2", optional = true }
 
-# The native code of the plugins it ships with that only the window uses, beside the CLI's, which is never deployed
+# The native code of the apps it ships with that only the window uses, beside the CLI's, which is never deployed
 # (`client::files`).
-encryption_client = { path = "../../plugins/encryption/client/native", optional = true }
-notifications_client = { path = "../../plugins/notifications/client/native", optional = true }
+encryption_client = { path = "../../apps/encryption/client/native", optional = true }
+notifications_client = { path = "../../apps/notifications/client/native", optional = true }
 
 # The notification plugins Notifications' client-side code uses, which Tauri gives the window's page permissions of only
 # where the app names them itself (`capabilities/phone.json`).

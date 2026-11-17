@@ -1,6 +1,6 @@
 {
   "name": "edge",
-  "description": "A network's edge: the gateway, the relay, the presigner, the web client's files, the network's MCP endpoint and front door, and each plugin's part there.",
+  "description": "A network's edge: the gateway, the relay, the presigner, the web client's files, the network's MCP endpoint and front door, and each app's part there.",
   "private": true,
   "type": "module",
   "dependencies": {

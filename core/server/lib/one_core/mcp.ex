@@ -1,27 +1,27 @@
 defmodule OneCore.Mcp do
   @moduledoc """
   Answers what a client asks, in MCP's JSON-RPC: a message in, and its answer out. So a server is an MCP server to
-  whatever reaches it, and the tools it lists are One Core's own and those of the plugins installed for whoever asks
+  whatever reaches it, and the tools it lists are One Core's own and those of the apps installed for whoever asks
   and for the network.
 
-  Every request is from someone and for someone, which `OneCore.User.asking/2` says, and a plugin's tool runs for
+  Every request is from someone and for someone, which `OneCore.User.asking/2` says, and an app's tool runs for
   them.
 
   Servers ask each other the same way, and four things only a server acting for whoever it asks for may ask: to call a
-  function of a plugin's service running here (`services/call`), and to run what was passed on of a service's
-  call into its plugin (`plugins/call`), of a plugin's hook (`hooks/call`) or of having a plugin's scheduled jobs
-  called (`plugins/schedule`).
+  function of an app's service running here (`services/call`), and to run what was passed on of a service's
+  call into its app (`apps/call`), of an app's hook (`hooks/call`) or of having an app's scheduled jobs
+  called (`apps/schedule`).
 
-  What of a plugin runs in a client, its folder `client/`, is MCP resources: `ui://<plugin>/<code>/<path>`, where
+  What of an app runs in a client, its folder `client/`, is MCP resources: `ui://<app>/<code>/<path>`, where
   `code` names the set of files a version runs, so a file at an address never changes. What a page loads is listed,
-  a plugin's apps among it as an MCP App is, and the rest of `client/` is read by name. The UI library every app
-  loads is One Core's own, the one this server ships with, at `ui://ui/<its code>/client/<path>` (`OneCore.App`).
+  an app's entrypoints among it as an MCP App is, and the rest of `client/` is read by name. The UI library every app
+  loads is One Core's own, the one this server ships with, at `ui://ui/<its code>/client/<path>` (`OneCore.Entrypoint`).
 
   Skills are served as MCP's Skills Extension says (SEP-2640), in the shapes it gives for the protocol versions a
   server speaks: `skills/list` lists them, `skills/get` gives one by its address, and each of a skill's files is
   a resource too, `skill://<path>/<file>`, which `resources/read` reads (`OneCore.Skills`).
 
-  A tool its plugin makes a task (`task_support`) is answered as MCP's Tasks have it, to a client that says it takes
+  A tool its app makes a task (`task_support`) is answered as MCP's Tasks have it, to a client that says it takes
   them (`OneCore.Tasks`), and every call is in a state while it runs (`OneCore.Call.State`): a client cancels one
   that isn't a task with `notifications/cancelled`, and is told what it's doing in its progress notifications.
 
@@ -35,13 +35,13 @@ defmodule OneCore.Mcp do
   require Logger
 
   alias OneCore.{
-    App,
+    Entrypoint,
     Artifact,
     Builds,
     CodeMode,
     Edge,
     Hooks,
-    Plugins,
+    Apps,
     Search,
     Server,
     Servers,
@@ -54,7 +54,7 @@ defmodule OneCore.Mcp do
   }
 
   alias OneCore.Call.State
-  alias OneCore.Plugins.{Calls, Deploy, Store, Version}
+  alias OneCore.Apps.{Calls, Deploy, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
   @external_resource Path.expand("../../priv/rules.md", __DIR__)
@@ -151,7 +151,7 @@ defmodule OneCore.Mcp do
         Servers.presence_again()
         ""
 
-      # Another server, or a plugin's edge function, saying that what this one kept of some hooks
+      # Another server, or an app's edge function, saying that what this one kept of some hooks
       # was decided from what has since changed.
       {:ok, %{"method" => "notifications/one/invalidate"} = notification} ->
         Hooks.invalidate(for hook <- List.wrap(notification["params"]["hooks"]), is_binary(hook), do: hook)
@@ -167,7 +167,7 @@ defmodule OneCore.Mcp do
 
         ""
 
-      # Another server saying where a plugin is in its life for someone moved, which this one's clients ask again.
+      # Another server saying where an app is in its life for someone moved, which this one's clients ask again.
       {:ok, %{"method" => "notifications/one/changed"} = notification} ->
         Server.changed(for owner <- List.wrap(notification["params"]["owners"]), is_binary(owner), User.owner?(owner), do: owner)
         ""
@@ -253,12 +253,12 @@ defmodule OneCore.Mcp do
       else: Map.put(result, key, value)
   end
 
-  defp result("services/call", %{"plugin" => plugin, "service" => service} = params, _from, _principal, forwarded) do
-    between(forwarded, fn -> Services.run(plugin, service, params["function"], params["arguments"]) end)
+  defp result("services/call", %{"app" => app, "service" => service} = params, _from, _principal, forwarded) do
+    between(forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("plugins/call", %{"installed" => at, "plugin" => plugin} = params, _from, principal, forwarded) do
-    function = fn -> Calls.function(at, plugin, params["function"], params["arguments"], principal, true) end
+  defp result("apps/call", %{"installed" => at, "app" => app} = params, _from, principal, forwarded) do
+    function = fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end
 
     with {:ok, result} <- between(forwarded, function) do
       Server.changed()
@@ -266,13 +266,13 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp result("plugins/schedule", %{"installed" => at, "plugin" => plugin}, _from, _principal, forwarded) do
-    between(forwarded, fn -> Calls.schedule(at, plugin, true) end)
+  defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, _principal, forwarded) do
+    between(forwarded, fn -> Calls.schedule(at, app, true) end)
   end
 
-  defp result("hooks/call", %{"installed" => at, "plugin" => plugin, "kind" => kind, "hook" => hook} = params, _from, principal, forwarded)
+  defp result("hooks/call", %{"installed" => at, "app" => app, "kind" => kind, "hook" => hook} = params, _from, principal, forwarded)
        when kind in ["observe", "mutate", "validate", "collect"] do
-    between(forwarded, fn -> Calls.hook(at, plugin, String.to_existing_atom(kind), hook, params["about"], principal, true) end)
+    between(forwarded, fn -> Calls.hook(at, app, String.to_existing_atom(kind), hook, params["about"], principal, true) end)
   end
 
   # `search`, `execute`, `call` and `skills` are this server's own, and a sharing link's holder has only the tools
@@ -297,8 +297,8 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
-  # asks for (a request that says its `actor`). A client calls as nobody's plugin.
+  # Which app called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
+  # asks for (a request that says its `actor`). A client calls as nobody's app.
   defp result("tools/call", %{"name" => name} = params, _from, {_actor, subject} = principal, forwarded) do
     caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
 
@@ -363,7 +363,7 @@ defmodule OneCore.Mcp do
     tools =
       cond do
         holder?(actor) -> listed
-        # Whether one may be a task is this server's to know (`OneCore.Tasks`), as a plugin's is.
+        # Whether one may be a task is this server's to know (`OneCore.Tasks`), as an app's is.
         mode(params) == :code ->
           for tool <- [Search.tool() | CodeMode.tools()] ++ [Skills.tool()], do: Map.delete(tool, :task_support)
         true -> [Skills.tool() | listed]
@@ -397,35 +397,35 @@ defmodule OneCore.Mcp do
       for %{uri: uri, frontmatter: %{"name" => name, "description" => description}} <- Skills.list(who),
           do: %{uri: uri, name: name, description: description, mimeType: "text/markdown"}
 
-    running = Enum.sort(Plugins.running(who))
+    running = Enum.sort(Apps.running(who))
 
     uis =
-      Map.new(for {plugin, version} <- running, %{ui: ui} when is_binary(ui) <- version.tools, do: {{plugin, ui}, true})
+      Map.new(for {app, version} <- running, %{ui: ui} when is_binary(ui) <- version.tools, do: {{app, ui}, true})
 
-    %{files: files, code: code} = App.library()
+    %{files: files, code: code} = Entrypoint.library()
 
     library =
       for path <- Enum.sort(Map.keys(files)), Version.loaded?(path),
           do: %{uri: "ui://ui/#{code}/#{path}", name: path, mimeType: Version.kind(path)}
 
     resources =
-      for {plugin, version} <- running, path <- Version.files(version) do
-        resource = %{uri: "ui://#{plugin}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
+      for {app, version} <- running, path <- Version.files(version) do
+        resource = %{uri: "ui://#{app}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
 
-        # An app's category goes as it is: a client opens the launcher first, and what the rest mean is the
+        # An entrypoint's category goes as it is: a client opens the launcher first, and what the rest mean is the
         # launcher's. A page that's a tool's UI is an MCP App's page too.
-        case Enum.find(version.apps, &(&1.page == path)) do
-          nil when is_map_key(uis, {plugin, path}) ->
+        case Enum.find(version.entrypoints, &(&1.page == path)) do
+          nil when is_map_key(uis, {app, path}) ->
             resource
 
           nil ->
             %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
 
-          %{category: nil} = app ->
-            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}]})
+          %{category: nil} = entrypoint ->
+            Map.merge(resource, %{name: entrypoint.name, icons: [%{src: entrypoint.icon}]})
 
-          app ->
-            Map.merge(resource, %{name: app.name, icons: [%{src: app.icon}], _meta: %{category: app.category}})
+          entrypoint ->
+            Map.merge(resource, %{name: entrypoint.name, icons: [%{src: entrypoint.icon}], _meta: %{category: entrypoint.category}})
         end
       end
 
@@ -440,7 +440,7 @@ defmodule OneCore.Mcp do
   end
 
   defp resources("resources/read", %{"uri" => "ui://ui/" <> _ = uri}, _who) do
-    library = App.library()
+    library = Entrypoint.library()
 
     with ["ui:", "", "ui", code, path] when code == library.code <- String.split(uri, "/", parts: 5),
          true <- Version.client?(path),
@@ -452,11 +452,11 @@ defmodule OneCore.Mcp do
   end
 
   defp resources("resources/read", %{"uri" => uri}, who) do
-    with ["ui:", "", plugin, code, path] <- String.split(uri, "/", parts: 5),
+    with ["ui:", "", app, code, path] <- String.split(uri, "/", parts: 5),
          true <- Version.client?(path),
-         %{^plugin => version} <- Plugins.running(who),
+         %{^app => version} <- Apps.running(who),
          {:ok, data} <- Store.file(version.artifact, code, path) do
-      data = if Path.extname(path) == ".html", do: mapped(data, path, [plugin | Map.keys(version.requires)]), else: data
+      data = if Path.extname(path) == ".html", do: mapped(data, path, [app | Map.keys(version.requires)]), else: data
       {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content(data))]}}
     else
       _ -> {:error, -32002, "There's nothing at #{uri}"}
@@ -467,8 +467,8 @@ defmodule OneCore.Mcp do
 
   # A page, with the import map its modules are resolved by in its head, before anything loads: what every app shares
   # by name, the UI library's one copy, which an app's build already imports by where it's served (`core/ui/app.js`),
-  # and as `<plugin>/` the client of its own plugin and of each plugin it requires, which a client serves beside it, at
-  # <its address>/<plugin>/client/, for what's imported by name as it runs. So separately built plugins share one
+  # and as `<app>/` the client of its own app and of each app it requires, which a client serves beside it, at
+  # <its address>/<app>/client/, for what's imported by name as it runs. So separately built apps share one
   # Solid. It depends on nothing but the page's own version, so the page is still read once.
   @shared %{
     "solid-js" => "/ui/client/solid.js",
@@ -476,9 +476,9 @@ defmodule OneCore.Mcp do
     "@zag-js/solid" => "/ui/client/zag.js",
     "ui" => "/ui/client/ui.js"
   }
-  defp mapped(page, path, plugins) do
+  defp mapped(page, path, apps) do
     up = String.duplicate("../", length(Path.split(path)))
-    imports = Map.merge(@shared, Map.new(plugins, &{"#{&1}/", "#{up}#{&1}/client/"}))
+    imports = Map.merge(@shared, Map.new(apps, &{"#{&1}/", "#{up}#{&1}/client/"}))
     map = ~s(<script type="importmap">#{JSON.encode!(%{imports: imports})}</script>)
 
     case Regex.split(~r/<!doctype html>|<head(?:\s[^>]*)?>/i, page, parts: 2, include_captures: true) do
@@ -508,7 +508,7 @@ defmodule OneCore.Mcp do
     deployed = Task.async(&Deploy.deployed/0)
     tools = scripted(subject)
     deployed = Task.await(deployed, 30_000)
-    text = Search.run(query, Map.get(inputs, "limit", 8), tools, Plugins.running(subject), deployed, mode(params))
+    text = Search.run(query, Map.get(inputs, "limit", 8), tools, Apps.running(subject), deployed, mode(params))
     {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}}}
   end
 
@@ -521,19 +521,19 @@ defmodule OneCore.Mcp do
   end
 
   # A script's calls are each answered here as that call of the tool would be, for whoever asked, and so are
-  # `call`'s. A plugin's tools in a script are in a namespace of its name, which says what the plugin is for.
+  # `call`'s. An app's tools in a script are in a namespace of its name, which says what the app is for.
   defp own("execute", %{"code" => code}, _params, from, {_actor, subject} = principal, forwarded) do
     tools =
       for tool <- scripted(subject),
           do: %{
             name: tool.name,
-            plugin: tool[:_meta][:plugin],
+            app: tool[:_meta][:app],
             description: tool.description,
             input: tool.inputSchema,
             output: tool[:outputSchema]
           }
 
-    namespaces = Map.new(Plugins.running(subject), fn {name, version} -> {name, Search.described(version)} end)
+    namespaces = Map.new(Apps.running(subject), fn {name, version} -> {name, Search.described(version)} end)
 
     # It's accepted once it's asked: a caller that asked for a task is answered it now, and the script runs.
     State.run(fn ->
@@ -563,7 +563,7 @@ defmodule OneCore.Mcp do
     end
 
   # A tool's path in a script, `gmail.search` or `deploy`.
-  defp dotted(%{_meta: %{plugin: plugin}} = tool), do: plugin <> "." <> String.replace_prefix(tool.name, plugin <> "_", "")
+  defp dotted(%{_meta: %{app: app}} = tool), do: app <> "." <> String.replace_prefix(tool.name, app <> "_", "")
   defp dotted(tool), do: tool.name
 
   # The tools a script has, and that `search` finds among: those every client is listed but code mode's own, and but
@@ -585,7 +585,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # Every tool there is for `who`, One Core's own first, or only those a sharing link's holder may call. A plugin's
+  # Every tool there is for `who`, One Core's own first, or only those a sharing link's holder may call. An app's
   # says whose it is, and one with a page of its own names it as an MCP App's tool names its UI.
   defp listed(who, holder) do
     open = fn tools -> if holder, do: Enum.filter(tools, &(&1[:by_link] == true)), else: tools end
@@ -603,13 +603,13 @@ defmodule OneCore.Mcp do
 
     own = for tool <- open.(Tools.tools()), do: listed.(tool.name, tool)
 
-    plugins =
-      for {plugin, version} <- Enum.sort(Plugins.running(who)), tool <- open.(version.tools) do
-        ui = if tool[:ui], do: %{ui: %{resourceUri: "ui://#{plugin}/#{version.code}/#{tool.ui}"}}, else: %{}
-        Map.put(listed.("#{plugin}_#{tool.name}", tool), :_meta, Map.put(ui, :plugin, plugin))
+    apps =
+      for {app, version} <- Enum.sort(Apps.running(who)), tool <- open.(version.tools) do
+        ui = if tool[:ui], do: %{ui: %{resourceUri: "ui://#{app}/#{version.code}/#{tool.ui}"}}, else: %{}
+        Map.put(listed.("#{app}_#{tool.name}", tool), :_meta, Map.put(ui, :app, app))
       end
 
-    own ++ plugins
+    own ++ apps
   end
 
   # Runs the call of `tool`, named `name`, by `run`. A tool made a task (`task_support`) is one for a person's client
@@ -661,22 +661,22 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # The tool `name` is for `who`: One Core's own, or a plugin's by its name and the plugin's, or `nil`.
+  # The tool `name` is for `who`: One Core's own, or an app's by its name and the app's, or `nil`.
   defp tool(name, who) do
     Enum.find(Tools.tools(), &(&1.name == name)) ||
-      with [plugin, tool] <- String.split(name, "_", parts: 2),
-           %{^plugin => version} <- Plugins.running(who) do
+      with [app, tool] <- String.split(name, "_", parts: 2),
+           %{^app => version} <- Apps.running(who) do
         Enum.find(version.tools, &(&1.name == tool))
       else
         _ -> nil
       end
   end
 
-  # A tool is one of One Core's own, or a plugin's by its name and the plugin's.
+  # A tool is one of One Core's own, or an app's by its name and the app's.
   defp call(name, inputs, principal, forwarded, caller) do
     with :none <- Tools.call(name, inputs, principal, forwarded),
-         [plugin, tool] <- String.split(name, "_", parts: 2),
-         {:ok, result} <- Calls.call(plugin, tool, inputs, principal, forwarded, caller) do
+         [app, tool] <- String.split(name, "_", parts: 2),
+         {:ok, result} <- Calls.call(app, tool, inputs, principal, forwarded, caller) do
       {:ok, result}
     else
       [_] -> {:error, "#{name} isn't a tool. tools/list says what there is."}
@@ -716,10 +716,10 @@ defmodule OneCore.Mcp do
     {:ok, result}
   end
 
-  @doc "Whether calling the tool `name` for `who` only reads: one of One Core's own that says so, or a plugin's."
+  @doc "Whether calling the tool `name` for `who` only reads: one of One Core's own that says so, or an app's."
   def reads?(name, who) do
-    with [plugin, tool] <- String.split(name, "_", parts: 2),
-         %{^plugin => version} <- Plugins.running(who) do
+    with [app, tool] <- String.split(name, "_", parts: 2),
+         %{^app => version} <- Apps.running(who) do
       Enum.any?(version.tools, &(&1.name == tool and &1[:read_only] == true))
     else
       _ -> Enum.any?(Tools.tools(), &(&1.name == name and &1[:read_only] == true))
@@ -734,12 +734,12 @@ defmodule OneCore.Mcp do
   defp skills({actor, subject}), do: if(holder?(actor), do: [], else: Skills.list(subject))
 
   # What an agent is told when it connects: the rules first, then how it finds tools as it calls them, then where
-  # the skills are, which say the rest, and the plugins there are, as many as fit. Not every client lists skills yet,
+  # the skills are, which say the rest, and the apps there are, as many as fit. Not every client lists skills yet,
   # and any reads one that it has the address of.
   defp instructions(mode, who) do
     network = """
     This is a One App network: what one user, family or workplace keeps and makes, which you use as whoever you act \
-    for. Its tools are its plugins', each named <plugin>_<tool>, and One Core's own, which add and remove plugins, \
+    for. Its tools are its apps', each named <app>_<tool>, and One Core's own, which add and remove apps, \
     servers and services.
 
     Rules, before anything else:
@@ -750,46 +750,46 @@ defmodule OneCore.Mcp do
       case mode do
         :code ->
           """
-          `search` finds the tools for a task across every plugin, with each one's exact call in a script and its \
-          plugin's skill: search before you guess, to learn a plugin, and before saying you can't, since it offers \
-          plugins you could install. `call` calls one or several at once, by their paths, and `execute` runs a short \
-          script where one call's answer feeds the next, `const r = await tools.<plugin>.<tool>({ ... }); return r`: \
-          what it returns comes back to you. Skills name tools <plugin>_<tool>, which in a script is \
-          tools.<plugin>.<tool>, and One Core's own are tools.<tool>.\
+          `search` finds the tools for a task across every app, with each one's exact call in a script and its \
+          app's skill: search before you guess, to learn an app, and before saying you can't, since it offers \
+          apps you could install. `call` calls one or several at once, by their paths, and `execute` runs a short \
+          script where one call's answer feeds the next, `const r = await tools.<app>.<tool>({ ... }); return r`: \
+          what it returns comes back to you. Skills name tools <app>_<tool>, which in a script is \
+          tools.<app>.<tool>, and One Core's own are tools.<tool>.\
           """
 
         _ ->
           """
           Every tool is listed, and your client's own tool search finds them. Where `one` runs, every tool is also a \
           command: gmail_search is `one gmail search`, and `one search <words>` finds the tools for a task and offers \
-          plugins you could install: use it before saying you can't.\
+          apps you could install: use it before saying you can't.\
           """
       end
 
     skills = """
-    A plugin's skill says when and how to use its tools, and the skill building-plugins how to make a plugin: when \
+    An app's skill says when and how to use its tools, and the skill building-apps how to make an app: when \
     the person asks for an app, tracker or tool, make it here, where it's on all their devices. `skills` lists them \
-    and reads one, as do skills/list and resources/read: a plugin's are under skill://<plugin>/, and building-plugins \
-    is skill://building-plugins/SKILL.md.\
+    and reads one, as do skills/list and resources/read: an app's are under skill://<app>/, and building-apps \
+    is skill://building-apps/SKILL.md.\
     """
 
     case mode do
       :holder -> network
-      _ -> fitted(Enum.join([network, finding, skills], "\n\n"), Enum.sort(Map.keys(Plugins.running(who))))
+      _ -> fitted(Enum.join([network, finding, skills], "\n\n"), Enum.sort(Map.keys(Apps.running(who))))
     end
   end
 
-  # The instructions, with the plugins there are, as many as fit under the limit.
+  # The instructions, with the apps there are, as many as fit under the limit.
   defp fitted(text, []), do: text
 
-  defp fitted(text, plugins) do
+  defp fitted(text, apps) do
     more = ", and more: `skills` lists them."
-    instructions = text <> "\n\nThe plugins here, whose tools start with their names: "
+    instructions = text <> "\n\nThe apps here, whose tools start with their names: "
 
-    Enum.reduce_while(plugins, {instructions, ""}, fn plugin, {instructions, sep} ->
-      if length16(instructions <> sep <> plugin <> more) > @instructions_limit,
+    Enum.reduce_while(apps, {instructions, ""}, fn app, {instructions, sep} ->
+      if length16(instructions <> sep <> app <> more) > @instructions_limit,
         do: {:halt, {instructions <> more, :full}},
-        else: {:cont, {instructions <> sep <> plugin, ", "}}
+        else: {:cont, {instructions <> sep <> app, ", "}}
     end)
     |> case do
       {instructions, :full} -> instructions

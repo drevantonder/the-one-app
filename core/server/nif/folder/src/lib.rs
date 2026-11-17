@@ -1,4 +1,4 @@
-//! A folder's files as a client deploys them (`client::files`), so a plugin a server deploys from a folder
+//! A folder's files as a client deploys them (`client::files`), so an app a server deploys from a folder
 //! (`tooling/network`) is deployed with what a deploy from that folder would send.
 
 use std::path::Path;

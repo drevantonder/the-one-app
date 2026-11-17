@@ -10,25 +10,25 @@ defmodule OneCore.Server do
   """
   use GenServer
   require Logger
-  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Plugins, Servers, Trace}
+  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Apps, Servers, Trace}
   alias OneCore.Call.State
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   @doc """
   Tells every client that's watching that something changed, so that it asks again. It says the UI library's build
-  (`library`), and for each of `owners` whose plugins moved, the version each of theirs runs at (`plugins`): an app's
+  (`library`), and for each of `owners` whose apps moved, the version each of theirs runs at (`apps`): an app's
   screen loaded against another of either is stale, and its client loads it again. With no server started, nobody is
   told. The versions are looked up apart from whoever says it, which may be what keeps them.
   """
   def changed(owners \\ []) do
     Task.Supervisor.start_child(OneCore.Asks, fn ->
-      plugins =
+      apps =
         Map.new(owners, fn owner ->
-          {owner, for({name, version} <- Plugins.versions([owner]), into: %{}, do: {name, version.code})}
+          {owner, for({name, version} <- Apps.versions([owner]), into: %{}, do: {name, version.code})}
         end)
 
-      params = %{library: OneCore.App.library().code, plugins: plugins}
+      params = %{library: OneCore.Entrypoint.library().code, apps: apps}
       notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed", params: params})
       GenServer.cast(__MODULE__, {:notify, notification})
     end)
@@ -58,7 +58,7 @@ defmodule OneCore.Server do
   Whether this server is ready: it's active, one of its network's servers, and running, which a build starting is
   once it has answered by its key, as the program keeping it running says (`OneCore.Release`). One that's joining,
   leaving or stopping isn't. One that isn't ready takes on nothing that others then go to it for, such as a
-  database's lease or building every app for them (`OneCore.Plugins.Deploy.rebuild/0`): it still runs what it's
+  database's lease or building every app for them (`OneCore.Apps.Deploy.rebuild/0`): it still runs what it's
   asked, and asks for the rest.
   """
   def up?, do: ready?(OneCore.Release.status())
@@ -86,7 +86,7 @@ defmodule OneCore.Server do
 
   Only a server that's ready (`OneCore.Servers.presence/1`), or isn't known not to be, is asked. With `ready: :any`
   one that isn't is asked too, unless it's stopped, for what only it can answer: a server that's starting answers
-  once its plugins have, and is ready only once it has answered by its key.
+  once its apps have, and is ready only once it has answered by its key.
   """
   def request(server, method, params, opts \\ []) do
     # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
@@ -172,7 +172,7 @@ defmodule OneCore.Server do
 
   @doc """
   Tells the other servers acting for `owners` that there's something new of theirs in the bucket to `look` for: a
-  plugin's version, a server, a service installed. Or that what they kept of `hooks` was `decided` from what has
+  app's version, a server, a service installed. Or that what they kept of `hooks` was `decided` from what has
   since changed. Each has looked or forgotten, or couldn't be reached, when this returns.
   """
   def notify_servers(owners, what \\ "reload", hooks \\ []),
@@ -194,21 +194,21 @@ defmodule OneCore.Server do
 
   @doc """
   Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
-  and the services it runs, and what's installed for them, running the latest version of each plugin. Looking at the
-  network invalidates whose each device is too, which the network's plugins say. Its clients are told if a plugin
+  and the services it runs, and what's installed for them, running the latest version of each app. Looking at the
+  network invalidates whose each device is too, which the network's apps say. Its clients are told if an app
   changed.
 
   A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
-  ago (`OneCore.Plugins`), and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody
+  ago (`OneCore.Apps`), and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody
   uses costs nothing.
   """
   def reload(owner) do
     Servers.reload(owner)
-    OneCore.Plugins.Deploy.forget()
+    OneCore.Apps.Deploy.forget()
     if owner == "network", do: Hooks.invalidate(["device"])
-    if Plugins.sync(owner), do: changed([owner])
-    # A plugin updated by a server elsewhere may require what isn't installed for them yet.
-    if Servers.here?(owner), do: Task.start(fn -> OneCore.Plugins.Lifecycle.required(owner) end)
+    if Apps.sync(owner), do: changed([owner])
+    # An app updated by a server elsewhere may require what isn't installed for them yet.
+    if Servers.here?(owner), do: Task.start(fn -> OneCore.Apps.Lifecycle.required(owner) end)
     :ok
   end
 
@@ -216,13 +216,13 @@ defmodule OneCore.Server do
   This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
   missed being told something, and the edge what it is: it says its status again (`OneCore.Servers.report/0`),
   invalidates what it cached of servers and hooks, looks at once at who it acts for, and at everyone else it has
-  looked at behind the next request for them (`OneCore.Plugins.refresh/0`).
+  looked at behind the next request for them (`OneCore.Apps.refresh/0`).
   """
   def reconnected do
     Servers.report()
     Hooks.invalidate()
     Servers.invalidate()
-    Enum.each(Plugins.refresh(), &reload/1)
+    Enum.each(Apps.refresh(), &reload/1)
   end
 
   # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
@@ -271,7 +271,7 @@ defmodule OneCore.Server do
     name = Application.get_env(:one_core, :name) || to_string(machine)
     Servers.started(key, address, name, Application.get_env(:one_core, :owner, "network"))
     # The clients that were watching before it stopped may have missed something meanwhile, a new build of its
-    # plugins among them, so they're told to ask again.
+    # apps among them, so they're told to ask again.
     changed()
     {:ok, %{endpoint: endpoint}}
   end
@@ -282,12 +282,12 @@ defmodule OneCore.Server do
     {:noreply, server}
   end
 
-  # A server is reached as soon as it starts, and answers what it's asked once its plugins are there, since they
+  # A server is reached as soon as it starts, and answers what it's asked once its apps are there, since they
   # say whose a device is: so whoever asks while they start waits for them, and isn't told it can't be reached.
   @impl true
   def handle_info({:ask, ask, from, message}, server) do
     reply = fn ->
-      Plugins.started()
+      Apps.started()
       Iroh.reply(ask, Mcp.handle(message, from, ask))
     end
 

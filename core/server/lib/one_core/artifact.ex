@@ -1,6 +1,6 @@
 defmodule OneCore.Artifact do
   @moduledoc """
-  A couple of blobs together in the bucket. A plugin reads a blob, or several at once, writes one only if it's absent, replaces one only
+  A couple of blobs together in the bucket. An app reads a blob, or several at once, writes one only if it's absent, replaces one only
   if it's unchanged, updates one, lists them and removes one, by their names in the artifact.
 
       case OneCore.Artifact.read(artifact, "notes.json") do
@@ -22,15 +22,15 @@ defmodule OneCore.Artifact do
   for each.
 
   An artifact's name is its prefix in the bucket without the last `/`, which is how relation tuples name it, and
-  its first parts say whose it is. A plugin has its own artifact (a call's `own`), makes others for whoever it
+  its first parts say whose it is. An app has its own artifact (a call's `own`), makes others for whoever it
   runs for (`OneCore.Call.make/2`) and reaches the ones they may (`OneCore.Call.reach/3`). One that was made or
-  reached knows as what: reached as a `viewer`, it's only read, and a change to it is told to the plugins that
+  reached knows as what: reached as a `viewer`, it's only read, and a change to it is told to the apps that
   observe `changed`.
 
-  A plugin gives an artifact a codec by saying what they pass through on their way in and out: `%{artifact |
+  An app gives an artifact a codec by saying what they pass through on their way in and out: `%{artifact |
   codec: {module, with}}`, where `module.encode(with, name, data)` and `module.decode(with, name, blob)` each give
   `{:ok, binary}` or `{:error, why}`, and `name` is the blob's whole name in the bucket. Everything built on blobs
-  then reads and writes through it without knowing, a database too. That's how a plugin encrypts
+  then reads and writes through it without knowing, a database too. That's how an app encrypts
   one. A blob with a codec isn't handed out by a link, which would give what's in the bucket.
   """
   alias OneCore.{Bucket, Hooks}
@@ -39,7 +39,7 @@ defmodule OneCore.Artifact do
   defstruct [:prefix, :reached, :codec]
 
   @typedoc """
-  `reached` is the plugin that reached it, who asked and who for, and as what, or `nil` for a plugin's own.
+  `reached` is the app that reached it, who asked and who for, and as what, or `nil` for an app's own.
   `codec` is what its blobs pass through, a module and what to call it with, or `nil`.
   """
   @type t :: %__MODULE__{
@@ -115,13 +115,13 @@ defmodule OneCore.Artifact do
     end
   end
 
-  defp writes(%__MODULE__{reached: {_plugin, _principal, "viewer"}} = artifact),
+  defp writes(%__MODULE__{reached: {_app, _principal, "viewer"}} = artifact),
     do: raise("#{name(artifact)} was reached as a viewer, which only reads it")
 
   defp writes(%__MODULE__{prefix: prefix}), do: prefix
 
-  defp changed(%__MODULE__{reached: {plugin, principal, _as}} = artifact, blob, :ok) do
-    Hooks.observe("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => plugin}, principal)
+  defp changed(%__MODULE__{reached: {app, principal, _as}} = artifact, blob, :ok) do
+    Hooks.observe("changed", %{"artifact" => name(artifact), "blob" => blob, "by" => app}, principal)
   end
 
   defp changed(_artifact, _blob, outcome), do: outcome

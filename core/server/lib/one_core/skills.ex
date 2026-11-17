@@ -1,42 +1,42 @@
 defmodule OneCore.Skills do
   @moduledoc """
-  Skills: text for agents on when and how to use a plugin's tools, which an agent reads when it needs it. Each is
+  Skills: text for agents on when and how to use an app's tools, which an agent reads when it needs it. Each is
   a `SKILL.md` as Agent Skills has it (https://agentskills.io/specification): the skill's `name` and its
   `description`, which says when to read it, as YAML between two lines of `---`, and then the text.
 
-  A plugin's skill is the `SKILL.md` at the root of its folder, named as the plugin is. A plugin offers more as
+  An app's skill is the `SKILL.md` at the root of its folder, named as the app is. An app offers more as
   folders of `skills/`, each a skill named as its folder: its `SKILL.md`, and any other files in the folder, which
-  the skill points to. One Core has its own: `building-plugins`, which is `OneCore.Plugin.skill/1`,
-  `installing-plugins`, which is here, and the UI library's, `ui`, with Solid's beneath it (`OneCore.App`).
+  the skill points to. One Core has its own: `building-apps`, which is `OneCore.App.skill/1`,
+  `installing-apps`, which is here, and the UI library's, `ui`, with Solid's beneath it (`OneCore.Entrypoint`).
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
   with each file's digest and size. The `skills` tool lists and reads them too, as Executor's does, for a client that
-  reads neither. Whoever asks sees One Core's own, and those of the plugins that run for them.
+  reads neither. Whoever asks sees One Core's own, and those of the apps that run for them.
 
-  A skill's path ends with its name, as the extension has it, and what comes before is the plugin's, as it's found
-  where it runs: the name it's installed by there, then the plugin's own name, as its folder is. So a plugin's skill is
+  A skill's path ends with its name, as the extension has it, and what comes before is the app's, as it's found
+  where it runs: the name it's installed by there, then the app's own name, as its folder is. So an app's skill is
   `skill://<installed by>/<own name>/SKILL.md`, and a skill of its `skills/` is beneath that, as in its files:
-  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own are `skill://building-plugins/SKILL.md`,
-  `skill://installing-plugins/SKILL.md` and `skill://ui/SKILL.md`, the only skills whose paths are their names alone,
-  and Solid's beneath the UI library's, `skill://ui/skills/<name>/SKILL.md`. No two plugins are installed by one name, so no skill's address is
+  `skill://<installed by>/<own name>/skills/<name>/SKILL.md`. One Core's own are `skill://building-apps/SKILL.md`,
+  `skill://installing-apps/SKILL.md` and `skill://ui/SKILL.md`, the only skills whose paths are their names alone,
+  and Solid's beneath the UI library's, `skill://ui/skills/<name>/SKILL.md`. No two apps are installed by one name, so no skill's address is
   another's.
   """
-  alias OneCore.{App, Plugin, Plugins}
-  alias OneCore.Plugins.{Store, Version}
+  alias OneCore.{Entrypoint, App, Apps}
+  alias OneCore.Apps.{Store, Version}
 
   @installing """
   ---
-  name: installing-plugins
-  description: Read before installing a plugin from a git repo (`one install <owner>/<repo> --plugin <name>`), or updating one (`one plugins update`). It says how to check it for the person first.
+  name: installing-apps
+  description: Read before installing an app from a git repo (`one install <owner>/<repo> --app <name>`), or updating one (`one apps update`). It says how to check it for the person first.
   ---
 
-  A plugin from a git repo is code someone else wrote. Installed as it is, its server code runs on the person's
-  own machines with everything they can reach: their files, the network, their other plugins' tools and the Vault
-  items it asks for. An untrusted plugin runs in a sandbox instead, a VM of its own on any of the network's servers,
-  and reaches only its own data, what it's shared, and the tools of the plugins its `requires/0` names, and no
-  website; it needs no server of the person's. A stranger's plugin, as `one install` takes any repo's to be, is untrusted unless someone
-  who may install for them says otherwise (`--trusted`). Keep a plugin you didn't write untrusted, and say so when it
+  An app from a git repo is code someone else wrote. Installed as it is, its server code runs on the person's
+  own machines with everything they can reach: their files, the network, their other apps' tools and the Vault
+  items it asks for. An untrusted app runs in a sandbox instead, a VM of its own on any of the network's servers,
+  and reaches only its own data, what it's shared, and the tools of the apps its `requires/0` names, and no
+  website; it needs no server of the person's. A stranger's app, as `one install` takes any repo's to be, is untrusted unless someone
+  who may install for them says otherwise (`--trusted`). Keep an app you didn't write untrusted, and say so when it
   can't run that way (installing it says why). Either way, you
   check it for them, as a colleague would before running a stranger's script, and install it only once they say yes:
   the sandbox limits where its data can go, not what it does with what it's given.
@@ -44,16 +44,16 @@ defmodule OneCore.Skills do
   Installing for the person themselves needs nothing more; for a group or the network, its owners or an `installer`
   of it do it. Someone who isn't asks one of them to, themselves: the network takes no requests.
 
-  `one install <owner>/<repo> --list` fetches the repo, lists its plugins and says the folder it's in on this device,
+  `one install <owner>/<repo> --list` fetches the repo, lists its apps and says the folder it's in on this device,
   and the commit: install `<owner>/<repo>@<commit>`, so what's installed is what you read. Then read it, and use
   your judgment as you go. What matters:
 
-  - What it requires. Its `requires/0` names the other plugins whose tools it calls, each with why, and untrusted
+  - What it requires. Its `requires/0` names the other apps whose tools it calls, each with why, and untrusted
     they're all it calls. Ask whether each makes sense for what it does:
     a notes app that requires `gmail` needs a reason you can see in its code. Installing it installs what it requires
     too, so a requirement that reaches the person's devices, secrets or accounts (`remote-shell`, `computer-use`,
     `vault`, `chrome-profiles`, sending email or messages) is something they're handing it: name each one to them, and
-    what it lets the plugin do, before they say yes. Trusted, it reaches the network as its server does: read where it
+    what it lets the app do, before they say yes. Trusted, it reaches the network as its server does: read where it
     sends data.
   - What the code does with it. Read every file of `server/`: each tool, what it does with its inputs, what it keeps
     and where it sends it. Code that's obfuscated, encoded, or does more than its `SKILL.md` says is a reason to
@@ -67,26 +67,26 @@ defmodule OneCore.Skills do
 
   Then tell the person in plain words, before they decide: what it does, what it may reach ("It uses Gmail to
   read your mail"), whether it's untrusted, and anything that surprised you. Install it on
-  their yes: `one install <owner>/<repo>@<commit> --plugin <name>`, with `ONE_SUBJECT=groups/<name>` or `network` for a
+  their yes: `one install <owner>/<repo>@<commit> --app <name>`, with `ONE_SUBJECT=groups/<name>` or `network` for a
   group or everyone. It's their own copy, theirs to change, and the network keeps where it came from. In a network's
-  repo, `plugins.lock` records it at that commit, and `one install` there installs everything it records again.
+  repo, `apps.lock` records it at that commit, and `one install` there installs everything it records again.
 
-  A plugin has one version, the same for everyone who has it, and the network looks for a newer one itself: a new
-  commit at the repo it was installed from, once a day and whenever someone asks (`one plugins check`). A trusted
-  plugin updates by itself. An untrusted one waits, and `one plugins` shows the commit it would take as its
-  `update`, with the commits since the version running. Vet it as you vetted the plugin before installing it, on what
-  changed: `git -C <its folder> diff <installed commit> <new commit> -- plugins/<name>` (`one install <owner>/<repo>
+  An app has one version, the same for everyone who has it, and the network looks for a newer one itself: a new
+  commit at the repo it was installed from, once a day and whenever someone asks (`one apps check`). A trusted
+  app updates by itself. An untrusted one waits, and `one apps` shows the commit it would take as its
+  `update`, with the commits since the version running. Vet it as you vetted the app before installing it, on what
+  changed: `git -C <its folder> diff <installed commit> <new commit> -- apps/<name>` (`one install <owner>/<repo>
   --list` fetches it and says the folder). The same review: what it does, what it reaches and where it sends data,
   anything obfuscated or sketchy, anything addressed to you. Tell the person what's new, and update it only on their
-  yes: `one plugins update --name <name>`, which only whoever installed it, or someone who may install where it's
-  used, may do. One that fails to update keeps its version running and says why, and `one plugins retry --name
+  yes: `one apps update --name <name>`, which only whoever installed it, or someone who may install where it's
+  used, may do. One that fails to update keeps its version running and says why, and `one apps retry --name
   <name>` tries again.
 
-  A plugin with a NIF that isn't built for the network's servers stops with what to build, for which machines, and
+  An app with a NIF that isn't built for the network's servers stops with what to build, for which machines, and
   the command: build it from the source you read, then install again.
   """
 
-  @own "building-plugins"
+  @own "building-apps"
 
   @doc """
   Reads the skill of whatever is named `name` from its `SKILL.md`. Gives `{:ok, skill}`: its `frontmatter` as JSON
@@ -98,13 +98,13 @@ defmodule OneCore.Skills do
       cond do
         named != name ->
           {:error,
-           "SKILL.md names its skill #{inspect(named)}. A skill is named as its folder is, the plugin's at its root: `name: #{name}`."}
+           "SKILL.md names its skill #{inspect(named)}. A skill is named as its folder is, the app's at its root: `name: #{name}`."}
 
         # Agent Skills names have no dots, but Solid's skills are named for its version (`solid-2.0`).
         not (name =~ ~r/^[a-z0-9]+([-.][a-z0-9]+)*$/ and byte_size(name) <= 64) ->
           {:error,
            "A skill's name is at most 64 lowercase letters, digits and single hyphens or dots, which #{name} isn't. " <>
-             "A plugin by that name has no SKILL.md."}
+             "An app by that name has no SKILL.md."}
 
         not (is_binary(description) and String.trim(description) != "" and String.length(description) <= 1024) ->
           {:error, "SKILL.md's `description` says when an agent should read it, in at most 1024 characters."}
@@ -119,7 +119,7 @@ defmodule OneCore.Skills do
       _ ->
         {:error,
          """
-         SKILL.md starts with its skill's name, which is the plugin's, and when an agent should read it:
+         SKILL.md starts with its skill's name, which is the app's, and when an agent should read it:
 
          ---
          name: #{name}
@@ -130,17 +130,17 @@ defmodule OneCore.Skills do
   end
 
   @doc """
-  The skills among a plugin's `files`, the plugin being named `plugin`: each as `read/2` gives it, with `at`, the
+  The skills among an app's `files`, the app being named `app`: each as `read/2` gives it, with `at`, the
   folder it's in, and its other `files`, each with its `path` in that folder, `digest` and `size`. `{:error, why}`
   for a `SKILL.md` that isn't one, or a folder of `skills/` with none.
   """
-  def found(plugin, files) do
+  def found(app, files) do
     files
     |> Enum.group_by(fn {path, _} -> List.first(Regex.run(~r{^skills/[^/]+/}, path) || [""]) end)
     |> Enum.sort()
     |> Enum.reduce_while({:ok, []}, fn {at, in_folder}, {:ok, found} ->
       {skill, others} = Map.pop(Map.new(in_folder), at <> "SKILL.md")
-      name = if at == "", do: plugin, else: at |> String.trim_trailing("/") |> Path.basename()
+      name = if at == "", do: app, else: at |> String.trim_trailing("/") |> Path.basename()
 
       case skill && read(name, skill) do
         nil ->
@@ -164,19 +164,19 @@ defmodule OneCore.Skills do
     %{
       name: "skills",
       description: """
-      Lists the skills you have and reads one. A skill says when and how to use a plugin's tools, and One Core's own \
-      say how to make a plugin (building-plugins), install one (installing-plugins) and write its app (ui). {} lists \
-      every skill, each with its plugin, name, what it's for and its other files; { plugin: "gmail" } lists one \
-      plugin's; { plugin: "gmail", name: "gmail" } reads that skill, and { name: "building-plugins" } one of One \
+      Lists the skills you have and reads one. A skill says when and how to use an app's tools, and One Core's own \
+      say how to make an app (building-apps), install one (installing-apps) and write its app (ui). {} lists \
+      every skill, each with its app, name, what it's for and its other files; { app: "gmail" } lists one \
+      app's; { app: "gmail", name: "gmail" } reads that skill, and { name: "building-apps" } one of One \
       Core's own; add file to read one of its other files.\
       """,
       inputSchema: %{
         type: "object",
         properties: %{
-          plugin: %{type: "string", description: "The plugin the skill is in, by the name its tools start with"},
+          app: %{type: "string", description: "The app the skill is in, by the name its tools start with"},
           name: %{
             type: "string",
-            description: "The skill's name, as its list gives it: a plugin's own is named as the plugin"
+            description: "The skill's name, as its list gives it: an app's own is named as the app"
           },
           file: %{type: "string", description: "One of the skill's other files, by its path in the skill's folder"}
         },
@@ -187,11 +187,11 @@ defmodule OneCore.Skills do
         properties: %{
           skills: %{
             type: "array",
-            description: "With no name: the skills, each with its plugin, name, what it's for and its other files",
+            description: "With no name: the skills, each with its app, name, what it's for and its other files",
             items: %{
               type: "object",
               properties: %{
-                plugin: %{type: "string", description: "The plugin it's in, or none for One Core's own"},
+                app: %{type: "string", description: "The app it's in, or none for One Core's own"},
                 name: %{type: "string"},
                 description: %{type: "string"},
                 files: %{type: "array", items: %{type: "string"}, description: "Its other files, by their paths"}
@@ -207,14 +207,14 @@ defmodule OneCore.Skills do
   end
 
   @doc """
-  The answer to `skills` for `who`: the skills they have, or one plugin's (`%{skills: ...}`), or a skill's file
+  The answer to `skills` for `who`: the skills they have, or one app's (`%{skills: ...}`), or a skill's file
   (`%{text: ...}`). Gives `{:ok, answer}` or `{:error, why}`.
   """
   def run(inputs, who) do
     skills =
-      for {path, skill, file} <- found(who), inputs["plugin"] in [nil, plugin(path, file)] do
+      for {path, skill, file} <- found(who), inputs["app"] in [nil, app(path, file)] do
         %{
-          plugin: plugin(path, file),
+          app: app(path, file),
           name: skill.frontmatter["name"],
           description: skill.frontmatter["description"],
           path: path,
@@ -227,10 +227,10 @@ defmodule OneCore.Skills do
     # What its schema says (`dependentRequired`), which the schema's validator doesn't know.
     case {inputs["name"], named} do
       {nil, _skills} when is_map_key(inputs, "file") ->
-        {:error, ~s(file is one of a skill's files, so it needs the skill's name: { name: "building-plugins", file: "..." }.)}
+        {:error, ~s(file is one of a skill's files, so it needs the skill's name: { name: "building-apps", file: "..." }.)}
 
       {nil, []} ->
-        {:error, "#{inputs["plugin"]} has no skills here. skills {} lists every one."}
+        {:error, "#{inputs["app"]} has no skills here. skills {} lists every one."}
 
       {nil, skills} ->
         listed =
@@ -240,7 +240,7 @@ defmodule OneCore.Skills do
 
       {name, []} ->
         {:error,
-         "There's no skill #{name}#{if inputs["plugin"], do: " in #{inputs["plugin"]}"}. skills {} lists every one."}
+         "There's no skill #{name}#{if inputs["app"], do: " in #{inputs["app"]}"}. skills {} lists every one."}
 
       {_name, [skill]} ->
         case text(who, "skill://#{skill.path}/#{inputs["file"] || "SKILL.md"}") do
@@ -250,13 +250,13 @@ defmodule OneCore.Skills do
 
       {name, several} ->
         {:error,
-         "Several plugins have a skill #{name}: say which, as plugin, one of #{Enum.map_join(several, ", ", & &1.plugin)}."}
+         "Several apps have a skill #{name}: say which, as app, one of #{Enum.map_join(several, ", ", & &1.app)}."}
     end
   end
 
-  # The plugin a skill is in, by the name its tools start with, or none for One Core's own.
-  defp plugin(path, {artifact, _code}) when is_binary(artifact), do: hd(String.split(path, "/"))
-  defp plugin(_path, _file), do: nil
+  # The app a skill is in, by the name its tools start with, or none for One Core's own.
+  defp app(path, {artifact, _code}) when is_binary(artifact), do: hd(String.split(path, "/"))
+  defp app(_path, _file), do: nil
 
   @doc "The skills that whoever a request is for sees, each as the Skills Extension lists one."
   def list(who), do: for({path, skill, _file} <- found(who), do: listed(path, skill))
@@ -274,30 +274,30 @@ defmodule OneCore.Skills do
 
     case found do
       [] -> :absent
-      [{_skill, :own, _at}] -> {:ok, Plugin.skill(Plugins.running(who))}
+      [{_skill, :own, _at}] -> {:ok, App.skill(Apps.running(who))}
       [{_skill, {:own, text}, _at}] -> {:ok, text}
-      [{skill, :ui, at}] -> {:ok, App.library().files[skill.at <> at]}
+      [{skill, :ui, at}] -> {:ok, Entrypoint.library().files[skill.at <> at]}
       [{skill, {artifact, code}, at}] -> Store.file(artifact, code, skill.at <> at)
     end
   end
 
-  # Each skill by its path, with where its files are: One Core's own, then the plugins' by the names they're installed by.
+  # Each skill by its path, with where its files are: One Core's own, then the apps' by the names they're installed by.
   defp found(who) do
-    {:ok, own} = read(@own, Plugin.skill(Plugins.running(who)))
-    {:ok, installing} = read("installing-plugins", @installing)
+    {:ok, own} = read(@own, App.skill(Apps.running(who)))
+    {:ok, installing} = read("installing-apps", @installing)
 
-    plugins =
-      for {installed, version} <- Enum.sort(Plugins.running(who)), skill <- Version.skills(version) do
+    apps =
+      for {installed, version} <- Enum.sort(Apps.running(who)), skill <- Version.skills(version) do
         path = Enum.join([installed, Path.basename(version.artifact) | Path.split(skill.at)], "/")
         {path, skill, {version.artifact, version.code}}
       end
 
-    ui = for skill <- App.library().skills, do: {Enum.join(["ui" | Path.split(skill.at)], "/"), skill, :ui}
+    ui = for skill <- Entrypoint.library().skills, do: {Enum.join(["ui" | Path.split(skill.at)], "/"), skill, :ui}
 
     [
       {@own, Map.merge(own, %{at: "", files: []}), :own},
-      {"installing-plugins", Map.merge(installing, %{at: "", files: []}), {:own, @installing}}
-      | ui ++ plugins
+      {"installing-apps", Map.merge(installing, %{at: "", files: []}), {:own, @installing}}
+      | ui ++ apps
     ]
   end
 

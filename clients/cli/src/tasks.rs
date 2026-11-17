@@ -1,4 +1,4 @@
-//! A tool called as a command, as MCP's Tasks have one (`OneCore.Tasks`): it says it takes tasks, so one its plugin
+//! A tool called as a command, as MCP's Tasks have one (`OneCore.Tasks`): it says it takes tasks, so one its app
 //! makes a task is answered as one, which it follows, saying each stage, asking what it asks and printing its answer.
 //! Ctrl+C cancels it. `--task` prints the task's id instead, for `one task <id>` to follow.
 
@@ -15,7 +15,7 @@ fn takes_tasks() -> Value {
     json!({"io.modelcontextprotocol/clientCapabilities": {"extensions": {"io.modelcontextprotocol/tasks": {}}}})
 }
 
-/// Calls the tool `name` with `inputs`, as a task if its plugin makes it one, and prints its answer, or with `task`,
+/// Calls the tool `name` with `inputs`, as a task if its app makes it one, and prints its answer, or with `task`,
 /// its task's id. A call that isn't a task says what it's doing as its progress does.
 pub async fn call(client: &Client, name: &str, inputs: Value, task: bool) -> Result<ExitCode> {
     let id = client::request_id();

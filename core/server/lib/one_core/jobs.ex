@@ -3,18 +3,18 @@ defmodule OneCore.Jobs do
   The clock that scheduled jobs are called by.
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
-  telling another. At each of those times, and when this server starts or a plugin's version changes, the plugin is
-  asked to have what's due called (`OneCore.Plugins.Calls.schedule/2`), for each one it was installed for. Every server asks,
-  and the plugin keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
-  plugin was installed for: a time that passed with no server up is made up for by the first that's back.
+  telling another. At each of those times, and when this server starts or an app's version changes, the app is
+  asked to have what's due called (`OneCore.Apps.Calls.schedule/2`), for each one it was installed for. Every server asks,
+  and the app keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
+  app was installed for: a time that passed with no server up is made up for by the first that's back.
   """
   use GenServer
-  alias OneCore.{Plugins, Servers}
-  alias OneCore.Plugins.Calls
+  alias OneCore.{Apps, Servers}
+  alias OneCore.Apps.Calls
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  @doc "The plugins running changed: every plugin's jobs are looked at now. With no clock running, nothing is."
+  @doc "The apps running changed: every app's jobs are looked at now. With no clock running, nothing is."
   def reload, do: GenServer.cast(__MODULE__, :reload)
 
   # `at` is the second up to which what was due has been asked for, and `timer` wakes this at the next.
@@ -30,14 +30,14 @@ defmodule OneCore.Jobs do
   @impl true
   def handle_info(:due, clock), do: {:noreply, schedule_next(clock)}
 
-  # Asks for each plugin that has a job due since `at`, apart from the others, and waits for the next time one is.
+  # Asks for each app that has a job due since `at`, apart from the others, and waits for the next time one is.
   defp schedule_next(%{at: at, timer: timer}) do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
 
-    # An untrusted plugin runs on any server acting for whoever it's installed for.
+    # An untrusted app runs on any server acting for whoever it's installed for.
     scheduled =
-      for {installed, name, jobs, trusted} <- Plugins.scheduled(),
+      for {installed, name, jobs, trusted} <- Apps.scheduled(),
           Servers.runs?(installed) or (not trusted and Servers.here?(installed)),
           do: {installed, name, jobs}
 

@@ -2,34 +2,34 @@ defmodule OneCore.Call do
   @moduledoc """
   What a tool is called with besides its inputs.
 
-  - `own`: the plugin's own `OneCore.Artifact` for whoever it was installed for. Only this plugin reaches it.
-  - `installed`: who the plugin was installed for, whose `own` is: a user, a group or the network. It's who the plugin
+  - `own`: the app's own `OneCore.Artifact` for whoever it was installed for. Only this app reaches it.
+  - `installed`: who the app was installed for, whose `own` is: a user, a group or the network. It's who the app
     runs for with nobody there, as a scheduled job and a service do.
-  - `folder`: a folder on the machine running this call that is the plugin's own for whoever it was installed for, for what
+  - `folder`: a folder on the machine running this call that is the app's own for whoever it was installed for, for what
     it keeps there. It may not be there yet, and another server has another.
   - `server`: the key of the server running this call.
   - `subject`: who this call runs for, as relation tuples name them: the user who asked, or a sharing link's holder,
     or the group or the network they asked for. What it makes is theirs, and it reaches what they may. A
-    scheduled job runs for whoever its plugin was installed for.
+    scheduled job runs for whoever its app was installed for.
   - `actor`: who asked: a user, or a sharing link's holder. They're a member of whoever the call is for. A scheduled
     job is called by the clock, so by nobody: `nil`.
-  - `caller`: the plugin that called this tool (`tool/5`), as its artifact's name, or the plugin that one acts on
+  - `caller`: the app that called this tool (`tool/5`), as its artifact's name, or the app that one acts on
     behalf of. One Core sets it from whose call made the call, wherever it runs, never from what's asked. A tool
     called by a person, an app or an agent has none: `nil`.
 
-  The rest is One Core's: the plugin's name where it was installed and the plugin as a who, what was asked of it, the
-  plugins it requires whose code runs inside it (`loaded`), whether another server passed it on, and the state it's in
+  The rest is One Core's: the app's name where it was installed and the app as a who, what was asked of it, the
+  apps it requires whose code runs inside it (`loaded`), whether another server passed it on, and the state it's in
   (`OneCore.Call.State`).
 
   A call is passed between servers at most twice, so none goes round. A server that can't run it has one that can
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
   what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
-  alias OneCore.{Artifact, Hooks, Mcp, Plugins, Server, Servers, Tasks, User}
+  alias OneCore.{Artifact, Hooks, Mcp, Apps, Server, Servers, Tasks, User}
   alias OneCore.Call.State
-  alias OneCore.Plugins.{Calls, Version}
+  alias OneCore.Apps.{Calls, Version}
 
-  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :plugin, :who, :request, :loaded, :forwarded]
+  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :app, :who, :request, :loaded, :forwarded]
   defstruct [
     :own,
     :installed,
@@ -38,7 +38,7 @@ defmodule OneCore.Call do
     :subject,
     :actor,
     :caller,
-    :plugin,
+    :app,
     :who,
     :request,
     :loaded,
@@ -49,46 +49,46 @@ defmodule OneCore.Call do
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
   @doc """
-  A plugin this call's plugin requires, or that one of those requires, whose module provides functions
-  (`OneCore.Plugin`): its module, whose functions take this call and run as this call's plugin, for whoever it runs
+  An app this call's app requires, or that one of those requires, whose module provides functions
+  (`OneCore.App`): its module, whose functions take this call and run as this call's app, for whoever it runs
   for.
 
-      database = OneCore.Call.plugin(call, "database")
+      database = OneCore.Call.app(call, "database")
   """
-  def plugin(%__MODULE__{loaded: loaded, plugin: plugin}, name) do
+  def app(%__MODULE__{loaded: loaded, app: app}, name) do
     case loaded do
       %{^name => {_artifact, module}} ->
         module
 
       _ ->
-        raise "#{name}'s code doesn't run inside #{plugin}: it does where #{plugin} requires it (requires/0), it's " <>
-                "installed for whoever #{plugin} runs for, it's trusted, and its module provides functions. Otherwise call its " <>
+        raise "#{name}'s code doesn't run inside #{app}: it does where #{app} requires it (requires/0), it's " <>
+                "installed for whoever #{app} runs for, it's trusted, and its module provides functions. Otherwise call its " <>
                "tools."
     end
   end
 
   @doc """
-  Calls a tool of another plugin, installed for whoever this call runs for or for the network, as they would call it
-  themselves: the same inputs are checked, the same hooks asked, and it runs as that plugin, with its own artifact.
+  Calls a tool of another app, installed for whoever this call runs for or for the network, as they would call it
+  themselves: the same inputs are checked, the same hooks asked, and it runs as that app, with its own artifact.
   Gives its answer as it would reach a client over JSON, a file it answers as the file (`{:blob, kind, data}`), or
-  raises with what that plugin said.
+  raises with what that app said.
 
-  The tool is told this call's plugin called it, as its `caller`. A tool that another plugin called can call one in
-  turn on behalf of that plugin, as OAuth's on-behalf-of flow does, with `on_behalf_of: call.caller`: then that
-  one is its `caller`, so a plugin that does something for others, as `google-account` does, uses the Vault for
+  The tool is told this call's app called it, as its `caller`. A tool that another app called can call one in
+  turn on behalf of that app, as OAuth's on-behalf-of flow does, with `on_behalf_of: call.caller`: then that
+  one is its `caller`, so an app that does something for others, as `google-account` does, uses the Vault for
   whichever called it.
 
       OneCore.Call.tool(call, "notifications", "send", %{"title" => "Lunch is here"})
   """
-  def tool(%__MODULE__{actor: actor, subject: subject} = call, plugin, tool, inputs, options \\ []) do
+  def tool(%__MODULE__{actor: actor, subject: subject} = call, app, tool, inputs, options \\ []) do
     caller =
       case Keyword.fetch(options, :on_behalf_of) do
         :error -> call.who
         {:ok, caller} when caller == call.caller and caller != nil -> caller
-        {:ok, _} -> raise "#{call.plugin} acts on behalf only of the plugin that called it, and #{inspect(call.caller)} did"
+        {:ok, _} -> raise "#{call.app} acts on behalf only of the app that called it, and #{inspect(call.caller)} did"
       end
 
-    case Calls.call(plugin, tool, inputs, {actor, subject}, false, caller) do
+    case Calls.call(app, tool, inputs, {actor, subject}, false, caller) do
       {:ok, result} when is_binary(result) ->
         result
 
@@ -119,23 +119,23 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  Runs `hook`, one this call's plugin offers (`offers/0`), for whoever this call runs for, as One Core runs its own:
-  the plugins installed for them and for the network that hook into `<plugin>.<hook>` are asked. What it gives is
+  Runs `hook`, one this call's app offers (`offers/0`), for whoever this call runs for, as One Core runs its own:
+  the apps installed for them and for the network that hook into `<app>.<hook>` are asked. What it gives is
   the kind's: an observe hook gives `:ok` at once, a mutate hook `{:ok, changes, by}` or `{:refuse, why}`, a
-  validate hook `:ok` or `{:refuse, why}`, and a collect hook `{:ok, parts, failed}`: each plugin's part by its name,
-  and why each that couldn't answer couldn't. A plugin runs only the hooks it offers.
+  validate hook `:ok` or `{:refuse, why}`, and a collect hook `{:ok, parts, failed}`: each app's part by its name,
+  and why each that couldn't answer couldn't. An app runs only the hooks it offers.
 
       OneCore.Call.run_hook(call, "removed", %{"artifact" => name, "what" => "restored"})
   """
-  def run_hook(%__MODULE__{installed: at, plugin: plugin, actor: actor, subject: subject}, hook, about) do
-    name = "#{plugin}.#{hook}"
+  def run_hook(%__MODULE__{installed: at, app: app, actor: actor, subject: subject}, hook, about) do
+    name = "#{app}.#{hook}"
 
     case Hooks.offered(name, at) do
       :observe -> Hooks.observe(name, about, {actor, subject})
       :mutate -> Hooks.mutate(name, about, {actor, subject})
       :validate -> Hooks.validate(name, about, {actor, subject})
       :collect -> Hooks.collect(name, about, {actor, subject})
-      nil -> raise "#{plugin} doesn't offer #{hook}. Its offers/0 names the hooks it offers."
+      nil -> raise "#{app} doesn't offer #{hook}. Its offers/0 names the hooks it offers."
     end
   end
 
@@ -148,8 +148,8 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  An artifact this call's plugin makes for whoever it runs for, under an `id` the plugin chooses: letters, digits,
-  `_` and `-`. It's theirs, not the plugin's, and the plugin reaches it for them without asking. The same `id`
+  An artifact this call's app makes for whoever it runs for, under an `id` the app chooses: letters, digits,
+  `_` and `-`. It's theirs, not the app's, and the app reaches it for them without asking. The same `id`
   is the same artifact, so a call that starts again makes it once.
 
       note = OneCore.Call.make(call, "7")
@@ -157,20 +157,20 @@ defmodule OneCore.Call do
       OneCore.Artifact.name(note)
       #=> "users/alice/made/notes/7"
   """
-  def make(%__MODULE__{subject: subject, actor: actor, plugin: plugin} = call, id) do
+  def make(%__MODULE__{subject: subject, actor: actor, app: app} = call, id) do
     if User.link?(subject), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
     if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
-    %Artifact{prefix: "#{subject}/made/#{plugin}/#{id}/", reached: {call.who, {actor, subject}, "owner"}}
+    %Artifact{prefix: "#{subject}/made/#{app}/#{id}/", reached: {call.who, {actor, subject}, "owner"}}
   end
 
   @doc """
   The artifact named `name`, for a call that may reach it as `relation`: a `viewer` reads it, an `editor` changes
   it too, and an `owner` says who else may. Raises with the reason if it may not.
 
-  A plugin reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
-  plugins that validate `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what
-  the plugin made for whoever it runs for, and nothing about the plugin where it made the artifact for someone
-  else, or the artifact is its own. Another plugin's own artifact is never reached: it's always that one plugin's.
+  An app reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
+  apps that validate `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what
+  the app made for whoever it runs for, and nothing about the app where it made the artifact for someone
+  else, or the artifact is its own. Another app's own artifact is never reached: it's always that one app's.
 
       note = OneCore.Call.reach(call, "users/alice/made/notes/7")
       {:ok, text, _tag} = OneCore.Artifact.read(note, "text")
@@ -187,27 +187,27 @@ defmodule OneCore.Call do
   def reaches?(%__MODULE__{} = call, name, relation \\ "viewer"), do: refused(call, name, relation) == nil
 
   @doc "Why this call may not reach the artifact `name` as `relation`, or `nil` if it may."
-  def refused(%__MODULE__{subject: subject, actor: actor, plugin: plugin} = call, name, relation)
+  def refused(%__MODULE__{subject: subject, actor: actor, app: app} = call, name, relation)
       when relation in ["viewer", "editor", "owner"] do
     parts = String.split(name, "/")
 
     if not Enum.all?(parts, &(&1 =~ ~r/^[^.]/)),
       do: raise(ArgumentError, "an artifact's name is parts joined by /, none empty or starting with a dot")
 
-    # What's someone's sits under their prefix by what it is: what a plugin made for them, or a plugin's own.
+    # What's someone's sits under their prefix by what it is: what an app made for them, or an app's own.
     kind = if hd(parts) == "network", do: Enum.slice(parts, 1, 2), else: Enum.slice(parts, 2, 2)
 
     about =
       cond do
         name == Artifact.name(call.own) -> [subject]
         match?(["own" | _], kind) -> nil
-        kind == ["made", plugin] and String.starts_with?(name, subject <> "/") -> []
-        kind == ["made", plugin] -> [subject]
+        kind == ["made", app] and String.starts_with?(name, subject <> "/") -> []
+        kind == ["made", app] -> [subject]
         true -> [subject, call.who]
       end
 
     if about == nil do
-      "#{name} is a plugin's own artifact, which only that plugin reaches"
+      "#{name} is an app's own artifact, which only that app reaches"
     else
       Enum.find_value(about, fn about ->
         case Hooks.validate("reach", %{"who" => about, "relation" => relation, "artifact" => name}, {actor, subject}) do
@@ -219,8 +219,8 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  Whether whoever asked is a member of `of`, a group or the network, as the plugins that validate `reach` say. With
-  nobody asking, as for a scheduled job, it's whoever the call runs for. It's what a plugin asks before telling
+  Whether whoever asked is a member of `of`, a group or the network, as the apps that validate `reach` say. With
+  nobody asking, as for a scheduled job, it's whoever the call runs for. It's what an app asks before telling
   someone what only a group's members, or the network's, may know.
   """
   def member?(%__MODULE__{subject: subject, actor: actor}, of) do
@@ -232,7 +232,7 @@ defmodule OneCore.Call do
 
   @doc """
   Whether whoever asked owns whoever this call runs for: themselves, or the group or the network they asked for,
-  as its `owner`. It's who changes what's installed for them, so a plugin asks it before changing what's a group's
+  as its `owner`. It's who changes what's installed for them, so an app asks it before changing what's a group's
   or the network's as a whole, where being a member isn't enough.
   """
   def owns?(%__MODULE__{subject: subject, actor: subject}), do: true
@@ -243,21 +243,21 @@ defmodule OneCore.Call do
       Hooks.validate("reach", %{"who" => actor, "relation" => "owner", "artifact" => subject}, {actor, subject}) == :ok
 
   @doc """
-  The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
-  `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle`, `about` and
-  `category`, its `apps`, its `widgets` and its `tools`' names and pages (`ui`). A Home Screen page is drawn from
+  The apps whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
+  `app` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle`, `about` and
+  `category`, its `entrypoints`, its `widgets` and its `tools`' names and pages (`ui`). A Home Screen page is drawn from
   these.
   """
-  def plugins(%__MODULE__{subject: subject}) do
-    for at <- Enum.reverse(Plugins.chain(subject)), {name, version} <- Plugins.versions([at]), into: %{} do
+  def apps(%__MODULE__{subject: subject}) do
+    for at <- Enum.reverse(Apps.chain(subject)), {name, version} <- Apps.versions([at]), into: %{} do
       tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui])
 
       {name,
-       Map.merge(OneCore.Plugins.Version.listing(version), %{
+       Map.merge(OneCore.Apps.Version.listing(version), %{
          name: name,
-         plugin: version.artifact,
+         app: version.artifact,
          installed: at,
-         apps: version.apps,
+         entrypoints: version.entrypoints,
          widgets: version.widgets,
          tools: tools
        })}
@@ -266,12 +266,12 @@ defmodule OneCore.Call do
   end
 
   @doc """
-  Every plugin anyone in the network has deployed, whether or not it's installed for anyone now: each one's `plugin`,
-  as its artifact's name, what a person reads of it where it's listed (`OneCore.Plugins.Version.listing/1`: its
-  `title`, `icon`, `subtitle`, `about`, `category`, `apps` and `widgets`) as its latest version has it. An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
+  Every app anyone in the network has deployed, whether or not it's installed for anyone now: each one's `app`,
+  as its artifact's name, what a person reads of it where it's listed (`OneCore.Apps.Version.listing/1`: its
+  `title`, `icon`, `subtitle`, `about`, `category`, `entrypoints` and `widgets`) as its latest version has it. An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
   the network it's in use for (`OneCore.Tools`).
   """
-  def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()
+  def deployed(%__MODULE__{}), do: OneCore.Apps.Deploy.deployed()
 
   @doc """
   Tells every app watching that something changed, so it asks again, as each call that changes something does once
@@ -282,7 +282,7 @@ defmodule OneCore.Call do
   def changed(%__MODULE__{}), do: OneCore.Server.changed()
 
   @doc """
-  Says what the call is doing, a stage of the plugin's own, such as `"Copying 3 of 12"`: an MCP task's
+  Says what the call is doing, a stage of the app's own, such as `"Copying 3 of 12"`: an MCP task's
   `statusMessage`, and the progress a caller waiting on it is told. Only the latest is said. A call that was cancelled
   raises here, so its `try … after` cleans up.
 
@@ -304,7 +304,7 @@ defmodule OneCore.Call do
   @doc """
   Makes a web request from the server running this call: its `url`, and its `method`, `headers` and `body` if it
   has them, by atoms or by text. Gives the answer's `status`, `headers` and `body`, as it came, without following a
-  redirect. An untrusted plugin reaches no website (`OneCore.Sandbox`).
+  redirect. An untrusted app reaches no website (`OneCore.Sandbox`).
 
       OneCore.Call.fetch(call, %{url: "https://api.example.com/notes", method: "POST", body: JSON.encode!(note)})
   """
@@ -333,26 +333,26 @@ defmodule OneCore.Call do
 
   @doc """
   A process that keeps running on this server between calls: the GenServer or `:gen_statem` `module`, which is one of
-  this call's plugin's or of a plugin whose code runs inside it. There's one for each `key`, started when first asked
-  for, with `argument` given to its `init/1`, and found again by every call after. It carries on through its plugin's
+  this call's app's or of an app whose code runs inside it. There's one for each `key`, started when first asked
+  for, with `argument` given to its `init/1`, and found again by every call after. It carries on through its app's
   updates as a service does, and one that stopped is started by the next call that asks for it.
 
       counter = OneCore.Call.process(call, Hello.Counter, call.subject, 0)
   """
-  def process(%__MODULE__{loaded: loaded, who: plugin}, module, key, argument) do
+  def process(%__MODULE__{loaded: loaded, who: app}, module, key, argument) do
     under = Version.under(module)
-    plugin = Enum.find_value(loaded, plugin, fn {_name, {plugin, other}} -> Version.under(other) == under && plugin end)
+    app = Enum.find_value(loaded, app, fn {_name, {app, other}} -> Version.under(other) == under && app end)
 
-    Plugins.Process.of(plugin, Version.own_name(module), key, argument) ||
-      raise "#{inspect(module)} isn't a module of #{plugin} as it runs now"
+    Apps.Process.of(app, Version.own_name(module), key, argument) ||
+      raise "#{inspect(module)} isn't a module of #{app} as it runs now"
   end
 
   @doc """
   Has a server acting for `owner` run this call instead, since this one doesn't act for them. The call ends here
-  with that server's answer, and raises if none of them is up, or none acts for whoever the plugin was installed for
+  with that server's answer, and raises if none of them is up, or none acts for whoever the app was installed for
   too.
 
-  With servers' keys in `owner`'s place, it's one of those that runs it, for a plugin that knows which can: the
+  With servers' keys in `owner`'s place, it's one of those that runs it, for an app that knows which can: the
   ones that hold a key, say. `:no_answer` then means none of them ran it.
   """
   def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
@@ -364,14 +364,14 @@ defmodule OneCore.Call do
   def forward(%__MODULE__{} = call, owner), do: forward(call.request, {call.actor, call.subject}, call.forwarded, owner)
 
   @doc """
-  Has a server that runs the plugins installed for `owner` run this call, since this one doesn't
+  Has a server that runs the apps installed for `owner` run this call, since this one doesn't
   (`OneCore.Servers.runs?/1`). It ends here with that server's answer, or raises saying whose servers run it and
   that none is on.
   """
   def run_elsewhere(%__MODULE__{} = call, owner),
-    do: run_elsewhere(call.request, {call.actor, call.subject}, call.forwarded, owner, call.plugin)
+    do: run_elsewhere(call.request, {call.actor, call.subject}, call.forwarded, owner, call.app)
 
-  @doc "Has a server that runs the plugins installed for `owner` run what was asked of this one, `what`, as `run_elsewhere/2` does."
+  @doc "Has a server that runs the apps installed for `owner` run what was asked of this one, `what`, as `run_elsewhere/2` does."
   def run_elsewhere(ask, principal, forwarded, owner, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
     servers = Servers.running(owner)

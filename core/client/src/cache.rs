@@ -72,10 +72,10 @@ impl Client {
         Some((kind.to_owned(), fs::read(self.home.join("files").join(name).as_path()).ok().filter(|_| named)?))
     }
 
-    /// Sends a file that's too large to go in a call to where the network keeps it, for a tool of `plugin`: a
+    /// Sends a file that's too large to go in a call to where the network keeps it, for a tool of `app`: a
     /// server gives a short-lived link to send it by. Gives the name that tool takes for it.
-    pub async fn upload(&self, plugin: &str, file: Vec<u8>) -> Result<String> {
-        let response = self.request("tools/call", json!({"name": "upload", "arguments": {"plugin": plugin}})).await?;
+    pub async fn upload(&self, app: &str, file: Vec<u8>) -> Result<String> {
+        let response = self.request("tools/call", json!({"name": "upload", "arguments": {"app": app}})).await?;
         let text = response["content"][0]["text"].as_str().unwrap_or_default();
         if response["isError"] == true {
             bail!("{text}")

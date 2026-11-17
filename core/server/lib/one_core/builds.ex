@@ -18,11 +18,11 @@ defmodule OneCore.Builds do
   `devices/<key>`, which it says as it renews its pass (`seen/3`).
   """
   alias OneCore.{Bucket, Server, Servers}
-  alias OneCore.Plugins.{Installed, Store}
+  alias OneCore.Apps.{Installed, Store}
 
   @builds "network/builds/"
   @latest @builds <> "latest"
-  @plugin ~r{^((?:network|(?:users|groups)/[^/]+)/plugins/[^/]+)/latest$}
+  @app ~r{^((?:network|(?:users|groups)/[^/]+)/apps/[^/]+)/latest$}
 
   @doc "The build this server is, as `tooling/version` names its commit: `0.15.2+2974.febd37350abc`."
   def build, do: Application.fetch_env!(:one_core, :build)
@@ -127,8 +127,8 @@ defmodule OneCore.Builds do
   any of their files, gives a link to send each one it lacks by, `{:send, %{name => link}}`, and changes nothing:
   sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more
   are removed: a machine downloads only the latest, and one whose update doesn't take goes back to the build it
-  kept of its own. So are the files of every plugin's versions before its last few (`OneCore.Plugins.Store.prune/1`),
-  since each release deploys the plugins that changed again, each a new version with its apps and NIFs.
+  kept of its own. So are the files of every app's versions before its last few (`OneCore.Apps.Store.prune/1`),
+  since each release deploys the apps that changed again, each a new version with its apps and NIFs.
   """
   def publish(builds) do
     missing =
@@ -155,11 +155,11 @@ defmodule OneCore.Builds do
     if written == :ok do
       named = for {_name, build} <- now, do: @builds <> build["sha256"]
       for blob <- Bucket.list(@builds), blob != @latest, blob not in named, do: Bucket.remove(blob)
-      # Every plugin in the bucket, whether or not anyone still has it: each one's `latest`.
-      plugins =
-        for blob <- Bucket.list(""), [artifact] <- [Regex.run(@plugin, blob, capture: :all_but_first)], do: artifact
+      # Every app in the bucket, whether or not anyone still has it: each one's `latest`.
+      apps =
+        for blob <- Bucket.list(""), [artifact] <- [Regex.run(@app, blob, capture: :all_but_first)], do: artifact
 
-      Stream.run(Task.async_stream(plugins, &Store.prune/1, max_concurrency: 16, timeout: :infinity))
+      Stream.run(Task.async_stream(apps, &Store.prune/1, max_concurrency: 16, timeout: :infinity))
       now
     else
       latest(builds)
@@ -188,8 +188,8 @@ defmodule OneCore.Builds do
   Which build each of `owner`'s servers runs, with what its machine is called and what it is (`say/1`), as it says
   it and, where the network's edge says it now, whether it's ready (`OneCore.Servers.presence/1`), and which each
   of `by`'s devices last said it is, and the latest for each kind of machine: what shows whether everything is on
-  the same build; and `plugins`, whether what runs on the server that answers is what's installed, `synced`, or it's
-  `syncing` (`OneCore.Plugins.sync/2`).
+  the same build; and `apps`, whether what runs on the server that answers is what's installed, `synced`, or it's
+  `syncing` (`OneCore.Apps.sync/2`).
   """
   def list(by, owner) do
     keys = Servers.acting(owner)
@@ -219,19 +219,19 @@ defmodule OneCore.Builds do
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
       devices: devices,
-      plugins: OneCore.Plugins.synced(),
+      apps: OneCore.Apps.synced(),
       waiting: waiting(owner)
     }
   end
 
-  # The plugins installed for `owner` whose version doesn't run on this server's platform, and why
-  # (`OneCore.Plugins.Version.platform/1`). Only one not running here is read from what it said of itself.
+  # The apps installed for `owner` whose version doesn't run on this server's platform, and why
+  # (`OneCore.Apps.Version.platform/1`). Only one not running here is read from what it said of itself.
   defp waiting(owner) do
-    running = OneCore.Plugins.running(owner)
+    running = OneCore.Apps.running(owner)
 
-    for {name, %{"plugin" => plugin}} <- Installed.read(owner),
-        is_binary(plugin) and not is_map_key(running, name),
-        %{state: state, why: why} when state != :runs <- [Store.platform(name, plugin)],
+    for {name, %{"app" => app}} <- Installed.read(owner),
+        is_binary(app) and not is_map_key(running, name),
+        %{state: state, why: why} when state != :runs <- [Store.platform(name, app)],
         do: %{name: name, state: state, why: why}
   end
 

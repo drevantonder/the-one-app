@@ -5,13 +5,13 @@ defmodule OneCore.User do
   without its last `/`. The holder of a sharing link is `users/<name>/links/<the link's name>`, after whoever the
   link leads to, and is nobody else.
 
-  Signing in is a plugin, which tells One Core whose device a request came from: `asking/3` is the one place
-  that's decided, and it asks the plugins that mutate `device` (`OneCore.Hooks.whose/1`). A device no plugin
-  places is nobody's, and nobody is refused everything: so with no plugin signing anyone in, a network answers
+  Signing in is an app, which tells One Core whose device a request came from: `asking/3` is the one place
+  that's decided, and it asks the apps that mutate `device` (`OneCore.Hooks.whose/1`). A device no app
+  places is nobody's, and nobody is refused everything: so with no app signing anyone in, a network answers
   nobody.
 
   A request is for whoever it's from, unless it says who else: a group, or the network. It then runs for them,
-  with their artifacts, once the plugins that validate `reach` say whoever asked is their `member`.
+  with their artifacts, once the apps that validate `reach` say whoever asked is their `member`.
   """
   alias OneCore.{Bucket, Hooks, Server, Servers}
 
@@ -23,7 +23,7 @@ defmodule OneCore.User do
   @doc """
   Who a request is by and who it's for, its actor and its subject: `{:ok, {actor, subject}, forwarded}`, or
   `{:error, why}`. `from` is the key of whatever sent it, which its connection proved, or `nil` for what came in at
-  the network's address over the web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks a plugin's hook: a
+  the network's address over the web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks an app's hook: a
   moment on any of the network's servers is about whoever it's about, so each of them is believed about that,
   where only one acting for someone is believed about what they asked for.
 
@@ -129,7 +129,7 @@ defmodule OneCore.User do
       else: {:error, "This server doesn't act for #{owner}. The ones that do are the ones to ask."}
   end
 
-  # Whether a request by `by` runs for `asked`: themselves, or whoever the plugins that validate `reach` say they're a
+  # Whether a request by `by` runs for `asked`: themselves, or whoever the apps that validate `reach` say they're a
   # member of.
   defp acts(by, by), do: :ok
 
@@ -150,7 +150,7 @@ defmodule OneCore.User do
 
   @doc """
   The network's first owner, or `nil` while it has none. One Core keeps who that is itself, in the blob
-  `network/owner`, since it's who may do anything where no plugin decides who may (`OneCore.Hooks.validate/4`).
+  `network/owner`, since it's who may do anything where no app decides who may (`OneCore.Hooks.validate/4`).
   """
   def first_owner do
     Servers.cached(:first_owner, fn ->
@@ -158,16 +158,16 @@ defmodule OneCore.User do
     end)
   end
 
-  # The plugins a network starts with, which whoever makes its first owner installs for it, each after the ones it
+  # The apps a network starts with, which whoever makes its first owner installs for it, each after the ones it
   # uses: database and encryption keep what the others keep, permissions decides who may do what, sign-in says whose
-  # each device is, sandbox runs untrusted plugins, vault keeps accounts and secrets, soft-delete keeps what's
+  # each device is, sandbox runs untrusted apps, vault keeps accounts and secrets, soft-delete keeps what's
   # deleted, notifications tells people things, and home-screen is the launcher every client opens first.
   @starting ~w(database encryption permissions sign-in sandbox vault soft-delete notifications home-screen)
 
   @doc """
   Makes the user `who` the network's first owner, which a network gets once: `:ok`, or `{:error, why}`. Then the
-  plugins a network starts with are installed for it as the first owner installs any, from what the network has
-  deployed of them (`network/plugins/<name>`), and only then are the plugins that validate `owner` asked, so the one
+  apps a network starts with are installed for it as the first owner installs any, from what the network has
+  deployed of them (`network/apps/<name>`), and only then are the apps that validate `owner` asked, so the one
   that keeps who may do what is there to write it down, and the one that signs people in to say where they join.
   Doing it again for the same user finishes what an earlier try left undone.
   """
@@ -199,14 +199,14 @@ defmodule OneCore.User do
     end
   end
 
-  # Installs one of the plugins a network starts with for it, unless it's there: `nil`, or why it wasn't.
+  # Installs one of the apps a network starts with for it, unless it's there: `nil`, or why it wasn't.
   defp starting(name, who) do
-    case OneCore.Plugins.Installed.read("network")[name] do
+    case OneCore.Apps.Installed.read("network")[name] do
       %{"state" => "installed"} ->
         nil
 
       _ ->
-        case OneCore.Plugins.Lifecycle.install("network", name, "network/plugins/#{name}", who) do
+        case OneCore.Apps.Lifecycle.install("network", name, "network/apps/#{name}", who) do
           %{"state" => "installed"} -> nil
           %{"state" => state} = record -> record["why"] || "it's #{state}"
           {:error, why} -> why
@@ -216,7 +216,7 @@ defmodule OneCore.User do
 
   @doc """
   Whose `who` is, or who they are: the user, the group or the network that an artifact's name, or a who's, starts
-  with. A sharing link's holder is whoever's the link leads to: their servers answer the holder, with the plugins
+  with. A sharing link's holder is whoever's the link leads to: their servers answer the holder, with the apps
   installed for them. `nil` for a name that starts with nobody's.
   """
   def owner(who) do

@@ -13,7 +13,7 @@
 # has a Windows build. --dry-run says what it would build, and builds nothing.
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
-# the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its plugins as
+# the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac builds a Mac's
 # `one`, which needs its system's frameworks: from Linux, it's built on the Mac `ssh mac` reaches, in its checkout
 # ~/scratch/one-release, at the same commit. One release runs on a machine at a time;
@@ -25,7 +25,7 @@
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
 # with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
-# builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
+# builds apps with named by its SHA-256, which it downloads the first time (`OneCore.Entrypoint`). The builds are in
 # target/builds/<build>.
 #
 # A server for a kind of machine, `server/<kind>`, is published in two parts, which a machine puts together (`one

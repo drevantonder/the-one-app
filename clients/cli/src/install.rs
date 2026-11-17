@@ -1,10 +1,10 @@
-//! Installing plugins from git repos, as `npx skills` installs agent skills (skills.sh): a plugin is a folder of a
-//! repo's `plugins/`, with a `SKILL.md`, and there's nothing to publish. `one install <owner>/<repo>[@<ref>] --plugin
+//! Installing apps from git repos, as `npx skills` installs agent skills (skills.sh): an app is a folder of a
+//! repo's `apps/`, with a `SKILL.md`, and there's nothing to publish. `one install <owner>/<repo>[@<ref>] --app
 //! <name>` fetches the repo with git, deploys that folder as a copy of the installer's own, with where it came from
-//! (`deploy`'s `from`), which the network keeps with the plugin and `plugins` gives back. In a network's repo (a
-//! folder with `plugins/`, or a `plugins.lock`), `plugins.lock` records each too, so `one install` there installs
+//! (`deploy`'s `from`), which the network keeps with the app and `apps` gives back. In a network's repo (a
+//! folder with `apps/`, or an `apps.lock`), `apps.lock` records each too, so `one install` there installs
 //! everything it names at the commits it names: that's how a network is made again from its repo. The network
-//! itself looks for newer commits once a day, and offers them as updates (`one plugins check`, `one plugins update`).
+//! itself looks for newer commits once a day, and offers them as updates (`one apps check`, `one apps update`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -16,11 +16,11 @@ use anyhow::{Context, Result, bail};
 use client::Client;
 use serde_json::{Value, json};
 
-/// Where an installer says it installed a plugin, for the directory of plugins (`www/plugin-directory/README.md`).
-const DIRECTORY: &str = "https://one.drevan.me/plugins/api/installs";
-const LOCK: &str = "plugins.lock";
+/// Where an installer says it installed an app, for the directory of apps (`www/app-directory/README.md`).
+const DIRECTORY: &str = "https://one.drevan.me/apps/api/installs";
+const LOCK: &str = "apps.lock";
 
-/// Where a plugin comes from: a repo as it's written in a lock file (`owner/repo` on GitHub, a git URL, or a
+/// Where an app comes from: a repo as it's written in a lock file (`owner/repo` on GitHub, a git URL, or a
 /// folder's absolute path), and the ref asked for, if one was.
 #[derive(Clone)]
 struct Source {
@@ -69,7 +69,7 @@ impl Source {
         (!self.local() && !path.contains(':') && path.split('/').count() == 2).then(|| path.to_owned())
     }
 
-    /// Where this device keeps its copy of the repo, which an agent reads a plugin's code in before installing it.
+    /// Where this device keeps its copy of the repo, which an agent reads an app's code in before installing it.
     fn folder(&self) -> Result<PathBuf> {
         let named = self.spec.split_once("://").map_or(self.spec.as_str(), |(_, rest)| rest);
         let named = named.replace(':', "/");
@@ -127,7 +127,7 @@ fn git(folder: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&ran.stdout).trim().to_owned())
 }
 
-/// A plugin as `plugins.lock` records it, by its name there.
+/// An app as `apps.lock` records it, by its name there.
 #[derive(Clone)]
 struct Locked {
     source: String,
@@ -153,16 +153,16 @@ impl Locked {
     }
 }
 
-/// The lock file, where this is run in a network's repo: a folder with `plugins/` or a `plugins.lock`.
+/// The lock file, where this is run in a network's repo: a folder with `apps/` or an `apps.lock`.
 fn lock_file() -> Option<PathBuf> {
-    (Path::new(LOCK).exists() || Path::new("plugins").is_dir()).then(|| PathBuf::from(LOCK))
+    (Path::new(LOCK).exists() || Path::new("apps").is_dir()).then(|| PathBuf::from(LOCK))
 }
 
 fn read_lock(file: &Path) -> Result<BTreeMap<String, Locked>> {
     let Ok(text) = fs::read_to_string(file) else { return Ok(BTreeMap::new()) };
     let lock: Value = serde_json::from_str(&text).with_context(|| format!("{} isn't JSON", file.display()))?;
-    let plugins = lock["plugins"].as_object().into_iter().flatten();
-    plugins
+    let apps = lock["apps"].as_object().into_iter().flatten();
+    apps
         .map(|(name, lock)| {
             Locked::read(lock).map(|locked| (name.clone(), locked)).with_context(|| format!("{LOCK} says {name} wrong"))
         })
@@ -170,8 +170,8 @@ fn read_lock(file: &Path) -> Result<BTreeMap<String, Locked>> {
 }
 
 fn write_lock(file: &Path, locked: &BTreeMap<String, Locked>) -> Result<()> {
-    let plugins: serde_json::Map<String, Value> = locked.iter().map(|(name, it)| (name.clone(), it.json())).collect();
-    let text = serde_json::to_string_pretty(&json!({"version": 1, "plugins": plugins}))?;
+    let apps: serde_json::Map<String, Value> = locked.iter().map(|(name, it)| (name.clone(), it.json())).collect();
+    let text = serde_json::to_string_pretty(&json!({"version": 1, "apps": apps}))?;
     Ok(fs::write(file, text + "\n")?)
 }
 
@@ -190,21 +190,21 @@ async fn call(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -
     Ok(text.join("\n"))
 }
 
-/// What's installed for `of` and the network, as the tool `plugins` lists it, and who `of` is.
+/// What's installed for `of` and the network, as the tool `apps` lists it, and who `of` is.
 async fn installed(client: &Client, of: Option<&str>) -> Result<(String, Vec<Value>)> {
-    let response: Value = serde_json::from_str(&call(client, of, "plugins", json!({})).await?)?;
-    let of = response["for"].as_str().context("`plugins` says who it lists for")?.to_owned();
-    Ok((of, response["plugins"].as_array().cloned().unwrap_or_default()))
+    let response: Value = serde_json::from_str(&call(client, of, "apps", json!({})).await?)?;
+    let of = response["for"].as_str().context("`apps` says who it lists for")?.to_owned();
+    Ok((of, response["apps"].as_array().cloned().unwrap_or_default()))
 }
 
-/// A repo's plugins: each folder of its `plugins/` with a `SKILL.md`, with what that says it's called and is for.
+/// A repo's apps: each folder of its `apps/` with a `SKILL.md`, with what that says it's called and is for.
 fn offered(folder: &Path) -> Vec<(String, String)> {
-    let mut offered: Vec<(String, String)> = fs::read_dir(folder.join("plugins"))
+    let mut offered: Vec<(String, String)> = fs::read_dir(folder.join("apps"))
         .into_iter()
         .flatten()
         .flatten()
-        .filter_map(|plugin| {
-            let skill = fs::read_to_string(plugin.path().join("SKILL.md")).ok()?;
+        .filter_map(|app| {
+            let skill = fs::read_to_string(app.path().join("SKILL.md")).ok()?;
             let front = skill.strip_prefix("---")?.split("\n---").next()?.to_owned();
             let field = |name: &str| {
                 front
@@ -213,7 +213,7 @@ fn offered(folder: &Path) -> Vec<(String, String)> {
                     .map(|value| value.trim().trim_matches(|quote| quote == '"' || quote == '\'').to_owned())
             };
             Some((
-                field("name").unwrap_or_else(|| plugin.file_name().to_string_lossy().into_owned()),
+                field("name").unwrap_or_else(|| app.file_name().to_string_lossy().into_owned()),
                 field("description")?,
             ))
         })
@@ -222,10 +222,10 @@ fn offered(folder: &Path) -> Vec<(String, String)> {
     offered
 }
 
-/// The plugins a plugin requires, as its `requires/0` names them (`OneCore.Plugin`): each `"name" =>` of its map.
-fn requires(plugin: &Path) -> Vec<String> {
+/// The apps an app requires, as its `requires/0` names them (`OneCore.App`): each `"name" =>` of its map.
+fn requires(app: &Path) -> Vec<String> {
     let mut required = Vec::new();
-    for file in fs::read_dir(plugin.join("server")).into_iter().flatten().flatten() {
+    for file in fs::read_dir(app.join("server")).into_iter().flatten().flatten() {
         let code = fs::read_to_string(file.path()).unwrap_or_default();
         let Some((_, after)) = code.split_once("def requires") else { continue };
         let Some(map) = after.split_once("%{").and_then(|(_, map)| map.split_once('}')).map(|(map, _)| map) else {
@@ -241,12 +241,12 @@ fn requires(plugin: &Path) -> Vec<String> {
     required
 }
 
-/// Stops with what to build, where a plugin brings a NIF that isn't built for every kind of machine the network's
+/// Stops with what to build, where an app brings a NIF that isn't built for every kind of machine the network's
 /// servers run on, here or published where its `server/checksums.json` says, which the server downloads
-/// (`OneCore.Plugins.Precompiled`): its source is never deployed, only the library built from it (`OneCore.Plugin`),
-/// so the agent installing it builds it, as `tooling/nifs` does for the plugins The One App ships with.
-async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<()> {
-    let published: Value = fs::read_to_string(plugin.join("server/checksums.json"))
+/// (`OneCore.Apps.Precompiled`): its source is never deployed, only the library built from it (`OneCore.App`),
+/// so the agent installing it builds it, as `tooling/nifs` does for the apps The One App ships with.
+async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> {
+    let published: Value = fs::read_to_string(app.join("server/checksums.json"))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
@@ -259,7 +259,7 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
         .collect();
     kinds.sort();
     kinds.dedup();
-    for crate_folder in fs::read_dir(plugin.join("server/nif")).into_iter().flatten().flatten() {
+    for crate_folder in fs::read_dir(app.join("server/nif")).into_iter().flatten().flatten() {
         let crate_folder = crate_folder.path();
         if !crate_folder.join("Cargo.toml").exists() {
             continue;
@@ -303,7 +303,7 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
     Ok(())
 }
 
-/// Deploys the plugin `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked.
+/// Deploys the app `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked.
 /// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
 /// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
 /// else `of` is in, as `deploy`'s `new` says.
@@ -317,27 +317,27 @@ async fn deploy(
     trusted: Option<bool>,
     new: bool,
 ) -> Result<Locked> {
-    let plugin = folder.join("plugins").join(name);
-    // Deployed over someone else's plugin, it would be changed for everyone who has it, not copied.
-    let (_, plugins) = installed(client, Some(of)).await?;
-    let own = format!("{of}/plugins/{name}");
-    if let Some(other) = plugins.iter().find(|it| it["name"] == name && it["for"] == of && it["plugin"] != own.as_str())
+    let app = folder.join("apps").join(name);
+    // Deployed over someone else's app, it would be changed for everyone who has it, not copied.
+    let (_, apps) = installed(client, Some(of)).await?;
+    let own = format!("{of}/apps/{name}");
+    if let Some(other) = apps.iter().find(|it| it["name"] == name && it["for"] == of && it["app"] != own.as_str())
     {
         bail!(
             "{name} is installed for {of} already, as {}. `one uninstall --name {name}` it first, to install a copy of \
              your own in its place.",
-            other["plugin"].as_str().unwrap_or_default()
+            other["app"].as_str().unwrap_or_default()
         );
     }
-    built(client, of, name, &plugin).await?;
+    built(client, of, name, &app).await?;
     println!(
-        "{name}'s code, from {} at {}, is in {}. Read it before installing (the skill installing-plugins): its \
+        "{name}'s code, from {} at {}, is in {}. Read it before installing (the skill installing-apps): its \
          server code runs with full access on {of}'s servers, or untrusted, in a sandbox, with only what it's given.",
         from.spec,
         &commit[..12],
-        plugin.display()
+        app.display()
     );
-    let files = crate::read(&plugin, false)?;
+    let files = crate::read(&app, false)?;
     let mut deployed =
         json!({"name": name, "files": files, "from": {"source": from.spec, "ref": from.reference, "commit": commit}});
     if let Some(trusted) = trusted {
@@ -350,12 +350,12 @@ async fn deploy(
     // What a person reads of it goes to the directory, not the terminal: its icons are long.
     let listing = deployed.as_object_mut().and_then(|it| it.remove("listing")).unwrap_or_default();
     println!("{deployed}");
-    let (_, plugins) = installed(client, Some(of)).await?;
-    let hash = plugins
+    let (_, apps) = installed(client, Some(of)).await?;
+    let hash = apps
         .iter()
-        .find(|plugin| plugin["name"] == name && plugin["for"] == of)
-        .and_then(|plugin| plugin["from"]["hash"].as_str())
-        .with_context(|| format!("{name} was deployed, but `plugins` doesn't list it for {of}"))?;
+        .find(|app| app["name"] == name && app["for"] == of)
+        .and_then(|app| app["from"]["hash"].as_str())
+        .with_context(|| format!("{name} was deployed, but `apps` doesn't list it for {of}"))?;
     report(from, name, commit, listing).await;
     Ok(Locked {
         source: from.spec.clone(),
@@ -366,7 +366,7 @@ async fn deploy(
     })
 }
 
-/// Tells the directory of plugins that a plugin was installed, with what a person reads of it there (`listing`, as
+/// Tells the directory of apps that an app was installed, with what a person reads of it there (`listing`, as
 /// `deploy` gave it) and nothing about who installed it. Not for a
 /// folder, nor a repo GitHub doesn't say is public, nor where `DO_NOT_TRACK` or `DISABLE_TELEMETRY` (skills.sh's own)
 /// is set. It's never waited on long, and its failing fails nothing.
@@ -382,15 +382,15 @@ async fn report(from: &Source, name: &str, commit: &str, listing: Value) {
     };
     let post = async {
         if public.await == Some(true) {
-            let body = json!({"source": repo, "plugin": name, "commit": commit, "listing": listing}).to_string();
+            let body = json!({"source": repo, "app": name, "commit": commit, "listing": listing}).to_string();
             let _ = web.post(DIRECTORY).header("content-type", "application/json").body(body).send().await;
         }
     };
     let _ = tokio::time::timeout(Duration::from_secs(3), post).await;
 }
 
-/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--trusted | --untrusted] [--new]`, for whoever
-/// `ONE_SUBJECT` says, or this device's user. A repo's plugins are a stranger's, so they're untrusted and run in a
+/// `one install <repo>[@<ref>] --app <name> ... [--list] [--trusted | --untrusted] [--new]`, for whoever
+/// `ONE_SUBJECT` says, or this device's user. A repo's apps are a stranger's, so they're untrusted and run in a
 /// sandbox, which needs no server of the user's, unless `--trusted` says otherwise, which only someone who may install
 /// for them may; `--new` makes a second copy where one by that name is installed for the network or a group they're
 /// in, which is refused without.
@@ -404,9 +404,9 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
             "--trusted" => trusted = Some(true),
             "--untrusted" => trusted = Some(false),
             "--new" => new = true,
-            "--plugin" => names.push(flags.next().context("--plugin needs a plugin's name")?.clone()),
+            "--app" => names.push(flags.next().context("--app needs an app's name")?.clone()),
             other => bail!(
-                "`{other}` isn't something `one install` takes: --plugin <name>, --trusted, --untrusted, --new or --list"
+                "`{other}` isn't something `one install` takes: --app <name>, --trusted, --untrusted, --new or --list"
             ),
         }
     }
@@ -417,33 +417,33 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         for (name, about) in &offered {
             println!("{name:width$}  {about}");
         }
-        println!("\n{} at {}, in {}/plugins.", source.spec, &commit[..12], folder.display());
+        println!("\n{} at {}, in {}/apps.", source.spec, &commit[..12], folder.display());
         if !list {
-            println!("`one install {} --plugin <name>` installs one.", args[0]);
+            println!("`one install {} --app <name>` installs one.", args[0]);
         }
         return Ok(ExitCode::SUCCESS);
     }
-    let (of, plugins) = installed(client, None).await?;
-    let is = |name: &str, at: &str| plugins.iter().find(|plugin| plugin["name"] == name && plugin["for"] == at);
-    // Each plugin after the ones it requires that aren't installed for them or the network yet and the repo has.
+    let (of, apps) = installed(client, None).await?;
+    let is = |name: &str, at: &str| apps.iter().find(|app| app["name"] == name && app["for"] == at);
+    // Each app after the ones it requires that aren't installed for them or the network yet and the repo has.
     let mut order: Vec<String> = Vec::new();
     let mut next: Vec<(String, bool)> = names.iter().rev().map(|name| (name.clone(), false)).collect();
     while let Some((name, placed)) = next.pop() {
         if order.contains(&name) {
             continue;
         }
-        let plugin = folder.join("plugins").join(&name);
-        if !plugin.join("SKILL.md").exists() {
-            bail!("{} has no plugin {name}: `one install {} --list` lists the ones it has", source.spec, args[0]);
+        let app = folder.join("apps").join(&name);
+        if !app.join("SKILL.md").exists() {
+            bail!("{} has no app {name}: `one install {} --list` lists the ones it has", source.spec, args[0]);
         }
         if placed {
             order.push(name);
             continue;
         }
         next.push((name.clone(), true));
-        for required in requires(&plugin) {
+        for required in requires(&app) {
             let there = is(&required, &of).or(is(&required, "network")).is_some();
-            let repo = folder.join("plugins").join(&required).join("SKILL.md").exists();
+            let repo = folder.join("apps").join(&required).join("SKILL.md").exists();
             if !there && repo && !order.contains(&required) {
                 println!(
                     "{name} requires {required}, which isn't installed for {of} or the network, so it's installed \
@@ -469,14 +469,14 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
     match lock {
         Some(file) => println!("Recorded in {}.", file.display()),
         None => println!(
-            "Not in a network's repo, so no {LOCK} is written: the network keeps where it came from (`one plugins`)."
+            "Not in a network's repo, so no {LOCK} is written: the network keeps where it came from (`one apps`)."
         ),
     }
     Ok(ExitCode::SUCCESS)
 }
 
-/// `one install` in a folder with a `plugins.lock`: installs everything it records, at the commits it records, for
-/// whoever it records, as it was, each after the ones it records that it requires. A plugin whose files hash
+/// `one install` in a folder with an `apps.lock`: installs everything it records, at the commits it records, for
+/// whoever it records, as it was, each after the ones it records that it requires. An app whose files hash
 /// differently now (a NIF built again) is said so.
 pub async fn locked(client: &Client) -> Result<ExitCode> {
     let file = PathBuf::from(LOCK);
@@ -487,7 +487,7 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
         for (name, it) in &waiting {
             let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
             let (folder, commit) = source.fetch(Some(&it.commit))?;
-            let required = requires(&folder.join("plugins").join(name));
+            let required = requires(&folder.join("apps").join(name));
             if required.iter().any(|required| required != name && waiting.contains_key(required)) {
                 continue;
             }
@@ -507,12 +507,12 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
         }
         waiting.retain(|name, _| !deployed.contains(name));
     }
-    println!("Installed the {count} plugins {LOCK} records.");
+    println!("Installed the {count} apps {LOCK} records.");
     Ok(ExitCode::SUCCESS)
 }
 
 
-/// `one uninstall --name <name>` in a network's repo: uninstalls it, and takes it out of `plugins.lock` if that
+/// `one uninstall --name <name>` in a network's repo: uninstalls it, and takes it out of `apps.lock` if that
 /// records it for whoever it was uninstalled for, so `one install` there doesn't install it again.
 pub async fn uninstall(client: &Client, name: &str) -> Result<ExitCode> {
     let (of, _) = installed(client, None).await?;
@@ -545,9 +545,9 @@ pub async fn deploy_folder(client: &Client, args: &[String]) -> Result<ExitCode>
     let source =
         git(&folder, &["remote", "get-url", "origin"]).or_else(|_| git(&folder, &["rev-parse", "--show-toplevel"]))?;
 
-    let (of, plugins) = installed(client, None).await?;
-    let live = plugins.iter().find(|plugin| plugin["name"] == name.as_str() && plugin["for"] == of.as_str());
-    let live = live.and_then(|plugin| plugin["from"]["commit"].as_str());
+    let (of, apps) = installed(client, None).await?;
+    let live = apps.iter().find(|app| app["name"] == name.as_str() && app["for"] == of.as_str());
+    let live = live.and_then(|app| app["from"]["commit"].as_str());
     if let Some(live) = live.filter(|live| !force && *live != commit) {
         // A commit someone else pushed is fetched before it's decided that this one doesn't contain it.
         if git(&folder, &["cat-file", "-e", &format!("{live}^{{commit}}")]).is_err() {

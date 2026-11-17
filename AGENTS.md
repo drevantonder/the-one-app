@@ -6,8 +6,8 @@ before choosing.
 - Follow Jakob's Law. It is the first rule and comes before every other one here: developers and agents spend most
   of their time in other codebases, so ours works the way those already do. That's its words, its folders, its
   tools, how it's set up and how it's built and tested. A thing is called what its own ecosystem calls it: a NIF, a
-  test, a cache. A word of ours is only for what's ours, and it's in `GLOSSARY.md`, or in its plugin's `SKILL.md` where
-  a plugin owns it.
+  test, a cache. A word of ours is only for what's ours, and it's in `GLOSSARY.md`, or in its app's `SKILL.md` where
+  an app owns it.
 - Plain English is for sentences. An identifier, a tool, a flag or a file is named with the word that ecosystem's own
   docs use for it (request, response, cache, token, forward, approve, create), never with an everyday verb chosen to
   avoid it.
@@ -20,7 +20,7 @@ before choosing.
   code.
 - One name per thing. A rename reaches everything in the same change, with no aliases or fallbacks for old names, and
   no internal words where a user reads.
-- A special case is a missing design: an `if` for one value or plugin, a parameter for one caller, a swallowed error,
+- A special case is a missing design: an `if` for one value or app, a parameter for one caller, a swallowed error,
   a retry or a sleep, a skipped test. Fix the design so it goes; keep one only when the outside world needs it, with
   a comment saying what in the world.
 - No kept tests for now: each change is checked by the agent that makes it, for whatever it could affect.
@@ -28,7 +28,7 @@ before choosing.
 - People use apps. The CLI and MCP are for their agents, even for the most technical person on a network, so never
   shape a person's flow around a terminal.
 - How it looks is the repo's `DESIGN.md`: our look, the same on every client.
-- A plugin, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
+- An app, and anything it provides, isn't forced to behave a certain way. The platform gives it the freedom to do
   what's best, and gives guidance to the agents that build it so they make wise decisions.
 
 ## Docs
@@ -49,9 +49,9 @@ before choosing.
 - One commit per change, once it works, as a Conventional Commit: `type(area): what changes, for whoever uses it`. No
   co-author or "Generated with" lines.
 - Mark with `!` (`feat(core)!: …`) a change that breaks whoever uses what the commit touches, such as a rename with
-  no alias: the platform (core, the edge, the clients) or a plugin, each with its own version (the `release` skill).
+  no alias: the platform (core, the edge, the clients) or an app, each with its own version (the `release` skill).
   The platform's next 0.minor doesn't talk with older parts.
-- A change that adds to `core/` says in its commit why a plugin or a hook couldn't do it.
+- A change that adds to `core/` says in its commit why an app or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
   the background and let your harness tell you when it ends. Don't end your turn while something you started runs:

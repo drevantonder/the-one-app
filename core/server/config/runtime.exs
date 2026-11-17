@@ -7,7 +7,7 @@ config :one_core,
 
 # A server installed on a machine is told where it is by the program that keeps it running (`one serve run`, in
 # `clients/cli/src/serving.rs`): its home, its network's address, and who it's for. The rest is the release's own: the
-# UI library's build, in `ui/`, and the Bun it builds apps with, which it fetches the first time (`OneCore.App`).
+# UI library's build, in `ui/`, and the Bun it builds apps with, which it fetches the first time (`OneCore.Entrypoint`).
 # `mix network` says all of this itself.
 if home = System.get_env("ONE_SERVER_HOME") do
   root = System.fetch_env!("RELEASE_ROOT")

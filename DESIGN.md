@@ -11,7 +11,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Three layers. Principles, the same everywhere: content first; order from type size and weight, not boxes, outlines or shadows; colour is for app icons and for warn or danger ("this needs you"), never for "tap this": a button's weight says how much it matters; fine is silent (no "Connected" or green); a problem shows on the thing itself, as one problem box (symbol, title, one sentence, the action that fixes it); an empty screen is one grey line, with a button only for an obvious first step; one component per job.
 - Our look, the same on every client: shadcn's design principles, language and component names, with its neutral theme and no platform tint. One `default` button per view, then `secondary`, `outline` and `ghost`; red only for `destructive`. App icons as flat tiles, one solid colour each, external brands' real logos (never a generic glyph, in widgets too), red count badges, Phosphor icons. Layout by container queries: each part sizes itself, grids fill the room, lists stop at a readable width, and what a list opens shows beside it where there's room. Never a page width. Screens are the UI library's components, through `ui`, by choice, not by rule: a screen is written in Solid. Every screen in this repo is on it; one that doesn't opt in gets its theme and the bridge, and native UI goes once it's moved.
 - The typeface is Allo at roundness 100, with the device's own monospace for code, the same on every client; a script it lacks falls back to the device's own.
-- Text is one of a few type styles (`core/ui/src/tokens.css`): screens and plugins use them, never a weight or size of their own. Weights sit between Allo's named ones, a little lighter in dark; big titles and figures are tracked in; numbers that change or line up are tabular. Weight doesn't animate.
+- Text is one of a few type styles (`core/ui/src/tokens.css`): screens and apps use them, never a weight or size of their own. Weights sit between Allo's named ones, a little lighter in dark; big titles and figures are tracked in; numbers that change or line up are tabular. Weight doesn't animate.
 - The platform's own: only what a web view can't do (passkeys, keychain, notifications, the scanner, files, home-screen widgets, the Mac's menu bar item). The sidebar, sheets, menus and alerts are the web's, the same everywhere.
 - A failure's trace id is for developers: the CLI and MCP show it, never a person's screen.
 - Text is short: one idea per sentence, the fewest words that still say it, nothing the reader doesn't need now. That's screens, notifications, CLI output, MCP tool descriptions and skills.
@@ -33,27 +33,27 @@ What users see, as the project's owner decided it. Only their decisions are here
 - The App Library has neither the dots nor the owner switcher. It holds only what's installed, only its owner's, by category as an iPhone's App Library: four small icons, one opening its app, anywhere else opening the category. An opened category has no owner above it, and grows from its place and back into it, as an iOS folder does.
 - New apps land in the App Library, not on a page: pages hold only what's put there. An app about you (Colour Mode, Vault, Sign-In & Security, Devices, Notifications, Connect Your AI, AI Usage and the device apps) is in your App Library even when it's installed for everyone, and no app is in two.
 - Desktop and tablet: no sidebar. As many whole pages side by side as fit, one to three, with the dots only when not every page fits. Up and down moves between owners, and the same owner switcher works. Nothing there the phone doesn't have.
-- Editing Home pages follows iOS's own, in its gestures, states and look. Touch and hold an app or empty space, then Edit Home Screen (right-click on a computer). Icons jiggle, each with ⊖, which takes it off the Home Screen and leaves it in the App Library; uninstalling is the Plugins app's. Drag to reorder, and hold at a page's edge to move to the next page, a new one past the last. + opens the widget gallery: pick a widget and its size, then place it. Tapping the page dots opens the page overview, to reorder, hide or delete Home pages. + is at the top left and Done at the top right, as iOS's. Done, or a tap on empty space, leaves. From the App Library, touch and hold an app, then drag it onto a Home page. A computer has the same edit mode, as Launchpad does.
+- Editing Home pages follows iOS's own, in its gestures, states and look. Touch and hold an app or empty space, then Edit Home Screen (right-click on a computer). Icons jiggle, each with ⊖, which takes it off the Home Screen and leaves it in the App Library; uninstalling is the App Store's. Drag to reorder, and hold at a page's edge to move to the next page, a new one past the last. + opens the widget gallery: pick a widget and its size, then place it. Tapping the page dots opens the page overview, to reorder, hide or delete Home pages. + is at the top left and Done at the top right, as iOS's. Done, or a tap on empty space, leaves. From the App Library, touch and hold an app, then drag it onto a Home page. A computer has the same edit mode, as Launchpad does.
 - Whoever may arrange an owner's pages edits them; anyone else gets only the app's own menu on touch and hold, with no Edit Home Screen. An owner's pages are one layout: editing everyone's or a group's changes them for everyone who sees them.
 - Settings isn't a place: its apps are ordinary apps, each in its category.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.
 
 ## Vault
 
-- The one place for everything a person has given access to, in sections: Asked for, Passwords and keys, Accounts, then one for each other kind of item a plugin keeps there (Chrome Profiles).
-- Accounts are every plugin's, in one list, each with its plugin's logo; Add Account under them.
-- An item is ready, busy or action_required, as its plugin says: ready shows nothing; busy shows a spinner and what's under way; action_required shows a dot, why and the one action that fixes it (Sign In, Try Again). Signing out is that, or deleting the item.
+- The one place for everything a person has given access to, in sections: Asked for, Passwords and keys, Accounts, then one for each other kind of item an app keeps there (Chrome Profiles).
+- Accounts are every app's, in one list, each with its app's logo; Add Account under them.
+- An item is ready, busy or action_required, as its app says: ready shows nothing; busy shows a spinner and what's under way; action_required shows a dot, why and the one action that fixes it (Sign In, Try Again). Signing out is that, or deleting the item.
 - Deleting an item is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
-- An item a plugin keeps opens beside the list on a desktop, drawn by that plugin itself (a Chrome profile by Chrome Profiles).
+- An item an app keeps opens beside the list on a desktop, drawn by that app itself (a Chrome profile by Chrome Profiles).
 
-## Plugins (17 Nov)
+## App Store (17 Nov)
 
 - Two parts, Marketplace and Installed, in one app, and quiet.
-- Marketplace: one row for each of the nine plugin categories, cut so the next app shows, with See All; apps the size they are on the Home Screen.
-- A plugin's page has a row for each owner, with Install, Open and its state there; then Requires, each requirement's title and why, never "What you get"; then See All.
+- Marketplace: one row for each of the nine app categories, cut so the next app shows, with See All; apps the size they are on the Home Screen.
+- An app's page has a row for each owner, with Install, Open and its state there; then Requires, each requirement's title and why, never "What you get"; then See All.
 - Trusted and untrusted are said plainly. An update available, a failed install with why and Try Again, and Recently Deleted for what was uninstalled.
 - Install installs what it requires too, saying why. Uninstalling one that others require warns first that they go too.
-- Uninstalling puts a plugin and its data in Recently Deleted, as one item, whose Restore brings both back for 30 days.
+- Uninstalling puts an app and its data in Recently Deleted, as one item, whose Restore brings both back for 30 days.
 - An owner you can't install for shows a plain line, "Only Andre can install for Everyone", with no button.
 
 ## Devices, Sign-In & Security and Connect Your AI
@@ -79,7 +79,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - The window's states and the connection's are the owner's signed-off machines (`client.js`, `Connection` in core/client): a new state or move is theirs to sign off.
 - Opening is the `Steps` look: "Connecting to your network" the first time, "Can't reach your network" while it's offline with nothing kept, then "Opening Home Screen". A launcher kept from before opens without the network.
 - With the launcher showing, a network that doesn't answer is a thin banner at the top, as Slack and Gmail have, and everything else stays: "Reconnecting…" as it tries again, and nothing once it's back.
-- No launcher: "There's no Home Screen yet." with Open Plugins, or "Only Andre can install a Home Screen for Everyone" where the person can't.
+- No launcher: "There's no Home Screen yet." with Open App Store, or "Only Andre can install a Home Screen for Everyone" where the person can't.
 - A launcher that doesn't draw: "Home Screen didn't open." with Try Again and Show Details.
 - Update is an icon top right on Home pages, with the word beside it on desktop as Chrome's Update pill, shown only when an update for this device is ready.
 

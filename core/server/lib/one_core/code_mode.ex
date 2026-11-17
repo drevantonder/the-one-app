@@ -17,7 +17,7 @@ defmodule OneCore.CodeMode do
   its runner is killed, and every call it started that's still in flight is cancelled and awaited, so none ends after
   whoever asked was told it stopped. What it gives back says which of its calls finished and which were cancelled.
   """
-  alias OneCore.{App, Server}
+  alias OneCore.{Entrypoint, Server}
   alias OneCore.Call.State
 
   # The processes a run started, whose ends it hears of as messages while it traps exits.
@@ -37,7 +37,7 @@ defmodule OneCore.CodeMode do
       name: "execute",
       description: """
       Runs a short script that calls tools, and gives back what it returns. It's JavaScript without imports, timers \
-      or network: call a tool as `await tools.<plugin>.<tool>({ ... })`, or One Core's own as `await \
+      or network: call a tool as `await tools.<app>.<tool>({ ... })`, or One Core's own as `await \
       tools.<tool>({ ... })` (search gives each exact call, and `search({ query })` in the script finds them too), use \
       plain JavaScript between calls, and `return` what you want back; what it logs comes back too. Use it where one \
       call's answer feeds another, or to cut a large answer down; for one call or a few that don't depend on each \
@@ -152,13 +152,13 @@ defmodule OneCore.CodeMode do
   end
 
   @doc """
-  Runs `code` with `tools`, each `%{name, plugin, description, input, output}`, and `namespaces`, what each plugin is for by
+  Runs `code` with `tools`, each `%{name, app, description, input, output}`, and `namespaces`, what each app is for by
   its name, as this process's call (`OneCore.Call.State`). `call` runs one: given its name and inputs, it gives MCP's
   result of calling it. Gives `{:ok, text}` or `{:error, text}`: what it returned or what went wrong, with what it
   logged and which of its calls finished and which were cancelled.
   """
   def run(code, tools, namespaces, call) do
-    with {:ok, bun} <- App.bun(),
+    with {:ok, bun} <- Entrypoint.bun(),
          {:ok, folder} <- runner(bun) do
       port =
         Port.open({:spawn_executable, bun}, [

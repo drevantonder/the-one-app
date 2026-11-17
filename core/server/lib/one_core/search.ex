@@ -2,33 +2,33 @@ defmodule OneCore.Search do
   @moduledoc """
   Code mode's `search`, and `one search`: the tools for a task among those whoever asks has, best first, each with
   the exact way to call it, what it does, whether it only reads and whether it runs as a task, then the skill of each
-  plugin they're in. It also offers the plugins they could install that match, from what anyone has deployed.
+  app they're in. It also offers the apps they could install that match, from what anyone has deployed.
 
   It ranks as the `search()` inside a code mode script does (OpenCode's, `@opencode/codemode`'s `tool-runtime.js`),
-  over the same tools: field-weighted BM25 over each tool's name, its plugin's name, its description, its inputs'
-  names and what its plugin says it's for, with the same weights, words and stems, so both give the same tools for
+  over the same tools: field-weighted BM25 over each tool's name, its app's name, its description, its inputs'
+  names and what its app says it's for, with the same weights, words and stems, so both give the same tools for
   the same words. Executor's `search` tool does the same.
 
   The call is written as whoever asked calls tools (`_meta.mode`): a line of a code mode script
   (`tools.gmail.search({ query: string })`), or a command (`one gmail search --query <string>`).
   """
   alias OneCore.Bucket
-  alias OneCore.Plugins.Version
+  alias OneCore.Apps.Version
 
   @doc "The tool, as MCP lists it."
   def tool do
     %{
       name: "search",
       description: """
-      Finds the tools for a task across every plugin: give a few words, like "unread email" or "add an event". \
-      Answers the best matches, each with its exact call and what it does, then each one's plugin's skill, and \
-      the plugins you could install that do it. Search before guessing, to learn a plugin, and before saying you \
+      Finds the tools for a task across every app: give a few words, like "unread email" or "add an event". \
+      Answers the best matches, each with its exact call and what it does, then each one's app's skill, and \
+      the apps you could install that do it. Search before guessing, to learn an app, and before saying you \
       can't.\
       """,
       inputSchema: %{
         type: "object",
         properties: %{
-          query: %{type: "string", description: "A few words for the task, or a plugin's name"},
+          query: %{type: "string", description: "A few words for the task, or an app's name"},
           limit: %{type: "integer", description: "How many tools at most, 8 if left out"}
         },
         required: ["query"]
@@ -43,7 +43,7 @@ defmodule OneCore.Search do
   end
 
   # About how much of an answer the matches may take, in characters, before their descriptions are cut short, and
-  # how much their plugins' skills may, best match's first, before the rest are only named.
+  # how much their apps' skills may, best match's first, before the rest are only named.
   @matches 6_000
   @skills 8_000
 
@@ -56,8 +56,8 @@ defmodule OneCore.Search do
   @prefix 0.3
 
   @doc """
-  The answer to `query`, at most `limit` of `tools` (as MCP lists them, a plugin's saying whose it is in `_meta`),
-  `running` being the plugins they're from and `deployed` what anyone has deployed. Its calls are written for
+  The answer to `query`, at most `limit` of `tools` (as MCP lists them, an app's saying whose it is in `_meta`),
+  `running` being the apps they're from and `deployed` what anyone has deployed. Its calls are written for
   `mode`: `:code` or `:cli`.
   """
   def run(query, limit, tools, running, deployed, mode) do
@@ -69,7 +69,7 @@ defmodule OneCore.Search do
     if matches == [] do
       nothing(could, Enum.sort(Map.keys(running)), mode)
     else
-      calls = for entry <- matches, do: call(entry.plugin, entry.tool, mode)
+      calls = for entry <- matches, do: call(entry.app, entry.tool, mode)
       room = @matches - Enum.sum(for call <- calls, do: String.length(call) + 4)
 
       described =
@@ -82,12 +82,12 @@ defmodule OneCore.Search do
           "#{call}\n  #{about}#{reads}#{task}"
         end
 
-      shown = for(entry <- matches, entry.plugin != nil, do: {entry.plugin, running[entry.plugin]}) |> Enum.uniq()
+      shown = for(entry <- matches, entry.app != nil, do: {entry.app, running[entry.app]}) |> Enum.uniq()
       Enum.join(lines ++ skills(shown, mode) ++ could, "\n\n")
     end
   end
 
-  @doc "What a plugin says it's for: its skill's description, or nothing."
+  @doc "What an app says it's for: its skill's description, or nothing."
   def described(version) do
     case Enum.find(Version.skills(version), &(&1.at == "")) do
       %{frontmatter: %{"description" => description}} -> description
@@ -100,11 +100,11 @@ defmodule OneCore.Search do
   defp entries(tools, running) do
     tools
     |> Enum.map(fn listed ->
-      plugin = listed[:_meta][:plugin]
-      name = if plugin, do: String.replace_prefix(listed.name, plugin <> "_", ""), else: listed.name
+      app = listed[:_meta][:app]
+      name = if app, do: String.replace_prefix(listed.name, app <> "_", ""), else: listed.name
       read_only = listed[:annotations][:readOnlyHint] == true
-      # Whether its plugin makes it an MCP task, which a tool's listing doesn't say (`OneCore.Tasks`).
-      own = if plugin, do: running[plugin].tools, else: OneCore.Tools.tools()
+      # Whether its app makes it an MCP task, which a tool's listing doesn't say (`OneCore.Tasks`).
+      own = if app, do: running[app].tools, else: OneCore.Tools.tools()
 
       tool = %{
         name: name,
@@ -115,15 +115,15 @@ defmodule OneCore.Search do
         task: Enum.any?(own, &(&1.name == name and &1[:task_support] != nil))
       }
 
-      about = if plugin, do: [described(running[plugin])], else: []
+      about = if app, do: [described(running[app])], else: []
 
       %{
-        path: Enum.join(List.wrap(plugin) ++ [name], "."),
-        plugin: plugin,
+        path: Enum.join(List.wrap(app) ++ [name], "."),
+        app: app,
         tool: tool,
         fields: %{
           name: [name],
-          namespace: List.wrap(plugin),
+          namespace: List.wrap(app),
           description: [tool.description],
           namespaceDescription: about,
           parameters: Map.keys(stringed(tool.inputs)["properties"] || %{})
@@ -252,21 +252,21 @@ defmodule OneCore.Search do
     end
   end
 
-  # The plugins whoever asked could install that match, ranked as tools are, by their names, what they're for and
+  # The apps whoever asked could install that match, ranked as tools are, by their names, what they're for and
   # their tools' names: those with one of the words in their name, or, when nothing they have matches, any. All
   # there is of one is what its listing says.
   defp installable(deployed, installed, query, none, mode) do
     entries =
-      for plugin <- deployed, not MapSet.member?(installed, plugin.plugin) do
+      for app <- deployed, not MapSet.member?(installed, app.app) do
         %{
-          path: plugin.plugin,
-          plugin: plugin,
+          path: app.app,
+          app: app,
           fields: %{
             name: [],
-            namespace: [Path.basename(plugin.plugin), plugin.title],
-            description: [plugin.description],
+            namespace: [Path.basename(app.app), app.title],
+            description: [app.description],
             namespaceDescription: [],
-            parameters: plugin.tools
+            parameters: app.tools
           },
           length: 1
         }
@@ -285,36 +285,36 @@ defmodule OneCore.Search do
 
       could ->
         lines =
-          for %{plugin: plugin} <- could do
-            install = call(nil, %{name: "install", inputs: nil}, mode, plugin: plugin.plugin)
-            about = if plugin.description == "", do: "", else: ": " <> String.trim_trailing(plugin.description, ".")
-            "- #{plugin.title} (#{plugin.plugin})#{about}. #{install} installs it for you."
+          for %{app: app} <- could do
+            install = call(nil, %{name: "install", inputs: nil}, mode, app: app.app)
+            about = if app.description == "", do: "", else: ": " <> String.trim_trailing(app.description, ".")
+            "- #{app.title} (#{app.app})#{about}. #{install} installs it for you."
           end
 
         ["Not installed for you yet, and may do it:\n" <> Enum.join(lines, "\n")]
     end
   end
 
-  defp nothing(could, plugins, mode) do
+  defp nothing(could, apps, mode) do
     make =
       case mode do
         :cli ->
-          "If no plugin does it yet, make one: `one building-plugins` says how."
+          "If no app does it yet, make one: `one building-apps` says how."
 
         _ ->
-          ~s(If no plugin does it yet, make one: the skill building-plugins says how, `skills { name: "building-plugins" }`.)
+          ~s(If no app does it yet, make one: the skill building-apps says how, `skills { name: "building-apps" }`.)
       end
 
     case could do
       [] ->
-        "Nothing matches. Try other words, or a plugin's name: #{Enum.join(plugins, ", ")}. #{make}"
+        "Nothing matches. Try other words, or an app's name: #{Enum.join(apps, ", ")}. #{make}"
 
       could ->
         Enum.join(["Nothing installed for you does that." | could] ++ [make], "\n\n")
     end
   end
 
-  # The skill of each plugin a match is in, read at once, as many as fit, and how to read the rest.
+  # The skill of each app a match is in, read at once, as many as fit, and how to read the rest.
   defp skills(shown, mode) do
     with_skill = Enum.filter(shown, fn {_name, version} -> Enum.any?(Version.skills(version), &(&1.at == "")) end)
     read = Bucket.read_all(for {_name, version} <- with_skill, do: "#{version.artifact}/code/#{version.code}/SKILL.md")
@@ -335,27 +335,27 @@ defmodule OneCore.Search do
       for {{{name, version, _}, _}, _} <- rest do
         case mode do
           :cli -> "`one #{name}`"
-          _ -> ~s(skills { plugin: "#{name}", name: "#{Path.basename(version.artifact)}" })
+          _ -> ~s(skills { app: "#{name}", name: "#{Path.basename(version.artifact)}" })
         end
       end
 
     for({{{_, _, text}, _}, _} <- fits, do: text) ++
-      if(read == [], do: [], else: ["The other plugins' skills: #{Enum.join(read, ", ")}."])
+      if(read == [], do: [], else: ["The other apps' skills: #{Enum.join(read, ", ")}."])
   end
 
   @doc """
-  A tool as `mode` calls it, `plugin`'s or One Core's own (`nil`), with its inputs as TypeScript has them, and in a
+  A tool as `mode` calls it, `app`'s or One Core's own (`nil`), with its inputs as TypeScript has them, and in a
   script what it answers, or with `inputs` given.
   """
-  def call(plugin, tool, mode, inputs \\ nil) do
-    name = if plugin, do: "#{plugin}_#{tool.name}", else: tool.name
+  def call(app, tool, mode, inputs \\ nil) do
+    name = if app, do: "#{app}_#{tool.name}", else: tool.name
     typed = if inputs, do: given(inputs, mode), else: ts(tool.inputs)
 
     case mode do
       :cli when inputs != nil -> "one #{String.replace(name, "_", " ", global: false)} #{typed}"
       :cli -> Enum.join(["one #{String.replace(name, "_", " ", global: false)}" | flags(tool.inputs)], " ")
-      _ when inputs != nil -> "#{path(Enum.join(List.wrap(plugin) ++ [tool.name], "."))}(#{typed})"
-      _ -> "#{path(Enum.join(List.wrap(plugin) ++ [tool.name], "."))}(#{typed}): Promise<#{ts(tool[:outputs])}>"
+      _ when inputs != nil -> "#{path(Enum.join(List.wrap(app) ++ [tool.name], "."))}(#{typed})"
+      _ -> "#{path(Enum.join(List.wrap(app) ++ [tool.name], "."))}(#{typed}): Promise<#{ts(tool[:outputs])}>"
     end
   end
 

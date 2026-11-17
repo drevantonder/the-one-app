@@ -1750,7 +1750,7 @@ html:has(.ui-sign-in) {
   scrollbar-gutter: auto;
 }
 
-/* A widget: a card of a plugin's, drawn from the parts a layout is made of. It fills the cells a Home Screen page gives
+/* A widget: a card of an app's, drawn from the parts a layout is made of. It fills the cells a Home Screen page gives
    it, and what doesn't fit is cut off, never scrolled. Its name is small and grey, low in its order. */
 .ui-widget {
   box-sizing: border-box;

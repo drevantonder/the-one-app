@@ -12,9 +12,9 @@ harness tell you when it ends; put the folder in your scratch folder.
 
 ## The fastest loop
 
-- A plugin or One Core's Elixir (`core/server/lib/`) changed: just call a tool. Before a client's request, the
+- An app or One Core's Elixir (`core/server/lib/`) changed: just call a tool. Before a client's request, the
   network's code reloader (`tooling/code_reloader.exs`) loads what changed into every server, in under a second: One
-  Core's modules while it runs, and a plugin deployed as `one deploy --files-from` deploys it, its app built again
+  Core's modules while it runs, and an app deployed as `one deploy --files-from` deploys it, its app built again
   too. A compile error, or what a running server can't load (a supervisor, a struct, `-on_load`: the rule a hot load
   follows), is that request's error, saying so. A changed NIF is built again by `mix compile` in `core/server/`, and
   then loads beside the build before.
@@ -27,7 +27,7 @@ harness tell you when it ends; put the folder in your scratch folder.
     export ONE_HOME=<folder>/client ONE_AS=owner
     target/debug/one permissions group --name family
     ONE_AS=alice target/debug/one permissions groups
-    ONE_SUBJECT=network target/debug/one deploy --name <plugin> --files-from plugins/<plugin>
+    ONE_SUBJECT=network target/debug/one deploy --name <app> --files-from apps/<app>
 
 Always set `ONE_HOME`: without it, `one` (yours or the installed one) is the owner's live client on the live
 network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
@@ -50,7 +50,7 @@ group. Never `pkill` or `killall`: other agents run networks on this machine too
 
 - Running `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
   (`tooling/network` does it itself).
-- Restarting the network to try a change to a plugin, rather than deploying it into the running one.
+- Restarting the network to try a change to an app, rather than deploying it into the running one.
 - Rebuilding from scratch in a new worktree each time. Keep one worktree built and rebase it, rather than making a
   new one for every check.
 - Starting the app where there's no desktop without `dbus-run-session` (see `qa`'s Screens).

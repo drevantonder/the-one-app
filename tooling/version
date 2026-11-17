@@ -1,7 +1,7 @@
 #!/bin/sh
 # Says the version of a part in this checkout: with no argument the platform's, which is the one name its build has
-# everywhere: `one --version`, the `builds` tool, a server, the edge, and a phone's app; with a plugin's folder,
-# `tooling/version plugins/gmail`, that plugin's. It's Semantic Versioning's, `0.18.2+2974.febd37350abc`: the
+# everywhere: `one --version`, the `builds` tool, a server, the edge, and a phone's app; with an app's folder,
+# `tooling/version apps/gmail`, that app's. It's Semantic Versioning's, `0.18.2+2974.febd37350abc`: the
 # version, then as build metadata how many commits lead to the one checked out, which only grows on main and is what
 # a phone's store takes as its build number, and that commit, with `.dirty` after when what's built isn't all
 # committed.
@@ -13,12 +13,12 @@
 # read 0.x. Anything else leaves it as it is, and a commit touching two parts moves each.
 set -e
 cd "$(dirname "$0")/.."
-# The platform was 0.18.40 there, counted from 0.15.0 by every commit; each plugin starts at 0.1.0.
+# The platform was 0.18.40 there, counted from 0.15.0 by every commit; each app starts at 0.1.0.
 since=4706f3067
 case $1 in
   "") paths="core clients icons Cargo.toml Cargo.lock mise.toml tooling/release" start=0.18.40 ;;
-  plugins/*) paths=$1 start=0.1.0 ;;
-  *) echo "tooling/version [plugins/<name>]" >&2 && exit 1 ;;
+  apps/*) paths=$1 start=0.1.0 ;;
+  *) echo "tooling/version [apps/<name>]" >&2 && exit 1 ;;
 esac
 # shellcheck disable=SC2086 # the paths are words
 version=$(git log --reverse --format='%s%n%b%x1e' "$since..HEAD" -- $paths | awk -v version=$start '

@@ -11,9 +11,9 @@ defmodule OneCore.Servers do
   chose. A new one is for its owner alone.
 
   So a server acts for someone once both said so: they put it on their list, which is what gives it their blobs,
-  and its owner chose them as a member, which is what has it run their plugins on its machine.
+  and its owner chose them as a member, which is what has it run their apps on its machine.
 
-  A plugin's code runs with all of its machine's access, so a plugin runs only on servers of whoever it's installed
+  An app's code runs with all of its machine's access, so an app runs only on servers of whoever it's installed
   for (`runs?/1`): the network's on the network's servers, and a user's or a group's on servers acting for them
   alone, never on the network's merely because those act for everyone. The network's owners own the network's
   servers, so what they install for themselves runs there too.
@@ -43,7 +43,7 @@ defmodule OneCore.Servers do
 
   @doc """
   Whether this server acts for `owner`: it's a member of this server that has it on their list, or the network
-  is, which is everyone. It's asked while the server starts its plugins too, before it's reached, whose key is
+  is, which is everyone. It's asked while the server starts its apps too, before it's reached, whose key is
   then only in its file.
   """
   def here?(owner) do
@@ -52,9 +52,9 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  Whether this server runs the plugins installed for `owner`: it acts for them as one of their own servers, not
+  Whether this server runs the apps installed for `owner`: it acts for them as one of their own servers, not
   only as one of the network's, or it's the network's and they are, or own, the network. Who owns the network is
-  what the plugins that validate `reach` say.
+  what the apps that validate `reach` say.
   """
   def runs?(owner) do
     cond do
@@ -64,7 +64,7 @@ defmodule OneCore.Servers do
     end
   end
 
-  @doc "The keys of the servers that run the plugins installed for `owner`, as `runs?/1` says of each, the first first."
+  @doc "The keys of the servers that run the apps installed for `owner`, as `runs?/1` says of each, the first first."
   def running(@network), do: listed(@network)
 
   def running(owner) do
@@ -72,34 +72,34 @@ defmodule OneCore.Servers do
     Enum.uniq(own ++ if(owns_network?(owner), do: listed(@network), else: []))
   end
 
-  # Asked of the network's plugins, as everything about the network is.
+  # Asked of the network's apps, as everything about the network is.
   defp owns_network?(owner) do
     about = %{"who" => owner, "relation" => "owner", "artifact" => @network}
     Hooks.validate("reach", about, {owner, @network}) == :ok
   end
 
   @doc """
-  What whoever asked for `what`, a plugin installed for `owner`, is told when none of `servers`, the ones that run
+  What whoever asked for `what`, an app installed for `owner`, is told when none of `servers`, the ones that run
   it, answered.
   """
   def off(what, owner, []),
     do:
       "#{what} runs on #{owner}'s own servers, and there are none. Set one up in Devices, or ask whoever may " <>
-        "install plugins for everyone to install it for everyone."
+        "install apps for everyone to install it for everyone."
 
   def off(what, owner, servers),
     do:
       "#{what} runs on #{owner}'s own servers, and none is on: " <>
         Enum.map_join(servers, "; ", &Server.error_message(:unreachable, &1)) <> "."
 
-  @doc "The services the server whose key is `key` has installed: each one's plugin and its name."
+  @doc "The services the server whose key is `key` has installed: each one's app and its name."
   def installed(key) do
-    cached({:installed, key}, fn -> for [plugin, name] <- read("servers/#{key}/services", []), do: {plugin, name} end)
+    cached({:installed, key}, fn -> for [app, name] <- read("servers/#{key}/services", []), do: {app, name} end)
   end
 
   @doc "This server's services installed are `services` from now on."
   def install(services) do
-    say("servers/#{Server.key()}/services", JSON.encode!(for {plugin, name} <- services, do: [plugin, name]))
+    say("servers/#{Server.key()}/services", JSON.encode!(for {app, name} <- services, do: [app, name]))
     invalidate()
   end
 

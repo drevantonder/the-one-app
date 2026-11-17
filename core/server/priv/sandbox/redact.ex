@@ -6,7 +6,7 @@ defmodule OneCore.Redact do
   # their arity, which keeps the module, function, arity, the reason's type and the stack trace. What code says to
   # Logger itself, and the message it raises an exception with, are its own words, and stay.
   #
-  # Both the server and an untrusted plugin's VM compile this file (`mix.exs`, `OneCore.Sandbox`).
+  # Both the server and an untrusted app's VM compile this file (`mix.exs`, `OneCore.Sandbox`).
 
   @doc """
   Puts the filter first among `:logger`'s primary filters, ahead of Elixir's translator, so every handler and every

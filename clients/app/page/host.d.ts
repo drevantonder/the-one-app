@@ -21,7 +21,7 @@ export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selectio
 /** An open app, as `client.js` keeps it. */
 export interface View {
   key: string
-  app: string
+  entrypoint: string
   subject: string | undefined
   host: string
   frame: HTMLIFrameElement
@@ -92,7 +92,7 @@ export type Moved =
   | { type: "tooOld" }
   | { type: "drawn" }
   | { type: "failed"; why: string }
-  | { type: "openPlugins" }
+  | { type: "openAppStore" }
   | { type: "retry" }
   | { type: "update" }
   | { type: "updateReady"; ready: boolean }
@@ -101,13 +101,13 @@ export type Moved =
 export interface Commands {
   /** Where the device is with its network as the window opens, whether its network answers, and whether a phone hears taps on notifications. */
   start(): Told & { connection: Connection; taps?: boolean }
-  /** The files a server lists for `subject`, and the plugins whose open apps are out of date. */
+  /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
   client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown }
-  upload(file: ArrayBuffer, options: { headers: { plugin: string } }): { upload: string }
+  upload(file: ArrayBuffer, options: { headers: { app: string } }): { upload: string }
   /** Asks the network again now, which didn't answer. */
   retry(): void
   /** Signs this device out, once it's removed from its person's devices. */
@@ -137,13 +137,13 @@ export type Invoke = <Command extends keyof Commands>(command: Command, ...args:
 
 /** Each event the page hears, and what it carries. */
 export interface Events {
-  /** A notification from a plugin's app was tapped: the plugin's name. */
+  /** A notification from an app's entrypoint was tapped: the app's name. */
   open: string
   /** What a server says changed: an open app's key, or `client` for the files listed. */
   changed: string
   /** Whether the client reaches its network, as it moves. */
   connection: Connection
-  /** The open apps loaded against a version of a plugin, or a build of the UI library, a server says is gone, as their addresses name them. */
+  /** The open apps loaded against a version of an app, or a build of the UI library, a server says is gone, as their addresses name them. */
   stale: string[]
   /** Where the device is with its network, as it moves. */
   session: Told
@@ -152,7 +152,7 @@ export interface Events {
 export type Listen = <Event extends keyof Events>(event: Event, handler: (event: { payload: Events[Event] }) => void) => unknown
 
 /** Where an app's page is. */
-export type Address = (view: Pick<View, "host" | "app">) => string
+export type Address = (view: Pick<View, "host" | "entrypoint">) => string
 
 declare global {
   /** XState, which the window's page is given as its UMD build (`xstate.umd.min.js`). */
@@ -160,7 +160,7 @@ declare global {
   /** Tauri's API, which the app gives its window's page (`withGlobalTauri`). */
   interface Window {
     __TAURI__: {
-      core: { invoke: Invoke; addPluginListener(plugin: string, event: string, handler: (payload: unknown) => void): Promise<unknown> }
+      core: { invoke: Invoke; addPluginListener(app: string, event: string, handler: (payload: unknown) => void): Promise<unknown> }
       event: { listen: Listen }
     }
     /** The device's own back (`client.js`). */

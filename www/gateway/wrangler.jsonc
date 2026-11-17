@@ -5,7 +5,7 @@
   "workers_dev": false,
   "routes": [{ "pattern": "one.drevan.me", "custom_domain": true }],
   "services": [
-    { "binding": "PLUGIN_DIRECTORY", "service": "one-www-plugin-directory" },
+    { "binding": "APP_DIRECTORY", "service": "one-www-app-directory" },
     { "binding": "MARKETING", "service": "one-www-marketing" }
   ]
 }
