@@ -395,12 +395,9 @@ defmodule SoftDelete do
 
   def call("expire", _inputs, call) do
     stale = now() - @stale
-
-    purged =
-      for {id, record} <- records(call), name <- expired(call, id, record, stale) do
-        name
-      end
-
+    was = records(call)
+    purged = for {id, record} <- was, name <- expired(call, id, record, stale), do: name
+    if records(call) != was, do: Call.changed(call)
     %{purged: purged}
   end
 
