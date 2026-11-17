@@ -27,6 +27,12 @@
 # with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
 # target/builds/<build>.
+#
+# A server is published whole, `server/<kind>`, and in two parts, which a machine puts together (`one serve run`):
+# `server-code`, One Core's own code, its release's `releases/` and the UI library, the same for every kind of
+# machine, and `server-runtime/<kind>`, the rest. A runtime is told by its files' SHA-256, which the network keeps
+# with it, and published only when that changed, under the build that first had it, which its file `runtime` names.
+# A machine on the same runtime loads new code into its server while it runs (`OneCore.Release.compare/2`).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -225,6 +231,22 @@ for kind in "${servers[@]}"; do
   cp -R core/ui/dist "$release/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 
+  # The runtime is everything but One Core's own code, and its files say which it is: the one published, if they're
+  # the same, and otherwise a new one, this build's.
+  (cd "$release" && find . -type f ! -path './releases/*' ! -path './ui/*' ! -path ./runtime ! -path ./nifs \
+    \( ! -path './lib/one_core-*' -o -path './lib/one_core-*/priv/native/*' \) -print0 | sort -z) >"$out/runtime-$kind.files"
+  files=$(cd "$release" && xargs -0 sha256sum <"$out/runtime-$kind.files" | sha256sum | cut -d' ' -f1)
+  runtime=$(jq -r --arg n "server-runtime/$kind" --arg f "$files" '.latest[$n] | select(.files == $f) | .build' <<<"$builds")
+  echo "${runtime:-$build}" >"$release/runtime"
+  if [[ -z $runtime ]]; then
+    echo "$files" >"$out/server-runtime-$kind.files"
+    (cd "$release" && printf '%s\0' ./runtime ./bun $([[ ! -e nifs ]] || echo ./nifs) | cat - "$out/runtime-$kind.files" |
+      tar -czf "$out/server-runtime-$kind.tar.gz" --null --no-recursion -T -)
+  fi
+  rm "$out/runtime-$kind.files"
+  [[ -e $out/server-code.tar.gz ]] ||
+    tar -czf "$out/server-code.tar.gz" -C "$release" --exclude='./lib/one_core-*/priv/native' ./releases ./ui $(cd "$release" && echo ./lib/one_core-*)
+
   tar -czf "$out/server-$kind.tar.gz" -C "$release" .
 done
 
@@ -237,10 +259,12 @@ if ((${#mine[@]})); then
   ONE=$(command -v one) OUT=$out BUILD=$build bun -e '
     const { ONE, OUT, BUILD } = process.env;
     const { readdirSync } = require("node:fs");
-    const builds = await Promise.all(readdirSync(OUT).map(async (file) => {
+    const builds = await Promise.all(readdirSync(OUT).filter((file) => file.endsWith(".gz")).map(async (file) => {
       const bytes = await Bun.file(`${OUT}/${file}`).bytes();
-      const [, what, kind] = file.match(/^(server|one-cli|one)-(.*?)(\.tar)?\.gz$/);
-      return { file, name: `${what}/${kind}`, build: BUILD, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
+      const [, what, kind] = file.match(/^(server-runtime|server-code|server|one-cli|one)-?(.*?)(\.tar)?\.gz$/);
+      // A runtime is told by its files, which the network keeps with it.
+      const files = what === "server-runtime" ? { files: (await Bun.file(`${OUT}/${file.replace(/\.tar\.gz$/, ".files")}`).text()).trim() } : {};
+      return { file, name: kind ? `${what}/${kind}` : what, build: BUILD, ...files, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
     }));
     const publish = () => {
       const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });

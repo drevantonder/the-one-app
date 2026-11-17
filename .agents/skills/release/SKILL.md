@@ -38,14 +38,14 @@ One release at a time. Before publishing a server or a client, look for another 
 names its build). If there's one, don't publish: say whose it is, from its commit's author and Agent Memory, and stop.
 
 A release is under way while it publishes (`tooling/release` holds the lock) and rolls out (`one update` until every
-server and device runs it), and no longer. Watching Telemetry afterwards for what it broke isn't part of it: never
-hold the lock for it, so the next release can start meanwhile.
+server and device runs it), and no longer. Nothing is watched after it: each server verifies a build answers before it
+keeps it, and a bug found later is fixed forward.
 
 A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
 is split only for minutes:
 
-1. The servers, one at a time (`tooling/release server`, `one update --server <key>` for each). A server that goes
-   back stops the release: read its log, and update no other.
+1. The servers (`tooling/release server`, then one server first and the rest at once, as below). A first server that
+   goes back stops the release: read its log, and update no other.
 2. The plugins that require the new platform, once every server is on it.
 3. The edge, from the commit the servers run.
 4. The clients (`tooling/release client`, `one update` on each device).
@@ -57,7 +57,7 @@ is split only for minutes:
 | A plugin's native code (`server/nif/`, `server/bin/`) | Also `tooling/publish-nifs` once it's on `main`: it publishes the new builds to a GitHub Release and pushes their `server/checksums.json`, from which every network updating the plugin from git gets them. A Mac's are built on GitHub's macOS runner when the Mac is busy |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
-| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |
+| The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <first>` for one server, and once it answers `up_to_date` on the new build, `one update --server <key>` for each of the rest at once. A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, seconds, answered once done, except where `OneCore.Server`, which holds its connections, changed: that answers that it went away, and `one builds` says how it went); one with a new runtime, `one`, 0.minor, supervisor, struct, macro or `-on_load` module restarts each (`restart: <why>`, as before) |
 | The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, `tooling/`, `.agents/` | Nothing |
