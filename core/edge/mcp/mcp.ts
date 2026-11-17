@@ -40,7 +40,7 @@ const NOBODY = -32003;
 const NO_SIGN_IN = "Nothing signs people in on this network, so only its own devices come in, signing what they ask with their key";
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/llms.txt") return new Response(llms(url.origin), { headers: { "content-type": "text/markdown; charset=utf-8" } });
     if (url.pathname.startsWith("/skills/")) return skill(request, env, url);
@@ -49,8 +49,8 @@ export default {
     // MCP's streamable HTTP: each message is a POST, answered with JSON, or a stream of its progress and then its
     // answer. There's no stream to GET.
     if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
-    if (url.pathname === "/mcp") return mcp(request, env);
-    if (url.pathname.startsWith("/link/")) return link(request, env, url);
+    if (url.pathname === "/mcp") return mcp(request, env, ctx);
+    if (url.pathname.startsWith("/link/")) return link(request, env, url, ctx);
     return new Response(null, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
@@ -138,19 +138,19 @@ async function signedIn(request: Request, env: Env) {
   return env.WHO.who(new Request(request.url, { method: request.method, headers: request.headers }));
 }
 
-async function mcp(request: Request, env: Env) {
+async function mcp(request: Request, env: Env, ctx: ExecutionContext) {
   // One of the network's own devices signs what it asks with its key. One that's nobody's is told so by the
   // server, and asks for a code to be let in by.
   if (request.headers.has("one-key")) {
     const body = await request.text();
     const device = await verifiedKey(request, body);
     if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
-    return forward(env, body, { device }, [NETWORK], request.headers, mode(new URL(request.url)));
+    return forward(env, body, { device }, [NETWORK], request.headers, mode(new URL(request.url)), { signal: request.signal, ctx });
   }
   // A browser or an assistant someone let in. One that's since become nobody's signs in, or is let in, again.
   const who = await signedIn(request, env);
   if ("refused" in who) return who.refused;
-  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], request.headers, mode(new URL(request.url)));
+  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], request.headers, mode(new URL(request.url)), { signal: request.signal, ctx });
   if (!(await nobodys(answer))) return answer;
   return who.challenge ? new Response(null, { status: 401, headers: { "www-authenticate": who.challenge } }) : refuse(401, "Sign in again");
 }
@@ -164,11 +164,11 @@ const mode = (url: URL) => (url.searchParams.has("code") ? "code" : undefined);
  * relation tuple doesn't give. Whose a request is, is a server's to say: one acting for whoever the link leads to,
  * or for the network.
  */
-async function link(request: Request, env: Env, url: URL) {
+async function link(request: Request, env: Env, url: URL, ctx: ExecutionContext) {
   const link = decodeURIComponent(url.pathname.slice("/link/".length));
   const of = LEADS_TO.exec(link)?.[0];
   if (!of) return refuse(404, "That isn't a sharing link");
-  return forward(env, await request.text(), { link }, [of, NETWORK], request.headers);
+  return forward(env, await request.text(), { link }, [of, NETWORK], request.headers, undefined, { signal: request.signal, ctx });
 }
 
 /** What MCP says of a request in its `_meta`, under its own prefix: its version, and its client and what that can do. */
@@ -182,9 +182,18 @@ type Call = { id?: unknown; method?: unknown; params?: { _meta?: Record<string, 
 /**
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `from`, a device or a sharing link's
  * holder, and answers what the server did. What's asked says who it's from, who it's for (a device's), the span
- * it's under and what MCP has it say, and nothing else of itself. `headers` are the HTTP request's, if it's one.
+ * it's under and what MCP has it say, and nothing else of itself. `headers` are the HTTP request's, if it's one, and
+ * `client` its client's connection, whose going before its answer the servers are told.
  */
-async function forward(env: Env, message: string, from: { device: string } | { link: string }, of: string[], headers?: Headers, mode?: string) {
+async function forward(
+  env: Env,
+  message: string,
+  from: { device: string } | { link: string },
+  of: string[],
+  headers?: Headers,
+  mode?: string,
+  client?: { signal: AbortSignal; ctx: ExecutionContext },
+) {
   let call: Call;
   try {
     call = JSON.parse(message);
@@ -203,6 +212,15 @@ async function forward(env: Env, message: string, from: { device: string } | { l
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: forwardedMeta } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const forwarded = env.RELAY.forward(servers, message);
+  // A client that goes away before its answer is said to have, by the request's id: what a call does then is its own
+  // (`OneCore.Call.State.gone/1`). MCP's Streamable HTTP has a client cancel with `notifications/cancelled`, which is
+  // passed on as any message is.
+  if (client && "id" in call) {
+    const gone = { jsonrpc: "2.0", method: "notifications/one/gone", params: { requestId: call.id, _meta: forwardedMeta } };
+    const went = () => client.ctx.waitUntil(env.RELAY.notify(JSON.stringify(gone)));
+    client.signal.addEventListener("abort", went, { once: true });
+    forwarded.finally(() => client.signal.removeEventListener("abort", went));
+  }
   // A request with a progress token from a client that takes a stream is told every second that it's still running,
   // as MCP's streamable HTTP has it: once it's run that long, it's answered with a stream of its progress and then
   // its answer, however long it runs. One answered sooner is answered as any other.
@@ -222,7 +240,7 @@ async function forward(env: Env, message: string, from: { device: string } | { l
 /**
  * The answer to the request `id`, which carries `token`, as a stream of server-sent events: MCP's progress
  * notification every second while it runs, how far it is being the seconds it's run, as a server says it, and then
- * the answer. Whoever asked closing it stops only the telling: the server runs the call to its end.
+ * the answer. Whoever asked closing it stops the telling, and the servers are told it went (`forward`).
  */
 function streamed(forwarded: Promise<{ answer: string } | null>, id: unknown, token: string | number) {
   let ran = 1;

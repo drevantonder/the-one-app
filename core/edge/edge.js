@@ -108,7 +108,16 @@ for (const { part, worker, tail } of workers.sort((a, b) => b.tail - a.tail)) {
   await Bun.write(`${part}/wrangler.jsonc`, JSON.stringify(tail ? worker : tailed(worker), null, 2));
   parts.push(relative(here, `${part}/wrangler.jsonc`));
 }
-const gateway = { name: "network-gateway", main: relative(built, `${here}/gateway/gateway.ts`), compatibility_date: "2026-11-01", services, vars: { PATHS: paths } };
+// A request's signal is aborted when its client goes away, and passed on with it, so the part it's for hears so
+// (`mcp/mcp.ts`).
+const gateway = {
+  name: "network-gateway",
+  main: relative(built, `${here}/gateway/gateway.ts`),
+  compatibility_date: "2026-11-01",
+  compatibility_flags: ["enable_request_signal"],
+  services,
+  vars: { PATHS: paths },
+};
 if (at) gateway.routes = [{ pattern: at.hostname, custom_domain: true }];
 await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);

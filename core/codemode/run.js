@@ -8,8 +8,10 @@
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
 
-// Ten minutes, a hundred calls and 60 KB back.
-const limits = { timeoutMs: 600_000, maxToolCalls: 100, maxOutputBytes: 60_000 }
+// No limit on its time or its calls, as OpenCode's Core has it: it runs until it's done, or whatever started it stops
+// it. What it gives back is kept to 60 KB, which an agent's client takes whole (Claude Code keeps 25,000 tokens of an
+// MCP tool's answer).
+const limits = { maxOutputBytes: 60_000 }
 
 const lines = (async function* () {
   let rest = ""
@@ -34,6 +36,8 @@ const waiting = new Map()
     waiting.delete(reply)
     if (call) error === undefined ? call.resolve(ok) : call.reject(error)
   }
+  // Whatever started it has gone, so nothing is left to answer its calls or hear what it came to.
+  process.exit(1)
 })()
 
 let next = 0

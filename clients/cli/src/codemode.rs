@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use client::Client;
@@ -55,9 +54,6 @@ const BUN_PACKAGES: [(&str, &str, &str); 5] = [
         "a3LNctBVO8PjePsFZfwDleF2JXYf2BfQ1u/PLRnBDLnC2Riml+4+LgJpKj4xRGhB92KweGyQI5PXaTkP9qypMQ==",
     ),
 ];
-
-/// The script's own limits are the runner's: ten minutes, and a minute for its last call to come back.
-const STOPPED: Duration = Duration::from_secs(11 * 60);
 
 /// Runs `code`, calling the tools the network lists for whoever this client asks as. Gives whether it ended well, and
 /// what it returned or what went wrong, with what it logged.
@@ -132,16 +128,16 @@ pub async fn run(client: &Arc<Client>, code: &str) -> Result<(bool, String)> {
         }
         anyhow::Ok(None)
     };
-    let done = tokio::time::timeout(STOPPED, listening).await;
+    // It runs until it's done, with no limit on its time, as the runner has it.
+    let done = listening.await;
     let _ = child.start_kill();
     match done {
-        Ok(Ok(Some(done))) => Ok(done),
-        Ok(Ok(None)) => {
+        Ok(Some(done)) => Ok(done),
+        Ok(None) => {
             let out = child.wait_with_output().await?;
             bail!("The script stopped without an answer: {}", String::from_utf8_lossy(&out.stderr).trim())
         }
-        Ok(Err(error)) => Err(error),
-        Err(_) => Ok((false, "The script ran past its time and was stopped.".to_owned())),
+        Err(error) => Err(error),
     }
 }
 

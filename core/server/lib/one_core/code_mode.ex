@@ -6,17 +6,28 @@ defmodule OneCore.CodeMode do
   inputs checked against what the tool takes. `call` makes one call or several at once with no script. The CLI does
   both on its own device (`clients/cli/src/codemode.rs`), so that what a device fills in of a tool's inputs is filled
   in there.
+
+  A run of one script, `codemode_run`, is in one of three states, and nothing it starts outlives it:
+
+      running ─done / cancelled / caller gone─► stopping (its calls cancelled) ─► stopped
+
+  It runs until its script is done, with no limit on its time or its calls, as OpenCode's Core has it. It's cancelled
+  as any call is (`OneCore.Call.State`): by `notifications/cancelled`, or `tasks/cancel` when it runs as an MCP task.
+  Its caller going away cancels it too, unless it's a task, which outlives its caller's connection by design. Stopping,
+  its runner is killed, and every call it started that's still in flight is cancelled and awaited, so none ends after
+  whoever asked was told it stopped. What it gives back says which of its calls finished and which were cancelled.
   """
   alias OneCore.{App, Server}
+  alias OneCore.Call.State
+
+  # The processes a run started, whose ends it hears of as messages while it traps exits.
+  @pids :"$one_codemode_run"
 
   @runner Path.expand("../../../codemode", __DIR__)
   @external_resource Path.join(@runner, "package.json")
   @external_resource Path.join(@runner, "bun.lock")
   @external_resource Path.join(@runner, "run.js")
   @files Map.new(~w(package.json bun.lock run.js), &{&1, File.read!(Path.join(@runner, &1))})
-
-  # The script's own limits are the runner's: ten minutes, and a minute for its last call to come back.
-  @stopped :timer.minutes(11)
 
   @doc "`execute` and `call`, as MCP lists them."
   def tools, do: [execute(), call()]
@@ -31,8 +42,10 @@ defmodule OneCore.CodeMode do
       plain JavaScript between calls, and `return` what you want back; what it logs comes back too. Use it where one \
       call's answer feeds another, or to cut a large answer down; for one call or a few that don't depend on each \
       other, use call. Each call runs as you, as any tool does, so what sends or can't be undone waits for the \
-      person's yes, as always. Up to 100 calls, 10 minutes and 60 KB back.\
+      person's yes, as always. It runs until it's done or cancelled, and gives back up to 60 KB; one that takes long \
+      can run as a task.\
       """,
+      task_support: :optional,
       inputSchema: %{
         type: "object",
         properties: %{code: %{type: "string", description: "The script"}},
@@ -112,7 +125,7 @@ defmodule OneCore.CodeMode do
           do: {path, answered(call, name, request["input"])},
           else: {path, {:error, "#{path} isn't a tool's path. search gives each exactly, as tools.gmail.search."}}
       end,
-      timeout: @stopped,
+      timeout: :infinity,
       ordered: true
     )
     |> Enum.map(fn {:ok, answer} -> answer end)
@@ -138,8 +151,9 @@ defmodule OneCore.CodeMode do
 
   @doc """
   Runs `code` with `tools`, each `%{name, plugin, description, input, output}`, and `namespaces`, what each plugin is for by
-  its name. `call` runs one: given its name and inputs, it gives MCP's result of calling it. Gives `{:ok, text}` or
-  `{:error, text}`: what it returned or what went wrong, with what it logged.
+  its name, as this process's call (`OneCore.Call.State`). `call` runs one: given its name and inputs, it gives MCP's
+  result of calling it. Gives `{:ok, text}` or `{:error, text}`: what it returned or what went wrong, with what it
+  logged and which of its calls finished and which were cancelled.
   """
   def run(code, tools, namespaces, call) do
     with {:ok, bun} <- App.bun(),
@@ -157,44 +171,161 @@ defmodule OneCore.CodeMode do
 
       Port.command(port, JSON.encode!(%{code: code, tools: tools, namespaces: namespaces}) <> "\n")
 
+      # What it starts is linked to it, so a run that's killed takes its calls with it, and they end as messages
+      # here meanwhile, as its caller's going does.
+      trapping = Process.flag(:trap_exit, true)
+
+      run = %{codemode_run: :running, port: port, call: call, calls: %{}, finished: [], part: "", output: []}
+
       try do
-        listen(port, call, %{}, "", [], System.monotonic_time(:millisecond) + @stopped)
+        listen(run)
       after
         stop(port)
+        Process.flag(:trap_exit, trapping)
+        flushed([port | Process.get(@pids, [])])
+        Process.delete(@pids)
       end
     end
   end
 
-  # Each line from the runner is a call to run, which runs beside the others, or what the script came to.
-  defp listen(port, call, running, part, output, until) do
+  # Running: each line from the runner is a call to run, which runs beside the others, or what the script came to.
+  defp listen(%{codemode_run: :running, port: port} = run) do
     receive do
       {^port, {:data, {:noeol, more}}} ->
-        listen(port, call, running, part <> more, output, until)
+        listen(%{run | part: run.part <> more})
 
       {^port, {:data, {:eol, more}}} ->
-        case JSON.decode(part <> more) do
-          {:ok, %{"call" => id, "name" => name} = request} ->
-            task = Task.async(fn -> called(call, name, request["input"]) end)
-            listen(port, call, Map.put(running, task.ref, id), "", output, until)
+        line = run.part <> more
+        run = %{run | part: ""}
 
-          {:ok, %{"done" => %{"ok" => ok, "text" => text}}} ->
-            {if(ok, do: :ok, else: :error), text}
-
-          _ ->
-            listen(port, call, running, "", [part <> more | output], until)
+        case JSON.decode(line) do
+          {:ok, %{"call" => id, "name" => name} = request} -> listen(started(run, id, name, request["input"]))
+          {:ok, %{"done" => %{"ok" => ok, "text" => text}}} -> stopping(run, {if(ok, do: :ok, else: :error), text}, nil)
+          _ -> listen(%{run | output: [line | run.output]})
         end
 
-      {ref, result} when is_map_key(running, ref) ->
-        Process.demonitor(ref, [:flush])
-        Port.command(port, JSON.encode!(Map.put(result, :reply, running[ref])) <> "\n")
-        listen(port, call, Map.delete(running, ref), part, output, until)
+      {ref, result} when is_map_key(run.calls, ref) ->
+        Port.command(port, JSON.encode!(Map.put(result, :reply, run.calls[ref].id)) <> "\n")
+        listen(ended(run, ref))
 
       {^port, {:exit_status, _}} ->
-        {:error, "The script stopped without an answer: " <> (output |> Enum.reverse() |> Enum.join("\n"))}
-    after
-      max(until - System.monotonic_time(:millisecond), 0) ->
-        {:error, "The script ran past its time and was stopped."}
+        why = "The script stopped without an answer: " <> Enum.join(Enum.reverse(run.output), "\n")
+        stopping(run, {:error, why}, nil)
+
+      # Its own process is stopped outright once its grace is over, so it gives its calls a little less.
+      {State, :cancelled, _id} ->
+        stopping(run, {:error, "It was cancelled."}, System.monotonic_time(:millisecond) + State.grace() - 1_000)
+
+      # Its caller went away (`OneCore.Call.State.gone/1`), which is its being cancelled.
+      {State, :gone, id} ->
+        State.cancel(id, "Its caller went away.")
+        listen(run)
+
+      # What started it is stopping, and it stops with it, once its calls have.
+      {:EXIT, from, why} ->
+        if from == port or from in Process.get(@pids, []) do
+          listen(run)
+        else
+          stopping(run, {:error, "It was stopped."}, nil)
+          exit(why)
+        end
     end
+  end
+
+  # A call the script made, run beside its others in a process of its own, as a call of its own that stopping
+  # cancels. The run waits for it to begin, so it has every call's id before it can stop.
+  defp started(run, id, name, input) do
+    here = self()
+
+    task =
+      Task.async(fn ->
+        call = State.begin()
+        send(here, {__MODULE__, :began, self(), call})
+
+        try do
+          called(run.call, name, input)
+        after
+          State.finish(call)
+        end
+      end)
+
+    pid = task.pid
+    Process.put(@pids, [pid | Process.get(@pids, [])])
+    call = receive do: ({__MODULE__, :began, ^pid, call} -> call)
+    %{run | calls: Map.put(run.calls, task.ref, %{id: id, name: name, call: call, pid: pid})}
+  end
+
+  defp ended(run, ref) do
+    Process.demonitor(ref, [:flush])
+    {%{name: name}, calls} = Map.pop(run.calls, ref)
+    %{run | calls: calls, finished: [name | run.finished]}
+  end
+
+  # Stopping: the runner is killed, so the script calls nothing more, and each call still in flight is cancelled and
+  # awaited, until `until` if the run has to end by then: what hasn't ended is stopped outright. One that ended
+  # meanwhile, before it could be cancelled, finished.
+  defp stopping(run, result, until) do
+    run = %{run | codemode_run: :stopping}
+    stop(run.port)
+
+    cancelling =
+      for {ref, %{call: call, name: name}} <- run.calls,
+          do: {ref, name, State.cancel(call, "The script it was called from stopped.") == :ok}
+
+    for {ref, %{pid: pid, call: call}} <- run.calls, do: awaited(ref, pid, call, until)
+    finished = Enum.reverse(run.finished) ++ for({_ref, name, false} <- cancelling, do: name)
+    cancelled = for {_ref, name, true} <- cancelling, do: name
+    stopped(%{run | codemode_run: :stopped, calls: %{}}, result, finished, cancelled)
+  end
+
+  # Stopped: nothing it started is left, and it says which of its calls finished and which were cancelled.
+  defp stopped(%{codemode_run: :stopped}, {done, text}, finished, cancelled),
+    do: {done, text <> said(finished, cancelled)}
+
+  # A cancelled call ends by what it calls next raising, or else is stopped by the call machine, or by the run if it
+  # has to end first, which then ends its state too.
+  defp awaited(ref, pid, call, until) do
+    left = if until, do: max(until - System.monotonic_time(:millisecond), 0), else: :infinity
+
+    receive do
+      {^ref, _result} ->
+        Process.demonitor(ref, [:flush])
+
+      {:DOWN, ^ref, :process, _pid, _why} ->
+        State.finish(call)
+    after
+      left ->
+        Process.exit(pid, :kill)
+        receive do: ({:DOWN, ^ref, :process, _pid, _why} -> State.finish(call))
+    end
+  end
+
+  defp flushed(pids) do
+    for pid <- pids do
+      receive do
+        {:EXIT, ^pid, _why} -> :ok
+      after
+        0 -> :ok
+      end
+    end
+  end
+
+  defp said([], []), do: ""
+
+  # Each tool once, with how many times it was called where that's more than once.
+  defp said(finished, cancelled) do
+    names = fn
+      [] ->
+        "none"
+
+      names ->
+        Enum.map_join(Enum.frequencies(names), ", ", fn
+          {name, 1} -> name
+          {name, times} -> "#{name} ×#{times}"
+        end)
+    end
+
+    "\n\nCalls finished: #{names.(finished)}. Cancelled, as the script stopped first: #{names.(cancelled)}."
   end
 
   # One call, as MCP answered it: what it answered as JSON (`structuredContent`). An error is what the script's call

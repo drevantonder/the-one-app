@@ -55,6 +55,9 @@ defmodule OneCore.Call.State do
     defexception message: "It was cancelled."
   end
 
+  @doc "How long a cancelled call has to end before its process is stopped outright, in milliseconds."
+  def grace, do: @grace
+
   @doc "Makes the table the states are in, once, from the application starting, whose process keeps it."
   def table, do: :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
 
@@ -334,6 +337,19 @@ defmodule OneCore.Call.State do
   def cancel_request(request) do
     for {id, %{request: ^request, task: nil}} <- :ets.select(@table, [{{:"$1", :_, :"$2"}, [], [{{:"$1", :"$2"}}]}]),
         do: cancel(id)
+
+    :ok
+  end
+
+  @doc """
+  Tells each call a client asked for by `request` that isn't a task that the client went away before its answer:
+  `{OneCore.Call.State, :gone, id}`. What a call does then is its own: a code mode run is cancelled
+  (`OneCore.CodeMode`), and any other runs to its end, as MCP's Streamable HTTP has a client's going.
+  """
+  def gone(request) do
+    for {id, %{request: ^request, task: nil, pid: pid}} <-
+          :ets.select(@table, [{{:"$1", :_, :"$2"}, [], [{{:"$1", :"$2"}}]}]),
+        do: send(pid, {__MODULE__, :gone, id})
 
     :ok
   end

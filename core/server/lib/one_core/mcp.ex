@@ -164,6 +164,11 @@ defmodule OneCore.Mcp do
         State.cancel_request({from, User.device(from, meta(params)), id})
         ""
 
+      # The network's edge saying a client that asked over the web went away before its answer, by the request's id.
+      {:ok, %{"method" => "notifications/one/gone", "params" => %{"requestId" => id} = params}} ->
+        State.gone({from, User.device(from, meta(params)), id})
+        ""
+
       {:ok, %{"method" => _notification}} ->
         ""
 
@@ -274,32 +279,20 @@ defmodule OneCore.Mcp do
         {:ok, %{content: [%{type: "text", text: "#{name} takes #{JSON.encode!(tool.inputSchema)}"}], isError: true}}
 
       true ->
-        own(name, inputs, params, from, principal, forwarded)
+        asked(tool, name, fn -> own(name, inputs, params, from, principal, forwarded) end, params, principal, nil)
     end
   end
 
   # Which plugin called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
-  # asks for (a request that says its `actor`). A client calls as nobody's plugin. A tool its plugin makes a task is
-  # one for a person's client that takes tasks, and refused to one that doesn't if it needs one. A script's calls
-  # are never tasks, since it waits on each.
-  defp result("tools/call", %{"name" => name} = params, _from, {actor, subject} = principal, forwarded) do
+  # asks for (a request that says its `actor`). A client calls as nobody's plugin.
+  defp result("tools/call", %{"name" => name} = params, _from, {_actor, subject} = principal, forwarded) do
     caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
 
     run = fn ->
       rendered(name, call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller), principal)
     end
 
-    case Tasks.support(tool(name, subject)) do
-      support when support != nil and is_binary(actor) and caller == nil and not is_map_key(params, :script) ->
-        cond do
-          Tasks.capable?(params) and not User.link?(actor) -> Tasks.start(run, name, principal)
-          support == :required -> Tasks.required()
-          true -> plainly(run)
-        end
-
-      _never ->
-        plainly(run)
-    end
+    asked(tool(name, subject), name, run, params, principal, caller)
   end
 
   defp result("tasks/" <> method, params, _from, principal, forwarded) when method in ["get", "update", "cancel"] do
@@ -356,7 +349,9 @@ defmodule OneCore.Mcp do
     tools =
       cond do
         holder?(actor) -> listed
-        mode(params) == :code -> [Search.tool() | CodeMode.tools()] ++ [Skills.tool()]
+        # Whether one may be a task is this server's to know (`OneCore.Tasks`), as a plugin's is.
+        mode(params) == :code ->
+          for tool <- [Search.tool() | CodeMode.tools()] ++ [Skills.tool()], do: Map.delete(tool, :task_support)
         true -> [Skills.tool() | listed]
       end
 
@@ -525,8 +520,13 @@ defmodule OneCore.Mcp do
           }
 
     namespaces = Map.new(Plugins.running(subject), fn {name, version} -> {name, Search.described(version)} end)
-    {done, text} = CodeMode.run(code, tools, namespaces, called(from, principal, forwarded))
-    {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}, isError: done == :error}}
+
+    # It's accepted once it's asked: a caller that asked for a task is answered it now, and the script runs.
+    State.run(fn ->
+      State.accepted(State.id(), &Tasks.made/1)
+      {done, text} = CodeMode.run(code, tools, namespaces, called(from, principal, forwarded))
+      {:ok, %{content: [%{type: "text", text: text}], structuredContent: %{text: text}, isError: done == :error}}
+    end)
   end
 
   defp own("call", %{"calls" => calls}, _params, from, {_actor, subject} = principal, forwarded) do
@@ -591,16 +591,40 @@ defmodule OneCore.Mcp do
     own ++ plugins
   end
 
-  # A call that isn't a task, run in the process answering it, which its client cancels by the request's id. One
-  # cancelled is answered as MCP has a cancelled request: it's said, and its client has stopped listening.
-  defp plainly(run) do
-    asked = Process.get(:"$one_request", %{})
-    id = State.begin(Map.take(asked, [:request, :ask]))
+  # Runs the call of `tool`, named `name`, by `run`. A tool made a task (`task_support`) is one for a person's client
+  # that takes tasks, and refused to one that doesn't if it needs one. A script's calls are never tasks, since it
+  # waits on each.
+  defp asked(tool, name, run, params, {actor, _subject} = principal, caller) do
+    case Tasks.support(tool) do
+      support when support != nil and is_binary(actor) and caller == nil and not is_map_key(params, :script) ->
+        cond do
+          Tasks.capable?(params) and not User.link?(actor) -> Tasks.start(run, name, principal)
+          support == :required -> Tasks.required()
+          true -> plainly(run)
+        end
 
-    try do
-      run.()
-    after
-      State.finish(id)
+      _never ->
+        plainly(run)
+    end
+  end
+
+  # A call that isn't a task, run in the process answering it, which its client cancels by the request's id. One
+  # cancelled is answered as MCP has a cancelled request: it's said, and its client has stopped listening. A script's
+  # call is in the state its run began for it, which cancels it when the run stops (`OneCore.CodeMode`).
+  defp plainly(run) do
+    case State.current() do
+      {_id, %{state: :asked}} ->
+        run.()
+
+      _none ->
+        asked = Process.get(:"$one_request", %{})
+        id = State.begin(Map.take(asked, [:request, :ask]))
+
+        try do
+          run.()
+        after
+          State.finish(id)
+        end
     end
   end
 
