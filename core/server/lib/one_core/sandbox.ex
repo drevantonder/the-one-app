@@ -18,8 +18,8 @@ defmodule OneCore.Sandbox do
   The protocol, over the child's standard input and output, each message a frame of a 4-byte length:
 
   - This server sends Erlang terms, which the child trusts: `{:load, sets, target}`, the apps' files to compile,
-    those it requires first; `{:call, id, what, about}`, a tool, a hook heard, a schedule to run or what `server-debug`
-    asks (`debug/5`), with who it's for;
+    those it requires first; `{:call, id, what, about}`, a tool, a hook heard or what `server-debug` asks (`debug/5`),
+    with who it's for;
     `{:reply, request, result}`; and `{:cancel, id}`.
   - The child sends JSON, which never reaches `binary_to_term`: `{"answer": id, "ok" | "raised": ...}`,
     `{"request": n, "call": id, "op": ..., ...}`, one of the functions below, and `{"log": level, "text": ...}`.
@@ -39,7 +39,7 @@ defmodule OneCore.Sandbox do
   require Logger
   alias OneCore.{Artifact, Builds, Call, Apps, Server}
   alias OneCore.Call.State
-  alias OneCore.Apps.{Calls, Store, Version}
+  alias OneCore.Apps.{Store, Version}
 
   @registry __MODULE__.Children
   @supervisor __MODULE__.Supervisor
@@ -136,8 +136,8 @@ defmodule OneCore.Sandbox do
   end
 
   @doc """
-  Runs `what` of the app `name` among `versions` in its child: `{:tool, tool, inputs}`, `{:hook, hook, about}` or
-  `{:schedule, jobs}`, for `call`. Gives what the app answered, or raises with why it didn't.
+  Runs `what` of the app `name` among `versions` in its child: `{:tool, tool, inputs}` or `{:hook, hook, about}`,
+  for `call`. Gives what the app answered, or raises with why it didn't.
   """
   def call(versions, name, what, %Call{} = call) do
     version = versions[name]
@@ -267,7 +267,6 @@ defmodule OneCore.Sandbox do
   defp op("list", %{"handle" => handle, "starting" => starting}, _call, context),
     do: Artifact.list(artifact!(context, handle), listed!(starting))
 
-  defp op("fire", request, _call, context), do: fire(request, context)
   defp op(op, _request, nil, _context), do: raise("#{op} is asked within a call, and that call has ended")
 
   defp op("tool", %{"app" => app, "tool" => tool, "inputs" => inputs} = request, call, context)
@@ -323,20 +322,6 @@ defmodule OneCore.Sandbox do
   defp artifact_name!(name) when is_binary(name), do: name
   defp relation!(relation) when relation in ["viewer", "editor", "owner"], do: relation
   defp relation!(_), do: raise(ArgumentError, "a relation is viewer, editor or owner")
-
-  # A scheduled job's call, which the app's schedule keeper in the child makes as the clock, for whoever it's
-  # installed for, as One Core would: only one of the app's own jobs, for the owner whose child it is.
-  defp fire(%{"installed" => at, "app" => name, "tool" => tool, "inputs" => inputs}, context) do
-    with true <- at == context.owner,
-         %{^name => %Version{artifact: artifact}} <- Apps.versions([at]),
-         true <- artifact == context.artifact,
-         %{} <- Enum.find(context.jobs, &(&1.tool == tool and &1.inputs == inputs)) do
-      Calls.fire(at, name, %{tool: tool, inputs: inputs})
-      nil
-    else
-      _ -> raise "That isn't one of #{context.name}'s scheduled jobs for #{at}"
-    end
-  end
 
   # An artifact the child holds a handle to, kept here for as long as the child runs. The same artifact has the
   # same handle, and no two children's handles are the same, so one passed on from another owner's child is refused.
@@ -479,7 +464,6 @@ defmodule OneCore.Sandbox do
       handles: handles,
       artifact: version && version.artifact,
       requires: (version && version.requires) || %{},
-      jobs: (version && version.jobs) || [],
       description: nil
     }
 

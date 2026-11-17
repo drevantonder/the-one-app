@@ -348,30 +348,37 @@ defmodule OneCore.Apps.Calls do
   that keeps schedules is given its jobs, as the app, and a function that makes one's call here. That app has one
   server make each call, once. The call runs for whoever the app was installed for, asked by nobody, and is never
   passed on: it's made where the schedule is kept.
+
+  An untrusted app's schedule is kept the same way, by the keeper's code here, never in its sandbox: only its calls
+  run there, each as any call of its tools does. The keeper keeps it in an artifact of its own for the app, not the
+  app's own artifact, which the app writes, so what this server reads of it is nothing the app wrote.
   """
   def schedule(at, name, forwarded \\ false) do
     clock = {nil, at}
 
     Apps.run([at], name, fn at, versions ->
+      version = versions[name]
       scheduled = called(at, name, versions, {"apps/schedule", %{installed: at, app: name}}, clock, forwarded)
+      scheduled = if version.trusted, do: scheduled, else: apart(scheduled, at, name)
 
       fire = &fire(at, name, &1)
-
-      # An untrusted app has its jobs kept in its sandbox, by the app it requires there.
-      if versions[name].trusted,
-        do: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, versions[name].jobs, fire)),
-        else: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, scheduled)
+      for keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, version.jobs, fire)
 
       {:ok, :ok}
     end)
   end
 
-  @doc """
-  Makes a scheduled job's call, the `tool` of the app that `name` is for `at` with its `inputs`, as the clock: for
-  whoever it was installed for, asked by nobody, and never passed on. What went wrong is logged. Nobody is told it
-  ran: a job that changes what a screen shows says so itself (`OneCore.Call.changed/1`).
-  """
-  def fire(at, name, job) do
+  # Where an untrusted app's schedule is kept: in the sandbox app's own artifact for whoever it's installed for, a
+  # folder for each app, which no untrusted app is given.
+  defp apart(%Call{} = call, at, name) do
+    own = "#{at}/own/sandbox/#{name}"
+    %{call | own: %Artifact{prefix: own <> "/"}, folder: Path.join(Server.home(), own)}
+  end
+
+  # Makes a scheduled job's call, the `tool` of the app that `name` is for `at` with its `inputs`, as the clock: for
+  # whoever it was installed for, asked by nobody, and never passed on. What went wrong is logged. Nobody is told it
+  # ran: a job that changes what a screen shows says so itself (`OneCore.Call.changed/1`).
+  defp fire(at, name, job) do
     with {:error, why} <- call(name, job.tool, job.inputs, {nil, at}, true),
          do: Logger.error("#{name}'s scheduled #{job.tool} for #{at} failed: #{why}")
   end

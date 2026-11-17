@@ -289,20 +289,6 @@ defmodule OneCore.Sandbox.Child do
     })
   end
 
-  # A job is called by the server, as the clock: whichever app it requires keeps its schedule.
-  defp run({:schedule, jobs}, call) do
-    fire = fn job ->
-      request(
-        "fire",
-        %{"installed" => call.installed, "app" => call.app, "tool" => job.tool, "inputs" => job.inputs},
-        nil
-      )
-    end
-
-    for {_name, module} <- call.loaded, function_exported?(module, :schedule, 3), do: module.schedule(call, jobs, fire)
-    nil
-  end
-
   defp call(id, about) do
     %OneCore.Call{
       id: id,
