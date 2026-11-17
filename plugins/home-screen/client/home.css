@@ -1,7 +1,7 @@
 /* The Home Screen: owners one above another, and in each, its pages and then its App Library side by side, moved by
    hand as a finger swipes them (pager.ts), not scrolled: the browser has every touch on them but the App Library's up
-   and down, which it scrolls. The owner switcher stays at the top in the middle; each owner's dots ride
-   with their row. A wide window (`.wide`) shows whole pages of 23rem side by side, as many as fit, up to as many as
+   and down, which it scrolls. The owner switcher and the page dots float at the bottom in the middle, in one bar.
+   A wide window (`.wide`) shows whole pages of 23rem side by side, as many as fit, up to as many as
    the owner has (`--pages`). */
 html,
 body {
@@ -47,17 +47,21 @@ body {
 .page::-webkit-scrollbar {
   display: none;
 }
-/* A page has no title at its top, and keeps the gap a phone's own home screen has, under the owner switcher. It
-   never scrolls, so a vertical swipe on it moves between owners. */
+/* A page has no title at its top, and keeps the gap a phone's own home screen has. It never scrolls, so a vertical
+   swipe on it moves between owners. While it's edited, it makes room for + and Done above it. */
 .page {
   box-sizing: border-box;
   flex: 0 0 100%;
   height: 100%;
   min-width: 0;
-  padding: 3.5rem 1.25rem 0;
+  padding: 1rem 1.25rem 0;
   overflow: hidden;
   container-type: size;
   touch-action: none;
+  transition: padding-top var(--move-settle) var(--ease-settle);
+}
+.home.editing .page {
+  padding-top: 3.5rem;
 }
 /* A page that scrolls keeps every vertical swipe on it, even where it has little: it can always move a point. */
 .page.scrolls {
@@ -79,7 +83,10 @@ body {
 }
 .home.wide .page {
   flex: 0 0 23rem;
-  padding-top: 5rem;
+  padding-top: 2rem;
+}
+.home.wide.editing .page {
+  padding-top: 4.5rem;
 }
 /* A Home page is a fixed grid: four across and as many rows as its height has room for. An app takes one cell, and a
    widget a phone's own sizes, 2×2, 4×2 and 4×4, each where it was placed. */
@@ -275,28 +282,89 @@ body {
   gap: 1rem 0.75rem;
 }
 
-/* The dots belong to their owner's row: they ride up and down with it, and stand still as its pages slide. Nothing
-   behind them, as on a phone. They go where the page doesn't have them (the App Library) and where every page shows. */
-.owner > .dots {
+/* The owner switcher and the page dots, one capsule floating at the bottom in the middle over every page, as iOS 26's
+   floating bars are: a material the pages blur through, with a rim of light. The launcher's frame ends above the home
+   indicator, so it never meets the swipe home. Each half is a window onto a strip with a row for every owner, which
+   rolls as the owners move, and is as wide as the row it shows (home.tsx's `roll`). It goes where the page has no
+   dots (the App Library). */
+.toolbar {
+  --bar: 2.5rem;
   position: absolute;
-  z-index: 4;
-  bottom: 1.5rem;
+  z-index: 6;
+  bottom: 1rem;
   left: 50%;
   translate: -50% 0;
   display: flex;
   align-items: center;
-  padding: 0 0.375rem;
-  touch-action: none;
-  transition: opacity var(--move-quick) var(--ease-quick);
+  max-width: calc(100% - 2rem);
+  height: var(--bar);
+  padding-inline: 0.25rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--popover) 66%, transparent);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 30%, transparent),
+    0 8px 24px -10px oklch(0 0 0 / 0.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
+  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
 }
-.dots[data-hidden] {
+.home.wide .toolbar {
+  bottom: 1.5rem;
+}
+.toolbar[data-hidden] {
   opacity: 0;
+  scale: 0.96;
   pointer-events: none;
+}
+.toolbar .roll {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: var(--bar);
+  overflow: hidden;
+}
+/* The rows move on a layer of their own. Moved in place, WebKit (an iPhone's, a Mac's) leaves what it last painted of
+   a neighbour in the sliver where the window's edge falls between two of the screen's pixels, as it does at most text
+   sizes. */
+.toolbar .names,
+.toolbar .rows {
+  flex: none;
+  display: grid;
+  grid-auto-rows: var(--bar);
+  justify-items: center;
+  align-items: center;
+  will-change: transform;
+}
+/* A long name is cut short. */
+.toolbar .names > span {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolbar .dots {
+  display: flex;
+  align-items: center;
+  height: var(--bar);
+  padding-inline: 0.25rem 0.375rem;
+  touch-action: none;
+}
+.toolbar .dots:empty {
+  padding: 0;
+}
+/* Editing, there's no owner to switch to: it's the dots alone, which open the page overview. */
+.toolbar.editing .switch {
+  display: none;
+}
+.toolbar.editing .dots {
+  padding-inline: 0.5rem;
 }
 .dots button {
   display: grid;
   place-items: center;
-  height: 2rem;
+  height: 100%;
   padding: 0 0.0625rem;
   border: 0;
   background: none;
@@ -328,10 +396,12 @@ body {
   outline-offset: -2px;
   border-radius: 999px;
 }
-/* Under a finger each is a fingertip tall. */
+/* Under a finger the bar is a fingertip tall. */
 @media (pointer: coarse) {
+  .toolbar {
+    --bar: 2.75rem;
+  }
   .dots button {
-    height: 2.75rem;
     padding: 0 0.125rem;
   }
   .dots .library {
@@ -344,26 +414,11 @@ body {
   }
 }
 
-/* The owner switcher, at the top in the middle, over every page. */
-.top {
-  position: absolute;
-  z-index: 6;
-  top: 0.5rem;
-  inset-inline: 0;
-  display: flex;
-  justify-content: center;
-  pointer-events: none;
-}
-.home.wide .top {
-  top: 1.25rem;
-}
-.top .switch {
-  pointer-events: auto;
-}
+/* The owner switcher, the bar's left half: the owner's name and its chevron. */
 .home .switch {
   gap: 0.25rem;
-  height: 2rem;
-  padding: 0 0.625rem;
+  height: calc(var(--bar) - 0.5rem);
+  padding: 0 0.375rem 0 0.75rem;
   border-radius: 999px;
   background: none;
   color: var(--foreground);
@@ -380,23 +435,6 @@ body {
   height: 0.875rem;
   color: var(--muted-foreground);
 }
-/* The owner's name rolls with the owners as they move: each name a line exactly as tall as the window onto them, so at
-   rest one shows and none of its neighbours. */
-.roll {
-  display: inline-block;
-  height: 1.25rem;
-  overflow: hidden;
-  line-height: 1.25rem;
-}
-/* The names move on a layer of their own. Moved in place, WebKit (an iPhone's, a Mac's) leaves what it last painted
-   of a neighbour in the sliver where the window's edge falls between two of the screen's pixels, as it does at most
-   text sizes. */
-.names {
-  display: grid;
-  grid-auto-rows: 1.25rem;
-  justify-items: center;
-  will-change: transform;
-}
 /* Its list ticks the owner shown. */
 .home [data-menu-item] > .ui-icon {
   visibility: hidden;
@@ -408,7 +446,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .dots i,
-  .dots {
+  .toolbar,
+  .page {
     transition: none;
   }
 }
@@ -475,7 +514,19 @@ body {
 .carried .ui-widget {
   height: 100%;
 }
-/* + and Done, at the top where the owner switcher is. */
+/* + and Done, at the top, + on the left and Done on the right, as on a phone. */
+.top {
+  position: absolute;
+  z-index: 6;
+  top: 0.5rem;
+  inset-inline: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.home.wide .top {
+  top: 1.25rem;
+}
 .top .edit-bar {
   display: flex;
   justify-content: space-between;
@@ -488,13 +539,6 @@ body {
 .home.wide .top .edit-bar {
   max-width: 52rem;
 }
-/* While editing, the dots are a capsule, which opens the page overview. */
-.owner > .dots.editing {
-  padding: 0 0.5rem;
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--muted-foreground) 22%, transparent);
-}
-
 /* What a finger holds, lifted over the blurred Home Screen, with its menu. */
 .holding {
   position: absolute;

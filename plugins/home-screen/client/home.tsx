@@ -1,11 +1,12 @@
 // The Home Screen: yours, everyone's, then each of your groups', one owner above another, each a row of pages and then
 // their App Library. Left and right moves between an owner's pages, as a phone's do, and up and down between owners,
 // unless a page scrolls itself, as the App Library does. The pages move by hand, as a phone's do (pager.ts). The
-// owner's name at the top opens a list of every owner. A page never scrolls: it's a fixed grid, and what doesn't fit
-// goes on to the next. A wide window shows as many whole pages of an owner's side by side as fit, one to three. Whoever
-// arranges an owner's pages edits them as a phone's Home Screen is edited: touch and hold an app or a widget, or right-
-// click it, then Edit Home Screen, or touch and hold a page's empty space. Where it is, what's open over it and the
-// editing are one state machine (machine.ts), whose snapshot is one signal here.
+// owner's name, in the bar at the bottom beside their page dots, opens a list of every owner. A page never scrolls:
+// it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole pages of an owner's
+// side by side as fit, one to three. Whoever arranges an owner's pages edits them as a phone's Home Screen is edited:
+// touch and hold an app or a widget, or right-click it, then Edit Home Screen, or touch and hold a page's empty
+// space. Where it is, what's open over it and the editing are one state machine (machine.ts), whose snapshot is one
+// signal here.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
@@ -50,9 +51,32 @@ addEventListener("message", ({ source, data }) => {
 /// The owner and page nearest where the pages are as they move, which the dots follow during a swipe, as a phone's do,
 /// rather than once it ends.
 const [seen, setSeen] = createSignal<At>({ owner: 0, page: 0 }, { equals: (a, b) => a.owner === b.owner && a.page === b.page })
-/// The owner switcher's names, which roll with the owners as they move: `owners` is where they are, in owners.
-let names: HTMLElement | undefined
-const roll = (owners: number) => names && (names.style.translate = `0 ${-owners * 1.25}rem`)
+/// The owner switcher's names and the owners' page dots, which roll together as the owners move: each a window onto a
+/// strip with a row for every owner. `at` is where the owners are, in owners. Each window is as wide as the row it
+/// shows, or between two rows' widths as the owners pass, so the bar fits whoever's shown, and a row fades as it
+/// rolls away, as a picker's do.
+const rolls = new Set<HTMLElement>()
+const widths = new WeakMap<HTMLElement, number[]>()
+let rolled = 0
+function roll(at = rolled) {
+  rolled = at
+  for (const window of rolls) {
+    const strip = window.firstElementChild as HTMLElement
+    const sizes = widths.get(window) ?? []
+    strip.style.translate = `0 ${(-at * 100) / Math.max(1, strip.children.length)}%`
+    for (const [index, row] of [...strip.children].entries()) (row as HTMLElement).style.opacity = `${Math.max(0, 1 - Math.abs(index - at) * 1.5)}`
+    if (!sizes.length) continue
+    const near = Math.max(0, Math.min(sizes.length - 1, at))
+    const [low, high] = [Math.floor(near), Math.ceil(near)]
+    window.style.width = `${sizes[low] + (sizes[high] - sizes[low]) * (near - low)}px`
+  }
+}
+/// Each row's own width, measured whenever one changes.
+const sized = new ResizeObserver(() => {
+  for (const window of rolls) widths.set(window, [...window.firstElementChild!.children].map((row) => row.getBoundingClientRect().width))
+  roll()
+})
+const rolling = (window: HTMLElement) => rolls.add(window)
 
 const still = matchMedia("(prefers-reduced-motion: reduce)")
 const rtl = () => (document.dir === "rtl" ? -1 : 1)
@@ -508,10 +532,10 @@ function Overview(props: { owner: Owner; index: number }) {
   )
 }
 
-/// The page dots of an owner's row, which belong to it and move with it: one for each Home page and the App Library's
-/// mark last, the one shown current. Tapping one goes there, and so does sliding a finger along them, a page for every
-/// 28 points, as a phone's do. While the owner's pages are edited, they're a capsule that opens the page overview.
-function Dots(props: { owner: Owner; index: number; kinds: Kind[]; hidden: boolean }) {
+/// An owner's page dots: one for each Home page and the App Library's mark last, the one shown current. Tapping one
+/// goes there, and so does sliding a finger along them, a page for every 28 points, as a phone's do. While the owner's
+/// pages are edited, they open the page overview.
+function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
   const current = () => (seen().owner === props.index ? seen().page : (state().context.last[props.index] ?? 0))
   let quiet = 0
   const slide = (down: PointerEvent & { currentTarget: HTMLElement }) => {
@@ -539,7 +563,7 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[]; hidden: boole
     if (Date.now() > quiet) home.send({ type: "go", page })
   }
   return (
-    <nav class={["dots", { editing: editingOwner(props.index) }]} aria-label={`${props.owner.name}'s pages`} data-hidden={props.hidden && !editingOwner(props.index) ? "" : undefined} onPointerDown={slide}>
+    <nav class="dots" ref={(nav) => sized.observe(nav)} aria-label={`${props.owner.name}'s pages`} inert={seen().owner !== props.index || undefined} onPointerDown={slide}>
       <For each={props.kinds}>
         {(kind, page) => (
           <Show when={!(editingOwner(props.index) && kind === "library")}>
@@ -557,48 +581,58 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[]; hidden: boole
   )
 }
 
-/// The owner switcher, fixed at the top in the middle: the owner's name, which rolls as the owners move, and a tap
-/// opens the list of every owner, the current one ticked. Picking one slides there. While pages are edited, + and Done
-/// are there instead, as on a phone.
-function Switcher(props: { owners: Owner[] }) {
+/// The owner switcher and the page dots, one capsule floating at the bottom in the middle, as iOS 26's floating bars
+/// are: the owner's name on the left, which opens the list of every owner, the current one ticked, and their dots on
+/// the right. Both roll as the owners move. It goes where the page shown has no dots (the App Library), and while
+/// pages are edited it's their dots alone. Its dots are only there for an owner whose pages don't all show at once.
+function Toolbar(props: { owners: Owner[]; laid: Kind[][]; fit: number; kindOf: (owner: number) => Kind }) {
   const at = () => state().context.at.owner
   let button!: HTMLButtonElement
   return (
-    <div class="top">
-      <Show
-        when={!state().matches("editing")}
-        fallback={
-          <div class="edit-bar">
-            <Button variant="secondary" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
-              <Icon name="plus" />
-            </Button>
-            <Button variant="secondary" onClick={() => home.send({ type: "done" })}>Done</Button>
-          </div>
-        }
-      >
-        <button type="button" class="switch ui-button press ring" data-variant="ghost" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
-          <span class="roll" aria-hidden="true">
-            <span class="names" ref={(element) => ((names = element), roll(seen().owner))}>
-              <For each={props.owners}>{(owner) => <span>{owner.name}</span>}</For>
-            </span>
+    <div class={["toolbar", { editing: state().matches("editing") }]} data-hidden={!state().matches("editing") && !kinds[props.kindOf(seen().owner)].dots ? "" : undefined}>
+      <button type="button" class="switch ui-button press ring" data-variant="ghost" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
+        <span class="roll" aria-hidden="true" ref={rolling}>
+          <span class="names">
+            <For each={props.owners}>{(owner) => <span ref={(name) => sized.observe(name)}>{owner.name}</span>}</For>
           </span>
-          <Icon name="caret-up-down" />
-        </button>
-        <Menu.Root open={state().matches("listing")} onOpenChange={({ open }) => !open && home.send({ type: "dismiss" })} onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })} positioning={{ placement: "bottom", getAnchorRect: () => button.getBoundingClientRect() }}>
-          <Menu.Positioner>
-            <Menu.Content>
-              <For each={props.owners}>
-                {(owner, index) => (
-                  <Menu.Item value={String(index())} data-current={index() === at() ? "" : undefined}>
-                    <Icon name="check" />
-                    <span>{owner.name}</span>
-                  </Menu.Item>
-                )}
-              </For>
-            </Menu.Content>
-          </Menu.Positioner>
-        </Menu.Root>
-      </Show>
+        </span>
+        <Icon name="caret-up-down" />
+      </button>
+      <Menu.Root open={state().matches("listing")} onOpenChange={({ open }) => !open && home.send({ type: "dismiss" })} onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })} positioning={{ placement: "top", getAnchorRect: () => button.getBoundingClientRect() }}>
+        <Menu.Positioner>
+          <Menu.Content>
+            <For each={props.owners}>
+              {(owner, index) => (
+                <Menu.Item value={String(index())} data-current={index() === at() ? "" : undefined}>
+                  <Icon name="check" />
+                  <span>{owner.name}</span>
+                </Menu.Item>
+              )}
+            </For>
+          </Menu.Content>
+        </Menu.Positioner>
+      </Menu.Root>
+      <div class="roll" ref={rolling}>
+        <div class="rows">
+          <For each={props.owners} keyed={(owner) => owner.key}>
+            {(owner, index) => <Dots owner={owner()} index={index()} kinds={(props.laid[index()]?.length ?? 0) > props.fit || editingOwner(index()) ? (props.laid[index()] ?? []) : []} />}
+          </For>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/// While pages are edited, + and Done are at the top, as on a phone.
+function EditBar() {
+  return (
+    <div class="top">
+      <div class="edit-bar">
+        <Button variant="secondary" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
+          <Icon name="plus" />
+        </Button>
+        <Button variant="secondary" onClick={() => home.send({ type: "done" })}>Done</Button>
+      </div>
     </div>
   )
 }
@@ -701,7 +735,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   let swiped = 0
   const press = (event: PointerEvent) => {
     const on = event.target as Element
-    if (event.pointerType === "mouse" || event.button || !on.closest(".owners") || on.closest(".dots")) return
+    if (event.pointerType === "mouse" || event.button || !on.closest(".owners")) return
     if (!state().matches("nothing") && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
     const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(down.value / height())))
     // A finger that lands while they move catches them.
@@ -953,7 +987,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .dots, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <main class="owners" ref={main}>
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (
@@ -966,12 +1000,14 @@ function HomeScreen(props: { owners: Owner[] }) {
                   <Library owner={owner()} index={index()} places={places} />
                 </div>
               </div>
-              <Dots owner={owner()} index={index()} kinds={laid()[index()] ?? []} hidden={!kinds[kindOf(index())].dots || (laid()[index()]?.length ?? 0) <= room().fit} />
             </section>
           )}
         </For>
       </main>
-      <Switcher owners={props.owners} />
+      <Toolbar owners={props.owners} laid={laid()} fit={room().fit} kindOf={kindOf} />
+      <Show when={state().matches("editing")}>
+        <EditBar />
+      </Show>
       <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[opened().owner]} opened={opened()} places={places} />}</Show>
       <Show when={held()}>{(held) => <Holding owner={owner()} index={state().context.at.owner} held={held()} />}</Show>
       <Show when={state().matches({ editing: "overview" }) && editing()}>
