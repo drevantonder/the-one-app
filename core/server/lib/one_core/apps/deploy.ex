@@ -20,6 +20,7 @@ defmodule OneCore.Apps.Deploy do
              "building-apps says how to write."
   # What an app is for, as its skill's `metadata` says (`OneCore.App`): one of these.
   @categories [
+    "Connectors",
     "Communication",
     "Productivity",
     "Privacy & Security",
