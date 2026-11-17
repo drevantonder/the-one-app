@@ -271,7 +271,7 @@ html:has(.ui-dialog[open]) {
   min-width: 0;
   font-size: var(--text-base);
 }
-.ui-field > label {
+.ui-field > label:not(.ui-choice) {
   justify-self: start;
   font-weight: var(--label-weight);
   line-height: 1.25;
