@@ -14,10 +14,20 @@ defmodule OneCore.Plugins.Git do
     if File.dir?(copy) do
       with {:ok, _} <- git(copy, ["fetch", "--quiet", "--prune", "--force"]), do: {:ok, copy}
     else
+      # Cloned beside it, then renamed into place, so a clone cut short never leaves a copy that looks whole. Another
+      # fetch may have cloned it meanwhile, which is as good.
       File.mkdir_p!(Path.dirname(copy))
+      cloning = copy <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 
-      with {:ok, _} <- git(Path.dirname(copy), ["clone", "--quiet", "--mirror", "--filter=blob:none", url(source), copy]),
-           do: {:ok, copy}
+      case git(Path.dirname(copy), ["clone", "--quiet", "--mirror", "--filter=blob:none", url(source), cloning]) do
+        {:ok, _} ->
+          with {:error, _} <- File.rename(cloning, copy), do: File.rm_rf!(cloning)
+          {:ok, copy}
+
+        error ->
+          File.rm_rf!(cloning)
+          error
+      end
     end
   end
 
