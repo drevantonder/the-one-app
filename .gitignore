@@ -20,5 +20,6 @@ erl_crash.dump
 .wrangler/
 /core/edge/presigner/secrets
 /apps/*/edge/secrets
+/apps/*/edge/files/
 /clients/web/dist/
 /www/app-directory/seed.sql
