@@ -5,8 +5,8 @@ description: Use to run a whole network of your own on this machine, to try a ch
 
     tooling/network <folder> [--standby] [--edge] [--owner <name>]
 
-Its header says what each flag does. It builds what isn't built (the UI library, then `mix deps.get && mix compile`,
-which builds the Rust workspace with `cargo build --release`), starts the server, and prints how to use it once it's
+Its header says what each flag does. It builds what isn't built (the UI library, then the server's `mix compile` as it
+starts, which builds the Rust workspace with `cargo build --release`), starts the server, and prints how to use it once it's
 running. From a fresh worktree that's under two minutes here; after that, about 3 s. Run it in the background and let your
 harness tell you when it ends; put the folder in your scratch folder.
 
