@@ -1,7 +1,9 @@
 /* The window's own page: the frames its apps are drawn in, the launcher's under the rest, and a problem above
-   them. An app has the whole window, and is told what of it the device keeps for itself (client.js's `insets`),
-   where its screen's bar and end keep clear and what scrolls passes under. The launcher's pages stay clear of it.
-   Android's window is already clear of its bars, and tells the page of none. */
+   them. An app's frame starts below the status bar and runs to the window's foot, under the home indicator, as an
+   iPhone app's list does: it's told how far that reaches (client.js's `insets`), and its end keeps clear of it while
+   what scrolls passes under. Its bar never goes under the status bar, whatever UI library it was built with. The
+   launcher's pages stay clear of all of it. Android's window is already clear of its bars, and tells the page of
+   none. */
 :root {
   --safe-top: env(safe-area-inset-top);
   --safe-right: env(safe-area-inset-right);
@@ -90,11 +92,12 @@ iframe {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
+  padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
   border: 0;
   background: var(--background);
 }
 iframe.launcher {
-  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  padding-bottom: var(--safe-bottom);
 }
 /* What the device keeps for itself, measured (client.js's `insets`). */
 #safe-area {
