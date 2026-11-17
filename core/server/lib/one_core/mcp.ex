@@ -233,11 +233,13 @@ defmodule OneCore.Mcp do
   # Parts of the platform talk across one breaking release and no more (`OneCore.Builds.talk?/2`): a server, a
   # client and the edge each say their build as `_meta.version`, and what one two or more away says is refused before
   # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022). One that says none is from
-  # before builds had versions, 0.15's. What updates a part that's behind, the builds it downloads and a server's
-  # update, is answered whatever it's on, since that's how it catches up, and so are the list of tools a client
-  # reads before it calls one and which builds run, by which the program keeping a server running, still the build
-  # before, tells a build it tries answers (`clients/cli/src/serving.rs`).
-  defp talks("tools/list", _params), do: :ok
+  # before builds had versions, 0.15's. What updates a part that's behind is answered whatever it's on, however far
+  # behind, as an app store always lets an old app update, since it's how a part catches up: the builds it
+  # downloads, an update, the task an update is followed by (`tasks/get`, as a client's Update follows it), the list
+  # of tools a client reads before it calls one, and which builds run, by which the program keeping a server running,
+  # still the build before, tells a build it tries answers (`clients/cli/src/serving.rs`). That's this exception's
+  # whole list, and it's permanent: a client of any version must always be able to update.
+  defp talks(method, _params) when method in ["tools/list", "tasks/get"], do: :ok
   defp talks("tools/call", %{"name" => name}) when name in ["builds", "download", "update"], do: :ok
 
   defp talks(_method, params) do
