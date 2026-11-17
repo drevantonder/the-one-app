@@ -35,6 +35,14 @@ pub fn main() -> ExitCode {
         for (name, value) in args.iter().filter_map(|args| args.split_once('=')) {
             unsafe { env::set_var(name, value) };
         }
+    } else {
+        // What it prints, piped into a program that stops reading (`one builds | head`), ends it quietly, as it ends
+        // `cat` and cargo: the system's own way, which Rust turns off, so printing panics. `one serve run` keeps it
+        // off, since it writes to the server it keeps running, which may have gone.
+        #[cfg(unix)]
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL)
+        };
     }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio starts");
     let args: Vec<String> = env::args().skip(1).collect();
