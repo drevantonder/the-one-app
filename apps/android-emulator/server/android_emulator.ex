@@ -37,7 +37,7 @@ defmodule AndroidEmulator do
   @impl true
   def requires do
     %{
-      "core" => "~> 0.19.0",
+      "core" => "~> 0.20.0",
       "database" => "to keep your emulators",
       "webrtc" => "to show an emulator's screen live"
     }

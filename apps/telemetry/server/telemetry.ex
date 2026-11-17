@@ -18,7 +18,7 @@ defmodule Telemetry do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => "~> 0.19.0", "database" => "to keep its schedule"}
+  def requires, do: %{"core" => "~> 0.20.0", "database" => "to keep its schedule"}
 
   @impl true
   def hooks, do: ["called", "measured"]

@@ -45,7 +45,7 @@ defmodule Permissions do
   @tuple "select 1 from tuples where artifact = ? and who = ? and relation in (?, ?, ?) limit 1"
 
   @impl true
-  def requires, do: %{"core" => "~> 0.19.0", "database" => "to keep who may reach what"}
+  def requires, do: %{"core" => "~> 0.20.0", "database" => "to keep who may reach what"}
 
   @impl true
   def tools do

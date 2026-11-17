@@ -83,7 +83,7 @@ defmodule Vault do
   @impl true
   def requires do
     %{
-      "core" => "~> 0.19.0",
+      "core" => "~> 0.20.0",
       "encryption" => "to keep your secrets from whoever runs the bucket",
       "database" => "to keep your items"
     }
