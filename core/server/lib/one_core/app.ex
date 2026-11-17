@@ -26,7 +26,7 @@ defmodule OneCore.App do
   to the server: `tools/0`, `call/3`, `entrypoints/0`, `icon/0`, `title/0`, `widgets/0`, `jobs/0` and
   `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `apps`, `deployed`, `process`,
-  `forward_to`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The apps
+  `forward_to`, `changed`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The apps
   it requires whose code runs inside it run in its VM too, as it, `database` among them, where their code can run
   there. It has no services, no hooks it mutates or validates, no other apps' functions but those (it calls the
   tools of the apps it requires), no programs, no network and no website, and no files but its `folder`, which goes
@@ -291,6 +291,8 @@ defmodule OneCore.App do
   - The call is made on one server, for whoever the app was installed for, when a server is up: once for each of
     them, with `call.subject` the user, the group or the network, and `call.actor` nobody. Times that
     passed with none up are made up for with one call when one is back.
+  - Nobody is told a job ran, as they are a person's call: one that changes what a screen shows calls
+    `OneCore.Call.changed/1` once it has, and one that changed nothing tells nobody.
   - An app with jobs requires `database`, which keeps when each last ran in the app's database, and has the
     server writing that database make the call. Its skill says what that promises a job's tool.
   - `schedule/3` is only for an app that keeps other apps' schedules, as `database` does. It's called as

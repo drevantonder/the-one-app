@@ -296,6 +296,7 @@ defmodule OneCore.Sandbox do
   defp op("apps", _request, call, _context), do: Call.apps(call)
   defp op("deployed", _request, call, _context), do: Call.deployed(call)
   defp op("forward_to", %{"server" => server}, call, _context) when is_binary(server), do: Call.forward_to(call, server)
+  defp op("changed", _request, call, _context), do: Call.changed(call)
   defp op("stage", %{"text" => text}, call, _context) when is_binary(text), do: Call.stage(call, text)
   defp op("ask", %{"question" => question}, call, _context), do: Call.ask(call, question)
   defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered to an untrusted app")

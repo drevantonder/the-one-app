@@ -368,14 +368,12 @@ defmodule OneCore.Apps.Calls do
 
   @doc """
   Makes a scheduled job's call, the `tool` of the app that `name` is for `at` with its `inputs`, as the clock: for
-  whoever it was installed for, asked by nobody, and never passed on. What went wrong is logged, and apps watching
-  are told something changed.
+  whoever it was installed for, asked by nobody, and never passed on. What went wrong is logged. Nobody is told it
+  ran: a job that changes what a screen shows says so itself (`OneCore.Call.changed/1`).
   """
   def fire(at, name, job) do
     with {:error, why} <- call(name, job.tool, job.inputs, {nil, at}, true),
          do: Logger.error("#{name}'s scheduled #{job.tool} for #{at} failed: #{why}")
-
-    Server.changed()
   end
 
   @doc "The apps among `versions`, by their names, that keep other apps' schedules."

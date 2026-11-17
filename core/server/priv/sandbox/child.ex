@@ -49,6 +49,9 @@ defmodule OneCore.Call do
   def apps(%__MODULE__{id: id}), do: Child.request("apps", %{}, id)
   def deployed(%__MODULE__{id: id}), do: Child.request("deployed", %{}, id)
 
+  @doc "Tells every app watching that something changed, as the server's own does."
+  def changed(%__MODULE__{id: id}), do: Child.request("changed", %{}, id)
+
   @doc "Says what the call is doing, as the server's own does."
   def stage(%__MODULE__{id: id}, text) when is_binary(text), do: Child.request("stage", %{"text" => text}, id)
 

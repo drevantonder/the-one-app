@@ -272,7 +272,7 @@ defmodule OneCore.App.Manifest do
   def offered do
     %{
       "OneCore.Call" =>
-        ~w(app tool make reach reaches? member? owns? apps deployed process forward_to stage ask __struct__)a,
+        ~w(app tool make reach reaches? member? owns? apps deployed process forward_to changed stage ask __struct__)a,
       "OneCore.Artifact" => ~w(name read read_all write replace remove size list __struct__)a,
       "OneCore.App" => ~w(file behaviour_info)a
     }
