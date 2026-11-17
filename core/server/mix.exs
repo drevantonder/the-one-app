@@ -9,6 +9,7 @@ defmodule OneCore.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: [
         {:ex_json_schema, "~> 0.11"},
+        {:fuse, "~> 2.5"},
         {:mime, "~> 2.0"},
         {:observer_cli, "~> 1.8"},
         {:recon, "~> 2.5"},

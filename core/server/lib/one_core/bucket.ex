@@ -75,22 +75,61 @@ defmodule OneCore.Bucket do
     end
   end
 
-  # A server that couldn't reach the bucket may have missed being told something meanwhile, so the first answer
-  # after has it look again (`OneCore.Server.reconnected/0`). A bucket that couldn't be reached raises
-  # `OneCore.Edge.Unreachable`, since what isn't on this machine is reached through the network's edge.
+  # A bucket that couldn't be reached raises `OneCore.Edge.Unreachable`, since what isn't on this machine is reached
+  # through the network's edge. A call that did melts `bucket_fuse` (`OneCore.Bucket.Fuse`), and while it's blown
+  # every call fails at once rather than each waiting through its own retries and timeouts.
   defp bucket(function, arguments) do
     {module, where} = Application.fetch_env!(:one_core, :bucket)
-    result = apply(module, function, [where | arguments])
 
-    if :persistent_term.get(Edge.Unreachable, false) do
-      :persistent_term.erase(Edge.Unreachable)
-      Task.start(&OneCore.Server.reconnected/0)
+    if :fuse.ask(:bucket_fuse, :async_dirty) == :blown do
+      raise Edge.Unreachable,
+            "The bucket can't be reached just now, so this server couldn't do what was asked. Try again in a moment."
     end
 
-    result
-  rescue
-    unreachable in Edge.Unreachable ->
-      if not :persistent_term.get(Edge.Unreachable, false), do: :persistent_term.put(Edge.Unreachable, true)
-      reraise unreachable, __STACKTRACE__
+    try do
+      apply(module, function, [where | arguments])
+    rescue
+      unreachable in Edge.Unreachable ->
+        :fuse.melt(:bucket_fuse)
+        reraise unreachable, __STACKTRACE__
+    end
+  end
+
+  defmodule Fuse do
+    @moduledoc """
+    `bucket_fuse`, `:fuse`'s circuit breaker for the bucket: `ok`, and `blown` once a call fails, after which it's
+    `ok` again for the next try once `@reset` has passed. A server that couldn't reach the bucket may have missed being
+    told something meanwhile, so each time it goes from `blown` back to `ok` it looks again
+    (`OneCore.Server.reconnected/0`), once: `:fuse` tells this handler of each, one at a time. A look that can't
+    reach the bucket blows the fuse again, so it's looked again after the next reset.
+    """
+    @behaviour :gen_event
+
+    # A call that fails has already been sent again: by Req up to three more times, and a write by
+    # `OneCore.Bucket` too, so a call failing at all is too many failures. One whose bucket couldn't be reached took
+    # 7 to 27 seconds to say so, so one every 15 seconds is all that waits while it's away.
+    @reset 15_000
+
+    @doc "Installs `bucket_fuse`, and this handler of what it does."
+    def install do
+      :ok = :fuse.install(:bucket_fuse, {{:standard, 0, @reset}, {:reset, @reset}})
+      :ok = :fuse_event.add_handler(__MODULE__, :ok)
+    end
+
+    @impl true
+    def init(state), do: {:ok, state}
+
+    @impl true
+    def handle_event({:bucket_fuse, :blown}, _state), do: {:ok, :blown}
+
+    def handle_event({:bucket_fuse, :ok}, :blown) do
+      Task.start(&OneCore.Server.reconnected/0)
+      {:ok, :ok}
+    end
+
+    def handle_event(_event, state), do: {:ok, state}
+
+    @impl true
+    def handle_call(_request, state), do: {:ok, :ok, state}
   end
 end
