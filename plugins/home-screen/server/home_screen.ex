@@ -3,7 +3,8 @@ defmodule HomeScreen do
   Home Screen: where apps and widgets sit. A user has one, and so does each group and the network: pages, and an App
   Library after them.
 
-  A page holds what its owner put on it, apps and widgets, in the order they arranged them: an artifact made for them.
+  Its pages hold what its owner put on them, apps and widgets, page by page in the order they arranged them, each page
+  shown or hidden: an artifact made for them.
   The App Library holds every app installed for whoever it's for, by category, and an app installed since goes there,
   not on a page. An app about whoever opens it (`subject: "user"`, as Vault and Devices say) is in the user's own App
   Library, wherever its plugin is installed, and is opened for them. No plugin's app is in two: one a user installed
@@ -87,6 +88,15 @@ defmodule HomeScreen do
       required: ["widget", "name", "tool", "sizes", "opens"]
     }
 
+    arranged = %{
+      type: "object",
+      properties: %{
+        app: %{type: "string", description: "An app, as its plugin's name and its page: notes/client/index.html"},
+        widget: %{type: "string", description: "A widget, as its plugin's name and its tool: notes/glance"},
+        size: %{type: "string", enum: ~w(2x2 4x2 4x4), description: "The widget's size"}
+      }
+    }
+
     adding = %{
       type: "object",
       properties: %{
@@ -104,10 +114,10 @@ defmodule HomeScreen do
         name: "pages",
         read_only: true,
         description: """
-        Gives your Home Screen: what's on its pages, in order (`items`), its App Library, every app installed for you
-        by category (`library`), the widgets that could be put on a page (`widgets`), the plugins with accounts
-        (`plugins_with_accounts`), which Accounts lists, and whether you may arrange it. Asked for a group or for the
-        network, it's theirs.
+        Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
+        Library, every app installed for you by category (`library`), the widgets that could be put on a page
+        (`widgets`), the plugins with accounts (`plugins_with_accounts`), which Accounts lists, and whether you may
+        arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none,
         outputs: %{
@@ -115,10 +125,21 @@ defmodule HomeScreen do
           properties: %{
             who: %{type: "string", description: "Whose Home Screen"},
             arranges: %{type: "boolean", description: "Whether you may arrange it"},
-            items: %{
+            pages: %{
               type: "array",
-              description: "What's on its pages, in order: each an app or a widget",
-              items: %{anyOf: [app, Map.put(widget, :required, ["widget", "name", "tool", "sizes", "opens", "size"])]}
+              description: "Its pages, in order",
+              items: %{
+                type: "object",
+                properties: %{
+                  items: %{
+                    type: "array",
+                    description: "What's on it, in order: each an app or a widget",
+                    items: %{anyOf: [app, Map.put(widget, :required, ["widget", "name", "tool", "sizes", "opens", "size"])]}
+                  },
+                  hidden: %{type: "boolean", description: "Whether it's hidden, kept but not shown"}
+                },
+                required: ["items", "hidden"]
+              }
             },
             library: %{
               type: "array",
@@ -150,43 +171,45 @@ defmodule HomeScreen do
               }
             }
           },
-          required: ["who", "arranges", "items", "library", "widgets", "plugins_with_accounts"]
+          required: ["who", "arranges", "pages", "library", "widgets", "plugins_with_accounts"]
         }
       },
       %{
         name: "arrange",
         description: """
-        Arranges your Home Screen's pages: the apps and widgets on them, in the order given, which fills each page
-        before the next. One not given is taken off, and stays in the App Library. Asked for a group or for the network,
-        it arranges theirs, which their owners do.
+        Arranges your Home Screen's pages: each page's apps and widgets, in order, and whether it's hidden (`pages`),
+        or the apps and widgets alone (`items`), which fill each page before the next. One not given is taken off, and
+        stays in the App Library; a page with nothing on it goes. Asked for a group or for the network, it arranges
+        theirs, for everyone who sees it, which their owners do.
         """,
         inputs: %{
           type: "object",
           properties: %{
-            items: %{
+            pages: %{
               type: "array",
-              description: "Each an app or a widget, as `pages` gives them",
+              description: "Each page, in order",
               items: %{
                 type: "object",
                 properties: %{
-                  app: %{
-                    type: "string",
-                    description: "An app, as its plugin's name and its page: notes/client/index.html"
-                  },
-                  widget: %{type: "string", description: "A widget, as its plugin's name and its tool: notes/glance"},
-                  size: %{type: "string", enum: ~w(2x2 4x2 4x4), description: "The widget's size"}
-                }
+                  items: %{type: "array", items: arranged, description: "Each an app or a widget, as `pages` gives them"},
+                  hidden: %{type: "boolean", description: "Whether it's hidden, kept but not shown"}
+                },
+                required: ["items"]
               }
-            }
-          },
-          required: ["items"]
+            },
+            items: %{type: "array", items: arranged, description: "Each an app or a widget, as `pages` gives them"}
+          }
         },
         outputs: %{
           type: "object",
           properties: %{
-            items: %{type: "array", items: %{type: "object"}, description: "What's on the pages now, as given"}
+            pages: %{
+              type: "array",
+              items: %{type: "object"},
+              description: "The pages now, each its `items` and, if it's hidden, `hidden`"
+            }
           },
-          required: ["items"]
+          required: ["pages"]
         }
       },
       %{
@@ -220,7 +243,7 @@ defmodule HomeScreen do
       %{
         name: "add",
         description: """
-        Puts an app on your Home Screen, after what's on its pages: one installed for you, which is in your App Library,
+        Puts an app on your Home Screen, last on its last page: one installed for you, which is in your App Library,
         or one of a plugin you can already use, in use for the network, which installs nothing. Asked for a group or
         for the network, on theirs.
         """,
@@ -256,10 +279,14 @@ defmodule HomeScreen do
     stored = stored(call)
 
     renamed =
-      for item <- stored do
-        Map.new(item, fn
-          {kind, ^from <> "/" <> part} when kind in ["app", "widget"] -> {kind, "#{to}/#{part}"}
-          other -> other
+      for page <- stored do
+        Map.update!(page, "items", fn items ->
+          for item <- items do
+            Map.new(item, fn
+              {kind, ^from <> "/" <> part} when kind in ["app", "widget"] -> {kind, "#{to}/#{part}"}
+              other -> other
+            end)
+          end
         end)
       end
 
@@ -273,7 +300,7 @@ defmodule HomeScreen do
     openable = openable(plugins)
     library = library(call, plugins)
     in_library = for %{apps: apps} <- library, app <- apps, into: MapSet.new(), do: app.plugin
-    put = for %{"app" => id} <- stored, app = openable[id], into: MapSet.new(), do: app.plugin
+    put = for page <- stored, %{"app" => id} <- page["items"], app = openable[id], into: MapSet.new(), do: app.plugin
 
     # The widgets that could go on a page: those of the plugins installed for whoever's it is, in its App Library,
     # or with an app on its pages.
@@ -285,12 +312,17 @@ defmodule HomeScreen do
         Map.merge(widget, %{widget: "#{plugin.name}/#{widget.tool}", opens: opens})
       end
 
-    items =
-      Enum.flat_map(stored, fn
-        %{"app" => id} -> List.wrap(openable[id])
-        %{"widget" => id} = item -> for w <- widgets, w.widget == id, do: Map.put(w, :size, size(w, item))
-        _ -> []
-      end)
+    pages =
+      for page <- stored do
+        items =
+          Enum.flat_map(page["items"], fn
+            %{"app" => id} -> List.wrap(openable[id])
+            %{"widget" => id} = item -> for w <- widgets, w.widget == id, do: Map.put(w, :size, size(w, item))
+            _ -> []
+          end)
+
+        %{items: items, hidden: page["hidden"] == true}
+      end
 
     # A plugin with accounts is listed in Accounts, and signs one in on its `sign_in`'s page if it has one.
     plugins_with_accounts =
@@ -306,21 +338,32 @@ defmodule HomeScreen do
     %{
       who: call.subject,
       arranges: Call.owns?(call),
-      items: items,
+      pages: pages,
       library: library,
       widgets: widgets,
       plugins_with_accounts: Enum.sort_by(plugins_with_accounts, &String.downcase(&1.title))
     }
   end
 
-  def call("arrange", %{"items" => items}, call) do
+  def call("arrange", inputs, call) do
     owner!(call)
 
-    items =
-      for item <- items, is_binary(item["app"]) or is_binary(item["widget"]), do: Map.take(item, ~w(app widget size))
+    pages =
+      case inputs do
+        %{"pages" => pages} when is_list(pages) ->
+          for %{"items" => items} = page <- pages, is_list(items), do: paged(items, page["hidden"] == true)
 
-    store(call, fn _ -> items end)
-    %{items: items}
+        %{"items" => items} when is_list(items) ->
+          [paged(items, false)]
+
+        _ ->
+          raise "Arranging takes the pages, each with its items (pages), or the items alone (items)."
+      end
+
+    # A page with nothing on it goes, as a phone's does.
+    pages = Enum.reject(pages, &(&1["items"] == []))
+    store(call, fn _ -> pages end)
+    %{pages: pages}
   end
 
   # Every plugin anyone deployed that a person could add, whether or not anyone has it now: not one every network has.
@@ -351,7 +394,7 @@ defmodule HomeScreen do
 
       {plugin, found} ->
         id = "#{plugin.name}/#{found.page}"
-        store(call, fn stored -> if %{"app" => id} in stored, do: stored, else: stored ++ [%{"app" => id}] end)
+        store(call, &last(&1, %{"app" => id}))
         %{app: id, installed: plugin.installed}
     end
   end
@@ -365,7 +408,12 @@ defmodule HomeScreen do
 
       {plugin, found} ->
         id = "#{plugin.name}/#{found.page}"
-        store(call, fn stored -> Enum.reject(stored, &(&1["app"] == id)) end)
+
+        store(call, fn pages ->
+          for page <- pages, items = Enum.reject(page["items"], &(&1["app"] == id)), items != [],
+              do: %{page | "items" => items}
+        end)
+
         %{app: id}
     end
   end
@@ -443,17 +491,37 @@ defmodule HomeScreen do
   # The size a widget is drawn at: the one it was put on the page at, if it still comes in it.
   defp size(widget, item), do: if(item["size"] in widget.sizes, do: item["size"], else: hd(widget.sizes))
 
-  # How a Home Screen's pages are arranged is its owner's: an artifact made for them, which holds the one blob.
+  # A page as it's kept: its apps and widgets, as arranging names them, and `hidden` only where it is.
+  defp paged(items, hidden) do
+    items =
+      for item <- items, is_binary(item["app"]) or is_binary(item["widget"]), do: Map.take(item, ~w(app widget size))
+
+    if hidden, do: %{"items" => items, "hidden" => true}, else: %{"items" => items}
+  end
+
+  # The pages with `item` last on the last one shown, or on a new one, unless it's on one already.
+  defp last(pages, item) do
+    shown = pages |> Enum.with_index() |> Enum.reject(fn {page, _} -> page["hidden"] end) |> List.last()
+
+    cond do
+      Enum.any?(pages, &(item in &1["items"])) -> pages
+      shown -> List.update_at(pages, elem(shown, 1), &%{&1 | "items" => &1["items"] ++ [item]})
+      true -> pages ++ [%{"items" => [item]}]
+    end
+  end
+
+  # How a Home Screen's pages are arranged is its owner's: an artifact made for them, which holds the one blob, every
+  # page with what's on it.
   defp stored(call) do
-    with {:ok, items, _tag} <- Artifact.read(Call.make(call, "page"), "items"),
-         do: JSON.decode!(items),
+    with {:ok, pages, _tag} <- Artifact.read(Call.make(call, "page"), "pages"),
+         do: JSON.decode!(pages),
          else: (:absent -> [])
   end
 
-  # Changes what's on the pages as `change` says of it, in one step, so two changes at once both land.
+  # Changes the pages as `change` says of them, in one step, so two changes at once both land.
   defp store(call, change) do
-    Artifact.update(Call.make(call, "page"), "items", fn items ->
-      JSON.encode!(change.(if items, do: JSON.decode!(items), else: []))
+    Artifact.update(Call.make(call, "page"), "pages", fn pages ->
+      JSON.encode!(change.(if pages, do: JSON.decode!(pages), else: []))
     end)
   end
 end

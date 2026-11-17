@@ -51,6 +51,7 @@ body {
   overflow: hidden;
   scroll-snap-align: start;
   scroll-snap-stop: always;
+  container-type: size;
 }
 /* A page that scrolls keeps every vertical swipe on it, even where it has little: it can always move a point. */
 .page.scrolls {
@@ -74,9 +75,11 @@ body {
 /* A Home page is a fixed grid: four across and as many rows as its height has room for. An app takes one cell, and a
    widget a phone's own sizes, 2×2, 4×2 and 4×4, each where it was placed. */
 .page .grid {
+  --row: min(5.5rem, (100cqh - 4rem - 5rem) / 6);
+  --tile: min(3.75rem, var(--row) - 1.75rem);
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  grid-template-rows: repeat(var(--rows), 5.5rem);
+  grid-template-rows: repeat(6, var(--row));
   gap: 1rem 0.75rem;
 }
 .cell {
@@ -411,5 +414,312 @@ body {
   .dots,
   .top {
     transition: none;
+  }
+}
+
+/* Editing an owner's Home pages, as a phone's are edited: everything on them jiggles, each with its ⊖ at the corner;
+   the owners stay put, and what's carried follows the finger while the place it left stays empty. */
+.home.editing .owners {
+  overflow-y: hidden;
+}
+.home.carrying .strip {
+  overflow-x: hidden;
+}
+.home.editing .cell {
+  position: relative;
+  touch-action: none;
+}
+.cell.jiggles {
+  animation: jiggle 0.26s ease-in-out var(--wobble) infinite alternate;
+}
+.cell.jiggles[data-size] {
+  animation-duration: 0.34s;
+}
+@keyframes jiggle {
+  from {
+    rotate: -1.4deg;
+  }
+  to {
+    rotate: 1.4deg;
+  }
+}
+.cell.lifted {
+  visibility: hidden;
+}
+.cell .minus {
+  position: absolute;
+  z-index: 2;
+  top: -0.375rem;
+  left: max(0rem, (100% - var(--tile, 3.75rem)) / 2 - 0.5rem);
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--foreground) 55%, var(--background));
+  color: var(--background);
+  cursor: pointer;
+}
+.cell[data-size] .minus {
+  left: -0.375rem;
+}
+.minus svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.carried {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  pointer-events: none;
+  scale: 1.08;
+  filter: drop-shadow(0 8px 16px oklch(0 0 0 / 0.2));
+}
+.carried .ui-widget {
+  height: 100%;
+}
+/* + and Done, at the top where the owner switcher is. */
+.top .edit-bar {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: calc(var(--pages, 1) * 26rem);
+  padding-inline: 1rem;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+.home.wide .top .edit-bar {
+  max-width: 52rem;
+}
+/* While editing, the dots are a capsule, which opens the page overview. */
+.owner > .dots.editing {
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--muted-foreground) 22%, transparent);
+}
+
+/* What a finger holds, lifted over the blurred Home Screen, with its menu. */
+.holding {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: color-mix(in oklab, var(--background) 40%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+  animation: appear var(--move-quick) var(--ease-quick);
+}
+.holding .lifted-copy img.alone {
+  width: 100%;
+  border-radius: 22.5%;
+}
+.hold-menu[hidden] {
+  display: none;
+}
+.holding .lifted-copy {
+  position: fixed;
+  display: grid;
+  scale: 1.06;
+  transition: scale var(--move-quick) var(--ease-quick);
+}
+.hold-menu {
+  position: fixed;
+  display: grid;
+  width: 15rem;
+  overflow: hidden;
+  border-radius: 0.875rem;
+  background: color-mix(in oklab, var(--popover) 88%, transparent);
+  color: var(--popover-foreground);
+  box-shadow: var(--shadow-lg);
+  animation: appear var(--move-quick) var(--ease-quick);
+}
+.hold-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: start;
+  cursor: pointer;
+}
+.hold-menu button[hidden] {
+  display: none;
+}
+.hold-menu button + button {
+  border-top: 1px solid var(--border);
+}
+.hold-menu button.destructive {
+  color: var(--destructive);
+}
+.hold-menu .ui-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+@media (hover: hover) and (pointer: fine) {
+  .hold-menu button:hover {
+    background: var(--accent);
+  }
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The page overview: every Home page small, two or more across, each with its tick under it. */
+.overview {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: color-mix(in oklab, var(--background) 70%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  backdrop-filter: blur(18px) saturate(1.2);
+  animation: appear var(--move-settle) var(--ease-settle);
+}
+.overview .bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 1rem;
+}
+.overview .thumbnails {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  align-content: center;
+  gap: 1.5rem 1rem;
+  padding: 1rem 1.5rem 3rem;
+  overflow-y: auto;
+}
+.thumbnail {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+}
+.thumbnail .miniature {
+  position: relative;
+  width: 8.5rem;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: var(--background);
+  box-shadow: 0 0 0 1px var(--border), var(--shadow-md);
+  cursor: grab;
+  touch-action: none;
+}
+.thumbnail.dragging .miniature {
+  scale: 1.05;
+  opacity: 0.8;
+}
+.thumbnail.hidden .miniature > .page {
+  opacity: 0.4;
+}
+.thumbnail .miniature > .page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 23rem;
+  height: calc(23rem * 16 / 9);
+  padding-top: 2rem;
+  scale: calc(8.5 / 23);
+  transform-origin: top left;
+  pointer-events: none;
+}
+.thumbnail .minus {
+  position: absolute;
+  top: 0.375rem;
+  left: 0.375rem;
+}
+.tick {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 2px solid var(--muted-foreground);
+  border-radius: 50%;
+  background: none;
+  color: transparent;
+  cursor: pointer;
+}
+.tick[aria-checked="true"] {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
+}
+.tick .ui-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* The widget gallery: a widget's sizes, each drawn small as it would be, and the one picked ringed. */
+.gallery {
+  display: grid;
+  gap: 1rem;
+}
+.gallery .sizes {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding: 0.25rem;
+}
+.gallery .size {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.gallery .size[aria-checked="true"] {
+  color: var(--foreground);
+}
+.gallery .preview {
+  display: grid;
+  width: 7.5rem;
+  height: 7.5rem;
+  border-radius: 1.375rem;
+  pointer-events: none;
+}
+.gallery .size[data-size="4x2"] .preview {
+  width: 15.5rem;
+}
+.gallery .size[data-size="4x4"] .preview {
+  width: 15.5rem;
+  height: 15.5rem;
+}
+.gallery .size[aria-checked="true"] .preview {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.ui-dialog .logo {
+  display: block;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 22.5%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell.jiggles {
+    animation: none;
+  }
+  .holding,
+  .hold-menu,
+  .overview {
+    animation: none;
   }
 }

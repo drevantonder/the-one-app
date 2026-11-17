@@ -41,11 +41,11 @@ export interface Category {
   apps: App[]
 }
 
-/** A Home Screen, as `home-screen_pages` answers it: whose it is, what's on its pages and its App Library. */
+/** A Home Screen, as `home-screen_pages` answers it: whose it is, its pages, each what's on it and whether it's hidden, and its App Library. */
 export interface Pages {
   who: string
   arranges: boolean
-  items: Item[]
+  pages: { items: Item[]; hidden: boolean }[]
   library: Category[]
   widgets: Widget[]
   plugins_with_accounts: PluginWithAccounts[]

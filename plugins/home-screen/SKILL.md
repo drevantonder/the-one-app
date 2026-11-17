@@ -7,18 +7,19 @@ metadata:
 ---
 
 Home Screen is the network's launcher: the app every client opens first, which draws the rest. It keeps how each
-owner's pages are arranged: `pages` gives an owner's Home Screen, `arrange` changes what's on its pages, `add` and
-`remove` put an app on them or take it off, and `store` lists the plugins that could be added.
+owner's pages are arranged: `pages` gives an owner's Home Screen, `arrange` changes its pages, `add` and `remove` put
+an app on them or take it off, and `store` lists the plugins that could be added. A person edits their pages as on a
+phone: touch and hold, or right-click, then Edit Home Screen.
 
 Its words:
 
 - **Home Screen**: an owner's pages, then their App Library. Its owner is a user, a group, or the network, which a
   person reads as Everyone. A user sees theirs, everyone's and their groups', and moves between them with the owner
   switcher.
-- **Page**: a fixed grid of apps and widgets, which never scrolls: what doesn't fit goes on the next. It holds only
-  what was put there, and an owner's pages are one layout, so arranging everyone's or a group's arranges it for
-  everyone who sees it. The user themselves arranges theirs, and a group's or the network's `owner`s theirs
-  (`arranges`).
+- **Page**: a fixed grid of apps and widgets, four across and six down, which never scrolls: what doesn't fit goes on
+  the next. It holds only what was put there. A page can be hidden, kept but not shown, and a page with nothing on it
+  goes. An owner's pages are one layout, so arranging everyone's or a group's arranges it for everyone who sees it.
+  The user themselves arranges theirs, and a group's or the network's `owner`s theirs (`arranges`).
 - **App Library**: every app installed for an owner, by category, after their pages. An app installed lands there,
   not on a page.
 - An app is in the App Library of whoever it's installed for, and in no other. One about whoever opens it

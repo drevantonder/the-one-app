@@ -61,7 +61,7 @@ function on(owner: Owner, plugin: Plugin): { name: string; put?: boolean } | und
   if (installed) return { name: installed.app.split("/")[0] }
   const withAccounts = owner.plugins_with_accounts.find((one) => one.plugin === plugin.plugin)
   if (withAccounts) return { name: withAccounts.name }
-  const item = owner.items.find((item) => item.app && item.plugin === plugin.plugin)
+  const item = owner.pages.flatMap((page) => page.items).find((item) => item.app && item.plugin === plugin.plugin)
   return item?.app ? { name: item.app.split("/")[0], put: true } : undefined
 }
 const [managing, setManaging] = createSignal<string>()
