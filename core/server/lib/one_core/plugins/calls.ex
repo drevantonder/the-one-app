@@ -86,7 +86,7 @@ defmodule OneCore.Plugins.Calls do
       State.accepted(State.id(), &Tasks.made/1)
 
       observed(about, principal, fn ->
-        Plugins.held(nil, List.wrap(version), fn -> answered(tool, about, fun.(about["inputs"])) end)
+        Plugins.held(List.wrap(version), fn -> answered(tool, about, fun.(about["inputs"])) end)
       end)
     else
       # A call refused is observed as one that failed, with why: what it was given is wrong, or who may or a hook

@@ -24,7 +24,7 @@ defmodule OneCore.Plugins.Lifecycle do
   alias OneCore.{Bucket, Hooks, Server, Servers}
   alias OneCore.Call.State
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Deploy, Git, Installed, Requires, Store, Update}
+  alias OneCore.Plugins.{Deploy, Git, Installed, LoadedVersion, Requires, Store, Update}
 
   @network "network"
   @day :timer.hours(24)
@@ -115,22 +115,30 @@ defmodule OneCore.Plugins.Lifecycle do
     move(owner, name, {:stage, "fetching"})
     stage("Getting #{title}'s code")
 
-    with {:ok, version} <- Store.version(artifact, code, Servers.runs?(owner), trusted),
-         _ = move(owner, name, {:stage, "building"}),
-         _ = stage("Building #{title}"),
-         version = %{version | artifact: artifact},
-         :ok <- Deploy.fits(owner, name, version),
-         %{} <- move(owner, name, {:stage, "starting"}) do
-      stage("Starting #{title}")
-      ran(owner, [{artifact, number, {:ok, version}}])
+    case Store.version(artifact, code, Servers.runs?(owner), trusted) do
+      {:ok, version} ->
+        # What it's installed for holds it once it runs; this lets go of it however installing ends.
+        try do
+          with _ = move(owner, name, {:stage, "building"}),
+               _ = stage("Building #{title}"),
+               :ok <- Deploy.fits(owner, name, version),
+               %{} <- move(owner, name, {:stage, "starting"}) do
+            stage("Starting #{title}")
+            ran(owner, [{artifact, number, {:ok, version}}])
 
-      case Plugins.versions([owner]) do
-        %{^name => %{artifact: ^artifact}} -> move(owner, name, :done)
-        _ -> failed(owner, name, "It didn't start.")
-      end
-    else
-      :error -> failed(owner, name, "Its latest version doesn't compile here.")
-      {:error, why} -> failed(owner, name, why)
+            case Plugins.versions([owner]) do
+              %{^name => %{artifact: ^artifact}} -> move(owner, name, :done)
+              _ -> failed(owner, name, "It didn't start.")
+            end
+          else
+            {:error, why} -> failed(owner, name, why)
+          end
+        after
+          LoadedVersion.release([version])
+        end
+
+      :error ->
+        failed(owner, name, "Its latest version doesn't compile here.")
     end
   rescue
     error ->

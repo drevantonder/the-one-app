@@ -1,11 +1,8 @@
 defmodule OneCore.Plugins.Version do
   @moduledoc """
-  One version of a plugin's code, compiled and loaded.
-
-  The VM keeps only two versions of a module, so each version loaded gets module names of its own: its modules
-  sit under a name no other loaded version has (`OneCore.Plugins.Load7.Notes`), by an alias put before each
-  file. A version is unloaded by removing every module under that name, which the next version loaded then takes,
-  so a server that's updated for years makes no more names than it ever ran versions at once.
+  One version of a plugin's code, loaded or described: its modules sit under a name of its own while it's loaded
+  (`OneCore.Plugins.LoadedVersion`), which compiles it (`OneCore.Plugins.Version.Compile`), checks what it says of
+  itself (`OneCore.Plugins.Version.Checks`), or describes it without its code (`OneCore.Plugins.Version.Description`).
 
   Its code is the Elixir in its folder `server/`, and what of it runs in a client is its folder `client/`.
   `files/1` are what a page loads from there, by their paths: its pages, scripts, stylesheets, pictures and fonts,
@@ -16,8 +13,8 @@ defmodule OneCore.Plugins.Version do
   template, say.
 
   Those grow with a plugin's files, and every call is handed the versions it runs on, from another process.
-  So they're kept apart from the struct, where reading them copies nothing (`:persistent_term`), and a call costs
-  the same however many files a plugin has.
+  So they're kept apart from the struct, where reading them copies nothing (`OneCore.Plugins.LoadedVersion.kept/1`),
+  and a call costs the same however many files a plugin has.
 
   `ui` is the code of the UI library its app was built against, or `nil` for a plugin with no app (`OneCore.App`).
 
@@ -38,12 +35,10 @@ defmodule OneCore.Plugins.Version do
   A version runs only on a server whose build its `core` allows: one that doesn't is refused where it's deployed, and
   where it's loaded runs nowhere here, as one that doesn't compile, until the server is updated.
 
-  A server that doesn't run a plugin for whoever it's installed for never loads its code, which runs with all of
-  its machine's access: it knows the version by what the version says of itself (`description/1`), which a server
-  that loaded it kept in the bucket, and is `described/2` from that. A described version has no modules, so it's
-  only listed here, and every call to it is run where it's loaded (`OneCore.Plugins.Calls`).
+  A server that doesn't run a plugin for whoever it's installed for never loads its code: it knows the version only
+  by what it says of itself (`OneCore.Plugins.Version.Description`).
   """
-  alias OneCore.{App, Builds, Hooks, Nif, Server, Skills}
+  alias OneCore.Plugins.LoadedVersion
 
   @enforce_keys [:under, :plugin, :tools, :apps, :widgets, :services, :hooks, :offers, :jobs, :code]
   defstruct [
@@ -67,65 +62,24 @@ defmodule OneCore.Plugins.Version do
     trusted: true
   ]
 
-  # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
-  @sizes ~w(2x2 4x2 4x4)
-
-  # The names versions are loaded under: each is free, or taken by the one version loaded under it.
-  @names 4096
-  @on_load :names
-
-  @doc false
-  def names, do: :persistent_term.put(__MODULE__, :atomics.new(@names, signed: false))
-
   @doc "The name of a set of files: the same files have the same name, on any server."
   def code(files),
     do: Base.encode16(:crypto.hash(:sha256, :erlang.term_to_binary(files, [:deterministic])), case: :lower)
 
-  @doc """
-  Compiles and loads the files of the plugin named `name`. Gives the version and the compiler's warnings, or what's
-  wrong.
-  """
-  def load(name, files) do
-    names = :persistent_term.get(__MODULE__)
-    free = Enum.find(1..@names, &(:atomics.compare_exchange(names, &1, 0, 1) == :ok))
-    if free == nil, do: raise("#{@names} versions of plugins are loaded, which is as many as a server runs at once")
-    under = Module.concat(OneCore.Plugins, "Load#{free}")
-    {sources, rest} = Enum.split_with(files, fn {path, _} -> server?(path) and Path.extname(path) == ".ex" end)
-    {nifs, sources} = Enum.split_with(sources, fn {path, _} -> Path.dirname(path) == "server/nif" end)
-
-    {skills, rest} =
-      Map.split_with(Map.new(rest), fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
-
-    with {:ok, skills} <- Skills.found(name, skills),
-         {:ok, builds} <- nifs(under, nifs, rest),
-         {:ok, modules, warnings} <- compile(under, sources, builds),
-         {:ok, version} <- describe(under, modules, rest) do
-      hashes = Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end)
-      served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
-      own = Map.reject(rest, fn {path, _} -> client?(path) end)
-      :persistent_term.put({__MODULE__, under}, %{files: served, hashes: hashes, skills: skills, own: own})
-      {:ok, %{version | code: code(files), ui: App.ui(files), title: version.title || name}, warnings}
-    else
-      {:error, why} ->
-        unload(under)
-        {:error, why}
-    end
-  end
-
   @doc "What a page of a version's apps loads, by its paths in `client/`."
-  def files(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).files
+  def files(%__MODULE__{under: under}), do: LoadedVersion.kept(under).files
 
   @doc "Each of a version's files that isn't Elixir or a skill, by its path, as the hash of what's in it."
-  def hashes(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).hashes
+  def hashes(%__MODULE__{under: under}), do: LoadedVersion.kept(under).hashes
 
   @doc """
   One of the files of the version that `module` is a module of, by its path: one that isn't Elixir, a skill or in
   `client/`, as it was deployed. `nil` if it has no such file.
   """
-  def own(module, path), do: :persistent_term.get({__MODULE__, under(module)}).own[path]
+  def own(module, path), do: LoadedVersion.kept(under(module)).own[path]
 
   @doc "A version's skills, as `OneCore.Skills.found/2` gives them."
-  def skills(%__MODULE__{under: under}), do: :persistent_term.get({__MODULE__, under}).skills
+  def skills(%__MODULE__{under: under}), do: LoadedVersion.kept(under).skills
 
   @doc """
   What a person reads of a version where it's listed (the plugin directory, a marketplace): its `title`, `icon`,
@@ -152,247 +106,8 @@ defmodule OneCore.Plugins.Version do
   defp text(text) when is_binary(text), do: text
   defp text(_), do: nil
 
-  @doc """
-  What a loaded version says of itself, as the bucket keeps it: what it provides, and its files and skills, but
-  none of its code.
-  """
-  def description(%__MODULE__{under: under} = version) do
-    cached = :persistent_term.get({__MODULE__, under})
-
-    description =
-      Map.take(version, [
-        :tools,
-        :apps,
-        :widgets,
-        :exports,
-        :services,
-        :hooks,
-        :offers,
-        :jobs,
-        :code,
-        :ui,
-        :title,
-        :icon,
-        :requires,
-        :core
-      ])
-
-    # It holds only names any server knows: a tool's inputs as JSON has them, not the atoms its plugin wrote them
-    # with, which a server that never loaded the plugin doesn't have, and won't take from the bucket.
-    tools =
-      for tool <- description.tools do
-        tool
-        |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
-        |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
-        |> Map.replace_lazy(:outputs, &JSON.decode!(JSON.encode!(&1)))
-      end
-
-    :erlang.term_to_binary(%{description | tools: tools} |> Map.merge(%{files: cached.files, skills: cached.skills}))
-  end
-
-  @doc """
-  A version of the plugin `artifact` from what it said of itself (`description/1`): `{:ok, version}`, or `:error`
-  where that isn't one. It was written by a server that runs the plugin, whoever's that is, so only what's
-  listed of it is taken, and what each tool takes and gives is read from its inputs and outputs again.
-  """
-  def described(artifact, description) do
-    # Its skills are as `OneCore.Skills` says them, whose names a server that has just started may not know yet.
-    Code.ensure_loaded!(Skills)
-    description = :erlang.binary_to_term(description, [:safe])
-    under = {:described, artifact, description.code}
-
-    tools = Enum.map(description.tools, &schemas/1)
-
-    :persistent_term.put({__MODULE__, under}, %{
-      files: description.files,
-      hashes: %{},
-      skills: description.skills,
-      own: %{}
-    })
-
-    fields =
-      Map.take(description, [
-        :apps,
-        :widgets,
-        :exports,
-        :services,
-        :hooks,
-        :offers,
-        :jobs,
-        :code,
-        :ui,
-        :title,
-        :icon,
-        :requires,
-        :core
-      ])
-
-    {:ok, struct!(__MODULE__, Map.merge(fields, %{under: under, plugin: nil, tools: tools, artifact: artifact}))}
-  rescue
-    _ -> :error
-  end
-
-  @doc """
-  A version of the untrusted plugin `artifact`, from its files as a server keeps them and what its code said of
-  itself in its sandbox (`OneCore.Sandbox`): `{:ok, version}`, or `{:error, why}`. Its code never loads
-  here, so it's described as a version a server doesn't run is, and is checked as one that loads is.
-  """
-  def untrusted(artifact, files, description) do
-    name = Path.basename(artifact)
-    code = code(files)
-    under = {:described, artifact, code}
-    rest = Map.reject(files, fn {path, _} -> server?(path) and Path.extname(path) == ".ex" end)
-
-    {skills, rest} =
-      Map.split_with(rest, fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
-
-    taken = fn list, keys ->
-      for item <- List.wrap(list),
-          is_map(item),
-          do: Map.new(Map.take(item, keys), &{String.to_existing_atom(elem(&1, 0)), elem(&1, 1)})
-    end
-
-    offers =
-      for offer <- taken.(description["offers"], ~w(name kind description)),
-          do: Map.update(offer, :kind, nil, &hook_kind/1)
-
-    description = %{
-      tools:
-        for(
-          tool <- taken.(description["tools"], ~w(name description inputs outputs read_only by_link ui task_support)),
-          do: Map.replace_lazy(tool, :task_support, &task_support/1)
-        ),
-      apps: taken.(description["apps"], ~w(name page icon category subject)),
-      title: description["title"],
-      icon: description["icon"],
-      widgets: taken.(description["widgets"], ~w(name tool sizes)),
-      exports: description["exports"],
-      hooks: description["hooks"],
-      offers: offers,
-      jobs: taken.(description["jobs"], ~w(tool every inputs)),
-      requires: description["requires"]
-    }
-
-    with {:ok, skills} <- Skills.found(name, skills),
-         {:ok, version} <- checked(under, nil, description, [], rest) do
-      served = Enum.sort(for path <- Map.keys(rest), loaded?(path), do: path)
-      :persistent_term.put({__MODULE__, under}, %{files: served, hashes: %{}, skills: skills, own: %{}})
-
-      version = %{
-        version
-        | code: code,
-          ui: App.ui(files),
-          title: version.title || name,
-          artifact: artifact,
-          trusted: false
-      }
-
-      {:ok, version}
-    end
-  end
-
-  defp hook_kind(kind) when kind in ["observe", "mutate", "validate", "collect"], do: String.to_existing_atom(kind)
-  defp hook_kind(_kind), do: nil
-
   @doc "Whether a version is only described here, not loaded (`described/2`)."
   def described?(%__MODULE__{under: under}), do: is_tuple(under)
-
-  @doc "Removes a version's modules from the VM."
-  def unload(%__MODULE__{under: under}), do: unload(under)
-
-  def unload({:described, _artifact, _code} = under), do: :persistent_term.erase({__MODULE__, under})
-
-  def unload(under) do
-    :persistent_term.erase({__MODULE__, under})
-    Nif.release(under)
-
-    for {module, _} <- :code.all_loaded(), under?(module, under) do
-      :code.delete(module)
-      :code.purge(module)
-    end
-
-    "Load" <> name = List.last(Module.split(under))
-    :atomics.put(:persistent_term.get(__MODULE__), String.to_integer(name), 0)
-  end
-
-  defp under?(module, under), do: String.starts_with?(Atom.to_string(module), Atom.to_string(under) <> ".")
-
-  # A NIF, `server/nif/<name>.ex` and its library as it's built for this kind of machine, `server/nif/<name>/<kind>.so`,
-  # loaded as its build (`OneCore.Nif`), which this version's code reaches by its name. Gives each build by that name,
-  # or what's wrong.
-  defp nifs(under, nifs, rest) do
-    Enum.reduce_while(nifs, {:ok, %{}}, fn {path, source}, {:ok, builds} ->
-      library = Path.rootname(path) <> "/#{Builds.target()}.so"
-
-      with {:built, true} <- {:built, is_map_key(rest, library)},
-           {:ok, name, build} <- Nif.load(source, rest[library], under, Path.join(Server.home(), "nif")),
-           [_one_word] <- Module.split(name) do
-        {:cont, {:ok, Map.put(builds, inspect(name), build)}}
-      else
-        {:built, false} -> {:halt, {:error, "#{path} has no build for this kind of machine, #{library}"}}
-        {:error, why} -> {:halt, {:error, "#{path} didn't load on this machine, #{Builds.target()}: #{why}"}}
-        _ -> {:halt, {:error, "#{path}'s module is named in one word, which this plugin's code reaches it by"}}
-      end
-    end)
-  end
-
-  # The files go to a folder of their own to be compiled together, so they can use each other's structs and macros
-  # in any order. The aliases share each file's first line, which keeps its line numbers.
-  defp compile(under, sources, builds) do
-    folder = Path.join([Server.home(), "compiling", List.last(Module.split(under))])
-    names = Enum.uniq(for {_, source} <- sources, name <- defined(source), do: name)
-    names = Map.merge(builds, Map.new(names, &{Atom.to_string(&1), Module.concat(under, &1)}))
-    aliases = Enum.map_join(names, fn {name, module} -> "alias #{inspect(module)}, as: #{name}, warn: false; " end)
-
-    paths =
-      for {path, source} <- sources do
-        file = Path.join(folder, path)
-        File.mkdir_p!(Path.dirname(file))
-        File.write!(file, aliases <> source)
-        file
-      end
-
-    try do
-      case Kernel.ParallelCompiler.compile(paths, return_diagnostics: true) do
-        {:ok, modules, warnings} ->
-          case Enum.reject(modules, &under?(&1, under)) do
-            [] ->
-              {:ok, modules, messages(warnings.compile_warnings ++ warnings.runtime_warnings, under, folder)}
-
-            outside ->
-              Enum.each(outside, &(:code.delete(&1) && :code.purge(&1)))
-              {:error, "Every module is a defmodule at the top of a file. These aren't: #{inspect(outside)}"}
-          end
-
-        {:error, errors, _warnings} ->
-          {:error, messages(errors, under, folder)}
-      end
-    after
-      File.rm_rf!(folder)
-    end
-  end
-
-  # The first part of each module name a file defines. A file that doesn't parse defines none, and the compiler
-  # says what's wrong with it.
-  defp defined(source) do
-    case Code.string_to_quoted(source) do
-      {:ok, {:__block__, _, forms}} -> Enum.flat_map(forms, &defined_by/1)
-      {:ok, form} -> defined_by(form)
-      {:error, _} -> []
-    end
-  end
-
-  defp defined_by({definer, _, [{:__aliases__, _, [name | _]} | _]}) when definer in [:defmodule, :defprotocol],
-    do: [name]
-
-  defp defined_by(_), do: []
-
-  defp messages(diagnostics, under, folder) do
-    Enum.map_join(diagnostics, "\n", fn %{file: file, position: position, message: message} ->
-      line = if is_tuple(position), do: elem(position, 0), else: position
-      own_names("#{file}:#{line}: #{String.trim(message)}", under) |> String.replace(folder <> "/", "")
-    end)
-  end
 
   @doc "A version's module that its plugin wrote as `name`, or `nil` if it has none by that name."
   def module(%__MODULE__{under: {:described, _artifact, _code}}, _name), do: nil
@@ -412,222 +127,8 @@ defmodule OneCore.Plugins.Version do
   def own_names(text, %__MODULE__{under: under}), do: own_names(text, under)
   def own_names(text, under), do: String.replace(text, inspect(under) <> ".", "")
 
-  # What a plugin says of itself, by the functions that say it, with what each gives where it has none.
-  @callbacks [
-    tools: [],
-    apps: [],
-    title: nil,
-    icon: nil,
-    widgets: [],
-    hooks: [],
-    offers: [],
-    jobs: [],
-    requires: %{}
-  ]
-
-  # `rest` is the files that aren't Elixir or skills. A plugin with no Elixir provides no tools and names no apps.
-  defp describe(under, modules, rest) do
-    case Enum.filter(modules, &(OneCore.Plugin in behaviours(&1))) do
-      [] when modules == [] ->
-        {:ok, version(under, nil, [], [], [], [], rest, nil)}
-
-      [plugin] ->
-        description =
-          for {function, none} <- @callbacks,
-              into: %{exports: exports(plugin)},
-              do: {function, if(function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none)}
-
-        services = Enum.filter(modules, &(OneCore.Service in behaviours(&1)))
-
-        process? = &(GenServer in behaviours(&1) or :gen_statem in behaviours(&1))
-
-        if Enum.all?(services, &(process?.(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) do
-          services =
-            for module <- services, do: %{name: own_name(module), called: module.called(), needs: module.needs()}
-
-          checked(under, plugin, description, services, rest)
-        else
-          {:error,
-           "A service says `use GenServer` or `@behaviour :gen_statem`, its needs/0 gives what it needs of a " <>
-             "machine, and its called/0 what it's called, each as text"}
-        end
-
-      found ->
-        {:error, "One module of a plugin says `@behaviour OneCore.Plugin`, and #{length(found)} do"}
-    end
-  rescue
-    error ->
-      {:error,
-       "tools/0, apps/0, widgets/0, hooks/0, offers/0, jobs/0, requires/0 or a service's " <>
-         "needs/0 or called/0 raised: " <>
-         Exception.message(error)}
-  end
-
-  # The functions a plugin's module provides other plugins, which run inside each plugin that requires it
-  # (`OneCore.Plugin`): its public ones besides the callbacks, as name/arity.
-  defp exports(plugin) do
-    callbacks = OneCore.Plugin.behaviour_info(:callbacks)
-
-    Enum.sort(
-      for {name, arity} <- plugin.__info__(:functions),
-          {name, arity} not in callbacks,
-          not String.starts_with?(Atom.to_string(name), "__"),
-          do: "#{name}/#{arity}"
-    )
-  end
-
-  # A version from what its plugin said of itself, if that's what a plugin says: `plugin` is its module, or nil for
-  # an untrusted one, whose module is in its sandbox's VM.
-  defp checked(under, plugin, description, services, rest) do
-    %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, exports: exports, hooks: hooks} =
-      description
-
-    %{offers: offers, jobs: jobs, requires: requires} = description
-
-    cond do
-      not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
-        {:error,
-         "tools/0 gives a list of %{name: ..., description: ..., inputs: ..., outputs: ...}, where outputs is a JSON " <>
-           "Schema of an object, ui, if a tool has one, is a page of client/, and task_support, if it has one, is " <>
-           ":optional or :required"}
-
-      not ((title == nil or is_binary(title)) and (icon == nil or is_binary(icon))) ->
-        {:error, "title/0 gives text, and icon/0 a file's path"}
-
-      not (is_list(apps) and Enum.all?(apps, &app?(&1, rest))) ->
-        {:error,
-         "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-           "here, the plugin's icon/0 where an app has none, and category and subject, if it has them, are text"}
-
-      not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
-        {:error,
-         "widgets/0 gives a list of %{name: ..., tool: ..., sizes: [...]}: one of this plugin's tools that only " <>
-           "reads, and the sizes it comes in, of #{Enum.join(@sizes, ", ")}"}
-
-      not (is_list(exports) and Enum.all?(exports, &is_binary/1)) ->
-        {:error, "Its module's functions are said as a list of names"}
-
-      not (is_list(hooks) and Enum.all?(hooks, &Hooks.hook?/1) and
-               (hooks == [] or plugin == nil or function_exported?(plugin, :hook, 3))) ->
-        {:error,
-         "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
-           Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ") <>
-           ", and the ones plugins offer, each as <plugin>.<hook>: soft-delete.moved"}
-
-      not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
-        {:error,
-         "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
-           "digits and _, and a kind of :observe, :mutate, :validate or :collect"}
-
-      not (is_map(requires) and Enum.all?(requires, &requirement?/1)) ->
-        {:error,
-         "requires/0 gives the other plugins it needs, each by its name with why, as a person reads it after " <>
-           "\"Gmail uses Google Account\", and \"core\" the versions of the platform it runs on, as an Elixir " <>
-           "requirement: %{\"core\" => \"~> 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
-
-      not runs_here?(requires["core"]) ->
-        {:error,
-         "It requires core #{requires["core"]}, and this server is on #{Builds.build()}, which that doesn't allow: " <>
-           "it runs on servers updated to a version it allows (`one builds`)"}
-
-      true ->
-        tools = Enum.map(tools, &schemas/1)
-
-        version = version(under, plugin, tools, apps, widgets, Enum.sort(services), rest, icon)
-        version = %{version | title: title || version.title}
-
-        with {:ok, jobs} <- jobs(jobs, tools),
-             do:
-               {:ok,
-                %{
-                  version
-                  | exports: exports,
-                    hooks: Enum.uniq(hooks),
-                    offers: offers,
-                    jobs: jobs,
-                    requires: Map.delete(requires, "core"),
-                    core: requires["core"]
-                }}
-    end
-  end
-
-  # The versions of the platform it runs on, as an Elixir requirement, or another plugin it requires, by its name,
-  # and why, which isn't left out.
-  defp requirement?({"core", requirement}),
-    do: is_binary(requirement) and match?({:ok, _}, Elixir.Version.parse_requirement(requirement))
-
-  defp requirement?({name, why}),
-    do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/ and is_binary(why) and String.trim(why) != ""
-
-  defp requirement?(_requirement), do: false
-
-  # Whether this server's build is one of the versions of the platform `core` says a plugin runs on, where it says.
-  defp runs_here?(nil), do: true
-  defp runs_here?(core), do: Elixir.Version.match?(Builds.version(Builds.build()), core)
-
-  defp offer?(%{name: name, kind: kind, description: description}),
-    do:
-      is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate, :collect] and
-        is_binary(description)
-
-  defp offer?(_offer), do: false
-
-  # A scheduled job calls one of the plugin's tools with inputs the tool takes, so one that could never run is
-  # found out when it's deployed.
-  defp jobs(jobs, tools) do
-    checked =
-      for job <- List.wrap(jobs) do
-        with %{tool: name, every: every} when is_integer(every) and every > 0 <- job,
-             inputs = JSON.decode!(JSON.encode!(Map.get(job, :inputs, %{}))),
-             %{takes: takes} <- Enum.find(tools, &(&1.name == name)),
-             :ok <- ExJsonSchema.Validator.validate(takes, inputs) do
-          %{tool: name, every: every, inputs: inputs}
-        else
-          _ -> nil
-        end
-      end
-
-    if is_list(jobs) and nil not in checked,
-      do: {:ok, checked},
-      else:
-        {:error,
-         "jobs/0 gives a list of %{tool: ..., every: ...}: one of this plugin's tools, how many seconds apart, and the inputs it takes, if any"}
-  end
-
   @doc "The behaviours a module says it follows, one `behaviour` attribute each."
   def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
-
-  # An icon goes to clients as a `data:` address, so a home screen asks for nothing more. The plugin's is the file it
-  # names, nil where that isn't one of its files (which deploying refuses), and an app's its own or else the plugin's.
-  defp version(under, plugin, tools, apps, widgets, services, rest, icon) do
-    apps =
-      for %{name: name, page: page} = app <- apps,
-          do: %{
-            name: name,
-            page: page,
-            icon: if(is_map_key(rest, app[:icon] || icon), do: data(app[:icon] || icon, rest)),
-            category: app[:category],
-            subject: app[:subject]
-          }
-
-    widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
-
-    %__MODULE__{
-      under: under,
-      plugin: plugin,
-      tools: tools,
-      apps: apps,
-      title: List.first(for(app <- apps, do: app.name)),
-      icon: if(is_map_key(rest, icon), do: data(icon, rest)),
-      widgets: widgets,
-      exports: [],
-      services: services,
-      hooks: [],
-      offers: [],
-      jobs: [],
-      code: nil
-    }
-  end
 
   @doc "Whether `path` is of what runs in a client: the folder `client/`."
   def client?(path), do: String.starts_with?(path, "client/")
@@ -654,44 +155,6 @@ defmodule OneCore.Plugins.Version do
       _ -> MIME.from_path(path)
     end
   end
-
-  defp data(path, rest), do: "data:#{kind(path)};base64,#{Base.encode64(rest[path])}"
-
-  defp app?(%{name: name, page: page} = app, rest) when is_binary(name),
-    do:
-      page?(page, rest) and (app[:icon] == nil or is_map_key(rest, app[:icon])) and
-        (app[:category] == nil or is_binary(app[:category])) and (app[:subject] == nil or is_binary(app[:subject]))
-
-  defp app?(_, _), do: false
-
-  # A widget is drawn from what one of the plugin's tools answers, which a Home Screen page asks again and again.
-  defp widget?(%{name: name, tool: tool, sizes: [_ | _] = sizes}, tools) when is_binary(name),
-    do: Enum.any?(tools, &(&1.name == tool and &1[:read_only] == true)) and sizes -- @sizes == []
-
-  defp widget?(_, _), do: false
-
-  defp page?(page, rest),
-    do: is_binary(page) and client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page)
-
-  # A tool may have a page of its own, its UI as MCP Apps has it, which a host shows for it. What it answers is an
-  # object, which is what every version of MCP a client speaks takes as a tool's `outputSchema`. A version deployed
-  # before tools said what they answer says nothing of it, and still loads (`OneCore.Plugins.Deploy` refuses a new one).
-  defp tool?(%{name: name, description: description, inputs: %{}} = tool, rest)
-       when is_binary(name) and is_binary(description),
-       do:
-         name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest)) and outputs?(tool[:outputs]) and
-           tool[:task_support] in [nil, :optional, :required]
-
-  defp tool?(_, _), do: false
-
-  # An untrusted plugin's code said its tools in JSON, where an atom is text.
-  defp task_support("optional"), do: :optional
-  defp task_support("required"), do: :required
-  defp task_support(other), do: other
-
-  defp outputs?(nil), do: true
-  defp outputs?(%{} = outputs), do: JSON.decode!(JSON.encode!(outputs))["type"] == "object"
-  defp outputs?(_outputs), do: false
 
   @doc """
   A tool with what it takes and what it gives read once, as the JSON Schemas its inputs and its answers are checked

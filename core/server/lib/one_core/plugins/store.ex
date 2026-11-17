@@ -14,7 +14,8 @@ defmodule OneCore.Plugins.Store do
   """
   require Logger
   alias OneCore.Bucket
-  alias OneCore.Plugins.Version
+  alias OneCore.Plugins.{LoadedVersion, Version}
+  alias OneCore.Plugins.Version.{Compile, Description}
 
   @doc "Whose the plugin `artifact` is: a user, a group or the network."
   def whose(artifact), do: String.replace_suffix(artifact, "/plugins/" <> Path.basename(artifact), "")
@@ -180,24 +181,36 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  The set of the plugin `artifact`'s files named `code`, as this server would run it: loaded, or described where
-  `load` is false, and an untrusted one always described, as the server that deployed it described it in its sandbox.
-  `{:ok, version}`, or `:error`.
+  The set of the plugin `artifact`'s files named `code`, as this server would run it, held by the caller
+  (`OneCore.Plugins.LoadedVersion`): loaded, or described where `load` is false, and an untrusted one always
+  described, as the server that deployed it described it in its sandbox. `{:ok, version}`, or `:error`.
   """
   def version(artifact, code, _load, false) do
-    with {:ok, version} <- described(artifact, code), do: {:ok, %{version | trusted: false}}
+    with {:ok, version} <- held(artifact, code), do: {:ok, %{version | trusted: false}}
   end
 
   def version(artifact, code, true, true), do: loaded(artifact, code)
-  def version(artifact, code, false, true), do: described(artifact, code)
+  def version(artifact, code, false, true), do: held(artifact, code)
 
   @doc """
   The set of the plugin `artifact`'s files named `code` as it described itself where it was loaded, without its
-  code: `{:ok, version}`, or `:error` while no server that loads it has said.
+  code, to read what it says: `{:ok, version}`, or `:error` while no server that loads it has said. It isn't held,
+  so nothing it keeps (`OneCore.Plugins.Version.files/1`) is there to read.
   """
   def described(artifact, code) do
+    with {:ok, version, _kept} <- description(artifact, code), do: {:ok, version}
+  end
+
+  defp held(artifact, code) do
+    with {:ok, version, kept} <- description(artifact, code) do
+      LoadedVersion.described(version, kept)
+      {:ok, version}
+    end
+  end
+
+  defp description(artifact, code) do
     with {:ok, description, _tag} <- Bucket.read("#{artifact}/described/#{code}"),
-         do: Version.described(artifact, description),
+         do: Description.described(artifact, description),
          else: (:absent -> :error)
   end
 
@@ -209,7 +222,7 @@ defmodule OneCore.Plugins.Store do
   def describe(%Version{artifact: artifact, code: code} = version) do
     if OneCore.Servers.here?(OneCore.User.owner(artifact)) do
       blob = "#{artifact}/described/#{code}"
-      description = Version.description(version)
+      description = Description.description(version)
 
       # One said otherwise, as a server from before descriptions named only what any server knows said it, is said again.
       with :exists <- Bucket.write(blob, description),
@@ -236,13 +249,12 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  Loads the set of the plugin `artifact`'s files named `code`: `{:ok, version}`, or `:error` if it doesn't compile
+  Loads the set of the plugin `artifact`'s files named `code`, held by the caller: `{:ok, version}`, or `:error` if it doesn't compile
   here, or doesn't run on this server's build (`OneCore.Plugins.Version`).
   """
   def loaded(artifact, code) do
-    case Version.load(Path.basename(artifact), files(artifact, code)) do
+    case LoadedVersion.load(artifact, code, &Compile.compile(artifact, files(artifact, code), &1)) do
       {:ok, version, _warnings} ->
-        version = %{version | artifact: artifact}
         describe(version)
         {:ok, version}
 

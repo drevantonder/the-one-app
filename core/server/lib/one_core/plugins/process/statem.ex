@@ -6,8 +6,7 @@ defmodule OneCore.Plugins.Process.Statem do
   module, so a plugin's module doesn't change it (`change_callback_module` and `push_callback_module`).
   """
   @behaviour :gen_statem
-  alias OneCore.Plugins
-  alias OneCore.Plugins.Process
+  alias OneCore.Plugins.{LoadedVersion, Process}
 
   # Entered from `OneCore.Plugins.Process.init/1` once the process holds its version: it runs the plugin's `init/1`
   # and enters the loop with what that gave, as a Ranch protocol's `init/1` does.
@@ -38,7 +37,7 @@ defmodule OneCore.Plugins.Process.Statem do
   def handle_event(:cast, {Process, :follow, from, monitor}, state, %{held: was_held, module: was} = process) do
     case Process.held(process.plugin, process.name, process.key) do
       {:ok, held, ^was} ->
-        Plugins.release(held)
+        LoadedVersion.release([held])
         send(from, {monitor, :done})
         :keep_state_and_data
 
@@ -49,18 +48,18 @@ defmodule OneCore.Plugins.Process.Statem do
           case code_changed(module, Process.vsn(was), state, process.data) do
             {:ok, state, data} ->
               process = %{process | held: held, module: module, data: data}
-              Plugins.release(was_held)
+              LoadedVersion.release([was_held])
               send(from, {monitor, :done})
               {:next_state, state, process}
 
             why ->
               process = Map.delete(%{process | held: held, module: module}, :data)
-              Plugins.release(was_held)
+              LoadedVersion.release([was_held])
               {:stop, {:code_change, why}, process}
           end
         else
           # It ends as it ran, in the old code.
-          Plugins.release(held)
+          LoadedVersion.release([held])
           {:stop, :normal}
         end
 
@@ -87,7 +86,7 @@ defmodule OneCore.Plugins.Process.Statem do
          true <- function_exported?(module, :terminate, 3),
          do: module.terminate(why, state, data)
 
-    Plugins.release(process.held)
+    LoadedVersion.release([process.held])
   end
 
   # A module with no `code_change/4`, which OTP doesn't ask of one either, carries on with what it holds as it is.

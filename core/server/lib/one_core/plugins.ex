@@ -6,12 +6,13 @@ defmodule OneCore.Plugins do
 
   A call runs on the version that was latest when it began. That version stays loaded until its last call ends,
   however many versions follow it. A plugin's processes hold a version the same way, and move to the latest
-  (`OneCore.Plugins.Process`).
+  (`OneCore.Plugins.Process`). What's loaded, and who uses it, is `OneCore.Plugins.LoadedVersion`'s, which outlives
+  this: restarted, this adopts what's loaded rather than loading it again.
 
   A server looks in the bucket at what's installed for the network and for whoever it acts for when it starts, and at
   what's installed for anyone else when it's first asked for them. Only a server that runs the plugins of whoever a
   plugin was installed for (`OneCore.Servers.runs?/1`) loads it and runs it for them: another knows it only by what it
-  says of itself (`OneCore.Plugins.Version.described/2`), which lists it, and passes every call to it on to one
+  says of itself (`OneCore.Plugins.Version.Description`), which lists it, and passes every call to it on to one
   that does. It looks again when it's told to, when it's asked for
   a plugin it doesn't run, when it comes back (`OneCore.Server.reconnected/0`), and behind a request for someone it
   last looked at more than five minutes ago: the request runs on what the server has, and the look is for what it
@@ -20,17 +21,17 @@ defmodule OneCore.Plugins do
   use GenServer
   require Logger
   alias OneCore.{Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Installed, Store, Version}
+  alias OneCore.Plugins.{Installed, LoadedVersion, Store, Version}
 
   @network "network"
 
   # How long after looking at someone a request for them has this server look again, behind it, in milliseconds.
   @looks_after :timer.minutes(5)
 
-  # This, and after it what runs plugins' processes, what tells the plugins that observe a hook, and the sandboxes
-  # untrusted plugins run in, which hold versions here.
+  # What's loaded, then this, and after it what runs plugins' processes, what tells the plugins that observe a hook,
+  # and the sandboxes untrusted plugins run in, which hold versions here.
   def child_spec(_) do
-    children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
+    children = [LoadedVersion, %{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
     children = children ++ __MODULE__.Process.children() ++ Hooks.Observer.children() ++ OneCore.Sandbox.children()
     start = {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}
     %{id: __MODULE__, type: :supervisor, start: start}
@@ -46,21 +47,25 @@ defmodule OneCore.Plugins do
   caller is told it.
   """
   def run(owners, name, fun) do
-    with {:ok, held, at, versions} <- begin(owners, name),
-         do: held(held, Map.values(versions), fn -> fun.(at, versions) end)
+    with {:ok, at, versions} <- begin(owners, name), do: released(Map.values(versions), fn -> fun.(at, versions) end)
   end
 
   @doc "Runs `fun` with the latest version of the plugin `artifact`, as `run/3` does. `:absent` if it isn't running here."
   def run(artifact, fun) do
-    with {:ok, held, version} <- hold(artifact), do: held(held, [version], fn -> fun.(version) end)
+    with {:ok, version} <- hold(artifact), do: released([version], fn -> fun.(version) end)
+  end
+
+  defp released(versions, fun) do
+    held(versions, fun)
+  after
+    LoadedVersion.release(versions)
   end
 
   @doc """
   Runs `fun`, and gives what it does, or `{:error, why}` with what it raised, as its caller is told it, in the
-  names `versions` wrote. A call it had another server run ends there with that server's answer. Lets go of `held`
-  after (`release/1`).
+  names `versions` wrote. A call it had another server run ends there with that server's answer.
   """
-  def held(held, versions, fun) do
+  def held(versions, fun) do
     fun.()
   catch
     :throw, {Call, outcome} ->
@@ -70,8 +75,6 @@ defmodule OneCore.Plugins do
       Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
       why = Enum.reduce(versions, why(kind, reason, __STACKTRACE__), &Version.own_names(&2, &1))
       {:error, if(said?(kind, reason), do: why, else: "Something went wrong.\n\n" <> why)}
-  after
-    if held, do: release(held)
   end
 
   # Whether what was raised is the plugin saying why, `raise "..."`, also in a process the call waited on. Anything
@@ -101,13 +104,10 @@ defmodule OneCore.Plugins do
   defp why(kind, reason, _stacktrace), do: Exception.format_banner(kind, OneCore.Redact.redact(reason))
 
   @doc """
-  Holds the latest version of the plugin `artifact` loaded: `{:ok, held, version}`, or `:absent` if it isn't
-  running here. It stays loaded until `release(held)`, or until the process that asked ends.
+  Holds the latest version of the plugin `artifact` loaded: `{:ok, version}`, or `:absent` if it isn't running here.
+  It stays loaded until the process that asked lets go of it (`OneCore.Plugins.LoadedVersion.release/1`) or ends.
   """
   def hold(artifact), do: ask({:hold, artifact})
-
-  @doc "Lets go of the versions that were held, which are unloaded once nothing runs or holds them."
-  def release(held), do: ask({:end, held})
 
   @doc "The plugins something that runs for `who` finds, by name: each one's `Version`, which holds its tools, its skill and its apps."
   def running(who), do: versions(chain(who))
@@ -174,7 +174,7 @@ defmodule OneCore.Plugins do
 
   @doc """
   Looks in the bucket at what runs for `owner` (`OneCore.Plugins.Installed.running/1`), and runs each plugin's latest version. Gives whether anything
-  changed. `loaded` are versions already loaded here, each as `OneCore.Plugins.Store.newer/2` gives one. A plugin
+  changed. `loaded` are versions already loaded here, each as `OneCore.Plugins.Store.newer/3` gives one, held by the caller. A plugin
   whose latest version took over has its processes follow it, and its services installed here that weren't
   running start.
   """
@@ -185,6 +185,7 @@ defmodule OneCore.Plugins do
     {latest, here} = ask({:latest, runs})
     newer = Store.newer(Enum.uniq(Map.values(installed)) -- (known ++ here), latest, runs)
     {changed, any} = ask({:looked, owner, installed, loaded ++ newer})
+    LoadedVersion.release(for {_artifact, _number, {:ok, version}} <- newer, do: version)
 
     for artifact <- changed do
       # A process whose own code brought the newer version in is the one that can't wait for itself.
@@ -224,11 +225,11 @@ defmodule OneCore.Plugins do
 
   # A server starts with the latest version of every plugin it runs whether or not it's asked for them. `installed` is
   # what's installed for each owner it has looked at, and `looked` when it last did; `running` and `latest` are by
-  # plugin, and `calls` are the versions each call holds.
+  # plugin.
   @impl true
   def init(nil) do
     Hooks.keep()
-    {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}, calls: %{}}, {:continue, :start}}
+    {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}}, {:continue, :start}}
   end
 
   @impl true
@@ -237,15 +238,18 @@ defmodule OneCore.Plugins do
 
     # What couldn't be read or started is left out and said in the log, as when the bucket didn't give or refused it:
     # someone's plugins, or everyone's, if it couldn't say whose plugins run here. A bucket that didn't answer has
-    # this server look again once it does (`OneCore.Bucket`).
+    # this server look again once it does (`OneCore.Bucket`). What's loaded already is adopted, not loaded again.
+    here = here(key)
+
     state =
       try do
-        for owner <- here(key), reduce: state do
+        for owner <- here, reduce: state do
           state ->
             try do
               installed = Installed.running(owner)
               newer = Store.newer(Enum.uniq(Map.values(installed)), state.latest)
               {state, _changed, _any} = took_over(state, owner, installed, newer)
+              LoadedVersion.release(for {_artifact, _number, {:ok, version}} <- newer, do: version)
               state
             rescue
               unanswered -> unstarted(state, owner, unanswered)
@@ -255,6 +259,9 @@ defmodule OneCore.Plugins do
         unanswered -> unstarted(state, "everyone", unanswered)
       end
 
+    # Whoever else something loaded here is installed for, this looked at before it restarted: they're looked at
+    # again beside this, as reading what's installed for them may call a plugin, and what's theirs is adopted.
+    Task.start(fn -> for owner <- LoadedVersion.owners() -- here, do: reload(owner) end)
     {:noreply, state}
   end
 
@@ -312,15 +319,15 @@ defmodule OneCore.Plugins do
   def handle_call({:required, owner, version}, _from, state),
     do: {:reply, inside(state, [owner, @network], version.trusted, Map.keys(version.requires), %{}), state}
 
-  # The caller is watched, so a call that dies has ended too.
+  # The caller holds them until it lets go of them or ends.
   def handle_call({:begin, owners, name}, {caller, _}, state) do
     state = behind(state, owners)
 
     with {at, artifact} <- found(state, owners, name),
          %Version{} = version <- state.running[artifact] || {:absent, name} do
       versions = inside(state, [at, @network], version.trusted, Map.keys(version.requires), %{name => version})
-      call = Process.monitor(caller)
-      {:reply, {:ok, call, at, versions}, put_in(state.calls[call], Map.values(versions))}
+      :ok = LoadedVersion.hold(Map.values(versions), caller)
+      {:reply, {:ok, at, versions}, state}
     else
       absent -> {:reply, absent, state}
     end
@@ -329,21 +336,13 @@ defmodule OneCore.Plugins do
   def handle_call({:hold, artifact}, {caller, _}, state) do
     case loaded(state.running[artifact]) do
       %Version{} = version ->
-        call = Process.monitor(caller)
-        {:reply, {:ok, call, version}, put_in(state.calls[call], [version])}
+        :ok = LoadedVersion.hold([version], caller)
+        {:reply, {:ok, version}, state}
 
       nil ->
         {:reply, :absent, state}
     end
   end
-
-  def handle_call({:end, call}, _from, state) do
-    Process.demonitor(call, [:flush])
-    {:reply, :ok, ended(state, call)}
-  end
-
-  @impl true
-  def handle_info({:DOWN, call, :process, _, _}, state), do: {:noreply, ended(state, call)}
 
   # Whoever a request is for, and the network, whose plugins it may run, are looked at behind it if this server last
   # looked at them more than five minutes ago, once however many requests come meanwhile. One it has never looked at
@@ -364,10 +363,12 @@ defmodule OneCore.Plugins do
   # What's installed for `owner` is `installed` now, and each version in `loaded` takes over from its plugin's if it's
   # newer: deploys that finish out of order still leave the one with the highest number, as the bucket has it. A
   # version that doesn't compile here leaves the one before it running. A plugin that's installed for nobody this
-  # server has looked at no longer runs here. Gives the plugins whose version changed, and whether anything did.
+  # server has looked at no longer runs here. Each owner's versions are installed for them
+  # (`OneCore.Plugins.LoadedVersion.installed/1`), which lets go of what they no longer run. Gives the plugins whose
+  # version changed, and whether anything did.
   defp took_over(state, owner, installed, loaded) do
-    {state, changed, stale} =
-      Enum.reduce(loaded, {state, [], []}, fn {artifact, number, loaded}, {state, changed, stale} ->
+    {state, changed} =
+      Enum.reduce(loaded, {state, []}, fn {artifact, number, loaded}, {state, changed} ->
         version = with {:ok, version} <- loaded, do: version
         # A version described is kept apart from the ones loaded, which it never takes over from. An untrusted
         # one runs here as one loaded does.
@@ -378,18 +379,18 @@ defmodule OneCore.Plugins do
 
         cond do
           numbers == :described and is_map_key(state.latest, artifact) ->
-            {state, changed, [version | stale]}
+            {state, changed}
 
           number <= Map.get(Map.fetch!(state, numbers), artifact, 0) ->
-            {state, changed, [version | stale]}
+            {state, changed}
 
           version == :error ->
-            {put_in(state.latest[artifact], number), changed, stale}
+            {put_in(state.latest[artifact], number), changed}
 
           true ->
             state = Map.update!(state, numbers, &Map.put(&1, artifact, number))
             state = if numbers == :latest, do: %{state | described: Map.delete(state.described, artifact)}, else: state
-            {put_in(state.running[artifact], version), [artifact | changed], [state.running[artifact] | stale]}
+            {put_in(state.running[artifact], version), [artifact | changed]}
         end
       end)
 
@@ -405,6 +406,12 @@ defmodule OneCore.Plugins do
         latest: Map.filter(state.latest, fn {artifact, _number} -> artifact in artifacts end),
         described: Map.filter(state.described, fn {artifact, _number} -> artifact in artifacts end)
     }
+
+    LoadedVersion.installed(
+      for {at, installed} <- state.installed,
+          into: %{},
+          do: {at, for({_name, artifact} <- installed, %Version{} = version <- [running[artifact]], do: version)}
+    )
 
     changed = Enum.uniq(changed ++ Map.keys(dropped))
 
@@ -430,7 +437,7 @@ defmodule OneCore.Plugins do
       :ets.insert(Hooks, {at, hooking, offered})
     end
 
-    {unload_unused(state, stale ++ Map.values(dropped)), changed, any}
+    {state, changed, any}
   end
 
   # A version that runs here, or `nil` for one only described.
@@ -473,18 +480,5 @@ defmodule OneCore.Plugins do
     else
       _ -> inside(state, owners, trusted, names, found)
     end
-  end
-
-  defp ended(state, call) do
-    {versions, calls} = Map.pop(state.calls, call, [])
-    unload_unused(%{state | calls: calls}, versions)
-  end
-
-  # A version nothing runs or holds any more is unloaded.
-  defp unload_unused(state, versions) do
-    held = Map.values(state.running) ++ Enum.concat(Map.values(state.calls))
-    unused = for %Version{} = version <- Enum.uniq(versions), version not in held, do: version
-    Enum.each(unused, &Version.unload/1)
-    state
   end
 end

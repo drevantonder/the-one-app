@@ -8,7 +8,8 @@ defmodule OneCore.Plugins.Deploy do
   alias OneCore.Call.State
   alias OneCore.{App, Bucket, Builds, Sandbox, Server, Servers}
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Installed, Calls, Store, Version}
+  alias OneCore.Plugins.{Installed, Calls, LoadedVersion, Store, Version}
+  alias OneCore.Plugins.Version.Compile
 
   @network "network"
   @looks_after :timer.minutes(5)
@@ -54,27 +55,27 @@ defmodule OneCore.Plugins.Deploy do
          {:ok, built} <- built(owner, name, files, trusted),
          _ = stage.(if(trusted, do: "Compiling its code", else: "Compiling its code in its sandbox")),
          {:ok, version, warnings} <- loaded(artifact, built, trusted) do
-      version = %{version | artifact: artifact}
-      install = install?.(version)
+      # The deploy holds the version it loaded until it ends, however it ends: what it's installed for holds it after.
+      try do
+        install = install?.(version)
 
-      with :ok <- outputs(version),
-           :ok <- categorized(version),
-           :ok <- icon(name, version),
-           :ok <- if(install, do: fits(owner, name, version), else: :ok),
-           {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
-           _ = stage.("Keeping it in the bucket"),
-           {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
-           :ok <- Store.describe(version),
-           %{} <- if(install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{}) do
-        listed(artifact, version)
-        if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}]), else: Version.unload(version)
-        Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
-        warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
-        {:ok, number, warnings}
-      else
-        {:error, why} ->
-          Version.unload(version)
-          {:error, why}
+        with :ok <- outputs(version),
+             :ok <- categorized(version),
+             :ok <- icon(name, version),
+             :ok <- if(install, do: fits(owner, name, version), else: :ok),
+             {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
+             _ = stage.("Keeping it in the bucket"),
+             {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
+             :ok <- Store.describe(version),
+             %{} <- if(install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{}) do
+          listed(artifact, version)
+          if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}])
+          Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
+          warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
+          {:ok, number, warnings}
+        end
+      after
+        LoadedVersion.release([version])
       end
     end
   end
@@ -189,7 +190,7 @@ defmodule OneCore.Plugins.Deploy do
   defp icon(_name, _version), do: :ok
 
   # A version's code, compiled and loaded here, or for an untrusted plugin only described, by its sandbox's VM.
-  defp loaded(artifact, built, true), do: Version.load(Path.basename(artifact), built)
+  defp loaded(artifact, built, true), do: LoadedVersion.load(artifact, Version.code(built), &Compile.compile(artifact, built, &1))
 
   defp loaded(artifact, built, false) do
     with {:ok, version} <- Sandbox.describe(artifact, built), do: {:ok, version, ""}

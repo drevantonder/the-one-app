@@ -69,7 +69,7 @@ defmodule OneCore.Sandbox do
     sets = [{name, Map.reject(files, fn {path, _} -> Version.client?(path) end)}]
 
     with {:ok, description} <- once({:describe, name, Version.code(files)}, name, sets),
-         do: Version.untrusted(artifact, files, description)
+         do: Version.Description.untrusted(artifact, files, description)
   end
 
   @doc """

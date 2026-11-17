@@ -17,7 +17,7 @@ defmodule OneCore.Plugins.Process do
   """
   use GenServer, restart: :temporary
   alias OneCore.Plugins
-  alias OneCore.Plugins.Version
+  alias OneCore.Plugins.{LoadedVersion, Version}
 
   @registry OneCore.Plugins.Processes
   @supervisor OneCore.Plugins.Supervisor
@@ -155,14 +155,14 @@ defmodule OneCore.Plugins.Process do
   def handle_cast({__MODULE__, :follow, from, monitor}, %{held: was_held, module: was} = process) do
     case held(process.plugin, process.name, process.key) do
       {:ok, held, ^was} ->
-        Plugins.release(held)
+        LoadedVersion.release([held])
         send(from, {monitor, :done})
         {:noreply, process}
 
       {:ok, held, module} ->
         if statem?(module) do
           # It ends as it ran, in the old code.
-          Plugins.release(held)
+          LoadedVersion.release([held])
           {:stop, :normal, process}
         else
           # The old version is let go of last, with nothing of it left here: unloading it ends any process that
@@ -170,13 +170,13 @@ defmodule OneCore.Plugins.Process do
           case returned(fn -> module.code_change(vsn(was), process.state, nil) end) do
             {:ok, state} ->
               process = %{process | held: held, module: module, state: state}
-              Plugins.release(was_held)
+              LoadedVersion.release([was_held])
               send(from, {monitor, :done})
               {:noreply, process}
 
             {:error, why} ->
               process = Map.delete(%{process | held: held, module: module}, :state)
-              Plugins.release(was_held)
+              LoadedVersion.release([was_held])
               {:stop, {:code_change, why}, process}
           end
         end
@@ -196,22 +196,22 @@ defmodule OneCore.Plugins.Process do
   @impl true
   def terminate(why, process) do
     with %{state: state} <- process, do: process.module.terminate(why, state)
-    Plugins.release(process.held)
+    LoadedVersion.release([process.held])
   end
 
   @doc false
   # Holds the plugin's latest version, says so where this process is registered, and gives its module in it.
   # `:absent` if the plugin isn't running here, or no longer has the module.
   def held(plugin, name, key) do
-    with {:ok, held, version} <- Plugins.hold(plugin) do
+    with {:ok, version} <- Plugins.hold(plugin) do
       case Version.module(version, name) do
         nil ->
-          Plugins.release(held)
+          LoadedVersion.release([version])
           :absent
 
         module ->
           {_, _} = Registry.update_value(@registry, {plugin, name, key}, fn _ -> version end)
-          {:ok, held, module}
+          {:ok, version, module}
       end
     end
   end
@@ -234,7 +234,7 @@ defmodule OneCore.Plugins.Process do
   @doc false
   # A process whose plugin's `init/1` didn't start it lets go of its version and ends, as OTP has one end.
   def ended(process, returned) do
-    Plugins.release(process.held)
+    LoadedVersion.release([process.held])
 
     case returned do
       :ignore -> exit(:normal)

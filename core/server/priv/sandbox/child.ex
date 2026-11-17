@@ -254,7 +254,7 @@ defmodule OneCore.Sandbox.Child do
         call = call(id, about)
         {:returned, encoded(run(what, call))}
       rescue
-        # What it raised is redacted (`OneCore.Redact`), as a call on the server is (`OneCore.Plugins.held/3`).
+        # What it raised is redacted (`OneCore.Redact`), as a call on the server is (`OneCore.Plugins.held/2`).
         error -> {:raised, Exception.message(OneCore.Redact.redact(error))}
       catch
         kind, reason -> {:raised, Exception.format_banner(kind, OneCore.Redact.redact(reason))}
