@@ -28,7 +28,10 @@ defmodule SoftDelete do
 
   Who deletes, restores and purges an item is whoever owns it, as the plugins that validate `reach` say. Every move is
   told to every plugin that hooks into the hook this plugin offers, `soft-delete.moved`, so one that keeps a list of
-  what it made keeps it true.
+  what it made keeps it true. It's collected, so each move waits for their answers. Purging puts each artifact back at
+  its name first, and tells them it's `purging` before anything is erased, so the plugin that made it reads it once
+  more, as one does to revoke a token it holds. One that fails or doesn't answer holds the purge back a day, once: the
+  next day it's purged whatever they answer, so no plugin keeps an item for ever.
   """
   @behaviour OneCore.Plugin
 
@@ -75,11 +78,14 @@ defmodule SoftDelete do
     [
       %{
         name: "moved",
-        kind: :observe,
+        kind: :collect,
         description:
           "An artifact moved from one state of soft delete to another. It's about the `artifact`'s name and the state it " <>
             "moved `to`: `deleted`, `purging`, `active` (restored) or `purged`. One restored beside something new at its " <>
-            "name says where, `as`. A plugin that keeps a list of what it made observes it to keep its list true."
+            "name says where, `as`. On `purging` it's at its name again, nothing of it erased yet, and `readable` says so " <>
+            "(false only where something new was made at its name since): the plugin that made it reads it, as one does " <>
+            "to revoke a token it holds. A plugin that keeps a list of what it made keeps it true from it. Each move " <>
+            "waits for the answers, and a plugin that fails or doesn't answer holds a purge back a day, once."
       }
     ]
   end
@@ -198,8 +204,10 @@ defmodule SoftDelete do
   `{:ok, record}` or `{:error, why}` for a move the table doesn't have.
 
   Events: `{:delete, record}`, `:moved` (everything of it is aside), `{:restore, as}` (each artifact's name and where it
-  goes back to), `:purge` (30 days on, or Delete Now), `{:fail, why, partly}` (purging it failed, `partly` once some of
-  it was purged already) and `:purged`.
+  goes back to), `:purge` (30 days on, or Delete Now), `{:back, names}` (the artifacts put back at their names while
+  their plugins are told), `:erasing`, `{:fail, why, how}` (purging it failed: `:partly` once some of it was erased,
+  `:unheard` where a plugin failed its hook, so the next purge goes on whatever they answer, or `:whole`) and
+  `:purged`.
   """
   def move(record, event)
   def move(nil, {:delete, record}), do: {:ok, Map.merge(record, %{"state" => "deleted", "moved" => false})}
@@ -214,12 +222,17 @@ defmodule SoftDelete do
   def move(%{"state" => "deleted"} = record, :purge),
     do: {:ok, record |> Map.put("state", "purging") |> Map.put("since", now())}
 
-  def move(%{"state" => "purging"} = record, {:fail, why, partly}),
+  def move(%{"state" => "purging"} = record, {:back, names}), do: {:ok, Map.put(record, "back", names)}
+  def move(%{"state" => "purging"} = record, :erasing), do: {:ok, Map.put(record, "erasing", true)}
+
+  def move(%{"state" => "purging"} = record, {:fail, why, how}) when how in [:partly, :unheard, :whole],
     do:
       {:ok,
        record
+       |> Map.drop(["back", "erasing"])
        |> Map.merge(%{"state" => "deleted", "why" => why, "retry" => now() + @retry})
-       |> Map.update("partly", partly, &(&1 or partly))}
+       |> Map.update("partly", how == :partly, &(&1 or how == :partly))
+       |> Map.update("unheard", how == :unheard, &(&1 or how == :unheard))}
 
   def move(%{"state" => "purging"} = record, :purged), do: {:ok, %{record | "state" => "purged"}}
   def move(nil, _event), do: {:error, "That isn't in Recently Deleted. `soft-delete list` lists what is."}
@@ -385,7 +398,8 @@ defmodule SoftDelete do
         []
 
       %{"state" => "purging", "since" => since} when since < stale ->
-        change(call, id, {:fail, "It was cut short.", true})
+        put_aside(record, id)
+        change(call, id, {:fail, "It was cut short.", if(record["erasing"], do: :partly, else: :whole)})
         []
 
       %{"state" => "deleted", "moved" => false, "at" => at} when at < stale ->
@@ -412,41 +426,85 @@ defmodule SoftDelete do
     end
   end
 
-  # Moves it to purging, purges what's aside, and then it's purged: its record goes. One that fails part way goes back
-  # to deleted, saying why, and is tried again the next day.
+  # Moves it to purging, puts each artifact back at its name and tells the plugins that hook `moved`, so the one that
+  # made it reads it once more, then erases it, and then it's purged: its record goes. One a plugin failed to answer for
+  # goes back to deleted the first time, and is purged the next day whatever they answer. One that fails part way goes
+  # back to deleted, saying why, and is tried again the next day.
   defp purge(call, id) do
     with {:ok, record} <- change(call, id, :purge) do
-      notify(call, record, "purging")
       if not record["moved"], do: moved_aside(record, id)
-      blobs = Enum.flat_map(Enum.with_index(record["artifacts"]), fn {_name, n} -> Bucket.list(aside(record, id, n)) end)
+      # Something new made at an artifact's name since keeps it: that one stays aside.
+      {:ok, record} = change(call, id, {:back, for(name <- record["artifacts"], not taken?(name), do: name)})
 
-      erased =
-        Enum.reduce_while(blobs, 0, fn blob, erased ->
-          case Bucket.remove(blob) do
-            :ok -> {:cont, erased + 1}
-            other -> {:halt, {erased, "#{blob} wasn't removed: #{inspect(other)}"}}
-          end
-        end)
+      for {name, n} <- Enum.with_index(record["artifacts"]), name in record["back"],
+          do: moved(Bucket.list(aside(record, id, n)), &(name <> "/" <> String.replace_prefix(&1, aside(record, id, n), "")))
 
-      case erased do
-        {erased, why} ->
-          failed(call, id, why, erased > 0)
+      unheard = notify(call, record, "purging")
 
-        _ ->
-          for name <- record["artifacts"], name =~ @plugin, do: Bucket.remove(listing(name))
-          # An uninstalled plugin goes for good with it, unless it went already.
-          with %{"name" => name} <- record["plugin"], do: Lifecycle.purge(record["owner"], name)
-          {:ok, record} = change(call, id, :purged)
-          gone(call, id, record)
-          record["artifacts"]
+      if unheard != %{} and !record["unheard"] do
+        put_aside(record, id)
+        why = Enum.map_join(unheard, "\n", fn {plugin, why} -> "#{plugin}: #{why}" end)
+        failed(call, id, "A plugin didn't answer as it was purged.\n#{why}", :unheard)
+      else
+        {:ok, record} = change(call, id, :erasing)
+        erase(call, id, record)
       end
     end
   rescue
-    error -> failed(call, id, Exception.message(error), true)
+    error ->
+      record = records(call)[id]
+
+      if record["state"] == "purging" do
+        try do
+          put_aside(record, id)
+        rescue
+          again -> Logger.error("soft-delete couldn't put #{id} aside again: #{Exception.message(again)}")
+        end
+
+        failed(call, id, Exception.message(error), if(record["erasing"], do: :partly, else: :whole))
+      else
+        {:error, Exception.message(error)}
+      end
   end
 
-  defp failed(call, id, why, partly) do
-    with {:ok, record} <- change(call, id, {:fail, why, partly}), do: notify(call, record, "deleted")
+  # Erases each artifact of an item, where it is: at its name, put back, or aside.
+  defp erase(call, id, record) do
+    blobs =
+      Enum.flat_map(Enum.with_index(record["artifacts"]), fn {name, n} ->
+        Bucket.list(if(name in record["back"], do: name <> "/", else: aside(record, id, n)))
+      end)
+
+    erased =
+      Enum.reduce_while(blobs, 0, fn blob, erased ->
+        case Bucket.remove(blob) do
+          :ok -> {:cont, erased + 1}
+          other -> {:halt, {erased, "#{blob} wasn't removed: #{inspect(other)}"}}
+        end
+      end)
+
+    case erased do
+      {_erased, why} ->
+        put_aside(record, id)
+        failed(call, id, why, :partly)
+
+      _ ->
+        for name <- record["artifacts"], name =~ @plugin, do: Bucket.remove(listing(name))
+        # An uninstalled plugin goes for good with it, unless it went already.
+        with %{"name" => name} <- record["plugin"], do: Lifecycle.purge(record["owner"], name)
+        {:ok, record} = change(call, id, :purged)
+        gone(call, id, record)
+        record["artifacts"]
+    end
+  end
+
+  # What of an item was put back at its names to be purged goes aside again, as it is while it's deleted.
+  defp put_aside(record, id) do
+    for {name, n} <- Enum.with_index(record["artifacts"]), name in (record["back"] || []),
+        do: moved(Bucket.list(name <> "/"), &(aside(record, id, n) <> String.replace_prefix(&1, name <> "/", "")))
+  end
+
+  defp failed(call, id, why, how) do
+    with {:ok, record} <- change(call, id, {:fail, why, how}), do: notify(call, record, "deleted")
     {:error, "It couldn't be deleted for good yet. It's tried again tomorrow.\n\n#{why}"}
   end
 
@@ -629,12 +687,22 @@ defmodule SoftDelete do
         {call.actor, call.subject}
       )
 
+  # Tells the plugins that hook `moved` of each artifact's move, for its owner, and gives why each that couldn't answer
+  # couldn't, by its name.
   defp notify(call, record, to) do
-    for name <- record["artifacts"] do
-      as = record["as"][name]
-      about = %{"artifact" => name, "to" => to}
-      Call.run_hook(call, "moved", if(to == "active" and as != name, do: Map.put(about, "as", as), else: about))
-    end
+    Enum.reduce(record["artifacts"], %{}, fn name, unheard ->
+      about =
+        cond do
+          to == "active" and record["as"][name] != name -> %{"as" => record["as"][name]}
+          to == "purging" -> %{"readable" => name in record["back"]}
+          true -> %{}
+        end
+
+      {:ok, _parts, failed} =
+        Hooks.collect("#{call.plugin}.moved", Map.merge(about, %{"artifact" => name, "to" => to}), {call.actor, record["owner"]})
+
+      Map.merge(unheard, failed)
+    end)
   end
 
   defp id, do: Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)

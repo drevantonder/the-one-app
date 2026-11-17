@@ -32,4 +32,5 @@ restored one is **active** again.
 A plugin deletes what someone asked it to delete with `OneCore.Call.tool(call, "soft-delete", "delete",
 %{"artifact" => name})`, never blob by blob, so it can be restored. One that keeps a list of what it made hooks into
 `soft-delete.moved`, the hook this plugin offers, which says each time one moved to another state, and keeps its
-list true from it.
+list true from it. On `purging` the item is at its name again, nothing erased yet, for the plugin that made it to read
+once more, as one does to revoke a token. A plugin that fails that hook holds the purge back a day, once.

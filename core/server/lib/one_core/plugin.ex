@@ -315,9 +315,16 @@ defmodule OneCore.Plugin do
   as One Core runs its own of that kind, for whoever the call runs for. Another plugin hooks into it by its full name,
   the plugin's name and the hook's, in its `hooks/0`, and before the offering plugin is installed it's never run:
 
-      def offers, do: [%{name: "moved", kind: :observe, description: "Something made for someone was deleted"}]
+      def offers, do: [%{name: "moved", kind: :collect, description: "Something made for someone was deleted"}]
       OneCore.Call.run_hook(call, "moved", %{"artifact" => name, "to" => "deleted"})   # in soft-delete
       def hooks, do: ["soft-delete.moved"]                                               # in git-repos
+
+  - `soft-delete.moved` says each move of something a plugin made through soft delete (deleted, purging, active
+    again, purged), and soft delete waits for every plugin's answer. On `purging`, before anything of it is erased,
+    it's at its name again, so the plugin that made it reads it once more as it always does, as one does to revoke a
+    token it holds; `readable` is false only where something new was made at its name since. A plugin that raises
+    or doesn't answer within ten seconds holds that purge back a day, once: the next day it's purged whatever it
+    answers, so no plugin keeps something someone deleted for ever.
 
   What of a plugin runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,

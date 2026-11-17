@@ -320,7 +320,7 @@ defmodule GitRepos do
     # It's heard where the repo was removed, and its list is kept by a server acting for whoever Git Repos is installed for.
     if not OneCore.Servers.here?(call.installed), do: Call.forward(call, call.installed)
     if name =~ @repo, do: indexed(name, to, about["as"] || name)
-    :ok
+    nil
   end
 
   @impl true
@@ -360,7 +360,7 @@ defmodule GitRepos do
         stored = JSON.decode!(data)
 
         # A repo restored while Git Repos wasn't installed wasn't heard of, so one marked removed is looked for.
-        if stored["removed"] && OneCore.Bucket.size(name <> "/repo.json") == :absent,
+        if stored["purging"] || (stored["removed"] && OneCore.Bucket.size(name <> "/repo.json") == :absent),
           do: [],
           else: [
             %{
@@ -858,8 +858,12 @@ defmodule GitRepos do
       stored = JSON.decode!(data)
 
       case to do
-        to when to in ["deleted", "purging"] ->
-          Artifact.replace(index(), key, JSON.encode!(Map.put_new(stored, "removed", now())), tag)
+        "deleted" ->
+          Artifact.replace(index(), key, JSON.encode!(stored |> Map.put_new("removed", now()) |> Map.delete("purging")), tag)
+
+        # It's at its name again while it's purged, and not listed.
+        "purging" ->
+          Artifact.replace(index(), key, JSON.encode!(stored |> Map.put_new("removed", now()) |> Map.put("purging", true)), tag)
 
         "active" ->
           Artifact.replace(index(), key, JSON.encode!(Map.delete(stored, "removed")), tag)
