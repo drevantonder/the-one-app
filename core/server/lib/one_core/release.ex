@@ -115,7 +115,11 @@ defmodule OneCore.Release do
   `starting`) and the `update_method` checking chose (`hot_load` or `restart`, `compare/2`), and `went_back`, why
   the last update didn't take, until one does.
   """
-  def status, do: Map.merge(@status, Application.get_env(:one_core, :status, %{}))
+  def status do
+    # A server that was running when this was hot loaded into it kept its status in the application's environment
+    # until it next restarts.
+    :persistent_term.get({__MODULE__, :status}, nil) || Map.merge(@status, Application.get_env(:one_core, :status, %{}))
+  end
 
   @doc """
   Keeps what changed of this server, `said`, as the program keeping it running says it, or as it stops. It's said in
@@ -127,7 +131,8 @@ defmodule OneCore.Release do
     now = Map.merge(was, Map.take(said, Map.keys(@status)))
 
     if now != was do
-      Application.put_env(:one_core, :status, now)
+      # Not the application's environment, which can't be changed while the server stops, when it says so.
+      :persistent_term.put({__MODULE__, :status}, now)
       Builds.say(Server.key())
       Servers.report()
 
