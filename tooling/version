@@ -13,13 +13,20 @@ set -e
 cd "$(dirname "$0")/.."
 # 0.15.0 is the commit before builds had versions.
 since=6ab2c6a02
-version=$(git log --reverse --format='%s%n%b%x1e' "$since..HEAD" | awk -v version=0.15.0 '
+# Commits marked breaking that weren't, read as what they are: main is shared, so a pushed commit's message can't be
+# changed.
+mismarked="4b6c917ff2581cc84a6fd3c81c40d5f713ff1360"
+version=$(git log --reverse --format='%H%n%s%n%b%x1e' "$since..HEAD" | awk -v version=0.15.0 -v mismarked="$mismarked" '
   BEGIN { RS = "\036"; split(version, v, "."); major = v[1]; minor = v[2]; patch = v[3] }
   {
     sub(/^\n+/, "")
+    hash = $0
+    sub(/\n.*/, "", hash)
+    sub(/^[^\n]*\n/, "")
     subject = $0
     sub(/\n.*/, "", subject)
-    if (subject ~ /^[a-z]+(\([^)]*\))?!:/ || $0 ~ /\nBREAKING[ -]CHANGE:/) {
+    if (index(mismarked, hash) > 0) sub(/!:/, ":", subject)
+    if (index(mismarked, hash) == 0 && (subject ~ /^[a-z]+(\([^)]*\))?!:/ || $0 ~ /\nBREAKING[ -]CHANGE:/)) {
       if (major == 0) minor++; else { major++; minor = 0 }
       patch = 0
     } else if (subject ~ /^feat(\([^)]*\))?:/) {

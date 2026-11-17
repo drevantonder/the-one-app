@@ -17,7 +17,8 @@ is that version with its commit's count and hash as build metadata, `0.15.2+2974
 bump but how commits are marked: only a change a part, plugin or agent using the platform must change for (a
 renamed field, tool or method with no alias, a new required param, a removed function plugins call) is marked `!`,
 never one inside the repo (tests, skills, tooling). One that wasn't is marked by a commit after it,
-`fix!: <what broke>`, before it's released.
+`fix!: <what broke>`, before it's released; one marked that wasn't breaking goes in `tooling/version`'s `mismarked`,
+before it's released.
 
 Exactly two rules hold at runtime:
 
