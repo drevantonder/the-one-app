@@ -2,6 +2,9 @@ defmodule Tally do
   @moduledoc "Notes installed one at a time to the plugin's database, for the tests that write and read one."
   @behaviour OneCore.Plugin
 
+  @impl true
+  def icon, do: "icon.svg"
+
   @schema ["create table notes (id integer primary key, note text not null)"]
 
   @impl true
