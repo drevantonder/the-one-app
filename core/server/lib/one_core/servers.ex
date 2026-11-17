@@ -107,42 +107,51 @@ defmodule OneCore.Servers do
   def name(key), do: cached({:name, key}, fn -> read("servers/#{key}/name", nil) end)
 
   @doc """
-  Whether the server whose key is `key` is on: `:on` while it's connected to the network's edge and up, `:restarting`
-  while it's stopping to start again, or starting, and isn't up yet (`restarting/1`), the time its machine was last on there,
-  in milliseconds since 1970, if it isn't, or `nil` where that isn't known: a network with no address, or a server
-  never seen. The relay at the address keeps it, and tells servers when one comes or goes (`seen_again/0`), so a
-  server that's known to be off isn't waited for, and one that's restarting is waited for only where it's the one
-  to ask (`back/1`).
+  Whether the server whose key is `key` is ready, as the relay at the network's address says of every server and
+  device: a map of whether it's `connected` there now, and if not when it was `last_seen`, in milliseconds since
+  1970, and of a server its `server_membership` and `server_daemon_status`, as it says them (`report/0`), and from
+  those `server_ready` and, where it isn't, `server_ready_reason`: `joining`, `starting`, `draining` or `stopped`.
+  `nil` where that isn't known: a network with no address, a relay that says none, or a key never seen. The relay
+  tells servers when one comes or goes (`presence_again/0`), so one that isn't ready is asked nothing, and one that's
+  starting or stopping is waited for only where it's the one to ask (`back/1`).
   """
-  def seen(key) do
+  def presence(key) do
     if at = Application.get_env(:one_core, :address) do
-      cached({:seen, key}, fn ->
+      cached({:presence, key}, fn ->
         path = "/relay/seen"
         response = Edge.send!(method: :get, url: at <> path, params: [keys: key], headers: Edge.signed(path, ""))
-        if response.status == 200, do: on(response.body[key]), else: nil
+        if response.status == 200, do: get_in(response.body, ["presence", key])
       end)
     end
   end
 
-  defp on("on"), do: :on
-  defp on("restarting"), do: :restarting
-  defp on(at), do: at
+  @doc "Whether the server whose key is `key` is ready (`presence/1`): `nil` where that isn't known."
+  def ready?(key), do: presence(key)["server_ready"]
 
   @doc """
-  What was kept of who's on is read again, once one of the network's servers came or went, and whoever waits for one
-  to be back (`back/1`) looks again.
+  What was kept of who's ready is read again, once one of the network's servers came or went, and whoever waits for
+  one to be back (`back/1`) looks again.
   """
-  def seen_again do
-    for {:seen, _key} = seen <- Cache.keys(__MODULE__), do: Cache.invalidate(__MODULE__, seen)
+  def presence_again do
+    for {:presence, _key} = presence <- Cache.keys(__MODULE__), do: Cache.invalidate(__MODULE__, presence)
 
     Registry.dispatch(OneCore.Waiting, :seen, fn waiting -> for {process, _} <- waiting, do: send(process, :seen) end)
     :ok
   end
 
   @doc """
-  The build the network's edge is, as its relay says, or `nil` where it says none or can't be reached. The relay
-  takes a server on a version before the edge's that doesn't talk with it (`OneCore.Builds.talk?/2`) for restarting
-  until it's updated.
+  Whether the server whose key is `key` is ready, as `presence/1` says, read again now. What was kept may be from
+  before it came back: what the relay told this server of it while this one wasn't listening, or what it read of it
+  while being told, is missed.
+  """
+  def presence_again(key) do
+    Cache.invalidate(__MODULE__, {:presence, key})
+    presence(key)
+  end
+
+  @doc """
+  The build the network's edge is, as its relay says, or `nil` where it says none or can't be reached. A call from
+  outside goes only to servers on a version that talks with it (`OneCore.Builds.talk?/2`).
   """
   def edge do
     if at = Application.get_env(:one_core, :address) do
@@ -155,66 +164,62 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  Says at the network's edge that this server is stopping to start again, or starting, and is up within `seconds`:
-  until it says it's up (`up/0`), or that's passed, the relay there says it's restarting, not off or on, so the
-  other servers ask it nothing and wait for it only where it's the one to ask. Where the edge can't be reached it's
-  only taken for off or on meanwhile, so that's no reason not to start. Each says the server's build, by which the
-  relay knows whether it talks with the edge.
+  Says at the network's edge this server's `server_membership` and `server_daemon_status`
+  (`OneCore.Release.status/0`), and its build, by which the relay knows whether it talks with the edge. It's ready
+  once it's active and running. Where the edge can't be reached, it's taken as what it last said meanwhile, so
+  that's no reason not to go on.
   """
-  def restarting(seconds), do: say_seen(%{restarting: seconds, until: "up"}, "restarting")
-  @doc "Says at the network's edge that this server is up (`OneCore.Server.up?/0`), and its plugins started: it's on."
-  def up, do: say_seen(%{up: true}, "up")
-
-  defp say_seen(said, what) do
+  def report do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
-      body = JSON.encode!(Map.put(said, :version, Builds.build()))
+      said = Map.take(OneCore.Release.status(), ["server_membership", "server_daemon_status"])
+      body = JSON.encode!(Map.put(said, "version", Builds.build()))
       response = Edge.send!(method: :post, url: at <> path, body: body, headers: Edge.signed(path, body))
 
       if response.status != 204,
-        do: Logger.warning("The edge didn't take that this server is #{what}: #{inspect(response.body)}")
+        do: Logger.warning("The edge didn't take this server's #{body}: #{inspect(response.body)}")
     end
 
     :ok
   rescue
-    error in Edge.Unreachable -> Logger.warning("Couldn't say this server is #{what}: #{Exception.message(error)}")
+    error in Edge.Unreachable -> Logger.warning("Couldn't say this server's status: #{Exception.message(error)}")
   end
 
   # How long a server that's stopping to start again, to update, takes to be back, in milliseconds: it finishes what
   # it took, then starts again, and connects to the edge as it does. Well within what an MCP client waits for an
-  # answer, 30 seconds. One that isn't back by then may be trying a build that doesn't start, which takes minutes.
+  # answer, 30 seconds. One that isn't back by then may be verifying a build that doesn't start, which takes minutes.
   @back 20_000
 
   @doc """
-  Waits for one of the servers whose keys are `keys` that's restarting to be back, for up to `@back`: where none of
-  the others answered, and what was asked is that one's to answer, as a service only it runs. Gives its key, or
-  `nil` if none is back by then, or none of them was restarting.
+  Waits for one of the servers whose keys are `keys` that's starting or stopping to be ready, for up to `@back`:
+  where none of the others answered, and what was asked is that one's to answer, as a service only it runs. Gives
+  its key, or `nil` if none is ready by then, or none of them was starting or stopping.
   """
   def back(keys) do
-    restarting = Enum.filter(keys, &(seen(&1) == :restarting))
+    coming = Enum.filter(keys, &(presence(&1)["server_daemon_status"] in ["starting", "stopping"]))
 
-    if restarting != [] do
+    if coming != [] do
       Registry.register(OneCore.Waiting, :seen, nil)
-      names = Enum.map_join(restarting, " or ", &(name(&1) || "a server"))
+      names = Enum.map_join(coming, " or ", &(name(&1) || "a server"))
       OneCore.Call.State.working(OneCore.Call.State.id(), :waiting, "Waiting for #{names} to start again")
 
       try do
-        await(restarting, System.monotonic_time(:millisecond) + @back)
+        await(coming, System.monotonic_time(:millisecond) + @back)
       after
         Registry.unregister(OneCore.Waiting, :seen)
       end
     end
   end
 
-  # Looks after each time a server came or went, until one of `keys` is on, or `until`, and then once more at the
+  # Looks after each time a server came or went, until one of `keys` is ready, or `until`, and then once more at the
   # edge: one that said it may take less than it did is back without having come or gone.
   defp await(keys, until) do
-    case Enum.find(keys, &(seen(&1) == :on)) do
+    case Enum.find(keys, &ready?/1) do
       nil ->
         receive do
           :seen -> await(keys, until)
         after
-          max(until - System.monotonic_time(:millisecond), 0) -> Enum.find(keys, &(seen_again(&1) == :on))
+          max(until - System.monotonic_time(:millisecond), 0) -> Enum.find(keys, &presence_again(&1)["server_ready"])
         end
 
       key ->
@@ -230,16 +235,6 @@ defmodule OneCore.Servers do
 
   @doc "Which build the server whose key is `key` runs is read again: it refused what it was asked for being on another."
   def build_again(key), do: Cache.invalidate(__MODULE__, {:build, key})
-
-  @doc """
-  Whether the server whose key is `key` is on, as `seen/1` says, read again now. What was kept may be from before
-  it came back: what the relay told this server of it while this one wasn't listening, or what it read of it while
-  being told, is missed.
-  """
-  def seen_again(key) do
-    Cache.invalidate(__MODULE__, {:seen, key})
-    seen(key)
-  end
 
   @doc "How long ago `at`, in milliseconds since 1970, was, as a person would say it short: `2 min ago`."
   def ago(at) do
@@ -310,7 +305,8 @@ defmodule OneCore.Servers do
 
   @doc """
   Takes a server off `owner`'s list, which only this server, acting for them, may: it no longer acts for them,
-  and the presigner hands it nothing of theirs. The network keeps a server, since its list is only ever begun once.
+  and the presigner hands it nothing of theirs. One that isn't on it is off it already, as a server leaving that
+  stopped part-way asks again. The network keeps a server, since its list is only ever begun once.
   """
   def remove(key, owner) do
     blob = "#{owner}/servers"
@@ -324,7 +320,7 @@ defmodule OneCore.Servers do
         true -> remove(key, owner)
       end
     else
-      _ -> {:error, "That server isn't on #{owner}'s list"}
+      _ -> :ok
     end
   end
 

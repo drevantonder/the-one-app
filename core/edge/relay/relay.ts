@@ -13,16 +13,17 @@
 // here has to say: a server holds one more connection here for those (`/relay/outside`), since nothing else at the
 // edge holds one.
 //
-// And it knows who's on: a server or a device is on while it's connected here, through any run of its client, and
-// otherwise was last seen when its last connection ended, which the Durable Object keeps. A connection that says
-// nothing for longer than iroh's pings allow has ended, as a machine that sleeps or loses its network says nothing.
-// A server that stops to start again, as it does to update, says so first, and so does one as it starts: it's
-// restarting until it says it's up, once its plugins have started and it isn't a build still being tried.
-// Servers are told when one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
+// And it knows who's here: a server or a device is connected while it's connected here, through any run of its
+// client, and otherwise was last seen when its last connection ended, which the Durable Object keeps. A connection
+// that says nothing for longer than iroh's pings allow has ended, as a machine that sleeps or loses its network says
+// nothing. A server says what it is as that changes (`OneCore.Release`): its `server_membership`, whether it's one of
+// the network's servers, and its `server_daemon_status`, whether its program is starting, running or stopping. It's
+// ready once it's active and running, and connected, and only a ready server is sent calls. Servers are told when
+// one of them comes or goes (`notifications/one/seen`), and ask (`/relay/seen`).
 //
-// Parts of the platform talk only on the same 0.minor (`OneCore.Builds.talk?/2`): a server says its build as it
-// says it's restarting or up, and one on a version before the edge's that doesn't talk with it is restarting until
-// it's updated. A call from outside goes only to a server that talks with the edge, and says the edge's build.
+// Parts of the platform talk only on the same 0.minor (`OneCore.Builds.talk?/2`): a server says its build as it says
+// what it is. A call from outside goes only to a server that talks with the edge, and says the edge's build: a rule
+// apart from being ready.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
@@ -76,22 +77,39 @@ const before = (a?: string, b?: string) => {
 /** A W3C `traceparent`: its trace and span. */
 const TRACE = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
 
-/** The longest a server says it may take to be back once it's restarting: a build it tries has three minutes to start. */
-const RESTART = 600;
+type ServerMembership = "inactive" | "joining" | "active" | "leaving";
+type ServerDaemonStatus = "starting" | "running" | "stopping" | "stopped";
+type ServerReadyReason = "joining" | "starting" | "draining" | "stopped";
+const MEMBERSHIPS: ServerMembership[] = ["joining", "active", "leaving"];
+const SAID: ServerDaemonStatus[] = ["starting", "running", "stopping"];
 
 /**
- * Who's on: `"on"` for one connected now, `"restarting"` for a server that said it's stopping to start again, or
- * starting, and isn't up yet, when the last one that was left (ms since 1970), or `null` for one never seen.
+ * How long a server that isn't connected is still starting or stopping as it said, in milliseconds: one says it's
+ * starting just before it connects, and one stopping to start again, to take an update, is starting again within a
+ * minute. Past that it's stopped.
  */
-type Seen = "on" | "restarting" | number | null;
+const STARTING = 60_000;
+const STOPPING = 60_000;
+
+/** What a server last said it is (`/relay/seen`), and when. */
+interface ServerStatus {
+  server_membership: ServerMembership;
+  server_daemon_status: ServerDaemonStatus;
+  at: number;
+}
 
 /**
- * A server that's restarting: until when at most, and whether it's back only once it says it's up (`up`), or once it
- * connects again, as a server from before servers said they're up is.
+ * Whether a server or a device is here: `connected` now, or when it was `last_seen` (ms since 1970). A server's
+ * `server_membership` and `server_daemon_status` too, the daemon stopped once it's gone, and from those whether it's
+ * `server_ready`, active and running, or the reason it isn't.
  */
-interface Restarting {
-  until: number;
-  up: boolean;
+interface Presence {
+  connected: boolean;
+  last_seen?: number;
+  server_membership?: ServerMembership;
+  server_daemon_status?: ServerDaemonStatus;
+  server_ready?: boolean;
+  server_ready_reason?: ServerReadyReason;
 }
 
 /** An endpoint joined to the relay: the connection its datagrams are passed over, and when its token expires. */
@@ -212,8 +230,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const traceparent = `00-${TRACE.exec(parent ?? "")?.[1] ?? hex.encode(crypto.getRandomValues(new Uint8Array(16)))}-${hex.encode(crypto.getRandomValues(new Uint8Array(8)))}-01`;
     message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent, version: this.env.VERSION } } });
 
-    // Only a server that talks with the edge is asked, and one that's restarting isn't up yet, so it's asked only if
-    // every one is.
+    // Only a server that talks with the edge is asked, and only one that's ready, or isn't known not to be.
     const versions = await this.relay().versions(servers);
     const talking = servers.filter((server) => !versions[server] || talk(versions[server], this.env.VERSION));
     if (!talking.length) {
@@ -221,10 +238,13 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length }, error } }));
       return null;
     }
-    servers = talking;
-    const seen = await this.seen(servers);
-    const on = servers.filter((server) => seen[server] !== "restarting");
-    if (on.length) servers = on;
+    const presence = await this.presence(talking);
+    servers = talking.filter((server) => presence[server]?.server_ready !== false);
+    if (!servers.length) {
+      const error = `None of its ${talking.length} servers is ready: ${talking.map((server) => `${server.slice(0, 8)} ${presence[server]?.server_ready_reason}`).join(", ")}`;
+      console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": talking.length }, error } }));
+      return null;
+    }
     const tries = servers.map((server) => reach(this.relay(), server));
     const reached = await Promise.any(tries).catch(() => null);
     for (const tried of tries) tried.then((other) => other !== reached && other.close(), () => {});
@@ -246,21 +266,16 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     await this.relay().fetch("https://relay/notify", { method: "POST", body: message });
   }
 
-  /**
-   * Who's on, of `keys`, servers' and devices': `"on"` for one connected here now, `"restarting"` for a server
-   * that's stopping to start again, or starting, and isn't up yet, when the last one that was left (milliseconds
-   * since 1970), or `null` for one never seen.
-   */
-  seen(keys: string[]): Promise<Record<string, Seen>> {
-    return this.relay().seen(keys);
+  /** Whether each of `keys`, servers' and devices', is here (`Presence`), or `null` for one never seen. */
+  presence(keys: string[]): Promise<Record<string, Presence | null>> {
+    return this.relay().presence(keys);
   }
 
   /**
-   * A server or a device of the network's asks who's on, of the keys it names: `?keys=<key>,<key>`, and is told the
-   * edge's build as `one-version`. A server says it's stopping to start again, or starting, with a POST of
-   * `{"restarting": <seconds>, "until": "up", "version": <its build>}`, the most it may take to be back, and that it's
-   * up with `{"up": true, "version": <its build>}`. One that leaves out `"until": "up"`, from before servers said
-   * they're up, is back once it connects again.
+   * A server or a device of the network's asks who's here, of the keys it names: `?keys=<key>,<key>`, and is told
+   * `{"presence": {<key>: <Presence>}}` and the edge's build as `one-version`. A server says what it is with a POST of
+   * `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>}`, as that changes. One that
+   * says neither, a server from before they said them, is taken as before: active and running while it's connected.
    */
   async handleSeen(request: Request, url: URL) {
     const body = request.method === "POST" ? await request.text() : "";
@@ -268,24 +283,22 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const admitted = key && (await this.env.NETWORK.admits(key, request.headers.get("one-token")));
     if (!admitted) return refuse(403, "This network doesn't know you");
     if (request.method === "POST") {
-      const said = JSON.parse(body || "{}") as { restarting?: unknown; until?: unknown; up?: unknown; version?: unknown };
-      if (admitted.until !== undefined) return refuse(403, "Only a server says it's restarting or up");
+      if (admitted.until !== undefined) return refuse(403, "Only a server says what it is");
+      const said = JSON.parse(body || "{}") as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown };
       const version = typeof said.version === "string" ? said.version : undefined;
-      if (said.up === true) {
-        await this.relay().up(key, version);
-        if (!talk(version, this.env.VERSION) && before(version, this.env.VERSION)) {
-          const error = `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, before the edge's ${this.env.VERSION}, so it's restarting until it's updated`;
-          console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes: { "one.server": key.slice(0, 8) }, error } }));
-        }
-      } else if (typeof said.restarting === "number" && said.restarting > 0 && said.restarting <= RESTART) {
-        await this.relay().restarting(key, said.restarting, said.until === "up", version);
-      } else {
-        return refuse(400, `A server says it's restarting with {"restarting": <seconds>, "until": "up"}, up to ${RESTART}, or {"up": true}`);
-      }
+      const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
+        ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
+        : undefined;
+      const now = await this.relay().report(key, version, status);
+      const behind = !talk(version, this.env.VERSION) && before(version, this.env.VERSION);
+      const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
+      const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
+      console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes, error } }));
+      if (!status) return refuse(400, `A server says what it is with {"server_membership": ${MEMBERSHIPS.join("|")}, "server_daemon_status": ${SAID.join("|")}}`);
       return new Response(null, { status: 204 });
     }
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
-    return Response.json(await this.seen(keys.slice(0, 1000)), { headers: { "one-version": this.env.VERSION } });
+    return Response.json({ presence: await this.presence(keys.slice(0, 1000)) }, { headers: { "one-version": this.env.VERSION } });
   }
 
   /** A network has one relay. */
@@ -334,9 +347,9 @@ export class Relay extends DurableObject<RelayEnv> {
 
   /**
    * An endpoint that proved its key is joined: what it sends another comes over this connection, and what another
-   * sends it goes back over it. One that connects again has left its old connection behind. It's on for its
-   * `device`, and a `server` that comes is told to the others: one that was restarting is back, unless it says when
-   * it's up.
+   * sends it goes back over it. One that connects again has left its old connection behind. It's connected for its
+   * `device`, and a `server` that comes is told to the others. One that has never said what it is, from before
+   * servers said it, is active and running from now, as it was taken before.
    */
   async endpoint(params: URLSearchParams) {
     const [key, device, server] = [params.get("key"), params.get("device"), params.has("server")];
@@ -345,27 +358,21 @@ export class Relay extends DurableObject<RelayEnv> {
     this.ctx.acceptWebSocket(ours, [`endpoint ${key}`, `on ${device}`]);
     ours.serializeAttachment({ key, device, server });
     if (server) {
-      if (!(await this.ctx.storage.get<Restarting>(`restarting ${key}`))?.up) await this.ctx.storage.delete(`restarting ${key}`);
+      if (!(await this.ctx.storage.get(`presence ${key}`)))
+        await this.ctx.storage.put(`presence ${key}`, { server_membership: "active", server_daemon_status: "running", at: Date.now() } satisfies ServerStatus);
       this.notify(SEEN);
     }
     return new Response(null, { status: 101, webSocket: theirs });
   }
 
   /**
-   * A server says it's stopping to start again, or starting, and may take up to `seconds` to be back: until it says
-   * it's up, or with `up` false until it connects again, or until that's passed, it's restarting, while it finishes
-   * what it took too. The other servers are told. It says its build, `version`, or none from before builds had them.
+   * A server says what it is, `status`, and its build, `version`, or none from before builds had them. The other
+   * servers are told. Gives its presence now.
    */
-  async restarting(key: string, seconds: number, up: boolean, version = "0.15.0") {
-    await this.ctx.storage.put({ [`restarting ${key}`]: { until: Date.now() + seconds * 1000, up } satisfies Restarting, [`version ${key}`]: version });
-    this.notify(SEEN);
-  }
-
-  /** A server says it's up: it's on while it's connected here. The other servers are told. It says its build, as `restarting` does. */
-  async up(key: string, version = "0.15.0") {
-    await this.ctx.storage.delete(`restarting ${key}`);
-    await this.ctx.storage.put(`version ${key}`, version);
-    this.notify(SEEN);
+  async report(key: string, version = "0.15.0", status?: ServerStatus) {
+    await this.ctx.storage.put({ [`version ${key}`]: version, ...(status && { [`presence ${key}`]: status }) });
+    if (status) this.notify(SEEN);
+    return (await this.presence([key]))[key];
   }
 
   /** The build each of `keys` that's a server said it is, by its key, leaving out one that never said. */
@@ -373,20 +380,29 @@ export class Relay extends DurableObject<RelayEnv> {
     return Object.fromEntries([...(await this.ctx.storage.get<string>(keys.map((key) => `version ${key}`)))].map(([at, version]) => [at.slice(8), version]));
   }
 
-  /**
-   * Who's on, of `keys`, as the relay's `seen` says. A server on a version before the edge's that doesn't talk with
-   * it is restarting, until it's updated.
-   */
-  async seen(keys: string[]): Promise<Record<string, Seen>> {
-    const [left, restarting, versions] = await Promise.all([
+  /** Whether each of `keys` is here, as the relay's `presence` says. */
+  async presence(keys: string[]): Promise<Record<string, Presence | null>> {
+    const [left, said] = await Promise.all([
       this.ctx.storage.get<number>(keys.map((key) => `seen ${key}`)),
-      this.ctx.storage.get<Restarting>(keys.map((key) => `restarting ${key}`)),
-      this.versions(keys),
+      this.ctx.storage.get<ServerStatus>(keys.map((key) => `presence ${key}`)),
     ]);
-    const behind = (key: string) => key in versions && !talk(versions[key], this.env.VERSION) && before(versions[key], this.env.VERSION);
-    const seen = (key: string): Seen =>
-      (restarting.get(`restarting ${key}`)?.until ?? 0) > Date.now() || behind(key) ? "restarting" : this.on(key) ? "on" : (left.get(`seen ${key}`) ?? null);
-    return Object.fromEntries(keys.map((key) => [key, seen(key)]));
+    const presence = (key: string): Presence | null => {
+      const [connected, last_seen, status] = [this.on(key), left.get(`seen ${key}`), said.get(`presence ${key}`)];
+      if (!connected && last_seen === undefined && !status) return null;
+      const here: Presence = { connected, ...(!connected && last_seen !== undefined && { last_seen }) };
+      if (!status) return here;
+      const { server_membership, server_daemon_status: daemon, at } = status;
+      const lasts = daemon === "starting" ? STARTING : daemon === "stopping" ? STOPPING : 0;
+      const server_daemon_status = connected || Date.now() - at < lasts ? daemon : "stopped";
+      const server_ready = server_membership === "active" && server_daemon_status === "running";
+      const server_ready_reason: ServerReadyReason | undefined = server_ready ? undefined
+        : server_daemon_status === "stopped" ? "stopped"
+        : server_membership === "joining" ? "joining"
+        : server_membership === "leaving" || server_daemon_status === "stopping" ? "draining"
+        : "starting";
+      return { ...here, server_membership, server_daemon_status, server_ready, ...(server_ready_reason && { server_ready_reason }) };
+    };
+    return Object.fromEntries(keys.map((key) => [key, presence(key)]));
   }
 
   /** Whether `device` has a connection here, other than `leaving`. */

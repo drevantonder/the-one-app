@@ -25,8 +25,9 @@ them: they hold this device's token.
 
 ## Mid-update or broken?
 
-`one builds` lists each server with its `build`, `seen` (`"on"`, `"restarting"`, or when it was last seen) and,
-while an update is under way, its `update` stage: `downloading`, `restarting` (it hands its work to another and
-stops), then `starting` on the new build, and none once it's kept. If the new build doesn't start and answer, it goes
-back to the old one by itself and says why in `went_back`: read its log, not the network's. A server neither `on`
-nor coming back after a few minutes is broken; say so, and don't release over it.
+`one builds` lists each server with its `build`, whether it's `server_ready` (`server_membership` active and
+`server_daemon_status` running) or its `server_ready_reason` (`joining`, `starting`, `draining`, or `stopped` with
+`last_seen`), and its `server_update_status`: `downloading`, then `verifying` while the new build and `one` start in
+its place (it hands its work to another and stops), and `up_to_date` once they're kept. If they don't start and
+answer, it goes back to the pair before by itself and says why in `went_back`: read its log, not the network's. A
+server neither ready nor coming back after a few minutes is broken; say so, and don't release over it.

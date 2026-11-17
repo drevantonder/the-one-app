@@ -33,7 +33,7 @@ declare global {
       };
       RELAY: {
         notify(message: string): Promise<void>;
-        seen(keys: string[]): Promise<Record<string, "on" | number | null>>;
+        presence(keys: string[]): Promise<Record<string, { connected: boolean; last_seen?: number } | null>>;
       };
     }
   }
@@ -453,9 +453,12 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, ...abo
       internalAdapter.listSessions(user.id),
       adapter.findMany<{ id: string; name?: string; createdAt: Date }>({ model: "passkey", where: mine }),
     ]);
-    // An app is on while it's connected to the relay, which says when it was last seen otherwise.
-    const seen = await env.RELAY.seen(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
-    const when = (id: string) => (seen[id] === "on" ? { seen: "on" } : seen[id] ? { seen: new Date(seen[id]) } : {});
+    // Whether an app is connected to the relay, which says when it was last seen otherwise.
+    const presence = await env.RELAY.presence(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
+    const when = (id: string) => {
+      const here = presence[id];
+      return here ? { connected: here.connected, ...(here.last_seen && { last_seen: new Date(here.last_seen) }) } : {};
+    };
     return {
       devices: [
         ...devices.map(({ id, kind, name, createdAt }) => ({ id, kind, name, added: createdAt, ...when(id) })),

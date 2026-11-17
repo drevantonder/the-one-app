@@ -39,35 +39,26 @@ defmodule OneCore.Server do
   def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
 
   @doc """
-  Whether this server is up: reached by its key, and not stopping. A build being tried isn't up until it has
-  answered by its key, which the program keeping it running says by ending its `starting` stage
-  (`OneCore.Release`), and a server stopping, to start again or for good, isn't up any more. One that isn't up
-  takes on nothing that others then go to it for, such as a database's lease or building every app for them
-  (`OneCore.Plugins.Deploy.rebuild/0`): it still runs what it's asked, and asks for the rest.
+  Whether this server is ready: it's active, one of its network's servers, and running, which a build starting is
+  once it has answered by its key, as the program keeping it running says (`OneCore.Release`). One that's joining,
+  leaving or stopping isn't. One that isn't ready takes on nothing that others then go to it for, such as a
+  database's lease or building every app for them (`OneCore.Plugins.Deploy.rebuild/0`): it still runs what it's
+  asked, and asks for the rest.
   """
-  def up? do
-    OneCore.Builds.update() not in ["starting", "restarting"] and not Application.get_env(:one_core, :stopping, false)
-  end
+  def up?, do: ready?(OneCore.Release.status())
 
-  @doc "Returns once this server is up (`up?/0`). A server that's stopping isn't up again."
-  def await_up do
-    Registry.register(OneCore.Waiting, :update, nil)
-    awaiting_up()
-  after
-    Registry.unregister(OneCore.Waiting, :update)
-  end
+  defp ready?(status),
+    do: status["server_membership"] == "active" and status["server_daemon_status"] == "running"
 
-  defp awaiting_up do
-    if not up?(), do: receive(do: ({:update, _stage} -> awaiting_up()))
-    :ok
-  end
+  @doc "Returns once this server is ready (`up?/0`)."
+  def await_up, do: OneCore.Release.await(&ready?/1)
 
   @doc "The JSON-RPC error a server answers a call that was passed on to it and that it would pass on in turn."
   def forwarding_loop, do: -32001
 
   @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
-  `:unreachable` if it couldn't be reached, is known to be off or restarting, or is on a version before this
+  `:unreachable` if it couldn't be reached, isn't ready, or is on a version before this
   server's that doesn't talk with it (`OneCore.Builds.talk?/2`), so it was asked nothing; or `:stopped` if it stopped
   answering after it was asked, so it may have done what was asked. One on a newer version that doesn't talk with this
   server refuses, saying this one is behind.
@@ -77,8 +68,9 @@ defmodule OneCore.Server do
   each server in turn, a server asks only those that talk with it: one behind is skipped, as if it were off, and one
   ahead refuses what this one asks.
 
-  With `restarting: true`, one that's restarting is asked too, for what only it can answer: a server that's
-  starting answers once its plugins have, and a build being tried is up only once it has answered by its key.
+  Only a server that's ready (`OneCore.Servers.presence/1`), or isn't known not to be, is asked. With `ready: :any`
+  one that isn't is asked too, unless it's stopped, for what only it can answer: a server that's starting answers
+  once its plugins have, and is ready only once it has answered by its key.
   """
   def request(server, method, params, opts \\ []) do
     # A call that's passed on is one trace on both servers. It asks for MCP's progress notifications, which are how
@@ -90,9 +82,11 @@ defmodule OneCore.Server do
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
     message = JSON.encode!(%{jsonrpc: "2.0", id: id, method: method, params: params})
 
-    asked = if opts[:restarting], do: [:on, :restarting, nil], else: [:on, nil]
+    asked? = fn presence ->
+      presence["server_ready"] != false or (opts[:ready] == :any and presence["server_daemon_status"] != "stopped")
+    end
 
-    with true <- Servers.seen(server) in asked or Servers.seen_again(server) in asked or :unreachable,
+    with true <- asked?.(Servers.presence(server)) or asked?.(Servers.presence_again(server)) or :unreachable,
          {:ok, response} <- passed(method, server, id, fn -> ask(server, message, State.answering()) end) do
       case JSON.decode(response) do
         {:ok, %{"result" => result}} -> {:ok, result}
@@ -138,17 +132,17 @@ defmodule OneCore.Server do
 
   @doc "What whoever asked is told of the server `server` that didn't answer `request/3`, by its machine's name."
   def error_message(:unreachable, server) do
-    seen = Servers.seen(server)
+    presence = Servers.presence(server) || %{}
 
     cond do
       not Builds.talk?(Servers.build(server), Builds.build()) ->
         "#{named(server)} is on #{Servers.build(server)} and #{named(key())} on #{Builds.build()}, so it's asked nothing until it's updated"
 
-      seen == :restarting ->
-        "#{named(server)} is restarting"
+      presence["last_seen"] ->
+        "#{named(server)} was last seen #{Servers.ago(presence["last_seen"])}"
 
-      is_integer(seen) ->
-        "#{named(server)} was last seen #{Servers.ago(seen)}"
+      why = presence["server_ready_reason"] ->
+        "#{named(server)} isn't ready: it's #{why}"
 
       true ->
         "#{named(server)} isn't answering"

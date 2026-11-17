@@ -1,17 +1,13 @@
 defmodule OneCore.Application do
   @moduledoc false
   use Application
-  alias OneCore.{Iroh, Jobs, Plugins, Server, Servers, Services}
+  alias OneCore.{Iroh, Jobs, Plugins, Release, Server, Servers, Services}
   alias OneCore.Plugins.Deploy
 
   # A server is started for its owner, its `:owner` setting: a user, a group or the network. One that isn't on
   # their list doesn't start: `{:not_joined, key}` says so, with its key. Once it's up (`OneCore.Server.up?/0`), one
   # server builds again the apps built against another UI library than the one it ships with, for everyone
   # (`OneCore.Plugins.Deploy.rebuild/0`).
-
-  # How long a server that's starting may take to be up, in seconds, after which the edge takes it for on once it's
-  # connected: a build being tried has three minutes to answer by its key, after its plugins have started.
-  @up_within 300
 
   @impl true
   def start(_type, _args) do
@@ -29,7 +25,7 @@ defmodule OneCore.Application do
       Deploy.table()
 
       # `OneCore.Waiting` is who waits for something to happen, by what: `:seen`, another server coming or going
-      # (`OneCore.Servers.back/1`), and `:update`, this one's update moving on (`OneCore.Builds.await_update/1`).
+      # (`OneCore.Servers.back/1`), and `:status`, what this one is changing (`OneCore.Release.await/1`).
       children = [
         {Registry, keys: :duplicate, name: OneCore.Waiting},
         {Task.Supervisor, name: OneCore.Asks},
@@ -40,10 +36,10 @@ defmodule OneCore.Application do
         OneCore.Plugins.Lifecycle
       ]
 
-      # It's restarting at the network's edge from before it's reached there until it's up, its plugins started, so
-      # nobody asks it what it would answer only once they have: another server's lease it held before it stopped
-      # among them.
-      Servers.restarting(@up_within)
+      # It's starting at the network's edge from before it's reached there until it's ready, its plugins started
+      # and answering by its key, so nobody asks it what it would answer only once they have: another server's lease
+      # it held before it stopped among them.
+      Servers.report()
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do
@@ -52,10 +48,10 @@ defmodule OneCore.Application do
           Deploy.rebuild()
         end
 
+        # A server nothing keeps running, as a network being built runs one, has nothing to answer by its key to.
         up = fn ->
           Plugins.started()
-          Server.await_up()
-          Servers.up()
+          if not Application.get_env(:one_core, :installed, false), do: Release.told(%{"server_daemon_status" => "running"})
         end
 
         Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, rebuild}, id: :rebuild))
@@ -67,13 +63,13 @@ defmodule OneCore.Application do
     end
   end
 
-  # A server that's stopping, as a system stops one with SIGTERM, first takes nothing new, so whoever asks it asks
-  # another, and answers what it took already, before anything of it stops. That's within the time a system gives
-  # a program to stop: launchd gives 20 s. It isn't up from now on (`OneCore.Server.up?/0`), so what it answers
-  # meanwhile takes no lease it would leave behind.
+  # A server that's stopping, as a system stops one with SIGTERM, drains: it says it's stopping, so it isn't ready
+  # and the network sends it nothing new, then takes nothing new, so whoever asks it asks another, and the leases it
+  # holds are taken by whoever asks for them next, and it answers what it took already, before anything of it stops.
+  # That's within the time the program keeping it running gives it to stop (`STOP`).
   @impl true
   def prep_stop(state) do
-    Application.put_env(:one_core, :stopping, true)
+    Release.told(%{"server_daemon_status" => "stopping"})
     Server.close(:timer.seconds(15))
     state
   end

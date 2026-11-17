@@ -126,7 +126,8 @@ defmodule SignIn do
                   kind: %{type: "string", description: "app, assistant or browser"},
                   name: %{type: "string"},
                   added: %{type: "string", description: "When, ISO 8601"},
-                  seen: %{type: "string", description: "on, or when an app was last seen, ISO 8601"}
+                  connected: %{type: "boolean", description: "Whether an app is connected now"},
+                  last_seen: %{type: "string", description: "When an app that isn't connected was last, ISO 8601"}
                 },
                 required: ["id", "kind", "name", "added"]
               }

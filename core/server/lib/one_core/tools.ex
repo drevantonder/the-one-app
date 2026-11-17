@@ -65,12 +65,12 @@ defmodule OneCore.Tools do
     required: ["build", "sha256", "size", "link"]
   }
 
-  @update %{
-    type: ["string", "null"],
-    enum: ["downloading", "restarting", "starting", nil],
+  @server_update_status %{
+    type: "string",
+    enum: ["up_to_date", "downloading", "verifying"],
     description:
-      "Where an update of it is: downloading the latest build, restarting to run it, or starting it, which is " <>
-        "kept once it answers and otherwise left for the one before. Nothing while none is under way"
+      "Where an update of it is: up_to_date, downloading the latest build and program while it answers on, or " <>
+        "verifying them by starting them in its place, kept once they answer and otherwise gone back from"
   }
 
   @acts_for %{
@@ -542,9 +542,9 @@ defmodule OneCore.Tools do
       name: "builds",
       read_only: true,
       description: """
-      Lists the build each of your servers runs, with what its machine is called and whether it's on, and the
-      build each of your devices last said it is, and the latest for each kind of machine, so it says whether
-      everything is on the same build.
+      Lists the build each of your servers runs, with what its machine is called and whether it's ready: active
+      (`server_membership`) and running (`server_daemon_status`), or why not; and the build each of your devices
+      last said it is, and the latest for each kind of machine, so it says whether everything is on the same build.
       A build is the version of the commit it was built from, Semantic Versioning's, with its commit's count and
       hash as build metadata: 0.15.2+2974.febd37350abc. Servers, the edge and clients talk only on the same 0.minor:
       `why` says what's on one that doesn't. With `server`, that server answers, saying its own.
@@ -568,19 +568,34 @@ defmodule OneCore.Tools do
                 server: %{type: "string", description: "Its key"},
                 name: %{type: ["string", "null"], description: "What its machine is called"},
                 build: %{type: "string"},
-                seen: %{
-                  type: ["string", "integer", "null"],
-                  description:
-                    "\"on\", \"restarting\" while it stops to start again or starts, until it's up, or when it was last on, in milliseconds since 1970"
+                server_membership: %{
+                  type: "string",
+                  enum: ["inactive", "joining", "active", "leaving"],
+                  description: "Whether it's one of the network's servers: joining until it answers by its key, and leaving while it drains"
+                },
+                server_daemon_status: %{
+                  type: "string",
+                  enum: ["starting", "running", "stopping", "stopped"],
+                  description: "Its program, which its machine keeps running: starting until it answers by its key"
+                },
+                server_ready: %{type: "boolean", description: "Whether it's sent calls: it's active and running"},
+                server_ready_reason: %{
+                  type: ["string", "null"],
+                  enum: ["joining", "starting", "draining", "stopped", nil],
+                  description: "Why it isn't ready"
+                },
+                last_seen: %{
+                  type: ["integer", "null"],
+                  description: "When it was last connected, in milliseconds since 1970, if it isn't now"
                 },
                 why: %{
                   type: "string",
                   description: "Why it doesn't talk with the server that answered or the edge, being on another 0.minor"
                 },
-                update: @update,
+                server_update_status: @server_update_status,
                 went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
               },
-              required: ["server", "name", "seen"]
+              required: ["server", "name"]
             }
           },
           devices: %{
@@ -660,11 +675,11 @@ defmodule OneCore.Tools do
       name: "update",
       task_support: :optional,
       description: """
-      Has a server's machine take the latest builds, its server's and its program's, if it isn't on them already.
-      It checks each before it runs it, hands its work to another server meanwhile, and goes back to the build it
-      had if the new one doesn't start and answer. It answers once the update has begun, with its stage; one under
-      way already is left to finish. `builds` then says each stage as it moves on, which build it's on once it's
-      done, and if it went back, why.
+      Has a server's machine take the latest builds, its server's and its program's together, if it isn't on them
+      already. It checks each before it runs it, hands its work to another server meanwhile, and goes back to the
+      pair it had if the new one doesn't start and answer. It answers once the update has begun, with its
+      `server_update_status`; one under way already is left to finish. `builds` then says it as it moves on, which
+      build it's on once it's done, and if it went back, why.
       """,
       inputs: %{
         type: "object",
@@ -674,9 +689,9 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{
           server: %{type: "string", description: "The key of the server taking them"},
-          update: @update
+          server_update_status: @server_update_status
         },
-        required: ["server"]
+        required: ["server", "server_update_status"]
       }
     }
   ]
@@ -968,7 +983,7 @@ defmodule OneCore.Tools do
       if not Application.get_env(:one_core, :installed, false),
         do: raise("#{here()} can't update itself.\n\nIt wasn't installed with `one serve on`, so it doesn't update itself.")
 
-      %{server: Server.key(), update: Release.update()}
+      %{server: Server.key(), server_update_status: Release.update()}
     end)
   end
 
@@ -1103,15 +1118,15 @@ defmodule OneCore.Tools do
   end
 
   # Runs what a tool does on the server it names: here, or by asking that server to, for whoever asked, which
-  # ends the call here with its answer. One that's restarting is asked too, since only it can answer: a build being
-  # tried is asked its build this way before it's up. One that can't be reached yet is waited for.
+  # ends the call here with its answer. One that isn't ready is asked too, since only it can answer: a build starting
+  # is asked its build this way before it's ready. One that's starting or stopping is waited for.
   defp on(server, tool, inputs, {actor, subject}, here) do
     if server in [nil, Server.key()] do
       here.()
     else
       ask = fn ->
         meta = %{actor: actor, subject: subject}
-        Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: meta}, restarting: true)
+        Server.request(server, "tools/call", %{name: tool, arguments: inputs, _meta: meta}, ready: :any)
       end
 
       answered =

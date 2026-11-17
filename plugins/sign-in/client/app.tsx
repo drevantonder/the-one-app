@@ -1,8 +1,9 @@
 // Devices: everything that acts as whoever's looking, and the servers that run their apps, each saying whether an
 // update is ready for it: the build itself is for agents, in `builds`. One that's behind the latest is updated here, and all of them at once; this device becomes a server and
 // stops being one; a server's services are switched on and off; and a device is taken out, or this one signs out.
-// An update a server is taking says each stage as the server says it (`OneCore.Release`), and one that didn't take
-// is a problem on it, until one does.
+// Each server says whether it's ready, active and running, or why not, and an update it's taking as it moves on
+// (`OneCore.Release`); one that didn't take is a problem on it, until one does. This device becoming a server, or
+// stopping being one, says each stage.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, client, confirm, Empty, leave, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
@@ -15,17 +16,31 @@ interface Built {
   target?: string
 }
 
-/** Where an update of a server is, as the server says it: what's under way, in this order. */
-type Stage = "downloading" | "restarting" | "starting"
+/** Where an update of a server is, as the server says it. */
+type ServerUpdateStatus = "up_to_date" | "downloading" | "verifying"
 
-/** Whether something is on, as `builds` and `sign-in_devices` answer it: a server says when it's restarting too. */
-type Seen = "on" | "restarting" | number | string | null
+/** What a server is, as `builds` answers it: whether it's one of the network's, its program, and whether it's ready. */
+interface ServerStatus {
+  server_membership?: "inactive" | "joining" | "active" | "leaving"
+  server_daemon_status?: "starting" | "running" | "stopping" | "stopped"
+  server_ready?: boolean
+  server_ready_reason?: "joining" | "starting" | "draining" | "stopped"
+  server_update_status?: ServerUpdateStatus
+  went_back?: string | null
+}
 
 /** What `builds` answers. */
 interface Builds {
   devices: (Built & { device: string })[]
   latest: Record<string, { build: string }>
-  servers: (Built & { server: string; name?: string; installed?: boolean; seen?: Seen; update?: Stage | null; went_back?: string | null })[]
+  servers: (Built & ServerStatus & { server: string; name?: string; installed?: boolean; last_seen?: number })[]
+}
+
+/** This device as a server, as the app says it: its key, and where becoming one or stopping being one is. */
+interface Here {
+  key: string
+  server_membership: "joining" | "active" | "leaving"
+  server_membership_stage?: "registering" | "downloading" | "installing" | "starting" | "draining" | "deregistering" | "uninstalling" | null
 }
 
 /** A plugin's service a server may run, as `services` answers it. */
@@ -38,17 +53,16 @@ interface Service {
 }
 
 /** A device or a server, as a row says it. */
-interface Thing {
+interface Thing extends ServerStatus {
   id: string
   name?: string
   kind?: "app" | "assistant" | "browser"
   here: boolean
   added?: string
-  seen?: Seen
+  connected?: boolean
+  last_seen?: number | string
   build?: string
   behind?: boolean
-  /** Where an update of it is, while one's under way. */
-  update?: Stage | null
   /** Whether its last update didn't take, and it's still behind. */
   failed?: boolean
   subject?: string
@@ -61,7 +75,7 @@ const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => ca
 const mine = createMemo(async () => {
   const [{ devices }, here, builds, network, services, networkServices] = await Promise.all([
     json<{ devices: Omit<Thing, "here">[] }>("sign-in_devices"),
-    client(),
+    client() as Promise<{ device: string; build: string; server?: Here }>,
     json<Builds>("builds"),
     json<Builds>("builds", {}, "network").catch(() => undefined),
     json<{ services: Service[] }>("services"),
@@ -87,29 +101,43 @@ const mine = createMemo(async () => {
       const runs = (theirs?.services ?? []).map((service) => ({ ...service, on: service.servers.includes(server.server) }))
       // Only a server that was installed takes the latest build when it's asked.
       const updates = server.installed ? behind("server", server) : undefined
-      const failed = !!(updates && !server.update && server.went_back)
-      servers.set(server.server, { ...server, id: server.server, subject: who, here: server.server === here.server, behind: updates, failed, services: runs })
+      const failed = !!(updates && !updating(server) && server.went_back)
+      servers.set(server.server, { ...server, id: server.server, subject: who, here: server.server === here.server?.key, behind: updates, failed, services: runs })
     }
   }
   return { devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here }
 })
 changed(() => refresh(mine))
 
-/// Whether something is on, or when it was last: nothing for one never seen. This device says only that it's this one.
-const presence = (thing: Thing) => (thing.here ? "This device" : thing.seen === "on" ? "Online" : thing.seen ? seen(thing.seen) : undefined)
+/// Whether an update of a server is under way.
+const updating = (server: ServerStatus) => server.server_update_status === "downloading" || server.server_update_status === "verifying"
 
-/// What each stage of an update says, as a step and on its row.
-const stages: Record<Stage, { step: string; row: string }> = {
-  downloading: { step: "Downloading the update", row: "Downloading update…" },
-  restarting: { step: "Restarting", row: "Restarting…" },
-  starting: { step: "Starting the new version", row: "Starting…" },
+/// Whether something is connected, or when it was last: nothing for one never seen. A server says whether it's
+/// ready, and why not. This device says only that it's this one.
+function presence(thing: Thing) {
+  if (thing.here) return "This device"
+  if (thing.kind === undefined && thing.server_ready !== undefined && thing.server_ready_reason !== "stopped")
+    return thing.server_ready ? "Ready" : `Not ready · ${capital(thing.server_ready_reason!)}`
+  return thing.connected ? "Online" : thing.last_seen ? seen(thing.last_seen) : undefined
 }
 
-/// What's under way for something, as its row says it beside a spinner: an update, a server restarting, or this device
-/// updating itself or becoming a server or stopping being one.
+const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
+
+/// Each stage of an update, as a step and on its row.
+const updates: Record<"downloading" | "verifying", { step: string; row: string }> = {
+  downloading: { step: "Downloading the update", row: "Downloading update…" },
+  verifying: { step: "Starting the new version", row: "Starting the new version…" },
+}
+
+/// Each stage of this device becoming a server, and of stopping being one, as a step.
+const joining = { registering: "Registering", downloading: "Downloading", installing: "Installing", starting: "Starting" }
+const leaving = { draining: "Draining", deregistering: "Deregistering", uninstalling: "Uninstalling" }
+
+/// What's under way for something, as its row says it beside a spinner: an update, a server starting or stopping,
+/// or this device updating itself or becoming a server or stopping being one.
 function underway(thing: Thing) {
-  if (thing.update) return stages[thing.update].row
-  if (thing.seen === "restarting") return "Restarting…"
+  if (thing.server_update_status === "downloading" || thing.server_update_status === "verifying") return updates[thing.server_update_status].row
+  if (thing.server_daemon_status === "starting" || thing.server_daemon_status === "stopping") return `${capital(thing.server_daemon_status)}…`
   if (thing.here && thing.kind && working() === thing.id) return "Downloading update…"
   if (thing.here && thing.kind === "app" && serving() !== undefined) return serving() ? "Starting its server…" : "Stopping its server…"
 }
@@ -185,17 +213,27 @@ function Detail(props: { thing: Thing; all: All }) {
     await doing(() => client({ serve: now }).then(({ message }) => toast(message)))
     setServing()
   }
-  const stage = () => thing().update
+  const stage = () => (updating(thing()) ? (thing().server_update_status as keyof typeof updates) : undefined)
+  // This device becoming a server, or stopping being one, at the stage the app says.
+  const membership = () => (thing().here && thing().kind === "app" ? props.all.here.server : undefined)
+  const steps = () => (membership()?.server_membership === "joining" ? joining : membership()?.server_membership === "leaving" ? leaving : undefined)
   return (
     <Screen heading={thing().name ?? "Server"} back>
       <Show when={stage()}>
         <Section heading="Updating">
           <div class="updating">
             <Steps
-              steps={Object.values(stages).map(({ step }) => step)}
-              at={Object.keys(stages).indexOf(stage()!)}
-              text={stage() === "starting" ? "If it doesn't start, it goes back to the version it had." : undefined}
+              steps={Object.values(updates).map(({ step }) => step)}
+              at={Object.keys(updates).indexOf(stage()!)}
+              text={stage() === "verifying" ? "If it doesn't start, it goes back to the version it had." : undefined}
             />
+          </div>
+        </Section>
+      </Show>
+      <Show when={steps()}>
+        <Section heading={membership()!.server_membership === "joining" ? "Becoming a server" : "Stopping being a server"}>
+          <div class="updating">
+            <Steps steps={Object.values(steps()!)} at={Math.max(0, Object.keys(steps()!).indexOf(membership()!.server_membership_stage ?? ""))} />
           </div>
         </Section>
       </Show>
@@ -222,6 +260,14 @@ function Detail(props: { thing: Thing; all: All }) {
             heading="Server"
             text={serving() === undefined ? "Runs your apps from this device whenever it's on." : <><Spinner /> {serving() ? "Starting…" : "Stopping…"}</>}
             end={<Switch aria-label="Server" checked={serving() ?? !!props.all.here.server} disabled={serving() !== undefined} onChange={(event) => serve(event.currentTarget.checked)} />}
+          />
+        </Show>
+        <Show when={!thing().kind && thing().server_membership}>
+          <Row heading="Server" text={capital(thing().server_membership!)} />
+          <Row heading="Server daemon" text={capital(thing().server_daemon_status ?? "stopped")} />
+          <Row
+            heading={thing().server_ready ? "Ready" : "Not ready"}
+            text={thing().server_ready ? "Calls go to it." : thing().server_ready_reason === "stopped" && thing().last_seen ? `Stopped, ${seen(thing().last_seen!)}` : capital(thing().server_ready_reason ?? "stopped")}
           />
         </Show>
       </List>
@@ -258,7 +304,7 @@ function Detail(props: { thing: Thing; all: All }) {
 function Devices(props: { all: All }) {
   const opened = () => [...props.all.devices, ...props.all.servers].find((thing) => thing.id === open())
   // What's behind and can be updated from here, with no update under way already: every server, and this device, last.
-  const behind = () => [...props.all.servers, ...props.all.devices.filter((device) => device.here)].filter((thing) => thing.behind && !thing.update)
+  const behind = () => [...props.all.servers, ...props.all.devices.filter((device) => device.here)].filter((thing) => thing.behind && !updating(thing))
   const all = async () => {
     setWorking("all")
     for (const thing of behind()) await doing(() => update(thing))

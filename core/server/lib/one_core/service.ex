@@ -51,11 +51,11 @@ defmodule OneCore.Service do
   def name(server), do: Servers.name(server)
 
   @doc """
-  Whether the machine a server runs on is on, by the server's key: `:on`, the time it was last on in milliseconds
-  since 1970, or `nil` where that isn't known. `call/5` doesn't wait for one that's known to be off, and says when
-  it was last seen.
+  When the machine a server runs on was last seen, by the server's key, in milliseconds since 1970, if it's stopped:
+  `nil` while it's on, or where that isn't known. `call/5` doesn't wait for one that's stopped, and says when it was
+  last seen.
   """
-  def seen(server), do: Servers.seen(server)
+  def seen(server), do: (Servers.presence(server) || %{})["last_seen"]
 
   # The plugin whose service it is: this call's, or one whose code runs inside it, whose function this call is running.
   defp whose(%Call{who: plugin, loaded: loaded}, service) do
@@ -161,8 +161,8 @@ defmodule OneCore.Service do
   # What arrives after going through JSON, which is how it reaches another server.
   defp json(term), do: JSON.decode!(JSON.encode!(term))
 
-  # Asks each server in turn until one is up, and then the first that's back of those that were restarting. A
-  # server that couldn't be reached was asked nothing.
+  # Asks each server in turn until one is ready, and then the first that's back of those that were starting or
+  # stopping. A server that couldn't be reached was asked nothing.
   defp ask(servers, here, ask, down \\ [])
 
   defp ask([], here, %{plugin: plugin, service: service} = ask, down) do

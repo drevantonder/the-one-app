@@ -301,8 +301,9 @@ defmodule OneCore.Tasks do
 
   defp expired?(_record), do: false
 
-  # Removes what's kept of `subject`'s tasks that ended over an hour ago, and has those whose server has stopped
-  # fail, as each task made does: so none is kept for long, however few are asked about again.
+  # Removes what's kept of `subject`'s tasks that ended over an hour ago, and has those whose server has stopped, or
+  # started again, which loses what it was running, fail, as each task made does: so none is kept for long, however
+  # few are asked about again.
   defp swept(subject) do
     old = System.system_time(:millisecond) - @kept
 
@@ -322,7 +323,7 @@ defmodule OneCore.Tasks do
         record["server"] == Server.key() and State.task(record["taskId"]) == nil ->
           gone(subject, name, Server.key())
 
-        record["server"] != Server.key() and Servers.seen(record["server"]) != :on ->
+        record["server"] != Server.key() and Servers.presence(record["server"])["server_daemon_status"] in ["starting", "stopped"] ->
           gone(subject, name, record["server"])
 
         true ->

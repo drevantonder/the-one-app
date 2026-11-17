@@ -22,9 +22,9 @@ never one inside the repo (tests, skills, tooling). One that wasn't is marked by
 Exactly two rules hold at runtime:
 
 - Parts talk only on the same 0.minor (`OneCore.Builds.talk?/2`). A server refuses a request of another
-  (`OneCore.Mcp`), which says why; a server asks one behind it nothing, as if it were off; the relay takes a server
-  behind the edge for restarting and passes the edge's calls only to servers on its own (`core/edge/relay/relay.ts`).
-  What updates a part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
+  (`OneCore.Mcp`), which says why; a server asks one behind it nothing, as if it were off; the relay passes the edge's
+  calls only to servers on its own (`core/edge/relay/relay.ts`), apart from whether they're ready. What updates a
+  part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
   server's `build`, the `edge`'s, and `why` one doesn't talk.
 - A plugin runs only on a server its `requires`' `"core" => "~> 0.16.0"` allows (`OneCore.Plugins.Version`):
   deploying it to an older one is refused, saying so, and a server that loads it runs the plugin nowhere until it's
@@ -98,13 +98,14 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
   device isn't signed in here`, 240 times in three minutes). Marked, they refuse it instead, and are asked nothing
   until they're updated. One that can't take its update for that (`permissions couldn't decide it`) is taken by hand,
   as its program would: download the build `one download --target <kind>` links, unpack it in its
-  `server/builds/<build>` past `bin/one_core eval "OneCore.Release.check()"` saying that build, write the build to
-  `server/next`, and restart its unit (`systemctl --user restart one-server-<key's first 12>`, or on a Mac
+  `server/builds/<build>` past `bin/one_core eval "OneCore.Release.check()"` saying that build, set `next` to
+  `{"build": <it>, "program": <its one --version>}` and `server_update_status` to `verifying` in `server/state.json`,
+  and restart its unit (`systemctl --user restart one-server-<key's first 12>`, or on a Mac
   `launchctl kickstart -k gui/$(id -u)/app.theone.server.<key's first 12>`); it goes back by itself if it doesn't
   answer.
 - Deploying the edge before the servers, from a commit they don't run: its relay took them all for gone and server
-  updates went back (17 Nov). It now takes those behind it for restarting, which still pauses the network until
-  they're updated: the edge goes after the servers.
+  updates went back (17 Nov). It now sends those behind it nothing, which still pauses the network until they're
+  updated: the edge goes after the servers.
 
 ## Report
 

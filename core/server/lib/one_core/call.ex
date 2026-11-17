@@ -391,7 +391,8 @@ defmodule OneCore.Call do
     raise "No server acting for #{owner} answered" <> if(why == "", do: "", else: ": " <> why)
   end
 
-  # Asks each of `servers` in turn to run it, and, if none did, the first that's back of those that were restarting.
+  # Asks each of `servers` in turn to run it, and, if none did, the first that's back of those that were starting or
+  # stopping.
   defp elsewhere(ask, principal, servers) do
     for server <- servers, do: asks(ask, principal, server, "to")
     if back = Servers.back(servers), do: asks(ask, principal, back, "to")

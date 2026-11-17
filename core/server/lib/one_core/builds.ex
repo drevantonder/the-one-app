@@ -60,66 +60,19 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  What this server says of itself, as it starts and as an update of it moves on: its build, its kind of machine,
-  the device it's on, if any, whether it was
-  installed with `one serve on`, which is what takes the latest builds when it's asked to update, where an update
-  of it is, if one is under way (`OneCore.Release`), and, if the last one didn't take, why, as that program said it.
+  What this server says of itself, as it starts and as what it is changes: its build, its kind of machine, the device
+  it's on, if any, whether it was installed with `one serve on`, which is what takes the latest builds when it's
+  asked to update, and what the program keeping it running says of it (`OneCore.Release.status/0`).
   """
   def say(key) do
     info = %{
       build: build(),
       target: target(),
       device: Application.get_env(:one_core, :device),
-      installed: Application.get_env(:one_core, :installed, false),
-      update: update(),
-      went_back: Application.get_env(:one_core, :went_back)
+      installed: Application.get_env(:one_core, :installed, false)
     }
 
-    Servers.say("servers/#{key}/build", JSON.encode!(info))
-  end
-
-  @doc """
-  Where an update of this server is: `"downloading"`, `"restarting"` or `"starting"`, or `nil` with none under way
-  (`OneCore.Release`).
-  """
-  def update, do: Application.get_env(:one_core, :update)
-
-  @doc """
-  Keeps where an update of this server is, as the program keeping it running says it (`OneCore.Release`):
-  `"update"`, its stage, and `"went_back"`, why the last one didn't take, where `said` has them. It's said in
-  `builds`, and the clients watching are told. A server that's restarting says so at the network's edge first, for
-  as long as it may take to be back, `"within"` seconds, as it's about to stop.
-  """
-  def updating(said) do
-    for {name, setting} <- [{"update", :update}, {"went_back", :went_back}], Map.has_key?(said, name),
-        do: Application.put_env(:one_core, setting, said[name])
-
-    if update() == "restarting", do: Servers.restarting(said["within"])
-    say(Server.key())
-    told = fn waiting -> for {process, _} <- waiting, do: send(process, {:update, update()}) end
-    Registry.dispatch(OneCore.Waiting, :update, told)
-    Server.changed()
-  end
-
-  # How long the program keeping a server running takes to say it has begun an update, in milliseconds: it reads the
-  # server's output as it comes, so this is only for a machine that's very busy.
-  @begun 5_000
-
-  @doc """
-  Has `ask` ask the program keeping this server running to update it, and waits for that program to say the update's
-  stage, `@begun` at most. Gives the stage, or `nil` if it said none: one from before it said stages.
-  """
-  def await_update(ask) do
-    Registry.register(OneCore.Waiting, :update, nil)
-    ask.()
-
-    receive do
-      {:update, stage} -> stage
-    after
-      @begun -> update()
-    end
-  after
-    Registry.unregister(OneCore.Waiting, :update)
+    Servers.say("servers/#{key}/build", JSON.encode!(Map.merge(info, OneCore.Release.status())))
   end
 
   @doc "The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\"}}`."
@@ -197,10 +150,14 @@ defmodule OneCore.Builds do
 
   def seen(_by, _device, _said), do: :ok
 
+  # What the edge says of a server: whether it's ready, why not, and when it was last seen if it isn't connected.
+  @presence ~w(server_membership server_daemon_status server_ready server_ready_reason last_seen)
+
   @doc """
-  Which build each of `owner`'s servers runs, with what its machine is called, whether it's on and where an update
-  of it is (`say/1`), and which each of `by`'s devices last said it is, and the latest for each kind of machine: what
-  shows whether everything is on the same build.
+  Which build each of `owner`'s servers runs, with what its machine is called and what it is (`say/1`), as it says
+  it and, where the network's edge says it now, whether it's ready (`OneCore.Servers.presence/1`), and which each
+  of `by`'s devices last said it is, and the latest for each kind of machine: what shows whether everything is on
+  the same build.
   """
   def list(by, owner) do
     keys = Servers.acting(owner)
@@ -214,7 +171,8 @@ defmodule OneCore.Builds do
     servers =
       for {key, read} <- Enum.zip(keys, server_reads) do
         info = with {:ok, info, _tag} <- read, do: JSON.decode!(info), else: (:absent -> %{})
-        server = Map.merge(info, %{"server" => key, "name" => Servers.name(key), "seen" => seen(key)})
+        presence = Map.take(Servers.presence(key) || %{}, @presence)
+        server = Map.merge(info, Map.merge(presence, %{"server" => key, "name" => Servers.name(key)}))
         if why = why(server, edge), do: Map.put(server, "why", why), else: server
       end
 
@@ -233,14 +191,14 @@ defmodule OneCore.Builds do
   end
 
   # Why `server` doesn't talk with this one or the edge, for being on a version that doesn't talk with theirs, or
-  # `nil` where it does. The edge takes one on a version before its own for restarting until it's updated.
+  # `nil` where it does. The edge sends one on a version before its own nothing until it's updated.
   defp why(%{"build" => theirs, "name" => name}, edge) do
     cond do
       not talk?(theirs, build()) ->
         "It's on #{theirs} and #{Servers.name(Server.key()) || "this server"} on #{build()}, so they don't talk until both are on one"
 
       edge != nil and not talk?(theirs, edge) and older?(theirs, edge) ->
-        "It's on #{theirs}, before the edge's #{edge}, so the edge takes #{name || "it"} for restarting until it's updated"
+        "It's on #{theirs}, before the edge's #{edge}, so the edge sends #{name || "it"} nothing until it's updated"
 
       true ->
         nil
@@ -248,14 +206,4 @@ defmodule OneCore.Builds do
   end
 
   defp why(_server, _edge), do: nil
-
-  # Whether a server is on, as `"on"`, stopping to start again or starting and not up yet, as `"restarting"`, or
-  # when it was last, in milliseconds since 1970, or `nil` if that isn't known.
-  defp seen(key) do
-    case Servers.seen(key) do
-      :on -> "on"
-      :restarting -> "restarting"
-      at -> at
-    end
-  end
 end

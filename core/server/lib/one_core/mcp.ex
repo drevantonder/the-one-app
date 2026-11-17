@@ -135,7 +135,7 @@ defmodule OneCore.Mcp do
 
       # The relay at the network's address saying one of its servers came or went.
       {:ok, %{"method" => "notifications/one/seen"}} ->
-        Servers.seen_again()
+        Servers.presence_again()
         ""
 
       # Another server, or a plugin's edge function, saying that what this one kept of some hooks

@@ -414,7 +414,7 @@ defmodule OneCore.Plugins.Deploy do
             true
 
           %{"ui" => ^code, "server" => server} ->
-            Servers.seen(server) not in [:on, nil] and
+            Servers.ready?(server) == false and
               (Bucket.replace(blob, claim, tag) == :ok or rebuilds?(whose, code))
 
           _another ->
