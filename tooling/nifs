@@ -15,7 +15,7 @@
 # committed. The Mac sleeps, so only one whose inputs changed is built there: one that hasn't is the one built before,
 # from this machine's cache, or One Core's from the latest server published for a Mac, whose `nifs` lists what each
 # NIF was built from, as `$target/nifs/<kind>` does for the ones here, which `tooling/release` puts in a server, and
-# a plugin's from the plugin as the network deployed it.
+# a plugin's from where its `server/checksums.json` says it's published (`tooling/publish-nifs`).
 #
 # Each NIF is named for its build, what it's built from (`tooling/input-hash`), so a server loads a changed one beside
 # the one before (`OneCore.Nif`). The Mac is given the names this machine worked out, in NIF_BUILD_<CRATE>, so a
@@ -59,6 +59,20 @@ for kind in "${kinds[@]}"; do
     for file in "${files[@]}"; do echo "${sums[$file]} $file"; done | sort -k2 >"$target/nifs/$kind"
     changed() { for file in "${files[@]}"; do cp "$cache/${sums[$file]}" "$file" 2>/dev/null || echo "$file"; done; }
 
+    # A plugin's published build, named for what it's built from, checked against the SHA-256 published with it.
+    for file in $(changed); do
+      [[ $file == plugins/* ]] || continue
+      plugin=${file#plugins/} && plugin=${plugin%%/*}
+      read -r url sha256 < <(jq -r --arg path "${file#plugins/"$plugin"/}" '.[$path] // empty | "\(.url) \(.sha256)"' \
+        "plugins/$plugin/server/checksums.json" 2>/dev/null) || continue
+      [[ ${url##*/} == *-"${sums[$file]}"-* ]] && curl -fsSL -o "$cache/${sums[$file]}.new" "$url" || continue
+      if [[ $(sha256sum "$cache/${sums[$file]}.new" | cut -d' ' -f1) == "$sha256" ]]; then
+        mv "$cache/${sums[$file]}.new" "$cache/${sums[$file]}"
+      else
+        rm "$cache/${sums[$file]}.new"
+      fi
+    done
+
     published=$(one download --target "$kind" | jq -c '.server // empty')
     if [[ -n $(changed) && -n $published ]]; then
       unpacked=$(mktemp -d -p "$target")
@@ -66,18 +80,9 @@ for kind in "${kinds[@]}"; do
       curl -fsSL "${headers[@]}" -o "$unpacked.tar.gz" "$(jq -r .link.url <<<"$published")"
       [[ $(sha256sum "$unpacked.tar.gz" | cut -d' ' -f1) == $(jq -r .sha256 <<<"$published") ]] || { echo "The server published for $kind isn't what it should be" >&2 && exit 1; }
       tar -xzf "$unpacked.tar.gz" -C "$unpacked"
-      # Where `tooling/release` puts each in a server: One Core's beside its code, and the plugins' in theirs.
+      # Where `tooling/release` puts One Core's in a server: beside its code.
       [[ ! -e $unpacked/nifs ]] || while read -r sum file; do
-        case $file in
-          core/*) crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum" ;;
-          # A plugin's NIF says what it was built from in its module's name (`OneCore.Nif`), so the one the network
-          # deployed is taken where it's that. A program says nothing, so one that changed is built again.
-          plugins/*/server/nif/*)
-            plugin=${file#plugins/} && plugin=${plugin%%/*}
-            { ONE_SUBJECT=network one code --name "$plugin" 2>/dev/null || echo '{}'; } |
-              jq -r --arg path "${file#plugins/"$plugin"/}" '.files[$path].base64 // empty' | base64 -d >"$cache/$sum.new"
-            if grep -qaF "OneCore.Nifs.B$sum" "$cache/$sum.new"; then mv "$cache/$sum.new" "$cache/$sum"; else rm "$cache/$sum.new"; fi ;;
-        esac
+        [[ $file != core/* ]] || { crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum"; }
       done <"$unpacked/nifs"
       rm -r "$unpacked" "$unpacked.tar.gz"
     fi
