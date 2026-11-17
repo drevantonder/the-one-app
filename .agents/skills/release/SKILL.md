@@ -49,11 +49,11 @@ is split only for minutes:
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`, then `one update --server <key>` for each server, one at a time |
 | The desktop app or CLI (`core/client/`, `clients/`, a plugin's `client/native/`) | `tooling/release client`, then `one update` on each device. `client` includes the Mac's build, made on the Mac over ssh; Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
-| Docs, tests, `tooling/`, `.agents/` | Nothing |
+| Docs, `tooling/`, `.agents/` | Nothing |
 
 Windows' builds, `server/windows-x86_64` and `one-cli/windows-x86_64`, are made on Linux like the others, and are
 built only for a network with a Windows server or device. They haven't yet run on a Windows PC: until
-`core/server/test/install.sh <pc>` has passed on one, a Windows PC isn't made a server of the live network.
+one has been installed and updated as a server on one, a Windows PC isn't made a server of the live network.
 
 A plugin change that uses something new in `core/server/` says so in its `requires`, `"core" => "~> 0.16.0"`, and is
 deployed once every server is on that version. A plugin someone deployed by hand isn't redeployed by the server.

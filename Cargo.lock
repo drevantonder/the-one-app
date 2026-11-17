@@ -1415,7 +1415,6 @@ dependencies = [
  "iroh-base",
  "serde_json",
  "sha2 0.11.1",
- "tokio",
  "zeroize",
 ]
 

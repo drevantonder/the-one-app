@@ -25,7 +25,7 @@ There are no pull requests: every change goes straight to `main`, from your own 
 - An agent squashed and reset against a copy of `main` it had fetched earlier and force-pushed, which erased two
   other agents' commits. Never `push --force`, and never reset or squash onto anything but a fresh
   `origin/main`.
-- Re-running tests after a rebase that only brought in other people's unrelated commits. A rebase onto unrelated
+- Checking again after a rebase that only brought in other people's unrelated commits. A rebase onto unrelated
   work needs no new check.
 - Cleaning up with a wildcard (`rm -rf /tmp/one-*`) that matched other
   agents' files. Remove only the exact paths you made.

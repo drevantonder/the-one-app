@@ -6,14 +6,13 @@ node_modules/
 erl_crash.dump
 .DS_Store
 # One Core's Rust NIFs as they're built for the server to load and for each kind of machine beside their source, a
-# plugin's NIFs and programs as they're built beside their source, and the server's tests' folders
+# plugin's NIFs and programs as they're built beside their source
 /core/server/priv/native/
 /core/server/nif/*/*.so
 /plugins/*/server/nif/*/*.so
 /plugins/*/server/bin/*/linux-*
 /plugins/*/server/bin/*/macos-*
 /plugins/*/server/bin/*/windows-*
-/core/server/tmp/
 # What Tauri writes as it builds
 /clients/app/gen/schemas/
 # What `wrangler dev` keeps, the secrets of the presigner and of a plugin's edge function as whoever deploys an

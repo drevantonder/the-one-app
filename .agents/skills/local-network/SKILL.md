@@ -46,10 +46,10 @@ group. Never `pkill` or `killall`: other agents run networks on this machine too
 
 ## Mistakes already made
 
-- Running a test or `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
+- Running `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
   (`tooling/network` does it itself).
 - Restarting the network to try a change to a plugin, rather than deploying it into the running one.
 - Rebuilding from scratch in a new worktree each time. Keep one worktree built and rebase it, rather than making a
   new one for every check.
 - Starting the app where there's no desktop without `dbus-run-session` (see `see-it-running`).
-- Setting `CARGO_TARGET_DIR`: `tooling/network` and the tests run `target/release/one` from the repo.
+- Setting `CARGO_TARGET_DIR`: `tooling/network` runs `target/release/one` from the repo.

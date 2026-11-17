@@ -27,6 +27,3 @@ serde_json = { workspace = true, optional = true }
 sha2 = "0.11"
 # Keys are wiped from memory when they're let go of.
 zeroize = "1"
-
-[dev-dependencies]
-tokio.workspace = true

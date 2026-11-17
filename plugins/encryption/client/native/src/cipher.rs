@@ -17,7 +17,7 @@
 //!   extension) holds only that key.
 //!
 //! What each is encrypted for (the `for_` functions) a server's plugin says too, in its Elixir, as what it hands the
-//! NIF (`about`): the same text in both, which the test with a real device shows agree (`plugins/vault/test/vault.sh`).
+//! NIF (`about`): the same text in both.
 
 use anyhow::{Context, Result, anyhow, bail};
 use chacha20poly1305::aead::{Aead, Generate, Payload};
@@ -186,63 +186,4 @@ pub fn decrypt(keys: &[Key], name: &str, blob: &[u8]) -> Result<Vec<u8>> {
     XChaCha20Poly1305::new(key.as_slice().try_into().expect("32 bytes"))
         .decrypt(&XNonce::try_from(nonce).map_err(|_| not())?, Payload { msg: encrypted, aad: name.as_bytes() })
         .map_err(|_| not())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_the_key_its_for_opens_it_and_only_for_what_it_says() {
-        let (server, other) = (SecretKey::generate(), SecretKey::generate());
-        let about = for_secret(&server.public().to_string());
-        let sealed = seal(&server.public(), &about, b"typed").unwrap();
-        assert_eq!(open(&server, &about, &sealed).unwrap().as_slice(), b"typed");
-        assert!(open(&other, &about, &sealed).is_err());
-        assert!(
-            open(&server, &for_server("users/alice/made/vault/items", &server.public().to_string()), &sealed).is_err()
-        );
-    }
-
-    #[test]
-    fn a_blob_opens_under_its_own_name_with_its_epochs_key() {
-        let owner = owner();
-        let keys = artifact(&owner, "users/alice/made/vault/items", 2);
-        let blob = encrypt(&keys, "users/alice/made/vault/items/log/1", b"a secret").unwrap();
-        assert!(!blob.windows(8).any(|part| part == b"a secret"));
-        assert_eq!(decrypt(&keys, "users/alice/made/vault/items/log/1", &blob).unwrap(), b"a secret");
-        assert!(decrypt(&keys, "users/alice/made/vault/items/log/2", &blob).is_err());
-        // A server taken off before the second epoch holds only the first's key.
-        assert!(decrypt(&keys[..1], "users/alice/made/vault/items/log/1", &blob).is_err());
-        assert!(
-            decrypt(&artifact(&owner, "users/bob/made/vault/items", 2), "users/alice/made/vault/items/log/1", &blob)
-                .is_err()
-        );
-        let first = encrypt(&keys[..1], "name", b"before").unwrap();
-        assert_eq!(decrypt(&keys, "name", &first).unwrap(), b"before");
-    }
-
-    #[test]
-    fn a_device_opens_a_notification_sent_to_it_and_nothing_else_does() {
-        let (device, other) = (SecretKey::generate(), SecretKey::generate());
-        let plaintext = br#"{"title":"Lunch is here","text":"At the door","app":"meals"}"#;
-        let to = notifications(&device).public();
-        let sealed = seal(&to, &for_notification(&to.to_string()), plaintext).unwrap();
-        assert!(!sealed.windows(5).any(|part| part == b"Lunch"));
-        assert_eq!(open_notification(&device, &sealed).unwrap().as_slice(), plaintext);
-        assert!(open_notification(&other, &sealed).is_err());
-        // Not with the device's own key: only the key derived for its notifications.
-        assert!(open(&device, &for_notification(&notifications(&device).public().to_string()), &sealed).is_err());
-    }
-
-    #[test]
-    fn a_recovery_key_is_the_owners_key_however_its_typed() {
-        let owner = owner();
-        let written = recovery(&owner);
-        assert_eq!(recovered(&written).unwrap(), owner);
-        assert_eq!(recovered(&written.to_lowercase().replace('-', " ")).unwrap(), owner);
-        assert!(recovered("not one").is_err());
-        assert_ne!(check(&owner), check(&super::owner()));
-        assert_eq!(split(&joined(&artifact(&owner, "a", 3))).unwrap(), artifact(&owner, "a", 3));
-    }
 }

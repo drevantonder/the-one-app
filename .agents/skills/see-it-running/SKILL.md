@@ -9,8 +9,7 @@ section of the screen you change first.
 
 ## Desktop (Linux)
 
-Start a network (`local-network`), then the app as its owner, on a screen of its own, as
-`clients/app/test/isolation.sh` does:
+Start a network (`local-network`), then the app as its owner, on a screen of its own:
 
     ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x720x24" bash -c '
       target/release/one >"$0/app.log" 2>&1 & app=$!

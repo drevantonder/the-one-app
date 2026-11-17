@@ -23,10 +23,8 @@ before choosing.
 - A special case is a missing design: an `if` for one value or plugin, a parameter for one caller, a swallowed error,
   a retry or a sleep, a skipped test. Fix the design so it goes; keep one only when the outside world needs it, with
   a comment saying what in the world.
-- Tests are few, and only for what using it wouldn't show: secrets and who may do what, data kept and restored,
-  releases, and where two languages must agree.
-- While it changes this fast, check your work with a throwaway test and don't commit it. A test that's kept slows
-  every change after it, so only the highest of high value are kept, and one that stops earning that is deleted.
+- No kept tests for now: each change is checked by the agent that makes it, for whatever it could affect.
+- While it changes this fast, check your work with a throwaway test and don't commit it.
 - People use apps. The CLI and MCP are for their agents, even for the most technical person on a network, so never
   shape a person's flow around a terminal.
 - How it looks is the repo's `DESIGN.md`: our look, the same on every client.

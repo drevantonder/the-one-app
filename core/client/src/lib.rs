@@ -1882,17 +1882,16 @@ async fn receive_notifications(connection: iroh::endpoint::Connection, notificat
 
 /// The files of `folder`, by their paths in it, as a plugin's folder is deployed: names starting with a dot are left
 /// out, and so is whatever the `.gitignore` files in it and above it leave out, as git would, in a git repo or not.
-/// So is a plugin's `test/`, which tests it where it's made, and its native code but what a server loads: the clients
-/// are built with its `client/native/`, and the source of a NIF or a program, a folder of its `server/nif/` or
-/// `server/bin/`, stays here, but for what's built from it for each kind of machine, `<kind>.so` or `<kind>` there,
-/// which is deployed though git ignores it as built (`OneCore.Plugin`). A server reads the plugins it ships with this
-/// way too (`core/server/nif/folder`).
+/// So is a plugin's native code but what a server loads: the clients are built with its `client/native/`, and the
+/// source of a NIF or a program, a folder of its `server/nif/` or `server/bin/`, stays here, but for what's built from
+/// it for each kind of machine, `<kind>.so` or `<kind>` there, which is deployed though git ignores it as built
+/// (`OneCore.Plugin`). A server reads the plugins it ships with this way too (`core/server/nif/folder`).
 pub fn files(folder: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
     let root = folder.to_owned();
     let never = move |entry: &ignore::DirEntry| {
         let path = entry.path().strip_prefix(&root).unwrap_or(entry.path());
-        ["client/native", "test"].iter().any(|never| path == Path::new(never))
+        path == Path::new("client/native")
             || [Path::new("server/nif"), Path::new("server/bin")].contains(&path.parent().unwrap_or(path))
                 && entry.file_type().is_some_and(|kind| kind.is_dir())
     };

@@ -15,7 +15,7 @@ defmodule OneCore.Plugin do
   server of your own, and for the network its owners or an `installer` of it (`permissions`); anyone else asks them
   by the network's launcher, whose skill says how. While none of the servers it runs on is on, a call to it says so. Calls already running finish on the version they started on, and the next call
   gets the new one. A plugin a program ships with can have native code that the clients are built with, in
-  `client/native/`, which is never deployed, and nor is its `test/`.
+  `client/native/`, which is never deployed.
 
   A plugin can be untrusted instead (`deploy` with `trusted: false`), and an untrusted plugin runs in a sandbox: its
   server code runs in an Erlang VM of its own, for each user, group or network it's installed for, behind its
