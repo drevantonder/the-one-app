@@ -286,7 +286,7 @@ defmodule OneCore.Apps.Store do
       blob = "#{artifact}/described/#{code}"
       description = Description.description(version)
 
-      # One said otherwise, as a server from before descriptions were JSON said it, is said again.
+      # One said otherwise, as an earlier build of this server said it, is said again.
       with :exists <- Bucket.write(blob, description),
            {:ok, was, tag} when was != description <- Bucket.read(blob),
            do: Bucket.replace(blob, description, tag)

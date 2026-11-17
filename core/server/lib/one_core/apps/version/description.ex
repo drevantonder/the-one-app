@@ -42,7 +42,7 @@ defmodule OneCore.Apps.Version.Description do
   and gives is read from its inputs and outputs again.
   """
   def described(artifact, description) do
-    with {:ok, %{} = json} <- decoded(description) do
+    with {:ok, %{} = json} <- JSON.decode(description) do
       said = Manifest.decode(json)
       fields = for field <- @kept, into: %{}, do: {field, json["#{field}"]}
 
@@ -66,18 +66,6 @@ defmodule OneCore.Apps.Version.Description do
       _ -> :error
     end
   end
-
-  # A description kept as a term is read as the same JSON, until every server writes JSON.
-  defp decoded(<<131, _::binary>> = term) do
-    Code.ensure_loaded!(OneCore.Skills)
-    {:ok, term |> :erlang.binary_to_term([:safe]) |> JSON.encode!() |> JSON.decode!()}
-  rescue
-    # A term may name atoms of the app's own, in a job's inputs say, which a server that never loaded it doesn't
-    # have and won't take from the bucket: it's as good as no description, until it's said again as JSON.
-    ArgumentError -> :error
-  end
-
-  defp decoded(json), do: JSON.decode(json)
 
   # A skill as `OneCore.Skills.found/2` gives it, from its JSON form.
   defp skill(skill) do
