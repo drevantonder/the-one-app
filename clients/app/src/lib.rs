@@ -324,7 +324,45 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     told["taps"] = json!(cfg!(mobile));
     let connection = app.try_state::<Views>().map(|views| *views.client.connection().borrow());
     told["connection"] = json!(connection.unwrap_or(Connection::Offline));
+    #[cfg(desktop)]
+    {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        let started = app.deep_link().get_current().ok().flatten().unwrap_or_default();
+        told["open"] = json!(started.iter().find_map(link));
+    }
     Ok(told)
+}
+
+/// What a `one:` link opens, as the window's page opens it (`go`): `<app>[/<page>][#<fragment>]`, an app, or a page
+/// of one, and the place in it its fragment names, which the app follows (`one:home-screen#library`).
+#[cfg(desktop)]
+fn link(url: &Url) -> Option<String> {
+    (url.scheme() == "one").then(|| url.as_str()["one:".len()..].to_owned())
+}
+
+/// Opens what each `one:` link the device hands the app links to, over whatever's showing, as a tap on a notification
+/// does, and brings the window forward. The link the app was started with is the page's to ask for (`start`). A
+/// computer's program that isn't a developer's build takes the device's `one:` links: Linux and Windows have a
+/// program say so itself (a Mac's says so in its bundle).
+#[cfg(desktop)]
+fn links(app: &tauri::App) -> tauri::Result<()> {
+    use tauri_plugin_deep_link::DeepLinkExt;
+    #[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
+    if let Err(error) = app.deep_link().register_all() {
+        eprintln!("this device's one: links don't open this app: {error}");
+    }
+    let handle = app.handle().clone();
+    app.deep_link().on_open_url(move |event| {
+        if let Some(window) = handle.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        for opens in event.urls().iter().filter_map(link) {
+            drop(handle.emit("open", opens));
+        }
+    });
+    Ok(())
 }
 
 /// What the window's page is told of where this device is now: its session, the session's place in the order the
@@ -517,6 +555,18 @@ mod status_bar {
 /// Ctrl-Q quits and Ctrl-W closes the window, as they do in a Linux app's, before the page hears them. A Mac's
 /// Cmd-Q and Cmd-W are its menu's, and Windows' Alt-F4 the system's.
 #[cfg(target_os = "linux")]
+/// A developer's build writes what its pages say to their console, warnings and errors among them, to its stdout,
+/// every frame's, as WebKitGTK offers: its web view has no other console to read without a window of its own.
+#[cfg(all(target_os = "linux", debug_assertions))]
+fn console_to_stdout(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    use webkit2gtk::{SettingsExt, WebViewExt};
+    window.with_webview(|webview| {
+        if let Some(settings) = webview.inner().settings() {
+            settings.set_enable_write_console_messages_to_stdout(true);
+        }
+    })
+}
+
 fn linux_keys(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     use gtk::gdk::{ModifierType, keys::constants as key};
     use gtk::glib::Propagation;
@@ -753,6 +803,17 @@ pub fn run() {
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init()).plugin(notifications::plugin());
     // The window keeps where it is, how large, and whether it's maximized or full screen, for the next time the app
     // opens (`opens_as_it_was`).
+    // One app at a time: a second start, with a link (`links`) or without, brings the first forward.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init());
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).skip_initial_state("main").build());
@@ -777,12 +838,16 @@ pub fn run() {
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center().build()?;
             #[cfg(desktop)]
             opens_as_it_was(&window)?;
+            #[cfg(desktop)]
+            links(app)?;
             #[cfg(mobile)]
             let window = window.build()?;
             #[cfg(target_os = "ios")]
             status_bar::watch(&window)?;
             #[cfg(target_os = "linux")]
             linux_keys(&window)?;
+            #[cfg(all(target_os = "linux", debug_assertions))]
+            console_to_stdout(&window)?;
             navigation_gestures(window, true)?;
             eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
             Ok(())

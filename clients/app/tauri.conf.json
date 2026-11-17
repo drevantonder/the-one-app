@@ -12,6 +12,11 @@
       "csp": "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; frame-src oneapp: http://*.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": { "schemes": ["one"] }
+    }
+  },
   "bundle": {
     "icon": ["../../icons/AppIcon@2x.png"]
   }

@@ -40,7 +40,7 @@ let appStore = ""
 const open = new Map()
 /** @param {string} entrypoint @param {string} [subject] */
 const key = (entrypoint, subject) => `${subject ?? ""}|${entrypoint}`
-/// Each app's first app, by the app's name, among this user's: what a notification from it opens.
+/// Each app's first app, by the app's name, among this user's: what a notification from it, or a `one:` link to it, opens.
 /** @type {Map<string, string>} */
 let first = new Map()
 /// Each app's name, by its page, as this user's apps list them.
@@ -110,7 +110,8 @@ visualViewport?.addEventListener("resize", keyboard)
 /// launcher, once it has drawn; signing in, where the device isn't in its network; why there's no launcher to show,
 /// with Apps to install one; and an update, which is all it shows once a server has refused this client for being
 /// behind it (`behind` from core/client), as an app that requires an update does. Only `on` moves it, by the moves `machine` has, and a move that isn't
-/// there is refused. Whether its network answers is the client's (`Connection` in core/client), which the
+/// there is refused. A link to an app (`one:`) is kept until the launcher has drawn, and then opened over it. While it
+/// opens or updates, the window is busy (`aria-busy`). Whether its network answers is the client's (`Connection` in core/client), which the
 /// window follows and never decides: it says it as it opens, and as a banner over the launcher.
 const { assign, createActor, fromPromise, setup } = XState
 const machine = setup({
@@ -147,6 +148,8 @@ const machine = setup({
     // The device hears its person's notifications once they see their home.
     listen: () => void invoke("listen"),
     openAppStore: () => openAppStore(),
+    link: assign({ link: ({ event, context }) => (event.type === "link" ? event.link : context.link) }),
+    follow: assign({ link: ({ context }) => void (context.link && go(context.link)) }),
   },
 }).createMachine({
   id: "window",
@@ -156,6 +159,7 @@ const machine = setup({
     session: { actions: "told" },
     connection: { actions: "connection" },
     updateReady: { actions: "updateReady" },
+    link: { actions: "link" },
   },
   states: {
     // Waits until it can start the launcher: its device in its network and its network answering, or a launcher
@@ -176,8 +180,8 @@ const machine = setup({
     // it, where it opens again (`follows` in `src/lib.rs`).
     sign_in: { entry: "signIn" },
     launcher: {
-      entry: "listen",
-      on: { update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating" },
+      entry: ["listen", "follow"],
+      on: { update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
     },
     no_launcher: {
       on: { openAppStore: { guard: "appStore", target: "app_store" }, tooOld: "needs_updating" },
@@ -223,6 +227,7 @@ const on = (event) => shown.send(event)
 /// until it draws after all, as a page loaded again behind another app may only once it's shown, when it's current.
 /// Only time it's on screen counts: while it's behind another app or the window is hidden, the 15 s wait (`away`),
 /// and go on from where they were once it's in front again (`seen`). The launcher's page is one too.
+/// Its frame is busy (`aria-busy`) while it loads.
 /// While a page is loading, as its parts: on screen, where the 15 s it has to draw in run, or not, where they wait.
 /** @type {any} */
 const waiting = {
@@ -265,6 +270,8 @@ const pageMachine = setup({
     unwaited: assign({ waited: 0 }),
     counts: assign({ since: () => performance.now() }),
     stops: assign({ waited: ({ context }) => context.waited + performance.now() - context.since }),
+    busy: ({ context }) => context.view.frame.setAttribute("aria-busy", "true"),
+    idle: ({ context }) => context.view.frame.removeAttribute("aria-busy"),
   },
 }).createMachine({
   id: "page",
@@ -277,7 +284,8 @@ const pageMachine = setup({
     // Loaded against what's gone before it's even drawn, as a kept launcher is when the list that's come since
     // names a newer one, it loads again at once: there's nothing of its person's on it yet.
     loading: {
-      entry: "unwaited",
+      entry: ["unwaited", "busy"],
+      exit: "idle",
       on: { drawn: "current", stale: "reloading" },
       ...waiting,
     },
@@ -294,7 +302,8 @@ const pageMachine = setup({
       on: { away: "reloading", opened: "reloading", reload: "reloading", errored: "reloading" },
     },
     reloading: {
-      entry: ["clear", "load", "unwaited"],
+      entry: ["clear", "load", "unwaited", "busy"],
+      exit: "idle",
       on: { drawn: "current", stale: { target: "reloading", reenter: true } },
       ...waiting,
     },
@@ -342,6 +351,7 @@ function draw() {
   const now = shown.getSnapshot()
   const { context } = now
   byId("state").hidden = now.matches("launcher") || now.matches("app_store") || now.matches("sign_in")
+  document.body.ariaBusy = now.matches("opening") || now.matches("updating") ? "true" : null
   const opening = now.matches("opening")
   byId("mark").hidden = byId("steps").hidden = !opening
   const opened = steps(context)
@@ -470,7 +480,10 @@ function launcherIn(resources) {
   names = new Map(pages.map(({ uri, name }) => [named(uri), name ?? ""]))
   const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
   appStore = found("app-store") ? named(/** @type {string} */ (found("app-store"))) : ""
-  return found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
+  const home = found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
+  // The launcher's app opens the launcher, as `one:home-screen` does.
+  if (home) first.set(home.split("/")[0], home)
+  return home
 }
 
 /// Who may install for everyone, if not this person, who then can't install a Home Screen: "Only Andre can install a
@@ -534,15 +547,17 @@ byId("page-problem-button").addEventListener("click", () => {
   page(view, { type: "retry" })
 })
 
-/// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown.
-/** @param {string} entrypoint @param {string} [subject] @returns {View} */
-function load(entrypoint, subject) {
+/// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown. A `fragment` is the
+/// place in its page a link names, which the app follows (its `hashchange`), open already or not.
+/** @param {string} entrypoint @param {string} [subject] @param {string} [fragment] @returns {View} */
+function load(entrypoint, subject, fragment) {
   const at = key(entrypoint, subject)
   const opened = open.get(at)
+  if (opened && fragment) opened.frame.src = `${located(opened)}#${fragment}`
   if (opened) return opened
   if (!listed.has(subject)) list(subject)
   const place = { key: at, entrypoint, subject, host: host(entrypoint, subject) }
-  const frame = Object.assign(document.createElement("iframe"), { src: located(place), inert: true })
+  const frame = Object.assign(document.createElement("iframe"), { src: `${located(place)}${fragment ? `#${fragment}` : ""}`, inert: true })
   /** @type {View} */
   const view = Object.assign({ ...place, frame }, { page: /** @type {View["page"]} */ (/** @type {unknown} */ (undefined)) })
   view.page = createActor(pageMachine, { input: view })
@@ -841,15 +856,21 @@ addEventListener("message", async ({ source, data }) => {
   if (!view.frame.inert) opened(view)
 })
 
-/// Shows an app over whatever's showing: by its app's name, and its page if it isn't the app's first app,
-/// for `subject`. With `behind` it only starts. → whether there is one here.
-/** @param {string} entrypoint @param {string} [subject] @param {boolean} [behind] @param {Rect} [from] */
-function go(entrypoint, subject, behind, from) {
+/// Shows an app over whatever's showing, by what a `one:` link says after its scheme: `<app>[/<page>][#<fragment>]`,
+/// its app's name, and its page if it isn't the app's first app, and the place in it, for `subject`. With `behind`
+/// it only starts. The launcher, linked to, is gone back to. → whether there is one here.
+/** @param {string} link @param {string} [subject] @param {boolean} [behind] @param {Rect} [from] */
+function go(link, subject, behind, from) {
+  const [entrypoint, fragment] = link.split("#", 2)
   const page = entrypoint.includes("/") ? entrypoint : first.get(entrypoint)
   if (!page) return false
   const tapped = performance.now()
-  const next = load(page, subject)
+  const next = load(page, subject, fragment)
   if (behind) return true
+  if (next.entrypoint === launcher) {
+    if (history.state) history.back()
+    return true
+  }
   const showing = history.state === next.key
   // It goes back into the icon it came out of, or slides out if it came from none.
   next.from = from
@@ -860,8 +881,8 @@ function go(entrypoint, subject, behind, from) {
   return true
 }
 
-// A notification from an app was tapped.
-listen("open", ({ payload: app }) => go(app))
+// A notification from an app was tapped, or a `one:` link opened (`links` in src/lib.rs).
+listen("open", ({ payload: link }) => on({ type: "link", link }))
 /// A phone's push plugin says a notification was tapped, even the tap that started the app, once this page hears
 /// it, which is once there are apps to open.
 async function hearTaps() {
@@ -967,9 +988,10 @@ await listen("session", ({ payload }) => hear(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
-const { taps, connection, ...told } = await invoke("start")
+const { taps, connection, open: link, ...told } = await invoke("start")
 phone = Boolean(taps)
 on({ type: "connection", connection })
+if (link) on({ type: "link", link })
 hear(told)
 invoke("visible", { onScreen: !document.hidden }).catch(() => {})
 if (taps) hearTaps()

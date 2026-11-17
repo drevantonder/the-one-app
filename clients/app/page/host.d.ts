@@ -93,6 +93,8 @@ export interface Context {
   lost: boolean
   starting: boolean
   updateReady: boolean
+  /** What a `one:` link opens once the launcher has drawn: `<app>[/<page>][#<fragment>]`. */
+  link?: string
   /** Who may install a Home Screen for everyone, where it isn't this person: "Only Andre can install a Home Screen for Everyone". */
   only?: string
   why?: string
@@ -112,11 +114,12 @@ export type Moved =
   | { type: "retry" }
   | { type: "update" }
   | { type: "updateReady"; ready: boolean }
+  | { type: "link"; link: string }
 
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
   /** Where the device is with its network as the window opens, whether its network answers, and whether a phone hears taps on notifications. */
-  start(): Told & { connection: Connection; taps?: boolean }
+  start(): Told & { connection: Connection; taps?: boolean; open?: string | null }
   /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown

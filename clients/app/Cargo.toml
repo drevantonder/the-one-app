@@ -28,6 +28,8 @@ window = [
   "dep:tauri-plugin-notification",
   "dep:tauri-plugin-notifications",
   "dep:tauri-plugin-window-state",
+  "dep:tauri-plugin-deep-link",
+  "dep:tauri-plugin-single-instance",
   "dep:tauri-plugin-haptics",
   "dep:encryption_client",
   "dep:notifications_client",
@@ -67,6 +69,10 @@ notifications_client = { path = "../../apps/notifications/client/native", option
 tauri-plugin-notification = { version = "2.8", optional = true }
 # The window opens where and as large as it was last, as a computer's apps do.
 tauri-plugin-window-state = { version = "2.5", optional = true }
+# A `one:` link opens the app at what it links to (`links`): one app, the only one, which a second start with a link
+# hands it to.
+tauri-plugin-deep-link = { version = "2.6", optional = true }
+tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"], optional = true }
 
 # The web view's own back and forward gestures, which Tauri doesn't switch on (`navigation_gestures`).
 # An app's haptics (`one/haptic` in client.js): an iPhone's, and on a computer nothing. Android's plays them through
