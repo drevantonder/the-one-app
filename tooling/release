@@ -82,19 +82,26 @@ for running in $(jq -r '[.servers[].build, .devices[].build, (.latest // {} | .[
   fi
 done
 
-# What's under way, published and not yet taken by every server, and isn't this release's own: a line for each
-# server it hasn't reached.
+# What's under way, published and not yet taken by every server it can reach, and isn't this release's own: a line
+# for each server it hasn't reached. A server the network hasn't seen for longer than `asleep` (a Mac asleep, a
+# machine off) holds up no release: it's named, and takes the latest with `one update --server` once it's back.
+asleep=600
 under_way() {
-  jq -r --arg build "$build" '(.latest["server-code"].build // "") as $latest | select($latest != $build) | .servers[] |
-    select(.build != $latest or .server_update_status != "up_to_date") |
-    "    \(.name) runs \(.build), \(.server_update_status), not \($latest)"' <<<"$1"
+  jq -r --arg build "$build" --argjson asleep "$asleep" '(.latest["server-code"].build // "") as $latest |
+    select($latest != $build) | .servers[] | select(.build != $latest or .server_update_status != "up_to_date") |
+    ((now - (.last_seen // now * 1000) / 1000) / 60 | floor) as $away |
+    if $away * 60 > $asleep then
+      "skipped: \(.name) was last seen \(if $away < 120 then "\($away) min" else "\($away / 60 | floor) h" end) ago, on \(.build): it takes the latest with `one update --server \(.server)` once it is back"
+    else "    \(.name) runs \(.build), \(.server_update_status), not \($latest)" end' <<<"$1"
 }
 refuse_under_way() {
-  local servers
+  local servers blocking
   servers=$(under_way "$1")
-  [[ -z $servers ]] || {
+  grep '^skipped: ' <<<"$servers" >&2 || true
+  blocking=$(grep -v -e '^skipped: ' -e '^$' <<<"$servers" || true)
+  [[ -z $blocking ]] || {
     echo "Another release is under way, which every server hasn't taken yet: let it finish rather than publish over it. Whose it is is its commit's thread and Agent Memory; a server neither ready nor coming back after a few minutes is broken, which is said, not released over." >&2
-    echo "$servers" >&2
+    echo "$blocking" >&2
     exit 1
   }
 }
