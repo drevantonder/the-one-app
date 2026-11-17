@@ -107,14 +107,21 @@ defmodule OneCore.Apps.Version do
     end
   end
 
-  defp listing(version, skills) do
-    metadata =
-      case Enum.find(skills, &(&1.at == "")) do
-        %{frontmatter: %{"metadata" => %{} = metadata}} -> metadata
-        _ -> %{}
-      end
+  @doc "What a version's skill says in its `metadata` (`OneCore.App`), as it says it, or `%{}`."
+  def metadata(version), do: metadata_of(skills(version))
 
+  defp metadata_of(skills) do
+    case Enum.find(skills, &(&1.at == "")) do
+      %{frontmatter: %{"metadata" => %{} = metadata}} -> metadata
+      _ -> %{}
+    end
+  end
+
+  # A category the platform no longer lists is read as the one that replaced it (`OneCore.Apps.Deploy.current/2`).
+  defp listing(version, skills) do
+    metadata = metadata_of(skills)
     text = for key <- ~w(subtitle about category), into: %{}, do: {String.to_atom(key), text(metadata[key])}
+    text = %{text | category: OneCore.Apps.Deploy.current(:category, text.category)}
 
     Map.merge(text, %{
       title: version.title,
