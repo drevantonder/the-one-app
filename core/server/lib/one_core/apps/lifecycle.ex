@@ -172,7 +172,7 @@ defmodule OneCore.Apps.Lifecycle do
   def required(owner) do
     for {name, version} <- Apps.versions([owner]),
         Requires.missing(owner, version.artifact, version.requires) != [],
-        Servers.runs?(owner) or not version.trusted,
+        Servers.runs?(owner) or (not version.trusted and Servers.here?(owner)),
         reduce: {:ok, []} do
       {:ok, also} ->
         with {:ok, more} <- requirements(owner, name, version.artifact, nil), do: {:ok, also ++ more}
