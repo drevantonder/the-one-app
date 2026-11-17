@@ -4,7 +4,7 @@ defmodule OneCore.Hooks do
   (`hooks/0`), and its `hook/3` is called at each, as that app, for whoever the moment is about. That's
   `asked` below: who asked for what brought the moment on, and who it runs for.
 
-  The hooks are One Core's, below, and the ones apps offer (`offers/0`), each named with the app's name:
+  The hooks are One Core's (`OneCore.App.Manifest`), and the ones apps offer (`offers/0`), each named with the app's name:
   `soft-delete.moved`. An app's hook is run here as One Core's are, and only that app runs it
   (`OneCore.Call.run_hook/3`).
 
@@ -48,125 +48,6 @@ defmodule OneCore.Hooks do
   require Logger
   alias OneCore.{Cache, Apps}
   alias OneCore.Apps.Calls
-
-  @kinds [
-    observe: """
-    is told after it happened, on the server where it happened, apart from what happened and from every other
-    app that observes it, in the order it happened. What it answers is ignored, and so is its raising. One that
-    needs a server acting for whoever it was installed for passes it there (`OneCore.Call.forward/2`).
-    """,
-    mutate: """
-    is handed it as it was asked, as every other app that mutates it is, and answers only what it changes, by
-    name: `%{}` changes nothing. Two apps that change the same thing to something different refuse it, and say
-    so. Which app changed what is said to the apps that validate and observe it.
-    """,
-    validate: """
-    answers `:ok` or `{:refuse, why}`. Every app that validates it has to answer `:ok`: one refusal refuses it,
-    and whoever asked is told why. An app that raises, or answers anything else, refuses it too.
-    """,
-    collect: """
-    is asked, as every other app that collects it is, and answers its own part of what's collected, which is
-    kept apart from every other app's, by its name: `nil` is no part. One that can't answer is left out, and
-    whoever ran the hook is told which, and why: an app that breaks takes away its own part and nothing else.
-    """
-  ]
-
-  @hooks [
-    {"inputs", :mutate,
-     """
-     A tool is about to be called. It's about the tool's `app`, which is `nil` for one of One Core's own tools, its
-     `tool` name and the `inputs` it was asked with. The answer is the inputs to set, by name. The tool is called only
-     if they are still what it takes.
-     """},
-    {"call", :validate,
-     """
-     A tool is about to be called. It's about the tool's `app`, which is `nil` for one of One Core's own tools, its
-     `tool` name, the `inputs` it will be called with, and `changed`: the app that set each input that was changed,
-     by the input's name.
-     """},
-    {"reach", :validate,
-     """
-     An app is about to reach an artifact that isn't its own. It's about `who` would reach it, the `relation`
-     they need to it (`viewer`, `editor` or `owner`) and the `artifact`'s name. It's asked about whoever the
-     app runs for, and about the app, by its artifact's name, where the app didn't make the artifact.
-     An `:ok` is kept for a few seconds, and until a tool of the app is called that doesn't only read: so
-     what it validates from is what its own tools change.
-     It's also asked whether whoever asks is a `member` of the group or the network they ask for: then `who` is
-     them, the `relation` is `member` and the `artifact` is the group, or `network`.
-     """},
-    {"device", :mutate,
-     """
-     A device asks, and One Core is about to say whose it is. It's about the `device`, by its key, and `who`, which
-     is nobody: `nil`. The answer is `who`: the user whose device it is, as `users/<name>`. With no app
-     answering, the device is nobody's, and nobody is refused everything. It's asked of the apps installed for the
-     network, since nobody is asking yet, and what's answered is kept until a tool of the app is called that
-     doesn't only read.
-     """},
-    {"owner", :validate,
-     """
-     The network is about to have its first owner. It's about `who` they are. An app that keeps who may do what
-     writes that down before it answers, and refuses if it can't: nothing else tells it.
-     """},
-    {"called", :observe,
-     """
-     A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
-     which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `forwarded`
-     to another server to run, whether its app makes it an MCP `task` (`OneCore.Tasks`), and its `trace`: its
-     `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A call passed on is observed on both servers.
-     """},
-    {"changed", :observe,
-     """
-     A blob of an artifact that an app made or reached was written or removed. It's about the `artifact`'s name, the
-     `blob`'s name in it, and `by`, the app that did it, as a who. An app is told only if it could already reach
-     the artifact for whoever changed it, and isn't told what it changed itself.
-     """},
-    {"measured", :observe,
-     """
-     A client said what it measured of itself. It's observed by the apps installed for the network, and it's about the
-     `device`'s key and `who` it's of, as its request proved, and its `records`, each as Telemetry's tool `record`
-     takes one, with the `time` it was made, in milliseconds since 1970, and the client's own say of which it is in
-     its `attributes`: what went wrong or was slow there, kept on the device until a server could be told.
-     """},
-    {"uninstalled", :observe,
-     """
-     An app was uninstalled for someone. It's about who it was installed `for`, the `name` it was installed by
-     there and the `app` it is, by its artifact's name, and `with`, each app installed for them that required it
-     and went with it, by its `name` and `app`. An app that keeps what's deleted takes what they kept and made for
-     them along, as one.
-     """},
-    {"restored", :observe,
-     """
-     An app was brought back from Recently Deleted for someone. It's about who it's installed `for`, the `name` it's
-     installed by there and the `app` it is. An app that keeps what's deleted brings back what it kept and made for
-     them with it.
-     """},
-    {"joined", :observe,
-     """
-     A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the
-     server that installed it.
-     """}
-  ]
-
-  @doc "Every one of One Core's hooks' names, with its kind: `:observe`, `:mutate`, `:validate` or `:collect`."
-  def kinds, do: Map.new(@hooks, fn {hook, kind, _about} -> {hook, kind} end)
-
-  @doc """
-  Whether `hook` is a name an app can hook into: one of One Core's hooks, or an app's, `<app>.<hook>`, which
-  may not be installed yet: then it's never run.
-  """
-  def hook?(hook),
-    do: is_map_key(kinds(), hook) or (is_binary(hook) and hook =~ ~r/^[a-z0-9][a-z0-9-]*\.[a-z][a-z0-9_]*$/)
-
-  @doc "What an app's author reads about hooks: each kind, and each of One Core's hooks with its kind and what it's about."
-  def listed do
-    kinds = for {kind, how} <- @kinds, do: "- An app that hooks into a hook of kind `#{inspect(kind)}` #{flat(how)}"
-    Enum.join(kinds ++ ["", "The hooks:", "", listed(@hooks)], "\n")
-  end
-
-  @doc "Hooks, each `{name, kind, about}`, as an app's author reads them."
-  def listed(hooks), do: Enum.map_join(hooks, "\n", fn {hook, kind, about} -> "- `#{hook}` #{kind}. #{flat(about)}" end)
-
-  defp flat(text), do: text |> String.split() |> Enum.join(" ")
 
   # How long an app has to answer a hook, in milliseconds. A check is answered in well under a millisecond, and
   # the slowest answer is one whose app's server has just gone: finding that out and taking over from it

@@ -47,10 +47,10 @@ defmodule OneCore.MixProject do
 
   # The program is One Core. On a developer's machine it's also `mix network`, which `tooling/network` runs, at the repo's
   # root.
-  # `OneCore.Redact` and `OneCore.Nif` are compiled by an untrusted app's VM too, which has none of the server's
+  # `OneCore.App.Manifest`, `OneCore.Redact` and `OneCore.Nif` are compiled by an untrusted app's VM too, which has none of the server's
   # code, so it's where that VM finds them, in `priv/sandbox`.
   defp elixirc_paths(:dev), do: elixirc_paths(:prod) ++ [Path.expand("../../tooling/network.ex", __DIR__)]
-  defp elixirc_paths(_env), do: ["lib", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
+  defp elixirc_paths(_env), do: ["lib", "priv/sandbox/manifest.ex", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
 
   # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` runs it: built as one, it
   # has one set of features, so nothing in it is built twice or again for nothing. It's the debug build, as a

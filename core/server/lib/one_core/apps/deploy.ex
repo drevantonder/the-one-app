@@ -265,7 +265,7 @@ defmodule OneCore.Apps.Deploy do
 
     deployed =
       for {{artifact, about}, {:ok, description, _tag}} <- Enum.zip(abouts, described),
-          {:ok, listing} <- [Version.listed(Path.basename(artifact), description)],
+          {:ok, listing} <- [Version.listed(artifact, description)],
           do: Map.merge(listing, %{app: artifact, trusted: about["trusted"] != false})
 
     :ets.insert(__MODULE__, {:deployed, deployed, System.monotonic_time(:millisecond)})

@@ -5,6 +5,7 @@ defmodule OneCore.Apps.Version.Compile do
   says of itself is checked (`OneCore.Apps.Version.Checks`).
   """
   alias OneCore.{Entrypoint, Builds, Nif, Server, Skills}
+  alias OneCore.App.Manifest
   alias OneCore.Apps.Version
   alias OneCore.Apps.Version.Checks
 
@@ -31,7 +32,8 @@ defmodule OneCore.Apps.Version.Compile do
         own: Map.reject(rest, fn {path, _} -> Version.client?(path) end)
       }
 
-      {:ok, %{version | code: Version.code(files), ui: Entrypoint.ui(files), title: version.title || name}, warnings, kept}
+      {:ok, %{version | code: Version.code(files), ui: Entrypoint.ui(files), title: version.title || name}, warnings,
+       kept}
     end
   end
 
@@ -114,68 +116,43 @@ defmodule OneCore.Apps.Version.Compile do
     end)
   end
 
-  # What an app says of itself, by the functions that say it, with what each gives where it has none.
-  @callbacks [
-    tools: [],
-    entrypoints: [],
-    title: nil,
-    icon: nil,
-    widgets: [],
-    hooks: [],
-    offers: [],
-    jobs: [],
-    requires: %{}
-  ]
-
   # `rest` is the files that aren't Elixir or skills. An app with no Elixir provides no tools and names no entrypoints.
   defp described(under, modules, rest) do
     case Enum.filter(modules, &(OneCore.App in Version.behaviours(&1))) do
       [] when modules == [] ->
-        Checks.checked(under, nil, Map.put(Map.new(@callbacks), :exports, []), [], rest)
+        Checks.checked(under, nil, Manifest.decode(%{}), [], rest)
 
       [app] ->
-        description =
-          for {function, none} <- @callbacks,
-              into: %{exports: exports(app)},
-              do: {function, if(function_exported?(app, function, 0), do: apply(app, function, []), else: none)}
-
         services = Enum.filter(modules, &(OneCore.Service in Version.behaviours(&1)))
-
         process? = &(GenServer in Version.behaviours(&1) or :gen_statem in Version.behaviours(&1))
 
-        if Enum.all?(services, &(process?.(&1) and is_binary(&1.needs()) and is_binary(&1.called()))) do
-          services =
-            for module <- services,
-                do: %{name: Version.own_name(module), called: module.called(), needs: module.needs()}
+        with {:ok, description, services} <- said(app, services) do
+          if Enum.all?(services, fn {module, called, needs} ->
+               process?.(module) and is_binary(needs) and is_binary(called)
+             end) do
+            services =
+              for {module, called, needs} <- services,
+                  do: %{name: Version.own_name(module), called: called, needs: needs}
 
-          Checks.checked(under, app, description, services, rest)
-        else
-          {:error,
-           "A service says `use GenServer` or `@behaviour :gen_statem`, its needs/0 gives what it needs of a " <>
-             "machine, and its called/0 what it's called, each as text"}
+            Checks.checked(under, app, description, services, rest)
+          else
+            {:error,
+             "A service says `use GenServer` or `@behaviour :gen_statem`, its needs/0 gives what it needs of a " <>
+               "machine, and its called/0 what it's called, each as text"}
+          end
         end
 
       found ->
         {:error, "One module of an app says `@behaviour OneCore.App`, and #{length(found)} do"}
     end
-  rescue
-    error ->
-      {:error,
-       "tools/0, entrypoints/0, widgets/0, hooks/0, offers/0, jobs/0, requires/0 or a service's " <>
-         "needs/0 or called/0 raised: " <>
-         Exception.message(error)}
   end
 
-  # The functions an app's module provides other apps, which run inside each app that requires it
-  # (`OneCore.App`): its public ones besides the callbacks, as name/arity.
-  defp exports(app) do
-    callbacks = OneCore.App.behaviour_info(:callbacks)
-
-    Enum.sort(
-      for {name, arity} <- app.__info__(:functions),
-          {name, arity} not in callbacks,
-          not String.starts_with?(Atom.to_string(name), "__"),
-          do: "#{name}/#{arity}"
-    )
+  # What the app and its services say of themselves, by their own functions, which may raise.
+  defp said(app, services) do
+    {:ok, Manifest.said(app), for(module <- services, do: {module, module.called(), module.needs()})}
+  rescue
+    error ->
+      functions = Enum.map_join(Manifest.said(), ", ", &"#{&1}/0")
+      {:error, "#{functions} or a service's needs/0 or called/0 raised: " <> Exception.message(error)}
   end
 end

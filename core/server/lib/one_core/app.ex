@@ -322,7 +322,7 @@ defmodule OneCore.App do
     hook gives an app nothing it couldn't already reach.
   - An app hooks into the moments of whoever it was installed for: one installed for a user mutates and validates only
     what runs for that user, and one installed for the network does for everyone.
-  #{OneCore.Hooks.listed()}
+  #{OneCore.App.Manifest.listed()}
 
   An app that knows which app it needs calls it (`OneCore.Call.tool/4`, `OneCore.Call.app/2`). One that can't
   know who will answer offers a hook instead, and whoever wants to hooks into it. `offers/0` lists them, each with a
@@ -621,34 +621,10 @@ defmodule OneCore.App do
       @text <>
       if(offered == [],
         do: "",
-        else: "\nThe hooks the apps you have offer:\n\n" <> OneCore.Hooks.listed(offered) <> "\n"
+        else: "\nThe hooks the apps you have offer:\n\n" <> OneCore.App.Manifest.listed(offered) <> "\n"
       )
   end
 
-  @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map, outputs: map}]
-  @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
-  @callback entrypoints() :: [%{name: String.t(), page: String.t()}]
-  @callback widgets() :: [%{name: String.t(), tool: String.t(), sizes: [String.t()]}]
-  @callback hooks() :: [String.t()]
-  @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term
-  @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate | :collect, description: String.t()}]
-  @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
-  @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-  @callback title() :: String.t()
-  @callback icon() :: String.t()
-  @callback requires() :: %{String.t() => String.t()}
-  @callback sensitive() :: boolean
-  @optional_callbacks tools: 0,
-                      call: 3,
-                      entrypoints: 0,
-                      widgets: 0,
-                      hooks: 0,
-                      hook: 3,
-                      offers: 0,
-                      jobs: 0,
-                      schedule: 3,
-                      title: 0,
-                      icon: 0,
-                      requires: 0,
-                      sensitive: 0
+  require OneCore.App.Manifest
+  OneCore.App.Manifest.callbacks()
 end

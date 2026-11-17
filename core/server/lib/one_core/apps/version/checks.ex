@@ -4,7 +4,7 @@ defmodule OneCore.Apps.Version.Checks do
   (`OneCore.Apps.Version.Compile`) and for an untrusted one, whose code said it in its sandbox
   (`OneCore.Apps.Version.Description`).
   """
-  alias OneCore.Hooks
+  alias OneCore.App.Manifest
   alias OneCore.Apps.Version
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
@@ -16,7 +16,15 @@ defmodule OneCore.Apps.Version.Checks do
   `rest` its files that aren't Elixir or skills.
   """
   def checked(under, app, description, services, rest) do
-    %{tools: tools, entrypoints: entrypoints, title: title, icon: icon, widgets: widgets, exports: exports, hooks: hooks} =
+    %{
+      tools: tools,
+      entrypoints: entrypoints,
+      title: title,
+      icon: icon,
+      widgets: widgets,
+      exports: exports,
+      hooks: hooks
+    } =
       description
 
     %{offers: offers, jobs: jobs, requires: requires} = description
@@ -44,11 +52,11 @@ defmodule OneCore.Apps.Version.Checks do
       not (is_list(exports) and Enum.all?(exports, &is_binary/1)) ->
         {:error, "Its module's functions are said as a list of names"}
 
-      not (is_list(hooks) and Enum.all?(hooks, &Hooks.hook?/1) and
+      not (is_list(hooks) and Enum.all?(hooks, &Manifest.hook?/1) and
                (hooks == [] or app == nil or function_exported?(app, :hook, 3))) ->
         {:error,
          "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
-           Enum.join(Enum.sort(Map.keys(Hooks.kinds())), ", ") <>
+           Enum.join(Enum.sort(Map.keys(Manifest.kinds())), ", ") <>
            ", and the ones apps offer, each as <app>.<hook>: soft-delete.moved"}
 
       not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
@@ -61,7 +69,6 @@ defmodule OneCore.Apps.Version.Checks do
          "requires/0 gives the other apps it needs, each by its name with why, as a person reads it after " <>
            "\"Gmail uses Google Account\", and \"core\" the versions of the platform it runs on, as an Elixir " <>
            "requirement: %{\"core\" => \"~> 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
-
 
       true ->
         tools = Enum.map(tools, &Version.schemas/1)
@@ -93,7 +100,6 @@ defmodule OneCore.Apps.Version.Checks do
     do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/ and is_binary(why) and String.trim(why) != ""
 
   defp requirement?(_requirement), do: false
-
 
   defp offer?(%{name: name, kind: kind, description: description}),
     do:
@@ -161,7 +167,8 @@ defmodule OneCore.Apps.Version.Checks do
   defp entrypoint?(%{name: name, page: page} = entrypoint, rest) when is_binary(name),
     do:
       page?(page, rest) and (entrypoint[:icon] == nil or is_map_key(rest, entrypoint[:icon])) and
-        (entrypoint[:category] == nil or is_binary(entrypoint[:category])) and (entrypoint[:subject] == nil or is_binary(entrypoint[:subject]))
+        (entrypoint[:category] == nil or is_binary(entrypoint[:category])) and
+        (entrypoint[:subject] == nil or is_binary(entrypoint[:subject]))
 
   defp entrypoint?(_, _), do: false
 

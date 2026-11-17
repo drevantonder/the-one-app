@@ -117,38 +117,14 @@ defmodule OneCore.App do
       else: files[path] || raise("#{name}'s app has no file #{path} outside client/")
   end
 
-  @callback tools() :: [map]
-  @callback call(String.t(), map, struct) :: term
-  @callback entrypoints() :: [map]
-  @callback widgets() :: [map]
-  @callback title() :: String.t()
-  @callback icon() :: String.t()
-  @callback hooks() :: [String.t()]
-  @callback hook(String.t(), map, struct) :: term
-  @callback offers() :: [map]
-  @callback jobs() :: [map]
-  @callback schedule(struct, [map], (map -> term)) :: term
-  @callback requires() :: %{String.t() => String.t()}
-  @callback sensitive() :: boolean
-  @optional_callbacks tools: 0,
-                      call: 3,
-                      entrypoints: 0,
-                      widgets: 0,
-                      title: 0,
-                      icon: 0,
-                      hooks: 0,
-                      hook: 3,
-                      offers: 0,
-                      jobs: 0,
-                      schedule: 3,
-                      requires: 0,
-                      sensitive: 0
+  require OneCore.App.Manifest
+  OneCore.App.Manifest.callbacks()
 end
 
 defmodule OneCore.Service do
   @moduledoc false
-  @callback called() :: String.t()
-  @callback needs() :: String.t()
+  require OneCore.App.Manifest
+  OneCore.App.Manifest.service_callbacks()
 end
 
 defmodule OneCore.Sandbox.Child do
@@ -468,44 +444,19 @@ defmodule OneCore.Sandbox.Child do
   @doc "The behaviours a module says it follows, one `behaviour` attribute each."
   def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
-  # What the app says of itself, as `OneCore.Apps.Version` takes it, with what an untrusted app isn't offered.
+  # What the app says of itself, its manifest's JSON form (`OneCore.App.Manifest`), with what an untrusted app isn't
+  # offered.
   defp described(app, main, modules, runs) do
-    value = fn function, none ->
-      if function_exported?(app, function, 0), do: apply(app, function, []), else: none
-    end
-
-    hooks = value.(:hooks, [])
-    offers = value.(:offers, [])
+    said = OneCore.App.Manifest.said(app)
     services = for module <- modules, OneCore.Service in behaviours(module), do: inspect(module)
 
-    %{
-      "tools" => value.(:tools, []),
-      "entrypoints" => value.(:entrypoints, []),
-      "title" => value.(:title, nil),
-      "icon" => value.(:icon, nil),
-      "offers" => offers,
-      "widgets" => value.(:widgets, []),
-      "exports" => exports(app),
-      "hooks" => hooks,
-      "jobs" => value.(:jobs, []),
-      "requires" => value.(:requires, %{}),
-      "warnings" => Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
-      "problems" => OneCore.Sandbox.Check.problems(app, modules, runs, hooks, offers, services)
-    }
+    said
+    |> Map.merge(%{
+      warnings: Process.get({__MODULE__, :warnings, main}, []) |> Enum.join("\n"),
+      problems: OneCore.Sandbox.Check.problems(app, modules, runs, said.hooks, said.offers, services)
+    })
     |> JSON.encode!()
     |> JSON.decode!()
-  end
-
-  # The functions its module provides other apps, as `OneCore.Apps.Version` says them.
-  defp exports(app) do
-    callbacks = OneCore.App.behaviour_info(:callbacks)
-
-    Enum.sort(
-      for {name, arity} <- app.__info__(:functions),
-          {name, arity} not in callbacks,
-          not String.starts_with?(Atom.to_string(name), "__"),
-          do: "#{name}/#{arity}"
-    )
   end
 
   # An IO server that takes whatever it's sent and keeps none of it.
@@ -536,18 +487,11 @@ defmodule OneCore.Sandbox.Check do
   # to do instead. It reads the compiled code, after every macro, so it sees what will run. It's a check for the
   # author, not the wall: the wall is the sandbox this VM runs in.
 
-  @offered %{
-    OneCore.Call =>
-      ~w(app tool make reach reaches? member? owns? apps deployed process forward_to stage ask __struct__)a,
-    OneCore.Artifact => ~w(name read read_all write replace remove size list __struct__)a,
-    OneCore.App => ~w(file behaviour_info)a
-  }
-
   @programs [{System, :cmd}, {System, :shell}, {Port, :open}, {:os, :cmd}, {:erlang, :open_port}]
   @network [:gen_tcp, :gen_udp, :gen_sctp, :ssl, :httpc, :socket, Req, Finch, Mint.HTTP, HTTPoison, Tesla]
 
   # Core's hooks that mutate or validate what happens, which only an app on a server of its owner's may.
-  @deciding ~w(inputs call reach device owner)
+  @deciding for {hook, kind} <- OneCore.App.Manifest.kinds(), kind in [:mutate, :validate], do: hook
 
   # Which of the apps it requires, by their names, run in its VM as it: those whose code can run there. One that
   # can't, as most of the network's own can't, is called by its tools instead.
@@ -648,8 +592,8 @@ defmodule OneCore.Sandbox.Check do
       m in loaded ->
         nil
 
-      Map.has_key?(@offered, m) ->
-        if f not in @offered[m], do: "#{name} isn't offered to an untrusted app. #{instead(m, f)}"
+      offered = OneCore.App.Manifest.offered()[inspect(m)] ->
+        if f not in offered, do: "#{name} isn't offered to an untrusted app. #{instead(m, f)}"
 
       m == OneCore.Service ->
         "#{name} reaches a service, which an untrusted app has none of: an app with one runs trusted, on a " <>

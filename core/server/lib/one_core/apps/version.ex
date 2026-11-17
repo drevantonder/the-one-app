@@ -90,23 +90,21 @@ defmodule OneCore.Apps.Version do
   def listing(version), do: listing(version, skills(version))
 
   @doc """
-  What a version of the app `name` described (`OneCore.Apps.Version.Description.description/1`) lists, as
+  What a version of the app `artifact` described (`OneCore.Apps.Version.Description.description/1`) lists, as
   `listing/1` with what the App Store's Marketplace says besides: its skill's `description`, its `tools`' names and its
   `requires`. `{:ok, listing}`, or `:error` where that isn't a description. Nothing is loaded.
   """
-  def listed(name, description) do
-    Code.ensure_loaded!(OneCore.Skills)
-    description = :erlang.binary_to_term(description, [:safe])
-    skill = Enum.find(description.skills, &(&1.at == "")) || %{frontmatter: %{}}
+  def listed(artifact, description) do
+    with {:ok, version, kept} <- OneCore.Apps.Version.Description.described(artifact, description) do
+      skill = Enum.find(kept.skills, &(&1.at == "")) || %{frontmatter: %{}}
 
-    {:ok,
-     Map.merge(listing(%{description | title: description.title || name}, description.skills), %{
-       description: skill.frontmatter["description"] || "",
-       tools: Enum.map(description.tools, & &1.name),
-       requires: description.requires || %{}
-     })}
-  rescue
-    _ -> :error
+      {:ok,
+       Map.merge(listing(version, kept.skills), %{
+         description: skill.frontmatter["description"] || "",
+         tools: Enum.map(version.tools, & &1.name),
+         requires: version.requires || %{}
+       })}
+    end
   end
 
   defp listing(version, skills) do

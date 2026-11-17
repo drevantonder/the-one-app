@@ -10,80 +10,83 @@ defmodule OneCore.Apps.Version.Description do
   Each is held as `OneCore.Apps.LoadedVersion` holds a version, by its app and its code.
   """
   alias OneCore.{Entrypoint, Skills}
+  alias OneCore.App.Manifest
   alias OneCore.Apps.{LoadedVersion, Version}
   alias OneCore.Apps.Version.Checks
 
+  # What a server keeps of a version besides what its app said: the version's own fields, and of what it keeps as
+  # it's held, its files a page loads and its skills.
+  @kept [:exports, :services, :code, :ui, :title, :icon, :core]
+
   @doc """
-  What a loaded version says of itself, as the bucket keeps it: what it provides, and its files and skills, but
-  none of its code.
+  What a loaded version says of itself, as the bucket keeps it: its manifest's JSON form (`OneCore.App.Manifest`)
+  as checked, what it provides besides, and its files and skills, but none of its code.
   """
   def description(%Version{under: under} = version) do
     kept = LoadedVersion.kept(under)
 
-    description =
-      Map.take(version, [
-        :tools,
-        :entrypoints,
-        :widgets,
-        :exports,
-        :services,
-        :hooks,
-        :offers,
-        :jobs,
-        :code,
-        :ui,
-        :title,
-        :icon,
-        :requires,
-        :core
-      ])
+    # Until every server reads its JSON form (`described/2`), it's kept as the term it was, holding only names any
+    # server knows: a tool's inputs as JSON has them, not the atoms its app wrote them with.
+    json = &JSON.decode!(JSON.encode!(&1))
 
-    # It holds only names any server knows: a tool's inputs as JSON has them, not the atoms its app wrote them
-    # with, which a server that never loaded the app doesn't have, and won't take from the bucket.
     tools =
-      for tool <- description.tools do
-        tool
-        |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
-        |> Map.update!(:inputs, &JSON.decode!(JSON.encode!(&1)))
-        |> Map.replace_lazy(:outputs, &JSON.decode!(JSON.encode!(&1)))
-      end
+      for tool <- version.tools,
+          do:
+            tool
+            |> Map.take([:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
+            |> Map.update!(:inputs, json)
+            |> Map.replace_lazy(:outputs, json)
 
-    :erlang.term_to_binary(%{description | tools: tools} |> Map.merge(%{files: kept.files, skills: kept.skills}))
+    version
+    |> Map.take(Manifest.said() ++ @kept)
+    |> Map.merge(%{tools: tools, files: kept.files, skills: kept.skills})
+    |> :erlang.term_to_binary()
   end
 
   @doc """
   A version of the app `artifact` from what it said of itself (`description/1`), and what it keeps as one held
-  (`OneCore.Apps.LoadedVersion.described/2`): `{:ok, version, kept}`, or `:error` where that isn't one. It was written by a server that runs the app, whoever's that is, so only
-  what's listed of it is taken, and what each tool takes and gives is read from its inputs and outputs again.
+  (`OneCore.Apps.LoadedVersion.described/2`): `{:ok, version, kept}`, or `:error` where that isn't one. It was written
+  by a server that runs the app, whoever's that is, so only what's listed of it is taken, and what each tool takes
+  and gives is read from its inputs and outputs again.
   """
   def described(artifact, description) do
-    # Its skills are as `OneCore.Skills` says them, whose names a server that has just started may not know yet.
-    Code.ensure_loaded!(Skills)
-    description = :erlang.binary_to_term(description, [:safe])
+    with {:ok, %{} = json} <- decoded(description) do
+      said = Manifest.decode(json)
+      fields = for field <- @kept, into: %{}, do: {field, json["#{field}"]}
 
-    fields =
-      Map.take(description, [
-        :entrypoints,
-        :widgets,
-        :exports,
-        :services,
-        :hooks,
-        :offers,
-        :jobs,
-        :code,
-        :ui,
-        :title,
-        :icon,
-        :requires,
-        :core
-      ])
+      services =
+        for service <- json["services"] || [],
+            do: %{name: service["name"], called: service["called"], needs: service["needs"]}
 
-    under = {:described, artifact, description.code}
-    tools = Enum.map(description.tools, &Version.schemas/1)
-    version = struct!(Version, Map.merge(fields, %{under: under, app: nil, tools: tools, artifact: artifact}))
-    {:ok, version, %{files: description.files, hashes: %{}, skills: description.skills, own: %{}}}
-  rescue
-    _ -> :error
+      under = {:described, artifact, json["code"]}
+      tools = Enum.map(said.tools, &Version.schemas/1)
+
+      version =
+        struct!(
+          Version,
+          said
+          |> Map.merge(fields)
+          |> Map.merge(%{under: under, app: nil, tools: tools, services: services, artifact: artifact})
+        )
+
+      {:ok, version, %{files: json["files"], hashes: %{}, skills: Enum.map(json["skills"], &skill/1), own: %{}}}
+    else
+      _ -> :error
+    end
+  end
+
+  # A description kept as a term is read as the same JSON, until every server writes JSON.
+  defp decoded(<<131, _::binary>> = term) do
+    Code.ensure_loaded!(OneCore.Skills)
+    {:ok, term |> :erlang.binary_to_term([:safe]) |> JSON.encode!() |> JSON.decode!()}
+  end
+
+  defp decoded(json), do: JSON.decode(json)
+
+  # A skill as `OneCore.Skills.found/2` gives it, from its JSON form.
+  defp skill(skill) do
+    files = for file <- skill["files"], do: %{path: file["path"], digest: file["digest"], size: file["size"]}
+    %{at: skill["at"], frontmatter: skill["frontmatter"], digest: skill["digest"], size: skill["size"], files: files}
   end
 
   @doc """
@@ -100,32 +103,7 @@ defmodule OneCore.Apps.Version.Description do
     {skills, rest} =
       Map.split_with(rest, fn {path, _} -> path == "SKILL.md" or String.starts_with?(path, "skills/") end)
 
-    taken = fn list, keys ->
-      for item <- List.wrap(list),
-          is_map(item),
-          do: Map.new(Map.take(item, keys), &{String.to_existing_atom(elem(&1, 0)), elem(&1, 1)})
-    end
-
-    offers =
-      for offer <- taken.(description["offers"], ~w(name kind description)),
-          do: Map.update(offer, :kind, nil, &hook_kind/1)
-
-    description = %{
-      tools:
-        for(
-          tool <- taken.(description["tools"], ~w(name description inputs outputs read_only by_link ui task_support)),
-          do: Map.replace_lazy(tool, :task_support, &task_support/1)
-        ),
-      entrypoints: taken.(description["entrypoints"], ~w(name page icon category subject)),
-      title: description["title"],
-      icon: description["icon"],
-      widgets: taken.(description["widgets"], ~w(name tool sizes)),
-      exports: description["exports"],
-      hooks: description["hooks"],
-      offers: offers,
-      jobs: taken.(description["jobs"], ~w(tool every inputs)),
-      requires: description["requires"]
-    }
+    description = Manifest.decode(description)
 
     with {:ok, skills} <- Skills.found(name, skills),
          {:ok, version} <- Checks.checked(under, nil, description, [], rest) do
@@ -143,12 +121,4 @@ defmodule OneCore.Apps.Version.Description do
       {:ok, version}
     end
   end
-
-  defp hook_kind(kind) when kind in ["observe", "mutate", "validate", "collect"], do: String.to_existing_atom(kind)
-  defp hook_kind(_kind), do: nil
-
-  # An untrusted app's code said its tools in JSON, where an atom is text.
-  defp task_support("optional"), do: :optional
-  defp task_support("required"), do: :required
-  defp task_support(other), do: other
 end

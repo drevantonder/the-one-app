@@ -25,9 +25,8 @@ defmodule OneCore.Sandbox do
     `{"request": n, "call": id, "op": ..., ...}`, one of the functions below, and `{"log": level, "text": ...}`.
     A frame over 64 MB, or that isn't one of these, stops it.
 
-  What it's offered is what the app interface offers, as messages: `OneCore.Artifact`'s read, read_all, write,
-  replace, remove, list, size and name; `OneCore.Call`'s tool, make, reach, reaches?, member?, owns?, apps,
-  deployed, process (its own VM's), forward_to, stage and ask; `OneCore.App.file/2` and `nif/2`; and Logger. An
+  What it's offered is what the app interface offers, as messages: `OneCore.App.Manifest.offered/0`, a process
+  being its own VM's, and Logger. An
   artifact it's given is a handle this server looks up, never a prefix
   it could rewrite, and a call is one this server is running, never a subject, actor or caller it could name. It hooks
   only into what it observes: a mutate, validate or collect hook asks it nothing. It has no services, no other apps'
@@ -475,7 +474,8 @@ defmodule OneCore.Sandbox do
     # What a version's VM compiled is kept on this machine for its next VM, whoever's it is, which loads it instead:
     # its own code and the child's side of One Core, as this server has it.
     runtime =
-      for file <- ~w(child.ex redact.ex nif.ex), do: File.read!(Application.app_dir(:one_core, "priv/sandbox/#{file}"))
+      for file <- ~w(child.ex manifest.ex redact.ex nif.ex),
+          do: File.read!(Application.app_dir(:one_core, "priv/sandbox/#{file}"))
 
     cache = if version, do: Path.join([Server.home(), "sandbox", Version.code({key, runtime})])
 
@@ -604,7 +604,7 @@ defmodule OneCore.Sandbox do
         do: "",
         else:
           "{ok, _, _} = 'Elixir.Kernel.ParallelCompiler':compile_to_path([<<\"#{child}/child.ex\"/utf8>>, " <>
-            "<<\"#{child}/redact.ex\"/utf8>>, <<\"#{child}/nif.ex\"/utf8>>], " <>
+            "<<\"#{child}/manifest.ex\"/utf8>>, <<\"#{child}/redact.ex\"/utf8>>, <<\"#{child}/nif.ex\"/utf8>>], " <>
             "unicode:characters_to_binary(filename:join(os:getenv(\"TMPDIR\"), \"runtime\")), " <>
             "[{return_diagnostics, true}]), "
 
