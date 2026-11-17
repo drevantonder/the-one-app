@@ -1,15 +1,17 @@
 // The Home Screen: yours, everyone's, then each of your groups', one owner above another, each a row of pages and then
 // their App Library. Left and right moves between an owner's pages, as a phone's do, and up and down between owners,
-// unless a page scrolls itself, as the App Library does. The owner's name at the top opens a list of every owner. A
-// page never scrolls: it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole
-// pages of an owner's side by side as fit, one to three. Whoever arranges an owner's pages edits them as a phone's
-// Home Screen is edited: touch and hold, or right-click, then Edit Home Screen. Where it is, what's open over it and
-// the editing are one state machine (machine.ts), whose snapshot is one signal here.
+// unless a page scrolls itself, as the App Library does. The pages move by hand, as a phone's do (pager.ts). The
+// owner's name at the top opens a list of every owner. A page never scrolls: it's a fixed grid, and what doesn't fit
+// goes on to the next. A wide window shows as many whole pages of an owner's side by side as fit, one to three. Whoever
+// arranges an owner's pages edits them as a phone's Home Screen is edited: touch and hold an app or a widget, or right-
+// click it, then Edit Home Screen, or touch and hold a page's empty space. Where it is, what's open over it and the
+// editing are one state machine (machine.ts), whose snapshot is one signal here.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
 import { Button, call, changed, confirm, covers, Empty, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
+import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { type At, type Editing, fitted, type Held, kinds, type Kind, machine, type Opened, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { App, Category, Item, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
@@ -633,37 +635,113 @@ function HomeScreen(props: { owners: Owner[] }) {
     const { last, pages } = state().context
     return pages[owner]?.[owner === seen().owner ? seen().page : (last[owner] ?? 0)] ?? "home"
   }
-  const step = (strip: HTMLElement) => (strip.firstElementChild as HTMLElement | null)?.offsetWidth ?? strip.clientWidth
-  const gap = (strip: HTMLElement) => parseFloat(getComputedStyle(strip).columnGap) || 0
+  /// Each owner's pages, across: `strips` are the windows onto them, and `tracks` the rows that move in them.
+  const tracks: HTMLElement[] = []
+  const height = () => main.clientHeight || innerHeight
+  /// How far apart an owner's pages are, and how far along their row can go before its last page's end shows.
+  const pitch = (owner: number) => {
+    const [first, second] = tracks[owner]?.children ?? []
+    return Math.abs((second as HTMLElement)?.offsetLeft - (first as HTMLElement)?.offsetLeft) || strips[owner]?.clientWidth || innerWidth
+  }
+  const furthest = (owner: number) => {
+    const track = tracks[owner]
+    if (!track) return 0
+    return Math.max(0, (track.children.length - 1) * pitch(owner) - (strips[owner].clientWidth - (track.firstElementChild as HTMLElement).offsetWidth))
+  }
+  /// How many places an owner's row of pages stops at: one fewer for each page beyond the first a wide window shows.
+  const stops = (owner: number) => Math.round(furthest(owner) / pitch(owner)) + 1
+  /// The owners, up and down, and each owner's pages, across: where they are, as the pager moves them.
+  const down = spring((y) => {
+    main.style.translate = `0 ${-y}px`
+    roll(y / height())
+    look()
+  })
+  const across: Spring[] = []
+  const sideways = (owner: number) =>
+    (across[owner] ??= spring((x) => {
+      if (tracks[owner]) tracks[owner].style.translate = `${-x * rtl()}px 0`
+      look()
+    }))
+  /// The owner and page nearest where they are, which the dots and the owner's name follow.
+  const look = () => {
+    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(down.value / height())))
+    setSeen({ owner, page: Math.round(sideways(owner).value / pitch(owner)) })
+  }
 
-  /// The owner's name rolls as the owners move, and the dots follow the page nearest.
-  const moved = () => {
-    const owners = main.scrollTop / Math.max(1, main.getBoundingClientRect().height)
-    roll(owners)
-    look(Math.round(owners))
-  }
-  const look = (owner: number) => {
-    const strip = strips[owner]
-    setSeen({ owner, page: strip ? Math.round(Math.abs(strip.scrollLeft) / (step(strip) + gap(strip))) : 0 })
-  }
-  /// Where the pages came to rest, told to the machine when it's somewhere new, and the name exactly that owner's,
-  /// whatever fraction of a pixel the scroll stopped short by. Nothing waits for it: a swipe while they move is the
-  /// browser's, and a step goes on from where the machine last sent them.
-  const rested = () => {
-    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(main.scrollTop / Math.max(1, main.getBoundingClientRect().height))))
-    const strip = strips[owner]
-    const page = strip ? Math.round(Math.abs(strip.scrollLeft) / (step(strip) + gap(strip))) : 0
-    const { at } = home.getSnapshot().context
-    if (at.owner !== owner || at.page !== page) home.send({ type: "settled", at: { owner, page } })
-    roll(owner)
-  }
-
-  /// Moves the pages to `at`, as the machine says.
+  /// Moves the pages to `at`, as the machine says: gliding, or at once where they're only laid out again.
   const slide = (at: At, smooth: boolean) => {
-    const behavior = smooth && !still.matches ? "smooth" : "instant"
-    main.scrollTo({ top: at.owner * main.clientHeight, behavior })
-    const strip = strips[at.owner]
-    strip?.scrollTo({ left: at.page * (step(strip) + gap(strip)) * rtl(), behavior })
+    const move = smooth ? glide : jump
+    move(down, at.owner * height())
+    move(sideways(at.owner), Math.min(furthest(at.owner), at.page * pitch(at.owner)))
+  }
+
+  /// A finger on the pages swipes them: across between an owner's pages, and up and down between owners, unless the
+  /// page scrolls itself, as the App Library does, or they're being edited. Until it has moved 10 points it may be a
+  /// tap or a hold; then it's a swipe, along the way it moved most, and the pages follow it from there. A mouse has
+  /// the wheel and the keys.
+  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; owner: number; from: number; base: number; moves: { time: number; value: number }[] } | undefined
+  let swiped = 0
+  const press = (event: PointerEvent) => {
+    const on = event.target as Element
+    if (event.pointerType === "mouse" || event.button || !on.closest(".owners") || on.closest(".dots")) return
+    if (!state().matches("nothing") && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
+    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(down.value / height())))
+    // A finger that lands while they move catches them.
+    stop(down)
+    stop(sideways(owner))
+    swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, owner, from: 0, base: 0, moves: [] }
+  }
+  const drag = (event: PointerEvent) => {
+    if (!swipe || event.pointerId !== swipe.id) return
+    if (!swipe.axis) {
+      const [dx, dy] = [event.clientX - swipe.x, event.clientY - swipe.y]
+      if (Math.hypot(dx, dy) < 10) return
+      const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
+      // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while editing.
+      const free = state().matches("nothing") || state().matches({ editing: "still" })
+      if (!free || (axis === "y" && (state().matches("editing") || kinds[kindOf(swipe.owner)].scrolls))) return void (swipe = undefined)
+      const moving = axis === "x" ? sideways(swipe.owner) : down
+      const size = axis === "x" ? pitch(swipe.owner) : height()
+      Object.assign(swipe, { axis, x: event.clientX, y: event.clientY, base: moving.value, from: Math.round(moving.value / size) })
+      root.setPointerCapture(event.pointerId)
+    }
+    const x = swipe.axis === "x"
+    const moved = x ? -(event.clientX - swipe.x) * rtl() : -(event.clientY - swipe.y)
+    const end = x ? furthest(swipe.owner) : (props.owners.length - 1) * height()
+    const size = x ? strips[swipe.owner].clientWidth : height()
+    const value = swipe.base + moved
+    swipe.moves.push({ time: event.timeStamp, value })
+    if (swipe.moves.length > 32) swipe.moves.shift()
+    jump(x ? sideways(swipe.owner) : down, value < 0 ? give(value, size) : value > end ? end + give(value - end, size) : value)
+  }
+  const lift = (event: PointerEvent) => {
+    if (!swipe || event.pointerId !== swipe.id) return
+    // Where the finger lifted is where it last was: moves come once a frame, so the last may be short of it.
+    if (event.type === "pointerup" && swipe.axis) drag(event)
+    const done = swipe
+    swipe = undefined
+    if (!done.axis) return
+    swiped = performance.now()
+    const velocity = event.type === "pointercancel" ? 0 : speed(done.moves, event.timeStamp)
+    if (done.axis === "x") {
+      const moving = sideways(done.owner)
+      const page = settle(done.from, moving.value / pitch(done.owner), velocity, stops(done.owner))
+      glide(moving, Math.min(furthest(done.owner), page * pitch(done.owner)), velocity)
+      home.send({ type: "settled", at: { owner: done.owner, page } })
+    } else {
+      const owner = settle(done.from, down.value / height(), velocity, props.owners.length)
+      glide(down, owner * height(), velocity)
+      home.send({ type: "settled", at: { owner, page: Math.round(sideways(owner).value / pitch(owner)) } })
+    }
+  }
+  /// The pages have the finger, not the web view the Home Screen is in: an iPhone's scrolls it up and down, bouncing,
+  /// whatever `touch-action` says, unless its touches are cancelled. Up and down on a page that scrolls is that page's.
+  const touchMove = (event: TouchEvent) => {
+    if (swipe && !(swipe.axis !== "x" && (event.target as Element).closest?.(".page.scrolls"))) event.preventDefault()
+  }
+  /// A finger that swiped taps nothing as it lifts.
+  const tapped = (event: MouseEvent) => {
+    if (performance.now() - swiped < 350) (event.stopPropagation(), event.preventDefault())
   }
 
   /// What's carried, while it's dragged: a copy that follows the finger, and over what it would go before. Held at a
@@ -706,7 +784,12 @@ function HomeScreen(props: { owners: Owner[] }) {
         const at = Number(page.dataset.page)
         if (held && (at !== held.page || (cell && index !== held.index))) home.send({ type: "over", page: at, index })
       }
-      const drop = () => home.send({ type: "drop" })
+      // Where it was last, so it can settle there once it's let go.
+      let left = held
+      const drop = () => {
+        left = home.getSnapshot().context.held ?? left
+        home.send({ type: "drop" })
+      }
       addEventListener("pointermove", move)
       addEventListener("pointerup", drop)
       addEventListener("pointercancel", drop)
@@ -715,8 +798,14 @@ function HomeScreen(props: { owners: Owner[] }) {
         removeEventListener("pointermove", move)
         removeEventListener("pointerup", drop)
         removeEventListener("pointercancel", drop)
-        copy.remove()
         quiet = Date.now() + 400
+        // What was carried settles into its place as it's let go, rather than vanishing over it.
+        const place = strips[home.getSnapshot().context.at.owner]?.querySelector<HTMLElement>(`[data-page="${left.page}"] .cell[data-index="${left.index}"]`)
+        if (!place || still.matches) return void copy.remove()
+        const to = place.getBoundingClientRect()
+        place.style.visibility = "hidden"
+        const settling = copy.animate([{ translate: copy.style.translate, scale: "1.08" }, { translate: `${to.x - rect.x}px ${to.y - rect.y}px`, scale: "1" }], { duration: 300, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "forwards" })
+        settling.finished.finally(() => (copy.remove(), (place.style.visibility = "")))
       }
     },
   )
@@ -724,8 +813,13 @@ function HomeScreen(props: { owners: Owner[] }) {
   onSettled(() => {
     const sliding = home.on("slide", ({ at, smooth }) => slide(at, smooth))
     const arranging = home.on("arrange", ({ editing }) => keep(editing, props.owners[editing.owner]))
-    // The window may have changed since this was first drawn.
-    const resized = () => setRoom(measure())
+    // The window may have changed since this was first drawn, and every owner's pages stay on the page they were.
+    const resized = () => {
+      setRoom(measure())
+      const { at, last } = home.getSnapshot().context
+      props.owners.forEach((_, owner) => jump(sideways(owner), Math.min(furthest(owner), (owner === at.owner ? at.page : (last[owner] ?? 0)) * pitch(owner))))
+      jump(down, at.owner * height())
+    }
     resized()
     addEventListener("resize", resized)
 
@@ -758,6 +852,12 @@ function HomeScreen(props: { owners: Owner[] }) {
       home.send(axis === "y" ? { type: "step", owner: by } : { type: "step", page: (by * rtl()) as 1 | -1 })
     }
     root.addEventListener("wheel", wheel, { passive: false })
+    root.addEventListener("pointerdown", press)
+    root.addEventListener("pointermove", drag)
+    root.addEventListener("pointerup", lift)
+    root.addEventListener("pointercancel", lift)
+    root.addEventListener("click", tapped, true)
+    root.addEventListener("touchmove", touchMove, { passive: false })
 
     // The arrow keys move as a swipe does: up and down on a page that scrolls itself scroll it. Escape ends editing.
     const keys = (event: KeyboardEvent) => {
@@ -771,7 +871,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       home.send({ type: "step", ...to })
     }
     addEventListener("keydown", keys)
-    return () => (sliding.unsubscribe(), arranging.unsubscribe(), removeEventListener("resize", resized), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys))
+    return () => (sliding.unsubscribe(), arranging.unsubscribe(), removeEventListener("resize", resized), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
   })
 
   // While pages are edited, the device's own back ends editing, as Done does.
@@ -785,15 +885,17 @@ function HomeScreen(props: { owners: Owner[] }) {
   const owner = () => props.owners[state().context.at.owner]
   return (
     <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .dots, .overview, .ui-dialog") && home.send({ type: "done" })}>
-      <main class="owners" ref={main} onScroll={moved} onScrollEnd={rested}>
+      <main class="owners" ref={main}>
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (
             <section class="owner" aria-label={owner().name}>
-              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }} onScroll={() => seen().owner === index() && look(index())} onScrollEnd={rested}>
-                <For each={pages()[index()] ?? [[]]} keyed={false}>
-                  {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
-                </For>
-                <Library owner={owner()} index={index()} places={places} />
+              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }}>
+                <div class="track" ref={(track) => (tracks[index()] = track)}>
+                  <For each={pages()[index()] ?? [[]]} keyed={false}>
+                    {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
+                  </For>
+                  <Library owner={owner()} index={index()} places={places} />
+                </div>
               </div>
               <Dots owner={owner()} index={index()} kinds={laid()[index()] ?? []} hidden={!kinds[kindOf(index())].dots || (laid()[index()]?.length ?? 0) <= room().fit} />
             </section>

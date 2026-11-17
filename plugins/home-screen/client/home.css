@@ -1,5 +1,6 @@
-/* The Home Screen: owners one above another, each snapping into place, and in each, its pages and then its App
-   Library side by side, each snapping too. The owner switcher stays at the top in the middle; each owner's dots ride
+/* The Home Screen: owners one above another, and in each, its pages and then its App Library side by side, moved by
+   hand as a finger swipes them (pager.ts), not scrolled: the browser has every touch on them but the App Library's up
+   and down, which it scrolls. The owner switcher stays at the top in the middle; each owner's dots ride
    with their row. A wide window (`.wide`) shows whole pages of 23rem side by side, as many as fit, up to as many as
    the owner has (`--pages`). */
 html,
@@ -14,6 +15,7 @@ body {
 .home {
   position: relative;
   height: 100%;
+  overflow: hidden;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -24,33 +26,29 @@ body {
 .owners {
   position: absolute;
   inset: 0;
-  overflow-y: auto;
-  overscroll-behavior: none;
-  scroll-snap-type: y mandatory;
-  scrollbar-width: none;
+  will-change: translate;
+  touch-action: none;
 }
 .owner {
   position: relative;
   height: 100%;
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
 }
+/* An owner's window onto their pages, and the row of them that moves in it. */
 .strip {
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+}
+.track {
   display: flex;
   height: 100%;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
+  will-change: translate;
 }
-.owners::-webkit-scrollbar,
-.strip::-webkit-scrollbar,
 .page::-webkit-scrollbar {
   display: none;
 }
 /* A page has no title at its top, and keeps the gap a phone's own home screen has, under the owner switcher. It
-   never scrolls, so a vertical swipe on it moves between owners. Pages snap without stopping at each, so a swipe
-   while they still move carries on from where they are, as a phone's do. */
+   never scrolls, so a vertical swipe on it moves between owners. */
 .page {
   box-sizing: border-box;
   flex: 0 0 100%;
@@ -58,12 +56,13 @@ body {
   min-width: 0;
   padding: 3.5rem 1.25rem 0;
   overflow: hidden;
-  scroll-snap-align: start;
   container-type: size;
+  touch-action: none;
 }
 /* A page that scrolls keeps every vertical swipe on it, even where it has little: it can always move a point. */
 .page.scrolls {
   overflow-y: auto;
+  touch-action: pan-y;
   overscroll-behavior-y: contain;
   padding-bottom: 3rem;
   scrollbar-width: none;
@@ -72,9 +71,11 @@ body {
   min-height: calc(100% + 1px);
 }
 .home.wide .strip {
-  gap: 3rem;
   width: calc(var(--pages) * 26rem - 3rem);
   margin-inline: auto;
+}
+.home.wide .track {
+  gap: 3rem;
 }
 .home.wide .page {
   flex: 0 0 23rem;
@@ -414,12 +415,6 @@ body {
 
 /* Editing an owner's Home pages, as a phone's are edited: everything on them jiggles, each with its ⊖ at the corner;
    the owners stay put, and what's carried follows the finger while the place it left stays empty. */
-.home.editing .owners {
-  overflow-y: hidden;
-}
-.home.carrying .strip {
-  overflow-x: hidden;
-}
 .home.editing .cell {
   position: relative;
   touch-action: none;
