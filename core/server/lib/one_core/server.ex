@@ -221,11 +221,10 @@ defmodule OneCore.Server do
   This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
   missed being told something, and the edge what it is: it says its status again (`OneCore.Servers.report/0`),
   invalidates what it cached of servers and hooks, looks at once at who it acts for, and at everyone else it has
-  looked at behind the next request for them (`OneCore.Apps.refresh/0`). The program keeping it running is told, to
-  take a release it may have missed (`OneCore.Release.reconnected/0`).
+  looked at behind the next request for them (`OneCore.Apps.refresh/0`). Saying its status is how the network's update
+  hears it's back, and catches it up if it missed a release.
   """
   def reconnected do
-    OneCore.Release.reconnected()
     Servers.report()
     Hooks.invalidate()
     Servers.invalidate()

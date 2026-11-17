@@ -894,23 +894,12 @@ defmodule OneCore.Tools do
       build published to the network now, where it waits, as a lone server that must restart waits for a quiet
       moment, or try again where it's held. It answers once the network is up to date, or held, saying which server
       didn't take it and why. Servers take each build published by themselves, so it's needed only for those.
-      With `server`, that server alone takes the latest builds, as before there was a network update.
       """,
-      inputs: %{
-        type: "object",
-        properties: %{server: %{type: "string", description: "A server's key, to update that one alone"}}
-      },
+      inputs: %{type: "object", properties: %{}},
       outputs: %{
         type: "object",
-        properties: %{
-          network: %{type: ["object", "null"], description: "The network's update, as `builds` says it"},
-          server: %{type: "string", description: "The key of the server taking them"},
-          build: %{type: "string", description: "The build it's on as it answers"},
-          server_update_status: @server_update_status,
-          server_update_stage: @server_update_stage,
-          update_method: @update_method,
-          went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
-        }
+        properties: %{network: %{type: ["object", "null"], description: "The network's update, as `builds` says it"}},
+        required: ["network"]
       }
     }
   ]
@@ -918,10 +907,6 @@ defmodule OneCore.Tools do
   # What each takes and gives is read once here, as the schemas its inputs and answers are checked against on every
   # call.
   @taking Enum.map(@tools, &OneCore.Apps.Version.schemas/1)
-
-  # How long `update` waits for another server to be ready on the build it takes: the 180 s every start of a build
-  # has to say it's running (`START` in `clients/cli/src/serving.rs`), and a minute more for it to stop first.
-  @ready :timer.seconds(240)
 
   # The tools an app has no say in for itself: how one that breaks is undone.
   @apart ~w(deploy uninstall apps_update apps_retry apps_trust)
@@ -954,27 +939,9 @@ defmodule OneCore.Tools do
         # An app has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in @apart, do: {User.owner(elem(principal, 1)), inputs["name"]}
 
-        State.run(fn ->
-          if waiter = waiter(name, inputs, principal, forwarded) do
-            # Before it's accepted, so that it's made a task there, which outlasts this server's restart.
-            ask = {"tools/call", %{name: name, arguments: Map.put(inputs, "server", Server.key())}}
-            Apps.held([], fn -> Call.run_on(ask, principal, waiter) end)
-          else
-            Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward, request), apart)
-          end
-        end)
+        State.run(fn -> Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward, request), apart) end)
     end
   end
-
-  # A server asked to update itself may restart, and then can't answer when it's ready, or keep the task it runs
-  # as: another of its owner's ready servers asks it and waits, if there is one. One passed on to it is its own.
-  # Update Now, which names no server, is the network's update's.
-  defp waiter("update", %{"server" => key}, {_actor, subject}, false) do
-    if key == Server.key(),
-      do: Enum.find(Servers.acting(User.owner(subject) || "network") -- [Server.key()], &Servers.ready?/1)
-  end
-
-  defp waiter(_name, _inputs, _principal, _forwarded), do: nil
 
   defp requires(nil), do: %{}
   defp requires(version), do: version.requires
@@ -1278,10 +1245,6 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("update", %{"server" => key}, principal, _pass, _request) when is_binary(key) do
-    if key == Server.key(), do: update(principal), else: rollout(key, principal)
-  end
-
   defp run("update", _inputs, principal, _pass, _request) do
     reaches!(principal, "network", "owner")
     network = Release.update_now()
@@ -1289,80 +1252,6 @@ defmodule OneCore.Tools do
   end
 
   # What takes the latest builds is the program that keeps an installed server running, which hears this said.
-  defp update(principal) do
-    reaches!(principal, owner(), "owner")
-
-    if not Application.get_env(:one_core, :installed, false),
-      do: raise("#{here()} can't update itself.\n\nIt wasn't installed with `one serve on`, so it doesn't update itself.")
-
-    status = Release.update()
-
-    %{server: Server.key(), build: OneCore.Builds.build()}
-    |> Map.merge(Map.take(status, ~w(server_update_status server_update_stage update_method went_back)))
-  end
-
-  # Has the server whose key is `key` take the latest builds, and answers once it's ready on the build it takes, as it
-  # takes it (`latest`): the latest server's, where there's a runtime for its kind of machine, and otherwise the one
-  # it's on.
-  defp rollout(key, {actor, subject} = principal) do
-    now = Builds.list(actor, User.owner(subject) || "network")
-    server = Enum.find(now.servers, &(&1["server"] == key)) || raise "None of your servers has the key #{key}."
-    name = server["name"] || key
-    runtime = now.latest["server-runtime/#{server["target"]}"]
-    build = if(is_map(runtime), do: now.latest["server-code"], else: server)["build"]
-    State.stage(State.id(), "Waiting for #{name} to be ready on #{build}")
-    Registry.register(OneCore.Waiting, :seen, nil)
-
-    try do
-      ready(key, name, build, asked(key, principal), System.monotonic_time(:millisecond) + @ready)
-    after
-      Registry.unregister(OneCore.Waiting, :seen)
-    end
-  end
-
-  # Why the server whose key is `key` didn't begin to update when asked, or `nil`. One that restarts to take the
-  # builds may stop before it answers: then what it says of itself decides.
-  defp asked(key, principal) do
-    Call.run_on({"tools/call", %{name: "update", arguments: %{"server" => key}}}, principal, key, ready: :any)
-  catch
-    :throw, {Call, {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}}} -> why
-    :throw, {Call, {:forwarded, _answered}} -> nil
-    :error, error -> Exception.message(error)
-  end
-
-  # Waits until the server whose key is `key` is ready and up to date: on `build`, or not, saying why. It looks each
-  # time a server comes or goes, and every 2 s, since what it says of its build isn't told.
-  defp ready(key, name, build, asked, until) do
-    info = with {:ok, info, _tag} <- Bucket.read("servers/#{key}/build"), do: JSON.decode!(info), else: (_ -> %{})
-    server = Map.merge(info, Servers.presence_again(key) || %{})
-    settled = server["server_ready"] == true and server["server_update_status"] == "up_to_date"
-
-    cond do
-      settled and server["went_back"] != nil ->
-        raise "#{name} didn't take #{build}: #{server["went_back"]}"
-
-      settled and server["build"] == build ->
-        answer = Map.take(server, ~w(build server_update_status server_update_stage update_method went_back))
-        {:content, Map.put(answer, "server", key), [%{type: "text", text: "#{name} is ready on #{build}."}]}
-
-      settled and asked != nil ->
-        raise "#{name} didn't take #{build}: #{asked}"
-
-      System.monotonic_time(:millisecond) >= until ->
-        raise "#{name} isn't ready on #{build} after #{div(@ready, 1000)} s: it's on #{server["build"]}, " <>
-                "#{server["server_update_status"]}, ready: #{server["server_ready"]}."
-
-      true ->
-        receive do
-          :seen -> :ok
-        after
-          2_000 -> :ok
-        end
-
-        ready(key, name, build, asked, until)
-    end
-  end
-
   # Each install as `apps` lists it, with its app's version, trust, update and where it came from, read at once.
   defp listed(installed) do
     apps = for {_at, _name, record} <- installed, do: record["app"]
@@ -1470,7 +1359,6 @@ defmodule OneCore.Tools do
   end
 
   # This server, as a person picks it: what its machine is called, or its key where it has no name.
-  defp here, do: Servers.name(Server.key()) || Server.key()
 
   # Whose this server is: who it was started for.
   defp owner, do: hd(Servers.members(Server.key()))

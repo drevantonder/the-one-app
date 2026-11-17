@@ -35,7 +35,6 @@
 //!       ─restart─► starting (the new `one` put in place) ─said at the edge─► up to date on the new pair
 //!                             └─doesn't─► up to date, went back
 //!     nothing newer, or a download or check that failed ─► up to date, staying on it, saying why
-//!   asked (`one update`): prepare, then go at once
 //!   cut short: downloading ─► up to date · checked stays checked · loading ─► went back · starting ─► started again
 //!   every start of `serve run`: the `one` the record pairs with the build is put in place and started first
 //!   said at the edge: the build started says it's running at the network's edge, by its key. Nothing else is asked,
@@ -373,8 +372,8 @@ async fn undo_leaving(client: &Client, here: &Here, key: &str, start: bool) -> R
     Ok(())
 }
 
-/// Takes the latest builds: this device's server's, if it's one, which it's asked to take as `one update --server`
-/// asks it, and otherwise the program's own.
+/// Takes the latest builds: the network's Update Now, where this device is one of its servers, and otherwise the
+/// program's own.
 pub async fn update(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
     // A server is taken to the latest build, as every other, by its network's update: this is its Update Now.
@@ -531,10 +530,6 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     loop {
         tokio::select! {
             heard = said.recv() => match heard {
-                Some(Heard { said: Some(Said::UpdateAsked), .. }) => {
-                    prepare(&here, &mut record, &mut server, &mut said, &program).await?;
-                    go(&here, &mut record, &mut server, &mut said, &program).await?
-                }
                 Some(Heard { said: Some(Said::Prepare), .. }) => prepare(&here, &mut record, &mut server, &mut said, &program).await?,
                 Some(Heard { said: Some(Said::Go), .. }) => go(&here, &mut record, &mut server, &mut said, &program).await?,
                 Some(_) => {}

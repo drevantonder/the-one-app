@@ -173,30 +173,6 @@ defmodule OneCore.Release do
     if test.(status()), do: :ok, else: receive(do: (:status -> awaiting(test, within)), after: (within -> :late))
   end
 
-  # How long the program keeping a server running takes to say it has begun an update, in milliseconds: it reads the
-  # server's output as it comes, so this is only for a machine that's very busy.
-  @begun 5_000
-
-  @doc """
-  Has the program keeping this server running take the latest builds, unless an update is under way already, and
-  gives `status/0` once it's done: up to date again, on the new build or gone back. One that restarts the server
-  (`update_method`) gives it as that begins, as does one under way already, and one that hasn't begun within
-  `@begun`.
-  """
-  def update do
-    if status()["server_update_status"] == "up_to_date" do
-      Registry.register(OneCore.Waiting, :status, nil)
-      say("update_asked")
-
-      with :ok <- awaiting(&(&1["server_update_status"] != "up_to_date"), @begun),
-           do: awaiting(&(&1["server_update_status"] == "up_to_date" or restarting?(&1)), :infinity)
-
-      Registry.unregister(OneCore.Waiting, :status)
-    end
-
-    status()
-  end
-
   @doc """
   Says to the program keeping this server running that the network's edge took what it said it is
   (`OneCore.Servers.say/0`), as `build`: what it waits for to keep a build it started or loaded.
@@ -348,15 +324,6 @@ defmodule OneCore.Release do
     end
   end
 
-  @doc """
-  Says this server can reach the network again after it couldn't (`OneCore.Server.reconnected/0`), as after its
-  machine slept, so the program keeping it running takes a release it may have missed.
-  """
-  def reconnected do
-    if Application.get_env(:one_core, :installed, false), do: say("reconnected")
-  end
-
-  defp restarting?(status), do: status["update_method"] == "restart" or status["server_daemon_status"] == "stopping"
 
   @doc """
   Says which build this is, once its code and NIFs have loaded: what's checked of a build before it's started. With

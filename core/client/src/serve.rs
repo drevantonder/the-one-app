@@ -109,16 +109,12 @@ pub enum Told {
 pub enum Said {
     /// It has started, and answers by this key.
     Running { key: String },
-    /// Someone asked it to take the latest builds: to prepare them and go at once.
-    UpdateAsked,
     /// Its network's updater told it to prepare the latest builds: download and check them, and say how it takes them.
     Prepare,
     /// Its network's updater told it to take the builds it has checked.
     Go,
     /// The network's edge took what it said it is, as this build.
     Reported { build: String },
-    /// It can reach the network again after it couldn't, as after the machine slept, so it may have missed a release.
-    Reconnected,
     /// The latest builds for the kind of machine it was asked, by what they are (`server-code`, `one`), each with a
     /// link to download it by, as it read them from the network's bucket.
     Latest { builds: serde_json::Map<String, serde_json::Value> },
