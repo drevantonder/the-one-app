@@ -37,6 +37,10 @@ One release at a time. Before publishing a server or a client, look for another 
 `latest` that not every server or device runs yet, or the release lock held (`${XDG_RUNTIME_DIR:-/tmp}/one-release.lock`
 names its build). If there's one, don't publish: say whose it is, from its commit's author and Agent Memory, and stop.
 
+A release is under way while it publishes (`tooling/release` holds the lock) and rolls out (`one update` until every
+server and device runs it), and no longer. Watching Telemetry afterwards for what it broke isn't part of it: never
+hold the lock for it, so the next release can start meanwhile.
+
 A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
 is split only for minutes:
 
