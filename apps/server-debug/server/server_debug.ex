@@ -54,6 +54,7 @@ defmodule ServerDebug do
     [
       %{
         name: "processes",
+        read_only: true,
         description:
           "An app's processes on a server, as observer_cli lists them: the top by memory, reductions or message queue, with each one's current function, and the ETS tables they own. Only those running your calls, and the app's own where it's installed only for whoever `subject` is",
         inputs:
@@ -107,6 +108,7 @@ defmodule ServerDebug do
       },
       %{
         name: "logs",
+        read_only: true,
         description:
           "Follows what an app says to Logger, every level from debug up, as it runs your calls, for up to `minutes` or `lines`. The first call starts following; each call answers what was said since the last, waiting up to `wait` seconds for a first line. Call the app in between",
         inputs:
@@ -140,6 +142,7 @@ defmodule ServerDebug do
       },
       %{
         name: "trace",
+        read_only: true,
         description:
           "Traces a function of an app with :recon_trace as your calls run it: what it was called with and what it returned or raised, for up to `calls` calls or `seconds`. Call the app while it runs. Recon's own limit stops a trace of a function everyone calls often",
         inputs:
