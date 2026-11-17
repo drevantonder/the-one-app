@@ -43,6 +43,9 @@ before choosing.
 - Push to `main` as you go, pulling with `--rebase` first: several threads on several machines work on it at once.
   Work in your own git worktree, never in a checkout others share, and from its branch push
   `git push -u origin HEAD:main`.
+- Make each change the smallest that goes live on its own, and put it live before the next. Change an interface by
+  expand and contract (add the new beside the old, move its callers, then remove the old), so no change needs
+  everything released together.
 - One commit per change, once it works, as a Conventional Commit: `type(area): what changes, for whoever uses it`. No
   co-author or "Generated with" lines.
 - Mark with `!` (`feat(core)!: …`) only what breaks someone using the platform: a part, plugin or agent that must
@@ -51,6 +54,7 @@ before choosing.
 - A change that adds to `core/` says in its commit why a plugin or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
-  the background and let your harness tell you when it ends.
+  the background and let your harness tell you when it ends. Don't end your turn while something you started runs:
+  wait on it in the foreground, or with your harness's background wait.
 - Stop what you start once you're done with it, since every thread shares these machines, and remove your worktree.
 - How to do the common things is in `.agents/skills/`.
