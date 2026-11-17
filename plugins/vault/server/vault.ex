@@ -1,23 +1,28 @@
 defmodule Vault do
   @moduledoc """
-  The Vault: keys, sign-ins and accounts, used without being seen. Each is an item with fields, some of them
-  secret, the sites its secrets are sent to, and what may use it: the plugins its person switched on for it, and
-  their agents if they said so.
+  The Vault: the one place for everything someone has given access to, used without being seen: keys, passwords,
+  sign-ins, accounts and Chrome profiles. Each is an item with fields, some of them secret, the sites its secrets are
+  sent to, what may use it (the plugins its person switched on for it, and their agents if they said so), and which of
+  three states its plugin says it's in. Other plugins register the kinds of item they keep (`vault.types`).
 
-  Someone's items are one encrypted database (`Encryption`, `Database`), in an artifact made for them, so only the
-  servers they chose open it. A secret gets here encrypted on its person's device for those servers, and leaves
-  only inside a request to one of its item's sites, or to the code of a plugin switched on for it. No tool here
-  answers with one, and nothing a tool raises says one: what handles them raises only words of its own
-  (`quietly/2`).
+  Each item is an artifact of its own, `<owner>/made/vault/<id>`, encrypted with their Vault's keys (`Encryption`), so
+  only the servers they chose open it, and deleted, restored and purged by soft delete as anything a plugin made is:
+  the Vault stores and encrypts, and keeps no lifecycle of its own. Their Vault's database (`Database`), encrypted the
+  same, says which item each name is, and keeps what's been asked for and the sign-ins under way. A secret gets here
+  encrypted on its person's device for those servers, and leaves only inside a request to one of its item's sites, or
+  to the code of a plugin switched on for it. No tool here answers with one, and nothing a tool raises says one: what
+  handles them raises only words of its own (`quietly/2`).
 
   A plugin uses an account through the Vault's tools, which act for the plugin that calls them (its `caller`), so
   no secret reaches its code: `fetch` makes a web request with an item's fields filled in, `sign_in` starts an
   OAuth sign-in whose tokens become an item (`Vault.OAuth`), which `fetch` then keeps fresh, `items` lists what it
-  may use, and `stop_using` switches one off for it. The rest of the tools are its person's, and refuse a plugin.
+  may use, `state` says which state one is in, and `stop_using` switches one off for it. The rest of the tools are its
+  person's, and refuse a plugin.
 
   A plugin trusted with secrets themselves, whose service hands one to a program, calls the functions: `value/3`
-  gives one field, `keep/4` keeps secrets the plugin made itself, `remove/2` removes one, and `items/1` lists what
-  it may use.
+  gives one field, `keep/4` keeps secrets the plugin made itself, `state/5` says an item's state, `remove/2` deletes
+  one through soft delete, `items/1` lists what it may use, and `write_contents/4` and `read_contents/4` keep and read
+  what's too large for a field.
   """
   @behaviour OneCore.Plugin
 
@@ -59,7 +64,10 @@ defmodule Vault do
       item text not null, name text not null, blob text not null, key text not null, size integer not null,
       at integer not null, primary key (item, name)
     ) without rowid
-    """
+    """,
+    # Which item each name is, now that each item is an artifact of its own. The tables before it are what was kept
+    # before that, which each item was copied from (`moved/2`).
+    "create table artifacts (id text primary key, name text not null)"
   ]
 
   # How long a request waits for its person, and a sign-in for its browser, in seconds.
@@ -83,11 +91,11 @@ defmodule Vault do
             "It's about nothing. A plugin with item types answers with its list of them, each a map: `name`, one item " <>
             "of it as a person reads it (Chrome profile); `prefix`, what its items' names start with, for the items " <>
             "switched on for the plugin (\"Chrome profile: \"), what follows being the item as a person reads it; and " <>
-            "either `account: true`, for items that are accounts, which the Vault lists under Accounts by the plugin's " <>
-            "`accounts`, `sign_in` and `sign_out` tools, or `plural`, the heading of their own section (Chrome " <>
-            "Profiles). `component` names a Solid component the plugin's client exports (client/package.json's " <>
-            "`exports`, as ./<component>), which draws one item, given `item` and `subject`, beside the list; and " <>
-            "`create`, a tool of the plugin's that makes one from its `name`."
+            "`section`, the heading it's listed under (Chrome Profiles, or Accounts, which several plugins' types share). " <>
+            "`component` names a Solid component the plugin's client exports (client/package.json's `exports`, as " <>
+            "./<component>), which draws one item beside the list, given `item` and `subject`; and `create` is how one " <>
+            "is added, an action as `state/5` takes one: `%{tool: \"create\", name: true}` asks its person for a name " <>
+            "first."
       }
     ]
   end
@@ -126,7 +134,12 @@ defmodule Vault do
                 type: "object",
                 properties: %{
                   name: %{type: "string"},
+                  artifact: %{type: "string", description: "The artifact it is, which soft delete deletes and restores it by"},
                   type: %{type: ["string", "null"], description: "Its type's id, as `types` lists them, if it's of one"},
+                  state: %{
+                    type: ["object", "null"],
+                    description: "Null when it's ready; else busy with a message, or action_required with why and an action, as its plugin says"
+                  },
                   fields: %{
                     type: "array",
                     items: %{
@@ -145,7 +158,7 @@ defmodule Vault do
                   sign_in: %{type: "boolean", description: "Whether a sign-in made it"},
                   changed: %{type: ["integer", "null"], description: "When it last changed, in milliseconds since 1970"}
                 },
-                required: ["name", "type", "fields", "hosts", "plugins", "agents", "sign_in"]
+                required: ["name", "artifact", "type", "state", "fields", "hosts", "plugins", "agents", "sign_in"]
               }
             },
             requests: %{
@@ -178,13 +191,11 @@ defmodule Vault do
                   trusted: %{type: "boolean", description: "Whether its component is drawn in the Vault's page, or in a frame of its own"},
                   name: %{type: "string", description: "One item of it, as a person reads it"},
                   prefix: %{type: "string", description: "What its items' names start with"},
-                  account: %{type: "boolean", description: "Whether its items are accounts"},
-                  plural: %{type: ["string", "null"], description: "Its section's heading"},
+                  section: %{type: "string", description: "The heading it's listed under"},
                   component: %{type: ["string", "null"], description: "What the plugin's client exports that draws one"},
-                  create: %{type: ["string", "null"], description: "The plugin's tool that makes one, from its name"},
-                  sign_in: %{type: ["string", "null"], description: "The page the plugin signs an account in on, if it has one"}
+                  create: %{type: ["object", "null"], description: "How one is added: a tool of the plugin's, or a page of its"}
                 },
-                required: ~w(id plugin title icon trusted name prefix account plural component create sign_in)
+                required: ~w(id plugin title icon trusted name prefix section component create)
               }
             }
           },
@@ -213,20 +224,14 @@ defmodule Vault do
       },
       %{
         name: "remove",
-        description: "Deletes an item, or with `field`, one of its fields.",
+        description:
+          "Takes a field out of an item. Deleting a whole item is soft delete's, as for anything an app made: its `delete` (or `remove`) with the item's artifact, as `list` gives it, so it can be restored for 30 days.",
         inputs: %{
           type: "object",
-          properties: %{
-            item: item,
-            field: %{type: "string", description: "Only this field. The whole item, if left out"}
-          },
-          required: ["item"]
-        },
-        outputs: %{
-          type: "object",
-          properties: %{item: item, field: %{type: ["string", "null"], description: "The field deleted, or null for the item"}},
+          properties: %{item: item, field: %{type: "string", description: "The field to take out"}},
           required: ["item", "field"]
-        }
+        },
+        outputs: %{type: "object", properties: %{item: item, field: %{type: "string"}}, required: ["item", "field"]}
       },
       %{
         name: "use",
@@ -380,9 +385,11 @@ defmodule Vault do
                 type: "object",
                 properties: %{
                   name: %{type: "string"},
-                  sign_in: %{type: ["string", "null"], description: "The service whose sign-in made it, if one did"}
+                  sign_in: %{type: ["string", "null"], description: "The service whose sign-in made it, if one did"},
+                  artifact: %{type: "string", description: "The artifact it is, as soft delete knows it"},
+                  state: %{type: ["object", "null"], description: "Null when it's ready, else what `state` last said of it"}
                 },
-                required: ["name", "sign_in"]
+                required: ["name", "sign_in", "artifact", "state"]
               }
             }
           },
@@ -439,6 +446,40 @@ defmodule Vault do
         """,
         inputs: %{type: "object", properties: %{item: item}, required: ["item"]},
         outputs: %{type: "object", properties: %{item: item}, required: ["item"]}
+      },
+      %{
+        name: "state",
+        description: """
+        For a plugin's code: says which of three states an item switched on for the plugin that calls this is in, for
+        its person to see in the Vault: ready, which shows nothing; busy, with a `message` (Saving…); or
+        action_required, with `message`, why, and `action`, the one thing that fixes it: a tool of the plugin's, called
+        as its person, or a page of its client's.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            item: item,
+            state: %{type: "string", enum: ~w(ready busy action_required)},
+            message: %{type: "string", description: "What's under way, or why its person has to act"},
+            action: %{
+              type: "object",
+              description: "For action_required: {label, tool, inputs} or {label, page}",
+              properties: %{
+                label: %{type: "string", description: "The button's words, like Sign In"},
+                tool: %{type: "string", description: "A tool of the plugin's, like sign_in"},
+                inputs: %{type: "object"},
+                page: %{type: "string", description: "Or a page of its client's, like client/sign-in.html#+61400000000"}
+              },
+              required: ["label"]
+            }
+          },
+          required: ["item", "state"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{item: item, state: %{type: "string"}},
+          required: ["item", "state"]
+        }
       },
       %{
         name: "grant",
@@ -518,13 +559,11 @@ defmodule Vault do
   program a service brings. What's given is the secret itself, so it goes nowhere a person or an agent reads.
   """
   def value(%Call{} = call, item, field) do
-    artifact = reached(call)
+    db = reached(call)
 
     quietly("Reading #{field}", fn ->
-      transaction(call, artifact, fn db ->
-        item = allowed!(db, item, {:plugin, call.who})
-        fields(db, item)[field] || raise "#{item["name"]} has no field named #{field}."
-      end)
+      found = allowed!(find!(call, db, item), {:plugin, call.who})
+      fields(found)[field] || raise "#{found["name"]} has no field named #{field}."
     end)
   end
 
@@ -537,44 +576,30 @@ defmodule Vault do
   def keep(%Call{} = call, item, fields, hosts \\ []) when is_map(fields) do
     # The plugin reaches the Vault as an editor of it from here on, as a sign-in has it.
     share(call, "share", theirs(call), call.who)
-    artifact = reached(call)
+    db = reached(call)
 
     quietly("Keeping #{item}", fn ->
-      transaction(call, artifact, fn db ->
-        stored =
-          if item(db, item) do
-            allowed!(db, item, {:plugin, call.who})
-          else
-            created = new(db, item, hosts)
-            query(db, "insert into uses (item, plugin) values (?, ?)", [created["id"], call.who])
-            created
-          end
+      found =
+        case find(call, db, item) do
+          nil -> create(call, db, item, hosts, %{"uses" => [call.who]})
+          found -> allowed!(found, {:plugin, call.who})
+        end
 
-        for {field, value} <- fields, do: keep(db, stored, field, value, true)
-        :ok
-      end)
+      change!(db, found, fn record -> Enum.reduce(fields, record, fn {name, value}, record -> put_field(record, name, value, true) end) end)
+      :ok
     end)
   end
 
   @doc """
-  Removes the item `item`, for the plugin that calls this, which its person switched on for it or which it made
-  with `keep/4`: as when an account it holds is signed out. One that isn't there is nothing to remove.
+  Deletes the item `item`, for the plugin that calls this, which its person switched on for it or which it made with
+  `keep/4`, as anything a plugin made is deleted: by soft delete, which keeps it, contents and all, for 30 days, so it
+  can be restored as it was. One that isn't there is nothing to delete.
   """
   def remove(%Call{} = call, item) do
-    artifact = reached(call)
+    db = reached(call)
 
-    quietly("Removing #{item}", fn ->
-      blobs =
-        transaction(call, artifact, fn db ->
-          if item(db, item) do
-            %{"id" => id} = allowed!(db, item, {:plugin, call.who})
-            deleted(db, id)
-          else
-            []
-          end
-        end)
-
-      if blobs != [], do: Enum.each(blobs, &Artifact.remove(contents!(call), &1))
+    quietly("Deleting #{item}", fn ->
+      if found = find(call, db, item), do: delete!(call, db, allowed!(found, {:plugin, call.who}))
       :ok
     end)
   end
@@ -584,17 +609,19 @@ defmodule Vault do
   contents and whatever it's switched on for go with it.
   """
   def rename(%Call{} = call, item, to) do
-    artifact = reached(call)
+    db = reached(call)
 
     quietly("Renaming #{item}", fn ->
-      transaction(call, artifact, fn db ->
-        %{"id" => id} = stored = allowed!(db, item, {:plugin, call.who})
-        if String.trim(to) == "", do: raise("An item has a name.")
-        if match?(%{"id" => other} when other != id, item(db, to)), do: raise("There's an item named #{to} already.")
-        query(db, "update items set name = ? where id = ?", [to, id])
-        touch(db, stored)
-        :ok
+      found = allowed!(find!(call, db, item), {:plugin, call.who})
+      if String.trim(to) == "", do: raise("An item has a name.")
+
+      transaction(call, db, fn d ->
+        if taken(d, db, to, found["id"]) != [], do: raise("There's an item named #{to} already.")
+        query(d, "update artifacts set name = ? where id = ?", [to, found["id"]])
       end)
+
+      change!(db, found, &Map.put(&1, "name", to))
+      :ok
     end)
   end
 
@@ -603,17 +630,38 @@ defmodule Vault do
   `value/3` gives each.
   """
   def values(%Call{} = call, item) do
-    artifact = reached(call)
+    db = reached(call)
+    quietly("Reading #{item}", fn -> fields(allowed!(find!(call, db, item), {:plugin, call.who})) end)
+  end
 
-    quietly("Reading #{item}", fn ->
-      transaction(call, artifact, fn db -> fields(db, allowed!(db, item, {:plugin, call.who})) end)
+  @doc """
+  Says which of three states the item `item` is in, for the plugin that calls this, which it's switched on for, so
+  its person sees it in the Vault: `:ready`, usable, which shows nothing; `:busy`, something's under way, said in
+  `message` ("Saving…"), which shows a spinner and it; or `:action_required`, its person has to act, `message` saying
+  why ("Signed out on your phone") and `action` the one thing that fixes it, which shows a dot, why and a button. The
+  plugin keeps its own detailed states and says only which of these it's in. `action` is the plugin's own:
+  `%{label: "Sign In", tool: "sign_in", inputs: %{account: "+614..."}}`, a tool of the plugin's, called as its person,
+  whose `url`, if it gives one, opens in their browser; or `%{label: "Sign In", page: "client/sign-in.html#+614..."}`,
+  a page of the plugin's, opened over the Vault. Whether its person is notified too is the plugin's to choose, with
+  `notifications`.
+  """
+  def state(%Call{} = call, item, state, message \\ nil, action \\ nil) do
+    db = reached(call)
+    said = said!(state, message, action, plugin_name(call, call.who))
+
+    quietly("Changing #{item}", fn ->
+      found = allowed!(find!(call, db, item), {:plugin, call.who})
+      if found["state"] != said, do: change!(db, found, &Map.put(&1, "state", said))
+      Call.changed(call)
+      :ok
     end)
   end
 
   @doc """
   Keeps the contents `name` of the item `item`, for the plugin that calls this, which it's switched on for: what's
   too large for a field, like a Chrome profile's hundreds of MB, kept as 1Password keeps a file. They're a blob of the
-  Vault's in the bucket, sealed under a key made for that blob alone, which only the item holds.
+  item's, beside its record, sealed under a key made for that blob alone, which only the item holds, so soft delete
+  deletes and restores them with it.
 
   `send` is given where they go, `%{"link" => link, "key" => key}`: a short-lived link that writes one blob, and the
   key, base64. It hands them to whatever holds the bytes, which seals them a chunk at a time and sends them, as
@@ -622,28 +670,17 @@ defmodule Vault do
   leaves the last one whole. Gives the size.
   """
   def write_contents(%Call{} = call, item, name, send) when is_function(send, 1) do
-    artifact = reached(call)
+    db = reached(call)
     {blob, key} = {Base.encode16(:crypto.strong_rand_bytes(16), case: :lower), Base.encode64(:crypto.strong_rand_bytes(32))}
 
     quietly("Keeping #{name} of #{item}", fn ->
-      transaction(call, artifact, &allowed!(&1, item, {:plugin, call.who}))
-      contents = contents!(call)
-      size = send.(%{"link" => link(contents, blob, :write), "key" => key})
-
-      replaced =
-        transaction(call, artifact, fn db ->
-          %{"id" => id} = stored = allowed!(db, item, {:plugin, call.who})
-          was = query(db, "select blob from contents where item = ? and name = ?", [id, name])
-
-          upsert =
-            "insert into contents (item, name, blob, key, size, at) values (?, ?, ?, ?, ?, ?) on conflict (item, name) do update set blob = excluded.blob, key = excluded.key, size = excluded.size, at = excluded.at"
-
-          query(db, upsert, [id, name, blob, key, size, now()])
-          touch(db, stored)
-          for %{"blob" => old} <- was, do: old
-        end)
-
-      for old <- replaced, do: Artifact.remove(contents, old)
+      found = allowed!(find!(call, db, item), {:plugin, call.who})
+      path = "#{found["id"]}/contents/#{blob}"
+      size = send.(%{"link" => link(db, path, :write), "key" => key})
+      kept = %{"blob" => path, "key" => key, "size" => size, "at" => now()}
+      change!(db, found, &Map.update(&1, "contents", %{name => kept}, fn contents -> Map.put(contents, name, kept) end))
+      was = found["contents"][name]
+      if was && was["blob"] != path, do: Artifact.remove(root(db), was["blob"])
       size
     end)
   end
@@ -655,40 +692,44 @@ defmodule Vault do
   Containers' `download` does. Gives what `receive` gives, or `nil` where the item has no such contents yet.
   """
   def read_contents(%Call{} = call, item, name, receive) when is_function(receive, 1) do
-    artifact = reached(call)
+    db = reached(call)
 
     quietly("Reading #{name} of #{item}", fn ->
-      stored =
-        transaction(call, artifact, fn db ->
-          %{"id" => id} = allowed!(db, item, {:plugin, call.who})
-          List.first(query(db, "select blob, key, size from contents where item = ? and name = ?", [id, name]))
-        end)
+      found = allowed!(find!(call, db, item), {:plugin, call.who})
 
-      if stored,
-        do: receive.(%{"link" => link(contents!(call), stored["blob"], :read), "key" => stored["key"], "size" => stored["size"]})
+      if kept = found["contents"][name],
+        do: receive.(%{"link" => link(db, kept["blob"], :read), "key" => kept["key"], "size" => kept["size"]})
     end)
   end
 
   @doc """
-  The items switched on for the plugin that calls this, each with the service whose sign-in made it, if one did:
-  `[%{name: "Google a@example.com", sign_in: "Google"}]`, by name. None before anything is.
+  The items switched on for the plugin that calls this, by name, each with the service whose sign-in made it, if one
+  did, its artifact, which soft delete knows it by, and its state, as `state/5` last said it:
+  `[%{name: "Google a@example.com", sign_in: "Google", artifact: "users/a/made/vault/x1", state: nil}]`. None before
+  anything is.
   """
   def items(%Call{} = call) do
-    if Call.reaches?(call, theirs(call), "editor"),
-      do: transaction(call, reached(call), &used_by(&1, call.who)),
-      else: []
+    if Call.reaches?(call, theirs(call), "editor") do
+      db = reached(call)
+      used_by(db, everything(call, db), call.who)
+    else
+      []
+    end
   end
 
-  defp used_by(db, plugin) do
-    used =
-      "select items.name, items.oauth from items join uses on uses.item = items.id where uses.plugin = ? order by items.name collate nocase"
-
-    for item <- query(db, used, [plugin]),
-        do: %{name: item["name"], sign_in: item["oauth"] && JSON.decode!(item["oauth"])["name"]}
+  defp used_by(db, items, plugin) do
+    for item <- Enum.sort_by(items, &String.downcase(&1["name"])), plugin in item["uses"] do
+      %{
+        name: item["name"],
+        sign_in: item["oauth"] && item["oauth"]["name"],
+        artifact: artifact(db, item["id"]),
+        state: item["state"]
+      }
+    end
   end
 
   # The tools a plugin's code calls, which act for it. The rest are its person's.
-  @plugins ~w(fetch items sign_in stop_using)
+  @plugins ~w(fetch items sign_in stop_using state)
 
   @impl true
   def hooks, do: ["renamed"]
@@ -698,11 +739,13 @@ defmodule Vault do
   @impl true
   def hook("renamed", %{"was" => was, "is" => is}, %Call{subject: "users/" <> _} = call) do
     if Artifact.list(items_artifact(call), "") != [] do
-      transaction(call, own(call), fn db ->
-        query(db, "update or ignore uses set plugin = ? where plugin = ?", [is, was])
-        query(db, "delete from uses where plugin = ?", [was])
-      end)
+      db = own(call)
+
+      for item <- everything(call, db), was in item["uses"],
+          do: change!(db, item, &Map.update!(&1, "uses", fn uses -> Enum.uniq(for use <- uses, do: if(use == was, do: is, else: use)) end))
     end
+
+    :ok
   end
 
   def hook("renamed", _about, _call), do: :ok
@@ -711,22 +754,32 @@ defmodule Vault do
   def call(tool, _inputs, %Call{caller: caller}) when caller != nil and tool not in @plugins,
     do: raise("vault_#{tool} is its person's, not a plugin's. A plugin calls #{Enum.join(@plugins, ", ")}.")
 
-  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(items sign_in stop_using),
+  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(items sign_in stop_using state),
     do: raise("vault_#{tool} is for a plugin's code, and acts for the plugin that calls it.")
 
-  def call("items", _inputs, call), do: %{items: transaction(call, own(call), &used_by(&1, call.caller))}
+  def call("items", _inputs, call) do
+    db = own(call)
+    %{items: used_by(db, everything(call, db), call.caller)}
+  end
 
   def call("stop_using", %{"item" => name}, call) do
-    transaction(call, own(call), fn db ->
-      query(db, "delete from uses where item = ? and plugin = ?", [item!(db, name)["id"], call.caller])
-    end)
-
+    db = own(call)
+    change!(db, find!(call, db, name), &Map.update!(&1, "uses", fn uses -> uses -- [call.caller] end))
     %{item: name}
+  end
+
+  def call("state", %{"item" => name, "state" => state} = inputs, call) do
+    db = own(call)
+    said = said!(state, inputs["message"], inputs["action"], plugin_name(call, call.caller))
+    found = allowed!(find!(call, db, name), {:plugin, call.caller})
+    if found["state"] != said, do: change!(db, found, &Map.put(&1, "state", said))
+    Call.changed(call)
+    %{item: name, state: state}
   end
 
   def call("sign_in", %{"service" => given} = inputs, call) do
     address = address()
-    artifact = own(call)
+    db = own(call)
 
     service = %{
       name: given["name"],
@@ -740,36 +793,33 @@ defmodule Vault do
 
     quietly("Starting the sign-in", fn ->
       {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{random(24)}", random(48)}
+      item = find!(call, db, service.client)
+      client = fields(item)
 
-      client =
-        transaction(call, artifact, fn db ->
-          item = item!(db, service.client)
-          client = fields(db, item)
+      client["client_id"] ||
+        raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
 
-          client["client_id"] ||
-            raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
+      # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
+      if client["client_secret"] && not OAuth.to?(service.token, item["hosts"]),
+        do:
+          raise(
+            "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
+          )
 
-          # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
-          if client["client_secret"] && not OAuth.to?(service.token, JSON.decode!(item["hosts"])),
-            do:
-              raise(
-                "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
-              )
+      stored = JSON.encode!(Map.take(service, [:name, :token, :hosts, :client]))
 
-          stored = JSON.encode!(Map.take(service, [:name, :token, :hosts, :client]))
-          query(db, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
+      transaction(call, db, fn d ->
+        query(d, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
 
-          query(db, "insert into sign_ins (state, verifier, service, plugin, item, at) values (?, ?, ?, ?, ?, ?)", [
-            state,
-            verifier,
-            stored,
-            call.caller,
-            inputs["item"] || service.name,
-            now()
-          ])
-
-          client
-        end)
+        query(d, "insert into sign_ins (state, verifier, service, plugin, item, at) values (?, ?, ?, ?, ?, ?)", [
+          state,
+          verifier,
+          stored,
+          call.caller,
+          inputs["item"] || service.name,
+          now()
+        ])
+      end)
 
       %{url: OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)}
     end)
@@ -786,6 +836,7 @@ defmodule Vault do
   end
 
   def call("list", _inputs, call) do
+    db = own(call)
     names = names(call)
     types = types(call)
 
@@ -796,45 +847,40 @@ defmodule Vault do
             do: name
       )
 
-    transaction(call, own(call), fn db ->
-      items =
-        for item <- query(db, "select * from items order by name collate nocase") do
-          fields =
-            for field <-
-                  query(
-                    db,
-                    "select name, secret, case secret when 0 then value end as shown from fields where item = ? order by rowid",
-                    [item["id"]]
-                  ) do
-              if field["secret"] == 1,
-                do: %{name: field["name"], secret: true},
-                else: %{name: field["name"], secret: false, value: field["shown"]}
-            end
+    items =
+      for item <- Enum.sort_by(everything(call, db), &String.downcase(&1["name"])) do
+        fields =
+          for field <- item["fields"] do
+            if field["secret"],
+              do: %{name: field["name"], secret: true},
+              else: %{name: field["name"], secret: false, value: field["value"]}
+          end
 
-          plugins =
-            for %{"plugin" => plugin} <- query(db, "select plugin from uses where item = ?", [item["id"]]),
-                do: named(names, plugin)
+        plugins = for plugin <- item["uses"], do: named(names, plugin)
 
-          # An item is of a plugin's type when it's switched on for that plugin and named as the type says.
-          type = Enum.find(types, &(&1.plugin in plugins and String.starts_with?(item["name"], &1.prefix)))
+        # An item is of a plugin's type when it's switched on for that plugin and named as the type says.
+        type = Enum.find(types, &(&1.plugin in plugins and String.starts_with?(item["name"], &1.prefix)))
 
-          %{
-            name: item["name"],
-            type: type && type.id,
-            fields: fields,
-            hosts: JSON.decode!(item["hosts"]),
-            plugins: Enum.sort(plugins),
-            agents: item["agents"] == 1,
-            sign_in: item["oauth"] != nil,
-            changed: item["changed"]
-          }
-        end
+        %{
+          name: item["name"],
+          artifact: artifact(db, item["id"]),
+          type: type && type.id,
+          state: item["state"],
+          fields: fields,
+          hosts: item["hosts"],
+          plugins: Enum.sort(plugins),
+          agents: item["agents"],
+          sign_in: item["oauth"] != nil,
+          changed: item["changed"]
+        }
+      end
 
-      waiting =
-        "select id, title, fields, hosts, plugin, why from requests where state = 'waiting' and at > ? order by at"
+    waiting =
+      "select id, title, fields, hosts, plugin, why from requests where state = 'waiting' and at > ? order by at"
 
-      requests =
-        for request <- query(db, waiting, [now() - @request_waits]) do
+    requests =
+      transaction(call, db, fn d ->
+        for request <- query(d, waiting, [now() - @request_waits]) do
           %{
             id: request["id"],
             title: request["title"],
@@ -844,96 +890,67 @@ defmodule Vault do
             why: request["why"]
           }
         end
+      end)
 
-      %{items: items, requests: requests, plugins: use_it, types: types}
-    end)
+    %{items: items, requests: requests, plugins: use_it, types: types}
   end
 
   def call("set", %{"item" => name, "field" => field, "value" => value} = inputs, call) do
-    artifact = own(call)
+    db = own(call)
 
     quietly("Keeping #{field}", fn ->
       value = encryption(call).secret(call, value)
+      found = find(call, db, name) || create(call, db, name, Map.get(inputs, "hosts", []))
 
-      transaction(call, artifact, fn db ->
-        item = item(db, name) || new(db, name, Map.get(inputs, "hosts", []))
-
-        if hosts = inputs["hosts"],
-          do: query(db, "update items set hosts = ? where id = ?", [JSON.encode!(hosts!(hosts)), item["id"]])
-
-        keep(db, item, field, value, Map.get(inputs, "secret", true))
-        %{item: name, field: field}
+      change!(db, found, fn record ->
+        record = if hosts = inputs["hosts"], do: Map.put(record, "hosts", hosts!(hosts)), else: record
+        put_field(record, field, value, Map.get(inputs, "secret", true))
       end)
+
+      %{item: name, field: field}
     end)
   end
 
-  def call("remove", %{"item" => name} = inputs, call) do
-    removed =
-      transaction(call, own(call), fn db ->
-        item = item!(db, name)
-
-        case inputs["field"] do
-          nil ->
-            plugins =
-              for %{"plugin" => plugin} <- query(db, "select plugin from uses where item = ?", [item["id"]]), do: plugin
-
-            blobs = deleted(db, item["id"])
-            {nil, Enum.reject(plugins, &used?(db, &1)), blobs}
-
-          field ->
-            removed = query(db, "delete from fields where item = ? and name = ? returning name", [item["id"], field])
-            if removed == [], do: raise("#{name} has no field named #{field}.")
-            touch(db, item)
-            {field, [], []}
-        end
-      end)
-
-    {field, unused, blobs} = removed
-    for blob <- blobs, do: Artifact.remove(Call.make(mine!(call), "contents"), blob)
-    for plugin <- unused, do: share(call, "unshare", Artifact.name(items_artifact(call)), plugin)
+  # Deleting an item is soft delete's, as for anything a plugin made: this takes out one of its fields.
+  def call("remove", %{"item" => name, "field" => field}, call) do
+    db = own(call)
+    found = find!(call, db, name)
+    if fields(found)[field] == nil, do: raise("#{name} has no field named #{field}.")
+    change!(db, found, &Map.update!(&1, "fields", fn fields -> Enum.reject(fields, fn kept -> kept["name"] == field end) end))
     %{item: name, field: field}
   end
 
   # A plugin switched on for an item is an editor of the Vault's artifact too, which is what lets its code reach it
   # at all, and goes when no item is switched on for it.
   def call("use", %{"item" => name, "plugin" => plugin} = inputs, call) do
-    artifact = own(call)
+    db = own(call)
 
     who =
       Plugins.plugin(call.subject, plugin) || Plugins.plugin("network", plugin) ||
         raise "There's no plugin named #{plugin}."
 
-    if Map.get(inputs, "on", true) do
-      transaction(call, artifact, fn db ->
-        query(db, "insert or ignore into uses (item, plugin) values (?, ?)", [item!(db, name)["id"], who])
-      end)
+    found = find!(call, db, name)
 
-      share(call, "share", Artifact.name(artifact), who)
+    if Map.get(inputs, "on", true) do
+      change!(db, found, &Map.update!(&1, "uses", fn uses -> Enum.uniq(uses ++ [who]) end))
+      share(call, "share", Artifact.name(db), who)
       %{item: name, plugin: plugin, on: true}
     else
-      unused =
-        transaction(call, artifact, fn db ->
-          query(db, "delete from uses where item = ? and plugin = ?", [item!(db, name)["id"], who])
-          not used?(db, who)
-        end)
-
-      if unused, do: share(call, "unshare", Artifact.name(artifact), who)
+      change!(db, found, &Map.update!(&1, "uses", fn uses -> uses -- [who] end))
+      if not Enum.any?(everything(call, db), &(who in &1["uses"])), do: share(call, "unshare", Artifact.name(db), who)
       %{item: name, plugin: plugin, on: false}
     end
   end
 
   def call("agents", %{"item" => name} = inputs, call) do
     on = Map.get(inputs, "on", true)
-
-    transaction(call, own(call), fn db ->
-      query(db, "update items set agents = ? where id = ?", [on, item!(db, name)["id"]])
-    end)
-
+    db = own(call)
+    change!(db, find!(call, db, name), &Map.put(&1, "agents", on))
     %{item: name, on: on}
   end
 
   def call("request", %{"title" => title, "fields" => fields} = inputs, call) do
-    artifact = own(call)
+    db = own(call)
 
     plugin =
       if name = inputs["plugin"],
@@ -945,9 +962,9 @@ defmodule Vault do
     fields = for {name, about} <- fields, do: %{name: field!(name), secret: Map.get(about, "secret", true)}
     id = random(9)
 
-    transaction(call, artifact, fn db ->
+    transaction(call, db, fn d ->
       query(
-        db,
+        d,
         "insert into requests (id, title, fields, hosts, plugin, why, state, at) values (?, ?, ?, ?, ?, ?, 'waiting', ?)",
         [
           id,
@@ -972,8 +989,8 @@ defmodule Vault do
   end
 
   def call("status", %{"id" => id}, call) do
-    transaction(call, own(call), fn db ->
-      case query(db, "select title, state, at from requests where id = ?", [id]) do
+    transaction(call, own(call), fn d ->
+      case query(d, "select title, state, at from requests where id = ?", [id]) do
         [%{"title" => title, "state" => "waiting", "at" => at}] ->
           %{title: title, state: if(at > now() - @request_waits, do: "waiting", else: "expired")}
 
@@ -987,46 +1004,43 @@ defmodule Vault do
   end
 
   def call("answer", %{"id" => id} = inputs, call) do
-    artifact = own(call)
+    db = own(call)
 
     quietly("Answering the request", fn ->
       values = if given = inputs["values"], do: JSON.decode!(encryption(call).secret(call, given))
 
-      result =
-        transaction(call, artifact, fn db ->
-          request =
-            case query(db, "select * from requests where id = ? and state = 'waiting' and at > ?", [
-                   id,
-                   now() - @request_waits
-                 ]) do
-              [request] -> request
-              [] -> raise "That request isn't waiting any more."
-            end
-
-          cond do
-            inputs["decline"] == true ->
-              query(db, "update requests set state = 'declined' where id = ?", [id])
-              {%{state: "declined"}, nil}
-
-            name = inputs["item"] ->
-              {allow(db, request, item!(db, name)), request["plugin"]}
-
-            is_map(values) ->
-              wanted = JSON.decode!(request["fields"])
-              missing = for %{"name" => name} <- wanted, values[name] in [nil, ""], do: name
-              if missing != [], do: raise("It needs #{Enum.join(missing, ", ")} too.")
-              item = item(db, request["title"]) || new(db, request["title"], JSON.decode!(request["hosts"]))
-              for %{"name" => name, "secret" => secret} <- wanted, do: keep(db, item, name, values[name], secret)
-              {allow(db, request, item), request["plugin"]}
-
-            true ->
-              raise "Answer with one of your items, with values, or by declining."
+      request =
+        transaction(call, db, fn d ->
+          case query(d, "select * from requests where id = ? and state = 'waiting' and at > ?", [id, now() - @request_waits]) do
+            [request] -> request
+            [] -> raise "That request isn't waiting any more."
           end
         end)
 
-      {message, plugin} = result
-      if plugin, do: share(call, "share", Artifact.name(artifact), plugin)
-      message
+      answered =
+        cond do
+          inputs["decline"] == true ->
+            nil
+
+          name = inputs["item"] ->
+            allow!(db, request, find!(call, db, name))
+
+          is_map(values) ->
+            wanted = JSON.decode!(request["fields"])
+            missing = for %{"name" => name} <- wanted, values[name] in [nil, ""], do: name
+            if missing != [], do: raise("It needs #{Enum.join(missing, ", ")} too.")
+            found = find(call, db, request["title"]) || create(call, db, request["title"], JSON.decode!(request["hosts"]))
+            filled = change!(db, found, fn record -> Enum.reduce(wanted, record, &put_field(&2, &1["name"], values[&1["name"]], &1["secret"])) end)
+            allow!(db, request, filled)
+
+          true ->
+            raise "Answer with one of your items, with values, or by declining."
+        end
+
+      state = if inputs["decline"] == true, do: "declined", else: "set"
+      transaction(call, db, &query(&1, "update requests set state = ? where id = ?", [state, id]))
+      if answered && request["plugin"], do: share(call, "share", Artifact.name(db), request["plugin"])
+      %{state: state}
     end)
   end
 
@@ -1062,13 +1076,13 @@ defmodule Vault do
          true <- User.owner?(owner),
          true <- actor == User.link("#{owner}/#{state}") or (actor == nil and call.subject == owner) do
       call = %{call | subject: owner, actor: nil}
-      artifact = own(call)
+      db = own(call)
 
       quietly("Finishing the sign-in", fn ->
         sign_in =
-          transaction(call, artifact, fn db ->
-            case query(db, "select * from sign_ins where state = ? and at > ?", [state, now() - @sign_in_waits]) do
-              [sign_in] -> Map.put(sign_in, "client", fields(db, item!(db, JSON.decode!(sign_in["service"])["client"])))
+          transaction(call, db, fn d ->
+            case query(d, "select * from sign_ins where state = ? and at > ?", [state, now() - @sign_in_waits]) do
+              [sign_in] -> sign_in
               [] -> raise "This sign-in isn't waiting any more. Start it again."
             end
           end)
@@ -1076,16 +1090,23 @@ defmodule Vault do
         service = JSON.decode!(sign_in["service"])
         if why = inputs["error"], do: raise("#{service["name"]} didn't sign you in: #{why}.")
         code = inputs["code"] || raise "#{service["name"]} sent no code back."
-        tokens = OAuth.exchange(service, sign_in["client"], code, sign_in["verifier"], address() <> "/vault/callback")
+        client = fields(find!(call, db, service["client"]))
+        tokens = OAuth.exchange(service, client, code, sign_in["verifier"], address() <> "/vault/callback")
         name = signed_in(sign_in["item"], service, tokens)
 
-        transaction(call, artifact, fn db ->
-          if query(db, "delete from sign_ins where state = ? returning state", [state]) != [] do
-            item = item(db, name) || new(db, name, service["hosts"])
-            keep_tokens(db, item, service, tokens)
-            query(db, "insert or ignore into uses (item, plugin) values (?, ?)", [item["id"], sign_in["plugin"]])
-          end
-        end)
+        if transaction(call, db, &query(&1, "delete from sign_ins where state = ? returning state", [state])) != [] do
+          found = find(call, db, name) || create(call, db, name, service["hosts"])
+
+          # Signed in, it's ready: whatever it needed of its person is done.
+          change!(db, found, fn record ->
+            record
+            |> kept_tokens(service, tokens)
+            |> Map.update!("uses", &Enum.uniq(&1 ++ [sign_in["plugin"]]))
+            |> Map.put("state", nil)
+          end)
+
+          Call.changed(call)
+        end
 
         %{service: service["name"], item: name}
       end)
@@ -1108,144 +1129,247 @@ defmodule Vault do
 
   # An item's fields filled into a request, for what may use it. Its tokens are renewed first if they've ended,
   # and once more if the site says they have.
-  defp fetched(call, artifact, name, request, by) do
+  defp fetched(call, db, name, request, by) do
     quietly("The request", fn ->
-      read = fn ->
-        transaction(call, artifact, fn db ->
-          item = allowed!(db, name, by)
-
-          {item, fields(db, item),
-           for(
-             %{"name" => field} <- query(db, "select name from fields where item = ? and secret = 1", [item["id"]]),
-             do: field
-           )}
-        end)
-      end
-
-      {item, fields, secret} = read.()
-      oauth = item["oauth"] && JSON.decode!(item["oauth"])
-      fields = if oauth && oauth["expires"] <= now() + 60, do: renewed(call, artifact, item, fields), else: fields
-      response = OAuth.request(request, fields, secret, JSON.decode!(item["hosts"]))
+      item = allowed!(find!(call, db, name), by)
+      secret = for %{"name" => field, "secret" => true} <- item["fields"], do: field
+      oauth = item["oauth"]
+      fields = if oauth && oauth["expires"] <= now() + 60, do: renewed(call, db, item, fields(item)), else: fields(item)
+      response = OAuth.request(request, fields, secret, item["hosts"])
 
       if oauth && response.status == 401,
-        do: OAuth.request(request, renewed(call, artifact, item, fields), secret, JSON.decode!(item["hosts"])),
+        do: OAuth.request(request, renewed(call, db, item, fields), secret, item["hosts"]),
         else: response
     end)
   end
 
-  # An item's fields with its tokens renewed, unless another call renewed them meanwhile: one renewal at a time, on
-  # the server that writes the Vault.
-  defp renewed(call, artifact, item, had) do
-    :global.trans({{__MODULE__, Artifact.name(artifact), item["id"]}, self()}, fn ->
-      {oauth, fields, client} =
-        transaction(call, artifact, fn db ->
-          [%{"oauth" => oauth}] = query(db, "select oauth from items where id = ?", [item["id"]])
-          oauth = JSON.decode!(oauth)
-          {oauth, fields(db, item), fields(db, item!(db, oauth["client"]))}
-        end)
+  # An item's fields with its tokens renewed, unless another call renewed them meanwhile: one renewal at a time.
+  defp renewed(call, db, item, had) do
+    :global.trans({{__MODULE__, artifact(db, item["id"])}, self()}, fn ->
+      latest = record(db, item["id"]) || raise "There's no item named #{item["name"]} in the Vault."
 
-      if fields["access_token"] != had["access_token"] do
-        fields
+      if fields(latest)["access_token"] != had["access_token"] do
+        fields(latest)
       else
+        oauth = latest["oauth"]
+        client = fields(find!(call, db, oauth["client"]))
+
         tokens =
           OAuth.renew(
             oauth,
             client,
-            fields["refresh_token"] || raise("#{item["name"]} has no way to renew its sign-in. Sign in again.")
+            fields(latest)["refresh_token"] || raise("#{item["name"]} has no way to renew its sign-in. Sign in again.")
           )
 
-        transaction(call, artifact, fn db ->
-          keep_tokens(db, item, oauth, tokens)
-          fields(db, item)
-        end)
+        fields(change!(db, latest, &kept_tokens(&1, oauth, tokens)))
       end
     end)
   end
 
-  defp keep_tokens(db, item, service, tokens) do
-    for field <- ~w(access_token refresh_token), value = tokens[field], do: keep(db, item, field, value, true)
+  defp kept_tokens(record, service, tokens) do
+    record =
+      Enum.reduce(~w(access_token refresh_token), record, fn field, record ->
+        if value = tokens[field], do: put_field(record, field, value, true), else: record
+      end)
 
     oauth = %{
-      name: service["name"],
-      token: service["token"],
-      client: service["client"],
-      expires: now() + (tokens["expires_in"] || 3600)
+      "name" => service["name"],
+      "token" => service["token"],
+      "client" => service["client"],
+      "expires" => now() + (tokens["expires_in"] || 3600)
     }
 
-    query(db, "update items set oauth = ? where id = ?", [JSON.encode!(oauth), item["id"]])
+    Map.put(record, "oauth", oauth)
   end
 
-  defp allow(db, request, item) do
+  # A request allowed with an item: switched on for whichever plugin asked, or for agents if no plugin did.
+  defp allow!(db, request, item) do
     if plugin = request["plugin"],
-      do: query(db, "insert or ignore into uses (item, plugin) values (?, ?)", [item["id"], plugin]),
-      else: query(db, "update items set agents = 1 where id = ?", [item["id"]])
-
-    query(db, "update requests set state = 'set' where id = ?", [request["id"]])
-    %{state: "set"}
+      do: change!(db, item, &Map.update!(&1, "uses", fn uses -> Enum.uniq(uses ++ [plugin]) end)),
+      else: change!(db, item, &Map.put(&1, "agents", true))
   end
 
-  # The item named `name`, if `by` may use it: a plugin switched on for it, or agents its person let.
-  defp allowed!(db, name, by) do
-    item = item!(db, name)
-
+  # The item, if `by` may use it: a plugin switched on for it, or agents its person let.
+  defp allowed!(item, by) do
     case by do
       :agents ->
-        if item["agents"] != 1,
+        if item["agents"] != true,
           do: raise("#{item["name"]} isn't one agents may use. Ask its person, with vault_request.")
 
       {:plugin, plugin} ->
-        if query(db, "select 1 from uses where item = ? and plugin = ?", [item["id"], plugin]) == [],
-          do:
-            raise(
-              "#{item["name"]} isn't switched on for #{Path.basename(plugin)}. Its person switches it on, in the Vault."
-            )
+        if plugin not in item["uses"],
+          do: raise("#{item["name"]} isn't switched on for #{Path.basename(plugin)}. Its person switches it on, in the Vault.")
     end
 
     item
   end
 
-  defp item(db, name), do: List.first(query(db, "select * from items where name = ? collate nocase", [name]))
-  defp item!(db, name), do: item(db, name) || raise("There's no item named #{name} in the Vault.")
+  # Someone's items, each an artifact of its own, `<owner>/made/vault/<id>`, so soft delete deletes, restores and
+  # purges one as it does anything a plugin made, and the Vault keeps no lifecycle of its own: it stores and
+  # encrypts. An item's record is the blob `<id>/item`, encrypted with the Vault's keys, as its database is, and
+  # changed in one step; its contents are blobs beside it, `<id>/contents/<blob>`, each sealed under a key the record
+  # holds. The database says which id each name is (`artifacts`), so finding one by name is one read, and one that
+  # soft delete took aside isn't there to read until it's restored.
 
-  defp new(db, name, hosts) do
+  # Where someone's items are: their Vault's database, with its keys and its reach, at the folder it's in.
+  defp root(%Artifact{} = db), do: %Artifact{db | prefix: String.replace_suffix(db.prefix, "items/", "")}
+
+  # An item's artifact, by its name, as soft delete knows it.
+  defp artifact(db, id), do: root(db).prefix <> id
+
+  defp record(db, id) do
+    case Artifact.read(root(db), "#{id}/item") do
+      {:ok, data, _tag} -> JSON.decode!(data)
+      :absent -> nil
+    end
+  end
+
+  # Changes an item's record in one step: `change` is given it as it is, and gives what it's to be.
+  defp change!(db, item, change) do
+    changed =
+      Artifact.update(root(db), "#{item["id"]}/item", fn
+        nil -> nil
+        data -> data |> JSON.decode!() |> change.() |> Map.put("changed", now()) |> JSON.encode!()
+      end)
+
+    if changed, do: JSON.decode!(changed), else: raise("There's no item named #{item["name"]} in the Vault.")
+  end
+
+  # The item named `name`, any case: the first whose record is there.
+  defp find(call, db, name) do
+    ids =
+      transaction(call, db, fn d ->
+        moved(d, db)
+        for %{"id" => id} <- query(d, "select id from artifacts where name = ? collate nocase", [name]), do: id
+      end)
+
+    Enum.find_value(ids, &record(db, &1))
+  end
+
+  defp find!(call, db, name), do: find(call, db, name) || raise("There's no item named #{name} in the Vault.")
+
+  # Every item that's there.
+  defp everything(call, db) do
+    ids =
+      transaction(call, db, fn d ->
+        moved(d, db)
+        for %{"id" => id} <- query(d, "select id from artifacts"), do: id
+      end)
+
+    for {:ok, data, _tag} <- Artifact.read_all(root(db), Enum.map(ids, &"#{&1}/item")), do: JSON.decode!(data)
+  end
+
+  # The ids of the items there are by the name `name`, other than `id`.
+  defp taken(d, db, name, id \\ nil) do
+    for %{"id" => other} <- query(d, "select id from artifacts where name = ? collate nocase", [name]),
+        other != id,
+        record(db, other),
+        do: other
+  end
+
+  # A new item, made once its name is free: its record, with `record`'s parts.
+  defp create(call, db, name, hosts, record \\ %{}) do
     if String.trim(name) == "", do: raise("An item has a name.")
+    id = random(9)
 
-    [item] =
-      query(db, "insert into items (id, name, hosts, changed) values (?, ?, ?, ?) returning *", [
-        random(9),
-        name,
-        JSON.encode!(hosts!(hosts)),
-        now()
-      ])
+    transaction(call, db, fn d ->
+      if taken(d, db, name) != [], do: raise("There's an item named #{name} already.")
+      query(d, "insert into artifacts (id, name) values (?, ?)", [id, name])
+    end)
 
+    item =
+      Map.merge(
+        %{
+          "id" => id,
+          "name" => name,
+          "hosts" => hosts!(hosts),
+          "agents" => false,
+          "oauth" => nil,
+          "fields" => [],
+          "uses" => [],
+          "contents" => %{},
+          "state" => nil,
+          "changed" => now()
+        },
+        record
+      )
+
+    :ok = Artifact.write(root(db), "#{id}/item", JSON.encode!(item))
     item
   end
 
-  defp keep(db, item, field, value, secret) do
-    sql =
-      "insert into fields (item, name, value, secret) values (?, ?, ?, ?) on conflict (item, name) do update set value = excluded.value, secret = excluded.secret"
+  # The items the database held before each was an artifact of its own are copied into one, each once, under its
+  # id, with what was kept of it; the database's copy stays as it was.
+  defp moved(d, db) do
+    for old <- query(d, "select * from items where id not in (select id from artifacts)") do
+      fields =
+        for field <- query(d, "select name, value, secret from fields where item = ? order by rowid", [old["id"]]),
+            do: %{"name" => field["name"], "value" => field["value"], "secret" => field["secret"] == 1}
 
-    query(db, sql, [item["id"], field!(field), value, secret == true])
-    touch(db, item)
+      contents =
+        for kept <- query(d, "select * from contents where item = ?", [old["id"]]), into: %{} do
+          {kept["name"], %{"blob" => "contents/#{kept["blob"]}", "key" => kept["key"], "size" => kept["size"], "at" => kept["at"]}}
+        end
+
+      record = %{
+        "id" => old["id"],
+        "name" => old["name"],
+        "hosts" => JSON.decode!(old["hosts"]),
+        "agents" => old["agents"] == 1,
+        "oauth" => old["oauth"] && JSON.decode!(old["oauth"]),
+        "fields" => fields,
+        "uses" => for(%{"plugin" => plugin} <- query(d, "select plugin from uses where item = ?", [old["id"]]), do: plugin),
+        "contents" => contents,
+        "state" => nil,
+        "changed" => old["changed"]
+      }
+
+      Artifact.write(root(db), "#{old["id"]}/item", JSON.encode!(record))
+      query(d, "insert into artifacts (id, name) values (?, ?)", [old["id"], old["name"]])
+    end
+
+    :ok
   end
 
-  defp touch(db, item), do: query(db, "update items set changed = ? where id = ?", [now(), item["id"]])
+  # Deletes an item as anything a plugin made is deleted: by soft delete, which keeps it for 30 days.
+  defp delete!(call, db, item), do: Call.tool(call, "recently-deleted", "remove", %{"artifact" => artifact(db, item["id"])})
 
-  defp fields(db, item),
-    do: Map.new(query(db, "select name, value from fields where item = ?", [item["id"]]), &{&1["name"], &1["value"]})
+  defp fields(item), do: Map.new(item["fields"], &{&1["name"], &1["value"]})
 
-  defp used?(db, plugin), do: query(db, "select 1 from uses where plugin = ? limit 1", [plugin]) != []
+  defp put_field(item, name, value, secret) do
+    field = %{"name" => field!(name), "value" => value, "secret" => secret == true}
 
-  # Deletes an item and what's kept of it, and gives the blobs its contents were, for whoever deletes it to remove.
-  defp deleted(db, id) do
-    blobs = for %{"blob" => blob} <- query(db, "select blob from contents where item = ?", [id]), do: blob
-    for table <- ~w(fields uses contents), do: query(db, "delete from #{table} where item = ?", [id])
-    query(db, "delete from items where id = ?", [id])
-    blobs
+    Map.update!(item, "fields", fn fields ->
+      if Enum.any?(fields, &(&1["name"] == name)),
+        do: Enum.map(fields, &if(&1["name"] == name, do: field, else: &1)),
+        else: fields ++ [field]
+    end)
   end
 
-  # A short-lived link to one blob of an item's contents, as what's handed on takes it: JSON's keys.
-  defp link(contents, blob, mode), do: contents |> Artifact.link(blob, mode) |> JSON.encode!() |> JSON.decode!()
+  # What a plugin said of its item's state, checked, as an item keeps it: nothing for `ready`, since fine is silent.
+  defp said!(state, message, action, plugin) do
+    case to_string(state) do
+      "ready" ->
+        nil
+
+      "busy" when is_binary(message) ->
+        %{"state" => "busy", "message" => message, "by" => plugin}
+
+      "action_required" when is_binary(message) and is_map(action) ->
+        action = JSON.decode!(JSON.encode!(action))
+
+        if not is_binary(action["label"]) or not (is_binary(action["tool"]) or is_binary(action["page"])),
+          do: raise("An action has a label, and either a tool of the plugin's or a page of its client's.")
+
+        %{"state" => "action_required", "message" => message, "action" => action, "by" => plugin}
+
+      _ ->
+        raise "An item is ready, busy with a message, or action_required with why and an action."
+    end
+  end
+
+  # A short-lived link to one blob of an item's, as what's handed on takes it: JSON's keys.
+  defp link(db, blob, mode), do: %{root(db) | codec: nil} |> Artifact.link(blob, mode) |> JSON.encode!() |> JSON.decode!()
 
   defp field!(name) do
     if is_binary(name) and name =~ ~r/^[A-Za-z0-9_]+$/,
@@ -1263,8 +1387,8 @@ defmodule Vault do
   end
 
   # The item types of the plugins whoever this runs for has (`vault.types`), each as `list` gives it, with its
-  # plugin's name, title and icon, whether its plugin is trusted, which decides where its component is drawn, and the
-  # page its plugin signs an account in on, if it has one. A type that doesn't say what one must is left out.
+  # plugin's name, title and icon, and whether its plugin is trusted, which decides where its component is drawn. A
+  # type that doesn't say what one must is left out.
   defp types(call) do
     {:ok, parts, _failed} = Call.run_hook(call, "types", %{})
     running = Plugins.running(call.subject)
@@ -1282,23 +1406,23 @@ defmodule Vault do
         trusted: Map.get(version, :trusted, true),
         name: type["name"],
         prefix: type["prefix"],
-        account: type["account"] == true,
-        plural: type["plural"],
+        section: type["section"],
         component: type["component"],
-        create: type["create"],
-        sign_in: Enum.find_value(version.tools, &(&1.name == "sign_in" and &1[:ui] && "#{plugin}/#{&1[:ui]}"))
+        create: type["create"]
       }
     end
   end
 
-  defp type?(%{"name" => name, "prefix" => prefix} = type) when is_binary(name) and is_binary(prefix) and prefix != "",
-    do: type["account"] == true or is_binary(type["plural"])
+  defp type?(%{"name" => name, "prefix" => prefix, "section" => section})
+       when is_binary(name) and is_binary(prefix) and prefix != "" and is_binary(section),
+       do: true
 
   defp type?(_type), do: false
 
   # The plugins' names as whoever this runs for finds them, by their artifacts.
   defp names(call), do: Map.new(Plugins.running(call.subject), fn {name, version} -> {version.artifact, name} end)
   defp named(names, plugin), do: Map.get(names, plugin, Path.basename(plugin))
+  defp plugin_name(call, plugin), do: named(names(call), plugin)
 
   defp address do
     Application.get_env(:one_core, :address) ||
@@ -1335,7 +1459,8 @@ defmodule Vault do
     call
   end
 
-  # The artifact that the items of whoever a call of the Vault's own tools is for are in.
+  # The artifact of the database of whoever a call of the Vault's own tools is for: which item each name is, what's
+  # been asked for, and the sign-ins under way.
   defp items_artifact(call), do: Call.make(mine!(call), "items")
 
   # Their Vault, opened: on a server they chose, which this call ends up on.
@@ -1347,19 +1472,9 @@ defmodule Vault do
   # It reaches the Vault as an editor, which a tuple says once anything of the Vault's is switched on for it.
   defp reached(call), do: encryption(call).encrypted(call, Call.reach(call, theirs(call), "editor"))
 
-  # Where the contents of someone's items are, each a blob sealed under a key its item holds: an artifact made for
-  # them, which a plugin reaches as an editor as it does their Vault. The bucket holds only what's sealed.
-  defp contents(call), do: "#{mine!(call).subject}/made/vault/contents"
-
-  # That artifact, reached by a plugin switched on for one of their items, which a tuple then lets it.
-  defp contents!(call) do
-    share(call, "share", contents(call), call.who)
-    Call.reach(call, contents(call), "editor")
-  end
-
   defp encryption(call), do: Call.plugin(call, "encryption")
 
-  # A transaction on someone's Vault. The database is theirs, so this server's copy of it is kept by its name.
+  # A transaction on someone's Vault's database. It's theirs, so this server's copy of it is kept by its name.
   defp transaction(call, artifact, fun) do
     database = Call.plugin(call, "database")
     call = %{call | own: artifact, folder: Path.join(Server.home(), Artifact.name(artifact))}

@@ -23,7 +23,8 @@ already signed in as them; then use Chrome's tools with its session, as with any
   Profiles, sign in there, and tap Save. `notifications_send` with `app: "vault"` reaches their devices. It's saved by
   itself after 15 minutes. Don't use that browser while they do; once it's saved, `open` the profile again.
 - `save` and `discard` finish an update for them when they ask: with and without saving.
-- `create`, `rename` and `remove` are for when your person asks. Removing one signs it out of everything, for good.
+- `create`, `rename` and `remove` are for when your person asks. Removing one deletes it: it's in Recently Deleted
+  for 30 days, where it can be restored with everything signed in on it, then gone.
 
 A profile is its person's alone: nobody else lists or opens it, the network's owner included. A site that signs
 out after a while needs signing in to again.

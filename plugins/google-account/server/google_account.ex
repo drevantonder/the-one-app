@@ -1,16 +1,15 @@
 defmodule GoogleAccount do
   @moduledoc """
-  What the Google plugins (gmail, google-calendar, google-drive, google-docs and google-sheets) share: Google's
-  sign-in and each account signed in, kept in the Vault, and their calls to Google's APIs. A Google plugin calls
-  this one's tools, which act for the plugin that called them (its `caller`), with that plugin's `title`, and `scopes` to
-  sign in with.
+  What the Google plugins (gmail, google-calendar, google-drive, google-docs and google-sheets) share: their person's
+  Google accounts and Google's sign-in, and their calls to Google's APIs. A Google plugin calls this one's tools, which
+  act for the plugin that called them (its `caller`), with that plugin's `title`.
 
-  Each Google account is one item of its person's Vault, "Google <address>", shared by every Google plugin signed in
-  to it. Signing in to it for another plugin adds that plugin's scopes to it (Google's incremental authorization) and
-  switches the item on for that plugin too. Signing out of one plugin switches it off for that plugin alone. This plugin
-  uses the Vault's tools on behalf of the plugin, so the Vault ties each account to the plugins it's switched on for, and
-  neither this plugin nor a Google plugin is ever handed a token: an untrusted one uses an account as safely as one
-  that isn't.
+  Each Google account is one item of its person's Vault, "Google <address>", of this plugin's type (`vault.types`), and
+  every Google plugin uses it through this one: it's switched on for this plugin alone, which signs it in, with what
+  every Google plugin they have asks of Google (`scopes`), and makes each call to Google with it. So neither this
+  plugin nor a Google plugin is ever handed a token. Signing in to it again for one plugin adds that plugin's scopes
+  (Google's incremental authorization). Signing out is deleting the item, which soft delete does; one Google says needs
+  signing in again is its person's to act on (`state`), with Sign In.
 
   Every Google address is written here and in the Google plugins as Google's own: a test points them at a fake Google by
   rewriting them.
@@ -30,7 +29,35 @@ defmodule GoogleAccount do
   @userinfo "https://openidconnect.googleapis.com/v1/userinfo"
 
   @impl true
-  def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_stop_using)
+  def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_state)
+
+  # It has no app, and its Google accounts are listed in the Vault, so it names and draws itself.
+  @impl true
+  def title, do: "Google"
+
+  @impl true
+  def icon, do: "icon.svg"
+
+  # A Google account is an item of the person's Vault, listed under Accounts, and added by signing in.
+  @impl true
+  def hooks, do: ["vault.types"]
+
+  @impl true
+  def hook("vault.types", _about, _call),
+    do: [%{name: "Google account", section: "Accounts", prefix: "Google ", create: %{tool: "sign_in"}}]
+
+  # What each Google plugin asks of Google, so one sign-in lets every one in.
+  @impl true
+  def offers do
+    [
+      %{
+        name: "scopes",
+        kind: :collect,
+        description:
+          "What a Google plugin asks of Google. It's about nothing. A Google plugin answers with its list of Google's scopes, which a Google account is signed in with."
+      }
+    ]
+  end
 
   @impl true
   def tools do
@@ -92,26 +119,20 @@ defmodule GoogleAccount do
       %{
         name: "sign_in",
         description:
-          "For a Google plugin's code: starts signing a Google account in to the plugin that calls this, and gives the url its person opens.",
-        inputs:
-          titled.(
-            %{
-              scopes: %{type: "array", items: %{type: "string"}, description: "What the plugin asks of Google"},
-              account: string.("The account's address, to suggest it to Google")
-            },
-            ["scopes"]
-          ),
+          "Starts signing a Google account in, for every Google plugin you have, or with `account`, signing that one in again, and gives the url to open, where Google signs you in. A Google plugin's code says its title and scopes.",
+        inputs: %{
+          type: "object",
+          properties: %{
+            title: title,
+            scopes: %{type: "array", items: %{type: "string"}, description: "What the plugin asks of Google"},
+            account: string.("The account's address, to suggest it to Google")
+          }
+        },
         outputs: %{
           type: "object",
           properties: %{url: string.("Where its person signs in"), then: string.("What happens next")},
           required: ["url", "then"]
         }
-      },
-      %{
-        name: "sign_out",
-        description: "For a Google plugin's code: signs a Google account out of the plugin that calls this.",
-        inputs: titled.(%{account: account}, ["account"]),
-        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "request",
@@ -162,38 +183,47 @@ defmodule GoogleAccount do
     %{plugins: Enum.sort_by(plugins, & &1.title)}
   end
 
-  def call(_tool, _inputs, %OneCore.Call{caller: nil}),
-    do:
-      raise("google-account's tools are for the Google plugins' code. Each has its own accounts, sign_in and sign_out.")
+  def call(tool, _inputs, %OneCore.Call{caller: nil}) when tool in ~w(accounts request),
+    do: raise("google-account_#{tool} is for the Google plugins' code. Each has its own tools.")
 
   def call("accounts", %{"title" => title}, call) do
     accounts =
       for email <- emails(call) do
         case vault(call, "fetch", Map.put(get(@userinfo), "item", item(email))) do
-          %{"status" => 200} -> %{account: email, ok: true}
-          response -> %{account: email, ok: false, why: trouble(call, title, email, response)}
+          %{"status" => 200} ->
+            state(call, email, :ready)
+            %{account: email, ok: true}
+
+          response ->
+            why = trouble(call, title, email, response)
+            again(call, email, response)
+            %{account: email, ok: false, why: why}
         end
       end
 
     %{accounts: accounts}
   end
 
-  def call("sign_in", %{"scopes" => scopes} = inputs, call) do
+  # Signed in for a Google plugin, with what it asks of Google, or for its person, with what every Google plugin they
+  # have asks: so adding an account in the Vault lets every one in at once.
+  def call("sign_in", inputs, call) do
+    scopes =
+      if call.caller do
+        inputs["scopes"] || raise("A Google plugin signs in with its scopes.")
+      else
+        {:ok, parts, _failed} = OneCore.Call.run_hook(call, "scopes", %{})
+        parts |> Map.values() |> List.flatten() |> Enum.uniq()
+      end
+
     params = %{"access_type" => "offline", "prompt" => "consent", "include_granted_scopes" => "true"}
     params = if hint = inputs["account"], do: Map.put(params, "login_hint", hint), else: params
-    service = Map.merge(@service, %{"scopes" => ["openid", "email" | scopes], "params" => params})
+    service = Map.merge(@service, %{"scopes" => Enum.uniq(["openid", "email" | scopes]), "params" => params})
 
     %{
       url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}"})["url"],
       then:
-        "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. #{plugin(call)}_accounts then lists the account."
+        "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. The account is then in their Vault, under Accounts."
     }
-  end
-
-  def call("sign_out", %{"account" => name}, call) do
-    email = account(call, name)
-    vault(call, "stop_using", %{"item" => item(email)})
-    %{account: email}
   end
 
   def call("request", %{"url" => url, "title" => title} = inputs, call) do
@@ -224,8 +254,10 @@ defmodule GoogleAccount do
 
     response = vault(call, "fetch", request)
 
-    if response["status"] not in 200..299,
-      do: raise(trouble(call, title, email, response, Map.take(inputs, ["missing", "hint"])))
+    if response["status"] not in 200..299 do
+      again(call, email, response)
+      raise trouble(call, title, email, response, Map.take(inputs, ["missing", "hint"]))
+    end
 
     %{status: response["status"], headers: response["headers"], body: decoded(response["body"])}
   end
@@ -313,9 +345,21 @@ defmodule GoogleAccount do
 
   defp message(_body), do: nil
 
-  # The addresses of the Google accounts signed in for the plugin that called, by address.
+  # The addresses of the Google accounts signed in, by address.
   defp emails(call) do
     for %{"name" => "Google " <> email, "sign_in" => "Google"} <- vault(call, "items", %{})["items"], do: email
+  end
+
+  # A Google account that Google says needs signing in again, or more allowed of it, is its person's to act on, in
+  # the Vault: with Sign In, which signs it in again for every Google plugin they have. They aren't notified: the
+  # call that found it says so to whoever made it, and the Vault shows the dot.
+  defp again(call, email, response) do
+    if response["status"] == 401 or (response["status"] == 403 and (message(response["body"]) || "") =~ ~r/insufficient|scope/i),
+      do: state(call, email, :action_required, "Sign in again", %{label: "Sign In", tool: "sign_in", inputs: %{account: email}})
+  end
+
+  defp state(call, email, state, message \\ nil, action \\ nil) do
+    vault(call, "state", %{"item" => item(email), "state" => to_string(state), "message" => message, "action" => action} |> Map.reject(fn {_, value} -> value == nil end))
   end
 
   # The plugin that called, by the name its tools start with.
@@ -324,6 +368,6 @@ defmodule GoogleAccount do
   defp item(email), do: "Google #{email}"
   defp get(url), do: %{"url" => url, "headers" => %{"authorization" => "Bearer {{access_token}}"}}
 
-  # The Vault's tools, for the plugin that called.
-  defp vault(call, tool, inputs), do: OneCore.Call.tool(call, "vault", tool, inputs, on_behalf_of: call.caller)
+  # The Vault's tools, as this plugin, which every Google account is switched on for.
+  defp vault(call, tool, inputs), do: OneCore.Call.tool(call, "vault", tool, inputs)
 end

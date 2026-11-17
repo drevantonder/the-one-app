@@ -155,7 +155,7 @@ export default function ChromeProfile(props: Props) {
   const [asking, setAsking] = createSignal(false)
   const act = async ({ value }: { value: string }) => {
     if (value === "rename") return setAsking(true)
-    const yes = await confirm({ heading: `Delete ${props.item}?`, text: "Every site signed in on it is signed out, for good.", action: "Delete", destructive: true })
+    const yes = await confirm({ heading: `Delete ${props.item}?`, text: "It's in Recently Deleted for 30 days, then gone, with everything signed in on it.", action: "Delete", destructive: true })
     if (yes) await call("chrome-profiles_remove", { profile: props.item }, { subject: props.subject }).then(() => props.close?.()).catch(toast)
   }
   return (

@@ -42,7 +42,9 @@ What users see, as the project's owner decided it. Only their decisions are here
 ## Vault
 
 - The one place for everything a person has given access to, in sections: Asked for, Passwords and keys, Accounts, then one for each other kind of item a plugin keeps there (Chrome Profiles).
-- Accounts are every plugin's, in one list: each with its plugin's logo, Sign In where it needs signing in again, and Sign Out; Add Account under them.
+- Accounts are every plugin's, in one list, each with its plugin's logo; Add Account under them.
+- An item is ready, busy or action_required, as its plugin says: ready shows nothing; busy shows a spinner and what's under way; action_required shows a dot, why and the one action that fixes it (Sign In, Try Again). Signing out is that, or deleting the item.
+- Deleting an item is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
 - An item a plugin keeps opens beside the list on a desktop, drawn by that plugin itself (a Chrome profile by Chrome Profiles).
 
 ## App Store

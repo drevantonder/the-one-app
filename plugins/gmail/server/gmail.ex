@@ -10,7 +10,7 @@ defmodule Gmail do
   @api "https://gmail.googleapis.com/gmail/v1/users/me/"
   @upload "https://gmail.googleapis.com/upload/gmail/v1/users/me/"
 
-  # It has accounts and no app, so it names and draws itself, in Accounts and the App Store.
+  # It has no app, so it names and draws itself, in the App Store.
   @impl true
   def title, do: google().title
 
@@ -28,12 +28,12 @@ defmodule Gmail do
   @impl true
   def permissions, do: ["google-account"]
 
-  # Its accounts are items in its person's Vault, "Google <address>", which the Vault lists under Accounts.
+  # Its person's Google accounts are google-account's, which signs one in with what each Google plugin asks of Google.
   @impl true
-  def hooks, do: ["vault.types"]
+  def hooks, do: ["google-account.scopes"]
 
   @impl true
-  def hook("vault.types", _about, _call), do: [%{name: "Google account", prefix: "Google ", account: true}]
+  def hook("google-account.scopes", _about, _call), do: google().scopes
 
   @impl true
   def tools do
@@ -114,12 +114,6 @@ defmodule Gmail do
           properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
           required: ["url", "then"]
         }
-      },
-      %{
-        name: "sign_out",
-        description: "Signs a Google account out of Gmail. Other Google plugins that use it still do, and gmail_sign_in signs it in again.",
-        inputs: with_account.(%{}, ["account"]),
-        outputs: %{type: "object", properties: %{account: string.("The account signed out")}, required: ["account"]}
       },
       %{
         name: "profile",
@@ -328,7 +322,7 @@ defmodule Gmail do
   end
 
   @impl true
-  def call(tool, inputs, call) when tool in ~w(accounts sign_in sign_out),
+  def call(tool, inputs, call) when tool in ~w(accounts sign_in),
     do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
 
   def call(tool, inputs, call), do: run(tool, inputs, %{call: call, account: inputs["account"]})

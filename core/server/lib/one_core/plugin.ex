@@ -299,10 +299,19 @@ defmodule OneCore.Plugin do
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
   - A plugin's name where a person reads it is `title/0`, and without one its first app's; one that names no icon
     is drawn with its first app's. One with no app gives `title/0`: `def title, do: "Gmail"`.
-  - A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts, as the Vault's skill says:
-    items in the person's Vault, of a type the plugin registers, which the Vault lists under Accounts. Accounts
-    aren't an app, and having them makes no app: a plugin has an app only for a screen a person opens for something
-    else.
+  - A plugin that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
+    registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
+    one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:
+    having them makes no app. A plugin has an app only for a screen a person opens for something else.
+  - Its item is in one of three states, which the plugin says (`vault_state`) and the Vault shows: `ready`, usable,
+    which shows nothing; `busy`, with a message ("Saving…"); or `action_required`, with why and the one action that
+    fixes it ("Signed out on your phone", Sign In). It keeps its own detailed states and says only which of these it's
+    in. Deleting, restoring and purging an item are soft delete's, which the Vault doesn't add to.
+  - Two things are the plugin's to choose, deliberately, and nothing chooses for it. Whether its person is also
+    notified when its item needs them (`notifications`): WhatsApp and Messenger notify, since messages stop, and
+    Chrome Profiles doesn't, since its person is in the update that failed. And what it does when soft delete's hook
+    says its item was deleted, restored or purged: sign out and revoke at once, so no token waits in Recently Deleted,
+    or keep the token so a restore just works and revoke it only once it's purged.
   - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
     listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
     an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's.

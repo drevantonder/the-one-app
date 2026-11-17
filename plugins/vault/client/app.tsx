@@ -1,13 +1,14 @@
 // The Vault: everything someone has given access to, or a group or the network has, for whoever owns them. What's
 // been asked for and waits for an answer; their passwords and keys, each opening beside the list with its fields (a
-// secret one is typed and never shown again), the sites its secrets go to, and what may use it; their accounts, each
-// plugin's as its `accounts` lists them, with Sign In and Sign Out; and a section for each other kind of item a plugin
-// keeps here (`vault.types`), one of which its plugin's own component draws beside the list. Below, the servers that
-// open the Vault, and which devices hold its person's key, since only one of those chooses the servers.
+// secret one is typed and never shown again), the sites its secrets go to, and what may use it; then a section for each
+// kind of item a plugin keeps here (`vault.types`): Accounts, Chrome Profiles. An item shows the state its plugin says
+// it's in: nothing when it's ready, a spinner and what's under way, or a dot, why and the one action that fixes it. One
+// of a type with a component is drawn beside the list by its own plugin. Deleting one is soft delete's. Below, the
+// servers that open the Vault, and which devices hold its person's key, since only one of those chooses the servers.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { Dynamic, render } from "@solidjs/web"
 import "./app.css"
-import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Icon, Input, leave, List, Menu, open as opening, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Split, Switch, toast, useRecoveryKey } from "ui"
+import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, leave, List, open as opening, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
 
 /// Whose Vault this is: a person's, a group's or the network's. Left unchosen, it's whoever the app was opened for.
 /** A field of an item: a secret one has no value here. */
@@ -20,12 +21,33 @@ interface ItemField {
 /** An item, as `vault_list` answers it. */
 interface Item {
   name: string
+  artifact: string
   type: string | null
+  state: State | null
   fields: ItemField[]
   hosts: string[]
   plugins: string[]
   agents: boolean
   sign_in?: boolean
+}
+
+/** What a plugin says its item needs of its person, as it says it, or what adds one of a type: a tool of the
+ * plugin's, called as its person, or a page of its client's. */
+interface Action {
+  label?: string
+  tool?: string
+  inputs?: Record<string, unknown>
+  page?: string
+  name?: boolean
+}
+
+/** Which of the three states an item is in, other than ready, which is none: busy with a message, or
+ * action_required with why and an action. `by` is the plugin that said it. */
+interface State {
+  state: "busy" | "action_required"
+  message: string
+  action?: Action
+  by: string
 }
 
 /** A kind of item a plugin keeps here, as `vault_list` answers it. */
@@ -37,18 +59,9 @@ interface ItemType {
   trusted: boolean
   name: string
   prefix: string
-  account: boolean
-  plural: string | null
+  section: string
   component: string | null
-  create: string | null
-  sign_in: string | null
-}
-
-/** An outside account, as a plugin's `accounts` lists it. */
-interface Account {
-  account: string
-  ok: boolean
-  why?: string
+  create: Action | null
 }
 
 /** What a plugin or an agent asked for, waiting for an answer. */
@@ -69,7 +82,7 @@ interface Device {
 
 /** The sheet that's open over the page: a field to type, a request to answer, a new item of a type to name, or the
  * plugins an account is added to. */
-type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "request"; request: Request } | { kind: "create"; type: ItemType } | { kind: "accounts" }
+type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "request"; request: Request } | { kind: "create"; type: ItemType } | { kind: "add"; section: string }
 
 const [whose, setWhose] = createSignal<string>()
 const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs, { subject: whose() }).then(JSON.parse)
@@ -122,8 +135,24 @@ const users = (item: Item) => [...item.plugins, ...(item.agents ? ["your agents"
 /// An item's type, if it's of one, and its name as a person reads it: "Personal", not "Chrome profile: Personal".
 const typeOf = (item: Item) => contents().types.find((type) => type.id === item.type)
 const shown = (item: Item) => item.name.slice(typeOf(item)?.prefix.length ?? 0)
-/// The plugins with accounts, one each, by their names as a person reads them.
-const withAccounts = () => [...new Map(contents().types.filter((type) => type.account).map((type) => [type.plugin, type])).values()].sort((a, b) => (a.title ?? a.plugin).localeCompare(b.title ?? b.plugin))
+/// Each section a type is listed under, by its heading, with the types in it.
+const sections = () => [...Map.groupBy(contents().types, (type) => type.section)].sort(([a], [b]) => a.localeCompare(b))
+/// Does an action a plugin gave, as its person: a tool of the plugin's, whose `url`, if it gives one, opens in the
+/// device's browser, or a page of its client's. → whether it did.
+async function act(action: Action, plugin: string, inputs: Record<string, unknown> = {}) {
+  try {
+    if (action.page) await opening(`${plugin}/${action.page}`, { subject: whose() })
+    else {
+      const done = await ask<{ url?: string }>(`${plugin}_${action.tool}`, { ...action.inputs, ...inputs })
+      if (done.url) await opening(done.url)
+    }
+    again()
+    return true
+  } catch (error) {
+    toast(error as Error)
+    return false
+  }
+}
 /// A type's name as a menu or a heading says it: "Chrome Profile".
 const titled = (name: string) => name.replace(/(^|\s)\S/g, (first) => first.toUpperCase())
 /// A component a plugin exports (client/package.json), beside the Vault's page, where a client serves each plugin's.
@@ -241,12 +270,16 @@ function RequestSheet() {
 /// One item: what it holds, where its secrets go, and what may use it, each switched on here.
 function ItemScreen(props: { item: Item }) {
   const item = () => props.item
+  // Deleting it is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
   const remove = async () => {
-    if (!(await confirm({ heading: `Delete ${item().name}?`, text: "Whatever uses it stops working, and it can't be brought back.", action: "Delete", destructive: true }))) return
-    if (await does("vault_remove", { item: item().name })) setOpen()
+    if (!(await confirm({ heading: `Delete ${shown(item())}?`, text: "Whatever uses it stops working. It's in Recently Deleted for 30 days.", action: "Delete", destructive: true }))) return
+    if (await does("recently-deleted_remove", { artifact: item().artifact })) setOpen()
   }
   return (
-    <Screen heading={item().name} back>
+    <Screen heading={shown(item())} back>
+      <Show when={item().state}>
+        {(state) => <Line state={state()} />}
+      </Show>
       <Section heading={item().sign_in ? "Signed in" : "Fields"}>
         <List>
           <For each={item().fields}>{(field) => <Row heading={label(field.name)} text={field.secret ? "Secret" : field.value} onClick={() => setSheet({ kind: "field", item: item(), field })} />}</For>
@@ -384,75 +417,76 @@ function Whose() {
   )
 }
 
-/// Signs an account in to a plugin, or with `account`, signs that one in again: on the plugin's own page for it, or at
-/// the web address its `sign_in` answers, in the device's browser.
-const signIn = (type: ItemType, account?: string) =>
-  (type.sign_in
-    ? opening(account ? `${type.sign_in}#${encodeURIComponent(account)}` : type.sign_in, { subject: whose() })
-    : ask<{ url: string }>(`${type.plugin}_sign_in`, account ? { account } : {}).then(({ url }) => opening(url))
-  ).catch(toast)
-
-/// A plugin's accounts, once its `accounts` answers: each with Sign Out, and Sign In where it needs signing in again.
-function AccountsOf(props: { type: ItemType }) {
-  const accounts = createMemo(() => ask<{ accounts: Account[] }>(`${props.type.plugin}_accounts`).then((listed) => listed.accounts))
-  changed(() => refresh(accounts))
-  const title = () => props.type.title ?? props.type.plugin
-  const signOut = async (account: string) => {
-    const sure = await confirm({ heading: `Sign out of ${account}?`, text: `${title()} can't use it until it's signed in again.`, action: "Sign Out", destructive: true })
-    if (sure) await call(`${props.type.plugin}_sign_out`, { account }, { subject: whose() }).catch(toast)
-    refresh(accounts)
+/// What its plugin says an item is in, in a row's grey line or atop its screen: a spinner and what's under way, or a
+/// dot, why and the action that fixes it. Ready is nothing: fine is silent.
+function Line(props: { state: State }) {
+  const [busy, setBusy] = createSignal(false)
+  const run = async () => {
+    setBusy(true)
+    await act(props.state.action!, props.state.by)
+    setBusy(false)
   }
   return (
-    <For each={accounts()} keyed={(account) => account.account}>
-      {(account) => (
-        <Row
-          start={<img class="logo" src={props.type.icon ?? ""} alt="" />}
-          heading={account().account}
-          text={account().ok ? title() : <span class="warn"><Icon name="warning-circle" />{account().why ?? "Sign in again"}</span>}
-          end={
-            <span class="actions">
-              <Show when={!account().ok}>
-                <Button variant="outline" onClick={() => signIn(props.type, account().account)}>Sign In</Button>
-              </Show>
-              <Button variant="ghost" onClick={() => signOut(account().account)}>Sign Out</Button>
-            </span>
-          }
-        />
-      )}
-    </For>
+    <span class="state">
+      <Show when={props.state.state === "busy"} fallback={<span class="dot" aria-hidden="true" />}>
+        <Spinner />
+      </Show>
+      <span class="message">{props.state.message}</span>
+      <Show when={props.state.state === "action_required" && props.state.action}>
+        <Button variant="outline" loading={busy()} onClick={(event: MouseEvent) => (event.stopPropagation(), run())}>
+          {props.state.action!.label}
+        </Button>
+      </Show>
+    </span>
   )
 }
 
-/// Every plugin's accounts, in one list, and Add Account.
-function Accounts() {
-  const add = () => (withAccounts().length === 1 ? signIn(withAccounts()[0]) : setSheet({ kind: "accounts" }))
+/// A section of a kind of item: its items, each with its plugin's icon and its state, and a way to add one where
+/// its types make one.
+function Kind(props: { section: string; types: ItemType[] }) {
+  const items = () => contents().items.filter((item) => props.types.some((type) => type.id === item.type))
+  const creatable = () => props.types.filter((type) => type.create && type.trusted)
+  // "Add Chrome Profile" for one kind, or "Add Account" for the section's several.
+  const adds = () => `Add ${titled(creatable().length === 1 ? creatable()[0].name : props.section.replace(/s$/, ""))}`
+  const add = () => (creatable().length === 1 ? create(creatable()[0]) : setSheet({ kind: "add", section: props.section }))
   return (
-    <Section heading="Accounts">
-      <List>
-        <For each={withAccounts()} keyed={(type) => type.plugin}>
-          {(type) => (
-            <Errored fallback={(error) => <Row start={<img class="logo" src={type().icon ?? ""} alt="" />} heading={type().title ?? type().plugin} text={<span class="warn"><Icon name="warning-circle" />{`Can't list its accounts: ${(error() as Error).message ?? error()}`}</span>} />}>
-              <Loading fallback={null}>
-                <AccountsOf type={type()} />
-              </Loading>
-            </Errored>
-          )}
-        </For>
-      </List>
-      <div class="more">
-        <Button variant="secondary" onClick={add}>Add Account</Button>
-      </div>
+    <Section heading={props.section}>
+      <Show when={items().length} fallback={<Empty>None yet.</Empty>}>
+        <List>
+          <For each={items()} keyed={(item) => item.artifact}>
+            {(item) => (
+              <Row
+                start={<img class="logo" src={typeOf(item())?.icon ?? ""} alt="" />}
+                heading={shown(item())}
+                text={item().state ? <Line state={item().state!} /> : <Summary type={typeOf(item())!} item={item()} />}
+                current={item().name === open()}
+                onClick={() => choose(item())}
+              />
+            )}
+          </For>
+        </List>
+      </Show>
+      <Show when={creatable().length}>
+        <div class="more">
+          <Button variant="secondary" onClick={add}>{adds()}</Button>
+        </div>
+      </Show>
     </Section>
   )
 }
 
-/// The plugins an account is added to, each signing one in.
-function AccountsSheet() {
+/// Adds an item of a type, as the type says: asked for a name first, where it needs one.
+const create = (type: ItemType) => (type.create!.name ? setSheet({ kind: "create", type }) : act(type.create!, type.plugin))
+
+/// The kinds of item a section's several types add, each adding one.
+function AddSheet() {
+  const section = () => { const open = sheet(); return open?.kind === "add" ? open.section : undefined }
+  const types = () => contents().types.filter((type) => type.section === section() && type.create && type.trusted)
   return (
-    <Sheet heading="Add Account" open={sheet()?.kind === "accounts"} onClose={shut}>
+    <Sheet heading={section() ? `Add ${titled(section()!.replace(/s$/, ""))}` : ""} open={!!section()} onClose={shut}>
       <List>
-        <For each={withAccounts()} keyed={(type) => type.plugin}>
-          {(type) => <Row start={<img class="logo" src={type().icon ?? ""} alt="" />} heading={type().title ?? type().plugin} onClick={() => (shut(), signIn(type()))} />}
+        <For each={types()} keyed={(type) => type.id}>
+          {(type) => <Row start={<img class="logo" src={type().icon ?? ""} alt="" />} heading={titled(type().name)} onClick={() => (shut(), create(type()))} />}
         </For>
       </List>
     </Sheet>
@@ -468,11 +502,10 @@ function CreateSheet() {
     const name = String(new FormData(event.currentTarget).get("name")).trim()
     const made = type()!
     setBusy(true)
-    const done = await call(`${made.plugin}_${made.create}`, { name }, { subject: whose() }).then(() => true, (error) => (toast(error), false))
+    const done = await act(made.create!, made.plugin, { name })
     setBusy(false)
     if (done) {
       shut()
-      again()
       setOpen(made.prefix + name)
     }
   }
@@ -511,13 +544,14 @@ function Detail(props: { item: Item }) {
   )
 }
 
-/// An item's grey line in a type's section: what its plugin's component says of it, else what it is.
+/// An item's grey line in a type's section when it's ready: what its plugin's component says of it, else whose it is.
 function Summary(props: { type: ItemType; item: Item }) {
   const summary = createMemo(() => (props.type.trusted && props.type.component ? component(props.type).then((module) => module.Summary) : undefined))
+  const plugin = () => props.type.title ?? props.type.name
   return (
-    <Errored fallback={props.type.name}>
-      <Loading fallback={props.type.name}>
-        <Show when={summary()} fallback={props.type.name}>
+    <Errored fallback={plugin()}>
+      <Loading fallback={plugin()}>
+        <Show when={summary()} fallback={plugin()}>
           {(drawn) => <Dynamic component={drawn()} item={shown(props.item)} subject={whose()} />}
         </Show>
       </Loading>
@@ -536,13 +570,8 @@ function choose(item: Item) {
 function Vault() {
   const item = () => contents().items.find(({ name }) => name === open())
   const plain = () => contents().items.filter((item) => !item.type)
-  /// Each other kind of item with any here, in its own section, by the name of the plugin that keeps it.
-  const kinds = () => contents().types.filter((type) => !type.account && contents().items.some((item) => item.type === type.id))
-  const creatable = () => contents().types.filter((type) => type.create && type.trusted)
-  const add = ({ value }: { value: string }) => {
-    const type = contents().types.find(({ id }) => id === value)
-    setSheet(type ? { kind: "create", type } : { kind: "field" })
-  }
+  /// A section for each kind of item: those with any here, or that can be added.
+  const kinds = () => sections().filter(([, types]) => types.some((type) => (type.create && type.trusted) || contents().items.some((item) => item.type === type.id)))
   return (
     <>
       <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={contents().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Detail item={item()} />}</Show>}>
@@ -552,17 +581,7 @@ function Vault() {
         onBack={leave}
         action={
           <Show when={opened().servers.length}>
-            <Show when={creatable().length} fallback={<Button onClick={() => setSheet({ kind: "field" })}>Add</Button>}>
-              <Menu.Root onSelect={add}>
-                <Menu.Trigger variant="default">Add</Menu.Trigger>
-                <Menu.Positioner>
-                  <Menu.Content>
-                    <Menu.Item value="item">Password or Key</Menu.Item>
-                    <For each={creatable()}>{(type) => <Menu.Item value={type.id}>{titled(type.name)}</Menu.Item>}</For>
-                  </Menu.Content>
-                </Menu.Positioner>
-              </Menu.Root>
-            </Show>
+            <Button onClick={() => setSheet({ kind: "field" })}>Add</Button>
           </Show>
         }
       >
@@ -584,40 +603,21 @@ function Vault() {
             <Section heading="Passwords and keys">
               <Show when={plain().length} fallback={<Empty>None yet.</Empty>}>
                 <List>
-                  <For each={plain()}>
+                  <For each={plain()} keyed={(item) => item.artifact}>
                     {(item) => (
                       <Row
-                        heading={item.name}
-                        text={users(item).length ? `Used by ${listed(users(item))}` : "Nothing uses it"}
-                        current={item.name === open()}
-                        onClick={() => setOpen(item.name)}
+                        heading={item().name}
+                        text={item().state ? <Line state={item().state!} /> : users(item()).length ? `Used by ${listed(users(item()))}` : "Nothing uses it"}
+                        current={item().name === open()}
+                        onClick={() => setOpen(item().name)}
                       />
                     )}
                   </For>
                 </List>
               </Show>
             </Section>
-            <Show when={withAccounts().length}>
-              <Accounts />
-            </Show>
-            <For each={kinds()} keyed={(type) => type.id}>
-              {(type) => (
-                <Section heading={type().plural}>
-                  <List>
-                    <For each={contents().items.filter((item) => item.type === type().id)}>
-                      {(item) => (
-                        <Row
-                          start={<img class="logo" src={type().icon ?? ""} alt="" />}
-                          heading={shown(item)}
-                          text={<Summary type={type()} item={item} />}
-                          current={item.name === open()}
-                          onClick={() => choose(item)}
-                        />
-                      )}
-                    </For>
-                  </List>
-                </Section>
-              )}
+            <For each={kinds()} keyed={([section]) => section}>
+              {(kind) => <Kind section={kind()[0]} types={kind()[1]} />}
             </For>
           </Show>
           <OpenedBy />
@@ -628,7 +628,7 @@ function Vault() {
       <FieldSheet />
       <RequestSheet />
       <CreateSheet />
-      <AccountsSheet />
+      <AddSheet />
     </>
   )
 }

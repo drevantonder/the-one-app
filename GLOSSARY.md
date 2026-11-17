@@ -25,10 +25,9 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
 - **App**: something with UI that the launcher shows, on a Home Screen page or in an App Library. A plugin provides it.
   It can have server-side code where it needs it, which is its plugin's tools.
 - **Account**: a user's account at an outside service (a Gmail address, a WhatsApp number), which they sign a plugin
-  in to so its tools act there as them. It's an item in their Vault, of a type the plugin registers, and the plugin
-  lists, signs in and signs out its accounts with its tools; the Vault lists every plugin's together, under Accounts.
-  An account isn't an app, and nor is a plugin for having accounts: its sign-in page, if it has one, is its `sign_in`
-  tool's.
+  in to so its tools act there as them. It's a word for people: what's kept is an item in their Vault, of a type the
+  plugin registers, which the Vault lists under Accounts. An account isn't an app, and nor is a plugin for having
+  accounts.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
 - **Trusted**, **Untrusted**: the state of an installed plugin, apart from where it is in its lifecycle, and either

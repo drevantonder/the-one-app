@@ -203,7 +203,7 @@ defmodule ChromeProfiles do
       },
       %{
         name: "remove",
-        description: "Remove a profile and everything signed in on it, for good.",
+        description: "Delete a profile and everything signed in on it: it's in Recently Deleted for 30 days, where it can be restored, then gone.",
         inputs: %{type: "object", required: ["profile"], properties: %{profile: @profile}},
         outputs: %{type: "object", properties: %{profile: @profile}, required: ["profile"]}
       },
@@ -393,7 +393,15 @@ defmodule ChromeProfiles do
   # A profile is an item of the Vault's, in a section of its own, drawn by `client/profile.tsx`.
   @impl true
   def hook("vault.types", _about, _call),
-    do: [%{name: "Chrome profile", plural: "Chrome Profiles", prefix: @item, component: "profile", create: "create"}]
+    do: [
+      %{
+        name: "Chrome profile",
+        section: "Chrome Profiles",
+        prefix: @item,
+        component: "profile",
+        create: %{tool: "create", name: true}
+      }
+    ]
 
   # A browser on a profile is starting: the profile's last save, if it has one, goes into its container.
   def hook("chrome.starting", %{"session" => session, "container" => container}, call) do
@@ -481,9 +489,29 @@ defmodule ChromeProfiles do
         if state in ~w(starting ready saving discarding) and event != "fail", do: Map.put(note, "why", nil), else: note
       end)
 
+    shown(call, note)
     Call.changed(call)
     note
   end
+
+  # Which of the Vault's three states the profile is in, from its update's own: busy while its browser starts, is
+  # open for its person, saves or closes; action_required, with Try Again, where it couldn't start or couldn't save;
+  # ready with no update. Its person isn't notified: they're in the update, which shows what went wrong.
+  defp shown(call, %{"profile" => name} = note) do
+    {state, message, action} =
+      case note do
+        %{"state" => "failed"} -> {:action_required, "Couldn't start its browser", %{label: "Try Again", tool: "update", inputs: %{profile: name}}}
+        %{"state" => "ready", "why" => why} when why != nil -> {:action_required, "Couldn't save", %{label: "Try Again", tool: "save", inputs: %{profile: name}}}
+        %{"state" => "ready"} -> {:busy, "Updating", nil}
+        %{"state" => "saving"} -> {:busy, "Saving…", nil}
+        %{"state" => "discarding"} -> {:busy, "Closing…", nil}
+        %{"state" => _starting} -> {:busy, "Starting…", nil}
+      end
+
+    if name in profiles(call), do: vault(call).state(call, @item <> name, state, message, action)
+  end
+
+  defp shown(_call, _note), do: :ok
 
   # A browser that's open already is only carried on with on the same profile: Chrome hands it a profile as it starts.
   # Whether it's running.
@@ -526,6 +554,11 @@ defmodule ChromeProfiles do
     JSON.decode!(Artifact.update(call.own, at(call, session), &JSON.encode!(change.(&1 && JSON.decode!(&1)))))
   end
 
-  defp forget(call, session), do: Artifact.remove(call.own, at(call, session))
+  # A browser's note goes as it closes, and its profile is ready again.
+  defp forget(call, session) do
+    note = note(call, session)
+    Artifact.remove(call.own, at(call, session))
+    with %{"profile" => name} <- note, true <- name in profiles(call), do: vault(call).state(call, @item <> name, :ready)
+  end
   defp at(call, session), do: "browsers/#{call.subject}/#{session}"
 end

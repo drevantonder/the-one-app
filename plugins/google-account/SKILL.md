@@ -6,17 +6,16 @@ metadata:
   about: "Signs your Google accounts in to Gmail, Google Calendar, Drive, Docs and Sheets, and out again. Each account you add is yours alone."
 ---
 
-Each Google plugin (gmail, google-calendar, google-drive, google-docs, google-sheets) has accounts: its own
-`accounts`, `sign_in` and `sign_out`. None of them is an app.
-`plugins` lists the ones the person has. Accounts, on their Home Screen, shows each plugin's accounts, with Add
-Account, Sign In and Sign Out, which is where a person does this themselves.
+Each Google plugin (gmail, google-calendar, google-drive, google-docs, google-sheets) uses its person's Google
+accounts through this one. `plugins` lists the ones the person has.
 
-- `<plugin>_sign_in` gives a link: give it to the person to open in their browser. Google signs them in and sends
-  them back to the network's address, which finishes it. Nothing is pasted back. With `account`, Google suggests
-  that one: use it for an account that needs signing in again.
-- An account is one item of their Vault, "Google <address>", shared by every Google plugin signed in to it.
-  Signing in to it for another plugin lets that plugin in too, and keeps the others. `<plugin>_sign_out` takes it
-  from that plugin alone.
+- A Google account is one item of their Vault, "Google <address>", which every Google plugin they have uses. It's
+  listed under Accounts in the Vault, which is where a person adds one (Add Account) and deletes one.
+- `google-account_sign_in`, or a Google plugin's own `<plugin>_sign_in`, gives a link: give it to the person to open
+  in their browser. Google signs them in, for every Google plugin they have, and sends them back to the network's
+  address, which finishes it. Nothing is pasted back. With `account`, Google suggests that one: use it for an account
+  that needs signing in again, which the Vault shows with a dot and Sign In.
+- Signing out is deleting the account's item, which soft delete keeps for 30 days.
 - Every other tool of a Google plugin takes `account`: an address, or a part only it has. Left out, it's the first
   `<plugin>_accounts` lists.
 

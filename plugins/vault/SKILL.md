@@ -16,7 +16,8 @@ their own device, where they pick or type it; `fetch` makes a web request with a
 you never see the secret. If someone pastes one anyway, keep it with `set` and don't repeat it.
 
 - `list` shows what's there: each item's fields, a secret one without its value, its sites, the plugins switched
-  on for it, whether agents may use it, the requests still waiting, and the plugins that use the Vault.
+  on for it, whether agents may use it, its state and its `artifact`, the requests still waiting, the plugins that
+  use the Vault, and the kinds of item they keep.
 - `request` asks for an item by its `title` and the `fields` it needs, for a `plugin` or, with none, for you.
   Give the person the link it answers with. Today the link's page tells them to open Vault on a device of
   theirs, where the request waits at the top; `status` says when they've answered. Allowing it switches the
@@ -35,13 +36,15 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
   `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
 - Someone's Vault is theirs alone: nobody asks for another user's, and the network's owner reads none. A group's
   or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owner's to choose servers for.
-- Removing an item, switching a plugin on and choosing servers are a person's decisions. Do them when asked
-  to, and say what you did.
+- Deleting an item is soft delete's, as for anything an app made: `recently-deleted remove --artifact` with its
+  `artifact`, as `list` gives it, and it can be restored for 30 days. `remove` takes one field out of an item.
+- Deleting an item, switching a plugin on and choosing servers are a person's decisions. Do them when asked to,
+  and say what you did.
 
 A plugin uses an account through this plugin's tools, which act for the plugin that calls them (its `caller`),
 and never sees a secret, so an untrusted plugin can use one too. It names them in its `permissions/0`:
 
-    def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_stop_using)
+    def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_state)
 
     @github %{
       "name" => "GitHub",
@@ -73,8 +76,9 @@ and never sees a secret, so an untrusted plugin can use one too. It names them i
   with `{{<field>}}` filled in, and answers the whole of what the site said. It waits 15 seconds for an answer,
   or `timeout`. A signed-in item's `access_token` is renewed when it has ended, or when the service says it has.
 - `items` lists the items switched on for the plugin, each with the service whose sign-in made it:
-  `[{"name": "Google a@example.com", "sign_in": "Google"}]`. `stop_using` switches one off for it, as signing
-  out does, and leaves it to whatever else uses it.
+  `[{"name": "Google a@example.com", "sign_in": "Google", "artifact": "...", "state": null}]`. `state` says which
+  of three states one is in (Item types, below), and `stop_using` switches one off for it, leaving it to whatever
+  else uses it.
 - The other tools are its person's, and refuse a plugin.
 - A plugin that does something for other plugins, as `google-account` does for the Google plugins, calls these on
   behalf of whichever called it: `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`.
@@ -96,36 +100,52 @@ A plugin trusted with a secret itself, whose service hands it to a program, uses
   them a chunk at a time (Containers' `upload` does), and keeps them once it gives their size; what they replace goes
   then. `read_contents(call, item, name, receive)` gives `receive` a link that reads them and the key, for
   Containers' `download`, or gives `nil` where there are none yet. Neither ever passes the bytes through a tool's
-  result, whatever their size. Removing the item removes its contents.
+  result, whatever their size. They're the item's, so deleting it deletes them, and restoring it brings them back.
+- `state(call, item, state, message, action)` says which of the three states an item is in; `remove(call, item)`
+  deletes one through soft delete.
 
 ## Item types
 
 A plugin that keeps items in its people's Vaults says what kind they are, as Android's AccountManager has apps
-define account types and keeps the accounts itself. It hooks into `vault.types`, answering with its list of types:
+define account types and keeps the accounts itself. An account (a Gmail address, a WhatsApp number) is one such item,
+of a type its plugin registers, as a password or a Chrome profile is. It hooks into `vault.types`, answering with its
+list of types:
 
     @impl true
     def hooks, do: ["vault.types"]
 
     @impl true
     def hook("vault.types", _about, _call),
-      do: [%{name: "Chrome profile", plural: "Chrome Profiles", prefix: "Chrome profile: ", component: "profile", create: "create"}]
+      do: [%{name: "Chrome profile", section: "Chrome Profiles", prefix: "Chrome profile: ", component: "profile", create: %{tool: "create", name: true}}]
 
 - `name` is one item of it, as a person reads it, and `prefix` what its items' names start with. An item switched on
   for the plugin whose name starts with it is of that type, and what follows is the item as a person reads it.
-- `account: true` makes its items accounts: they're under Accounts in the Vault, by the plugin's own three tools.
-  `accounts` lists them, the default first: `%{accounts: [%{account: "sam@example.com", ok: true}]}`, with `why`,
-  a few words, where `ok` is false. `sign_in` signs one in, or with `account` signs that one in again, answering
-  `%{url: ...}`, where the person signs in; one whose signing in needs a screen of its own (a QR code) gives it as
-  `sign_in`'s `ui` (`client/sign-in.html`), which is opened instead, with the account after a `#`. `sign_out` takes
-  `account`. Its other tools take `account`, the first `accounts` lists when it's left out.
-- Any other type has its own section, headed `plural`. `component` is what draws one item beside the list: a Solid
-  component the plugin's client exports (`client/package.json`: `{"exports": {"./profile": "./profile.tsx"}}`), the
-  module's default export, given `item` (the item as a person reads it), `subject` (whose Vault it is), and `open(item)`
-  and `close()`, for once it's renamed or gone. Its `Summary` export, given the same, is the item's line in the
-  list. A trusted plugin's component is drawn in the Vault's page and acts with what the Vault may do. An untrusted
-  plugin's item opens its page `client/<component>.html` in a frame of its own instead, with the item after a `#`,
-  where it keeps what its own app may do. Without a component, an item opens with its fields, as a password does.
-- `create` is the plugin's tool that makes one from a `name`, which the Vault's Add offers.
+- `section` is the heading its items are listed under: its own (Chrome Profiles), or one several plugins' types share
+  (Accounts).
+- `create` is how one is added, an action as below; `name: true` asks its person for a name first, which the tool is
+  given as `name`.
+- `component` is what draws one item beside the list: a Solid component the plugin's client exports
+  (`client/package.json`: `{"exports": {"./profile": "./profile.tsx"}}`), the module's default export, given `item`
+  (the item as a person reads it), `subject` (whose Vault it is), and `open(item)` and `close()`, for once it's
+  renamed or gone. Its `Summary` export, given the same, is the item's line in the list when it's ready. A trusted
+  plugin's component is drawn in the Vault's page and acts with what the Vault may do. An untrusted plugin's item
+  opens its page `client/<component>.html` in a frame of its own instead, with the item after a `#`, where it keeps
+  what its own app may do. Without a component, an item opens with its fields, as a password does.
 
-What the plugin keeps of an item, and the bytes in its contents, are the Vault's to keep and encrypt; what they mean
-and do (a running browser, signed-in tools) are the plugin's.
+An item is in one of three states, which the Vault shows and the plugin says, with `state` (or `state/5`). The plugin
+keeps its own detailed states (WhatsApp's linking, Chrome Profiles' update) and says only which of these it's in:
+
+- `ready`: usable, which shows nothing: fine is silent. Every item starts there, and a password is always there.
+- `busy`, with a `message` ("Saving…"): something's under way, shown as a spinner and it.
+- `action_required`, with a `message`, why ("Signed out on your phone"), and one `action`: its person has to act,
+  shown as a dot, why and a button. An action is a tool of the plugin's, called as its person, whose `url`, if it
+  gives one, opens in their browser (`%{label: "Sign In", tool: "sign_in", inputs: %{account: "+614..."}}`), or a
+  page of its client's (`%{label: "Sign In", page: "client/sign-in.html#+614..."}`).
+
+Two things are each plugin's to choose, and none chooses for another: whether its person is notified when its item
+needs them (`notifications`), and what it does when its item is deleted, restored or purged, which soft delete's hook
+tells it (signing out and revoking at once, or keeping its token so a restore just works).
+
+What the plugin keeps of an item, and the bytes in its contents, are the Vault's to keep and encrypt, and deleting,
+restoring and purging an item are soft delete's; what an item means and does (a running browser, signed-in tools) are
+the plugin's.
