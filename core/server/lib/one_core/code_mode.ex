@@ -206,7 +206,7 @@ defmodule OneCore.CodeMode do
           _ -> listen(%{run | output: [line | run.output]})
         end
 
-      {ref, result} when is_map_key(run.calls, ref) ->
+      {ref, {result, _stopped}} when is_map_key(run.calls, ref) ->
         Port.command(port, JSON.encode!(Map.put(result, :reply, run.calls[ref].id)) <> "\n")
         listen(ended(run, ref, :finished))
 
@@ -252,8 +252,9 @@ defmodule OneCore.CodeMode do
         call = State.begin()
         send(here, {__MODULE__, :began, self(), call})
 
+        # Its answer, and whether it stopped at its cancel before its end, which its state says.
         try do
-          called(run.call, name, input)
+          {called(run.call, name, input), State.get(call)[:stopped] == true}
         after
           State.finish(call)
         end
@@ -274,38 +275,37 @@ defmodule OneCore.CodeMode do
   end
 
   # Stopping: the runner is killed, so the script calls nothing more, and each call still in flight is cancelled and
-  # awaited, until `until` if the run has to end by then: what hasn't ended is stopped outright. One that ended
-  # meanwhile, before it could be cancelled, finished.
+  # awaited, until `until` if the run has to end by then: what hasn't ended is stopped outright. How each ended is what
+  # it gave: one with its answer finished, however late it was cancelled.
   defp stopping(run, result, until) do
     run = %{run | codemode_run: :stopping}
     stop(run.port)
-
-    cancelling =
-      for {_ref, %{call: call, name: name}} <- run.calls,
-          do: {name, if(State.cancel(call, "The script it was called from stopped.") == :ok, do: :cancelled, else: :finished)}
-
-    for {ref, %{pid: pid, call: call}} <- run.calls, do: awaited(ref, pid, call, until)
-    stopped(%{run | codemode_run: :stopped, calls: %{}}, result, Enum.reverse(run.ended) ++ cancelling)
+    for {_ref, %{call: call}} <- run.calls, do: State.cancel(call, "The script it was called from stopped.")
+    ended = for {ref, %{pid: pid, call: call, name: name}} <- run.calls, do: {name, awaited(ref, pid, call, until)}
+    stopped(%{run | codemode_run: :stopped, calls: %{}}, result, Enum.reverse(run.ended) ++ ended)
   end
 
   # Stopped: nothing it started is left, and it says which of its calls finished and which were cancelled.
   defp stopped(%{codemode_run: :stopped}, {done, text}, ended), do: {done, text <> said(ended)}
 
   # A cancelled call ends by what it calls next raising, or else is stopped by the call machine, or by the run if it
-  # has to end first, which then ends its state too.
+  # has to end first, which then ends its state too. Gives how it ended, as `ended/3` has it.
   defp awaited(ref, pid, call, until) do
     left = if until, do: max(until - System.monotonic_time(:millisecond), 0), else: :infinity
 
     receive do
-      {^ref, _result} ->
+      {^ref, {_result, stopped}} ->
         Process.demonitor(ref, [:flush])
+        if stopped, do: :cancelled, else: :finished
 
       {:DOWN, ^ref, :process, _pid, _why} ->
         State.finish(call)
+        :unanswered
     after
       left ->
         Process.exit(pid, :kill)
         receive do: ({:DOWN, ^ref, :process, _pid, _why} -> State.finish(call))
+        :unanswered
     end
   end
 
@@ -341,7 +341,8 @@ defmodule OneCore.CodeMode do
         do: " Ended without answering, so they may or may not have been done: #{names.(:unanswered)}.",
         else: ""
 
-    "\n\nCalls finished: #{names.(:finished)}. Cancelled, as the script stopped first: #{names.(:cancelled)}." <> unanswered
+    "\n\nCalls finished: #{names.(:finished)}. Cancelled, as the script stopped first: #{names.(:cancelled)}." <>
+      unanswered
   end
 
   # One call, as MCP answered it: what it answered as JSON (`structuredContent`). An error is what the script's call

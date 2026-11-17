@@ -76,7 +76,17 @@ defmodule OneCore.Call.State do
 
     row =
       Map.merge(
-        %{state: :asked, message: nil, stage: nil, pid: self(), task: nil, inputs: %{}, asked: 0, forwarded: nil},
+        %{
+          state: :asked,
+          message: nil,
+          stage: nil,
+          pid: self(),
+          task: nil,
+          inputs: %{},
+          asked: 0,
+          forwarded: nil,
+          stopped: false
+        },
         Map.merge(about, %{created: now, updated: now})
       )
 
@@ -236,9 +246,16 @@ defmodule OneCore.Call.State do
       row -> {:ok, %{row | stage: text}}
     end)
     |> case do
-      {:refused, :cancelled} -> raise Cancelled
+      {:refused, :cancelled} -> stopped(id)
       _ -> told(id)
     end
+  end
+
+  # A cancelled call stops at what it calls next, which raises in it, before what it would have done after. Its row
+  # says so, as one that ran to its end anyway, having called neither, isn't stopped: it has its result.
+  defp stopped(id) do
+    changed(id, fn row -> {:ok, Map.put(row, :stopped, true)} end)
+    raise Cancelled
   end
 
   # What a call is doing, which its caller is told in its progress: what it said in the state it's in, or the
@@ -278,7 +295,7 @@ defmodule OneCore.Call.State do
       end)
 
     case key do
-      {:refused, :cancelled} -> raise Cancelled
+      {:refused, :cancelled} -> stopped(id)
       {:refused, :plain} -> raise "It asks a person something, which a call asks only when it's made as an MCP task"
       {:refused, state} -> raise "It can't ask anything once it's #{state}"
       key -> answer_of(id, key)
@@ -296,7 +313,7 @@ defmodule OneCore.Call.State do
         answer
 
       {__MODULE__, :cancelled, ^id} ->
-        raise Cancelled
+        stopped(id)
     end
   end
 
