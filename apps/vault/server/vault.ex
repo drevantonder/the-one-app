@@ -523,6 +523,32 @@ defmodule Vault do
         }
       },
       %{
+        name: "names",
+        read_only: true,
+        description:
+          "What items are called, by their artifacts, deleted ones too: an item's artifact is named by an id, as its name is encrypted. Recently Deleted asks it",
+        inputs: %{
+          type: "object",
+          properties: %{artifacts: %{type: "array", items: %{type: "string"}, description: "Items' artifacts, as `list` gives them"}},
+          required: ["artifacts"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            names: %{
+              type: "array",
+              description: "Each of them that's an item of this Vault",
+              items: %{
+                type: "object",
+                properties: %{artifact: %{type: "string"}, name: %{type: "string"}},
+                required: ["artifact", "name"]
+              }
+            }
+          },
+          required: ["names"]
+        }
+      },
+      %{
         name: "unlocked_on",
         read_only: true,
         description: "Says which servers open your Vault, and which may be chosen to.",
@@ -815,6 +841,13 @@ defmodule Vault do
 
       %{url: OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)}
     end)
+  end
+
+  # From the database, which keeps each item's name while soft delete has it aside.
+  def call("names", %{"artifacts" => artifacts}, call) do
+    db = own(call)
+    rows = transaction(call, db, &query(&1, "select id, name from artifacts"))
+    %{names: for(%{"id" => id, "name" => name} <- rows, artifact(db, id) in artifacts, do: %{artifact: artifact(db, id), name: name})}
   end
 
   def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, items_artifact(call))

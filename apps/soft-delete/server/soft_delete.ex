@@ -144,6 +144,11 @@ defmodule SoftDelete do
                         description: "Whether that app is installed for its owner, to open it once it's restored"
                       },
                       owner: %{type: "string", description: "Whose it is: users/<name>, groups/<name> or network"},
+                      names: %{
+                        type: ["string", "null"],
+                        description:
+                          "The app to ask what its artifacts are called, by its tool `names`, where their names don't say: the Vault's are ids, as its items' names are encrypted"
+                      },
                       by: %{type: "string", description: "Who deleted it"},
                       at: %{type: "integer", description: "When, in milliseconds since 1970"},
                       purges: %{type: "integer", description: "When it's purged, in milliseconds since 1970"},
@@ -152,7 +157,7 @@ defmodule SoftDelete do
                         description: "Why purging it last failed; it's tried again the next day"
                       }
                     },
-                    ["item", "state", "artifacts", "app", "title", "installed", "owner", "by", "at", "purges", "why"]
+                    ["item", "state", "artifacts", "app", "title", "installed", "owner", "names", "by", "at", "purges", "why"]
                   )
               }
             },
@@ -319,6 +324,7 @@ defmodule SoftDelete do
           title: record["title"],
           installed: installed?(record),
           owner: record["owner"],
+          names: names(record),
           by: record["by"],
           at: record["at"],
           purges: record["at"] + @retention,
@@ -666,6 +672,16 @@ defmodule SoftDelete do
   defp installed?(%{"artifacts" => [name], "owner" => owner}) do
     if name =~ @made, do: is_map_key(Apps.running(owner), app_of(name)), else: true
   end
+
+  # The app that says what an item's artifact is called, where its name doesn't: one that offers `names`, asked by
+  # Recently Deleted on its person's device, so this app never reads what it says.
+  defp names(%{"artifacts" => [name], "owner" => owner} = record) when not is_map_key(record, "app") do
+    app = app_of(name)
+    version = Apps.running(owner)[app]
+    if version && Enum.any?(version.tools, &(&1.name == "names")), do: app
+  end
+
+  defp names(_record), do: nil
 
   defp owns!(call, name) do
     if not (name =~ @app or (name =~ @made and app_of(name) != "soft-delete")),

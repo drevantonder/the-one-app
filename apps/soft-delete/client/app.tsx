@@ -13,17 +13,38 @@ interface Item {
   app: string | null
   title: string
   installed: boolean
+  owner: string
+  names: string | null
   purges: number
   why: string | null
 }
 
 const items = createMemo(() => call("soft-delete_list").then((text): Item[] => JSON.parse(text).deleted))
+/// What the apps that name their own artifacts call them, by artifact, asked from this device: the Vault's are ids, as
+/// its items' names are encrypted, and only a server its person chose reads them.
+const called = createMemo(async () => {
+  const asked = Map.groupBy(items().filter((item) => item.names), (item) => `${item.names}_names ${item.owner}`)
+  const answers = await Promise.all(
+    [...asked.values()].map((some) =>
+      call(`${some[0].names}_names`, { artifacts: some.flatMap((item) => item.artifacts) }, { subject: some[0].owner }).then(
+        (text): { artifact: string; name: string }[] => JSON.parse(text).names,
+        () => [],
+      ),
+    ),
+  )
+  return new Map(answers.flat().map((one) => [one.artifact, one.name]))
+})
 changed(() => refresh(items))
 
 /// An artifact's name as a person reads it: users/alice/made/git-repos/notes is notes.
 const named = (artifact: string) => artifact.split("/").pop()!
-/// What a person calls an item: an uninstalled app's name, else its one artifact's.
-const heading = (item: Item) => (item.app ? item.title : named(item.artifacts[0]))
+/// What a person calls an item: an uninstalled app's name, else its one artifact's, as its app says it where it names
+/// them itself, or by its app's name where it can't say here: "Vault item".
+function heading(item: Item) {
+  if (item.app) return item.title
+  if (!item.names) return named(item.artifacts[0])
+  return called().get(item.artifacts[0]) ?? `${item.title} item`
+}
 /// What an uninstalled app took with it, as the real things: "With notes, site and 10 more".
 function along(item: Item) {
   const names = item.artifacts.filter((artifact) => artifact.includes("/made/")).map(named)
