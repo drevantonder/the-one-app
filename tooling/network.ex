@@ -43,6 +43,11 @@ defmodule Mix.Tasks.Network do
   plugin decides who may do what, everything is let through (`OneCore.User`, `OneCore.Hooks`). No network anyone
   relies on is started with it.
 
+      mix network <folder> --reloader <node>
+
+  has the server ask the code reloader running as that node, by its short name, before it answers a client's request,
+  which loads what changed in this checkout into it (`tooling/code_reloader.exs`).
+
       mix network <folder> <server> --without <plugin>
 
   starts a server after removing that plugin from what's installed for whoever the server is for. It's the way back
@@ -69,7 +74,8 @@ defmodule Mix.Tasks.Network do
              subject: :string,
              without: :string,
              owner: :string,
-             name: :string
+             name: :string,
+             reloader: :string
            ]
          ) do
       {options, [folder | server]} when length(server) <= 1 ->
@@ -170,6 +176,13 @@ defmodule Mix.Tasks.Network do
     File.mkdir_p!(only)
     {:ok, reached} = Servers.address(Server.key())
     File.write!(Path.join(only, "servers"), "[#{reached}]")
+
+    if reloader = options[:reloader] do
+      [_name, host] = String.split(Atom.to_string(node()), "@")
+      reloader = String.to_atom("#{reloader}@#{host}")
+      Application.put_env(:one_core, :reloader, {:erpc, :call, [reloader, CodeReloader, :reload, [node()], :infinity]})
+      :ok = :erpc.call(reloader, CodeReloader, :serving, [node()], :infinity)
+    end
 
     Mix.shell().info("A server is running in #{folder}: #{Server.key()}. Its client: ONE_HOME=#{client}")
     System.no_halt(true)

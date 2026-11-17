@@ -205,7 +205,7 @@ defmodule OneCore.Release do
   One Core's modules that differ from the code `old` to the code `new`, as `{removed, added, changed}`, and why a
   running server can't load them, or `nil`: the rule `compare/2` applies to them. `old` and `new` are whole builds, or
   the folders a developer's `_build` keeps One Core's code in, `%{ebin: <folder>, consolidated: <folder>}`, as a local
-  network's code reloader has them (`mix network.reload`, in `tooling/`). It loads the code of both into the VM it runs
+  network's code reloader has them (`tooling/code_reloader.exs`). It loads the code of both into the VM it runs
   in, as `compare/2` does.
   """
   def modules(old, new) do

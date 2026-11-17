@@ -12,12 +12,14 @@ harness tell you when it ends; put the folder in your scratch folder.
 
 ## The fastest loop
 
-- A plugin changed: deploy it into the running network, which takes under a second, its app built again too:
-  `ONE_SUBJECT=network target/debug/one deploy --name <plugin> --files-from plugins/<plugin>`. A changed NIF is built
-  again by `mix compile` in `core/server/`, and deployed the same way: it loads beside the build before, with no
-  restart.
-- Anything else changed (`core/`, `clients/`): stop it and start it again in the same folder. Only what changed is
-  built again, so that's seconds.
+- A plugin or One Core's Elixir (`core/server/lib/`) changed: just call a tool. Before a client's request, the
+  network's code reloader (`tooling/code_reloader.exs`) loads what changed into every server, in under a second: One
+  Core's modules while it runs, and a plugin deployed as `one deploy --files-from` deploys it, its app built again
+  too. A compile error, or what a running server can't load (a supervisor, a struct, `-on_load`: the rule a hot load
+  follows), is that request's error, saying so. A changed NIF is built again by `mix compile` in `core/server/`, and
+  then loads beside the build before.
+- Anything else changed (One Core's NIFs, `core/ui`, `clients/`, the deps), or a request says to: stop it and start it
+  again in the same folder. Only what changed is built again, so that's seconds.
 - A commit, or a rebase that moves it, builds `one` again once (about 5 s): a build is named by its commit.
 
 ## Acting as someone
@@ -38,7 +40,7 @@ node's name as `tooling/network` prints it. `:recon`, `:recon_trace` and `:obser
 
 ## Logs and stopping
 
-Everything is in the folder: `server.log` (and `standby.log`, `edge.log`, `bucket.log` with those flags), the
+Everything is in the folder: `server.log`, `reloader.log` (and `standby.log`, `edge.log`, `bucket.log` with those flags), the
 bucket, and the client's home. Starting again in the same folder carries on with what's there.
 
 Stop it by its PID: `kill <pid of tooling/network>` stops every process it started, since each is its own process

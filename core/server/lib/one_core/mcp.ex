@@ -78,7 +78,7 @@ defmodule OneCore.Mcp do
   # what's installed for them changes what's there.
   @cacheable ~w(server/discover tools/list resources/list resources/read)
 
-  # A local network's code reloader (`mix network.reload`, in `tooling/`), its `:reloader` setting, loads what a
+  # A local network's code reloader (`tooling/code_reloader.exs`), its `:reloader` setting, loads what a
   # developer changed before a client's request is answered, as Phoenix's code reloader does before a request in
   # development. A server's request, which names who it acts for, came from a client's that was.
   defp reloaded(%{"actor" => _}), do: :ok

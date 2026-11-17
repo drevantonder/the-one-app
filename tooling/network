@@ -98,11 +98,19 @@ fi
 [[ -s $folder/cookie ]] || (umask 077 && random 20 >"$folder/cookie")
 node_name() { echo "$1-$(printf %s "$folder" | cksum | cut -d' ' -f1)"; }
 
+# Each server asks the code reloader before it answers a client's request, and it loads what changed in this
+# checkout into every server, as Phoenix's does in development (`tooling/code_reloader.exs`). It compiles first.
+(cd "$root/core/server" && exec elixir --sname "$(node_name reloader)" --cookie "$(cat "$folder/cookie")" -S \
+  mix run --no-start --no-halt ../../tooling/code_reloader.exs "$folder") >"$folder/reloader.log" 2>&1 &
+started+=($!)
+wait_for "The code reloader is running" "$folder/reloader.log" || { cat "$folder/reloader.log" >&2 && exit 1; }
+
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
   (cd "$root/core/server" && exec elixir --sname "$(node_name "$1")" --cookie "$(cat "$folder/cookie")" -S \
-    mix network "$folder" "$1" --name "$1" "${as[@]}" "${at_address[@]}") >"$folder/$1.log" 2>&1 &
+    mix network "$folder" "$1" --name "$1" --reloader "$(node_name reloader)" "${as[@]}" "${at_address[@]}") \
+    >"$folder/$1.log" 2>&1 &
   started+=($!)
   if ! wait_for "A server is running" "$folder/$1.log"; then
     approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
