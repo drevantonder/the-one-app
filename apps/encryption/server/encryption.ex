@@ -23,7 +23,7 @@ defmodule Encryption do
 
   # It reads which apps run inside a call as `call.loaded` names them.
   @impl true
-  def requires, do: %{"core" => "~> 0.20.0"}
+  def requires, do: %{"core" => ">= 0.20.0"}
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are keys, and what they decrypt.
   @impl true

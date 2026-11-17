@@ -51,7 +51,7 @@ defmodule Notifications do
   @impl true
   def requires do
     %{
-      "core" => "~> 0.20.0",
+      "core" => ">= 0.20.0",
       "database" => "to keep your inbox",
       "encryption" => "to encrypt what's sent to your devices"
     }

@@ -76,7 +76,7 @@ defmodule Containers do
   @impl true
   def requires do
     %{
-      "core" => "~> 0.20.0",
+      "core" => ">= 0.20.0",
       "database" => "to keep your containers",
       "webrtc" => "to show a container's screen live"
     }
