@@ -31,9 +31,13 @@ defmodule OneCore.Release do
   Starts the server, says so, and runs until it's stopped: until its input closes, as the program that started it
   stops it, or as a system stops a program, with SIGTERM. Either way it takes nothing new and answers what it took
   already (`OneCore.Application`). Until then, each line on its input says what changed of it.
+
+  It's started permanent, as OTP's releases start theirs: if it stops, as its supervisor does once its children fail
+  more often than it restarts them, the runtime stops with it, so the system starts the server again, rather than
+  keeping a runtime with nothing in it that the network sees as gone.
   """
   def serve do
-    case Application.ensure_all_started(:one_core) do
+    case Application.ensure_all_started(:one_core, :permanent) do
       {:ok, _started} ->
         say(%{"running" => %{"key" => Server.key()}})
         __MODULE__.read()
