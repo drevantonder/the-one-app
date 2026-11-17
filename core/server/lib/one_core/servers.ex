@@ -375,16 +375,24 @@ defmodule OneCore.Servers do
     blob = "servers/#{Server.key()}/members"
     {:ok, members, tag} = Bucket.read(blob)
     members = JSON.decode!(members)
-    if member not in members, do: :ok = Bucket.replace(blob, JSON.encode!(members ++ [member]), tag)
-    invalidate()
+
+    if member in members or Bucket.replace(blob, JSON.encode!(members ++ [member]), tag) == :ok,
+      do: invalidate(),
+      else: choose(member)
   end
 
-  @doc "Writes one of a server's own blobs. Only that server writes it, so what's there is its own from before."
+  @doc """
+  Writes one of a server's own blobs. Only that server writes it, so what's there is its own from before, though
+  two of its own changes at once may each find the other's there: the later is written over it.
+  """
   def say(blob, data) do
-    case Bucket.read(blob) do
-      {:ok, _was, tag} -> :ok = Bucket.replace(blob, data, tag)
-      :absent -> :ok = Bucket.write(blob, data)
-    end
+    wrote =
+      case Bucket.read(blob) do
+        {:ok, _was, tag} -> Bucket.replace(blob, data, tag)
+        :absent -> Bucket.write(blob, data)
+      end
+
+    if wrote == :ok, do: :ok, else: say(blob, data)
   end
 
   @doc """
