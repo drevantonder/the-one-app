@@ -1,32 +1,33 @@
 #!/bin/sh
-# Says the version of this checkout, which is the one name its build has everywhere: `one --version`, the `builds`
-# tool, a server, the edge, and a phone's app. It's Semantic Versioning's, `0.15.2+2974.febd37350abc`: the
-# platform's version, then as build metadata how many commits lead to the one checked out, which only grows on main
-# and is what a phone's store takes as its build number, and that commit, with `.dirty` after when what's built
-# isn't all committed.
+# Says the version of a part in this checkout: with no argument the platform's, which is the one name its build has
+# everywhere: `one --version`, the `builds` tool, a server, the edge, and a phone's app; with a plugin's folder,
+# `tooling/version plugins/gmail`, that plugin's. It's Semantic Versioning's, `0.18.2+2974.febd37350abc`: the
+# version, then as build metadata how many commits lead to the one checked out, which only grows on main and is what
+# a phone's store takes as its build number, and that commit, with `.dirty` after when what's built isn't all
+# committed.
 #
-# The version is the commits' since 0.15.0, by their Conventional Commit types, as semantic-release reads them, and
-# as Cargo, npm and Hex read 0.x: a breaking change (`type!:`, or a `BREAKING CHANGE:` footer) takes the next minor
-# before 1.0 and the next major from it, a `feat` the next patch before 1.0 and the next minor from it, and a `fix`
-# the next patch. Anything else leaves it as it is.
+# A version counts the Conventional Commits since 4706f3067 that touch its part's paths, as release-please's manifest
+# mode, Nx Release and release-plz do: the message says what kind of change it is, the paths which part changed. A
+# breaking change (`type!:`, or a `BREAKING CHANGE:` footer) takes the next minor before 1.0 and the next major from
+# it, a `feat` the next patch before 1.0 and the next minor from it, and a `fix` the next patch, as Cargo, npm and Hex
+# read 0.x. Anything else leaves it as it is, and a commit touching two parts moves each.
 set -e
 cd "$(dirname "$0")/.."
-# 0.15.0 is the commit before builds had versions.
-since=6ab2c6a02
-# Commits marked breaking that weren't, read as what they are: main is shared, so a pushed commit's message can't be
-# changed.
-mismarked="4b6c917ff2581cc84a6fd3c81c40d5f713ff1360 9c43d976a8f93e432e89f99cefa07f93b878089b"
-version=$(git log --reverse --format='%H%n%s%n%b%x1e' "$since..HEAD" | awk -v version=0.15.0 -v mismarked="$mismarked" '
+# The platform was 0.18.40 there, counted from 0.15.0 by every commit; each plugin starts at 0.1.0.
+since=4706f3067
+case $1 in
+  "") paths="core clients icons Cargo.toml Cargo.lock mise.toml tooling/release" start=0.18.40 ;;
+  plugins/*) paths=$1 start=0.1.0 ;;
+  *) echo "tooling/version [plugins/<name>]" >&2 && exit 1 ;;
+esac
+# shellcheck disable=SC2086 # the paths are words
+version=$(git log --reverse --format='%s%n%b%x1e' "$since..HEAD" -- $paths | awk -v version=$start '
   BEGIN { RS = "\036"; split(version, v, "."); major = v[1]; minor = v[2]; patch = v[3] }
   {
     sub(/^\n+/, "")
-    hash = $0
-    sub(/\n.*/, "", hash)
-    sub(/^[^\n]*\n/, "")
     subject = $0
     sub(/\n.*/, "", subject)
-    if (index(mismarked, hash) > 0) sub(/!:/, ":", subject)
-    if (index(mismarked, hash) == 0 && (subject ~ /^[a-z]+(\([^)]*\))?!:/ || $0 ~ /\nBREAKING[ -]CHANGE:/)) {
+    if (subject ~ /^[a-z]+(\([^)]*\))?!:/ || $0 ~ /\nBREAKING[ -]CHANGE:/) {
       if (major == 0) minor++; else { major++; minor = 0 }
       patch = 0
     } else if (subject ~ /^feat(\([^)]*\))?:/) {

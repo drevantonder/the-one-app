@@ -10,15 +10,14 @@ A release is part of your change: it isn't done until it's live.
 ## Versions
 
 The platform (One Core's server, the UI library, the edge, the clients and what they say to each other) has one
-version, Semantic Versioning's, which `tooling/version` reads from the commits since 0.15.0 by their Conventional
-Commit types, as semantic-release does: a breaking change (`type!:` or a `BREAKING CHANGE:` footer) takes the next
-minor, a `feat` or a `fix` the next patch. Before 1.0 a minor is breaking, as Cargo, npm and Hex read 0.x. A build
-is that version with its commit's count and hash as build metadata, `0.15.2+2974.febd37350abc`. Nothing decides a
-bump but how commits are marked: only a change a part, plugin or agent using the platform must change for (a
-renamed field, tool or method with no alias, a new required param, a removed function plugins call) is marked `!`,
-never one inside the repo (tests, skills, tooling). One that wasn't is marked by a commit after it,
-`fix!: <what broke>`, before it's released; one marked that wasn't breaking goes in `tooling/version`'s `mismarked`,
-before it's released.
+version, and each plugin one of its own, Semantic Versioning's. `tooling/version` says the platform's, and
+`tooling/version plugins/<name>` a plugin's, from the Conventional Commits that touch that part's paths, as
+release-please's manifest mode does: a breaking change (`type!:` or a `BREAKING CHANGE:` footer) takes the next
+minor, a `feat` or a `fix` the next patch, and a commit touching two parts moves each. Before 1.0 a minor is
+breaking, as Cargo, npm and Hex read 0.x. A build is that version with its commit's count and hash as build
+metadata, `0.18.2+2974.febd37350abc`. Nothing decides a bump but how commits are marked and what they touch: `!`
+marks what breaks whoever uses the part the commit changes. One that wasn't marked is marked by a commit after it
+that touches the same part, `fix!: <what broke>`, before it's released.
 
 Exactly two rules hold at runtime:
 

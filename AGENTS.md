@@ -48,9 +48,9 @@ before choosing.
   everything released together.
 - One commit per change, once it works, as a Conventional Commit: `type(area): what changes, for whoever uses it`. No
   co-author or "Generated with" lines.
-- Mark with `!` (`feat(core)!: …`) only what breaks someone using the platform: a part, plugin or agent that must
-  change for it, such as a rename with no alias. Changes inside the repo (tests, skills, tooling) never are, and neither is a change to one plugin, which has its own version; only a change to core, the edge or the clients can be. A `!`
-  gives the platform its next 0.minor version, which older parts don't talk with (the `release` skill).
+- Mark with `!` (`feat(core)!: …`) a change that breaks whoever uses what the commit touches, such as a rename with
+  no alias: the platform (core, the edge, the clients) or a plugin, each with its own version (the `release` skill).
+  The platform's next 0.minor doesn't talk with older parts.
 - A change that adds to `core/` says in its commit why a plugin or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
