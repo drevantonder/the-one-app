@@ -24,8 +24,26 @@ export async function signedBy(key: unknown, signature: unknown, message: string
   }
 }
 
-/** How far an ask's clock may be from ours. An ask seen on the wire is no use to anyone after this. */
-const FRESH = 60_000;
+/**
+ * How far an ask's clock may be from ours: 15 minutes, as AWS's Signature Version 4 allows. A server signs an ask
+ * before it waits its turn to send it (`OneCore.Bucket.S3`'s `@at_once`), and one starting under heavy load waited
+ * more than a minute for its turn. An ask seen on the wire is no use to anyone after this.
+ */
+const FRESH = 15 * 60_000;
+
+/**
+ * The answer to `request`, which isn't `verifiedKey`'s, as S3 answers one it refuses: by S3's code, which says
+ * whether its clock was too far from ours (`RequestTimeTooSkewed`) or what it signed isn't its key's
+ * (`SignatureDoesNotMatch`), and with our time in `Date`. A signer refused for its clock corrects it by that and
+ * asks again (`OneCore.Edge.ask!/2`).
+ */
+export function unsigned(request: Request): Response {
+  const skewed = !(Math.abs(Date.now() - Number(request.headers.get("one-at"))) <= FRESH);
+  const [error, code] = skewed
+    ? ["Sign what you ask by a clock within 15 minutes of the right time", "RequestTimeTooSkewed"]
+    : ["Sign what you ask with your key", "SignatureDoesNotMatch"];
+  return Response.json({ error, code }, { status: 401, headers: { date: new Date().toUTCString() } });
+}
 
 /**
  * The key that signed `request`, whose body is `body`, or null. An ask carries `one-key`, `one-at` (ms) and

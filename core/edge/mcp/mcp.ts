@@ -6,7 +6,7 @@
 // One of the network's own devices signs what it asks with its key, which is checked here. Anyone else has signed in,
 // and who they are is the app's to say that signs people in: it's bound here as WHO, by `edge.js`, and asked
 // `who(request)` (`apps/sign-in/edge/worker.ts`). With no such app, only devices signing with their key come in.
-import { verifiedKey } from "../ask.ts";
+import { verifiedKey, unsigned } from "../ask.ts";
 import rules from "../../server/priv/rules.md";
 
 /** Who a request is from, as the app that signs people in says. */
@@ -144,7 +144,7 @@ async function mcp(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.headers.has("one-key")) {
     const body = await request.text();
     const device = await verifiedKey(request, body);
-    if (!device) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
+    if (!device) return unsigned(request);
     return forward(env, body, { device }, [NETWORK], request.headers, mode(new URL(request.url)), { signal: request.signal, ctx });
   }
   // A browser or an assistant someone let in. One that's since become nobody's signs in, or is let in, again.

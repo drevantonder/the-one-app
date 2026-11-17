@@ -9,7 +9,7 @@
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
-import { verifiedKey, isKey, signedBy } from "../ask.ts";
+import { verifiedKey, unsigned, isKey, signedBy } from "../ask.ts";
 
 /** How long a signed request works for, in seconds. */
 const SIGNED_FOR = 60;
@@ -83,7 +83,7 @@ export default {
     const { pathname, searchParams } = new URL(request.url);
     const body = await request.text();
     const by = await verifiedKey(request, body);
-    if (!by) return refuse(401, "Sign what you ask with your key, by a clock within a minute of the right time");
+    if (!by) return unsigned(request);
     const token = request.headers.get("one-token");
     if (pathname === "/presigner/sign" && request.method === "POST") return sign(env, by, token, body);
     if (pathname === "/presigner/read" && request.method === "POST") return read(env, by, token, body);

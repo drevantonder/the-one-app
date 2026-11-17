@@ -211,7 +211,7 @@ const devices = () => ({
     // Whatever names a key as `client_id` is signed with it (`core/edge/ask.ts`).
     const key = await env.NETWORK.verifiedKey(request.url, Object.fromEntries(request.headers), body);
     if (!key || key !== form.client_id) {
-      const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within a minute of the right time" };
+      const refused = { error: "invalid_client", error_description: "Sign what you ask with the key it names, by a clock within 15 minutes of the right time" };
       return { response: Response.json(refused, { status: 401 }) };
     }
     // A device is no OAuth client, so it's answered as Better Auth answers a device of its own, which takes JSON.
