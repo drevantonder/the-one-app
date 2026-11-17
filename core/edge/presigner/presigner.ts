@@ -27,12 +27,13 @@ const SERVER = /^servers\/([0-9a-f]{64})\//;
  * the server to pass a call on to, knows who may do anything where no plugin decides who may, updates, and lists
  * every app there is.
  */
-const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|installs|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
+// Under `plugins/` as well as `apps/` while the servers move to `apps/` (its old name), one at a time.
+const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:(?:plugins|apps)\/.*|installs|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
 /**
  * That a user, a group or the network installed a plugin is a blob under the plugin, `installed/<who>`, which a server
  * acting for them writes and removes, whoever's the plugin is: a deploy of it tells their servers.
  */
-const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)plugins\/[^/]+\/installed\/((?:users|groups)\/[^/]+|network)$/;
+const INSTALLED = /^(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins|apps)\/[^/]+\/installed\/((?:users|groups)\/[^/]+|network)$/;
 /**
  * That a user, a group or the network deployed a plugin is a blob of the network's, `deployed/<who>/<name>`, naming
  * the plugin, which a server acting for them writes as it deploys: so every app there is is listed in one place,
