@@ -24,7 +24,8 @@ defmodule SoftDelete do
   servers reach it. An encrypted artifact's blobs go aside still encrypted, keys and all, and a database's log,
   snapshots and lease go together, so each opens again as it was once it's back. The record is written before
   anything moves and says when everything has (`moved`), so a move cut short is finished by the next one to touch the
-  item, or by the clock.
+  item, or by the clock. One restored while it's still moving aside is put back by what's moving it, once that's done,
+  so two moves of an item never overlap.
 
   Who deletes, restores and purges an item is whoever owns it, as the apps that validate `reach` say. Every move is
   told to every app that hooks into the hook this app offers, `soft-delete.moved`, so one that keeps a list of
@@ -362,8 +363,13 @@ defmodule SoftDelete do
         {name, if(record["moved"] and taken?(name), do: free(name), else: name)}
       end)
 
-    with {:error, why} <- change(call, id, {:restore, as}), do: raise(why)
-    back(call, id)
+    # Restored while it's still moving aside, whoever is moving it puts it back once its own removing is done (`aside/2`),
+    # so the two never move it at once.
+    case change(call, id, {:restore, as}) do
+      {:ok, %{"moved" => true}} -> back(call, id)
+      {:ok, record} -> record
+      {:error, why} -> raise why
+    end
   end
 
   def call("purge", %{"item" => id}, call) do
@@ -395,7 +401,7 @@ defmodule SoftDelete do
   # What the clock does with each item: purges one that's due, and finishes any work on one that was cut short.
   defp expired(call, id, record, stale) do
     case record do
-      %{"state" => "active"} ->
+      %{"state" => "active", "since" => since} when since < stale ->
         back(call, id)
         []
 
@@ -521,12 +527,19 @@ defmodule SoftDelete do
   end
 
   # Takes each artifact of an item aside, and says so in its record once it's all there, then tells whoever keeps a list.
+  # One restored meanwhile is put back by this, as the restore left it to.
   defp aside(call, id) do
     record = records(call)[id]
     moved_aside(record, id)
-    {:ok, record} = change(call, id, :moved)
-    notify(call, record, "deleted")
-    record
+
+    case change(call, id, :moved) do
+      {:ok, record} ->
+        notify(call, record, "deleted")
+        record
+
+      {:error, why} ->
+        if records(call)[id]["state"] == "active", do: back(call, id), else: raise(why)
+    end
   end
 
   defp moved_aside(record, id) do
