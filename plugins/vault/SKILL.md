@@ -36,7 +36,7 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
   `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
 - Someone's Vault is theirs alone: nobody asks for another user's, and the network's owner reads none. A group's
   or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owner's to choose servers for.
-- Deleting an item is soft delete's, as for anything an app made: `recently-deleted remove --artifact` with its
+- Deleting an item is soft delete's, as for anything an app made: `soft-delete delete --artifact` with its
   `artifact`, as `list` gives it, and it can be restored for 30 days. `remove` takes one field out of an item.
 - Deleting an item, switching a plugin on and choosing servers are a person's decisions. Do them when asked to,
   and say what you did.

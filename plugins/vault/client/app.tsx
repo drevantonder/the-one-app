@@ -273,7 +273,7 @@ function ItemScreen(props: { item: Item }) {
   // Deleting it is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
   const remove = async () => {
     if (!(await confirm({ heading: `Delete ${shown(item())}?`, text: "Whatever uses it stops working. It's in Recently Deleted for 30 days.", action: "Delete", destructive: true }))) return
-    if (await does("recently-deleted_remove", { artifact: item().artifact })) setOpen()
+    if (await does("soft-delete_delete", { artifact: item().artifact })) setOpen()
   }
   return (
     <Screen heading={shown(item())} back>

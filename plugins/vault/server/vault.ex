@@ -225,7 +225,7 @@ defmodule Vault do
       %{
         name: "remove",
         description:
-          "Takes a field out of an item. Deleting a whole item is soft delete's, as for anything an app made: its `delete` (or `remove`) with the item's artifact, as `list` gives it, so it can be restored for 30 days.",
+          "Takes a field out of an item. Deleting a whole item is soft delete's, as for anything an app made: `soft-delete_delete` with the item's artifact, as `list` gives it, so it can be restored for 30 days.",
         inputs: %{
           type: "object",
           properties: %{item: item, field: %{type: "string", description: "The field to take out"}},
@@ -1332,7 +1332,7 @@ defmodule Vault do
   end
 
   # Deletes an item as anything a plugin made is deleted: by soft delete, which keeps it for 30 days.
-  defp delete!(call, db, item), do: Call.tool(call, "recently-deleted", "remove", %{"artifact" => artifact(db, item["id"])})
+  defp delete!(call, db, item), do: Call.tool(call, "soft-delete", "delete", %{"artifact" => artifact(db, item["id"])})
 
   defp fields(item), do: Map.new(item["fields"], &{&1["name"], &1["value"]})
 
