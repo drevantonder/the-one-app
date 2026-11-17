@@ -35,14 +35,16 @@ export interface Resource {
 }
 
 /**
- * Where a device is with its network, as the client says it (`Session` in core/client): opening, in, not in with the
- * code it's let in by, or its network not answering.
+ * Where a device is with its network, as the client says it (`Session` in core/client): opening, in, or not in with
+ * the code it's let in by.
  */
 export type Session =
   | { state: "opening" }
   | { state: "signedIn" }
   | { state: "signIn"; code?: { link: string; code: string }; why?: "denied" | "expired" | "removed" | null }
-  | { state: "unreachable"; why: string }
+
+/** Whether the client reaches its network, beside its session (`Connection` in core/client). */
+export type Connection = "connecting" | "online" | "offline"
 
 /** What the page is told of the device's session: the session, its place in the order the page hears them in, and while it's signing in, where the window goes. */
 export interface Told {
@@ -51,32 +53,39 @@ export interface Told {
   link?: string | null
 }
 
-/** What the window shows of itself, one state at a time (`client.js`). */
-export type Shown =
-  | { state: "opening"; step: 0 | 1 | 2 }
-  | { state: "unreachable" }
-  | { state: "home" }
-  | { state: "unlisted"; why: string }
-  | { state: "tooOld" }
-  | { state: "updating"; message?: string }
-  | { state: "updateFailed"; why: string }
+/** What the window knows as it moves (`client.js`): the device's session and whether its network answers, as they
+ * were last told, whether its network has not answered since the window opened, whether the launcher is loading,
+ * whether an update for this device is ready, and what its state says. */
+export interface Context {
+  told?: Told
+  connection: Connection
+  lost: boolean
+  starting: boolean
+  updateReady: boolean
+  /** Who may install a Home Screen for everyone, where it isn't this person: "Only Andre can install a Home Screen for Everyone". */
+  only?: string
+  why?: string
+  message?: string
+}
 
-/** What moves what the window shows (`client.js`). */
+/** What moves the window (`client.js`). */
 export type Moved =
-  | { type: "session"; session: Session }
+  | { type: "session"; told: Told }
+  | { type: "connection"; connection: Connection }
   | { type: "listed" }
-  | { type: "unlisted"; why: string }
+  | { type: "none"; only?: string }
   | { type: "tooOld" }
   | { type: "drawn" }
+  | { type: "failed"; why: string }
+  | { type: "openPlugins" }
   | { type: "retry" }
   | { type: "update" }
-  | { type: "updated"; message: string }
-  | { type: "updateFailed"; why: string }
+  | { type: "updateReady"; ready: boolean }
 
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
-  /** Where the device is with its network as the window opens, and whether a phone hears taps on notifications. */
-  start(): Told & { taps?: boolean }
+  /** Where the device is with its network as the window opens, whether its network answers, and whether a phone hears taps on notifications. */
+  start(): Told & { connection: Connection; taps?: boolean }
   /** The files a server lists for `subject`, and the plugins whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
@@ -84,7 +93,7 @@ export interface Commands {
   close(args: { view: string }): void
   client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown }
   upload(file: ArrayBuffer, options: { headers: { plugin: string } }): { upload: string }
-  /** Asks the network's address again now, which didn't answer. */
+  /** Asks the network again now, which didn't answer. */
   retry(): void
   /** Signs this device out, once it's removed from its person's devices. */
   sign_out(): void
@@ -114,8 +123,8 @@ export interface Events {
   open: string
   /** What a server says changed: an open app's key, or `client` for the files listed. */
   changed: string
-  /** Whether a server answered the last thing asked. */
-  answering: boolean
+  /** Whether the client reaches its network, as it moves. */
+  connection: Connection
   /** Where the device is with its network, as it moves. */
   session: Told
 }
@@ -126,6 +135,8 @@ export type Listen = <Event extends keyof Events>(event: Event, handler: (event:
 export type Address = (view: Pick<View, "host" | "app">) => string
 
 declare global {
+  /** XState, which the window's page is given as its UMD build (`xstate.umd.min.js`). */
+  var XState: typeof import("xstate")
   /** Tauri's API, which the app gives its window's page (`withGlobalTauri`). */
   interface Window {
     __TAURI__: {

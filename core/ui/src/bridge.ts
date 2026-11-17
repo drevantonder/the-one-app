@@ -1,7 +1,7 @@
 // The bridge: how an app's page reaches its client, which is all it reaches. It speaks as an MCP App speaks to its
 // host, in JSON-RPC messages posted to the frame's parent, so one page is an app here and an MCP App in an
 // assistant.
-import { configureClientErrors } from "solid-js"
+import { configureClientErrors, createSignal } from "solid-js"
 import { readable, reduced } from "./shared.ts"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
@@ -11,12 +11,17 @@ interface JsonRpcResponse {
   error?: { message: string }
 }
 
-/** What the client says of where the page is shown: light or dark, and how far in from each edge what the device
- * keeps for itself reaches. */
+/** What the client says of where the page is shown: light or dark, how far in from each edge what the device
+ * keeps for itself reaches, whether its network answers, and whether an update for this device is ready. */
 interface HostContext {
   theme?: "light" | "dark" | null
   safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
+  connection?: Connection
+  updateReady?: boolean
 }
+
+/** Whether this device reaches its network (`connection()`). */
+export type Connection = "connecting" | "online" | "offline"
 
 /** Who a call or an app is for, its subject: a group (`groups/family`), or `network`. Whoever the app is for, unless said. */
 export interface Subject {
@@ -64,10 +69,25 @@ const ask = <Result>(method: string, params: object = {}) => new Promise<Result>
   parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
 })
 
+const [connected, setConnected] = createSignal<Connection>("online")
+const [updatable, setUpdatable] = createSignal(false)
+
+/// `<Button disabled={connection() === "offline"}>Send</Button>`: whether this device reaches its network now, as it
+/// changes: `"online"`, `"connecting"` or `"offline"`. For what can't be done without it: what was answered stays
+/// shown either way, and the client says it's offline itself. A client that doesn't say is `"online"`.
+export const connection = () => (greet(), connected())
+
+/// `<Show when={updateReady()}><Button onClick={() => client({ update: true })}>Update</Button></Show>`: whether an
+/// update for this device is ready, as it changes, which `client({ update: true })` takes. The launcher shows it.
+export const updateReady = () => (greet(), updatable())
+
 /// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
 /// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css). And what the
-/// device keeps for itself at each edge, as `--safe-top` and the rest.
+/// device keeps for itself at each edge, as `--safe-top` and the rest, whether its network answers and whether an
+/// update is ready.
 function dress(context: HostContext | undefined) {
+  if (context?.connection) setConnected(context.connection)
+  if (context && "updateReady" in context) setUpdatable(context.updateReady === true)
   const root = document.documentElement
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
   if (!context || !("theme" in context)) return
@@ -180,7 +200,8 @@ export const open = (app: string, { subject, behind }: Subject & { behind?: bool
 /// `null` as the device is, and `client({ leave: true })` signs this device out once it's been removed from its
 /// person's devices. `client({ serve: true })` makes this device a server of its person's and `false` stops it being
 /// one, `client({ update: true })` has it take the latest builds, and `client({ push: true })` has a phone whose push
-/// failed try again: each answers `{ message }`, what it did, or throws why it couldn't.
+/// failed try again: each answers `{ message }`, what it did, or throws why it couldn't. An update shows over every app
+/// as it's under way, and the app starts again on the new build.
 export function client(): Promise<Client>
 export function client(change: ClientChange): Promise<{ message: string }>
 export function client(change: ClientChange = {}) {

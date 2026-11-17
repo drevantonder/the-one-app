@@ -30,6 +30,8 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   accounts.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
+- **Plugins app**: the app that installs and removes plugins, in the category `plugins`, which a client opens itself
+  where there's no launcher yet to open it from.
 - **Trusted**, **Untrusted**: the state of an installed plugin, apart from where it is in its lifecycle, and either
   can become the other. A trusted plugin runs in its server's VM, on a server of whoever it's installed for. An
   untrusted plugin runs in a sandbox: a VM of its own, for each user, group or network it's installed for, by any of

@@ -34,8 +34,10 @@ const emit = (event, payload) => hearing.get(event)?.forEach((handler) => handle
 let apps
 /** @type {string} */
 let device
-/// Whether a server answered the last thing asked, how soon it's asked again while none does, and that ask.
-let answering = true
+/// Whether its network answers, as the app's client says it (`Connection` in core/client), how soon it's asked
+/// again while it doesn't, and that ask.
+/** @type {import("../app/page/host.js").Connection} */
+let connection = "connecting"
 let again = 1000
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let asking
@@ -55,18 +57,18 @@ async function mcp(method, params = {}) {
   // outage, reported once it's over (`said`).
   const tool = method === "tools/call" ? params.name : undefined
   const span = { name: tool ? `${method} ${tool}` : method, traceId: hex(16), spanId: hex(8), kind: "client", attributes: { "mcp.method.name": method, "gen_ai.tool.name": tool, "one.reached": "edge" } }
-  const [started, was] = [performance.now(), answering]
+  const [started, was] = [performance.now(), connection]
   /** @param {string} [error] */
   const ended = (error) => {
     const took = performance.now() - started
-    if ((error && (was || answering)) || took > SLOW) report({ ...span, took, error })
+    if ((error && (was === "online" || connection === "online")) || took > SLOW) report({ ...span, took, error })
   }
   let response
   try {
     const headers = { "content-type": "application/json", traceparent: `00-${span.traceId}-${span.spanId}-01` }
     response = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
   } catch {
-    setAnswering(false)
+    answered(false)
     ended("Can't reach your network")
     throw new Error("Can't reach your network. Check this device is online.")
   }
@@ -74,7 +76,7 @@ async function mcp(method, params = {}) {
     location.replace(await signIn())
     throw new Error("Sign in again.")
   }
-  setAnswering(response.status !== 503)
+  answered(response.status !== 503)
   const { result, error } = await response.json()
   ended(error?.message ?? (result?.isError ? (result.content?.[0]?.text ?? "The tool failed") : undefined))
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
@@ -91,7 +93,7 @@ function report(record) {
   const browser = ["Edge", "Firefox", "Chrome", "Safari"].find((name) => navigator.userAgent.includes(name === "Edge" ? "Edg/" : `${name}/`))
   const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser }
   if (stored.length < 300) localStorage.setItem(REPORTS, JSON.stringify([...stored, { ...record, attributes, time: Date.now() }]))
-  if (answering) sendReports()
+  if (connection === "online") sendReports()
 }
 /// Reports are told a few seconds after the first of them, as one batch.
 /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -108,23 +110,45 @@ async function send() {
 /// Since when no server has answered, which once one does is reported, if it was long enough to show.
 let unanswered = 0
 
-/// While no server answers, this browser asks again by itself, sooner at first and then less often, as what's
-/// outside a device comes and goes, and no person should have to ask for what was going to come back anyway. Once
-/// one answers, every open app asks again, for what it missed.
+/// The moves its connection makes, from each state, as the app's client has them (`Connection::moves_to`).
+const MOVES = { connecting: ["online", "offline"], offline: ["connecting"], online: ["offline"] }
+/// Moves its connection to `next`, if that's a move there is from where it is.
+/** @param {import("../app/page/host.js").Connection} next */
+function connected(next) {
+  if (!MOVES[connection].includes(next)) return
+  connection = next
+  emit("connection", next)
+}
+
+/// Says whether its network answered what was just asked, which leaves it offline until it's tried again
+/// (`tryAgain`), and an answer to what was asked while it was offline is a try that was answered. While it doesn't
+/// answer, this browser asks again by itself, sooner at first and then less often, as what's outside a device comes
+/// and goes, and no person should have to ask for what was going to come back anyway. Once it answers, every open app
+/// asks again, for what it missed.
 /** @param {boolean} now */
-function setAnswering(now) {
-  const was = answering
-  if (now && !was) for (const view of views.keys()) refresh(view)
-  if (now !== was) emit("answering", (answering = now))
-  if (!now && was) unanswered = performance.now()
-  if (now && !was && performance.now() - unanswered > 3000) report({ name: "one.client.unanswered", took: performance.now() - unanswered, error: "No server is answering" })
-  else if (now && !was) sendReports()
-  if (now) again = 1000
-  else asking ??= setTimeout(() => {
-    asking = undefined
+function answered(now) {
+  const lost = connection === "offline" || unanswered > 0
+  if (now) connected("connecting")
+  const was = connection
+  connected(now ? "online" : "offline")
+  if (was === connection) return
+  if (now && lost) for (const view of views.keys()) refresh(view)
+  if (!now) unanswered ||= performance.now()
+  if (now && unanswered && performance.now() - unanswered > 3000) report({ name: "one.client.unanswered", took: performance.now() - unanswered, error: "No server is answering" })
+  else if (now) sendReports()
+  if (now) [again, unanswered] = [1000, 0]
+  else tryAgain()
+}
+/// Tries its network again once `again` has passed, or with `now`, at once: by opening again while it hasn't, and
+/// by asking a server once it has.
+function tryAgain(now = false) {
+  clearTimeout(asking)
+  asking = setTimeout(() => {
     again = Math.min(again * 2, 30000)
-    mcp("ping").catch(() => {})
-  }, again)
+    connected("connecting")
+    if (apps) mcp("ping").catch(() => {})
+    else opening()
+  }, now ? 0 : again)
 }
 
 /// What each open app was answered that only reads, by what it asked: it's answered that again until something
@@ -185,6 +209,37 @@ function outdated(subject, resources) {
   return changed.map((plugin) => plugin + whose)
 }
 
+/// How many moves of its session this browser has told the page of.
+let told = 0
+/// Asks the network's address whether this browser is signed in, as it opens: → where it is with its network, as the
+/// app's client says a device's session (`Session` in core/client), and, while it's to sign in, where it does.
+/** @returns {Promise<Omit<import("../app/page/host.js").Told, "seq">>} */
+async function opened() {
+  let response
+  try {
+    response = await fetch("/apps")
+  } catch {
+    answered(false)
+    return { session: { state: "opening" } }
+  }
+  if (response.status === 401) {
+    answered(true)
+    return { session: { state: "signIn" }, link: await signIn() }
+  }
+  if (!response.ok) {
+    answered(false)
+    return { session: { state: "opening" } }
+  }
+  ;({ apps, device } = await response.json())
+  answered(true)
+  return { session: { state: "signedIn" } }
+}
+/// Asks again, while it's still opening, and tells the page where it is now, if it's moved.
+async function opening() {
+  const now = await opened()
+  if (now.session.state !== "opening") emit("session", { seq: ++told, ...now })
+}
+
 /// What a browser can't do, as it's said where it's asked.
 /** @param {string} why */
 const cannot = (why) => () => Promise.reject(new Error(why))
@@ -193,20 +248,10 @@ const NO_KEY = "A browser can't hold your key. Use the app on your phone or comp
 /** @type {{ [Command in keyof Commands]?: (...args: Parameters<Commands[Command]>) => ReturnType<Commands[Command]> | Promise<ReturnType<Commands[Command]>> }} */
 const commands = {
   /// Where this browser is with its network, as the app's client says a device's session (`Session` in core/client):
-  /// signed in here, or sent to sign in. A browser keeps nothing of a network's, so with its address not answering
-  /// there's nothing to show, and trying again opens the page again. It's told once, so it's the first in order.
+  /// signed in here, or sent to sign in, and whether its network answers. A browser keeps nothing of a network's, so
+  /// with its address not answering it's still opening, and asks again by itself (`tryAgain`).
   async start() {
-    let response
-    try {
-      response = await fetch("/apps")
-    } catch {
-      return { seq: 0, session: { state: "unreachable", why: "Your network's address didn't answer" } }
-    }
-    if (response.status === 401) return { seq: 0, session: { state: "signIn" }, link: await signIn() }
-    if (!response.ok) return { seq: 0, session: { state: "unreachable", why: `Your network's address answered ${response.status}` } }
-    ;({ apps, device } = await response.json())
-    sendReports()
-    return { seq: 0, session: { state: "signedIn" } }
+    return { seq: (told = 0), ...(await opened()), connection }
   },
   /// The files a server lists for `subject`, and the open apps that are out of date.
   async apps({ subject }) {
@@ -233,7 +278,7 @@ const commands = {
     if (!sent.ok) throw new Error("The file couldn't be sent. Try again.")
     return { upload: to.upload }
   },
-  retry: () => location.reload(),
+  retry: () => tryAgain(true),
   sign_out: () => location.reload(),
   serve: cannot("A browser can't be a server. Make your phone or computer one in its app."),
   update: cannot("A browser has the latest each time it opens."),

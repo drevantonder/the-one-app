@@ -1,7 +1,8 @@
 //! The app: a window on One Core in a client (`core/client`). Its own page (`page`) draws nothing of its own but its
-//! device's session and what's under way or wrong with it: it holds the frames. The window always opens there, and
-//! follows the client's session (`Session`): a device that isn't in its network is sent on to the network's sign-in
-//! page, with the code it's let in by, until its person has let it in. Each app is a page of its plugin's, drawn in a frame of its own, which
+//! device's session, whether its network answers, and what's under way or wrong with it: it holds the frames. The
+//! window always opens there, and follows the client's session (`Session`) and connection (`Connection`): a device
+//! that isn't in its network is sent on to the network's sign-in page, with the code it's let in by, until its person
+//! has let it in. Each app is a page of its plugin's, drawn in a frame of its own, which
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The launcher
 //! is an app too, the one a network lists in the category `launcher`, which the window shows first and under every other.
 
@@ -12,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use ::client::{Client, Session, Subscription};
+use ::client::{Client, Connection, Session, Subscription};
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 use tauri::http::{Response, StatusCode, Uri, header};
@@ -261,8 +262,8 @@ fn close(views: State<'_, Views>, view: String) {
     views.subscriptions.lock().expect("no view panics").remove(&view);
 }
 
-/// Asks the network's address again now, which didn't answer, as its person does with Try Again. A client that
-/// couldn't open at all is opened again.
+/// Asks the network again now, which didn't answer, as its person does with Try Again. A client that couldn't open
+/// at all is opened again.
 #[tauri::command]
 fn retry(app: AppHandle) {
     match app.try_state::<Views>() {
@@ -279,14 +280,17 @@ async fn sign_out(views: State<'_, Views>) -> Result<(), String> {
 }
 
 /// Where this device is with its network, as the window's page asks once it has opened (`told`), which waits for
-/// the client to open, and whether a phone hears a tap on a notification, through its push plugin, which the page
-/// listens to. The page follows the session from there (`session`).
+/// the client to open, whether its network answers, and whether a phone hears a tap on a notification, through its
+/// push plugin, which the page listens to. The page follows the session and the connection from there (`session`,
+/// `connection`). A client that couldn't open at all has reached nothing.
 #[tauri::command]
 async fn start(app: AppHandle) -> Result<Value, ()> {
     let mut session = app.state::<Start>().0.subscribe();
     let (seq, session) = session.wait_for(Option::is_some).await.map_err(drop)?.clone().expect("it waited for one");
     let mut told = told(seq, &session);
     told["taps"] = json!(cfg!(mobile));
+    let connection = app.try_state::<Views>().map(|views| *views.client.connection().borrow());
+    told["connection"] = json!(connection.unwrap_or(Connection::Offline));
     Ok(told)
 }
 
@@ -467,12 +471,12 @@ fn report(views: State<'_, Views>, record: Value) {
 }
 
 /// Where this device is with its network, as the window follows it (`follows`), with how many moves it has made:
-/// nothing until the client has opened, and a client that couldn't open at all is `Unreachable`, saying why.
+/// nothing until the client has opened, and a client that couldn't open at all is still opening.
 struct Start(tokio::sync::watch::Sender<Option<(u64, Session)>>);
 
-/// Opens the client, gives the window its views, and has the window follow the client's session from then on
-/// (`follows`). A client that couldn't open at all, as one whose home can't be read, is said as the network not
-/// answering would be, which trying again opens again.
+/// Opens the client, gives the window its views, and has the window follow the client's session and connection from
+/// then on (`follows`). A client that couldn't open at all, as one whose home can't be read, is said as one still
+/// opening that reaches nothing (`start`), which trying again opens again.
 async fn opens(app: AppHandle) {
     // A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
     // the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
@@ -493,8 +497,7 @@ async fn opens(app: AppHandle) {
         Ok(client) => client,
         Err(error) => {
             eprintln!("{error:#}");
-            let unreachable = Session::Unreachable { why: format!("{error:#}") };
-            app.state::<Start>().0.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), unreachable)));
+            app.state::<Start>().0.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), Session::Opening)));
             return home(&app);
         }
     };
@@ -511,14 +514,15 @@ async fn opens(app: AppHandle) {
         hearing: AtomicBool::new(false),
     });
 
-    // The window says when no server is answering, which is what the last thing asked found, and once one answers
+    // The window follows whether its network answers, which is what the last thing asked found, and once it answers
     // again, every view asks again, so it picks up what it missed where it was.
-    let (handle, mut answering) = (app.clone(), client.connected());
+    let (handle, mut connection) = (app.clone(), client.connection());
     tauri::async_runtime::spawn(async move {
-        while answering.changed().await.is_ok() {
-            let now = *answering.borrow_and_update();
-            drop(handle.emit("answering", now));
-            if now {
+        while connection.changed().await.is_ok() {
+            let now = *connection.borrow_and_update();
+            eprintln!("this client's connection: {now:?}");
+            drop(handle.emit("connection", now));
+            if now == Connection::Online {
                 handle.state::<Views>().refresh().await
             }
         }
@@ -549,8 +553,10 @@ async fn opens(app: AppHandle) {
 /// Has the window follow the client's session as it moves (`Session`). The window's own page draws each state but
 /// one, and hears each move (`session`). The one is signing in, which is the network's own sign-in page with this
 /// device's code: a web view has no passkeys, so the page is told it's in the app (`&app`), and shows the code, and
-/// its button opens the link in the device's own browser. The window goes there from its own page, and is brought
-/// back to its own page once the device has moved on, which asks where it is then.
+/// its button opens the link in the device's own browser. The window goes there from its own page as it opens, and
+/// is brought back to its own page once the device has moved on, which asks where it is then. A device that leaves
+/// its network, or is found to be out of it, starts the window again at its own page, as a web app goes back to its
+/// start once its person is signed out, which opens from there.
 async fn follows(app: AppHandle, client: Arc<Client>) {
     let mut session = client.session();
     loop {
@@ -558,7 +564,13 @@ async fn follows(app: AppHandle, client: Arc<Client>) {
         let seq = app.state::<Start>().0.borrow().as_ref().map_or(0, |(seq, _)| seq + 1);
         eprintln!("this device's session: {now:?}");
         let was = app.state::<Start>().0.send_replace(Some((seq, now.clone())));
-        if matches!(was, Some((_, Session::SignIn { .. }))) {
+        let starts_again = match (&was, &now) {
+            (Some((_, Session::SignIn { .. })), _) => true,
+            (Some((_, Session::SignedIn)), Session::Opening) => true,
+            (Some(_), Session::SignIn { .. }) => true,
+            _ => false,
+        };
+        if starts_again {
             home(&app);
         } else {
             drop(app.emit("session", told(seq, &now)));

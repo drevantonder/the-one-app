@@ -1,4 +1,5 @@
-// The page is JavaScript, served as it is with no build, and TypeScript checks it: `bunx --package typescript@7.0.2 tsc -p .`.
+// The page is JavaScript, served as it is with no build, and TypeScript checks it: `bunx --package typescript@7.0.2 tsc -p .`,
+// with XState's types from the UI library's packages (`bun install` in core/ui).
 {
   "compilerOptions": {
     "target": "es2024",
@@ -6,6 +7,7 @@
     "moduleResolution": "bundler",
     "lib": ["es2024", "dom", "dom.iterable"],
     "types": [],
+    "paths": { "xstate": ["../../../core/ui/node_modules/xstate"] },
     "allowJs": true,
     "checkJs": true,
     "strict": true,

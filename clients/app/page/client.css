@@ -47,8 +47,59 @@ body {
   opacity: 0;
   animation: ui-late var(--move-settle) var(--ease-settle) 600ms forwards;
 }
-/* What's passing shows at the foot of the window, over whatever's showing, where a mail or chat app says it's
-   reconnecting and a web app offers its update: it covers little and moves nothing. */
+/* Why there's no Home Screen: grey lines, and the button that installs one. */
+#empty {
+  display: grid;
+  justify-items: center;
+  gap: 1rem;
+}
+#empty p {
+  margin: 0;
+}
+#empty p + p {
+  margin-top: -0.75rem;
+}
+/* Show Details says Hide Details once it's open, as the UI library's Problem does. */
+#problem-details:not([open]) .hide,
+#problem-details[open] .show {
+  display: none;
+}
+/* While its network doesn't answer, a thin banner across the top of the launcher, which moves it down by its height
+   and covers none of it, as a mail or chat app's does. A moment's gap says nothing: it comes in only once it has
+   lasted a few seconds, behind what the device keeps for itself at the top, which it reaches into. */
+#banner {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  height: calc(2.25rem + var(--safe-top));
+  margin: 0;
+  padding: var(--safe-top) calc(0.5rem + var(--safe-right)) 0 calc(0.5rem + var(--safe-left));
+  overflow: hidden;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  animation: banner var(--move-settle) var(--ease-settle) 3s backwards;
+}
+@keyframes banner {
+  from {
+    height: var(--safe-top);
+    background: var(--background);
+    color: transparent;
+  }
+}
+#banner-retry {
+  height: auto;
+  padding: 0.125rem 0.5rem;
+  font-size: inherit;
+}
+body:has(#banner:not([hidden])) iframe {
+  padding-top: 0;
+}
+/* What's passing shows at the foot of the window, over whatever's showing, where a web app offers its update: it
+   covers little and moves nothing. */
 #passing {
   z-index: 2;
   grid-area: 2 / 1;
@@ -62,19 +113,6 @@ body {
 }
 #passing > * {
   pointer-events: auto;
-}
-/* No server answering for now is one quiet line, with a spinner while it reconnects. */
-#connection {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0.25rem 0.75rem;
-  border-radius: 999px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
-  text-align: center;
 }
 #update p {
   margin: 0;

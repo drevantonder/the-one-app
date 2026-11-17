@@ -9,7 +9,7 @@
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, invoke, listen, openLink, sandbox } from "./host.js"
-/** @import { Moved, Shown, Told, View } from "./host.js" */
+/** @import { Context, Moved, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -29,8 +29,10 @@ addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message
 const NEVER = 15000
 /** An element of the page's own, which is there. @param {string} id */
 const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
-/// The launcher's page, as this user's apps list it, once they're listed: `<plugin>/<page>`.
+/// The launcher's page, as this user's apps list it, once they're listed: `<plugin>/<page>`. And the Plugins app's,
+/// which installs one where there's none: the app in the category `plugins`, if there is one.
 let launcher = ""
+let plugins = ""
 /// The apps that are open, by who each is for and what it is: `{ key, app, subject, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
@@ -85,6 +87,8 @@ function placed() {
   for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { safeAreaInsets: insets(view.frame) } })
 }
 addEventListener("resize", placed)
+// The banner moves every frame down as it comes in.
+byId("banner").addEventListener("animationend", placed)
 
 /// An iPhone's keyboard covers the window rather than making it smaller, as Android's does: while it's up, the
 /// window's apps end above it, so a sheet sits on it and what's typed in can be scrolled to. Pinched in, the window
@@ -96,122 +100,187 @@ function keyboard() {
 }
 visualViewport?.addEventListener("resize", keyboard)
 
-/// What the window shows of itself, one state at a time, which only `on` moves: while its device's session opens,
-/// the steps it takes to its person's home; their home, once the launcher has drawn; or why it can't show, and an
-/// update under way. While the device isn't in its network, the window is on the network's own sign-in page
-/// instead, which the client brings it back from (`follows` in `src/lib.rs`).
-/** @type {Shown} */
-let shown = { state: "opening", step: 0 }
-
-/// The moves there are, from `now` on `event`: the next state, or nothing where `event` moves nothing from `now`.
-/** @param {Shown} now @param {Moved} event @returns {Shown | undefined} */
-function next(now, event) {
-  // Whether it waits for its apps to be listed: as it opens, or again after it updated or couldn't show home.
-  const listing = (now.state === "opening" && now.step === 1) || now.state === "updating" || now.state === "unlisted" || now.state === "tooOld"
-  switch (event.type) {
-    // The device's session moved: it's opening again, it's in and lists its apps next, or its network didn't answer.
-    case "session":
-      if (event.session.state === "opening") return { state: "opening", step: 0 }
-      if (event.session.state === "unreachable") return { state: "unreachable" }
-      if (event.session.state === "signedIn" && (now.state === "unreachable" || (now.state === "opening" && now.step === 0))) return { state: "opening", step: 1 }
-      return
-    // Its apps were listed with the launcher among them, which loads next, or without one, or not at all, or the
-    // launcher never drew.
-    case "listed":
-      return listing ? { state: "opening", step: 2 } : undefined
-    case "unlisted":
-      return listing || (now.state === "opening" && now.step === 2) ? { state: "unlisted", why: event.why } : undefined
-    case "tooOld":
-      return listing && now.state !== "tooOld" ? { state: "tooOld" } : undefined
-    // The launcher drew: home shows.
-    case "drawn":
-      return now.state === "opening" && now.step === 2 ? { state: "home" } : undefined
-    // Its person tried again, or pressed Update.
-    case "retry":
-      return now.state === "unlisted" ? { state: "opening", step: 1 } : now.state === "updateFailed" ? { state: "updating" } : undefined
-    case "update":
-      return now.state === "tooOld" ? { state: "updating" } : undefined
-    // What a device that's also a server was told as it asked its server to update, or why an update failed.
-    case "updated":
-      return now.state === "updating" ? { state: "updating", message: event.message } : undefined
-    case "updateFailed":
-      return now.state === "updating" ? { state: "updateFailed", why: event.why } : undefined
-  }
-}
-
-/// Moves what the window shows on `event`, if that's a move there is, draws it, and starts what the new state does.
-/** @param {Moved} event */
-function on(event) {
-  const moved = next(shown, event)
-  if (!moved) return
-  const was = shown
-  shown = moved
-  draw()
-  if (moved.state === "opening" && moved.step === 1) list()
-  if (moved.state === "opening" && moved.step === 2) start()
-  if (moved.state === "updating" && was.state !== "updating") {
+/// What the window shows of itself, one state at a time: while it opens, until it can start the launcher; the
+/// launcher, once it has drawn; signing in, where the device isn't in its network; why there's no launcher to show,
+/// with Plugins to install one; and an update. Only `on` moves it, by the moves `machine` has, and a move that isn't
+/// there is refused. Whether its network answers is the client's (`Connection` in core/client), which the
+/// window follows and never decides: it says it as it opens, and as a banner over the launcher.
+const { assign, createActor, fromPromise, setup } = XState
+const machine = setup({
+  types: /** @type {{ context: Context, events: Moved }} */ ({}),
+  actors: {
     // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
-    invoke("update").then(
-      (message) => on({ type: "updated", message }),
-      (error) => on({ type: "updateFailed", why: `${error}` }),
-    )
-  }
+    update: fromPromise(() => invoke("update")),
+  },
+  guards: {
+    signIn: ({ event }) => event.type === "session" && event.told.session.state === "signIn",
+    online: ({ event }) => event.type === "connection" && event.connection === "online",
+    waiting: ({ context }) => !context.starting,
+    updateReady: ({ context }) => context.updateReady,
+    // A phone's app is its network's, which its owner builds and updates.
+    updates: () => !phone,
+    plugins: () => Boolean(plugins),
+  },
+  actions: {
+    told: assign({ told: ({ event, context }) => (event.type === "session" ? event.told : context.told) }),
+    connection: assign(({ event, context }) => {
+      if (event.type !== "connection") return {}
+      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { connection: event.connection } })
+      return { connection: event.connection, lost: context.lost || event.connection === "offline" }
+    }),
+    updateReady: assign(({ event, context }) => {
+      if (event.type !== "updateReady" || event.ready === context.updateReady) return {}
+      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { updateReady: event.ready } })
+      return { updateReady: event.ready }
+    }),
+    // Its apps are listed once it's told where its device is, unless it's to sign in.
+    list: ({ context }) => void (context.told && context.told.session.state !== "signIn" && list()),
+    start: () => start(),
+    signIn: ({ context }) => void (context.told?.link && location.replace(context.told.link)),
+    // The device hears its person's notifications once they see their home.
+    listen: () => void invoke("listen"),
+    openPlugins: () => openPlugins(),
+  },
+}).createMachine({
+  id: "window",
+  initial: "opening",
+  context: { connection: "connecting", lost: false, starting: false, updateReady: false },
+  on: {
+    session: { actions: "told" },
+    connection: { actions: "connection" },
+    updateReady: { actions: "updateReady" },
+  },
+  states: {
+    // Waits until it can start the launcher: its device in its network and its network answering, or a launcher
+    // kept from before.
+    opening: {
+      entry: [assign({ starting: false }), "list"],
+      on: {
+        session: [{ guard: "signIn", target: "sign_in", actions: "told" }, { actions: ["told", "list"] }],
+        connection: [{ guard: "online", actions: ["connection", "list"] }, { actions: "connection" }],
+        listed: { guard: "waiting", actions: [assign({ starting: true }), "start"] },
+        drawn: "launcher",
+        none: { target: "no_launcher", actions: assign({ only: ({ event }) => event.only }) },
+        tooOld: "needs_updating",
+        failed: { target: "launcher_failed", actions: assign({ why: ({ event }) => event.why }) },
+      },
+    },
+    // The network's own sign-in page, which the client brings the window back from once its person has approved
+    // it, where it opens again (`follows` in `src/lib.rs`).
+    sign_in: { entry: "signIn" },
+    launcher: {
+      entry: "listen",
+      on: { update: { guard: "updateReady", target: "updating" } },
+    },
+    no_launcher: {
+      on: { openPlugins: { guard: "plugins", target: "plugins" } },
+    },
+    // The Plugins app, shown with no launcher under it, until a launcher is installed.
+    plugins: {
+      entry: "openPlugins",
+      on: { listed: "opening" },
+    },
+    launcher_failed: {
+      on: { retry: "opening" },
+    },
+    needs_updating: {
+      on: { update: { guard: "updates", target: "updating" } },
+    },
+    // It starts again on the new build once it has updated, as an app does: a device that's also a server once the
+    // program keeping its server running has taken it, which says so meanwhile.
+    updating: {
+      entry: assign({ message: undefined }),
+      invoke: {
+        src: "update",
+        onDone: { actions: assign({ message: ({ event }) => event.output }) },
+        onError: { target: "update_failed", actions: assign({ why: ({ event }) => `${event.error}` }) },
+      },
+    },
+    update_failed: {
+      on: { retry: "updating" },
+    },
+  },
+})
+const shown = createActor(machine)
+/** @param {Moved} event */
+const on = (event) => shown.send(event)
+
+/// What the window says as it opens: the steps it takes to its person's home, the first of which says whether its
+/// network answers. With a launcher kept from before, it's starting that alone.
+/** @param {Context} context @returns {{ steps: string[], at: number, text?: string }} */
+function steps({ connection, lost, starting }) {
+  if (starting && connection !== "online") return { steps: ["Opening Home Screen"], at: 0 }
+  const reached = connection === "offline" || lost ? "Can't reach your network" : "Connecting to your network"
+  const at = starting || connection === "online" ? 1 : 0
+  return { steps: [reached, "Opening Home Screen"], at, text: at === 0 && reached !== "Connecting to your network" ? "Check this device is online." : undefined }
 }
 
-/// The steps the window takes as it opens, each ticked as it's done.
-const STEPS = ["Connecting to your network", "Getting your apps", "Opening Home Screen"]
-
-/// What each problem says: its heading, its one sentence, and the button that fixes it, if there is one.
-/** @param {Shown} now @returns {[string, string, string | undefined] | undefined} */
+/// What each problem says: its heading, its one sentence, what's behind it for Show Details, and the button that
+/// fixes it, if there is one.
+/** @param {import("xstate").SnapshotFrom<typeof machine>} now @returns {[string, string, string | undefined, string | undefined] | undefined} */
 function problemOf(now) {
-  switch (now.state) {
-    case "unreachable":
-      return ["Can't reach your network", "Check this device is online.", "Try Again"]
-    case "unlisted":
-      return ["Can't show your Home Screen", now.why, "Try Again"]
-    case "tooOld":
-      return ["This app needs updating", phone ? "Its owner updates this app." : "An update is ready.", phone ? undefined : "Update"]
-    case "updateFailed":
-      return ["Couldn't update", now.why, "Try Again"]
-  }
+  if (now.matches("launcher_failed")) return ["Home Screen didn't open.", "Try again in a moment.", now.context.why, "Try Again"]
+  if (now.matches("needs_updating")) return phone ? ["This app needs updating", "Its owner updates this app.", undefined, undefined] : ["This app needs updating", "An update is ready.", undefined, "Update"]
+  if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]
 }
 
 /// Draws what the window shows of itself, in its middle, over the frames: its mark and steps while it opens, a
-/// spinner and a line while it updates, or a problem. Home is the frames alone, and whether a server is answering.
+/// spinner and a line while it updates, why there's no Home Screen, or a problem; and over the launcher, a banner
+/// while its network doesn't answer. The launcher is the frames alone.
 /** @type {string | undefined} */
 let lastProblem
 function draw() {
-  const now = shown
-  byId("state").hidden = now.state === "home"
-  byId("mark").hidden = byId("steps").hidden = now.state !== "opening"
-  if (now.state === "opening") {
+  const now = shown.getSnapshot()
+  const { context } = now
+  byId("state").hidden = now.matches("launcher") || now.matches("plugins") || now.matches("sign_in")
+  const opening = now.matches("opening")
+  byId("mark").hidden = byId("steps").hidden = !opening
+  const opened = steps(context)
+  byId("reconnect").hidden = !opening || opened.text === undefined
+  if (opening) {
     byId("steps").replaceChildren(
-      ...STEPS.map((step, i) => {
-        const item = Object.assign(document.createElement("li"), { className: i < now.step ? "done" : i === now.step ? "now" : "" })
-        const mark = i < now.step ? icon(CHECK) : i === now.step ? spinner() : Object.assign(document.createElement("span"), { className: "next" })
-        item.append(mark, Object.assign(document.createElement("span"), { textContent: step }))
+      ...opened.steps.map((step, i) => {
+        const item = Object.assign(document.createElement("li"), { className: i < opened.at ? "done" : i === opened.at ? "now" : "" })
+        const mark = i < opened.at ? icon(CHECK) : i === opened.at ? spinner() : Object.assign(document.createElement("span"), { className: "next" })
+        const words = Object.assign(document.createElement("span"), { textContent: step })
+        if (i === opened.at && opened.text) words.append(Object.assign(document.createElement("small"), { textContent: opened.text }))
+        item.append(mark, words)
         return item
       }),
     )
   }
-  byId("status").hidden = now.state !== "updating"
-  if (now.state === "updating") byId("status-text").textContent = now.message ?? ""
-  byId("status-text").hidden = !(now.state === "updating" && now.message)
+  byId("status").hidden = !now.matches("updating")
+  byId("status-text").textContent = context.message ?? ""
+  byId("status-text").hidden = !(now.matches("updating") && context.message)
+  byId("empty").hidden = !now.matches("no_launcher")
+  byId("empty-text").textContent = context.only ?? (plugins ? "" : "Ask your AI to install a Home Screen")
+  byId("empty-text").hidden = !byId("empty-text").textContent
+  byId("open-plugins").hidden = Boolean(context.only) || !plugins
   const problem = problemOf(now)
   byId("problem").hidden = !problem
   if (problem) {
-    const [heading, text, action] = problem
+    const [heading, text, details, action] = problem
     byId("problem-heading").textContent = heading
     byId("problem-text").textContent = text
+    byId("problem-details").hidden = !details
+    byId("problem-details-text").textContent = details ?? ""
     byId("problem-action").hidden = !action
-    byId("retry").textContent = action ?? ""
-    byId("retry").dataset.variant = action === "Update" ? "default" : "outline"
+    byId("problem-button").textContent = action ?? ""
+    byId("problem-button").dataset.variant = action === "Update" ? "default" : "outline"
   }
   // What's shown is reported once, as it's shown.
   const said = problem && `${problem[0]}: ${problem[1]}`
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
-  status()
+  // Over the launcher: its network not answering, and trying again once it has lost it. Answering, nothing.
+  const banner = now.matches("launcher") && (context.connection === "offline" || (context.connection === "connecting" && context.lost))
+  if (byId("banner").hidden === banner) {
+    byId("banner").hidden = !banner
+    placed()
+  }
+  byId("banner-spinner").hidden = context.connection !== "connecting"
+  byId("banner-text").textContent = context.connection === "connecting" ? "Reconnecting…" : "Can't reach your network"
+  byId("banner-retry").hidden = context.connection !== "offline"
 }
 
 /// The UI library's check icon and spinner, which the window draws its steps with, as the UI library does.
@@ -227,43 +296,12 @@ function icon(path) {
   svg.append(drawn)
   return svg
 }
-const spinner = () => /** @type {HTMLElement} */ (byId("connection-spinner").cloneNode(true))
-
-/// Whether a server answered the last thing this client asked, and since when none has.
-let answering = true
-let unanswered = 0
-
-/// How long no server answering goes unsaid, as a moment's gap while the client reconnects by itself, and how long
-/// before the window says it's showing what was saved.
-const BLIP = 3000
-const LONG = 15000
-/** @type {ReturnType<typeof setTimeout> | undefined} */
-let saying
-/// Whether a server is answering, while home shows: one that is, or none for a blip, which say nothing; then none for
-/// a few seconds, reconnecting, and for longer, which says it shows what was saved; and the device offline.
-/** @returns {"answering" | "blip" | "reconnecting" | "waiting" | "offline"} */
-function connection() {
-  if (answering) return "answering"
-  if (!navigator.onLine) return "offline"
-  const waited = performance.now() - unanswered
-  return waited < BLIP ? "blip" : waited < LONG ? "reconnecting" : "waiting"
+function spinner() {
+  const shown = /** @type {HTMLElement} */ (byId("banner-spinner").cloneNode(true))
+  shown.removeAttribute("id")
+  shown.hidden = false
+  return shown
 }
-/// Says the connection in one quiet line at the foot of the window, over whatever's showing: a spinner and that it's
-/// reconnecting, and nothing while it's fine. A blip and reconnecting each end by the clock.
-function status() {
-  clearTimeout(saying)
-  const now = shown.state === "home" ? connection() : "answering"
-  byId("connection").hidden = now === "answering" || now === "blip"
-  byId("connection-spinner").hidden = now === "offline"
-  byId("connection-text").textContent = { answering: "", blip: "", reconnecting: "Reconnecting…", waiting: "Reconnecting… Showing what was saved.", offline: "You're offline. Showing what was saved." }[now]
-  if (now === "blip" || now === "reconnecting") saying = setTimeout(status, (now === "blip" ? BLIP : LONG) - (performance.now() - unanswered))
-}
-addEventListener("offline", status)
-// Back online, the client asks at once, rather than when it next would have.
-addEventListener("online", () => {
-  status()
-  if (!answering) invoke("refresh", { view: key(launcher) })
-})
 
 /// Whether this device is behind the latest build of its program for its kind of machine, as its network says
 /// (`builds`): a browser, or an app whose network says nothing of its build, isn't.
@@ -276,34 +314,69 @@ async function behind() {
 }
 
 /// Lists the files a server has for `subject`, which the client keeps, so an app opens with no server up. An open app
-/// whose plugins have a new version loads again. This user's own list says whether home can show: with a launcher
-/// in it, without one, or not at all. A launcher missing from a later list, as during a release, leaves the one that's
-/// open as it is. Its list missing a launcher says this app needs updating only where its network says an update is
-/// ready for it (`behind`): otherwise it's the network that has none right now.
+/// whose plugins have a new version loads again. This user's own list has the launcher in it, which starts, or none:
+/// which is a server's word, so a list kept from before is asked for again first, and while its network doesn't
+/// answer, the window waits. With none, this app needs updating where its network says an update is ready for it
+/// (`behind`): otherwise it's the network that has none right now. A launcher missing from a later list, as during a
+/// release, leaves the one that's open as it is. Each of this user's lists says again whether an update is ready.
 /** @param {string} [subject] */
 async function list(subject) {
   listed.add(subject)
   try {
-    const { resources, outdated } = await invoke("apps", { subject })
+    let { resources, outdated } = await invoke("apps", { subject })
     for (const view of open.values()) if (outdated.includes(view.host)) view.stale = true
     if (!subject) {
-      // An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
-      const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
-      const named = (/** @type {string} */ uri) => {
-        const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
-        return `${plugin}/${page.join("/")}`
+      if (!launcherIn(resources) && shown.getSnapshot().matches("opening")) {
+        await invoke("refresh", { view: "client" })
+        ;({ resources } = await invoke("apps", { subject }))
       }
-      // The last one set for a plugin is the one kept: its first.
-      first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
-      const found = pages.find(({ _meta }) => _meta?.category === "launcher")
-      if (found) launcher = named(found.uri)
+      launcher = launcherIn(resources) || launcher
       if (launcher) on({ type: "listed" })
-      else on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "unlisted", why: "Your network has no Home Screen right now." })
+      else if (shown.getSnapshot().context.connection === "online") on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "none", only: await only() })
+      on({ type: "updateReady", ready: !phone && (await behind().catch(() => false)) })
     }
-  } catch (error) {
-    if (!subject) on({ type: "unlisted", why: `${error}`.replace(/[^.]$/, "$&.") })
+  } catch {
+    // Nothing kept, and its network didn't answer: it's listed again once it does.
   }
   reload()
+}
+
+/// The launcher's page among the files listed, and with them, which app each plugin opens first (`first`) and the
+/// Plugins app's page (`plugins`). An app is a page of an MCP App's kind, at ui://<plugin>/<version>/<page>.
+/** @param {import("./host.js").Resource[]} resources */
+function launcherIn(resources) {
+  const pages = resources.filter(({ mimeType }) => mimeType === "text/html;profile=mcp-app")
+  const named = (/** @type {string} */ uri) => {
+    const [plugin, _version, ...page] = uri.slice("ui://".length).split("/")
+    return `${plugin}/${page.join("/")}`
+  }
+  // The last one set for a plugin is the one kept: its first.
+  first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
+  const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
+  plugins = found("plugins") ? named(/** @type {string} */ (found("plugins"))) : ""
+  return found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
+}
+
+/// Who may install for everyone, if not this person, who then can't install a Home Screen: "Only Andre can install a
+/// Home Screen for Everyone", by the names they go by, as the App Store says it. Nothing where they can, or where
+/// the network can't say.
+async function only() {
+  /** @param {string} name @param {Record<string, unknown>} [inputs] @returns {Promise<any>} */
+  const call = async (name, inputs = {}) => {
+    const result = /** @type {{ structuredContent?: unknown, content: { text: string }[], isError?: boolean }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name, arguments: inputs } }))
+    if (result.isError) throw new Error(result.content[0]?.text)
+    return result.structuredContent ?? JSON.parse(result.content[0].text)
+  }
+  try {
+    const [{ who }, { users }] = await Promise.all([call("permissions_check", { artifact: "network" }), call("permissions_users", { artifact: "network", relation: "installer" })])
+    if (users.includes(who) || users.includes("everyone")) return undefined
+    const { people } = await call("sign-in_everyone").catch(() => ({ people: [] }))
+    const called = (/** @type {string} */ user) => people.find((/** @type {{ who: string }} */ person) => person.who === user)?.called ?? user.replace(/^users\//, "").replace(/^./, (first) => first.toUpperCase())
+    const names = new Intl.ListFormat("en", { type: "disjunction" }).format(users.map(called))
+    return users.length ? `Only ${names} can install a Home Screen for Everyone` : "Nobody can install a Home Screen for Everyone"
+  } catch {
+    return undefined
+  }
 }
 
 /// Loads again each open app that has a new version, as a web app picks up its own, unless its person may be in
@@ -370,7 +443,7 @@ function show(at, tapped) {
     if (view.tapped !== tapped || view.drawn) return
     report("one.client.open", `Didn't open in ${NEVER / 1000} s`, { "one.view": view.app.split("/")[0] })
     // A launcher that never draws leaves nothing to show: trying again loads it again.
-    if (view.app === launcher) on({ type: "unlisted", why: "It didn't open. Try again in a moment." })
+    if (view.app === launcher) on({ type: "failed", why: `${launcher} didn't draw in ${NEVER / 1000} s.` })
   }, NEVER)
   if (!view.drawn) return
   // Its user returned to it.
@@ -407,9 +480,10 @@ function gestures() {
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
 }
-/// The app that's open as `at`, or with none there, the launcher.
+/// The app that's open as `at`, or with none there, the one under every other: the launcher, or while there's none,
+/// the Plugins app.
 /** @param {string | null} at */
-const showing = (at) => open.get(at ?? "") ?? open.get(key(launcher))
+const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().matches("plugins") ? plugins : launcher))
 
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
 /// showing with what it drew from. The launcher's time is from when this page began to load.
@@ -422,11 +496,8 @@ function opened(view) {
     const name = view.app.split("/")[0]
     const { duration } = performance.measure(`open ${name}`, { start: tapped })
     invoke("opened", { view: name, ms: Math.round(duration) })
-    // The device hears its person's notifications once they see their home, which has drawn over the steps.
-    if (view.app === launcher) {
-      on({ type: "drawn" })
-      invoke("listen")
-    }
+    // Their home has drawn over the steps.
+    if (view.app === launcher) on({ type: "drawn" })
   }))
 }
 
@@ -482,6 +553,10 @@ async function respond(view, method, params) {
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches },
         safeAreaInsets: insets(view.frame),
+        // Whether its network answers, and whether an update for this device is ready, which the window keeps it
+        // told of: the launcher shows Update while one is.
+        connection: shown.getSnapshot().context.connection,
+        updateReady: shown.getSnapshot().context.updateReady,
       },
     }
   }
@@ -510,7 +585,13 @@ async function respond(view, method, params) {
     if (params.push) return invoke("push")
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
     if ("serve" in params) return { message: await invoke("serve", { on: params.serve === true }) }
-    if (params.update) return { message: await invoke("update") }
+    // It updates as the window shows it, over every app, where an update is ready.
+    if (params.update) {
+      if (!shown.getSnapshot().context.updateReady) on({ type: "updateReady", ready: !phone && (await behind()) })
+      on({ type: "update" })
+      if (!shown.getSnapshot().matches("updating")) throw new Error("There's no update for this device.")
+      return { message: "Updating…" }
+    }
     if ("theme" in params) {
       if (params.theme) localStorage.setItem("theme", params.theme)
       else localStorage.removeItem("theme")
@@ -611,24 +692,16 @@ addEventListener("popstate", (event) => {
   shownByDevice = false
 })
 
-listen("answering", ({ payload }) => {
-  const back = !answering && payload
-  if (answering && !payload) unanswered = performance.now()
-  answering = payload
-  status()
-  // What couldn't be listed is asked for again now that a server answers, and so is what a server that updated
-  // lists once it's back.
-  if (back && (shown.state === "unlisted" || shown.state === "updating")) list()
-})
-byId("retry").addEventListener("click", () => {
-  if (shown.state === "unreachable") invoke("retry")
-  else on({ type: shown.state === "tooOld" ? "update" : "retry" })
-})
+listen("connection", ({ payload }) => on({ type: "connection", connection: payload }))
+// Its network is tried again now, rather than when it next would be.
+for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry"))
+byId("problem-button").addEventListener("click", () => on({ type: shown.getSnapshot().matches("needs_updating") ? "update" : "retry" }))
+byId("open-plugins").addEventListener("click", () => on({ type: "openPlugins" }))
 
 /// The user returned to the window, so what's showing asks again, and its apps' files are listed again, for a new
 /// version of any. While the window is on screen, what's showing asks again when a server says something changed.
 function returned() {
-  if (shown.state !== "home") return
+  if (!shown.getSnapshot().matches("launcher")) return
   invoke("visible", { onScreen: !document.hidden })
   if (document.hidden) return void reload()
   for (const subject of listed) list(subject)
@@ -648,24 +721,34 @@ function start() {
   show(null, 0)
 }
 
+/// Shows the Plugins app with no launcher under it, which its person installs one with. There's nothing to go back
+/// to from it.
+function openPlugins() {
+  const view = load(plugins)
+  if (history.state) history.replaceState(null, "")
+  show(view.key, performance.now())
+}
+
 /// Follows the device's session as it moves, each move heard once and in order: the page may hear one as it opens
-/// before `start` has said where it was. While the device isn't in its network, the window goes where it signs in.
+/// before `start` has said where it was.
 let heard = -1
 /** @param {Told} told */
-function hear({ seq, session, link }) {
-  if (seq <= heard) return
-  heard = seq
-  if (session.state === "signIn" && link) location.replace(link)
-  else on({ type: "session", session })
+function hear(told) {
+  if (told.seq <= heard) return
+  heard = told.seq
+  on({ type: "session", told })
 }
 
 dress()
-draw()
+shown.subscribe(draw)
+shown.start()
 await listen("session", ({ payload }) => hear(payload))
-// Where the window starts: where its device is with its network, as the client says it (`Session`), which it
-// follows from then on. A phone's app hears a tap on a notification through its push plugin.
-const { taps, ...told } = await invoke("start")
+// Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
+// network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
+// its push plugin.
+const { taps, connection, ...told } = await invoke("start")
 phone = Boolean(taps)
+on({ type: "connection", connection })
 hear(told)
 invoke("visible", { onScreen: !document.hidden }).catch(() => {})
 if (taps) hearTaps()

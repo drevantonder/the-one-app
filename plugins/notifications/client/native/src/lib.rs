@@ -209,7 +209,7 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
         Ok(_) => return moved(Push::Denied),
         Err(error) => return moved(Push::Failed { why: format!("This phone wasn't asked to show notifications: {error}") }),
     }
-    let (mut connected, mut session) = (client.connected(), client.session());
+    let (mut connection, mut session) = (client.connection(), client.session());
     loop {
         moved(Push::Registering);
         match register(&notifications, &client).await {
@@ -217,8 +217,8 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
             Err(why) => moved(Push::Failed { why }),
         }
         let answering = async {
-            while connected.changed().await.is_ok() {
-                if *connected.borrow_and_update() {
+            while connection.changed().await.is_ok() {
+                if *connection.borrow_and_update() == client::Connection::Online {
                     return;
                 }
             }

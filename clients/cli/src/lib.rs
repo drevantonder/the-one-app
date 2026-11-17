@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::{env, fs, io};
 
 use anyhow::{Context, Result, bail};
-use client::{Client, InputResolver, NotApproved, Session};
+use client::{Client, Connection, InputResolver, NotApproved, Session};
 use data_encoding::BASE64;
 use serde_json::{Map, Value, json};
 
@@ -119,19 +119,23 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
 }
 
 /// Waits until this device is in its network. One that isn't says its code and where it's let in, and carries on
-/// once it is; one whose code was denied or ended, or whose network didn't answer, says so and stops.
+/// once it is; one whose code was denied or ended, or that's opening while its network doesn't answer, says so and
+/// stops.
 async fn signed_in(client: &Client) -> Result<()> {
-    let mut session = client.session();
+    let (mut session, mut connection) = (client.session(), client.connection());
     loop {
+        let offline = *connection.borrow_and_update() == Connection::Offline;
         match &*session.borrow_and_update() {
             Session::SignedIn => return Ok(()),
+            Session::Opening if offline => bail!("{}", Connection::Offline),
             Session::Opening => {}
-            out @ (Session::Unreachable { .. } | Session::SignIn { why: Some(NotApproved::Denied | NotApproved::Expired), .. }) => {
-                bail!("{out}")
-            }
+            out @ Session::SignIn { why: Some(NotApproved::Denied | NotApproved::Expired), .. } => bail!("{out}"),
             out @ Session::SignIn { .. } => eprintln!("{out}"),
         }
-        session.changed().await?;
+        tokio::select! {
+            changed = session.changed() => changed?,
+            changed = connection.changed() => changed?,
+        }
     }
 }
 

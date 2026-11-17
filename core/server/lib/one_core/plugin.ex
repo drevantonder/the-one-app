@@ -342,7 +342,8 @@ defmodule OneCore.Plugin do
     which there are and what each means is the launcher's to say, in its skill (`category: "coding"`). One Core knows
     one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one, installed
     for the network, so installing a second is refused, and so is uninstalling it; deploying another as its new
-    version replaces it.
+    version replaces it. A client knows one more, `plugins`: the app that installs and removes plugins, which it
+    opens itself where there's no launcher yet.
   - An app may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
     `subject: "user"` is an app about whoever opens it, as Vault and Devices are, which is opened for them wherever
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
