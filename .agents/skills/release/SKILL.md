@@ -32,6 +32,10 @@ Exactly two rules hold at runtime:
 
 ## Order
 
+One release at a time. Before publishing a server or a client, look for another under way: a build in `one builds`'
+`latest` that not every server or device runs yet, or the release lock held (`${XDG_RUNTIME_DIR:-/tmp}/one-release.lock`
+names its build). If there's one, don't publish: say whose it is, from its commit's author and Agent Memory, and stop.
+
 A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
 is split only for minutes:
 
