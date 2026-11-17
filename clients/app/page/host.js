@@ -16,3 +16,13 @@ export const sandbox = "allow-scripts allow-same-origin allow-forms"
 /// A web address an app opens: the window is sent there, and the app hands it to the device's own browser.
 /** @type {typeof import("./host.js").openLink} */
 export const openLink = (url) => location.assign(url)
+
+/// A haptic: Android's app plays it as Android's own (`MainActivity`), and elsewhere Tauri's haptics plugin, as
+/// UIKit's feedback on an iPhone, and as nothing on a computer. Each follows the system's own setting.
+/** @type {typeof import("./host.js").haptic} */
+export const haptic = (kind) => {
+  if (globalThis.androidHaptic) return globalThis.androidHaptic.postMessage(kind)
+  if (kind === "selection") return invoke("plugin:haptics|selection_feedback")
+  if (kind === "success" || kind === "warning" || kind === "error") return invoke("plugin:haptics|notification_feedback", { type: kind })
+  return invoke("plugin:haptics|impact_feedback", { style: kind })
+}

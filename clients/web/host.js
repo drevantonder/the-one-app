@@ -311,3 +311,10 @@ export const sandbox = "allow-scripts allow-forms"
 /// A web address an app opens, in a tab of its own.
 /** @type {typeof import("../app/page/host.js").openLink} */
 export const openLink = (url) => void open(url, "_blank", "noopener")
+
+/// A haptic, as a short vibration where the browser has one and lets this page vibrate (Chrome on Android, after a
+/// tap), and nothing elsewhere: iOS's Safari and a computer's browsers have none.
+/** @type {Record<import("../app/page/host.js").Haptic, number | number[]>} */
+const VIBRATIONS = { light: 10, soft: 8, medium: 15, rigid: 15, heavy: 25, selection: 5, success: [10, 60, 10], warning: [20, 80, 20], error: [20, 40, 20, 40, 20] }
+/** @type {typeof import("../app/page/host.js").haptic} */
+export const haptic = (kind) => void navigator.vibrate?.(VIBRATIONS[kind])

@@ -173,6 +173,17 @@ export const showRecoveryKey = ({ subject }: Subject = {}): Promise<boolean> => 
 /// it. → whether the device holds their key now. Whose, as `showRecoveryKey` says.
 export const useRecoveryKey = ({ subject }: Subject = {}): Promise<boolean> => greet().then(() => ask<{ done: boolean }>("one/recovery-key", { typed: true, subject })).then(({ done }) => done)
 
+/// `haptic("medium")`: plays a haptic, by iOS's name: an impact (`"light"`, `"medium"`, `"heavy"`, `"rigid"`,
+/// `"soft"`) for something physical, a lift, a snap, a landing; `"selection"` as a value changes step by step; or an
+/// outcome (`"success"`, `"warning"`, `"error"`). An iPhone and Android's app play it, as does Chrome on Android, where
+/// the device has them on; elsewhere it does nothing.
+export const haptic = (kind: Haptic): void =>
+  // An assistant showing the page as an MCP App has no haptics, and says so: that it played none is all there is.
+  void greet().then(() => ask("one/haptic", { kind })).catch(() => {})
+
+/** A haptic, by iOS's name (`haptic`). */
+export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"
+
 /// `changed(() => refresh(notes))`: runs what it's given whenever what this page was answered has changed, to ask
 /// again and draw it. → the function that stops it.
 export function changed(listener: () => void): () => void {

@@ -1,7 +1,9 @@
 package app.theone.client
 
 import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -49,6 +51,22 @@ class MainActivity : TauriActivity() {
       WebViewCompat.addWebMessageListener(webView, "androidBack", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
         behind = message.data == "true"
         gate?.pass()
+      }
+      // A haptic an app asked for, by iOS's name (`one/haptic` in client.js), played as Android's own, which follows
+      // the system's Touch feedback. Flutter's choices for iOS's impacts and selection.
+      WebViewCompat.addWebMessageListener(webView, "androidHaptic", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
+        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+        val played = when (message.data) {
+          "light", "soft" -> HapticFeedbackConstants.VIRTUAL_KEY
+          "medium" -> HapticFeedbackConstants.KEYBOARD_TAP
+          "heavy", "rigid" -> HapticFeedbackConstants.CONTEXT_CLICK
+          "selection" -> HapticFeedbackConstants.CLOCK_TICK
+          "success" -> if (modern) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+          "warning" -> HapticFeedbackConstants.LONG_PRESS
+          "error" -> if (modern) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+          else -> return@addWebMessageListener
+        }
+        webView.performHapticFeedback(played)
       }
     }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

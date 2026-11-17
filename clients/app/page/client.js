@@ -8,7 +8,7 @@
 // The launcher is an app too, which reaches this client from a server as every plugin's does: the app in the category
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
-import { address, invoke, listen, openLink, sandbox } from "./host.js"
+import { address, haptic, invoke, listen, openLink, sandbox } from "./host.js"
 /** @import { Context, Moved, Paged, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
@@ -617,6 +617,9 @@ function recoveryKey(typed, subject) {
 /** @param {View} view @param {Record<string, unknown>} message */
 const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc: "2.0", ...message }, "*")
 
+/// The haptics an app may ask for, by iOS's names.
+/** @type {unknown[]} */
+const HAPTICS = ["light", "medium", "heavy", "rigid", "soft", "selection", "success", "warning", "error"]
 /// What this page answers an app itself. The rest is the client's to answer.
 /** @param {View} view @param {string} method @param {Record<string, any>} params */
 async function respond(view, method, params) {
@@ -657,6 +660,13 @@ async function respond(view, method, params) {
   // A web address opens in the device's own browser, outside the app.
   if (method === "ui/open-link" && /^https?:/.test(new URL(params.url).protocol)) {
     openLink(params.url)
+    return {}
+  }
+  // A haptic plays here, not in the app's frame: only this page reaches the device's, and Chrome lets no frame of
+  // another address vibrate.
+  if (method === "one/haptic") {
+    if (!HAPTICS.includes(params.kind)) throw new Error(`There's no haptic ${params.kind}`)
+    await haptic(params.kind)
     return {}
   }
   // What an app is told of its client, and the few things one changes of it.

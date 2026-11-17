@@ -28,6 +28,7 @@ window = [
   "dep:tauri-plugin-notification",
   "dep:tauri-plugin-notifications",
   "dep:tauri-plugin-window-state",
+  "dep:tauri-plugin-haptics",
   "dep:encryption_client",
   "dep:notifications_client",
   "dep:objc2",
@@ -68,6 +69,11 @@ tauri-plugin-notification = { version = "2.8", optional = true }
 tauri-plugin-window-state = { version = "2.5", optional = true }
 
 # The web view's own back and forward gestures, which Tauri doesn't switch on (`navigation_gestures`).
+# An app's haptics (`one/haptic` in client.js): an iPhone's, and on a computer nothing. Android's plays them through
+# the web view instead (`MainActivity`), as this plugin's Vibrator there doesn't follow the system's Touch feedback.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-haptics = { version = "2.4", optional = true }
+
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
 

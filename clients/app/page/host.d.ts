@@ -12,6 +12,11 @@ export declare const address: Address
 export declare const sandbox: string
 /** A web address an app opens. */
 export declare const openLink: (url: string) => void
+/** Plays a haptic an app asked for (`one/haptic`), where the device has them on. */
+export declare const haptic: (kind: Haptic) => Promise<unknown> | void
+
+/** A haptic, by iOS's name: an impact, a selection, or a notification's outcome. */
+export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"
 
 /** An open app, as `client.js` keeps it. */
 export interface View {
@@ -122,6 +127,9 @@ export interface Commands {
   listen(): void
   tapped(args: { tapped: unknown }): void
   "plugin:notifications|set_click_listener_active"(args: { active: boolean }): void
+  "plugin:haptics|impact_feedback"(args: { style: string }): void
+  "plugin:haptics|selection_feedback"(): void
+  "plugin:haptics|notification_feedback"(args: { type: string }): void
 }
 
 /** Asks where the page runs to do `command`. */
@@ -162,4 +170,6 @@ declare global {
   }
   /** Where Android's app hears whether something is open over the app that's showing (`MainActivity`). */
   var androidBack: { postMessage(message: string): void } | undefined
+  /** Where Android's app plays a haptic, by its name (`MainActivity`). */
+  var androidHaptic: { postMessage(message: string): void } | undefined
 }

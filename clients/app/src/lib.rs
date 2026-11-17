@@ -684,6 +684,8 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).skip_initial_state("main").build());
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_haptics::init());
     builder
         .setup(move |app| {
             app.manage(Start(tokio::sync::watch::Sender::new(None)));
