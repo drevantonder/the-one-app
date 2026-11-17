@@ -222,8 +222,8 @@ defmodule RecentlyDeleted do
   defp unused!(name) do
     if name =~ @plugin do
       owner = User.owner(name)
-      {installed, _tag} = OneCore.Plugins.Installed.read(owner)
-      using = OneCore.Plugins.Installed.installed_for(name) ++ for({_, ^name} <- installed, do: owner)
+      {installed, _automatic} = OneCore.Plugins.Installed.read(owner)
+      using = OneCore.Plugins.Installed.installed_for(name) ++ for({_, %{"plugin" => ^name}} <- installed, do: owner)
 
       if using != [],
         do:

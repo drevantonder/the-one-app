@@ -17,7 +17,7 @@ defmodule OneCore.Tools do
   the call on to.
   """
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
-  alias OneCore.Plugins.{Installed, Calls, Deploy, Rename, Store}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Store}
 
   # What a plugin may do beyond its own, as `permissions/0` says it.
   @permissions %{
@@ -89,6 +89,66 @@ defmodule OneCore.Tools do
       server: %{type: "string", description: "The key of the server it runs on, or no longer does"}
     },
     required: ["plugin", "service", "server"]
+  }
+
+  # Where a plugin is in its life for whoever it's installed for (`OneCore.Plugins.Installed`).
+  @state %{
+    state: %{
+      type: ["string", "null"],
+      enum: ["installing", "installed", "updating", "failed", "recently_deleted", nil],
+      description:
+        "Where it is in its life: installing, installed, updating (also while its trust switches), failed, in Recently Deleted, or null once it's not installed"
+    },
+    stage: %{
+      type: ["string", "null"],
+      enum: ["fetching", "building", "starting", nil],
+      description: "While installing or updating: fetching its code, building it, or starting it"
+    },
+    why: %{type: ["string", "null"], description: "Why it failed, if it did"},
+    deleted: %{type: ["integer", "null"], description: "When it was uninstalled, in ms since 1970, while it's in Recently Deleted"},
+    update: %{
+      type: ["object", "null"],
+      description:
+        "A newer version to take, while it's installed, or null while it's up to date: `available`, or `needs_approval` where it asks for more permissions",
+      properties: %{
+        state: %{type: "string", enum: ["available", "needs_approval"]},
+        version: %{type: ["integer", "null"], description: "The newer version deployed, if it's one"},
+        commit: %{type: ["string", "null"], description: "The newer commit at its git source, if it's one"},
+        permissions: %{type: "array", items: %{type: "string"}, description: "What it asks for that the version running doesn't"},
+        commits: %{
+          type: "array",
+          description: "The commits since the version running, newest first: read what changed before taking a stranger's",
+          items: %{
+            type: "object",
+            properties: %{commit: %{type: "string"}, subject: %{type: "string"}, author: %{type: "string"}, date: %{type: "string"}}
+          }
+        },
+        why: %{type: ["string", "null"], description: "Why taking it failed last time, if it did; the version before kept running"}
+      },
+      required: ["state"]
+    }
+  }
+
+  # What a tool that moves a plugin in its life answers: where it is now, for whoever it's installed for.
+  @moved %{
+    type: "object",
+    properties:
+      Map.merge(@state, %{
+        name: %{type: "string", description: "The name it's installed by"},
+        for: %{type: "string", description: "Who it's installed for"},
+        plugin: %{type: ["string", "null"], description: "Its artifact, or null once it's not installed any more"},
+        version: %{type: ["integer", "null"], description: "The version that runs, if one does"},
+        trusted: %{type: ["boolean", "null"]},
+        permissions: @permissions
+      }),
+    required: ["name", "for", "plugin", "state", "permissions"]
+  }
+
+  # A tool that takes only the name a plugin is installed by.
+  @named %{
+    type: "object",
+    properties: %{name: %{type: "string", description: "The name it's installed by"}},
+    required: ["name"]
   }
 
   @tools [
@@ -182,18 +242,22 @@ defmodule OneCore.Tools do
       read_only: true,
       description: """
       Lists the plugins installed for you and for the network, as `npm ls` does packages: asked for a group, for it
-      and the network. Each with the name it's installed by, who it's installed `for`, its artifact (`plugin`), its
-      latest version, whether it's `trusted` or runs in a sandbox, what it may do beyond its own (`permissions`), the hash
-      of the files that version was deployed from (`source`), and, if it was installed from
-      a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, whether it had changes not
-      committed (`dirty`), and the `hash` of the files as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
-      have moved on upstream or changed since, and `one plugins update` installs the newer.
+      and the network, and those of yours in Recently Deleted. Each with the name it's installed by, who it's
+      installed `for`, its artifact (`plugin`), the version that runs for them, where it is in its life (`state`, and
+      its `stage` while installing or updating, `why` it failed), whether it's `trusted` or runs in a sandbox, what it
+      may do beyond its own (`permissions`), and a newer version to take (`update`). Each owner's install updates on
+      its own. With the latest version's `source`, the hash of the files it was deployed from, and, if it was installed
+      from a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, whether it had changes not
+      committed (`dirty`), and the `hash` of the files as installed, which differs from `source` once it's changed since.
+      `automatic` is whether updates are taken without asking, for whoever they're listed for. `plugins_check` looks
+      for newer versions now, `plugins_update` takes one.
       """,
       inputs: %{type: "object", properties: %{}},
       outputs: %{
         type: "object",
         properties: %{
           for: %{type: ["string", "null"], description: "Whoever they're listed for"},
+          automatic: %{type: "boolean", description: "Whether their updates are taken without asking, where they may be"},
           plugins: %{
             type: "array",
             items: %{
@@ -202,8 +266,14 @@ defmodule OneCore.Tools do
                 name: %{type: "string", description: "The name it's installed by"},
                 for: %{type: "string", description: "Who it's installed for"},
                 plugin: %{type: "string", description: "Its artifact: users/alice/plugins/notes"},
-                version: %{type: ["integer", "null"], description: "Its latest version"},
+                version: %{type: ["integer", "null"], description: "The version that runs for them"},
+                latest: %{type: ["integer", "null"], description: "Its latest version"},
                 trusted: %{type: "boolean"},
+                state: @state.state,
+                stage: @state.stage,
+                why: @state.why,
+                deleted: @state.deleted,
+                update: @state.update,
                 permissions: @permissions,
                 source: %{type: ["string", "null"], description: "The hash of the files its latest version was deployed from"},
                 from: %{
@@ -218,43 +288,39 @@ defmodule OneCore.Tools do
                   }
                 }
               },
-              required: ["name", "for", "plugin", "trusted", "permissions"]
+              required: ["name", "for", "plugin", "trusted", "state", "permissions"]
             }
           }
         },
-        required: ["for", "plugins"]
+        required: ["for", "automatic", "plugins"]
       }
     },
     %{
       name: "install",
       description: """
-      Adds a plugin someone else deployed for you: asked for a group or for the network, for them. It answers with
-      what the plugin may do beyond its own (its permissions).
-      Its code runs on a server of yours, so you need one, unless it's untrusted; for the network, its owners
-      and installers add plugins, and anyone else asks one of them to.
+      Adds a plugin someone else deployed for you: asked for a group or for the network, for them. Also tries
+      again one that failed to install. It's installing, a stage at a time, until it answers where it is: installed,
+      with what it may do beyond its own (its permissions), or failed, saying why.
+      Anyone installs for themselves; for the network or a group, its owners and installers do, and anyone else asks
+      one of them to, themselves. Its code runs on a server of whoever it's for, unless it's untrusted.
+      It's trusted where it's the network's or your own, and a stranger's (another user's or group's) is untrusted
+      and runs in a sandbox, unless `trusted` says otherwise, which only someone who may install for them says.
       `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
-      It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
-      use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
-      with you first, as a viewer. The plugins it uses are installed for you first.
+      It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for, and
+      updates on its own: a newer version deployed is an update for them (`plugins`). One in use for a group you're
+      in or for the network is open to you; one that isn't, whoever it belongs to shares with you first, as a
+      viewer. The plugins it uses are installed for you first.
       """,
       inputs: %{
         type: "object",
         properties: %{
           plugin: %{type: "string", description: "The plugin, by its artifact's name: users/alice/plugins/notes"},
-          name: %{type: "string", description: "What to call it. Its own name, if left out"}
+          name: %{type: "string", description: "What to call it. Its own name, if left out"},
+          trusted: %{type: "boolean", description: "Whether it's trusted, or runs in a sandbox. Left out, as where it comes from says"}
         },
         required: ["plugin"]
       },
-      outputs: %{
-        type: "object",
-        properties: %{
-          plugin: %{type: "string", description: "The plugin, by its artifact's name"},
-          for: %{type: "string", description: "Who it's installed for"},
-          name: %{type: "string", description: "The name it's installed by"},
-          permissions: @permissions
-        },
-        required: ["plugin", "for", "name", "permissions"]
-      }
+      outputs: @moved
     },
     %{
       name: "rename",
@@ -281,16 +347,110 @@ defmodule OneCore.Tools do
     },
     %{
       name: "uninstall",
-      description: "Removes a plugin from what's installed for you. It stays whoever's it is, and what it kept stays.",
+      description: """
+      Removes a plugin from what's installed for you. It waits in Recently Deleted with what it kept for 30 days,
+      when `plugins_restore` brings it back as it was, and is then removed for good with what it kept. It stays
+      whoever's it is.
+      """,
+      inputs: @named,
+      outputs: @moved
+    },
+    %{
+      name: "plugins_restore",
+      description: "Brings back a plugin of yours from Recently Deleted, as it was, with what it kept.",
+      inputs: @named,
+      outputs: @moved
+    },
+    %{
+      name: "plugins_update",
+      description: """
+      Updates a plugin of yours to the newer version `plugins` offers (Update), or with `approve` takes one that asks
+      for more permissions than it has (Approve), which otherwise waits for that. It's updating, a stage at a time,
+      while the version before keeps running, until it answers where it is: installed at the new version, or failed,
+      saying why, with the version before still running. It stays trusted, or untrusted, as it was. A stranger's
+      plugin is never updated without asking: read the commits it brings first (the skill installing-plugins).
+      """,
       inputs: %{
         type: "object",
-        properties: %{name: %{type: "string", description: "The plugin's name"}},
+        properties: %{
+          name: %{type: "string", description: "The name it's installed by"},
+          approve: %{type: "boolean", description: "Whether it may ask for more permissions than it has"}
+        },
         required: ["name"]
+      },
+      outputs: @moved
+    },
+    %{
+      name: "plugins_decline",
+      description: "Leaves an update that asks for more permissions for now (Not now): it stays there to take.",
+      inputs: @named,
+      outputs: @moved
+    },
+    %{
+      name: "plugins_retry",
+      description: "Tries again what failed of a plugin of yours (Try Again): installing it, updating it or switching its trust.",
+      inputs: @named,
+      outputs: @moved
+    },
+    %{
+      name: "plugins_dismiss",
+      description: """
+      Dismisses a plugin of yours that failed: one that failed to install is not installed, and one whose update
+      failed carries on as it was, its update still there to take.
+      """,
+      inputs: @named,
+      outputs: @moved
+    },
+    %{
+      name: "plugins_trust",
+      description: """
+      Makes a plugin of yours trusted, running on a server of yours with everything you can reach, or untrusted,
+      running in a sandbox with only what it's given. It restarts the other way, updating meanwhile. A stranger's
+      plugin is made trusted only by someone who may install for you.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{
+          name: %{type: "string", description: "The name it's installed by"},
+          trusted: %{type: "boolean", description: "Whether it's trusted, or runs in a sandbox"}
+        },
+        required: ["name", "trusted"]
+      },
+      outputs: @moved
+    },
+    %{
+      name: "plugins_check",
+      description: """
+      Looks now for newer versions of your plugins, as servers do once a day: a new commit at the git source of one
+      of your own, and a newer version deployed of anyone's. What it finds, `plugins` lists as their update, and one
+      that may be taken without asking is taken.
+      """,
+      inputs: %{type: "object", properties: %{}},
+      outputs: %{
+        type: "object",
+        properties: %{
+          for: %{type: "string"},
+          plugins: %{type: "array", items: @moved, description: "Each, as it is now"}
+        },
+        required: ["for", "plugins"]
+      }
+    },
+    %{
+      name: "plugins_automatic_updates",
+      description: """
+      Turns on or off taking updates without asking, for you, a group or the network. It's on unless turned off, and
+      takes only an update of a trusted plugin that asks for no more permissions, from the network's own plugins or
+      your own repos.
+      """,
+      inputs: %{
+        type: "object",
+        properties: %{on: %{type: "boolean"}},
+        required: ["on"]
       },
       outputs: %{
         type: "object",
-        properties: %{name: %{type: "string"}, for: %{type: "string", description: "Who it was installed for"}},
-        required: ["name", "for"]
+        properties: %{for: %{type: "string"}, automatic: %{type: "boolean"}},
+        required: ["for", "automatic"]
       }
     },
     %{
@@ -580,6 +740,9 @@ defmodule OneCore.Tools do
   # call.
   @taking Enum.map(@tools, &OneCore.Plugins.Version.schemas/1)
 
+  # The tools a plugin has no say in for itself: how one that breaks is undone.
+  @apart ~w(deploy uninstall rename plugins_restore plugins_update plugins_decline plugins_retry plugins_dismiss plugins_trust)
+
   @doc "One Core's own tools, each as a plugin says one of its own."
   def tools, do: @taking
 
@@ -603,7 +766,7 @@ defmodule OneCore.Tools do
 
         about = %{"plugin" => nil, "tool" => name, "inputs" => inputs}
         # A plugin has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
-        apart = if name in ["deploy", "uninstall", "rename"], do: {User.owner(elem(principal, 1)), inputs["name"]}
+        apart = if name in @apart, do: {User.owner(elem(principal, 1)), inputs["name"]}
 
         Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward), apart)
     end
@@ -639,13 +802,17 @@ defmodule OneCore.Tools do
   # An untrusted plugin runs on any server acting for whoever it's for, the network's among them.
   defp run("deploy", %{"name" => name, "files" => files} = inputs, {_actor, subject} = principal, forward) do
     plugin = Plugins.plugin(subject, name)
-    trusted = Map.get(inputs, "trusted", plugin == nil or Store.about(plugin)["trusted"] != false)
+    was = plugin == nil or Plugins.running(subject)[name].trusted
+    trusted = Map.get(inputs, "trusted", was)
     if trusted, do: runs(subject, forward), else: at(subject, forward)
 
     case plugin do
       nil -> reaches!(principal, subject, "installer")
       plugin -> reaches!(principal, plugin, "editor")
     end
+
+    # Only someone who may install for them makes a stranger's plugin trusted.
+    if trusted and not was, do: reaches!(principal, subject, "installer")
 
     if plugin == nil and inputs["new"] != true, do: elsewhere!(principal, name)
 
@@ -676,37 +843,36 @@ defmodule OneCore.Tools do
   end
 
   defp run("plugins", _inputs, {_actor, subject}, _pass) do
-    installed =
-      for at <- Plugins.chain(subject), {name, version} <- Enum.sort(Plugins.versions([at])), do: {at, name, version}
+    owner = User.owner(subject)
 
-    latest = Bucket.read_all(for {_at, _name, version} <- installed, do: version.artifact <> "/latest")
+    installed =
+      for at <- Plugins.chain(subject),
+          {records, _automatic} = Installed.read(at),
+          {name, record} <- Enum.sort(records),
+          at == owner or record["state"] != "recently_deleted",
+          do: {at, name, record}
+
+    latest = Bucket.read_all(for {_at, _name, record} <- installed, do: record["plugin"] <> "/latest")
 
     plugins =
-      for {{at, name, version}, read} <- Enum.zip(installed, latest) do
+      for {{at, name, record}, read} <- Enum.zip(installed, latest) do
         about = with {:ok, latest, _tag} <- read, do: JSON.decode!(latest), else: (_ -> %{})
 
-        %{
-          name: name,
-          for: at,
-          plugin: version.artifact,
-          version: about["number"],
-          trusted: version.trusted,
-          permissions: version.permissions,
-          source: about["source"],
-          from: about["from"]
-        }
+        at
+        |> moved(name, record)
+        |> Map.merge(%{latest: about["number"], source: about["source"], from: about["from"]})
       end
 
-    %{for: User.owner(subject), plugins: plugins}
+    %{for: owner, automatic: elem(Installed.read(owner || "network"), 1), plugins: plugins}
   end
 
   defp run("install", %{"plugin" => plugin} = inputs, {_actor, subject} = principal, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
-    if Store.about(plugin)["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
+    trusted = Map.get(inputs, "trusted", Lifecycle.trusted?(subject, plugin))
+    if trusted, do: runs(subject, forward), else: at(subject, forward)
     opens!(principal, plugin)
     reaches!(principal, subject, "installer")
-    with {:error, why} <- Installed.install(subject, name, plugin), do: raise(why)
-    %{plugin: plugin, for: subject, name: name, permissions: permitted(Plugins.running(subject)[name])}
+    moved!(subject, name, Lifecycle.install(subject, name, plugin, trusted))
   end
 
   # It's renamed where it runs, which is where it's deployed again.
@@ -721,9 +887,66 @@ defmodule OneCore.Tools do
   defp run("uninstall", %{"name" => name}, {_actor, subject} = principal, forward) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
-    with {:error, why} <- Installed.uninstall(subject, name), do: raise(why)
-    %{name: name, for: subject}
+    moved!(subject, name, Lifecycle.uninstall(subject, name))
   end
+
+  # Restoring is undoing an uninstall, which is an owner's.
+  defp run("plugins_restore", %{"name" => name}, {_actor, subject} = principal, forward) do
+    record!(subject, name, forward)
+    reaches!(principal, subject, "owner")
+    moved!(subject, name, Lifecycle.restore(subject, name))
+  end
+
+  defp run("plugins_update", %{"name" => name} = inputs, {_actor, subject} = principal, forward) do
+    record!(subject, name, forward)
+    reaches!(principal, subject, "installer")
+    moved!(subject, name, Lifecycle.update(subject, name, inputs["approve"] == true))
+  end
+
+  defp run("plugins_decline", %{"name" => name}, {_actor, subject} = principal, forward) do
+    record!(subject, name, forward)
+    reaches!(principal, subject, "installer")
+    moved!(subject, name, Lifecycle.change(subject, name, :decline))
+  end
+
+  defp run("plugins_retry", %{"name" => name}, {_actor, subject} = principal, forward) do
+    record!(subject, name, forward)
+    reaches!(principal, subject, "installer")
+    moved!(subject, name, Lifecycle.retry(subject, name))
+  end
+
+  defp run("plugins_dismiss", %{"name" => name}, {_actor, subject} = principal, forward) do
+    record!(subject, name, forward)
+    reaches!(principal, subject, "installer")
+    moved!(subject, name, Lifecycle.change(subject, name, :dismiss))
+  end
+
+  # Untrusted, it runs on any server acting for them; trusted, on one that runs their plugins.
+  defp run("plugins_trust", %{"name" => name, "trusted" => trusted}, {_actor, subject} = principal, forward) do
+    if trusted, do: runs(subject, forward), else: at(subject, forward)
+    reaches!(principal, subject, "installer")
+    moved!(subject, name, Lifecycle.trust(subject, name, trusted))
+  end
+
+  defp run("plugins_check", _inputs, {_actor, subject} = principal, forward) do
+    owner = User.owner(subject) || "network"
+    at(owner, forward)
+    reaches!(principal, owner, "installer")
+    Lifecycle.reconcile(owner)
+    Lifecycle.check(owner)
+    {records, _automatic} = Installed.read(owner)
+    %{for: owner, plugins: for({name, record} <- Enum.sort(records), do: moved(owner, name, record))}
+  end
+
+  defp run("plugins_automatic_updates", %{"on" => on}, {_actor, subject} = principal, forward) do
+    owner = User.owner(subject) || "network"
+    at(owner, forward)
+    reaches!(principal, owner, "installer")
+    Installed.automatic(owner, on)
+    if on, do: Task.start(fn -> Lifecycle.reconcile(owner) end)
+    %{for: owner, automatic: on}
+  end
+
 
   # A file sent this way lands in the plugin's own artifact, for whoever it was installed for, under a name nobody
   # could guess.
@@ -837,6 +1060,55 @@ defmodule OneCore.Tools do
     end)
   end
 
+  # Where a plugin is in its life for `owner`, as a tool that moves it answers: `record` is its record, or `nil` once
+  # it's not installed any more.
+  defp moved(owner, name, record) do
+    record = record || %{}
+    version = with number when is_integer(number) <- record["version"], do: Plugins.running(owner)[name]
+    update = record["update"]
+
+    %{
+      name: name,
+      for: owner,
+      plugin: record["plugin"],
+      version: record["version"],
+      trusted: record["trusted"],
+      state: record["state"],
+      stage: record["stage"],
+      why: record["why"],
+      deleted: record["deleted"],
+      update:
+        update &&
+          %{
+            state: update["state"],
+            version: update["version"],
+            commit: update["commit"],
+            permissions: update["permissions"] || [],
+            commits: update["commits"] || [],
+            why: update["why"]
+          },
+      permissions: permitted(version)
+    }
+  end
+
+  # What failed is an error for whoever asked, as it is where it was asked: the record says so too, until it's tried
+  # again or dismissed.
+  defp moved!(_owner, _name, {:error, why}), do: raise(why)
+
+  defp moved!(_owner, name, %{"state" => "failed", "why" => why}),
+    do: raise("#{why}\n\n#{name} failed. Try again (plugins_retry) or dismiss it (plugins_dismiss).")
+
+  defp moved!(owner, name, record), do: moved(owner, name, record)
+
+  # Has a server that runs `owner`'s plugins move the record of the plugin `name`, or any acting for them where it's
+  # untrusted, since the version it moves to runs where this moves it.
+  defp record!(owner, name, forward) do
+    case elem(Installed.read(owner), 0)[name] do
+      %{"trusted" => false} -> at(owner, forward)
+      _ -> runs(owner, forward)
+    end
+  end
+
   # Raises where a plugin named `name` is installed for someone else whoever asked is in, whose plugins they find
   # too: a new one would answer first for whoever it's deployed for, empty, as a second copy.
   defp elsewhere!({actor, subject}, name) do
@@ -882,7 +1154,7 @@ defmodule OneCore.Tools do
   defp opens!({actor, _subject} = principal, plugin) do
     with {:refuse, why} <- reaches(principal, plugin, "viewer") do
       in_use =
-        for of <- [User.owner(plugin) | Installed.installed_for(plugin)],
+        for of <- [User.owner(plugin) | Installed.in_use_for(plugin)],
             of == "network" or match?("groups/" <> _, of),
             do: of
 

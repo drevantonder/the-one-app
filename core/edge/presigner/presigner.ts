@@ -27,7 +27,7 @@ const SERVER = /^servers\/([0-9a-f]{64})\//;
  * the server to pass a call on to, knows who may do anything where no plugin decides who may, updates, and lists
  * every app there is.
  */
-const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
+const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:plugins\/.*|installs|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
 /**
  * That a user, a group or the network installed a plugin is a blob under the plugin, `installed/<who>`, which a server
  * acting for them writes and removes, whoever's the plugin is: a deploy of it tells their servers.

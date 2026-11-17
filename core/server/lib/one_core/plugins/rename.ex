@@ -22,12 +22,12 @@ defmodule OneCore.Plugins.Rename do
     was = "#{owner}/plugins/#{name}"
     is = "#{owner}/plugins/#{to}"
     installs = installs(owner, was)
-    moved = for {at, as} <- installs, do: {at, as, if(as == name, do: to, else: as)}
+    moved = for {at, as, _record} <- installs, do: {at, as, if(as == name, do: to, else: as)}
 
     with :ok <- Installed.named(to),
          :ok <- renamable(owner, name, to, was, is, moved),
          :ok <- follows(installs, name, was) do
-      case moved(owner, name, to, was, is, moved) do
+      case moved(owner, name, to, was, is, moved, installs) do
         :ok ->
           for {at, as, now} <- moved do
             about = %{"was" => was, "is" => is, "for" => at, "from" => as, "to" => now}
@@ -40,11 +40,11 @@ defmodule OneCore.Plugins.Rename do
           :ok
 
         {:error, why} ->
-          # Whoever had it finds it by its old name again, and what was copied goes: the old is all there.
-          installed(installs, fn at, installed ->
-            installed
-            |> Map.reject(&(elem(&1, 1) == is))
-            |> Map.merge(Map.new(for {^at, as} <- installs, do: {as, was}))
+          # Whoever had it finds it by its old name again, as it was, and what was copied goes: the old is all there.
+          installed(installs, fn at, records ->
+            records
+            |> Map.reject(&(elem(&1, 1)["plugin"] == is))
+            |> Map.merge(Map.new(for {^at, as, record} <- installs, do: {as, record}))
           end)
 
           for {at, as, now} <- moved, as != now, blob <- Bucket.list("#{at}/own/#{now}/"), do: Bucket.remove(blob)
@@ -57,12 +57,12 @@ defmodule OneCore.Plugins.Rename do
 
   # Copies it to the new name and has whoever had it find it there, then copies what was written meanwhile, and
   # gives whether every copy is the same as what it was copied from.
-  defp moved(owner, name, to, was, is, moved) do
+  defp moved(owner, name, to, was, is, moved, records) do
     with :ok <- copy("#{was}/", "#{is}/", &(&1 != "latest" and not String.starts_with?(&1, "installed/"))) do
       # Whoever had it stops finding it by its old name before what it keeps is copied, so nothing's written there
       # after. Its latest version is copied last: until then the new name names no plugin.
-      installs = for {at, as, _now} <- moved, do: {at, as}
-      installed(installs, fn _at, installed -> Map.reject(installed, &(elem(&1, 1) == was)) end)
+      installs = for {at, as, _now} <- moved, do: {at, as, nil}
+      installed(installs, fn _at, records -> Map.reject(records, &(elem(&1, 1)["plugin"] == was)) end)
       {:ok, latest, _tag} = Bucket.read("#{was}/latest")
       :ok = Bucket.write("#{is}/latest", latest)
       {_number, code, _tag} = Store.latest(is)
@@ -70,12 +70,20 @@ defmodule OneCore.Plugins.Rename do
 
       with :ok <- each(moved, fn {at, as, now} -> copy("#{at}/own/#{as}/", "#{at}/own/#{now}/") end),
            files = skill(Store.source(is, code), name, to),
-           {:ok, _number, _warnings} <- Deploy.deploy(owner, to, files, :stored, :stored, fn _ -> installed? end),
-           :ok <- each(moved, fn {at, _as, now} -> if(at == owner, do: :ok, else: Installed.install(at, now, is)) end),
+           {:ok, number, _warnings} <- Deploy.deploy(owner, to, files, :stored, :stored, fn _ -> installed? end),
+           :ok <- each(moved, fn {at, _as, now} -> if(at == owner, do: :ok, else: renamed(at, now, is, number, records)) end),
            :ok <- runs_renamed(moved, is) do
         each(moved, fn {at, as, now} -> copy("#{at}/own/#{as}/", "#{at}/own/#{now}/") end)
       end
     end
+  end
+
+  # Whoever else had it has it by its new name, as they had it, at the version it was renamed as.
+  defp renamed(at, now, is, number, records) do
+    record = Enum.find_value(records, fn {^at, _as, record} -> record; _ -> nil end) || Installed.record(is, number, true)
+    Installed.edit(at, &Map.put(&1, now, Map.merge(record, %{"plugin" => is, "version" => number})))
+    Plugins.reload(at)
+    :ok
   end
 
   # Its skill is named as the plugin is (`OneCore.Plugins.Version`).
@@ -104,17 +112,18 @@ defmodule OneCore.Plugins.Rename do
     end
   end
 
-  # Who it's installed for, each with the name it's installed by there: whoever's it is first, if they have it.
+  # Who it's installed for, each with the name it's installed by there and its record: whoever's it is first, if
+  # they have it.
   defp installs(owner, was) do
     for at <- Enum.uniq([owner | Installed.installed_for(was)]),
-        {installed, _tag} = Installed.read(at),
-        {as, ^was} <- installed,
-        do: {at, as}
+        {records, _automatic} = Installed.read(at),
+        {as, %{"plugin" => ^was} = record} <- records,
+        do: {at, as, record}
   end
 
   # What would be left naming its old name, or couldn't be copied, refuses it before anything is changed.
   defp follows(installs, name, was) do
-    servers = Enum.uniq(Enum.flat_map(installs, fn {at, _as} -> Servers.acting(at) end))
+    servers = Enum.uniq(Enum.flat_map(installs, fn {at, _as, _record} -> Servers.acting(at) end))
 
     serving =
       for key <- servers, {^was, service} <- Servers.installed(key), do: "#{service} on #{Servers.name(key) || key}"
@@ -137,7 +146,7 @@ defmodule OneCore.Plugins.Rename do
         String.starts_with?(path, "server/") and text =~ ~r/\bmake\(/
       end)
 
-    encrypted = for {at, as} <- installs, Bucket.list("#{at}/own/#{as}/keys/") != [], do: at
+    encrypted = for {at, as, _record} <- installs, Bucket.list("#{at}/own/#{as}/keys/") != [], do: at
 
     cond do
       serving != [] ->
@@ -165,8 +174,8 @@ defmodule OneCore.Plugins.Rename do
 
   # Changes what's installed for each of `installs` as `change` says, and has their servers look.
   defp installed(installs, change) do
-    owners = Enum.uniq(for {at, _as} <- installs, do: at)
-    for at <- owners, do: :ok = Installed.note(at, &{:ok, change.(at, &1)})
+    owners = Enum.uniq(for {at, _as, _record} <- installs, do: at)
+    for at <- owners, do: :ok = Installed.edit(at, &change.(at, &1))
     for at <- owners, do: Plugins.reload(at)
     Server.notify_servers(owners)
   end

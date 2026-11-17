@@ -108,8 +108,6 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
             install::uninstall(&client, name).await?
         }
         ["deploy", ..] if words.contains(&"--files-from") => install::deploy_folder(&client, &args).await?,
-        ["plugins", "check", ..] => install::check(&client, &args[2..]).await?,
-        ["plugins", "update", ..] => install::update(&client, &args[2..]).await?,
         _ => command(&client, &args).await?,
     };
     client.close().await;

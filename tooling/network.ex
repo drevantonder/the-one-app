@@ -53,7 +53,7 @@ defmodule Mix.Tasks.Network do
   """
   use Mix.Task
   alias OneCore.{Edge, Iroh, Server, Servers, User}
-  alias OneCore.Plugins.{Deploy, Installed}
+  alias OneCore.Plugins.Deploy
 
   @root Path.expand("..", __DIR__)
 
@@ -109,8 +109,8 @@ defmodule Mix.Tasks.Network do
     end
 
     if without = options[:without] do
-      case Installed.uninstall(options[:subject] || "network", without) do
-        :ok ->
+      case OneCore.Plugins.Lifecycle.uninstall(options[:subject] || "network", without) do
+        %{} ->
           Mix.shell().info("#{without} is removed from what's installed for #{options[:subject] || "the network"}.")
 
         {:error, why} ->

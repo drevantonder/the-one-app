@@ -6,7 +6,9 @@
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
 # someone with none adds none for themselves but an untrusted one, which runs in a sandbox, where it calls only the tools it's permitted and a
-# stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does, renaming one among them. One Core's own tools are whoever's may. Anyone brings a server,
+# stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does, renaming one among them. A stranger's
+# plugin is untrusted until someone who may install for them says it's trusted, and one uninstalled waits in Recently
+# Deleted until it's restored. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. Whoever may deploy a plugin looks into it as it runs, at their own calls alone, and not into a sensitive
 # one. A plugin that decides refuses a call with its reason, and one that breaks is undone. Who may approve is
@@ -465,11 +467,14 @@ refused as bob diary write --text "Dear diary"
 refused as bob install --plugin users/alice/plugins/diary
 may as alice permissions share --artifact users/alice/plugins/diary --relation viewer --who everyone
 may as bob install --plugin users/alice/plugins/diary
+[[ $output == *'"trusted":false'* ]] && echo "  alice's plugin is a stranger's to bob, so it's untrusted"
 may as bob diary write --text "Mine"
 listed=$(skills as bob)
 echo "  bob is listed its skill now: $listed"
 [[ " $listed " == *" diary "* ]]
 may as alice for groups/family install --plugin users/alice/plugins/diary
+refused as carol for groups/family plugins trust --name diary --trusted true
+may as alice for groups/family plugins trust --name diary --trusted true
 may as carol for groups/family diary write --text "Ours"
 refused as dave for groups/family diary write --text "Theirs"
 may as owner for network install --plugin users/alice/plugins/diary --name journal
@@ -478,7 +483,9 @@ refused as alice reader read --note users/bob/own/diary
 may as bob uninstall --name diary
 refused as bob diary write --text "Mine again"
 may as alice diary write --text "Still here"
-may as bob install --plugin users/alice/plugins/diary
+refused as bob install --plugin users/alice/plugins/diary
+may as bob plugins restore --name diary
+may as bob diary write --text "Mine again"
 
 say "A plugin's code is open to everyone it's in use for, and to nobody else, and what it keeps stays whoever's it is"
 may as alice deploy --name recipes --files-from "$folder/notes"

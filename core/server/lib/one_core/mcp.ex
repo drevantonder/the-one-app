@@ -139,6 +139,11 @@ defmodule OneCore.Mcp do
 
         ""
 
+      # Another server saying where a plugin is in its life for someone moved, which this one's clients ask again.
+      {:ok, %{"method" => "notifications/one/changed"}} ->
+        Server.changed()
+        ""
+
       {:ok, %{"method" => _notification}} ->
         ""
 

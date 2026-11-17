@@ -35,7 +35,8 @@ defmodule OneCore.Application do
         Plugins,
         Server,
         Services,
-        Jobs
+        Jobs,
+        OneCore.Plugins.Lifecycle
       ]
 
       # It's restarting at the network's edge from before it's reached there until it's up, its plugins started, so

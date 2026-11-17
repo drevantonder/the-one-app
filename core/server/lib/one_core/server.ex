@@ -176,6 +176,8 @@ defmodule OneCore.Server do
     OneCore.Plugins.Deploy.forget()
     if owner == "network", do: Hooks.forget(["device"])
     if Plugins.reload(owner), do: changed()
+    # What's newer for them is offered, and taken where it may be, behind it.
+    if Servers.here?(owner), do: Task.start(fn -> OneCore.Plugins.Lifecycle.reconcile(owner) end)
     :ok
   end
 

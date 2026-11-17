@@ -5,7 +5,7 @@ defmodule OneCore.Plugins.Store do
   some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `latest` says
   which set it runs now, with that version's number. A deploy replaces `latest` only if it's unchanged, so two
   deploys at once can't both be the plugin's next version, and first writes the version it replaces to
-  `versions/<number>`; only the last few versions keep their files (`prune/1`). `latest` names the files it was deployed from too, by their
+  `versions/<number>`; only the last few versions keep their files, and any someone has installed (`prune/1`). `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
   version after keeps its `from`, so one whose `source` isn't that hash was changed since. `trusted` says whether it's
@@ -122,16 +122,23 @@ defmodule OneCore.Plugins.Store do
   @versions_kept 3
 
   @doc """
-  Removes the files of the plugin `artifact`'s versions before its last few (`@versions_kept`): the set each ran, the files
-  it was deployed from and what it said of itself, and its entry in `versions/`. Nothing runs them, and nothing
-  goes back to one: a plugin goes back by being deployed again from its git repo. A set a kept version runs too
-  stays. Gives how many blobs went.
+  Removes the files of the plugin `artifact`'s versions before its last few (`@versions_kept`) that nobody has
+  installed: the set each ran, the files it was deployed from and what it said of itself, and its entry in
+  `versions/`. Nothing runs them, and nothing goes back to one: a plugin goes back by being deployed again from its
+  git repo. A set a kept version runs too stays. Gives how many blobs went.
   """
   def prune(artifact) do
     with {number, latest, _tag} <- latest(artifact) do
       history = Bucket.list("#{artifact}/versions/")
       codes = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, code, _tag} -> {blob, code} end)
-      {old, retained} = Enum.split_with(codes, fn {blob, _code} -> String.to_integer(Path.basename(blob)) <= number - @versions_kept end)
+      installed = OneCore.Plugins.Installed.versions_installed(artifact)
+
+      {old, retained} =
+        Enum.split_with(codes, fn {blob, _code} ->
+          before = String.to_integer(Path.basename(blob))
+          before <= number - @versions_kept and before not in installed
+        end)
+
       retained = MapSet.new([latest | Enum.map(retained, &elem(&1, 1))])
 
       files =
@@ -148,26 +155,47 @@ defmodule OneCore.Plugins.Store do
   end
 
   @doc """
-  The versions in the bucket of the plugins `artifacts` that are newer than the ones in `latest`: each one's
-  plugin, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
-  false the version described (`described/2`), leaving out one not described yet. An untrusted one is never
-  loaded here, only described. Read at once: a bucket at an address is asked for each over the internet.
-
-  One that couldn't be read or loaded, as when the bucket didn't give its blobs or refused them, is left out, as one
-  that isn't newer is, and said in the log: one plugin never stops the others. The first answer a bucket that didn't
-  answer gives after has this server look again (`OneCore.Bucket`), which finds it newer then.
+  The set of files the plugin `artifact`'s version `number` runs, by its hash, or `nil` where it has no such version
+  or it was pruned.
   """
-  def newer(artifacts, latest, load \\ true) do
-    artifacts
-    |> Task.async_stream(&{&1, unanswered(&1, fn -> about(&1) end)}, max_concurrency: 16, timeout: :infinity)
-    |> Enum.flat_map(fn {:ok, {artifact, in_bucket}} ->
-      with %{"number" => number, "code" => code} <- in_bucket,
-           true <- number > Map.get(latest, artifact, 0),
-           version when version != nil <-
-             unanswered(artifact, fn -> version(artifact, code, load, in_bucket["trusted"] != false) end),
-           true <- load or version != :error,
-           do: [{artifact, number, version}],
-           else: (_ -> [])
+  def code(artifact, number) do
+    case latest(artifact) do
+      {^number, code, _tag} ->
+        code
+
+      {latest, _code, _tag} when number < latest ->
+        with {:ok, code, _tag} <- Bucket.read("#{artifact}/versions/" <> String.pad_leading("#{number}", 8, "0")),
+             do: code,
+             else: (_ -> nil)
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
+  The versions `keys` name, each a plugin, its version's number and whether it runs trusted: each one's key and the
+  version loaded, `:error` for one this server can't compile, or with `load` false the version described
+  (`described/2`), leaving out one not described yet. An untrusted one is never loaded here, only described. Read at
+  once: a bucket at an address is asked for each over the internet.
+
+  One that couldn't be read or loaded, as when the bucket didn't give its blobs or refused them, is left out and said
+  in the log: one plugin never stops the others. The first answer a bucket that didn't answer gives after has this
+  server look again (`OneCore.Bucket`).
+  """
+  def versions(keys, load \\ true) do
+    keys
+    |> Task.async_stream(
+      fn {artifact, number, trusted} = key ->
+        {key, unanswered(artifact, fn -> with code when is_binary(code) <- code(artifact, number), do: version(artifact, code, load, trusted) end)}
+      end,
+      max_concurrency: 16,
+      timeout: :infinity
+    )
+    |> Enum.flat_map(fn
+      {:ok, {{artifact, number, _trusted} = key, {:ok, version}}} -> [{key, {:ok, %{version | artifact: artifact, number: number}}}]
+      {:ok, {key, :error}} -> if load, do: [{key, :error}], else: []
+      {:ok, {_key, _none}} -> []
     end)
   end
 

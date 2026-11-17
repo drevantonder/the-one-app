@@ -33,12 +33,13 @@ defmodule OneCore.Skills do
 
   A plugin from a git repo is code someone else wrote. Installed as it is, its server code runs on the person's
   own machines with everything they can reach: their files, the network, their other plugins' tools and the Vault
-  items it asks for. An untrusted plugin (`one install ... --untrusted`, or `deploy` with `trusted: false`) runs in a
-  sandbox instead, a VM of its own on any of the network's servers, and reaches only its own data, what it's shared,
-  and the tools and hosts its `permissions/0` names; it needs no server of the person's. Install anything you didn't
-  write untrusted, and say so when a plugin can't run that way (deploying it says why). Either way, you check it for
-  them, as a colleague would before running a stranger's script, and install it only once they say yes: the sandbox
-  limits where its data can go, not what it does with what it's given.
+  items it asks for. An untrusted plugin runs in a sandbox instead, a VM of its own on any of the network's servers,
+  and reaches only its own data, what it's shared, and the tools and hosts its `permissions/0` names; it needs no
+  server of the person's. A stranger's plugin, as `one install` takes any repo's to be, is untrusted unless someone
+  who may install for them says otherwise (`--trusted`). Keep a plugin you didn't write untrusted, and say so when it
+  can't run that way (installing it says why). Either way, you
+  check it for them, as a colleague would before running a stranger's script, and install it only once they say yes:
+  the sandbox limits where its data can go, not what it does with what it's given.
 
   Installing for the person themselves needs nothing more; for a group or the network, its owners or an `installer`
   of it do it. Someone who isn't asks one of them to, themselves: the network takes no requests.
@@ -66,11 +67,17 @@ defmodule OneCore.Skills do
   group or everyone. It's their own copy, theirs to change, and the network keeps where it came from. In a network's
   repo, `plugins.lock` records it at that commit, and `one install` there installs everything it records again.
 
-  Every update is a new stranger's code: read it again. `one plugins check` says which have moved on, and `git -C
-  <its folder> diff <installed commit> <new commit> -- plugins/<name>` shows what changed. Tell the person what's
-  new in what it reaches, its permissions above all, before `one plugins update <name>`. One changed in the network
-  since it was installed is left as it is unless they say to overwrite it (`--force`): bring their change across by
-  hand if they want both.
+  The network looks for newer versions itself, once a day and whenever someone asks (`one plugins check`), and
+  `one plugins` shows each as the plugin's `update`, with the commits it brings and any permissions it asks for
+  that the version running doesn't. A trusted plugin from the network's own plugins or the person's own repos
+  updates by itself while their automatic updates are on; any other update waits for someone who may install for
+  them. Every update of a stranger's plugin is a new stranger's code, even one they made trusted: read what changed
+  before you take it, with `git -C <its folder> diff <installed commit> <new commit> -- plugins/<name>` (`one install
+  <owner>/<repo> --list` fetches it and says the folder), as you read it the first time. Tell the person what's new
+  in what it reaches, its permissions above all, and update it only on their yes: `one plugins update --name <name>`,
+  with `--approve` where it asks for more. Updating it keeps it trusted, or untrusted, as it was. One that fails to
+  update keeps its version running and says why: `one plugins retry --name <name>` tries again, and `one plugins
+  dismiss --name <name>` leaves it.
 
   A plugin with a NIF that isn't built for the network's servers stops with what to build, for which machines, and
   the command: build it from the source you read, then install again.

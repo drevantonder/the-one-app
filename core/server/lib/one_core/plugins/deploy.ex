@@ -26,15 +26,33 @@ defmodule OneCore.Plugins.Deploy do
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
   (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/6` takes it, and
   `trusted` whether it's trusted, where an untrusted plugin runs in a sandbox (`OneCore.Sandbox`), each as the version
-  before had it if `:stored`. Gives its version's number and the compiler's warnings.
+  before had it if `:stored`. It's theirs, so what's installed for them runs it at once; whoever else has it installed
+  sees it as an update (`OneCore.Plugins.Lifecycle`). Gives its version's number and the compiler's warnings.
   """
   def deploy(owner, name, files, from \\ :stored, trusted \\ :stored),
     do: deploy(owner, name, files, from, trusted, fn _version -> true end)
 
   @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
   def deploy(owner, name, files, from, trusted, install?) do
+    with {:ok, number, warnings, version} <- keep(owner, name, files, from, trusted, install?),
+         artifact = version.artifact,
+         :ok <- installed(owner, name, version, install?.(version)) do
+      others = Installed.installed_for(artifact) -- [owner]
+      Server.notify_servers(Enum.uniq([owner | others]))
+      # The servers told look for themselves; this one looks here.
+      for other <- others, Servers.here?(other), do: Task.start(fn -> OneCore.Plugins.Lifecycle.reconcile(other) end)
+      {:ok, number, warnings}
+    end
+  end
+
+  @doc """
+  Builds, checks and keeps a new version of the plugin `name` of `owner`'s, as `deploy/6` does, and gives its number,
+  the compiler's warnings and the version, loaded, or described for an untrusted one, without installing it. Where
+  `install?` says it's to be installed for `owner`, it's checked to fit them first.
+  """
+  def keep(owner, name, files, from, trusted, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
-    trusted = if trusted == :stored, do: Store.about(artifact)["trusted"] != false, else: trusted != false
+    trusted = if trusted == :stored, do: stored_trust(owner, name, artifact), else: trusted != false
 
     with :ok <- check(name, files),
          {:ok, built} <- built(owner, name, files, trusted),
@@ -46,17 +64,37 @@ defmodule OneCore.Plugins.Deploy do
            :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
            {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
-           :ok <- Store.describe(version),
-           :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
+           :ok <- Store.describe(version) do
         listed(artifact, version)
-        if install, do: Plugins.reload(owner, [{artifact, number, {:ok, version}}]), else: Version.unload(version)
-        Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
-        {:ok, number, warnings}
+        {:ok, number, warnings, %{version | number: number}}
       else
         {:error, why} ->
           Version.unload(version)
           {:error, why}
       end
+    end
+  end
+
+  # A version deployed for whoever it's installed for runs for them at once, since it's theirs.
+  defp installed(owner, name, version, true) do
+    commit = Store.about(version.artifact)["from"]["commit"]
+
+    with %{} <- Installed.change(owner, name, {:deployed, version.artifact, version.number, version.trusted, commit}) do
+      Plugins.reload(owner, [{{version.artifact, version.number, version.trusted}, {:ok, version}}])
+      :ok
+    end
+  end
+
+  defp installed(_owner, _name, version, false) do
+    Version.unload(version)
+    :ok
+  end
+
+  # As it's installed for `owner`, where it is, and otherwise as its latest version was deployed.
+  defp stored_trust(owner, name, artifact) do
+    case elem(Installed.read(owner), 0) do
+      %{^name => %{"plugin" => ^artifact, "trusted" => trusted}} -> trusted != false
+      _ -> Store.about(artifact)["trusted"] != false
     end
   end
 
@@ -237,8 +275,8 @@ defmodule OneCore.Plugins.Deploy do
     deploying(name, "building")
 
     with true <- files != %{} || {:error, "There are no files to deploy it from"},
-         {installed, _tag} = Installed.read(@network),
-         install? = &(&1.essential or is_map_key(installed, name)),
+         {installed, _automatic} = Installed.read(@network),
+         install? = &(installed[name] == nil and &1.essential or installed[name]["state"] not in [nil, "recently_deleted"]),
          {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, true, install?),
          :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")
@@ -513,7 +551,7 @@ defmodule OneCore.Plugins.Deploy do
 
     there =
       &(is_map_key(Plugins.running(owner), &1) or
-          (bundled(&1) != %{} and Installed.install(owner, &1, "#{@network}/plugins/#{&1}") == :ok))
+          (bundled(&1) != %{} and OneCore.Plugins.Lifecycle.bring(owner, &1, "#{@network}/plugins/#{&1}") == :ok))
 
     case Enum.reject(uses, there) do
       [] ->

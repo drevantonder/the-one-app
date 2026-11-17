@@ -3,8 +3,8 @@
 //! <name>` fetches the repo with git, deploys that folder as a copy of the installer's own, with where it came from
 //! (`deploy`'s `from`), which the network keeps with the plugin and `plugins` gives back. In a network's repo (a
 //! folder with `plugins/`, or a `plugins.lock`), `plugins.lock` records each too, so `one install` there installs
-//! everything it names at the commits it names: that's how a network is made again from its repo. `one plugins
-//! check` says which have moved on upstream or were changed since, and `one plugins update` installs the newer.
+//! everything it names at the commits it names: that's how a network is made again from its repo. The network
+//! itself looks for newer commits once a day, and offers them as updates (`one plugins check`, `one plugins update`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -117,13 +117,6 @@ impl Source {
         Ok((folder, commit))
     }
 
-    /// The commit a plugin's folder would be installed at now, if its files differ from those at `commit`.
-    fn newer(&self, name: &str, commit: &str) -> Result<Option<String>> {
-        let folder = self.folder()?;
-        let (_, latest) = self.fetch(None)?;
-        let tree = |at: &str| git(&folder, &["rev-parse", "--verify", "--quiet", &format!("{at}:plugins/{name}")]).ok();
-        Ok((tree(&latest) != tree(commit)).then_some(latest))
-    }
 }
 
 fn git(folder: &Path, args: &[&str]) -> Result<String> {
@@ -296,9 +289,10 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
     Ok(())
 }
 
-/// Deploys the plugin `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked. With
-/// `untrusted` it's untrusted, and runs in a sandbox; left out, it's as the version before was. With `new` it's made where one by that
-/// name is installed for someone else `of` is in, as `deploy`'s `new` says.
+/// Deploys the plugin `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked.
+/// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
+/// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
+/// else `of` is in, as `deploy`'s `new` says.
 async fn deploy(
     client: &Client,
     of: &str,
@@ -306,7 +300,7 @@ async fn deploy(
     folder: &Path,
     from: &Source,
     commit: &str,
-    untrusted: bool,
+    trusted: Option<bool>,
     new: bool,
 ) -> Result<Locked> {
     let plugin = folder.join("plugins").join(name);
@@ -332,8 +326,8 @@ async fn deploy(
     let files = crate::read(&plugin, false)?;
     let mut deployed =
         json!({"name": name, "files": files, "from": {"source": from.spec, "ref": from.reference, "commit": commit}});
-    if untrusted {
-        deployed["trusted"] = json!(false);
+    if let Some(trusted) = trusted {
+        deployed["trusted"] = json!(trusted);
     }
     if new {
         deployed["new"] = json!(true);
@@ -377,20 +371,25 @@ async fn report(from: &Source, name: &str, commit: &str) {
     let _ = tokio::time::timeout(Duration::from_secs(3), post).await;
 }
 
-/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--untrusted] [--new]`, for whoever `ONE_SUBJECT` says, or
-/// this device's user. `--untrusted` makes them untrusted, run in a sandbox, which needs no server of the user's; `--new` makes a
-/// second copy where one by that name is installed for the network or a group they're in, which is refused without.
+/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--trusted | --untrusted] [--new]`, for whoever
+/// `ONE_SUBJECT` says, or this device's user. A repo's plugins are a stranger's, so they're untrusted and run in a
+/// sandbox, which needs no server of the user's, unless `--trusted` says otherwise, which only someone who may install
+/// for them may; `--new` makes a second copy where one by that name is installed for the network or a group they're
+/// in, which is refused without.
 pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
     let source = Source::parse(&args[0])?;
-    let (mut names, mut list, mut untrusted, mut new) = (Vec::new(), false, false, false);
+    let (mut names, mut list, mut trusted, mut new) = (Vec::new(), false, Some(false), false);
     let mut flags = args[1..].iter();
     while let Some(flag) = flags.next() {
         match flag.as_str() {
             "--list" => list = true,
-            "--untrusted" => untrusted = true,
+            "--trusted" => trusted = Some(true),
+            "--untrusted" => trusted = Some(false),
             "--new" => new = true,
             "--plugin" => names.push(flags.next().context("--plugin needs a plugin's name")?.clone()),
-            other => bail!("`{other}` isn't something `one install` takes: --plugin <name>, --untrusted, --new or --list"),
+            other => bail!(
+                "`{other}` isn't something `one install` takes: --plugin <name>, --trusted, --untrusted, --new or --list"
+            ),
         }
     }
     let (folder, commit) = source.fetch(None)?;
@@ -441,7 +440,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         None => BTreeMap::new(),
     };
     for name in &order {
-        let it = deploy(client, &of, name, &folder, &source, &commit, untrusted, new).await?;
+        let it = deploy(client, &of, name, &folder, &source, &commit, trusted, new).await?;
         if let Some(file) = &lock {
             locked.insert(name.clone(), it);
             write_lock(file, &locked)?;
@@ -471,7 +470,7 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
             if uses(&folder.join("plugins").join(name)).iter().any(|used| used != name && waiting.contains_key(used)) {
                 continue;
             }
-            let now = deploy(client, &it.of, name, &folder, &source, &commit, false, false).await?;
+            let now = deploy(client, &it.of, name, &folder, &source, &commit, None, false).await?;
             if now.hash != it.hash {
                 println!(
                     "{name}'s files hash differently from what {LOCK} says, from the same commit: a NIF built again does."
@@ -491,104 +490,6 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Each plugin installed from a git repo, by its name: the lock file's, in a network's repo, or else what the
-/// network keeps of what's installed for whoever this runs for and the network. With `names`, only those.
-async fn recorded(client: &Client, names: &[String]) -> Result<BTreeMap<String, Locked>> {
-    let all = match lock_file() {
-        Some(file) => read_lock(&file)?,
-        None => {
-            let (_, plugins) = installed(client, None).await?;
-            let mut by_name = BTreeMap::new();
-            for plugin in plugins.iter().rev() {
-                let from = &plugin["from"];
-                let mut locked = from.clone();
-                locked["for"] = plugin["for"].clone();
-                if let (Some(name), Some(locked)) = (plugin["name"].as_str(), Locked::read(&locked)) {
-                    by_name.insert(name.to_owned(), locked);
-                }
-            }
-            by_name
-        }
-    };
-    for name in names {
-        if !all.contains_key(name) {
-            bail!("{name} wasn't installed from a git repo here");
-        }
-    }
-    Ok(all.into_iter().filter(|(name, _)| names.is_empty() || names.contains(name)).collect())
-}
-
-/// What's become of each: `(newer commit upstream, changed since it was installed)`.
-async fn state(client: &Client, name: &str, it: &Locked) -> Result<(Option<String>, bool)> {
-    let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
-    let newer = source.newer(name, &it.commit)?;
-    let (_, plugins) = installed(client, Some(&it.of)).await?;
-    let now = plugins.iter().find(|plugin| plugin["name"] == name && plugin["for"] == it.of.as_str());
-    let changed = now.is_none_or(|plugin| plugin["source"].as_str() != Some(&it.hash));
-    Ok((newer, changed))
-}
-
-/// `one plugins check [names]`: which have a newer version upstream, and which were changed in the network since
-/// they were installed. Fails if any has either, as `npx skills check` does.
-pub async fn check(client: &Client, names: &[String]) -> Result<ExitCode> {
-    let recorded = recorded(client, names).await?;
-    let mut behind = false;
-    for (name, it) in &recorded {
-        let (newer, changed) = state(client, name, it).await?;
-        let at = format!("{}@{}", it.source, &it.commit[..12]);
-        let status = match (&newer, changed) {
-            (None, false) => "up to date".to_owned(),
-            (Some(newer), false) => format!("update available: {}", &newer[..12]),
-            (None, true) => "changed locally since it was installed".to_owned(),
-            (Some(newer), true) => {
-                format!("update available: {}, and changed locally since it was installed", &newer[..12])
-            }
-        };
-        behind |= newer.is_some() || changed;
-        println!("{name} ({}, {at}): {status}", it.of);
-    }
-    if recorded.is_empty() {
-        println!("Nothing here was installed from a git repo.");
-    }
-    Ok(if behind { ExitCode::FAILURE } else { ExitCode::SUCCESS })
-}
-
-/// `one plugins update [names] [--force]`: installs the newer version of each that has one. One changed in the
-/// network since it was installed is left as it is, unless `--force` says to overwrite it: nothing is merged.
-pub async fn update(client: &Client, args: &[String]) -> Result<ExitCode> {
-    let force = args.iter().any(|arg| arg == "--force");
-    let names: Vec<String> = args.iter().filter(|arg| *arg != "--force").cloned().collect();
-    let lock = lock_file();
-    let mut all = match &lock {
-        Some(file) => read_lock(file)?,
-        None => BTreeMap::new(),
-    };
-    let mut skipped = false;
-    for (name, it) in recorded(client, &names).await? {
-        let (newer, changed) = state(client, &name, &it).await?;
-        let Some(newer) = newer else {
-            println!("{name} is up to date.");
-            continue;
-        };
-        if changed && !force {
-            println!(
-                "{name} was changed in the network since it was installed, so it's left as it is. `one code --name {name}` \
-                 gives it as it is now; `one plugins update {name} --force` overwrites it with {}.",
-                &newer[..12]
-            );
-            skipped = true;
-            continue;
-        }
-        let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
-        let (folder, commit) = source.fetch(Some(&newer))?;
-        let updated = deploy(client, &it.of, &name, &folder, &source, &commit, false, false).await?;
-        if let Some(file) = &lock {
-            all.insert(name, updated);
-            write_lock(file, &all)?;
-        }
-    }
-    Ok(if skipped { ExitCode::FAILURE } else { ExitCode::SUCCESS })
-}
 
 /// `one uninstall --name <name>` in a network's repo: uninstalls it, and takes it out of `plugins.lock` if that
 /// records it for whoever it was uninstalled for, so `one install` there doesn't install it again.

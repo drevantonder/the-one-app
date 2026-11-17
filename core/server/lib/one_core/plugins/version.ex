@@ -31,7 +31,7 @@ defmodule OneCore.Plugins.Version do
   `called` where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the hooks it offers, each one's `name`, `kind` and
   `description`, and `jobs` lists its scheduled jobs: each one's
   `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
-  without it (`OneCore.Plugins.Deploy`). `artifact` is the plugin it's a version of, which whatever loaded it says.
+  without it (`OneCore.Plugins.Deploy`). `artifact` is the plugin it's a version of, and `number` which version, which whatever loaded it says.
 
   A server that doesn't run a plugin for whoever it's installed for never loads its code, which runs with all of
   its machine's access: it knows the version by what the version says of itself (`description/1`), which a server
@@ -55,6 +55,7 @@ defmodule OneCore.Plugins.Version do
     :code,
     :ui,
     :artifact,
+    :number,
     :title,
     :icon,
     essential: false,
