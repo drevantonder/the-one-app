@@ -177,7 +177,7 @@ defmodule OneCore.CodeMode do
       # here meanwhile, as its caller's going does.
       trapping = Process.flag(:trap_exit, true)
 
-      run = %{codemode_run: :running, port: port, call: call, calls: %{}, finished: [], part: "", output: []}
+      run = %{codemode_run: :running, port: port, call: call, calls: %{}, ended: [], part: "", output: []}
 
       try do
         listen(run)
@@ -208,7 +208,15 @@ defmodule OneCore.CodeMode do
 
       {ref, result} when is_map_key(run.calls, ref) ->
         Port.command(port, JSON.encode!(Map.put(result, :reply, run.calls[ref].id)) <> "\n")
-        listen(ended(run, ref))
+        listen(ended(run, ref, :finished))
+
+      # A call whose process ended without answering, as one does when a process it's linked to crashes, failed: the
+      # script's call throws why, and the run goes on.
+      {:DOWN, ref, :process, _pid, why} when is_map_key(run.calls, ref) ->
+        State.finish(run.calls[ref].call)
+        failed = %{error: "It ended without an answer: " <> Exception.format_exit(why), reply: run.calls[ref].id}
+        Port.command(port, JSON.encode!(failed) <> "\n")
+        listen(ended(run, ref, :unanswered))
 
       {^port, {:exit_status, _}} ->
         why = "The script stopped without an answer: " <> Enum.join(Enum.reverse(run.output), "\n")
@@ -257,10 +265,12 @@ defmodule OneCore.CodeMode do
     %{run | calls: Map.put(run.calls, task.ref, %{id: id, name: name, call: call, pid: pid})}
   end
 
-  defp ended(run, ref) do
+  # A call that ended, as `how`: `:finished` with its answer, `:cancelled`, or `:unanswered`, which may or may not have
+  # done what it does.
+  defp ended(run, ref, how) do
     Process.demonitor(ref, [:flush])
     {%{name: name}, calls} = Map.pop(run.calls, ref)
-    %{run | calls: calls, finished: [name | run.finished]}
+    %{run | calls: calls, ended: [{name, how} | run.ended]}
   end
 
   # Stopping: the runner is killed, so the script calls nothing more, and each call still in flight is cancelled and
@@ -271,18 +281,15 @@ defmodule OneCore.CodeMode do
     stop(run.port)
 
     cancelling =
-      for {ref, %{call: call, name: name}} <- run.calls,
-          do: {ref, name, State.cancel(call, "The script it was called from stopped.") == :ok}
+      for {_ref, %{call: call, name: name}} <- run.calls,
+          do: {name, if(State.cancel(call, "The script it was called from stopped.") == :ok, do: :cancelled, else: :finished)}
 
     for {ref, %{pid: pid, call: call}} <- run.calls, do: awaited(ref, pid, call, until)
-    finished = Enum.reverse(run.finished) ++ for({_ref, name, false} <- cancelling, do: name)
-    cancelled = for {_ref, name, true} <- cancelling, do: name
-    stopped(%{run | codemode_run: :stopped, calls: %{}}, result, finished, cancelled)
+    stopped(%{run | codemode_run: :stopped, calls: %{}}, result, Enum.reverse(run.ended) ++ cancelling)
   end
 
   # Stopped: nothing it started is left, and it says which of its calls finished and which were cancelled.
-  defp stopped(%{codemode_run: :stopped}, {done, text}, finished, cancelled),
-    do: {done, text <> said(finished, cancelled)}
+  defp stopped(%{codemode_run: :stopped}, {done, text}, ended), do: {done, text <> said(ended)}
 
   # A cancelled call ends by what it calls next raising, or else is stopped by the call machine, or by the run if it
   # has to end first, which then ends its state too.
@@ -312,22 +319,29 @@ defmodule OneCore.CodeMode do
     end
   end
 
-  defp said([], []), do: ""
+  defp said([]), do: ""
 
   # Each tool once, with how many times it was called where that's more than once.
-  defp said(finished, cancelled) do
-    names = fn
-      [] ->
-        "none"
+  defp said(ended) do
+    names = fn how ->
+      case for({name, ^how} <- ended, do: name) do
+        [] ->
+          "none"
 
-      names ->
-        Enum.map_join(Enum.frequencies(names), ", ", fn
-          {name, 1} -> name
-          {name, times} -> "#{name} ×#{times}"
-        end)
+        names ->
+          Enum.map_join(Enum.frequencies(names), ", ", fn
+            {name, 1} -> name
+            {name, times} -> "#{name} ×#{times}"
+          end)
+      end
     end
 
-    "\n\nCalls finished: #{names.(finished)}. Cancelled, as the script stopped first: #{names.(cancelled)}."
+    unanswered =
+      if List.keymember?(ended, :unanswered, 1),
+        do: " Ended without answering, so they may or may not have been done: #{names.(:unanswered)}.",
+        else: ""
+
+    "\n\nCalls finished: #{names.(:finished)}. Cancelled, as the script stopped first: #{names.(:cancelled)}." <> unanswered
   end
 
   # One call, as MCP answered it: what it answered as JSON (`structuredContent`). An error is what the script's call
