@@ -174,10 +174,7 @@ pub async fn on(client: &Client) -> Result<String> {
     let lock = here.lock()?.context("This device is already becoming a server, or stopping being one.")?;
     let mut record = here.read()?;
     let key = here.key()?;
-    let who = match env::var("ONE_SUBJECT") {
-        Ok(who) => who,
-        Err(_) => client.who().context("This device isn't signed in yet. Sign in on it first.")?,
-    };
+    let who = who(client)?;
     match record.server_membership {
         ServerMembership::Active => return Ok(format!("This device is a server for {who} already. Its key: {key}")),
         ServerMembership::Leaving => {
@@ -201,11 +198,6 @@ async fn join(client: &Client, here: &Here, record: &mut Record, key: &str, who:
     here.stage(record, ServerMembershipStage::Downloading)?;
     if record.current.is_none() {
         let builds = download(client).await?;
-        ensure!(
-            latest(&builds).is_some(),
-            "The network has no server for {} yet: `tooling/release` makes one.",
-            target()
-        );
         record.current = Some(Pair { build: here.take(&builds).await?, program: BUILD.to_owned() });
     }
     here.stage(record, ServerMembershipStage::Installing)?;
@@ -224,6 +216,11 @@ async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
     let listed = tool(client, "remove_server", json!({"key": key})).await.err();
     let _ = fs::remove_dir_all(&here.folder);
     listed.map(|why| format!(", though it's still on the list of servers: {why:#}")).unwrap_or_default()
+}
+
+/// Who the server is for: whoever `ONE_SUBJECT` names, or this device's person.
+fn who(client: &Client) -> Result<String> {
+    env::var("ONE_SUBJECT").or_else(|_| client.who().context("This device isn't signed in yet. Sign in on it first."))
 }
 
 /// The environment the system runs the server with: the client it updates by, who it's for, and where programs
@@ -322,8 +319,7 @@ async fn undo_leaving(client: &Client, here: &Here, record: &mut Record, key: &s
     record.server_membership_stage = None;
     here.write(record)?;
     if start {
-        let who = env::var("ONE_SUBJECT").or_else(|_| client.who().context("who it's for"))?;
-        system::install(here, key, &env::current_exe()?, &unit_env(who, None).await?)?;
+        system::install(here, key, &env::current_exe()?, &unit_env(who(client)?, None).await?)?;
         system::start(here, key).await?;
     }
     Ok(())
@@ -901,10 +897,7 @@ impl Here {
     fn prune(&self, record: &Record) -> Result<()> {
         let pairs = [&record.current, &record.previous, &record.next];
         let named = |name: &str| {
-            pairs
-                .iter()
-                .filter_map(|pair| pair.as_ref())
-                .any(|pair| pair.build == name || pair.program == name)
+            pairs.iter().filter_map(|pair| pair.as_ref()).any(|pair| pair.build == name || pair.program == name)
         };
         for folder in ["builds", "programs"] {
             for kept in fs::read_dir(self.folder.join(folder)).into_iter().flatten() {
@@ -934,7 +927,9 @@ impl Here {
     /// loads its NIFs: a build that can't do that here goes. Gives its name. One that's here already is taken as it
     /// is.
     async fn take(&self, builds: &Map<String, Value>) -> Result<String> {
-        let name = latest(builds).context("The network has no server build for this machine")?.to_owned();
+        let name = latest(builds)
+            .with_context(|| format!("The network has no server for {} yet: `tooling/release` makes one.", target()))?
+            .to_owned();
         let folder = self.build(&name);
         if folder.exists() {
             return Ok(name);
