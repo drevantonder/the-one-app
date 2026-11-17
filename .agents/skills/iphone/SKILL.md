@@ -8,9 +8,9 @@ tools are on its PATH). Work in a checkout of your own there under `~/scratch/`,
 repo beside it (only its `app/` is read; copying that folder over is enough). Clone it whole, not `--depth 1`: the
 app's version and build number are `tooling/version`'s count of commits, so a shallow clone builds an app numbered 1.
 The Mac is the owner's own and shared by every agent: tonight several agents' simulators and builds took its load past
-700, so builds timed out and a server update on it went back. Before booting a simulator or building, run `uptime`
-there; above about 20, don't add to it: tell your orchestrator. Only one simulator may be booted on the Mac at a time: before booting, run `xcrun simctl list devices booted`,
-and if one is booted, use it (its udid) rather than booting another, and shut down and delete yours and remove your `~/scratch/` checkout when you're done.
+700, so builds timed out and a server update on it went back. Before building, run `uptime` there; above about 20,
+don't add to it: tell your orchestrator. Shut down and delete a simulator you booted, and remove your `~/scratch/`
+checkout, when you're done.
 
 An app is a network's: the commands that build it are in that repo's `app/README.md`, and what they need in
 `clients/app/README.md`. This is what neither says.

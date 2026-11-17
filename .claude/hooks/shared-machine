@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Claude Code runs this before each shell command (`.claude/settings.json`), with the command as JSON on stdin, and
+# refuses one that reaches past an agent's own work on machines every agent shares: exit 2, with why on stderr.
+command=$(jq -r '.tool_input.command // ""')
+refuse() { echo "$1" >&2 && exit 2; }
+
+# A pattern matches other agents' programs too: two networks were killed so on 17 Nov.
+grep -qE '(^|[^[:alnum:]_-])(pkill|killall)([^[:alnum:]_-]|$)' <<<"$command" &&
+  refuse "pkill and killall match other agents' processes too. Stop what you started by the PID you kept when you started it (\`\$!\`, or what your harness gave); \`kill <pid of tooling/network>\` stops everything a network started."
+
+# Other programs' command lines hold other agents' work and secrets.
+grep -qE '(^|[^[:alnum:]_-])pgrep[^|;&]*[[:space:]]-[[:alpha:]]*[fa]' <<<"$command" &&
+  refuse "pgrep -f matches other agents' command lines, and -a prints them. Use the PID you kept when you started it."
+while read -r ps; do
+  all= lines=
+  grep -qE '[[:space:]]-[[:alpha:]]*[eA]|[[:space:]][[:alpha:]]*x[[:alpha:]]*([[:space:]]|$)' <<<"$ps" && all=yes
+  grep -qE '[[:space:]]-[[:alpha:]]*[fF]|[[:space:]][[:alpha:]]*u[[:alpha:]]*([[:space:]]|$)|args|cmd|command' <<<"$ps" && lines=yes
+  [[ -z $all || -z $lines ]] ||
+    refuse "This lists every process with its command line, which holds other agents' work and secrets. Look at your own by PID (\`ps -o pid,stat,etime,comm -p <pid>\`), or every process by name only (\`ps -eo pid,comm\`)."
+done < <(grep -oE '(^|[^[:alnum:]_-])ps([[:space:]][^|;&]*)?' <<<"$command")
+grep -qE '/proc/[^[:space:]/]*\*|(^|[^[:alnum:]_-])h?top[^|;&]*[[:space:]]-[[:alpha:]]*c' <<<"$command" &&
+  refuse "This reads every process's command line, which holds other agents' work and secrets. Look at your own by PID."
+
+# The Mac is the owner's, and shared: two simulators at once took its load to 300 (17 Nov).
+if grep -qE 'simctl[[:space:]]+boot([[:space:]]|$)' <<<"$command"; then
+  if [[ $(uname) == Darwin ]]; then on=(bash -c); else on=(ssh -o BatchMode=yes -o ConnectTimeout=5 mac); fi
+  booted=$("${on[@]}" 'xcrun simctl list devices booted | grep "(Booted)"; uptime' 2>/dev/null) || exit 0
+  load=$(sed -n 's/.*load averages*: *\([0-9]*\).*/\1/p' <<<"$booted")
+  booted=$(grep '(Booted)' <<<"$booted")
+  [[ -z $booted ]] ||
+    refuse "A simulator is booted on the Mac already, and only one may be at a time: use it, by its udid, rather than boot another.
+$booted"
+  ((${load:-0} <= 20)) || refuse "The Mac's load is $load: above 20, don't add to it, and tell whoever you work for."
+fi
+exit 0

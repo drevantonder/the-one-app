@@ -44,7 +44,7 @@ Everything is in the folder: `server.log`, `reloader.log` (and `standby.log`, `e
 bucket, and the client's home. Starting again in the same folder carries on with what's there.
 
 Stop it by its PID: `kill <pid of tooling/network>` stops every process it started, since each is its own process
-group. Never `pkill` or `killall`: other agents run networks on this machine too.
+group.
 
 ## Mistakes already made
 
