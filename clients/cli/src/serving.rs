@@ -442,7 +442,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
             }
             last.push_back(heard.line.clone());
             if let Some(Said::Running { .. }) = heard.said {
-                return answers(&client, &key, &pair.build).await;
+                return answered(&client, &key, &pair.build, &mut said).await;
             }
         }
         bail!("it stopped before it was running")
@@ -537,6 +537,15 @@ async fn answers(client: &Client, key: &str, build: &str) -> Result<()> {
             return Ok(());
         }
         sleep(Duration::from_secs(2)).await;
+    }
+}
+
+/// Whether the server whose key is `key` answers by it as `build` (`answers`), until it stops: one that stops first,
+/// as one that crashes just after it said it's running, didn't.
+async fn answered(client: &Client, key: &str, build: &str, said: &mut UnboundedReceiver<Heard>) -> Result<()> {
+    tokio::select! {
+        answered = answers(client, key, build) => answered,
+        () = async { while said.recv().await.is_some() {} } => bail!("it stopped before it answered by its key"),
     }
 }
 
@@ -640,7 +649,7 @@ async fn update_server(
                 })
                 .await?;
             let loaded = match load(server, said, &here.build(&next.build)).await {
-                Ok(()) => within("answer by its key", answers(now, key, &next.build)).await,
+                Ok(()) => within("answer by its key", answered(now, key, &next.build, said)).await,
                 Err(why) => Err(why),
             };
             if let Err(why) = loaded {
