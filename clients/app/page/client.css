@@ -157,8 +157,10 @@ iframe.launcher {
   visibility: hidden;
   pointer-events: none;
 }
-/* An app behind the one that's showing stays laid out, so it's back in one frame. */
+/* An app behind the one that's showing stays laid out, so it's back in one frame, and under the one that's showing:
+   WebKit sends a right-click to a hidden frame that lies over it. */
 iframe[inert] {
+  z-index: -1;
   visibility: hidden;
 }
 [hidden] {
