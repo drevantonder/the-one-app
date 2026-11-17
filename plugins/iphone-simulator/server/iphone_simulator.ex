@@ -19,13 +19,15 @@ defmodule IphoneSimulator do
     properties: %{
       name: %{type: "string"},
       description: %{type: ["string", "null"], description: "What it's for"},
-      state: %{type: "string", description: "running, starting, stopping or stopped"},
+      state: %{type: "string", enum: ~w(stopped starting running stopping removing gone)},
+      step: %{type: ["string", "null"], enum: ["booting", "connecting", nil], description: "While it's starting: booting iOS, or connecting to its screen"},
+      why: %{type: ["string", "null"], description: "Why it couldn't start, when it's stopped for that"},
       machine: %{type: ["string", "null"]},
       by: %{type: ["string", "null"], description: "Who created it"},
       created: %{type: "integer", description: "In milliseconds since 1970"},
       last_used: %{type: "integer", description: "In milliseconds since 1970"}
     },
-    required: ["name", "description", "state", "machine", "by", "created", "last_used"]
+    required: ["name", "description", "state", "step", "why", "machine", "by", "created", "last_used"]
   }
 
   @impl true
@@ -47,7 +49,7 @@ defmodule IphoneSimulator do
         name: "list",
         read_only: true,
         description:
-          "The simulators you can use, on every Mac: each one's name, model, iOS version, state (running, starting, stopping, stopped), machine, what it's for, who created it, and when it was created and last used (ms since 1970).",
+          "The simulators you can use, on every Mac: each one's name, model, iOS version, state (stopped, starting, running, stopping, removing, gone), machine, what it's for, who created it, and when it was created and last used (ms since 1970).",
         inputs: %{type: "object", properties: %{}},
         outputs: %{type: "object", properties: %{simulators: %{type: "array", items: @listed}}, required: ["simulators"]}
       },
@@ -282,6 +284,10 @@ defmodule IphoneSimulator do
 
   # Computer Use asks for the caller's screens: each running simulator of theirs is one, called what it is, and acted
   # on with `screen`.
+  @doc false
+  # A simulator's state changed: every app watching is told. For `IphoneSimulator.Simulator`.
+  def changed(call), do: Call.changed(call)
+
   @impl true
   def hook("computer-use.screens", _about, call) do
     for server <- Service.servers(call, Simulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do

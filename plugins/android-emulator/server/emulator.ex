@@ -9,9 +9,47 @@ defmodule AndroidEmulator.Emulator do
   Linux each runs in a network of its own (pasta), reaching the internet as this machine does but nothing on its
   127.0.0.1, which takes in only the phone's console and adb ports. A Mac has nothing like pasta: there a phone's
   apps reach the Mac's 127.0.0.1.
+
+  Each emulator is in one state, which changes only as `@steps` says, and every app watching is told as it does:
+  `stopped`, `starting` (its `step`: `preparing` the SDK, then `booting` Android), `running`, `stopping` (it saves
+  where it was, which it does alone once asked) and `removing`. Running and stopping are what the machine says (an
+  emulator's processes, and the `.stopping` file a stop leaves beside its AVD), so they outlast this service's
+  restarts; starting and removing, and why a start failed, are this service's own while a call is under way. A
+  step that isn't one, such as Start while it's stopping, is refused saying why.
   """
   use GenServer
   @behaviour OneCore.Service
+
+  # An emulator's states, by the state it's in and what happens, as the moduledoc says. `exited` is its emulator
+  # having ended, `fail` a start that couldn't finish.
+  @steps %{
+    {"stopped", "start"} => "starting",
+    {"starting", "started"} => "running",
+    {"starting", "fail"} => "stopped",
+    {"starting", "stop"} => "stopping",
+    {"running", "stop"} => "stopping",
+    {"stopping", "stop"} => "stopping",
+    {"stopped", "stop"} => "stopped",
+    {"stopping", "fail"} => "stopping",
+    {"stopped", "fail"} => "stopped",
+    {"running", "exited"} => "stopped",
+    {"stopping", "exited"} => "stopped",
+    {"starting", "exited"} => "starting",
+    {"removing", "exited"} => "removing",
+    {"stopped", "exited"} => "stopped",
+    {"stopped", "remove"} => "removing",
+    {"starting", "remove"} => "removing",
+    {"running", "remove"} => "removing",
+    {"stopping", "remove"} => "removing",
+    {"removing", "removed"} => "stopped",
+    {"removing", "fail"} => "stopped"
+  }
+  # The states this service keeps, as the machine can't say them.
+  @kept ~w(starting removing)
+
+  # `emulators` has those in a state of `@kept`, or stopped with why a start failed, by id; `watched` the emulator
+  # each port watches, by port.
+  defstruct emulators: %{}, watched: %{}
 
   # Android 16, with Google Play, as Google's emulator images name it, for this machine's processor.
   @android "android-36"
@@ -53,7 +91,93 @@ defmodule AndroidEmulator.Emulator do
     end
 
     System.find_executable("uv") || raise "This machine has no uv, which a stream's sender is installed with"
-    {:ok, nil}
+    {:ok, %__MODULE__{}, {:continue, :watch}}
+  end
+
+  # Emulators outlive this service: those running as it starts are watched, so it can say when each stops.
+  @impl GenServer
+  def handle_continue(:watch, data) do
+    data = Enum.reduce(processes(), data, fn {id, p}, data -> if p.emulator, do: watched(data, id, p.emulator), else: data end)
+    {:noreply, data}
+  end
+
+  # Each version's module has a name of its own, so its struct is taken by its fields. A version before this one
+  # kept nothing (`nil`), and one started afresh watches what's running.
+  @impl GenServer
+  def code_change(_old, %_{} = data, _extra), do: {:ok, struct(__MODULE__, Map.from_struct(data))}
+  def code_change(_old, _data, _extra), do: {:error, "kept nothing to carry on with"}
+
+  @impl GenServer
+  def handle_call({:step, id, event, changes}, _from, data) do
+    kept = data.emulators[id]
+    was = (kept && kept.state) || derived(self(), id, processes()[id])
+
+    case if(event, do: @steps[{was, event}], else: was) do
+      nil ->
+        {:reply, {:error, refused(was, event)}, data}
+
+      to ->
+        # Why a start failed is kept until the next step, and only for one that was starting.
+        why = if event == "fail" and was == "starting", do: changes[:why]
+        step = if to == "starting", do: changes[:step] || (kept && kept.step)
+
+        emulators =
+          if to in @kept or why,
+            do: Map.put(data.emulators, id, %{state: to, step: step, why: why}),
+            else: Map.delete(data.emulators, id)
+
+        # An emulator that ended was running a moment ago, though the machine says it's stopped already.
+        if emulators != data.emulators or to != was or event == "exited", do: tell()
+        {:reply, {:ok, to}, %{data | emulators: emulators}}
+    end
+  end
+
+  def handle_call(:emulators, _from, data), do: {:reply, data.emulators, data}
+
+  @impl GenServer
+  def handle_cast({:watch, id, pid}, data), do: {:noreply, watched(data, id, pid)}
+
+  # An emulator that was watched has ended: stopped, or stopped by itself.
+  @impl GenServer
+  def handle_info({port, {:exit_status, _}}, %{watched: watched} = data) when is_map_key(watched, port) do
+    {id, watched} = Map.pop(watched, port)
+    {:reply, _, data} = handle_call({:step, id, "exited", %{}}, nil, %{data | watched: watched})
+    {:noreply, data}
+  end
+
+  def handle_info(_message, data), do: {:noreply, data}
+
+  # Watches the emulator `id`, whose process is `pid`, until it ends. It isn't this server's child (it's in a scope
+  # of its own, to outlive the server's restarts), so nothing tells the server when it ends: a shell asks the
+  # machine every second, and ends with it, or with this service.
+  defp watched(data, id, pid) do
+    if id in Map.values(data.watched) do
+      data
+    else
+      wait = ~s(while kill -0 "$0" 2>/dev/null; do read -t 1 _; [ $? = 1 ] && exit; done)
+      port = Port.open({:spawn_executable, System.find_executable("bash")}, [:exit_status, args: ["-c", wait, "#{pid}"]])
+      put_in(data.watched[port], id)
+    end
+  end
+
+  defp refused("starting", "start"), do: "It's starting already."
+  defp refused("running", "start"), do: "It's running already."
+  defp refused("stopping", "start"), do: "It's still stopping, as it saves where it was. Start it once it's stopped.\n\n`list` says when it is."
+  defp refused("removing", _), do: "It's being removed."
+  defp refused(state, event), do: "It can't #{event} while it's #{state}."
+
+  # Tells every app watching that an emulator's state changed, as a call to the plugin does once it's done.
+  defp tell do
+    service = self()
+    for who <- Enum.take(OneCore.Service.acts_for(), 1), do: Task.start(fn -> OneCore.Service.plugin(service, who, :changed) end)
+  end
+
+  # Takes the emulator `id` one step (`event`, by `@steps`, or `nil` for none) with `changes`, and gives its state.
+  defp step(service, id, event, changes \\ %{}) do
+    case GenServer.call(service, {:step, id, event, changes}) do
+      {:ok, state} -> state
+      {:error, why} -> raise why
+    end
   end
 
   @doc "Every emulator here: its id, name, whose it is, what it's for, its state and when it was created and last used."
@@ -61,13 +185,17 @@ defmodule AndroidEmulator.Emulator do
     avd = avd_home(service)
     used = used(service)
     running = processes()
+    kept = GenServer.call(service, :emulators)
 
     for file <- if(File.dir?(avd), do: File.ls!(avd), else: []), String.ends_with?(file, ".json") do
       device = JSON.decode!(File.read!(Path.join(avd, file)))
       id = device["id"]
+      state = kept[id] || %{state: derived(service, id, running[id]), step: nil, why: nil}
 
       Map.merge(device, %{
-        "state" => state(service, id, running[id]),
+        "state" => state.state,
+        "step" => state.step,
+        "why" => state.why,
         "last_used" => Map.get(used, id, device["created"])
       })
     end
@@ -97,8 +225,23 @@ defmodule AndroidEmulator.Emulator do
   that didn't save would take its disk back to then.
   """
   def start(service, id) do
-    if processes()[id], do: raise("It's running, or still stopping. Try again once it's stopped.\n\n`list` says when it is.")
+    step(service, id, "start", %{step: "preparing"})
+
+    try do
+      boot(service, id)
+      step(service, id, "started")
+    rescue
+      e ->
+        step(service, id, "fail", %{why: Exception.message(e)})
+        reraise e, __STACKTRACE__
+    end
+
+    :ok
+  end
+
+  defp boot(service, id) do
     sdk = sdk!(service)
+    step(service, id, nil, %{step: "booting"})
     port = port()
     log = log(service, id)
     saved = String.contains?(read(log), "Saving snapshot 'default_boot' took")
@@ -133,31 +276,51 @@ defmodule AndroidEmulator.Emulator do
     # Erlang starts is.
     %{exit: 0} = run(service, ["sh", "-c", ~s("$@" >"$0" 2>&1 </dev/null &), log | command], 10)
     booted(service, id, port, System.monotonic_time(:millisecond), false)
+    with %{emulator: pid} when is_integer(pid) <- processes()[id], do: GenServer.cast(service, {:watch, id, pid})
 
     for args <- [~w(svc power stayon true), ~w(input keyevent KEYCODE_WAKEUP), ~w(wm dismiss-keyguard)],
         do: adb(service, id, ["shell" | args], 10)
-
-    :ok
   end
 
   @doc """
   Stops an emulator, as its own SIGTERM does: it saves what it was doing (its Quick Boot snapshot) and ends, a few
-  seconds' work it carries on with alone.
+  seconds' work it carries on with alone, and it's `stopping` until it has.
   """
   def stop(service, id) do
-    File.touch!(Path.join(avd_home(service), id <> ".stopping"))
-    with %{emulator: pid} when is_integer(pid) <- processes()[id], do: System.cmd("kill", ["-TERM", "#{pid}"])
+    if step(service, id, "stop") == "stopping" do
+      File.touch!(Path.join(avd_home(service), id <> ".stopping"))
+
+      case processes()[id] do
+        %{emulator: pid} when is_integer(pid) ->
+          GenServer.cast(service, {:watch, id, pid})
+          System.cmd("kill", ["-TERM", "#{pid}"])
+
+        _ ->
+          step(service, id, "exited")
+      end
+    end
+
     :ok
   end
 
   @doc "Removes an emulator and its AVD, for good, stopping it at once if it's running."
   def remove(service, id) do
-    kill(id)
-    avd = avd_home(service)
-    File.rm_rf!(Path.join(avd, id <> ".avd"))
-    for file <- [id <> ".ini", id <> ".json", id <> ".stopping", id <> ".log"], do: File.rm(Path.join(avd, file))
-    File.rm_rf!(Path.join([OneCore.Service.folder(service), "run", id]))
-    File.rm(Path.join([OneCore.Service.folder(service), "used", id]))
+    step(service, id, "remove")
+
+    try do
+      kill(id)
+      avd = avd_home(service)
+      File.rm_rf!(Path.join(avd, id <> ".avd"))
+      for file <- [id <> ".ini", id <> ".json", id <> ".stopping", id <> ".log"], do: File.rm(Path.join(avd, file))
+      File.rm_rf!(Path.join([OneCore.Service.folder(service), "run", id]))
+      File.rm(Path.join([OneCore.Service.folder(service), "used", id]))
+    rescue
+      e ->
+        step(service, id, "fail")
+        reraise e, __STACKTRACE__
+    end
+
+    step(service, id, "removed")
     :ok
   end
 
@@ -353,15 +516,12 @@ defmodule AndroidEmulator.Emulator do
     end
   end
 
-  defp state(_service, _id, nil), do: "stopped"
+  # An emulator's state as the machine says it, by its processes: none is stopped, and one a stop left its file
+  # beside is stopping.
+  defp derived(_service, _id, nil), do: "stopped"
 
-  defp state(service, id, _pids) do
-    cond do
-      File.exists?(Path.join(avd_home(service), id <> ".stopping")) -> "stopping"
-      match?(%{exit: 0, stdout: "device" <> _}, adb(service, id, ["get-state"], 5)) -> "running"
-      true -> "starting"
-    end
-  end
+  defp derived(service, id, _processes),
+    do: if(File.exists?(Path.join(avd_home(service), id <> ".stopping")), do: "stopping", else: "running")
 
   # Ends an emulator at once, keeping nothing: on Linux its scope, with everything it started; on a Mac its
   # processes, by their PIDs.
@@ -388,11 +548,11 @@ defmodule AndroidEmulator.Emulator do
         :ok
 
       not running and (seen or waited > 10_000) ->
-        raise "Its emulator stopped as it started: #{String.slice(read(log(service, id)), -2000..-1//1)}"
+        raise "Its emulator stopped as it started.\n\n#{String.slice(read(log(service, id)), -2000..-1//1)}"
 
       waited > 300_000 ->
         kill(id)
-        raise "It didn't start in 5 minutes, so it was stopped: #{String.slice(read(log(service, id)), -2000..-1//1)}"
+        raise "It didn't start in 5 minutes, so it was stopped.\n\n#{String.slice(read(log(service, id)), -2000..-1//1)}"
 
       true ->
         Process.sleep(1000)

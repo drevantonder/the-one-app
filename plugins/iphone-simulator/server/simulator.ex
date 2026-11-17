@@ -10,9 +10,44 @@ defmodule IphoneSimulator.Simulator do
 
   A simulator is the Mac's own processes, run as the Mac's user: it shares the Mac's network, its 127.0.0.1 among it,
   and what the Mac's user may read. Nothing here can keep an app in it from either.
+
+  Each simulator is in one state, which changes only as `@steps` says, and every app watching is told as it does:
+  `stopped`, `starting` (its `step`: `booting` iOS, then `connecting` idb to its screen), `running`, `stopping`,
+  `removing`, and `gone` once Xcode no longer has it. Running, stopped and gone are what simctl says; starting,
+  stopping and removing, and why a start failed, are this service's own while a call is under way. A step that
+  isn't one, such as Start while it's stopping, is refused saying why.
   """
   use GenServer
   @behaviour OneCore.Service
+
+  # A simulator's states, by the state it's in and what happens, as the moduledoc says. `fail` is a start that
+  # couldn't finish, `stopped` a stop that's over, however it went.
+  @steps %{
+    {"stopped", "start"} => "starting",
+    {"starting", "started"} => "running",
+    {"starting", "fail"} => "stopped",
+    {"starting", "stop"} => "stopping",
+    {"running", "stop"} => "stopping",
+    {"stopping", "stop"} => "stopping",
+    {"stopped", "stop"} => "stopped",
+    {"stopping", "started"} => "stopping",
+    {"stopping", "fail"} => "stopping",
+    {"stopped", "fail"} => "stopped",
+    {"stopping", "stopped"} => "stopped",
+    {"stopped", "stopped"} => "stopped",
+    {"stopped", "remove"} => "removing",
+    {"starting", "remove"} => "removing",
+    {"running", "remove"} => "removing",
+    {"stopping", "remove"} => "removing",
+    {"gone", "remove"} => "removing",
+    {"removing", "removed"} => "stopped",
+    {"removing", "fail"} => "stopped"
+  }
+  # The states this service keeps, as simctl can't say them.
+  @kept ~w(starting stopping removing)
+
+  # Those in a state of `@kept`, or stopped with why a start failed, by udid.
+  defstruct simulators: %{}
 
   @idb "1.7.8"
   @companion_sha256 "44369a2df0b62e3a1764de61bd09280999c7e9b27ea8f20bff1ea3a9db0302a2"
@@ -37,20 +72,78 @@ defmodule IphoneSimulator.Simulator do
     match?({:unix, :darwin}, :os.type()) || raise "iOS Simulators run on Macs"
     match?(%{exit: 0}, cmd(["xcrun", "simctl", "help"], 30)) || raise "This Mac has no Xcode's simctl"
     System.find_executable("uv") || raise "This Mac has no uv, which idb and a stream's sender are installed with"
-    {:ok, nil}
+    {:ok, %__MODULE__{}}
+  end
+
+  # Each version's module has a name of its own, so its struct is taken by its fields. A version before this one
+  # kept nothing (`nil`), and one started afresh has nothing under way.
+  @impl GenServer
+  def code_change(_old, %_{} = data, _extra), do: {:ok, struct(__MODULE__, Map.from_struct(data))}
+  def code_change(_old, _data, _extra), do: {:error, "kept nothing to carry on with"}
+
+  @impl GenServer
+  def handle_call({:step, udid, event, changes}, _from, data) do
+    kept = data.simulators[udid]
+    was = (kept && kept.state) || state(simulators()[udid]["state"])
+
+    case if(event, do: @steps[{was, event}], else: was) do
+      nil ->
+        {:reply, {:error, refused(was, event)}, data}
+
+      to ->
+        # Why a start failed is kept until the next step, and only for one that was starting.
+        why = if event == "fail" and was == "starting", do: changes[:why]
+        step = if to == "starting", do: changes[:step] || (kept && kept.step)
+
+        simulators =
+          if to in @kept or why,
+            do: Map.put(data.simulators, udid, %{state: to, step: step, why: why}),
+            else: Map.delete(data.simulators, udid)
+
+        if simulators != data.simulators or to != was, do: tell()
+        {:reply, {:ok, to}, %{data | simulators: simulators}}
+    end
+  end
+
+  def handle_call(:simulators, _from, data), do: {:reply, data.simulators, data}
+
+  defp refused("starting", "start"), do: "It's starting already."
+  defp refused("running", "start"), do: "It's running already."
+  defp refused("stopping", "start"), do: "It's still stopping. Start it once it's stopped.\n\n`list` says when it is."
+  defp refused("removing", _), do: "It's being removed."
+  defp refused("gone", _), do: "It's gone from Xcode, deleted outside The One App. `remove` takes it off the list."
+  defp refused(state, event), do: "It can't #{event} while it's #{state}."
+
+  # Tells every app watching that a simulator's state changed, as a call to the plugin does once it's done.
+  defp tell do
+    service = self()
+    for who <- Enum.take(OneCore.Service.acts_for(), 1), do: Task.start(fn -> OneCore.Service.plugin(service, who, :changed) end)
+  end
+
+  # Takes the simulator `udid` one step (`event`, by `@steps`, or `nil` for none) with `changes`, and gives its state.
+  defp step(service, udid, event, changes \\ %{}) do
+    case GenServer.call(service, {:step, udid, event, changes}, 30_000) do
+      {:ok, state} -> state
+      {:error, why} -> raise why
+    end
   end
 
   @doc "Every simulator The One App made here: its udid, name, whose it is, what it's for, its state and times."
   def list(service) do
     states = for {udid, s} <- simulators(), into: %{}, do: {udid, s["state"]}
+    kept = GenServer.call(service, :simulators)
     used = used(service)
     folder = folder(service, "simulators")
 
     for file <- File.ls!(folder), String.ends_with?(file, ".json") do
       s = JSON.decode!(File.read!(Path.join(folder, file)))
 
+      state = kept[s["udid"]] || %{state: state(states[s["udid"]]), step: nil, why: nil}
+
       Map.merge(s, %{
-        "state" => state(states[s["udid"]]),
+        "state" => state.state,
+        "step" => state.step,
+        "why" => state.why,
         "last_used" => Map.get(used, s["udid"], s["created"])
       })
     end
@@ -82,6 +175,21 @@ defmodule IphoneSimulator.Simulator do
   first time: Computer Use's list of screens, which asks idb for each, gives a plugin no longer than that.
   """
   def start(service, udid) do
+    step(service, udid, "start", %{step: "booting"})
+
+    try do
+      boot(service, udid)
+      step(service, udid, "started")
+    rescue
+      e ->
+        step(service, udid, "fail", %{why: Exception.message(e)})
+        reraise e, __STACKTRACE__
+    end
+
+    :ok
+  end
+
+  defp boot(service, udid) do
     touch(service, udid)
 
     case cmd(["xcrun", "simctl", "boot", udid], 120) do
@@ -90,14 +198,27 @@ defmodule IphoneSimulator.Simulator do
     end
 
     simctl!(service, ["bootstatus", udid, "-b"], 600)
+    step(service, udid, nil, %{step: "connecting"})
     # idb remembers each simulator's companion, in a file of its own, and keeps asking one that's gone, as each is once
     # its simulator shuts down, rather than starting another: it's told to forget it.
     %{exit: 0} = cmd(idb(service) ++ ["disconnect", udid], 30)
     describe(service, udid) || raise "idb couldn't reach it"
+  end
+
+  @doc "Shuts a simulator down, and it's `stopping` until it has."
+  def stop(service, udid) do
+    if step(service, udid, "stop") == "stopping" do
+      try do
+        shutdown(udid)
+      after
+        step(service, udid, "stopped")
+      end
+    end
+
     :ok
   end
 
-  def stop(_service, udid) do
+  defp shutdown(udid) do
     case cmd(["xcrun", "simctl", "shutdown", udid], 120) do
       %{exit: 0} -> :ok
       %{stderr: why} -> if why =~ "current state: Shutdown", do: :ok, else: raise(String.trim(why))
@@ -106,10 +227,24 @@ defmodule IphoneSimulator.Simulator do
 
   @doc "Removes a simulator and everything on it, for good."
   def remove(service, udid) do
-    stop(service, udid)
-    simctl!(service, ["delete", udid])
-    File.rm(Path.join(folder(service, "simulators"), udid <> ".json"))
-    File.rm(Path.join(folder(service, "used"), udid))
+    gone = step(service, udid, nil) == "gone"
+    step(service, udid, "remove")
+
+    try do
+      if not gone do
+        shutdown(udid)
+        simctl!(service, ["delete", udid])
+      end
+
+      File.rm(Path.join(folder(service, "simulators"), udid <> ".json"))
+      File.rm(Path.join(folder(service, "used"), udid))
+    rescue
+      e ->
+        step(service, udid, "fail")
+        reraise e, __STACKTRACE__
+    end
+
+    step(service, udid, "removed")
     :ok
   end
 

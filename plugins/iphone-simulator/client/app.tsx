@@ -1,13 +1,15 @@
 // iPhone Simulator: your simulators on every Mac, and one of them live, to use as an iPhone, start, stop or remove.
-import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, leave, List, LiveScreen, Menu, Problem, Row, Screen, Skeleton, Split, toast } from "ui"
+import { Button, call, changed, confirm, Empty, leave, List, LiveScreen, Menu, Problem, Row, Screen, Skeleton, Split, Status, Steps, toast } from "ui"
 
 /** A simulator, as `iphone-simulator_list` answers it. */
 interface Simulator {
   name: string
   description: string
-  state: string
+  state: State
+  step?: "booting" | "connecting"
+  why?: string
   machine: string
   last_used: number
 }
@@ -20,14 +22,21 @@ function since(at: number) {
   if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
   return ago.format(Math.round(minutes / (24 * 60)), "day")
 }
-const STATE: Record<string, string> = { running: "Running", starting: "Starting", stopping: "Stopping", stopped: "Stopped", gone: "Gone from Xcode" }
+/** A simulator's state, as the service keeps it (simulator.ex's `@steps`). */
+type State = "stopped" | "starting" | "running" | "stopping" | "removing" | "gone"
+const SAYS: Record<State, string> = { stopped: "Stopped", starting: "Starting", running: "Running", stopping: "Stopping", removing: "Removing", gone: "Gone from Xcode" }
+/// What a simulator's row says of its state.
+const says = (e: Simulator) => (e.state === "stopped" && e.why ? "Couldn't start" : SAYS[e.state])
+/// What its menu offers in each state: none while it's being removed.
+const ACTIONS: Record<State, ("start" | "stop" | "remove")[]> = { stopped: ["start", "remove"], starting: ["stop", "remove"], running: ["stop", "remove"], stopping: ["remove"], removing: [], gone: ["remove"] }
 
 const [open, setOpen] = createSignal<string>()
 
 function Detail(props: { simulator: Simulator }) {
   const e = () => props.simulator
   const [busy, setBusy] = createSignal(false)
-  const act = async ({ value }: { value: string }) => {
+  const act = async (value: string) => {
+    if (busy()) return
     if (value === "remove") {
       const yes = await confirm({ heading: `Remove ${e().name}?`, text: "Its apps and everything on it go with it, for good.", action: "Remove", destructive: true })
       if (!yes) return
@@ -35,36 +44,65 @@ function Detail(props: { simulator: Simulator }) {
     setBusy(true)
     await call(`iphone-simulator_${value}`, { simulator: e().name })
       .then(() => value === "remove" && setOpen())
-      .catch(toast)
+      // A start that fails says why where it would have shown, as the problem it's stopped with.
+      .catch((error) => value !== "start" && toast(error))
       .finally(() => setBusy(false))
   }
+  const actions = () => ACTIONS[e().state]
   return (
     <Screen
       heading={e().name}
       back
       onBack={() => setOpen()}
       action={
-        <Menu.Root onSelect={act}>
-          <Menu.Trigger aria-label={`More for ${e().name}`} />
-          <Menu.Positioner>
-            <Menu.Content>
-              <Show when={e().state === "stopped"} fallback={<Menu.Item value="stop">Stop</Menu.Item>}>
-                <Menu.Item value="start">Start</Menu.Item>
-              </Show>
-              <Menu.Separator />
-              <Menu.Item value="remove" destructive>Remove</Menu.Item>
-            </Menu.Content>
-          </Menu.Positioner>
-        </Menu.Root>
+        <Show when={actions().length}>
+          <Menu.Root onSelect={({ value }) => act(value)}>
+            <Menu.Trigger aria-label={`More for ${e().name}`} />
+            <Menu.Positioner>
+              <Menu.Content>
+                <Show when={actions().includes("start")}>
+                  <Menu.Item value="start">Start</Menu.Item>
+                </Show>
+                <Show when={actions().includes("stop")}>
+                  <Menu.Item value="stop">Stop</Menu.Item>
+                </Show>
+                <Show when={actions().length > 1}>
+                  <Menu.Separator />
+                </Show>
+                <Menu.Item value="remove" destructive>Remove</Menu.Item>
+              </Menu.Content>
+            </Menu.Positioner>
+          </Menu.Root>
+        </Show>
       }
     >
-      <Show
-        when={e().state === "running" && e().name}
-        keyed
-        fallback={<Empty>{busy() || e().state === "starting" ? "Starting…" : `${STATE[e().state] ?? e().state}. Start it to use it.`}</Empty>}
-      >
-        {(name) => <LiveScreen label={`${name}'s screen`} screen={(inputs) => call("iphone-simulator_screen", { simulator: name, ...inputs })} />}
-      </Show>
+      <Switch>
+        <Match when={e().state === "running" && e().name} keyed>
+          {(name) => <LiveScreen label={`${name}'s screen`} screen={(inputs) => call("iphone-simulator_screen", { simulator: name, ...inputs })} />}
+        </Match>
+        <Match when={e().state === "starting"}>
+          <Steps
+            steps={["Starting iOS", "Connecting to its screen"]}
+            at={e().step === "connecting" ? 1 : 0}
+            text={e().step === "connecting" ? "The first time takes a few seconds more." : undefined}
+          />
+        </Match>
+        <Match when={e().state === "stopping"}>
+          <Status heading="Stopping…" />
+        </Match>
+        <Match when={e().state === "removing"}>
+          <Status heading="Removing…" />
+        </Match>
+        <Match when={e().state === "gone"}>
+          <Problem warn heading="Gone from Xcode" text="It was deleted outside The One App." action={<Button variant="outline" loading={busy()} onClick={() => act("remove")}>Remove</Button>} />
+        </Match>
+        <Match when={e().why}>
+          <Problem heading={`Couldn't start ${e().name}`} text={e().why} action={<Button variant="outline" loading={busy()} onClick={() => act("start")}>Try Again</Button>} />
+        </Match>
+        <Match when={e().state === "stopped"}>
+          <Empty action={<Button loading={busy()} onClick={() => act("start")}>Start</Button>}>Stopped.</Empty>
+        </Match>
+      </Switch>
     </Screen>
   )
 }
@@ -81,7 +119,7 @@ function App() {
             <Show when={simulators().length} fallback={<Empty>No simulators. Your agents create them as they need them.</Empty>}>
               <List>
                 <For each={simulators()} keyed={(e) => e.name}>
-                  {(e) => <Row heading={e().name} text={`${e().description} · ${STATE[e().state] ?? e().state} · ${e().machine} · used ${since(e().last_used)}`} current={open() === e().name} onClick={() => setOpen(e().name)} />}
+                  {(e) => <Row heading={e().name} text={`${e().description} · ${says(e())} · ${e().machine} · used ${since(e().last_used)}`} current={open() === e().name} onClick={() => setOpen(e().name)} />}
                 </For>
               </List>
             </Show>
