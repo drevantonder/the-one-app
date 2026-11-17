@@ -4,11 +4,7 @@ defmodule OneCore.Edge do
   one of the network's own. The pieces of the edge check both (`core/edge/ask.ts`, `core/edge/presigner/presigner.ts`).
   """
   alias OneCore.{Iroh, Server}
-
-  defmodule Unreachable do
-    @moduledoc "What's raised when the network's edge, or what it hands out a link to, couldn't be reached or didn't answer."
-    defexception [:message]
-  end
+  alias OneCore.Edge.Unreachable
 
   # The list this server is on: its owner's, whom it was started for.
   defp list, do: Application.get_env(:one_core, :owner, "network") <> "/"

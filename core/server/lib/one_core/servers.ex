@@ -334,25 +334,19 @@ defmodule OneCore.Servers do
   by a server acting for the network.
   """
   def add(key, owner) do
-    blob = "#{owner}/servers"
+    added =
+      Bucket.update("#{owner}/servers", fn
+        nil ->
+          if Server.key() in listed(@network),
+            do: JSON.encode!([key]),
+            else: {:error, "The first server to act for #{owner} is installed by one acting for the network"}
 
-    wrote =
-      case Bucket.read(blob) do
-        {:ok, keys, tag} ->
-          keys = JSON.decode!(keys)
-          if key in keys, do: :ok, else: Bucket.replace(blob, JSON.encode!(keys ++ [key]), tag)
-
-        :absent ->
-          if Server.key() in listed(@network), do: Bucket.write(blob, JSON.encode!([key])), else: :refused
-      end
+        keys ->
+          if key in JSON.decode!(keys), do: keys, else: JSON.encode!(JSON.decode!(keys) ++ [key])
+      end)
 
     invalidate()
-
-    case wrote do
-      :ok -> :ok
-      :refused -> {:error, "The first server to act for #{owner} is installed by one acting for the network"}
-      _changed -> add(key, owner)
-    end
+    added
   end
 
   @doc """
@@ -361,45 +355,37 @@ defmodule OneCore.Servers do
   stopped part-way asks again. The network keeps a server, since its list is only ever begun once.
   """
   def remove(key, owner) do
-    blob = "#{owner}/servers"
+    removed =
+      Bucket.update("#{owner}/servers", fn
+        nil ->
+          nil
 
-    with {:ok, keys, tag} <- Bucket.read(blob),
-         keys = JSON.decode!(keys),
-         true <- key in keys do
-      cond do
-        owner == @network and keys == [key] -> {:error, "The network keeps a server. Add another before this one goes."}
-        Bucket.replace(blob, JSON.encode!(keys -- [key]), tag) == :ok -> invalidate()
-        true -> remove(key, owner)
-      end
-    else
-      _ -> :ok
-    end
+        listed ->
+          case JSON.decode!(listed) do
+            [^key] when owner == @network -> {:error, "The network keeps a server. Add another before this one goes."}
+            keys -> if key in keys, do: JSON.encode!(keys -- [key]), else: listed
+          end
+      end)
+
+    invalidate()
+    removed
   end
 
   @doc "This server acts for `member` too from now on, once they have it on their list: its owner chose them."
   def choose(member) do
-    blob = "servers/#{Server.key()}/members"
-    {:ok, members, tag} = Bucket.read(blob)
-    members = JSON.decode!(members)
+    :ok =
+      Bucket.update("servers/#{Server.key()}/members", fn members ->
+        if member in JSON.decode!(members), do: members, else: JSON.encode!(JSON.decode!(members) ++ [member])
+      end)
 
-    if member in members or Bucket.replace(blob, JSON.encode!(members ++ [member]), tag) == :ok,
-      do: invalidate(),
-      else: choose(member)
+    invalidate()
   end
 
   @doc """
   Writes one of a server's own blobs. Only that server writes it, so what's there is its own from before, though
   two of its own changes at once may each find the other's there: the later is written over it.
   """
-  def say(blob, data) do
-    wrote =
-      case Bucket.read(blob) do
-        {:ok, _was, tag} -> Bucket.replace(blob, data, tag)
-        :absent -> Bucket.write(blob, data)
-      end
-
-    if wrote == :ok, do: :ok, else: say(blob, data)
-  end
+  def say(blob, data), do: Bucket.update(blob, fn _was -> data end)
 
   @doc """
   Invalidates what's cached of the servers acting for `owner`: their list, and what each server on it acts for, has

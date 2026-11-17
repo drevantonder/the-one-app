@@ -12,8 +12,7 @@ defmodule OneCore.Search do
   The call is written as whoever asked calls tools (`_meta.mode`): a line of a code mode script
   (`tools.gmail.search({ query: string })`), or a command (`one gmail search --query <string>`).
   """
-  alias OneCore.Bucket
-  alias OneCore.Apps.Version
+  alias OneCore.Apps.{Store, Version}
 
   @doc "The tool, as MCP lists it."
   def tool do
@@ -317,10 +316,10 @@ defmodule OneCore.Search do
   # The skill of each app a match is in, read at once, as many as fit, and how to read the rest.
   defp skills(shown, mode) do
     with_skill = Enum.filter(shown, fn {_name, version} -> Enum.any?(Version.skills(version), &(&1.at == "")) end)
-    read = Bucket.read_all(for {_name, version} <- with_skill, do: "#{version.artifact}/code/#{version.code}/SKILL.md")
+    read = Store.read_all(for {_name, version} <- with_skill, do: {version.artifact, version.code, "SKILL.md"})
 
     skills =
-      for {{name, version}, {:ok, text, _tag}} <- Enum.zip(with_skill, read) do
+      for {{name, version}, {:ok, text}} <- Enum.zip(with_skill, read) do
         body = text |> String.split(~r/\A---\r?\n.*?\r?\n---\r?\n/s, parts: 2) |> List.last() |> String.trim()
         {name, version, "## #{version.title} (#{name})\n\n#{body}"}
       end

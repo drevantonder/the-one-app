@@ -53,6 +53,8 @@ defmodule OneCore.Apps.Deploy do
   def deploy(owner, name, files, from, trusted, install?) do
     artifact = Apps.app(owner, name) || "#{owner}/apps/#{name}"
     trusted = if trusted == :stored, do: Store.trusted?(artifact), else: trusted != false
+    # What it commits against, read before it writes anything (`OneCore.Apps.Store.keep/8`).
+    was = Store.latest(artifact)
 
     stage = &State.stage(State.id(), &1)
 
@@ -60,6 +62,7 @@ defmodule OneCore.Apps.Deploy do
          {:ok, files} <- Precompiled.fill(files),
          _ = stage.("Building its app"),
          {:ok, built} <- built(owner, name, files, trusted),
+         built = Store.deployment(built),
          _ = stage.(if(trusted, do: "Compiling its code", else: "Compiling its code in its sandbox")),
          {:ok, version, warnings} <- loaded(artifact, built, trusted) do
       # The deploy holds the version it loaded until it ends, however it ends: what it's installed for holds it after.
@@ -75,9 +78,8 @@ defmodule OneCore.Apps.Deploy do
              _ = stage.("Keeping it in the bucket"),
              # Its files, what it describes and that it's listed are written first, and none is read until `latest`
              # names them.
-             :ok <- Store.describe(version),
              :ok <- listed(artifact),
-             {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
+             {:ok, number} <- Store.keep(artifact, name, version, built, files, from, trusted, was),
              :ok <- committed(owner, name, number, version, install) do
           warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}

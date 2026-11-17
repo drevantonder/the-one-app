@@ -37,9 +37,9 @@ defmodule OneCore.Sandbox do
   """
   @behaviour :gen_statem
   require Logger
-  alias OneCore.{Artifact, Bucket, Builds, Call, Apps, Server}
+  alias OneCore.{Artifact, Builds, Call, Apps, Server}
   alias OneCore.Call.State
-  alias OneCore.Apps.{Calls, Version}
+  alias OneCore.Apps.{Calls, Store, Version}
 
   @registry __MODULE__.Children
   @supervisor __MODULE__.Supervisor
@@ -425,15 +425,10 @@ defmodule OneCore.Sandbox do
     own = Path.basename(version.artifact)
 
     for {name, %Version{artifact: artifact, code: code}} <- Enum.to_list(required) ++ [{own, version}] do
-      prefix = "#{artifact}/code/#{code}/"
-
-      found =
-        if name == own and files,
-          do: files,
-          else: Map.new(Bucket.list(prefix), &{String.replace_prefix(&1, prefix, ""), &1})
+      found = if name == own and files, do: Map.keys(files), else: Store.paths(artifact, code)
 
       paths =
-        for {path, _} <- found,
+        for path <- found,
             not Version.client?(path),
             Path.extname(path) != ".so" or Path.basename(path) == "#{Builds.target()}.so",
             do: path
@@ -443,7 +438,7 @@ defmodule OneCore.Sandbox do
           do: Map.take(files, paths),
           else:
             for(
-              {path, {:ok, data, _tag}} <- Enum.zip(paths, Bucket.read_all(Enum.map(paths, &found[&1]))),
+              {path, {:ok, data}} <- Enum.zip(paths, Store.read_all(for path <- paths, do: {artifact, code, path})),
               into: %{},
               do: {path, data}
             )

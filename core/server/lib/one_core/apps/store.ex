@@ -5,14 +5,15 @@ defmodule OneCore.Apps.Store do
   some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `latest` says
   which set it runs now, with that version's number. A deploy replaces `latest` only if it's unchanged, so two
   deploys at once can't both be the app's next version, and first writes the version it replaces to
-  `versions/<number>`; only the last few versions keep their files (`prune/1`). `latest` names the files it was deployed from too, by their
+  `versions/<number>`; only the last few versions keep their files (`prune/1`). Each deploy's set is its own
+  (`deployment/1`), so one that goes back to an earlier version's files writes them again. `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
   version after keeps its `from`, so one whose `source` isn't that hash was changed since. `trusted` says whether it's
   trusted: an untrusted app runs in a sandbox (`OneCore.Sandbox`). What a set of files says of itself once loaded is
   kept at `described/<its hash>`, for the servers that don't load it (`described/2`). A deploy writes a set, and
-  what it describes, before it swaps `latest`, which is what commits it: one that stops before leaves a set no
-  version names, which `prune/1` sweeps.
+  what it describes, before it swaps `latest`, which is what commits it (`keep/8`): one that stops before leaves a set
+  no version names, which `prune/1` sweeps.
   """
   require Logger
   alias OneCore.Bucket
@@ -22,9 +23,26 @@ defmodule OneCore.Apps.Store do
   @doc "Whose the app `artifact` is: a user, a group or the network."
   def whose(artifact), do: String.replace_suffix(artifact, "/apps/" <> Path.basename(artifact), "")
 
+  # Each deploy's set of files is its own, by an id no other deploy has, kept among them as One Core's own file
+  # `deployment`, as `client/ui` is (`OneCore.Entrypoint`): so no deploy writes files an earlier one wrote, which a
+  # prune may have chosen to remove (`prune/1`).
+  @deployment "deployment"
+
   @doc "One file of the set of the app `artifact`'s files named `code`, which needn't be the set running now."
   def file(artifact, code, path) do
     with {:ok, text, _tag} <- Bucket.read("#{artifact}/code/#{code}/#{path}"), do: {:ok, text}
+  end
+
+  @doc "Each of several files, `{artifact, code, path}` as `file/3` takes them, read at once: `{:ok, text}` or `:absent`."
+  def read_all(files) do
+    for read <- Bucket.read_all(for {artifact, code, path} <- files, do: "#{artifact}/code/#{code}/#{path}"),
+        do: with({:ok, text, _tag} <- read, do: {:ok, text})
+  end
+
+  @doc "The paths of the set of the app `artifact`'s files named `code`, without reading them."
+  def paths(artifact, code) do
+    prefix = "#{artifact}/code/#{code}/"
+    for blob <- Bucket.list(prefix), do: String.replace_prefix(blob, prefix, "")
   end
 
   @doc """
@@ -48,7 +66,7 @@ defmodule OneCore.Apps.Store do
   @doc "The files the app `artifact`'s set of files named `code` was deployed with: its source."
   def source(artifact, code) do
     case files(artifact, code, "source") do
-      deployed when deployed == %{} -> files(artifact, code)
+      deployed when deployed == %{} -> Map.delete(files(artifact, code), @deployment)
       deployed -> deployed
     end
   end
@@ -85,20 +103,27 @@ defmodule OneCore.Apps.Store do
 
   def trusted?(%{} = about), do: about["trusted"] != false
 
+  @doc "A deploy's `files`, with the id that makes its set of files its own (`keep/8`)."
+  def deployment(files), do: Map.put(files, @deployment, Base.encode16(:crypto.strong_rand_bytes(16), case: :lower))
+
   @doc """
-  Writes a set of files, and makes it the app's next version: `files` as the server keeps them, and `deployed`
-  as they were deployed. The version being replaced goes to the app's history first, so every version but the
-  latest is there, and `from`, the git repo its files came from, is kept with it (`:stored` keeps what the version
-  before said, and `nil` says they came from none), and whether it's `trusted`. Gives the version's number.
+  Commits a deploy: writes its set of files, as `deployment/1` made them, and what its `version` says of itself
+  (`describe/1`), and makes it the app's next version, then prunes the app (`prune/1`). `files` are as the server
+  keeps them, and `deployed` as they were deployed. `was` is the app's `latest` as the deploy read it before it wrote
+  anything (`latest/1`): `latest` is replaced only if it's still that, so two deploys at once can't both be the app's
+  next version, and one that a prune began after can't name what the prune removes. The version being replaced goes
+  to the app's history first, so every version but the latest is there, and `from`, the git repo its files came
+  from, is kept with it (`:stored` keeps what the version before said, and `nil` says they came from none), and
+  whether it's `trusted`. Gives the version's number.
   """
-  def keep(artifact, name, files, deployed, from, trusted) do
+  def keep(artifact, name, version, files, deployed, from, trusted, was) do
     code = Version.code(files)
     for {path, text} <- files, do: Bucket.write("#{artifact}/code/#{code}/#{path}", text)
 
-    if deployed != files,
+    if deployed != Map.delete(files, @deployment),
       do: for({path, text} <- deployed, do: Bucket.write("#{artifact}/source/#{code}/#{path}", text))
 
-    was = latest(artifact)
+    :ok = describe(version)
     number = if was, do: elem(was, 0) + 1, else: 1
     source = Version.code(deployed)
 
@@ -122,10 +147,14 @@ defmodule OneCore.Apps.Store do
         nil -> Bucket.write("#{artifact}/latest", next)
       end
 
-    # Another deploy of this app got there first, and whoever asked for this one hasn't seen it.
-    if wrote == :ok,
-      do: {:ok, number},
-      else: {:error, "#{name} was deployed by someone else just now. Look at it, and do this again."}
+    # Another deploy of this app got there first, or a prune began since this one read `latest`, and whoever asked
+    # for this one hasn't seen it.
+    if wrote == :ok do
+      prune(artifact)
+      {:ok, number}
+    else
+      {:error, "#{name} was deployed by someone else just now. Look at it, and do this again."}
+    end
   end
 
   # How many of an app's versions keep their files: the latest, which every server runs, and the two before it, which
@@ -135,46 +164,51 @@ defmodule OneCore.Apps.Store do
   @doc """
   Removes the files of the app `artifact`'s versions before its last few (`@versions_kept`): the set each ran, the files
   it was deployed from and what it said of itself, and its entry in `versions/`. Nothing runs them, and nothing
-  goes back to one: an app goes back by being deployed again from its git repo. A set a kept version runs too
-  stays. Gives how many blobs went.
+  goes back to one: an app goes back by being deployed again. A set a kept version runs too stays. So do the sets no
+  version names, as `git gc` removes what no ref reaches: what a deploy that failed, stopped or is still under way
+  wrote. Gives how many blobs went.
 
-  So are the sets no version names, as `git gc` removes what no ref reaches: what a deploy that failed or stopped
-  before swapping `latest` wrote. A deploy writes its set before it swaps `latest`, so a set no version names may be
-  one still deploying: it's noted in `unused`, and removed only if the next prune finds it unused still.
+  What it removes is chosen from one `latest`, which it replaces with itself, counted, before it removes anything:
+  a deploy under way read `latest` before it wrote its set (`keep/8`), so its swap is refused and it names
+  nothing removed, and every deploy after writes a set of its own that wasn't there to be chosen. One that finds
+  `latest` changed meanwhile removes nothing: the deploy that changed it prunes after.
   """
   def prune(artifact) do
-    with {number, latest, _tag} <- latest(artifact) do
+    with {:ok, json, tag} <- Bucket.read("#{artifact}/latest") do
+      latest = JSON.decode!(json)
       history = Bucket.list("#{artifact}/versions/")
       codes = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, code, _tag} -> {blob, code} end)
-      {old, retained} = Enum.split_with(codes, fn {blob, _code} -> String.to_integer(Path.basename(blob)) <= number - @versions_kept end)
-      retained = MapSet.new([latest | Enum.map(retained, &elem(&1, 1))])
-      named = MapSet.union(retained, MapSet.new(old, &elem(&1, 1)))
 
-      sets = for prefix <- ~w(code source described), blob <- Bucket.list("#{artifact}/#{prefix}/"), do: {set(artifact, prefix, blob), blob}
-      unused = for {code, _blob} <- sets, code not in named, uniq: true, do: code
-      noted = with {:ok, json, _tag} <- Bucket.read("#{artifact}/unused"), do: JSON.decode!(json), else: (:absent -> [])
-      swept = for code <- unused, code in noted, do: code
-      gone_sets = MapSet.new(swept ++ for({_blob, code} <- old, code not in retained, do: code))
+      {old, retained} =
+        Enum.split_with(codes, fn {blob, _code} ->
+          String.to_integer(Path.basename(blob)) <= latest["number"] - @versions_kept
+        end)
 
-      gone = for({code, blob} <- sets, code in gone_sets, do: blob) ++ Enum.map(old, &elem(&1, 0))
-      Stream.run(Task.async_stream(gone, &Bucket.remove/1, max_concurrency: 16, timeout: :infinity))
-      unused(artifact, unused -- swept)
-      length(gone)
+      retained = MapSet.new([latest["code"] | Enum.map(retained, &elem(&1, 1))])
+
+      gone =
+        for(
+          prefix <- ~w(code source described),
+          blob <- Bucket.list("#{artifact}/#{prefix}/"),
+          set(artifact, prefix, blob) not in retained,
+          do: blob
+        ) ++ Enum.map(old, &elem(&1, 0))
+
+      counted = JSON.encode!(Map.update(latest, "pruned", 1, &(&1 + 1)))
+
+      if gone != [] and Bucket.replace("#{artifact}/latest", counted, tag) == :ok do
+        Stream.run(Task.async_stream(gone, &Bucket.remove/1, max_concurrency: 16, timeout: :infinity))
+        length(gone)
+      else
+        0
+      end
     else
-      nil -> 0
+      :absent -> 0
     end
   end
 
   # The hash of the set a blob of `prefix` is in: `code/<hash>/<path>`, `source/<hash>/<path>`, `described/<hash>`.
   defp set(artifact, prefix, blob), do: blob |> String.replace_prefix("#{artifact}/#{prefix}/", "") |> String.split("/") |> hd()
-
-  defp unused(artifact, []), do: Bucket.remove("#{artifact}/unused")
-
-  defp unused(artifact, codes) do
-    with {:ok, _was, tag} <- Bucket.read("#{artifact}/unused"),
-         do: Bucket.replace("#{artifact}/unused", JSON.encode!(codes), tag),
-         else: (:absent -> Bucket.write("#{artifact}/unused", JSON.encode!(codes)))
-  end
 
   @doc """
   The versions in the bucket of the apps `artifacts` that are newer than the ones in `latest`: each one's

@@ -36,16 +36,16 @@ defmodule OneCore.Bucket do
   def read_all(keys), do: bucket(:read_all, [keys])
 
   @doc "Writes a blob only if there's none at `key`."
-  def write(key, data), do: sent(&conditionally(:write, [key, data], &1))
+  def write(key, data), do: fused(fn -> sent(&conditionally(:write, [key, data], &1)) end)
 
   @doc "Replaces a blob only if it's still the one `tag` was read with."
-  def replace(key, data, tag), do: sent(&conditionally(:replace, [key, data, tag], &1))
+  def replace(key, data, tag), do: fused(fn -> sent(&conditionally(:replace, [key, data, tag], &1)) end)
 
   @doc "The keys starting with `prefix`, in order."
   def list(prefix), do: bucket(:list, [prefix])
 
   @doc "Removes a blob. Nothing brings it back, so only what nothing reads any more is removed."
-  def remove(key), do: sent(fn _tried -> bucket(:remove, [key]) end)
+  def remove(key), do: fused(fn -> sent(fn _tried -> backend(:remove, [key]) end) end)
 
   @doc "How many bytes a blob is, or `:absent`."
   def size(key), do: bucket(:size, [key])
@@ -56,10 +56,30 @@ defmodule OneCore.Bucket do
   """
   def link(key, mode) when mode in [:read, :write], do: bucket(:link, [key, mode])
 
+  @doc """
+  Changes a blob in one step: `change` is given what's there, or `nil` for nothing, and gives what's to be there,
+  what's there already to write nothing, or `{:error, why}` to change nothing. If someone else wrote it meanwhile,
+  `change` is given theirs and asked again, so neither change is lost: a bucket offers only writes on a condition
+  (ETags, as S3 and R2 do), so that's how a change to what's there is made. Gives `:ok` or `{:error, why}`.
+  """
+  def update(key, change) do
+    {was, tag} = with {:ok, was, tag} <- read(key), do: {was, tag}, else: (:absent -> {nil, nil})
+
+    case change.(was) do
+      {:error, why} -> {:error, why}
+      ^was -> :ok
+      now -> if(tag, do: replace(key, now, tag), else: write(key, now)) |> updated(key, change)
+    end
+  end
+
+  defp updated(:ok, _key, _change), do: :ok
+  defp updated(_changed, key, change), do: update(key, change)
+
   # A bucket that didn't answer a write may still have made it: R2 says so of a conditional write whose answer was
   # lost. Sending one again is safe, since the bucket refuses it if anything got there first, its own earlier try
   # too. So a write is sent again, and one refused after a try that wasn't answered is read back: it was made if
-  # what's there is what it wrote. A removal is the same however often it's sent. Each is sent at most this often.
+  # what's there is what it wrote. A removal is the same however often it's sent. Each is sent at most this often,
+  # as one call: the fuse hears only how the last try went (`fused/1`).
   @tries 3
 
   defp sent(tried \\ 1, send) do
@@ -70,24 +90,29 @@ defmodule OneCore.Bucket do
   end
 
   defp conditionally(function, [key, data | _] = arguments, tried) do
-    with refused when refused != :ok <- bucket(function, arguments) do
-      if tried > 1 and match?({:ok, ^data, _tag}, read(key)), do: :ok, else: refused
+    with refused when refused != :ok <- backend(function, arguments) do
+      if tried > 1 and match?({:ok, ^data, _tag}, backend(:read, [key])), do: :ok, else: refused
     end
   end
 
-  # A bucket that couldn't be reached raises `OneCore.Edge.Unreachable`, since what isn't on this machine is reached
-  # through the network's edge. A call that did melts `bucket_fuse` (`OneCore.Bucket.Fuse`), and while it's blown
-  # every call fails at once rather than each waiting through its own retries and timeouts.
-  defp bucket(function, arguments) do
-    {module, where} = Application.fetch_env!(:one_core, :bucket)
+  defp bucket(function, arguments), do: fused(fn -> backend(function, arguments) end)
 
+  defp backend(function, arguments) do
+    {module, where} = Application.fetch_env!(:one_core, :bucket)
+    apply(module, function, [where | arguments])
+  end
+
+  # A bucket that couldn't be reached raises `OneCore.Edge.Unreachable`, since what isn't on this machine is reached
+  # through the network's edge. A call that did, after its own tries, melts `bucket_fuse` (`OneCore.Bucket.Fuse`),
+  # and while it's blown every call fails at once rather than each waiting through its own retries and timeouts.
+  defp fused(call) do
     if :fuse.ask(:bucket_fuse, :async_dirty) == :blown do
       raise Edge.Unreachable,
             "The bucket can't be reached just now, so this server couldn't do what was asked. Try again in a moment."
     end
 
     try do
-      apply(module, function, [where | arguments])
+      call.()
     rescue
       unreachable in Edge.Unreachable ->
         :fuse.melt(:bucket_fuse)
@@ -98,10 +123,9 @@ defmodule OneCore.Bucket do
   defmodule Fuse do
     @moduledoc """
     `bucket_fuse`, `:fuse`'s circuit breaker for the bucket: `ok`, and `blown` once a call fails, after which it's
-    `ok` again for the next try once `@reset` has passed. A server that couldn't reach the bucket may have missed being
-    told something meanwhile, so each time it goes from `blown` back to `ok` it looks again
-    (`OneCore.Server.reconnected/0`), once: `:fuse` tells this handler of each, one at a time. A look that can't
-    reach the bucket blows the fuse again, so it's looked again after the next reset.
+    `ok` again for the next try once `@reset` has passed. Whoever installs it says what's done each time it goes from
+    `blown` back to `ok` (`install/1`), once: `:fuse` tells this handler of each, one at a time. A server that
+    couldn't reach the bucket may have missed being told something meanwhile, so it looks again then.
     """
     @behaviour :gen_event
 
@@ -110,21 +134,21 @@ defmodule OneCore.Bucket do
     # 7 to 27 seconds to say so, so one every 15 seconds is all that waits while it's away.
     @reset 15_000
 
-    @doc "Installs `bucket_fuse`, and this handler of what it does."
-    def install do
+    @doc "Installs `bucket_fuse`, and this handler of what it does, which runs `back` in a process of its own each time it's `ok` again."
+    def install(back) do
       :ok = :fuse.install(:bucket_fuse, {{:standard, 0, @reset}, {:reset, @reset}})
-      :ok = :fuse_event.add_handler(__MODULE__, :ok)
+      :ok = :fuse_event.add_handler(__MODULE__, {:ok, back})
     end
 
     @impl true
     def init(state), do: {:ok, state}
 
     @impl true
-    def handle_event({:bucket_fuse, :blown}, _state), do: {:ok, :blown}
+    def handle_event({:bucket_fuse, :blown}, {_was, back}), do: {:ok, {:blown, back}}
 
-    def handle_event({:bucket_fuse, :ok}, :blown) do
-      Task.start(&OneCore.Server.reconnected/0)
-      {:ok, :ok}
+    def handle_event({:bucket_fuse, :ok}, {:blown, back}) do
+      Task.start(back)
+      {:ok, {:ok, back}}
     end
 
     def handle_event(_event, state), do: {:ok, state}

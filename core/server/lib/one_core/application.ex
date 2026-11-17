@@ -13,7 +13,9 @@ defmodule OneCore.Application do
   def start(_type, _args) do
     # What a crash reports holds what it was working with, which may be a person's tokens: none of it reaches the log.
     OneCore.Redact.install()
-    OneCore.Bucket.Fuse.install()
+
+    # A server that couldn't reach the bucket may have missed being told something meanwhile: once it can, it looks again.
+    OneCore.Bucket.Fuse.install(&Server.reconnected/0)
     # Apps tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
     {:ok, key} = Iroh.key(Server.key_file())

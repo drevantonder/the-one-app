@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Network do
     if owner = options[:owner] do
       if User.first_owner() == nil and Servers.here?("network"), do: publish()
 
-      case User.make_first_owner("users/" <> owner) do
+      case OneCore.Apps.Lifecycle.make_first_owner("users/" <> owner) do
         :ok -> Mix.shell().info("users/#{owner} is the network's first owner.")
         {:error, why} -> Mix.shell().error("users/#{owner}, the network's first owner: #{why}")
       end

@@ -22,7 +22,6 @@ defmodule OneCore.Builds do
 
   @builds "network/builds/"
   @latest @builds <> "latest"
-  @app ~r{^((?:network|(?:users|groups)/[^/]+)/apps/[^/]+)/latest$}
 
   @doc "The build this server is, as `tooling/version` names its commit: `0.15.2+2974.febd37350abc`."
   def build, do: Application.fetch_env!(:one_core, :build)
@@ -127,8 +126,7 @@ defmodule OneCore.Builds do
   any of their files, gives a link to send each one it lacks by, `{:send, %{name => link}}`, and changes nothing:
   sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more
   are removed: a machine downloads only the latest, and one whose update doesn't take goes back to the build it
-  kept of its own. So are the files of every app's versions before its last few (`OneCore.Apps.Store.prune/1`),
-  since each release deploys the apps that changed again, each a new version with its apps and NIFs.
+  kept of its own.
   """
   def publish(builds) do
     missing =
@@ -155,11 +153,6 @@ defmodule OneCore.Builds do
     if written == :ok do
       named = for {_name, build} <- now, do: @builds <> build["sha256"]
       for blob <- Bucket.list(@builds), blob != @latest, blob not in named, do: Bucket.remove(blob)
-      # Every app in the bucket, whether or not anyone still has it: each one's `latest`.
-      apps =
-        for blob <- Bucket.list(""), [artifact] <- [Regex.run(@app, blob, capture: :all_but_first)], do: artifact
-
-      Stream.run(Task.async_stream(apps, &Store.prune/1, max_concurrency: 16, timeout: :infinity))
       now
     else
       latest(builds)
