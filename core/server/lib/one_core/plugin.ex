@@ -6,8 +6,9 @@ defmodule OneCore.Plugin do
   Elixir, says what's wrong if it doesn't compile, and otherwise runs it at once, with no restart. The plugin is
   whoever's deployed it, and is installed for them: a user, or the group or the network they asked for. Someone else
   has it too once it's installed for them (the `install` tool), and what's installed for the network is everyone's. A plugin is
-  updated by deploying it again: whoever it's deployed for runs the new version at once, and everyone else who has it
-  is offered it as an update (`plugins`), which they take as their automatic updates and what it asks for allow.
+  updated by deploying it again, which everyone who has it runs at once: a plugin has one version. A trusted plugin
+  installed from a git repo also takes the repo's newer commits by itself, and an untrusted one offers them as its
+  update (`plugins`).
 
   Its server code runs with all of its machine's access, so it runs only on servers of whoever it's installed for:
   the network's servers for the network, and for a user or a group a server of their own, set up in Devices to act

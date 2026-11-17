@@ -130,8 +130,9 @@ defmodule OneCore.Hooks do
     {"uninstalled", :observe,
      """
      A plugin was uninstalled for someone. It's about who it was installed `for`, the `name` it was installed by
-     there and the `plugin` it is, by its artifact's name. A plugin that keeps what's deleted takes what it kept and
-     made for them along.
+     there and the `plugin` it is, by its artifact's name, and `with`, each plugin installed for them that required it
+     and went with it, by its `name` and `plugin`. A plugin that keeps what's deleted takes what they kept and made for
+     them along, as one.
      """},
     {"restored", :observe,
      """

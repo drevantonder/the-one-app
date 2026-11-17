@@ -7,16 +7,16 @@ defmodule OneCore.Plugins.Requires do
   These only say what's what; `OneCore.Plugins.Lifecycle` makes the moves.
   """
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Installed, Lifecycle, Store}
+  alias OneCore.Plugins.{Installed, Store}
 
   @network "network"
 
   @doc """
-  What the plugin `artifact`'s version `number` (its latest where `nil`) requires, as it described itself: each
-  requirement's name and why, `%{"google-account" => "to reach your mail"}`. None where no server has described it yet.
+  What the plugin `artifact` requires, as its version described itself: each requirement's name and why,
+  `%{"google-account" => "to reach your mail"}`. None where no server has described it yet.
   """
-  def requires(artifact, number \\ nil) do
-    with {:ok, version} <- described(artifact, number), do: version.requires, else: (_ -> %{})
+  def requires(artifact) do
+    with {:ok, version} <- described(artifact), do: version.requires, else: (_ -> %{})
   end
 
   @doc """
@@ -24,12 +24,11 @@ defmodule OneCore.Plugins.Requires do
   turn, deepest first, so each comes before what requires it. Each is
 
       %{name: "google-account", title: "Google", by: "gmail", why: "to reach your mail",
-        plugin: "network/plugins/google-account", number: 7, trusted: true, deleted: false}
+        plugin: "network/plugins/google-account", deleted: false}
 
-  `by` is the plugin that requires it, and `why` its reason. `plugin` and `number` are where to get it from: the
-  owner's Recently Deleted (`deleted`, to restore), their own plugin of that name, that of whoever's plugin requires
-  it, or the network's; `nil` where it's none of these, so it can't be installed. `trusted` is whether it would be
-  where nobody says (`OneCore.Plugins.Lifecycle.trusted?/2`).
+  `by` is the plugin that requires it, and `why` its reason. `plugin` is where to get it from: the owner's Recently
+  Deleted (`deleted`, to restore), their own plugin of that name, that of whoever's plugin requires it, or the
+  network's; `nil` where it's none of these, so it can't be installed.
   """
   def missing(owner, artifact, requires), do: found(owner, artifact, requires, [Path.basename(artifact)], [])
 
@@ -45,7 +44,7 @@ defmodule OneCore.Plugins.Requires do
 
         found =
           if requirement.plugin,
-            do: found(owner, requirement.plugin, requires(requirement.plugin, requirement.number), [name | seen], found),
+            do: found(owner, requirement.plugin, requires(requirement.plugin), [name | seen], found),
             else: found
 
         found ++ [requirement]
@@ -54,38 +53,25 @@ defmodule OneCore.Plugins.Requires do
   end
 
   defp source(owner, name, whose) do
-    record = elem(Installed.read(owner), 0)[name]
+    record = Installed.read(owner)[name]
 
-    {artifact, number, deleted} =
+    {artifact, deleted} =
       if match?(%{"state" => "recently_deleted"}, record) do
-        {record["plugin"], record["version"], true}
+        {record["plugin"], true}
       else
-        Enum.find_value(Enum.uniq([owner, whose, @network]), {nil, nil, false}, fn from ->
-          with {number, _code, _tag} <- Store.latest("#{from}/plugins/#{name}"),
-               do: {"#{from}/plugins/#{name}", number, false}
+        Enum.find_value(Enum.uniq([owner, whose, @network]), {nil, false}, fn from ->
+          if Store.latest("#{from}/plugins/#{name}"), do: {"#{from}/plugins/#{name}", false}
         end)
       end
 
-    title = with {:ok, version} <- described(artifact, number), do: version.title, else: (_ -> nil)
-
-    trusted =
-      cond do
-        deleted -> record["trusted"] != false
-        artifact -> Lifecycle.trusted?(owner, artifact)
-        true -> false
-      end
-
-    %{name: name, title: title || name, plugin: artifact, number: number, trusted: trusted, deleted: deleted}
+    title = with {:ok, version} <- described(artifact), do: version.title, else: (_ -> nil)
+    %{name: name, title: title || name, plugin: artifact, deleted: deleted}
   end
 
-  defp described(nil, _number), do: :error
+  defp described(nil), do: :error
 
-  defp described(artifact, nil) do
-    with {number, _code, _tag} <- Store.latest(artifact), do: described(artifact, number)
-  end
-
-  defp described(artifact, number) do
-    with code when is_binary(code) <- Store.code(artifact, number), do: Store.described(artifact, code)
+  defp described(artifact) do
+    with {_number, code, _tag} <- Store.latest(artifact), do: Store.described(artifact, code), else: (_ -> :error)
   end
 
   @doc """

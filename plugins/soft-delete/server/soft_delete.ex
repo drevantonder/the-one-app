@@ -242,22 +242,20 @@ defmodule SoftDelete do
   def move(%{"state" => state}, event), do: {:error, "An item that's #{state} can't be moved by #{inspect(event)}."}
 
   @impl true
-  def hook("uninstalled", %{"for" => owner, "name" => name, "plugin" => plugin}, call) do
+  # The plugins that required it went with it (`with`), and are one item with it: Restore brings them all back.
+  def hook("uninstalled", %{"for" => owner, "name" => name, "plugin" => plugin} = about, call) do
     # It's heard where the plugin was uninstalled, and its items are kept by a server acting for the network.
     if not Servers.here?(call.installed), do: Call.forward(call, call.installed)
+    went = for %{"name" => other, "plugin" => artifact} <- List.wrap(about["with"]), do: %{"name" => other, "artifact" => artifact}
 
-    made =
-      for blob <- Bucket.list("#{owner}/made/#{name}/"),
-          [artifact] <- [Regex.run(~r{^[^/]+(?:/[^/]+)?/made/[^/]+/[^/]+}, blob)],
-          uniq: true,
-          do: artifact
+    artifacts =
+      for each <- [name | Enum.map(went, & &1["name"])], artifact <- kept(owner, each), uniq: true, do: artifact
 
-    own = "#{owner}/own/#{name}"
-    artifacts = made ++ if(Bucket.list(own <> "/") != [], do: [own], else: [])
     record = %{
       "owner" => owner,
       "artifacts" => artifacts,
       "plugin" => %{"name" => name, "artifact" => plugin},
+      "with" => went,
       "app" => title(call, Path.basename(plugin)),
       "by" => call.actor || owner,
       "at" => now()
@@ -278,6 +276,18 @@ defmodule SoftDelete do
         do: restored(call, id, record)
 
     :ok
+  end
+
+  # What a plugin kept and made for `owner`: its own artifact, if it kept anything, and each it made.
+  defp kept(owner, name) do
+    made =
+      for blob <- Bucket.list("#{owner}/made/#{name}/"),
+          [artifact] <- [Regex.run(~r{^[^/]+(?:/[^/]+)?/made/[^/]+/[^/]+}, blob)],
+          uniq: true,
+          do: artifact
+
+    own = "#{owner}/own/#{name}"
+    made ++ if(Bucket.list(own <> "/") != [], do: [own], else: [])
   end
 
   @impl true
@@ -667,7 +677,7 @@ defmodule SoftDelete do
   defp unused!(name) do
     if name =~ @plugin do
       owner = User.owner(name)
-      {installed, _automatic} = OneCore.Plugins.Installed.read(owner)
+      installed = OneCore.Plugins.Installed.read(owner)
       using = OneCore.Plugins.Installed.installed_for(name) ++ for({_, %{"plugin" => ^name}} <- installed, do: owner)
 
       if using != [],

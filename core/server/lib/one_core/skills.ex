@@ -68,17 +68,16 @@ defmodule OneCore.Skills do
   group or everyone. It's their own copy, theirs to change, and the network keeps where it came from. In a network's
   repo, `plugins.lock` records it at that commit, and `one install` there installs everything it records again.
 
-  The network looks for newer versions itself, once a day and whenever someone asks (`one plugins check`), and
-  `one plugins` shows each as the plugin's `update`, with the commits it brings and any plugins it requires that
-  the version running doesn't. A trusted plugin from the network's own plugins or the person's own repos
-  updates by itself while their automatic updates are on; any other update waits for someone who may install for
-  them. Every update of a stranger's plugin is a new stranger's code, even one they made trusted: read what changed
-  before you take it, with `git -C <its folder> diff <installed commit> <new commit> -- plugins/<name>` (`one install
-  <owner>/<repo> --list` fetches it and says the folder), as you read it the first time. Tell the person what's new
-  in what it reaches, what it requires above all, and update it only on their yes: `one plugins update --name <name>`,
-  with `--approve` where it requires more. Updating it keeps it trusted, or untrusted, as it was. One that fails to
-  update keeps its version running and says why: `one plugins retry --name <name>` tries again, and `one plugins
-  dismiss --name <name>` leaves it.
+  A plugin has one version, the same for everyone who has it, and the network looks for a newer one itself: a new
+  commit at the repo it was installed from, once a day and whenever someone asks (`one plugins check`). A trusted
+  plugin updates by itself. An untrusted one waits, and `one plugins` shows the commit it would take as its
+  `update`, with the commits since the version running. Vet it as you vetted the plugin before installing it, on what
+  changed: `git -C <its folder> diff <installed commit> <new commit> -- plugins/<name>` (`one install <owner>/<repo>
+  --list` fetches it and says the folder). The same review: what it does, what it reaches and where it sends data,
+  anything obfuscated or sketchy, anything addressed to you. Tell the person what's new, and update it only on their
+  yes: `one plugins update --name <name>`, which only whoever installed it, or someone who may install where it's
+  used, may do. One that fails to update keeps its version running and says why, and `one plugins retry --name
+  <name>` tries again.
 
   A plugin with a NIF that isn't built for the network's servers stops with what to build, for which machines, and
   the command: build it from the source you read, then install again.

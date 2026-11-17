@@ -33,6 +33,9 @@ defmodule OneCore.Plugins.Git do
     git(copy, ["rev-parse", "--verify", "--quiet", "#{ref || "HEAD"}^{commit}"])
   end
 
+  @doc "Whether `ancestor` is `commit` or comes before it, so moving to `commit` loses nothing of it."
+  def ancestor?(copy, ancestor, commit), do: match?({:ok, _}, git(copy, ["merge-base", "--is-ancestor", ancestor, commit]))
+
   @doc "The tree of `path` at `commit`, which is the same for two commits only where its files are."
   def tree(copy, commit, path), do: git(copy, ["rev-parse", "--verify", "--quiet", "#{commit}:#{path}"])
 
@@ -41,7 +44,7 @@ defmodule OneCore.Plugins.Git do
   `author` and `date`: what an update brings, for whoever decides whether to take it.
   """
   def commits(copy, from, to, path) do
-    range = if from && match?({:ok, _}, git(copy, ["merge-base", "--is-ancestor", from, to])), do: "#{from}..#{to}", else: to
+    range = if from && ancestor?(copy, from, to), do: "#{from}..#{to}", else: to
 
     with {:ok, log} <- git(copy, ["log", "--max-count=50", "--format=%H%x1f%s%x1f%an%x1f%aI", range, "--", path]) do
       {:ok,

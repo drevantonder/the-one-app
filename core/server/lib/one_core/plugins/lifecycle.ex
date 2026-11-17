@@ -1,32 +1,31 @@
 defmodule OneCore.Plugins.Lifecycle do
   @moduledoc """
-  What moves a plugin through its life for an owner, as `OneCore.Plugins.Installed` keeps it: installing it,
-  updating it and switching its trust, a stage at a time (`fetching` its code, `building` it, `starting` it), and
-  uninstalling, restoring, and removing it for good 30 days after.
+  What moves an install through its life (`OneCore.Plugins.Installed`) and a plugin through its updates
+  (`OneCore.Plugins.Update`): installing, a stage at a time; uninstalling to Recently Deleted, restoring, and removing
+  for good 30 days after; and taking a newer version of a plugin, or switching whether it's trusted, for everyone who
+  has it.
 
-  Newer versions come from two places. A newer version someone deployed: whoever deployed it runs it at once, as it's
-  theirs (`OneCore.Plugins.Deploy`), and everyone else who has it sees an update. And a new commit at the git source
-  of a plugin of the owner's own, which servers acting for them look for once a day (`check/1`), and whenever a person
-  asks (the tool `plugins_check`). A plugin the server ships updates with the server, and never shows an update.
+  A newer version is a new commit at the git source a plugin was deployed from, which changes its folder and comes
+  after the commit it runs, so taking it loses nothing that's live: servers acting for whoever the plugin is look
+  once a day, and when someone asks (`plugins_check`). A trusted plugin takes it at once; an untrusted one offers it,
+  for someone who may to Update once an agent has read what changed. A failed update leaves the version that ran
+  running. A plugin the server ships updates with the server, and one deployed with changes not committed has no
+  newer commit to take.
 
-  An update is taken without asking only where all of these hold: the owner's automatic updates are on, the plugin is
-  trusted, the newer version requires no plugin the one running doesn't, and it comes from the network's own plugins or the owner's
-  own repos. Any other waits for someone who may install for them. Each is decided again when it runs, and a failed
-  update leaves the version that ran running.
+  A plugin requires others (`OneCore.Plugins.Requires`). Installing it installs first each of its requirements that
+  isn't there, as their own installs, and fails, naming it, where one can't be. Uninstalling one that others there are
+  required by takes them to Recently Deleted with it, as one, once whoever asked confirms it; restoring any of them
+  brings them all back. Uninstalling one that only requires others leaves them installed.
 
-  Where a plugin comes from decides those, and whether it's trusted when it's installed: the network's own plugins
-  (`network/plugins/…`) and the owner's own (what they deployed, and their repos in the network, `one::<owner>/…`)
-  are trusted, and a stranger's (another user's or group's plugin, or one `one install` fetched from any other git
-  repo, which it installs untrusted) is untrusted until someone who may install for them says it's trusted.
-
-  It's a GenServer only for the clock: once a day it checks the git sources, and removes for good what's been in
+  It's a GenServer only for the clock: once a day it looks for newer versions, and removes for good what's been in
   Recently Deleted for 30 days, for whoever this server acts for.
   """
   use GenServer
   require Logger
-  alias OneCore.{Bucket, Sandbox, Server, Servers}
+  alias OneCore.{Bucket, Hooks, Server, Servers}
+  alias OneCore.Call.State
   alias OneCore.Plugins
-  alias OneCore.Plugins.{Deploy, Git, Installed, Store, Version}
+  alias OneCore.Plugins.{Deploy, Git, Installed, Requires, Store, Update}
 
   @network "network"
   @day :timer.hours(24)
@@ -47,28 +46,115 @@ defmodule OneCore.Plugins.Lifecycle do
     Process.send_after(self(), :daily, @day)
 
     Task.start(fn ->
-      for owner <- Servers.acts_for(Server.key()) do
-        reconcile(owner)
-        check(owner)
-      end
+      for owner <- Servers.acts_for(Server.key()), do: reconcile(owner)
+      for %{plugin: artifact} <- Deploy.deployed(), takes?(artifact), installed?(artifact), do: check(artifact)
     end)
 
     {:noreply, state}
   end
 
   @doc """
-  Installs the plugin `artifact` for `owner` by `name`, or tries again where it failed to: `trusted` as given, or as
-  where it comes from says where it's `nil`. Gives the record it's at once done, or `{:error, why}` for a move that
-  isn't in the machine.
+  Installs the plugin `artifact` for `owner` by `name`, for `by`, who asked, or tries again where it failed to: its
+  requirements first. Gives the record it's at once done, with `also`, a line for each requirement it installed too,
+  or `{:error, why}` for a move that isn't in the machine.
   """
-  def install(owner, name, artifact, trusted) do
-    trusted = if trusted == nil, do: trusted?(owner, artifact), else: trusted
-
+  def install(owner, name, artifact, by) do
     with :ok <- Installed.named(name),
-         {number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no plugin #{artifact}"},
-         %{} <- move(owner, name, {:install, artifact, trusted}) do
-      run(owner, name, fn -> version(owner, name, artifact, number, trusted) end)
+         {_number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no plugin #{artifact}"},
+         %{} <- move(owner, name, {:install, artifact, by}) do
+      case requirements(owner, name, artifact, by) do
+        {:ok, also} -> with %{} = record <- installing(owner, name, artifact), do: Map.put(record, "also", also)
+        {:error, why} -> failed(owner, name, why)
+      end
     end
+  end
+
+  # Installs each of the plugin's requirements that isn't there for `owner`, deepest first, as its own install, or
+  # brings it back from their Recently Deleted. Gives a line for each, saying why it's installed too, or `{:error,
+  # why}` naming the first that couldn't be.
+  defp requirements(owner, name, artifact, by) do
+    title = title(artifact, name)
+    missing = Requires.missing(owner, artifact, Requires.requires(artifact))
+    titles = Map.new(missing, &{&1.name, &1.title}) |> Map.put(name, title)
+    # Whoever installs it may add each of them too, or nothing is installed.
+    asking = {by || owner, owner}
+    closed = Enum.find(missing, &(&1.plugin && not &1.deleted && opens(asking, &1.plugin) != :ok))
+
+    if closed,
+      do: {:error, "#{title} requires #{closed.title}, which #{elem(asking, 0)} may not add: whoever owns #{closed.plugin} shares it first."},
+      else: install_requirements(owner, missing, titles, title, by)
+  end
+
+  defp install_requirements(owner, missing, titles, title, by) do
+    Enum.reduce_while(missing, {:ok, []}, fn requirement, {:ok, also} ->
+      stage("Installing #{requirement.title}")
+
+      installed =
+        cond do
+          requirement.plugin == nil -> {:error, "it isn't in this network, so it can't be installed for #{owner}"}
+          requirement.deleted -> restore(owner, requirement.name, {by, owner})
+          true -> install(owner, requirement.name, requirement.plugin, by)
+        end
+
+      case installed do
+        %{"state" => "installed"} ->
+          line = "#{titles[requirement.by] || requirement.by} uses #{requirement.title} #{requirement.why}, so it's installed too."
+          {:cont, {:ok, also ++ [line]}}
+
+        other ->
+          why = if match?({:error, _}, other), do: elem(other, 1), else: other["why"]
+          {:halt, {:error, "#{title} requires #{requirement.title}, which couldn't be installed: #{why}"}}
+      end
+    end)
+  end
+
+  # Fetches, builds and starts what's being installed, whose record is at its first stage. Gives the record it's at.
+  defp installing(owner, name, artifact) do
+    {number, code, _tag} = Store.latest(artifact)
+    trusted = Store.about(artifact)["trusted"] != false
+    title = title(artifact, name)
+    move(owner, name, {:stage, "fetching"})
+    stage("Getting #{title}'s code")
+
+    with {:ok, version} <- Store.version(artifact, code, Servers.runs?(owner), trusted),
+         _ = move(owner, name, {:stage, "building"}),
+         _ = stage("Building #{title}"),
+         version = %{version | artifact: artifact},
+         :ok <- Deploy.fits(owner, name, version),
+         %{} <- move(owner, name, {:stage, "starting"}) do
+      stage("Starting #{title}")
+      ran(owner, [{artifact, number, {:ok, version}}])
+
+      case Plugins.versions([owner]) do
+        %{^name => %{artifact: ^artifact}} -> move(owner, name, :done)
+        _ -> failed(owner, name, "It didn't start.")
+      end
+    else
+      :error -> failed(owner, name, "Its latest version doesn't compile here.")
+      {:error, why} -> failed(owner, name, why)
+    end
+  rescue
+    error ->
+      Logger.error(Exception.format(:error, error, __STACKTRACE__))
+      failed(owner, name, Exception.message(error))
+  end
+
+  # A step a person reads while a tool runs as an MCP task: "Installing Google Account", "Getting Gmail's code".
+  defp stage(text), do: State.stage(State.id(), text)
+
+  # A plugin's name where a person reads it.
+  defp title(artifact, name) do
+    with {_number, code, _tag} <- Store.latest(artifact),
+         {:ok, version} <- Store.described(artifact, code),
+         title when is_binary(title) <- version.title,
+         do: title,
+         else: (_ -> name)
+  end
+
+  defp failed(owner, name, why) do
+    record = move(owner, name, {:fail, why})
+    ran(owner)
+    record
   end
 
   @doc """
@@ -76,77 +162,101 @@ defmodule OneCore.Plugins.Lifecycle do
   the server. `:ok`, or `{:error, why}`.
   """
   def bring(owner, name, artifact) do
-    with {number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no plugin #{artifact}"},
-         %{} <- move(owner, name, {:deployed, artifact, number, true, nil}) do
+    with %{} <- move(owner, name, {:deployed, artifact, nil}) do
       ran(owner)
       :ok
     end
   end
 
   @doc """
-  Updates a plugin for `owner` to the version its update offers (Update), or `approve`s one that asks for more
-  plugins (Approve). One that does and isn't approved waits for approval. Gives the record it's at.
+  Installs for `owner` what the plugins that run for them require and isn't there, as their own installs: what a
+  plugin's newer version requires that the one before didn't. A server that takes the requirement's install does
+  it, as any of theirs that's told what changed. Gives a line for each, or `{:error, why}` naming one that couldn't be.
   """
-  def update(owner, name, approve) do
-    with %{} = record <- move(owner, name, {:update, approve}) do
-      if record["state"] == "updating", do: updating(owner, name, record), else: record
+  def required(owner) do
+    for {name, version} <- Plugins.versions([owner]),
+        Requires.missing(owner, version.artifact, version.requires) != [],
+        Servers.runs?(owner) or not version.trusted,
+        reduce: {:ok, []} do
+      {:ok, also} ->
+        with {:ok, more} <- requirements(owner, name, version.artifact, nil), do: {:ok, also ++ more}
+
+      failed ->
+        failed
     end
   end
 
-  @doc "Tries again what failed (Try Again): installing it, or the update or switch that failed. Gives the record it's at."
+  @doc """
+  Tries again what failed of the plugin `name` for `owner` (Try Again): installing it, or its update. Gives the
+  record of their install, or `{:error, why}`.
+  """
   def retry(owner, name) do
-    with %{} = record <- move(owner, name, :retry) do
-      case record do
-        %{"state" => "installing", "plugin" => artifact, "trusted" => trusted} ->
-          with {number, _code, _tag} <- Store.latest(artifact) || fail(owner, name, "There's no plugin #{artifact} any more"),
-               do: run(owner, name, fn -> version(owner, name, artifact, number, trusted) end)
+    case Installed.read(owner)[name] do
+      %{"state" => "not_installed", "plugin" => artifact} = record ->
+        install(owner, name, artifact, record["by"])
 
-        %{"state" => "updating"} ->
-          updating(owner, name, record)
-      end
-    end
-  end
+      %{"plugin" => artifact} = record ->
+        with nil <- update(artifact), do: Installed.read(owner)[name] || record
 
-  @doc "Switches whether a plugin is trusted for `owner`, restarting it the other way. Gives the record it's at."
-  def trust(owner, name, trusted) do
-    with %{} = record <- move(owner, name, {:trust, trusted}) do
-      if record["state"] == "updating", do: updating(owner, name, record), else: record
-    end
-  end
-
-  @doc "Moves a record by an event that needs no work: Dismiss, Not now. Gives the record it's at, or `nil`."
-  def change(owner, name, event) do
-    with record when not is_tuple(record) <- move(owner, name, event) do
-      ran(owner)
-      record
+      nil ->
+        {:error, "#{name} isn't installed for #{owner}."}
     end
   end
 
   @doc """
   Uninstalls a plugin for `owner`: it stops running for them, and waits in Recently Deleted, with what it keeps, for
-  30 days. Refused where another plugin they have uses it, or it's the network's launcher. The plugins that observe
-  `uninstalled` are told, so one that keeps what's deleted takes what it kept and made for them along. `asked` is who
-  asked.
+  30 days. Where other plugins installed for them are required by it, it's refused saying so, unless whoever asked
+  `confirm`s that they go too: then they all go to Recently Deleted, as one. Refused where another plugin they have
+  uses its code, or it's the network's launcher. The plugins that observe `uninstalled` are told once, with each
+  that went (`with`), so one that keeps what's deleted takes what they kept and made for them along, as one item.
+  `asked` is who asked.
   """
-  def uninstall(owner, name, {actor, _subject}) do
+  def uninstall(owner, name, {actor, _subject}, confirm \\ false) do
     # What uses it still finds it where it's installed for the network too.
     after_it = Map.new(Plugins.versions(Plugins.chain(owner) -- [owner]))
+    versions = Map.new(Plugins.versions([owner]))
 
     used_by =
-      for {other, version} <- Plugins.versions([owner]), name in version.uses, not is_map_key(after_it, name), do: other
+      for {other, version} <- versions, name in version.uses, not is_map_key(after_it, name), do: other
 
-    with [] <- used_by,
-         :ok <- last_launcher(owner, name),
-         %{} = record <- move(owner, name, :uninstall) do
-      ran(owner)
-      about = %{"for" => owner, "name" => name, "plugin" => record["plugin"]}
-      OneCore.Hooks.observe("uninstalled", about, {actor, owner})
-      record
-    else
-      {:error, why} -> {:error, why}
-      used_by -> {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
+    required_by = Requires.required_by(owner, name)
+
+    cond do
+      used_by != [] ->
+        {:error, "#{name} is used by #{Enum.join(used_by, ", ")}. Remove what uses it first."}
+
+      required_by != [] and confirm != true ->
+        {:error, "#{removed_too(versions, name, required_by)}\n\nTo uninstall them all, uninstall #{name} again with confirm, once the person has said yes."}
+
+      true ->
+        with :ok <- Enum.find_value([name | required_by], :ok, &with(:ok <- last_launcher(owner, &1), do: nil)),
+             :ok <- Enum.find_value(required_by, :ok, &with(%{} <- move(owner, &1, {:uninstall, %{"deleted_with" => name}}), do: nil)),
+             %{} = record <- move(owner, name, {:uninstall, %{"with" => required_by}}) do
+          ran(owner)
+          records = Installed.read(owner)
+          went = for other <- required_by, do: %{"name" => other, "plugin" => records[other]["plugin"]}
+          about = %{"for" => owner, "name" => name, "plugin" => record["plugin"], "with" => went}
+          Hooks.observe("uninstalled", about, {actor, owner})
+          record
+        end
     end
   end
+
+  # What a person reads before what's required by a plugin goes with it: "Gmail, Calendar and Drive use Google Account
+  # to reach your Google data. They can't work without it, so they'll be removed too."
+  defp removed_too(versions, name, required_by) do
+    title = &((versions[&1] && versions[&1].title) || &1)
+    reasons = Enum.uniq(for other <- required_by, why = versions[other] && versions[other].requires[name], do: why)
+    reason = if length(reasons) == 1, do: " " <> hd(reasons), else: ""
+
+    case required_by do
+      [one] -> "#{title.(one)} uses #{title.(name)}#{reason}. It can't work without it, so it'll be removed too."
+      many -> "#{list(Enum.map(many, title))} use #{title.(name)}#{reason}. They can't work without it, so they'll be removed too."
+    end
+  end
+
+  defp list([one]), do: one
+  defp list(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
 
   # A network with no launcher has no way in, so the one it has stays until another version replaces it.
   defp last_launcher(owner, name) do
@@ -161,296 +271,239 @@ defmodule OneCore.Plugins.Lifecycle do
   end
 
   @doc """
-  Brings a plugin back from Recently Deleted for `owner`, as it was. Gives the record it's at. The plugins that observe
-  `restored` are told, so one that keeps what's deleted brings back what it kept and made for them. `asked` is who asked.
+  Brings a plugin back from Recently Deleted for `owner`, as it was, with whatever went there with it. Gives its record.
+  The plugins that observe `restored` are told once, of the one uninstalled, so one that keeps what's deleted brings
+  back what they kept and made for them. `asked` is who asked.
   """
   def restore(owner, name, {actor, _subject}) do
-    with %{} = record <- move(owner, name, :restore) do
+    records = Installed.read(owner)
+    first = (records[name] || %{})["deleted_with"] || name
+    group = [first | (records[first] || %{})["with"] || []]
+
+    with %{} = record <- move(owner, first, :restore) do
+      for other <- group -- [first], match?(%{"state" => "recently_deleted"}, records[other]), do: move(owner, other, :restore)
       ran(owner)
-      OneCore.Hooks.observe("restored", %{"for" => owner, "name" => name, "plugin" => record["plugin"]}, {actor, owner})
-      record
-    end
-  end
-
-  @doc "Removes a plugin in Recently Deleted for `owner` for good, with what it kept: `nil`, or `{:error, why}`."
-  def purge(owner, name) do
-    {records, _automatic} = Installed.read(owner)
-
-    with nil <- move(owner, name, :purge) do
-      for blob <- Bucket.list("#{owner}/own/#{name}/"), do: Bucket.remove(blob)
-      Installed.unmarked(records[name]["plugin"], owner)
-      nil
+      Hooks.observe("restored", %{"for" => owner, "name" => first, "plugin" => record["plugin"]}, {actor, owner})
+      Installed.read(owner)[name]
     end
   end
 
   @doc """
-  Brings what's installed for `owner` up to date with what's newer, as a server acting for them does whenever it's
-  told something changed: a plugin the server ships runs its latest version; any other with a newer version offers
-  it as an update, taken at once where it may be; one installing or updating for longer than it could has failed; and
-  one in Recently Deleted for 30 days is removed for good, with what it kept.
+  Removes a plugin in Recently Deleted for `owner` for good, with what it kept, and whatever went there with it:
+  `nil`, or `{:error, why}`.
+  """
+  def purge(owner, name) do
+    records = Installed.read(owner)
+    group = [name | (records[name] || %{})["with"] || []]
+
+    Enum.reduce(group, nil, fn each, outcome ->
+      if match?(%{"state" => "recently_deleted"}, records[each]) do
+        with nil <- move(owner, each, :purge) do
+          for blob <- Bucket.list("#{owner}/own/#{each}/"), do: Bucket.remove(blob)
+          Installed.unmarked(records[each]["plugin"], owner)
+          outcome
+        end
+      else
+        outcome
+      end
+    end)
+  end
+
+  @doc """
+  Moves on what's installed for `owner` that the clock moves, as a server acting for them does once a day: one in
+  Recently Deleted for 30 days is removed for good, with what it kept, and one installing for longer than it could
+  has failed.
   """
   def reconcile(owner) do
-    {records, automatic} = Installed.read(owner)
+    now = System.system_time(:millisecond)
 
-    for {name, record} <- records do
-      try do
-        reconciled(owner, name, record, automatic)
-      rescue
-        error -> Logger.error("#{name} for #{owner} wasn't brought up to date: #{Exception.message(error)}")
+    for {name, record} <- Installed.read(owner) do
+      case record do
+        %{"state" => "recently_deleted", "deleted" => deleted} when deleted <= now - @kept ->
+          with nil <- purge(owner, name),
+               do: Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
+
+        %{"state" => "installing", "at" => at} when at <= now - @partway ->
+          failed(owner, name, "It stopped partway, as the server installing it did. Try again.")
+
+        _ ->
+          :ok
       end
     end
 
     :ok
   end
 
-  defp reconciled(owner, name, %{"state" => "recently_deleted", "deleted" => deleted}, _automatic) do
-    if deleted <= System.system_time(:millisecond) - @kept do
-      with nil <- purge(owner, name),
-           do: Logger.info("#{name} was in Recently Deleted for #{owner} for 30 days, and is removed for good")
-    end
-  end
-
-  defp reconciled(owner, name, %{"state" => state, "at" => at}, _automatic) when state in ~w(installing updating) do
-    if at <= System.system_time(:millisecond) - @partway,
-      do: fail(owner, name, "It stopped partway, as the server doing it did. Try again.")
-  end
-
-  defp reconciled(owner, name, %{"plugin" => artifact, "version" => number} = record, automatic) when is_integer(number) do
-    with {latest, _code, _tag} when latest > number <- Store.latest(artifact) do
-      if bundled?(artifact) do
-        move(owner, name, {:follow, latest})
-        ran(owner)
-      else
-        offered = %{"version" => latest, "requires" => added(record, artifact, latest), "commits" => commits(artifact, record, latest)}
-
-        with %{"update" => %{"state" => "available"} = update} = record <- move(owner, name, {:available, offered}),
-             true <- record["state"] == "installed" and runs?(owner, record) and automatic?(owner, record, update, automatic) do
-          Logger.info("#{name} for #{owner} updates by itself to version #{update["version"]}")
-          update(owner, name, false)
-        end
-      end
-    end
-  end
-
-  defp reconciled(_owner, _name, _record, _automatic), do: :ok
-
   @doc """
-  Looks at the git source of each plugin of `owner`'s own that came from one, for a commit that changed it since the
-  version they run, and offers it as an update, taken at once where it may be. Gives what it found, by name.
+  Looks at the git source of the plugin `artifact` for a commit after the one it runs that changed its folder: a
+  trusted plugin takes it at once, and an untrusted one offers it. Gives where its updates are.
   """
-  def check(owner) do
-    {records, automatic} = Installed.read(owner)
+  def check(artifact) do
+    record = Update.read(artifact)
 
-    for {name, %{"plugin" => artifact, "version" => number, "state" => state}} <- records,
-        state in ~w(installed failed),
-        Store.whose(artifact) == owner,
-        not bundled?(artifact),
-        about = Store.about(artifact),
-        about["number"] == number,
-        %{"source" => source, "commit" => commit} = from <- [about["from"]],
-        into: %{} do
-      case newer_commit(source, from["ref"], commit, name) do
-        {:ok, nil} ->
-          {name, nil}
+    cond do
+      bundled?(artifact) ->
+        nil
 
-        {:ok, offered} ->
-          with %{"update" => update} = record <- move(owner, name, {:available, offered}),
-               true <- record["state"] == "installed" and update["state"] == "available" and runs?(owner, record),
-               true <- automatic?(owner, record, update, automatic) do
-            update(owner, name, false)
-          end
+      match?(%{"state" => "updating"}, record) and record["at"] > System.system_time(:millisecond) - @partway ->
+        record
 
-          {name, offered}
+      true ->
+        if match?(%{"state" => "updating"}, record),
+          do: Update.change(artifact, {:fail, "It stopped partway, as the server updating it did. Try again."})
 
-        {:error, why} ->
-          Logger.warning("#{name}'s git source wasn't checked for #{owner}: #{why}")
-          {name, %{"why" => why}}
-      end
+        about = Store.about(artifact)
+
+        with %{"source" => source, "commit" => commit} = from <- about["from"] || :none,
+             false <- from["dirty"] == true,
+             {:ok, offer} when offer != nil <- newer(source, from["ref"], commit, Path.basename(artifact)),
+             %{} = record <- Update.change(artifact, {:newer, offer, about["trusted"] != false, Server.key()}) do
+          told(artifact)
+          if mine?(record), do: updating(artifact, record), else: record
+        else
+          {:error, why} ->
+            Logger.warning("#{artifact}'s git source wasn't checked: #{why}")
+            Update.read(artifact)
+
+          _ ->
+            Update.read(artifact)
+        end
     end
   end
 
-  # The newest commit at a git source that changed the plugin's folder since `commit`, with the commits between.
-  defp newer_commit(source, ref, commit, name) do
+  # The newest commit at a git source that comes after `commit` and changed the plugin's folder, with the commits
+  # between, or `nil`.
+  defp newer(source, ref, commit, name) do
     path = "plugins/#{name}"
 
     with {:ok, copy} <- Git.fetch(source),
          {:ok, newest} <- Git.commit(copy, ref) do
-      if newest == commit or Git.tree(copy, newest, path) == Git.tree(copy, commit, path) do
-        {:ok, nil}
-      else
-        with {:ok, commits} <- Git.commits(copy, commit, newest, path),
-             do: {:ok, %{"commit" => newest, "source" => source, "ref" => ref, "commits" => commits, "requires" => []}}
+      cond do
+        newest == commit ->
+          {:ok, nil}
+
+        not Git.ancestor?(copy, commit, newest) ->
+          {:ok, nil}
+
+        Git.tree(copy, newest, path) == Git.tree(copy, commit, path) ->
+          {:ok, nil}
+
+        true ->
+          with {:ok, commits} <- Git.commits(copy, commit, newest, path),
+               do: {:ok, %{"commit" => newest, "source" => source, "ref" => ref, "commits" => commits}}
       end
     end
   end
 
-  # Whether this server may take an update for `owner`: one that runs their plugins, or any acting for them for an
-  # untrusted plugin, which runs in a sandbox.
-  defp runs?(owner, record), do: Servers.runs?(owner) or record["trusted"] == false
-
-  # Whether an update may be taken without asking: the owner's automatic updates are on, it's trusted, it asks for
-  # no plugin the one running doesn't, and it comes from the network's own plugins or the owner's own repos.
-  defp automatic?(owner, record, update, automatic) do
-    automatic and record["trusted"] != false and update["requires"] in [nil, []] and
-      ours?(owner, record["plugin"], update)
+  @doc """
+  Updates the plugin `artifact` to the commit its update offers (Update), or tries one that failed again, for everyone
+  who has it. Gives where its updates are once done: `nil` for up to date, or `{:error, why}`.
+  """
+  def update(artifact) do
+    with %{} = record <- Update.change(artifact, {:update, Server.key()}) do
+      told(artifact)
+      updating(artifact, record)
+    end
   end
 
-  defp ours?(owner, artifact, %{"commit" => _} = update), do: repo(update["source"]) in [owner, @network] or bundled?(artifact)
-  defp ours?(owner, artifact, _update), do: Store.whose(artifact) in [owner, @network]
+  # Fetches the commit an update takes, and deploys it as the plugin's next version, for everyone who has it.
+  defp updating(artifact, %{"commit" => commit, "source" => source} = record) do
+    whose = Store.whose(artifact)
+    name = Path.basename(artifact)
+    title = title(artifact, name)
+
+    outcome =
+      try do
+        stage("Getting #{title}'s code")
+
+        with {:ok, copy} <- Git.fetch(source),
+             {:ok, files} <- Git.files(copy, commit, "plugins/#{name}") do
+          step(artifact, "building")
+          stage("Building #{title}")
+          from = %{"source" => source, "ref" => record["ref"], "commit" => commit}
+          installed? = fn _version -> Plugins.plugin(whose, name) == artifact end
+          Deploy.deploy(whose, name, files, from, :stored, installed?)
+        end
+      rescue
+        error -> {:error, Exception.message(error)}
+      end
+
+    case outcome do
+      {:ok, _number, _warnings} ->
+        # What the new version requires that isn't there is installed for each that has it, by their servers.
+        for owner <- Enum.uniq([whose | Installed.in_use_for(artifact)]), Servers.here?(owner) do
+          with {:error, why} <- required(owner), do: Logger.warning("#{artifact}'s update for #{owner}: #{why}")
+        end
+
+        told(artifact, Update.change(artifact, :done))
+
+      {:error, why} -> told(artifact, Update.change(artifact, {:fail, why}))
+    end
+  end
+
+  defp step(artifact, stage), do: told(artifact, Update.change(artifact, {:stage, stage}))
 
   @doc """
-  Whether a plugin installed for `owner` from `artifact` is trusted where nobody says: the network's own plugins and the
-  owner's own are, as the version deployed says, and a stranger's isn't.
+  Makes the plugin `artifact` trusted or untrusted, for everyone who has it: it's deployed again from the files it
+  was, the other way. `{:ok, number}`, or `{:error, why}`.
   """
-  def trusted?(owner, artifact) do
-    Store.whose(artifact) in [owner, @network] and Store.about(artifact)["trusted"] != false
+  def trust(artifact, trusted) do
+    whose = Store.whose(artifact)
+    name = Path.basename(artifact)
+
+    with {_number, code, _tag} <- Store.latest(artifact) || {:error, "There's no plugin #{artifact}"},
+         {:ok, number, _warnings} <-
+           Deploy.deploy(whose, name, Store.source(artifact, code), :stored, trusted, fn _ -> Plugins.plugin(whose, name) == artifact end),
+         do: {:ok, number}
   end
 
-  # Whose a repo is, where it's one in the network (`one::users/alice/made/git-repos/notes`), or `nil`.
-  defp repo("one::" <> artifact), do: OneCore.User.owner(artifact)
-  defp repo(_source), do: nil
+  @doc """
+  Whether whoever asked may read a plugin's code and add it: a `viewer` of it, or a member of a group or the network
+  that it's whoever's or installed for, as the plugins that validate `reach` say. That's VISION's "what's made is open
+  to everyone inside once it's in use": what only its author has is theirs and whoever they share it with. Only its
+  code is opened: what it keeps for anyone is never the plugin's artifact. Nothing is asked of what's their own.
+  `:ok`, or `{:refuse, why}`.
+  """
+  def opens({actor, _subject} = principal, plugin) do
+    reach = fn relation, artifact -> Hooks.validate("reach", %{"who" => actor, "relation" => relation, "artifact" => artifact}, principal) end
+
+    with false <- artifact_of?(actor, plugin),
+         {:refuse, why} <- reach.("viewer", plugin) do
+      in_use =
+        for of <- [OneCore.User.owner(plugin) | Installed.in_use_for(plugin)],
+            of == @network or match?("groups/" <> _, of),
+            uniq: true,
+            do: of
+
+      member = &(Hooks.validate("reach", %{"who" => actor, "relation" => "member", "artifact" => &1}, {actor, &1}) == :ok)
+      if Enum.any?(in_use, member), do: :ok, else: {:refuse, why}
+    else
+      true -> :ok
+      :ok -> :ok
+    end
+  end
+
+  defp artifact_of?(nil, _plugin), do: false
+  defp artifact_of?(actor, plugin), do: plugin == actor or String.starts_with?(plugin, actor <> "/")
+
+  # Whether this server takes an update it moved to: only the one that did.
+  defp mine?(record), do: record["state"] == "updating" and record["by"] == Server.key()
+
+  @doc """
+  Whether this server takes the plugin `artifact`'s updates: it acts for whoever it is, and runs their plugins where
+  it's trusted.
+  """
+  def takes?(artifact) do
+    whose = Store.whose(artifact)
+    Servers.here?(whose) and (Store.about(artifact)["trusted"] == false or Servers.runs?(whose))
+  end
+
+  defp installed?(artifact),
+    do: Installed.installed_for(artifact) != [] or Plugins.plugin(Store.whose(artifact), Path.basename(artifact)) == artifact
 
   # A plugin the server ships, which updates with the server.
   defp bundled?(@network <> "/plugins/" <> name), do: is_map_key(Application.get_env(:one_core, :bundled, %{}), name)
   defp bundled?(_artifact), do: false
-
-  # The plugins version `latest` requires that the version `record` runs doesn't.
-  defp added(%{"version" => number}, artifact, latest) do
-    asks = fn number ->
-      with code when is_binary(code) <- Store.code(artifact, number),
-           {:ok, version} <- Store.described(artifact, code),
-           do: Map.keys(version.requires),
-           else: (_ -> [])
-    end
-
-    asks.(latest) -- asks.(number)
-  end
-
-  # The commits between the version `record` runs and the latest, deployed from the same git repo, newest first, or
-  # none where either didn't come from one.
-  defp commits(artifact, %{"commit" => from}, latest) do
-    with %{"number" => ^latest, "from" => %{"source" => source, "commit" => to}} <- Store.about(artifact),
-         {:ok, copy} <- Git.fetch(source),
-         {:ok, commits} <- Git.commits(copy, from, to, "plugins/#{Path.basename(artifact)}") do
-      commits
-    else
-      _ -> []
-    end
-  end
-
-  defp commits(_artifact, _record, _latest), do: []
-
-  # What an update does, from `record`'s target: a version deployed, a commit at its git source, or the same version
-  # the other way round.
-  defp updating(owner, name, %{"plugin" => artifact, "target" => target} = record) do
-    trusted = target["trusted"]
-
-    run(owner, name, fn ->
-      cond do
-        commit = target["commit"] -> from_git(owner, name, record, commit)
-        number = target["version"] -> version(owner, name, artifact, number, trusted)
-        true -> version(owner, name, artifact, record["version"], trusted)
-      end
-    end)
-  end
-
-  # A version deployed, fetched, built and checked to fit, as `owner` runs it: `{:ok, version}`, or `{:error, why}`.
-  defp version(owner, name, artifact, number, trusted) do
-    with code when is_binary(code) <- Store.code(artifact, number) || {:error, "Its version #{number} isn't kept any more."},
-         files = Store.files(artifact, code),
-         _ = move(owner, name, {:stage, "building"}),
-         {:ok, version} <- built(owner, artifact, code, files, trusted),
-         version = %{version | artifact: artifact, number: number},
-         :ok <- Deploy.fits(owner, name, version) do
-      {:ok, version}
-    else
-      :error -> {:error, "It doesn't compile here."}
-      {:error, why} -> {:error, why}
-    end
-  end
-
-  # Loaded where this server runs the owner's plugins, and otherwise only described.
-  defp built(owner, artifact, code, _files, true), do: Store.version(artifact, code, Servers.runs?(owner), true)
-
-  defp built(owner, artifact, code, files, false) do
-    described =
-      with :error <- Store.version(artifact, code, false, false), do: Sandbox.describe(artifact, files)
-
-    with {:ok, version} <- described,
-         {:ok, _warnings} <- Sandbox.check(owner, version, files),
-         do: {:ok, %{version | trusted: false}}
-  end
-
-  # A commit at its git source, fetched and deployed as the owner's next version, which runs only once it's checked
-  # to ask for no more than what they approved.
-  defp from_git(owner, name, record, commit) do
-    %{"source" => source} = update = record["update"] || %{}
-    trusted = record["target"]["trusted"]
-    install? = fn version -> record["target"]["approved"] == true or (Map.keys(version.requires) -- current_requires(owner, name)) == [] end
-
-    with {:ok, copy} <- Git.fetch(source),
-         {:ok, files} <- Git.files(copy, commit, "plugins/#{name}"),
-         _ = move(owner, name, {:stage, "building"}),
-         from = %{"source" => source, "ref" => update["ref"], "commit" => commit},
-         {:ok, number, _warnings, version} <- Deploy.keep(owner, name, files, from, trusted, install?) do
-      if install?.(version) do
-        {:ok, version}
-      else
-        Version.unload(version)
-        added = Map.keys(version.requires) -- current_requires(owner, name)
-        offered = %{"version" => number, "requires" => added, "commits" => update["commits"], "source" => source, "ref" => update["ref"]}
-        {:asks, "It requires more than the version running: #{Enum.join(offered["requires"], ", ")}.", offered}
-      end
-    end
-  end
-
-  defp current_requires(owner, name) do
-    case Plugins.versions([owner]) do
-      %{^name => version} -> Map.keys(version.requires)
-      _ -> []
-    end
-  end
-
-  # Runs what installs or updates a plugin, whose record is at fetching: `work` fetches and builds its version, then
-  # it starts. Gives the record it's at.
-  defp run(owner, name, work) do
-    case work.() do
-      {:ok, version} ->
-        key = {version.artifact, version.number, version.trusted}
-
-        about = Store.about(version.artifact)
-        commit = if about["number"] == version.number, do: about["from"]["commit"]
-
-        with %{} <- move(owner, name, {:start, version.number, commit}) do
-          ran(owner, [{key, {:ok, version}}])
-
-          case Plugins.versions([owner]) do
-            %{^name => %Version{number: number, trusted: trusted}} when number == version.number and trusted == version.trusted ->
-              move(owner, name, :done)
-
-            _ ->
-              fail(owner, name, "It didn't start.")
-          end
-        end
-
-      {:asks, why, offered} ->
-        fail(owner, name, why)
-        move(owner, name, {:available, offered})
-
-      {:error, why} ->
-        fail(owner, name, why)
-    end
-  rescue
-    error ->
-      Logger.error(Exception.format(:error, error, __STACKTRACE__))
-      fail(owner, name, Exception.message(error))
-  end
-
-  defp fail(owner, name, why) do
-    record = move(owner, name, {:fail, why})
-    ran(owner)
-    record
-  end
 
   # What runs for `owner` changed: it runs here, with what's loaded already, and their other servers look.
   defp ran(owner, loaded \\ []) do
@@ -458,8 +511,16 @@ defmodule OneCore.Plugins.Lifecycle do
     Server.notify_servers([owner])
   end
 
-  # A move of the record, told to whoever watches what's installed for `owner`: gives the record it's at, `nil`, or
-  # `{:error, why}`.
+  # Where a plugin's updates are moved, told to whoever has it installed, so their clients ask again.
+  defp told(artifact, record \\ nil) do
+    owners = Enum.uniq([Store.whose(artifact) | Installed.installed_for(artifact)])
+    Server.changed()
+    Server.notify_servers(owners, "changed")
+    record
+  end
+
+  # A move of an install's record, told to whoever watches what's installed for `owner`: gives the record it's at,
+  # `nil`, or `{:error, why}`.
   defp move(owner, name, event) do
     with record when not is_tuple(record) <- Installed.change(owner, name, event) do
       Server.changed()

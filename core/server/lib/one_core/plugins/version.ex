@@ -33,7 +33,7 @@ defmodule OneCore.Plugins.Version do
   `tool`, the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work
   without it (`OneCore.Plugins.Deploy`), `requires` the other plugins it needs, each by its name with why, and `core`
   the versions of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any, both from its
-  `requires/0` (`OneCore.Plugin`). `artifact` is the plugin it's a version of, and `number` which version, which whatever loaded it says.
+  `requires/0` (`OneCore.Plugin`). `artifact` is the plugin it's a version of, which whatever loaded it says.
 
   A version runs only on a server whose build its `core` allows: one that doesn't is refused where it's deployed, and
   where it's loaded runs nowhere here, as one that doesn't compile, until the server is updated.
@@ -60,7 +60,6 @@ defmodule OneCore.Plugins.Version do
     :code,
     :ui,
     :artifact,
-    :number,
     :title,
     :icon,
     :core,
