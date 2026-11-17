@@ -20,7 +20,8 @@ anything you build, use a network of your own (`local-network`).
 - Send anything outside: email, messages, notifications to people.
 
 The network's address, its servers' names and where its secrets are kept are in Agent Memory, not the repo. Never
-write them into a commit.
+write them into a commit. Never print the client's own files (under `~/.local/share/app.theone.client` or its config folder) to find
+them: they hold this device's token.
 
 ## Mid-update or broken?
 
