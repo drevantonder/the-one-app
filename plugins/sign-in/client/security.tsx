@@ -1,4 +1,4 @@
-// Passkeys: what whoever's looking signs in with. One is removed here, but never the last, which says so before
+// Sign-In & Security: the passkeys whoever's looking signs in with. One is removed here, but never the last, which says so before
 // it's pressed. Another is made in the device's own browser, which has passkeys where an app's web view doesn't,
 // by a link that works once.
 import { createMemo, Errored, For, Loading, refresh } from "solid-js"
@@ -32,7 +32,7 @@ async function add() {
 
 render(
   () => (
-    <Screen heading="Passkeys" back onBack={leave} action={<Button onClick={add}>Add Passkey</Button>}>
+    <Screen heading="Sign-In & Security" back onBack={leave} action={<Button onClick={add}>Add Passkey</Button>}>
       <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={2} />}>
           <List>

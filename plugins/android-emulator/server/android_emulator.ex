@@ -41,7 +41,16 @@ defmodule AndroidEmulator do
   def hooks, do: ["computer-use.screens"]
 
   @impl true
-  def apps, do: [%{name: "Android Emulator", page: "client/index.html", icon: "client/icon.svg"}]
+  def apps,
+    do: [
+      %{
+        name: "Android Emulator",
+        page: "client/index.html",
+        icon: "client/icon.svg",
+        category: "device-automation",
+        subject: "user"
+      }
+    ]
 
   @impl true
   def tools do

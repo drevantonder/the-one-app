@@ -1,4 +1,4 @@
-// Telemetry, a part of Settings: what a person acts on of what the network recorded, laid out as a trace and
+// Telemetry: what a person acts on of what the network recorded, laid out as a trace and
 // metrics viewer is, cut down. Calls over time first, then what's failing, what's slowest and what AI cost, over
 // the range picked above them. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
 // long it took over time. What's fine is silent: with nothing failing, there's no Failing.

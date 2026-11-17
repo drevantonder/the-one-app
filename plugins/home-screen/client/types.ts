@@ -1,13 +1,13 @@
 // What the Home Screen's tools answer, which every screen here reads.
 
-/** An app on a page: its page's address, name and icon, its plugin, and whether it was put on the page rather than installed for it. */
+/** An app: its page's address, name, icon, plugin and category, and `subject: "user"` if it's opened for whoever opens it. */
 export interface App {
   app: string
   name: string
   icon: string
-  plugin?: string
-  put?: boolean
-  subject?: string
+  plugin: string
+  category: string | null
+  subject?: "user"
 }
 
 /** A plugin with accounts, which Accounts lists. Not an app: its name there (what its tools start with), its own title and icon, and its `sign_in` tool's page, if it has one. */
@@ -20,14 +20,13 @@ export interface PluginWithAccounts {
   subject?: string
 }
 
-/** A widget on a page, or one a page's plugins have: its tool, the sizes it comes in, and what pressing it opens. */
+/** A widget on a page, or one that could go on one: its tool, the sizes it comes in, and the app pressing it opens. */
 export interface Widget {
   widget: string
   name: string
   size?: Size
   sizes: Size[]
-  opens?: string
-  plugin?: string
+  opens: App | null
 }
 
 export type Size = "2x2" | "4x2" | "4x4"
@@ -35,15 +34,21 @@ export type Size = "2x2" | "4x2" | "4x4"
 /** Something on a page: an app or a widget. */
 export type Item = (App & { widget?: undefined; size?: undefined }) | (Widget & { app?: undefined })
 
-/** A page, as `home-screen_page` answers it, and whose it is. */
-export interface Page {
+/** A category of an App Library, as it shows it: its apps by name. Other's `category` is null. */
+export interface Category {
+  category: string | null
+  name: string
+  apps: App[]
+}
+
+/** A Home Screen, as `home-screen_pages` answers it: whose it is, what's on its pages and its App Library. */
+export interface Pages {
   who: string
+  arranges: boolean
   items: Item[]
+  library: Category[]
   widgets: Widget[]
   plugins_with_accounts: PluginWithAccounts[]
-  arranges?: boolean
-  subject?: string
-  name: string
 }
 
 /** An outside account, as a plugin's `accounts` lists it. */

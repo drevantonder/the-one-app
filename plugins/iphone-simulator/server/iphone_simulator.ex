@@ -40,7 +40,16 @@ defmodule IphoneSimulator do
   def hooks, do: ["computer-use.screens"]
 
   @impl true
-  def apps, do: [%{name: "iPhone Simulator", page: "client/index.html", icon: "client/icon.svg"}]
+  def apps,
+    do: [
+      %{
+        name: "iPhone Simulator",
+        page: "client/index.html",
+        icon: "client/icon.svg",
+        category: "device-automation",
+        subject: "user"
+      }
+    ]
 
   @impl true
   def tools do

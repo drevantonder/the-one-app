@@ -18,29 +18,32 @@ What users see, as the project's owner decided it. Only their decisions are here
 - One way to do each thing. No second version of a screen to save a step; fewer screens, modes and variants beat a shortcut.
 - Something that takes a while shows what it's doing where its result will be, one state at a time: its steps while it starts (`Steps`), a spinner and a line while it's under way (`Status`), on what's there now when it's busy with that, and a problem box with Try Again once it's failed. A hold-up of a few seconds isn't a problem: only one that lasts is. (Andre, 16 Nov.)
 - Screens are for people; the CLI and MCP are for agents.
-- A device says whether it's on in its grey line, never with a dot or the word "Offline": "Online" while its socket is open, else "Seen 2 minutes ago" (screens, long form) or "seen 2 min ago" (CLI and MCP), and nothing for one never seen. This device says "This device" instead. Everywhere a user picks a device (Settings › Devices rows, Run Priority cards, Enabled Services columns, an app's Runs On, where schedules run) each one says it; a call to a device that's off says "mac was last seen 2 min ago", never "offline". Mockups skipped on purpose (Andre, 11-11): this is the best fit for the rules above, so change it freely later.
+- A device says whether it's on in its grey line, never with a dot or the word "Offline": "Online" while its socket is open, else "Seen 2 minutes ago" (screens, long form) or "seen 2 min ago" (CLI and MCP), and nothing for one never seen. This device says "This device" instead. Everywhere a user picks a device (Devices rows, Run Priority cards, Enabled Services columns, an app's Runs On, where schedules run) each one says it; a call to a device that's off says "mac was last seen 2 min ago", never "offline". Mockups skipped on purpose (Andre, 11-11): this is the best fit for the rules above, so change it freely later.
 - A screen works fully within what MCP Apps allows (no reliance on notifications, a navigation stack, sheets outside its frame or native features), so it's the same in our clients and in someone else's.
 - Motion: the browser's own transitions and animations inside a screen, the browser's View Transitions between screens, and neither when the user asked for reduced motion.
 
 ## Home Screen
 
-- A page has no title at its top. Its name is small above the dots.
-- On a phone the dots are a centred capsule; a wide window has the Sidebar instead, and no dots or page name. Swiping moves between pages, and so does sliding along the dots.
-- The top of a page keeps the gap a phone's own home screen has.
-- Settings is a cog at the end of the dots, with no Back.
+- Each owner (You first, then Everyone, then your groups) has several pages side by side, then their own App Library last, as iOS's.
+- A page has no title at its top, and keeps the gap a phone's own home screen has.
+- Pages never scroll: a page is a fixed grid, and what doesn't fit goes on a new page. Widgets never scroll either: a fixed number of rows, and tapping one opens its app.
+- Left and right move between an owner's pages. Up and down on a page that doesn't scroll moves between owners, sliding vertically; a page that scrolls, as the App Library does, keeps them. Each owner stays on the page it was left on.
+- The owner switcher is fixed at the top in the middle, and its name rolls as the owner changes. Tapping it opens a list of every owner; picking one slides there.
+- The page dots sit at the bottom in the middle, with nothing behind them, and belong to their owner's row: they slide with it. Sliding along them moves between pages too.
+- The App Library has neither the dots nor the owner switcher. It holds only what's installed, only its owner's, by category as an iPhone's App Library: four small icons, one opening its app, anywhere else opening the category. An opened category has no owner above it, and grows from its place and back into it, as an iOS folder does.
+- New apps land in the App Library, not on a page: pages hold only what's put there. An app about you (Colour Mode, Vault, Sign-In & Security, Devices, Notifications, Connect Your AI, AI Usage and the device apps) is in your App Library even when it's installed for everyone, and no app is in two.
+- Desktop and tablet: no sidebar. As many whole pages side by side as fit, one to three, with the dots only when not every page fits. Up and down moves between owners, and the same owner switcher works. Nothing there the phone doesn't have.
+- Settings isn't a place: its apps are ordinary apps, each in its category.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.
 - Accounts is a folder with no count, and opens as a page, not a dialog.
 
-## Sidebar
-
-- It shows every page's apps and all of Settings, each a section you can collapse.
-
 ## App Store
 
-- A tile's button is "Add to", then "Manage" once the app is on at least one page. Both change which pages it's on.
-- Taking an app off a page keeps its data, and adding it back brings the data back.
+- A tile's button is "Add to", then "Manage" once an owner has it. Both change which owners have it.
+- Taking an app off keeps its data, and adding it back brings the data back.
+- An owner you can't install for shows a plain line, "Only Andre can install for Everyone", with no button.
 
-## Settings
+## Devices, Sign-In & Security and Connect Your AI
 
 - Passkeys are managed inside the app.
 - Connect Your AI is one short prompt pointing the AI at the network's llms.txt.

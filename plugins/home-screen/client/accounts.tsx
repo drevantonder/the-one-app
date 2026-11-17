@@ -1,20 +1,20 @@
 // Accounts: the outside accounts a person has signed plugins in to. A section for each plugin with accounts
-// (SKILL.md) on any of this user's pages, by its own title and icon, as it has no app, and its accounts as its
+// (SKILL.md) installed for this user, everyone or any of their groups, by its own title and icon, as it has no app, and its accounts as its
 // `accounts` lists them, each filling in as it answers. One that needs signing in again says why, with Sign In;
 // each has Sign Out, and each section Add Account. Add Account for Another App opens the App Store at the plugins
 // that have accounts.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, confirm, Empty, Icon, leave, List, open, Problem, Row, Screen, Section, Skeleton, toast } from "ui"
-import type { Account, Page, PluginWithAccounts } from "./types.ts"
+import type { Account, Pages, PluginWithAccounts } from "./types.ts"
 
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
-/// Every page's plugins with accounts, each once, by its title.
+/// Every owner's plugins with accounts, yours, everyone's and your groups', each once, by its title.
 const withAccounts = createMemo(async () => {
   const groups = await json<{ groups: { group: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string }[] => [])
-  const pages = await Promise.all([undefined, ...groups.map(({ group }) => group), "network"].map((who) => json<Page>("home-screen_page", {}, who).then((page) => ({ ...page, subject: who }))))
-  const all = new Map(pages.flatMap((page) => page.plugins_with_accounts.map((plugin): [string, PluginWithAccounts] => [plugin.plugin, { ...plugin, subject: page.subject }])))
+  const owners = await Promise.all([undefined, "network", ...groups.map(({ group }) => group)].map((who) => json<Pages>("home-screen_pages", {}, who).then((pages) => ({ ...pages, subject: who }))))
+  const all = new Map(owners.flatMap((owner) => owner.plugins_with_accounts.map((plugin): [string, PluginWithAccounts] => [plugin.plugin, { ...plugin, subject: owner.subject }])))
   return [...all.values()].sort((a, b) => a.title.localeCompare(b.title))
 })
 changed(() => refresh(withAccounts))

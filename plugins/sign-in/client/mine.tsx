@@ -1,4 +1,4 @@
-// What Devices and Passkeys both draw with.
+// What Devices and Sign-In & Security both draw with.
 import { Button, Icon } from "ui"
 
 export const on = (added: string | number) => new Date(added).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })

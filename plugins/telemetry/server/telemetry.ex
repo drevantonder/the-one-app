@@ -1,7 +1,7 @@
 defmodule Telemetry do
   @moduledoc """
   Telemetry: what the network's servers, clients and plugins did, how long it took and how it ended, kept in the
-  network and read back by agents and on a screen of Settings.
+  network and read back by agents and in its app.
 
   It observes each tool call (the hook `called`) and what a client measured (`measured`), and what plugins record with
   its tool `record`, gathers it on each server in OpenTelemetry's shapes (`Telemetry.Recorded`), and keeps a
@@ -24,7 +24,7 @@ defmodule Telemetry do
   def jobs, do: [%{tool: "prune", every: 3600}]
 
   @impl true
-  def apps, do: [%{name: "Telemetry", page: "client/index.html", icon: "client/icon.svg", category: "settings"}]
+  def apps, do: [%{name: "Telemetry", page: "client/index.html", icon: "client/icon.svg", category: "coding"}]
 
   @impl true
   def tools do

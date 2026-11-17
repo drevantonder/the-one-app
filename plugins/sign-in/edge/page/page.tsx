@@ -1,7 +1,7 @@
 // The sign-in page. It asks for the passkey, and what that lets happen depends on how the page was opened (`Flow`):
 // with an invitation, someone joins; from an assistant's request to be let in, the assistant is. Opened with a new
 // device's code, as that device's link has it, its person signs in if they aren't yet, and is shown the code to
-// compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Passkeys, someone
+// compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign-In & Security, someone
 // makes another passkey. Whichever it was, this browser is signed in after, and is one of that person's devices,
 // whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, which has no
 // passkeys, the page shows the device's code and its button opens the page in the device's browser instead.
@@ -18,7 +18,7 @@ const opened = new URLSearchParams(location.hash.slice(1))
 const params = new URLSearchParams(location.search)
 
 /// How the page was opened, which picks what it does: someone joining with an invitation, someone who has joined
-/// making another passkey (the app's Passkeys), an assistant's request to be let in, which Better Auth carries signed
+/// making another passkey (the app's Sign-In & Security), an assistant's request to be let in, which Better Auth carries signed
 /// in the query and goes back as it came, a new device's code in a browser, or in the app's own window, and otherwise
 /// signing in.
 type Flow =

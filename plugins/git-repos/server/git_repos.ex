@@ -32,7 +32,7 @@ defmodule GitRepos do
   def hooks, do: ["recently-deleted.removed"]
 
   @impl true
-  def apps, do: [%{name: "Git Repos", page: "client/index.html", icon: "client/icon.svg"}]
+  def apps, do: [%{name: "Git Repos", page: "client/index.html", icon: "client/icon.svg", category: "coding"}]
 
   @impl true
   def tools do

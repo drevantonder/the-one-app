@@ -17,7 +17,7 @@ server `edge`, with its route, status, duration, the server it was passed to and
 reached a server. A call that reached one is one trace with the server's span, and with the client's when the
 client sent a `traceparent`.
 
-- `overview` is what the Telemetry screen in Settings shows: what's failing, what's slowest and what AI cost, over
+- `overview` is what Telemetry's app shows: what's failing, what's slowest and what AI cost, over
   the last `hours` (24 if left out, up to 336).
 - `errors` lists each kind of error once: where (a span's name, as `<plugin> <tool>`, or `<method> <route>` for the edge's, or what logged it), its
   message, how often, when it was last, how long it lasted, and the trace of the newest. Start a bug there. What a

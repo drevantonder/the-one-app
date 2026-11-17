@@ -249,8 +249,8 @@ defmodule Permissions do
       do: :ok,
       else:
         {:refuse,
-         "#{who} can't install plugins for #{artifact}. Ask whoever can, with home-screen_request, or its owner " <>
-           "lets them, with permissions_share --relation installer."}
+         "#{who} can't install plugins for #{artifact}. Whoever can installs it for them, or its owner lets them, " <>
+           "with permissions_share --relation installer."}
   end
 
   def hook("reach", %{"who" => who, "relation" => relation, "artifact" => artifact}, call) do

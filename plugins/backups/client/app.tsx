@@ -1,4 +1,4 @@
-// Backups, a part of Settings: the destinations backups go, each saying when it was last backed up and how big it is, or
+// Backups: the destinations backups go, each saying when it was last backed up and how big it is, or
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"

@@ -76,7 +76,7 @@ defmodule Containers do
   def hooks, do: ["computer-use.screens"]
 
   @impl true
-  def apps, do: [%{name: "Containers", page: "client/index.html", icon: "client/icon.svg"}]
+  def apps, do: [%{name: "Containers", page: "client/index.html", icon: "client/icon.svg", category: "devices"}]
 
   @impl true
   def tools do

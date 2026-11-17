@@ -26,10 +26,16 @@ defmodule SignIn do
   @impl true
   def apps do
     [
-      %{name: "People", page: "client/people.html", icon: "client/people.svg", category: "settings"},
-      %{name: "Devices", page: "client/index.html", icon: "client/icon.svg", category: "settings"},
-      %{name: "Passkeys", page: "client/passkeys.html", icon: "client/passkeys.svg", category: "settings"},
-      %{name: "Connect Your AI", page: "client/connect.html", icon: "client/connect.svg", category: "settings"}
+      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "admin"},
+      %{name: "Devices", page: "client/index.html", icon: "client/icon.svg", category: "devices", subject: "user"},
+      %{
+        name: "Sign-In & Security",
+        page: "client/security.html",
+        icon: "client/security.svg",
+        category: "access",
+        subject: "user"
+      },
+      %{name: "Connect Your AI", page: "client/connect.html", icon: "client/connect.svg", category: "agents", subject: "user"}
     ]
   end
 

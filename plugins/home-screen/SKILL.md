@@ -1,33 +1,54 @@
 ---
 name: home-screen
-description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, asking for a plugin to be installed for everyone, or giving a plugin accounts or a part of Settings.
+description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, or giving a plugin's app a category, accounts or the user it's about.
 metadata:
   subtitle: "Your pages of apps"
-  about: "Your Home Screen, your groups' and everyone's: pages of apps and widgets, arranged your way. Add apps from the App Store, and ask for one to be installed for everyone."
+  about: "Your Home Screen, everyone's and your groups': pages of apps and widgets, arranged your way, and an App Library of every app you have, by category."
 ---
 
 Home Screen is the network's launcher: the app every client opens first, which draws the rest. It keeps how each
-page is arranged: `page` gives it, `arrange` changes it, `store` lists the plugins that could be added and
-`settings` the parts of Settings.
+owner's pages are arranged: `pages` gives an owner's Home Screen, `arrange` changes what's on its pages, `add` and
+`remove` put an app on them or take it off, and `store` lists the plugins that could be added.
 
 Its words:
 
-- **Home Screen**: where apps and widgets sit, on its pages. A user has their own, and so does each group and the
-  network. A user sees theirs, their groups' and the network's.
-- A page has the apps of what's installed for whoever it's for, and the apps put on it with `add`: those of
-  plugins in use for the network, which anyone may put on their own page and `remove` again. Adding one installs
-  nothing.
-- Installing a plugin puts its code on a server, so for the network only its owners and those they let
-  (`installer`, see `permissions`) do it. Anyone else asks them with `request`: a plugin in the network, as `store`
-  lists it, or one from a git repo by `source` (owner/repo) and `name`, with a short `reason`. They're notified,
-  `requests` lists the requests, and `approve` or `decline` answers one, which tells the asker. Approving a plugin
-  in the network installs it for everyone; approving one from a git repo answers the `one install` command to run
-  first, and is done again once it's installed.
+- **Home Screen**: an owner's pages, then their App Library. Its owner is a user, a group, or the network, which a
+  person reads as Everyone. A user sees theirs, everyone's and their groups', and moves between them with the owner
+  switcher.
+- **Page**: a fixed grid of apps and widgets, which never scrolls: what doesn't fit goes on the next. It holds only
+  what was put there, and an owner's pages are one layout, so arranging everyone's or a group's arranges it for
+  everyone who sees it. The user themselves arranges theirs, and a group's or the network's `owner`s theirs
+  (`arranges`).
+- **App Library**: every app installed for an owner, by category, after their pages. An app installed lands there,
+  not on a page.
+- An app is in the App Library of whoever it's installed for, and in no other. One about whoever opens it
+  (`subject: "user"`) is in the user's own App Library wherever it's installed, and opens for them. A plugin a user
+  installed for themselves too is in theirs and not in everyone's; a group's own install keeps the group's data, so
+  it's in the group's.
+- Installing a plugin puts its code on a server, so for the network only its owners and those they let (`installer`,
+  see `permissions`) do it, and for a group, its owners. Whoever can't asks one of them themselves.
 
 ## Categories
 
-An app's `category` says where it goes. With none, it's on a Home Screen page. `settings` puts it in Settings
-instead, on no page. `launcher` is this one's.
+An app says its `category`, one of these, as a desktop's menu entry does:
+
+| `category` | Shown as |
+|---|---|
+| `coding` | Coding |
+| `device-automation` | Device Automation |
+| `admin` | Admin |
+| `appearance` | Appearance |
+| `agents` | Agents |
+| `devices` | Devices |
+| `access` | Access |
+
+An App Library shows them in that order. An app that says none of these is in Other, last. `launcher` is this one's.
+
+## Who an app is for
+
+An app opens for whoever's Home Screen it's on, or whose App Library it's in. One about whoever opens it, as Vault,
+Devices and Notifications are, says `subject: "user"`: it's in the user's own App Library and opens for them,
+wherever its plugin is installed.
 
 ## Accounts
 
@@ -45,7 +66,7 @@ plugin in to, so its tools act there as them. A plugin that does has accounts, a
 Its other tools take `account`, the first `accounts` lists when it's left out. It gives its own icon (`icon/0`)
 and, with no app to take it from, its name (`title/0`): the plugin's, which Accounts and the App Store show.
 
-Accounts, a folder at the end of the first page, lists them: a section for each plugin with accounts, by its name
-and icon, its accounts with Sign In and Sign Out, and Add Account. Neither an account nor a plugin with accounts is
-an app, so `page` gives them apart from its apps, as `plugins_with_accounts`. A plugin with accounts is on a page
-only if it also has an app, a screen a person opens for something else.
+Accounts, a folder at the end of your pages, lists them: a section for each plugin with accounts, by its name and
+icon, its accounts with Sign In and Sign Out, and Add Account. Neither an account nor a plugin with accounts is an
+app, so `pages` gives them apart from its apps, as `plugins_with_accounts`. A plugin with accounts has an app only
+for a screen a person opens for something else.

@@ -19,8 +19,11 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
 - **Plugin**: an artifact whose blobs are code. It provides any of: apps, widgets, tools, scheduled jobs, services, an
   edge function and kinds of artifact. It uses other artifacts, and is a subject. A git repo can be where its code comes from, but needn't be.
   Avoid: module.
-- **App**: something with UI that the launcher shows, on a Home Screen page or in Settings. A plugin provides it. It can
-  have server-side code where it needs it, which is its plugin's tools.
+- **Owner**: whoever something belongs to: a user, a group or the network, as an artifact's name says. A plugin is
+  installed for an owner (`for`), and each owner has a Home Screen. Not the relation `owner`, which says who may share
+  what an owner has.
+- **App**: something with UI that the launcher shows, on a Home Screen page or in an App Library. A plugin provides it.
+  It can have server-side code where it needs it, which is its plugin's tools.
 - **Account**: a user's account at an outside service (a Gmail address, a WhatsApp number), which they sign a plugin
   in to so its tools act there as them. The plugin lists, signs in and signs out its accounts with its tools, and the
   launcher's Accounts lists every plugin's together. An account isn't an app, and nor is a plugin for having

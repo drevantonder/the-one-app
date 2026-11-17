@@ -113,7 +113,10 @@ defmodule ChromeProfiles do
   def jobs, do: [%{tool: "save_updates", every: 60}]
 
   @impl true
-  def apps, do: [%{name: "Chrome Profiles", page: "client/index.html", icon: "client/icon.svg"}]
+  def apps,
+    do: [
+      %{name: "Chrome Profiles", page: "client/index.html", icon: "client/icon.svg", category: "access", subject: "user"}
+    ]
 
   @impl true
   def tools do

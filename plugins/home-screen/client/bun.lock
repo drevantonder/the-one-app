@@ -1,0 +1,14 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "dependencies": {
+        "xstate": "5.33.3",
+      },
+    },
+  },
+  "packages": {
+    "xstate": ["xstate@5.33.3", "", {}, "sha512-AnDRjS/GyKHmbA1PyhVCYBqYsA7EGe3KGgeD0ht3NFsXzoz7leX/HQDFX9QlHFJ/ltLHPsgChJYwPzRvB/0b4g=="],
+  }
+}

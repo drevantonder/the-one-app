@@ -1,4 +1,4 @@
-// Notifications, a part of Settings: what you've been told, newest first, and the apps that have told you
+// Notifications: what you've been told, newest first, and the apps that have told you
 // something, each of which you hear from or not. Tapping one marks it read and opens the app it's from. A phone that
 // isn't woken by them says so first, and why.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"

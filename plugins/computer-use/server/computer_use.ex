@@ -53,7 +53,16 @@ defmodule ComputerUse do
   end
 
   @impl true
-  def apps, do: [%{name: "Computer Use", page: "client/index.html", icon: "client/icon.svg"}]
+  def apps,
+    do: [
+      %{
+        name: "Computer Use",
+        page: "client/index.html",
+        icon: "client/icon.svg",
+        category: "device-automation",
+        subject: "user"
+      }
+    ]
 
   @impl true
   def tools do

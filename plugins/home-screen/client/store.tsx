@@ -1,12 +1,13 @@
-// The App Store, which Settings calls Apps: every plugin a person could add, one with an app or with accounts, each
-// with its subtitle, and on its sheet what it's about and which of your pages it's on. Adding one to a page installs
-// it for whoever's page it is or puts its app there, and so on the clients of everyone who sees that page; one with
-// accounts and no app is then in their Accounts. Taking one off keeps what it kept, and adding it back brings that
-// back. Opened as `#accounts` (Accounts' Add Account for Another App), it lists the plugins with accounts.
+// The App Store: every plugin a person could add, one with an app or with accounts, each with its subtitle, and on
+// its sheet what it's about and whose it's in use for: yours, everyone's or a group's. Adding one installs it for
+// them, into their App Library, or where it's in use for everyone already, puts its app on their Home Screen; one with
+// accounts and no app is then in Accounts. Taking one off keeps what it kept, and adding it back brings that back.
+// Where the person may not install, a grey line says who may, whom they ask themselves. Opened as `#accounts`
+// (Accounts' Add Account for Another App), it lists the plugins with accounts.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, Empty, leave, List, Problem, Row, Screen, Sheet, Skeleton, Switch, toast } from "ui"
-import type { Page } from "./types.ts"
+import type { Pages } from "./types.ts"
 
 /** A plugin, as `home-screen_store` lists it. */
 interface Plugin {
@@ -18,46 +19,76 @@ interface Plugin {
   accounts: boolean
 }
 
-const named = (who?: string) => (!who ? "You" : who === "network" ? "Everyone" : who.replace("groups/", "").replace(/^./, (first) => first.toUpperCase()))
-const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
+/** An owner of a Home Screen, by the name a person reads, what `home-screen_pages` answers for them, and who may install for them. */
+interface Owner extends Pages {
+  subject?: string
+  name: string
+  installers: string[]
+}
 
-/// Every plugin a person could add, and the pages this user sees, each with the plugins it has.
+const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
+
+/// Every plugin a person could add, and the Home Screens this user sees: theirs, everyone's and their groups', each
+/// with who may install for it, by the names they go by.
 const store = createMemo(async () => {
-  const groups = await json<{ groups: { group: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string }[] => [])
-  const whos = [undefined, ...groups.map(({ group }) => group), "network"]
-  const [all, pages] = await Promise.all([json<{ plugins: Plugin[] }>("home-screen_store").then(({ plugins }) => plugins), Promise.all(whos.map((who) => json<Page>("home-screen_page", {}, who).then((page): Page => ({ ...page, subject: who, name: named(who) }))))])
+  const [groups, people] = await Promise.all([
+    json<{ groups: { group: string; called: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string; called: string }[] => []),
+    json<{ people: { who: string; called?: string }[] }>("sign-in_everyone").then(({ people }) => people, (): { who: string; called?: string }[] => []),
+  ])
+  const called = (who: string) => people.find((person) => person.who === who)?.called ?? who.replace(/^users\//, "").replace(/^./, (first) => first.toUpperCase())
+  const whose: { subject?: string; name: string }[] = [{ name: "You" }, { subject: "network", name: "Everyone" }, ...groups.map(({ group, called }) => ({ subject: group, name: called }))]
+  const [all, owners] = await Promise.all([
+    json<{ plugins: Plugin[] }>("home-screen_store").then(({ plugins }) => plugins),
+    Promise.all(
+      whose.map(async (who): Promise<Owner> => {
+        const pages = await json<Pages>("home-screen_pages", {}, who.subject)
+        // Whoever may install for a group or everyone; anyone installs for themselves.
+        const installers = who.subject ? await json<{ users: string[] }>("permissions_users", { artifact: who.subject, relation: "installer" }).then(({ users }) => users, (): string[] => []) : [pages.who]
+        return { ...pages, ...who, installers }
+      }),
+    ),
+  ])
+  const me = owners[0].who
   const plugins = location.hash === "#accounts" ? all.filter((plugin) => plugin.accounts) : all
-  return { plugins, pages }
+  return { plugins, owners, me, called }
 })
 changed(() => refresh(store))
 
-/// The plugin, by its name there, if it's on the page: its app, or, with none, it in Accounts. `put` says it was
-/// put there rather than installed for it.
-function on(page: Page, plugin: Plugin): { name: string; put?: boolean } | undefined {
-  const item = page.items.find((item) => item.plugin === plugin.plugin)
-  if (item?.app) return { name: item.app.split("/")[0], put: item.put }
-  const withAccounts = page.plugins_with_accounts.find((one) => one.plugin === plugin.plugin)
-  return withAccounts && { name: withAccounts.name }
+/// The plugin, by its name there, if an owner has it: installed for them, so in their App Library or Accounts, or with
+/// its app put on their Home Screen (`put`).
+function on(owner: Owner, plugin: Plugin): { name: string; put?: boolean } | undefined {
+  const installed = owner.library.flatMap((category) => category.apps).find((app) => app.plugin === plugin.plugin)
+  if (installed) return { name: installed.app.split("/")[0] }
+  const withAccounts = owner.plugins_with_accounts.find((one) => one.plugin === plugin.plugin)
+  if (withAccounts) return { name: withAccounts.name }
+  const item = owner.items.find((item) => item.app && item.plugin === plugin.plugin)
+  return item?.app ? { name: item.app.split("/")[0], put: true } : undefined
 }
 const [managing, setManaging] = createSignal<string>()
 
-/// Puts a plugin on a page or takes it off. One in use for the network has its app put on without installing
-/// anything, and any other is installed for whoever's page it is, which takes a server of their own.
-async function put(page: Page, plugin: Plugin, there: boolean) {
-  const item = on(page, plugin)
+/// Adds a plugin for an owner or takes it off. One in use for everyone has its app put on their Home Screen without
+/// installing anything, and any other is installed for them, which takes a server of their own.
+async function put(owner: Owner, plugin: Plugin, there: boolean) {
+  const item = on(owner, plugin)
   try {
-    if (there) await call("home-screen_add", { plugin: plugin.plugin }, { subject: page.subject }).catch(() => call("install", { plugin: plugin.plugin }, { subject: page.subject }))
-    else if (item?.put) await call("home-screen_remove", { plugin: plugin.plugin }, { subject: page.subject })
-    else await call("uninstall", { name: item!.name }, { subject: page.subject })
+    if (there) await call("home-screen_add", { app: plugin.plugin }, { subject: owner.subject }).catch(() => call("install", { plugin: plugin.plugin }, { subject: owner.subject }))
+    else if (item?.put) await call("home-screen_remove", { app: plugin.plugin }, { subject: owner.subject })
+    else await call("uninstall", { name: item!.name }, { subject: owner.subject })
   } catch (error) {
     toast(error as Error)
   }
   refresh(store)
 }
 
-function Store(props: { store: { plugins: Plugin[]; pages: Page[] } }) {
-  const pages = (plugin: Plugin) => props.store.pages.filter((page) => on(page, plugin))
+function Store(props: { store: Awaited<ReturnType<typeof store>> }) {
+  const owners = (plugin: Plugin) => props.store.owners.filter((owner) => on(owner, plugin))
   const plugin = () => props.store.plugins.find((plugin) => plugin.plugin === managing())
+  /// Who may install for an owner, if not this person: "Only Andre can install for Everyone".
+  const only = (owner: Owner) => {
+    if (owner.installers.includes(props.store.me) || owner.installers.includes("everyone")) return undefined
+    const who = new Intl.ListFormat("en", { type: "disjunction" }).format(owner.installers.map(props.store.called))
+    return owner.installers.length ? `Only ${who} can install for ${owner.name}` : `Nobody can install for ${owner.name}`
+  }
   return (
     <>
       <Show when={props.store.plugins.length} fallback={<Empty>No apps yet. Ask your AI to make one.</Empty>}>
@@ -68,7 +99,7 @@ function Store(props: { store: { plugins: Plugin[]; pages: Page[] } }) {
                 heading={plugin().title}
                 text={plugin().subtitle}
                 start={<img class="icon" src={plugin().icon} alt="" />}
-                end={<Button variant={pages(plugin()).length ? "outline" : "secondary"} onClick={() => setManaging(plugin().plugin)}>{pages(plugin()).length ? "Manage" : "Add to"}</Button>}
+                end={<Button variant={owners(plugin()).length ? "outline" : "secondary"} onClick={() => setManaging(plugin().plugin)}>{owners(plugin()).length ? "Manage" : "Add to"}</Button>}
               />
             )}
           </For>
@@ -80,8 +111,12 @@ function Store(props: { store: { plugins: Plugin[]; pages: Page[] } }) {
             <p class="about">{plugin()!.about}</p>
           </Show>
           <form>
-            <For each={props.store.pages} keyed={(page) => page.who}>
-              {(page) => <Switch label={page().name} checked={!!on(page(), plugin()!)} disabled={!page().arranges} onChange={(event) => put(page(), plugin()!, event.currentTarget.checked)} />}
+            <For each={props.store.owners} keyed={(owner) => owner.who}>
+              {(owner) => (
+                <Show when={only(owner())} fallback={<Switch label={owner().name} checked={!!on(owner(), plugin()!)} onChange={(event) => put(owner(), plugin()!, event.currentTarget.checked)} />}>
+                  {(line) => <p class="only">{line()}</p>}
+                </Show>
+              )}
             </For>
           </form>
         </Show>
@@ -92,9 +127,9 @@ function Store(props: { store: { plugins: Plugin[]; pages: Page[] } }) {
 
 render(
   () => (
-    <Screen heading="Apps" back onBack={leave}>
-      <style>{".icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; } .about { margin: 0 0 1rem; }"}</style>
-      <Errored fallback={(error) => <Problem heading="Can't show the apps" text={error() as Error} />}>
+    <Screen heading="App Store" back onBack={leave}>
+      <style>{".icon { display: block; width: 2.25rem; height: 2.25rem; border-radius: 22.5%; } .about { margin: 0 0 1rem; } .only { margin: 0.5rem 0; color: var(--muted-foreground); font-size: var(--text-sm); }"}</style>
+      <Errored fallback={(error) => <Problem heading="Can't show the App Store" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <Store store={store()} />
         </Loading>
