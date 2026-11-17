@@ -4,7 +4,10 @@ defmodule OneCore.Builds do
 
   A build is named by the version it is, its commit's (`build/0`), and is made for a kind of machine (`target/0`):
   `server/<target>`, an installed server, `one/<target>`, the program `one`, and `one-cli/<target>`, `one` without its
-  window. `tooling/release` makes them and publishes them (`publish/1`): each is a blob under the network's `builds/`, named
+  window. A server is also in two parts, which a machine puts together (`clients/cli/src/serving.rs`):
+  `server-runtime/<target>`, the VM, Elixir, the deps, One Core's NIFs and its config, named by the build that last
+  changed them and made only then, and `server-code`, One Core's own code and the UI library, the same for every kind
+  of machine and made every time. `tooling/release` makes them and publishes them (`publish/1`): each is a blob under the network's `builds/`, named
   by its SHA-256, and the blob `builds/latest` says which is latest for each name, by its build, its SHA-256 and its
   size. Every server reads them, whoever's it is (`core/edge/presigner/presigner.ts`), and a client downloads one by a link
   a server gives (`download/1`), checking it against what `latest` says before it runs it
@@ -68,8 +71,8 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  What this server says of itself, as it starts and as what it is changes: its build, its kind of machine, the device
-  it's on, if any, whether it was installed with `one serve on`, which is what takes the latest builds when it's
+  What this server says of itself, as it starts and as what it is changes: its build, the runtime it runs on, its kind
+  of machine, the device it's on, if any, whether it was installed with `one serve on`, which is what takes the latest builds when it's
   asked to update, and what the program keeping it running says of it (`OneCore.Release.status/0`).
   """
   def say(key) do
@@ -77,10 +80,22 @@ defmodule OneCore.Builds do
       build: build(),
       target: target(),
       device: Application.get_env(:one_core, :device),
-      installed: Application.get_env(:one_core, :installed, false)
+      installed: Application.get_env(:one_core, :installed, false),
+      runtime: runtime()
     }
 
     Servers.say("servers/#{key}/build", JSON.encode!(Map.merge(info, OneCore.Release.status())))
+  end
+
+  @doc """
+  The runtime this server runs on, `server-runtime/<target>`'s build, which a hot load of its code keeps, or `nil`
+  where it was built whole, before there were runtimes.
+  """
+  def runtime do
+    case File.read(Path.join(to_string(:code.root_dir()), "runtime")) do
+      {:ok, runtime} -> String.trim(runtime)
+      {:error, _} -> nil
+    end
   end
 
   @doc "The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\"}}`."
@@ -92,17 +107,23 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  The latest builds for a kind of machine, each with a link to download it by: `%{\"one\" => ..., \"server\" => ...}`,
-  with whichever there's one of.
+  The latest builds for a kind of machine, each with a link to download it by: `%{\"one\" => ..., \"server\" => ...,
+  \"server-runtime\" => ..., \"server-code\" => ...}`, with whichever there's one of.
   """
   def download(target) do
-    for {name, build} <- latest(), [what, ^target] <- [String.split(name, "/")], into: %{} do
+    for {name, build} <- latest(), what <- what(String.split(name, "/"), target), into: %{} do
       {what, Map.put(build, "link", Bucket.link(@builds <> build["sha256"], :read))}
     end
   end
 
+  # What a build is for a kind of machine: one for that kind, or one for every kind, as `server-code` is.
+  defp what([what, target], target), do: [what]
+  defp what([what], _target), do: [what]
+  defp what(_name, _target), do: []
+
   @doc """
-  Makes `builds` the latest of their names: each `%{\"name\", \"build\", \"sha256\", \"size\"}`. While the bucket lacks
+  Makes `builds` the latest of their names: each `%{\"name\", \"build\", \"sha256\", \"size\"}`, and a runtime's
+  `\"files\"`, the SHA-256 of its files, which `tooling/release` tells whether it changed by. While the bucket lacks
   any of their files, gives a link to send each one it lacks by, `{:send, %{name => link}}`, and changes nothing:
   sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more
   are removed: a machine downloads only the latest, and one whose update doesn't take goes back to the build it
@@ -126,7 +147,7 @@ defmodule OneCore.Builds do
         :absent -> {%{}, nil}
       end
 
-    now = Map.merge(was, Map.new(builds, &{&1["name"], Map.take(&1, ~w(build sha256 size))}))
+    now = Map.merge(was, Map.new(builds, &{&1["name"], Map.take(&1, ~w(build sha256 size files))}))
 
     written =
       if tag, do: Bucket.replace(@latest, JSON.encode!(now), tag), else: Bucket.write(@latest, JSON.encode!(now))
@@ -135,7 +156,9 @@ defmodule OneCore.Builds do
       named = for {_name, build} <- now, do: @builds <> build["sha256"]
       for blob <- Bucket.list(@builds), blob != @latest, blob not in named, do: Bucket.remove(blob)
       # Every plugin in the bucket, whether or not anyone still has it: each one's `latest`.
-      plugins = for blob <- Bucket.list(""), [artifact] <- [Regex.run(@plugin, blob, capture: :all_but_first)], do: artifact
+      plugins =
+        for blob <- Bucket.list(""), [artifact] <- [Regex.run(@plugin, blob, capture: :all_but_first)], do: artifact
+
       Stream.run(Task.async_stream(plugins, &Store.prune/1, max_concurrency: 16, timeout: :infinity))
       now
     else

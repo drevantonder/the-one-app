@@ -443,7 +443,7 @@ defmodule OneCore.Plugins.Deploy do
     end
 
     Builds.latest()
-    |> Enum.filter(fn {name, _} -> String.starts_with?(name, "server/") end)
+    |> Enum.filter(fn {name, _} -> name == "server-code" or String.starts_with?(name, "server/") end)
     |> Enum.all?(fn {_name, %{"build" => build}} -> count.(build) <= count.(Builds.build()) end)
   end
 

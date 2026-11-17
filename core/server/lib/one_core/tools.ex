@@ -70,7 +70,24 @@ defmodule OneCore.Tools do
     enum: ["up_to_date", "downloading", "verifying"],
     description:
       "Where an update of it is: up_to_date, downloading the latest build and program while it answers on, or " <>
-        "verifying them by starting them in its place, kept once they answer and otherwise gone back from"
+        "verifying them, by loading the build into it or by starting both in its place, kept once it answers as " <>
+        "the new build and otherwise gone back from"
+  }
+
+  @server_update_stage %{
+    type: ["string", "null"],
+    enum: ["checking", "loading", "starting", nil],
+    description:
+      "Where verifying is: checking the build starts and whether it can be loaded into the server while it runs, " <>
+        "then loading it, which takes seconds, or starting it in the server's place"
+  }
+
+  @update_method %{
+    type: ["string", "null"],
+    enum: ["hot_load", "restart", nil],
+    description:
+      "How checking chose to take the build: hot_load, loaded into the server while it runs, or restart, started " <>
+        "in its place, for a new runtime, `one`, 0.minor, supervision tree, struct, macro or -on_load module"
   }
 
   @acts_for %{
@@ -606,6 +623,9 @@ defmodule OneCore.Tools do
                   description: "Why it doesn't talk with the server that answered or the edge, being on another 0.minor"
                 },
                 server_update_status: @server_update_status,
+                server_update_stage: @server_update_stage,
+                update_method: @update_method,
+                runtime: %{type: ["string", "null"], description: "The server-runtime build it runs on"},
                 went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
               },
               required: ["server", "name"]
@@ -668,12 +688,17 @@ defmodule OneCore.Tools do
           builds: %{
             type: "array",
             description:
-              "Each build: its name (server/<target>, one/<target> or one-cli/<target>), build, sha256 and size",
+              "Each build: its name (server/<target>, server-runtime/<target>, server-code, one/<target> or " <>
+                "one-cli/<target>), build, sha256 and size, and a runtime's files, the SHA-256 that tells it",
             items: %{
               type: "object",
               properties: %{
-                name: %{type: "string", pattern: "^(server|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+$"},
+                name: %{
+                  type: "string",
+                  pattern: "^((server|server-runtime|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+|server-code)$"
+                },
                 build: %{type: "string"},
+                files: %{type: "string", pattern: "^[0-9a-f]{64}$"},
                 sha256: %{type: "string", pattern: "^[0-9a-f]{64}$"},
                 size: %{type: "integer"}
               },
@@ -701,9 +726,10 @@ defmodule OneCore.Tools do
       description: """
       Has a server's machine take the latest builds, its server's and its program's together, if it isn't on them
       already. It checks each before it runs it, hands its work to another server meanwhile, and goes back to the
-      pair it had if the new one doesn't start and answer. It answers once the update has begun, with its
-      `server_update_status`; one under way already is left to finish. `builds` then says it as it moves on, which
-      build it's on once it's done, and if it went back, why.
+      pair it had if the new one doesn't answer. A build that only changed One Core's code is loaded into the server
+      while it runs, in seconds, and it answers once that's done, with the build it's on and, if it went back, why.
+      One that must restart (`update_method`) answers once it begins, and one under way already is left to finish:
+      `builds` then says it as it moves on, which build it's on once it's done, and if it went back, why.
       """,
       inputs: %{
         type: "object",
@@ -713,7 +739,11 @@ defmodule OneCore.Tools do
         type: "object",
         properties: %{
           server: %{type: "string", description: "The key of the server taking them"},
-          server_update_status: @server_update_status
+          build: %{type: "string", description: "The build it's on as it answers"},
+          server_update_status: @server_update_status,
+          server_update_stage: @server_update_stage,
+          update_method: @update_method,
+          went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
         },
         required: ["server", "server_update_status"]
       }
@@ -1007,7 +1037,10 @@ defmodule OneCore.Tools do
       if not Application.get_env(:one_core, :installed, false),
         do: raise("#{here()} can't update itself.\n\nIt wasn't installed with `one serve on`, so it doesn't update itself.")
 
-      %{server: Server.key(), server_update_status: Release.update()}
+      status = Release.update()
+
+      %{server: Server.key(), build: OneCore.Builds.build()}
+      |> Map.merge(Map.take(status, ~w(server_update_status server_update_stage update_method went_back)))
     end)
   end
 
