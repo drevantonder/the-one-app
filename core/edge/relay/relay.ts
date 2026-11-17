@@ -61,6 +61,16 @@ const REACH = 5_000;
 /** MCP's ping, which a server answers at once, whoever asks. */
 const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
 /**
+ * How long a call to the relay's Durable Object is tried again, in milliseconds. A deploy leaves the object on the
+ * code before while it's busy, up to `max_delay` in `wrangler.jsonc`, and a Worker on either side of the deploy may
+ * call it meanwhile, as Cloudflare says (Durable Objects' "Code updates"): a call the other doesn't take yet, or no
+ * longer, fails until it's switched over. That's also what a reset or a broken connection to it fails with, which
+ * Cloudflare has callers try again, on a new stub, waiting longer each time, here up to a second, so a try comes soon
+ * after it's switched over. An overloaded one isn't tried again. It's within what a server waits for an answer,
+ * 15 seconds.
+ */
+const SWITCH = 12_000;
+/**
  * The versions a build talks with, as Semantic Versioning's 0.x reads at Cargo, npm and Hex: its 0.minor, or from
  * 1.0 its major. A server from before builds had versions says none, and is 0.15.0.
  */
@@ -139,7 +149,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     if (url.pathname === "/relay/seen") return this.handleSeen(request, url);
     if (request.headers.get("upgrade") !== "websocket") return refuse(url.pathname.startsWith("/relay") ? 426 : 404, "The relay is a WebSocket at /relay");
     if (url.pathname === "/relay") return this.endpoint(request, url);
-    if (url.pathname === "/relay/outside") return this.relay().fetch(request);
+    if (url.pathname === "/relay/outside") return this.relay((relay) => relay.fetch(request));
     return refuse(404, "The relay is at /relay");
   }
 
@@ -205,7 +215,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     // A run of a client is on for the device it runs for, which its token names, and a server for itself.
     const [, device = key] = (token ?? "").split(".");
     const on = new URLSearchParams({ key, device, ...(admitted.until === undefined && { server: "yes" }) });
-    const relay = (await this.relay().fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } })).webSocket!;
+    const relay = (await this.relay((relay) => relay.fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } }))).webSocket!;
     relay.accept();
     relay.binaryType = "arraybuffer";
     relay.addEventListener("message", ({ data }) => ours.send(data as ArrayBuffer));
@@ -231,7 +241,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent, version: this.env.VERSION } } });
 
     // Only a server that talks with the edge is asked, and only one that's ready, or isn't known not to be.
-    const versions = await this.relay().versions(servers);
+    const versions = await this.relay((relay) => relay.versions(servers));
     const talking = servers.filter((server) => !versions[server] || talk(versions[server], this.env.VERSION));
     if (!talking.length) {
       const error = `None of its ${servers.length} servers is on a version that talks with the edge's ${this.env.VERSION}: ${servers.map((server) => `${server.slice(0, 8)} ${versions[server]}`).join(", ")}`;
@@ -245,7 +255,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": talking.length }, error } }));
       return null;
     }
-    const tries = servers.map((server) => reach(this.relay(), server));
+    const tries = servers.map((server) => reach(this.relay((relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } })), server));
     const reached = await Promise.any(tries).catch(() => null);
     for (const tried of tries) tried.then((other) => other !== reached && other.close(), () => {});
     const answer = reached && (await reached.ask(message));
@@ -263,12 +273,12 @@ export default class extends WorkerEntrypoint<RelayEnv> {
 
   /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
   async notify(message: string): Promise<void> {
-    await this.relay().fetch("https://relay/notify", { method: "POST", body: message });
+    await this.relay((relay) => relay.fetch("https://relay/notify", { method: "POST", body: message }));
   }
 
   /** Whether each of `keys`, servers' and devices', is here (`Presence`), or `null` for one never seen. */
   presence(keys: string[]): Promise<Record<string, Presence | null>> {
-    return this.relay().presence(keys);
+    return this.relay((relay) => relay.presence(keys));
   }
 
   /**
@@ -289,7 +299,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
         ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
         : undefined;
-      const now = await this.relay().report(key, version, status);
+      const now = await this.relay((relay) => relay.report(key, version, status));
       const behind = !talk(version, this.env.VERSION) && before(version, this.env.VERSION);
       const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
       const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
@@ -301,18 +311,28 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     return Response.json({ presence: await this.presence(keys.slice(0, 1000)) }, { headers: { "one-version": this.env.VERSION } });
   }
 
-  /** A network has one relay. */
-  relay() {
-    return this.env.RELAY.get(this.env.RELAY.idFromName("relay"));
+  /** Gives what `call` gives of the network's one relay, tried again for up to `SWITCH` where it fails. */
+  async relay<T>(call: (relay: DurableObjectStub<Relay>) => Promise<T>): Promise<T> {
+    const until = Date.now() + SWITCH;
+    for (let wait = 250; ; wait = Math.min(wait * 2, 1_000)) {
+      try {
+        return await call(this.env.RELAY.get(this.env.RELAY.idFromName("relay")));
+      } catch (error) {
+        if ((error as { overloaded?: boolean }).overloaded || Date.now() + wait > until) throw error;
+        console.log(JSON.stringify({ relay: "tried again", error: String(error) }));
+        await scheduler.wait(wait);
+      }
+    }
   }
 }
 
 /**
- * A connection to `server` through `relay`, once it has answered a ping within `REACH`: `ask` sends a message and
- * gives its answer, or `null` if the server left first. Rejects for a server that isn't here or didn't answer.
+ * A connection to `server`, the relay's answer to `call`, once it has answered a ping within `REACH`: `ask` sends a
+ * message and gives its answer, or `null` if the server left first. Rejects for a server that isn't here or didn't
+ * answer.
  */
-async function reach(relay: DurableObjectStub<Relay>, server: string) {
-  const { webSocket } = await relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } });
+async function reach(call: Promise<Response>, server: string) {
+  const { webSocket } = await call;
   if (!webSocket) throw new Error("isn't connected to the relay");
   webSocket.accept();
   let answered: ((answer: string | null) => void) | undefined;
