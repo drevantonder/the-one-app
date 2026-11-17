@@ -113,8 +113,8 @@ defmodule OneCore.App do
     it, is what a person reads where the app's listed (the App Store's Marketplace, the app directory): its `subtitle`, a
     few words under its name, as an App Store app's is, and `about`, a few plain sentences on its page, as Google
     Play's "About this app" is. Both say what it does for a person, with no word of an agent's. Its `category`
-    says what the app is for, and a listing groups apps by it; it's one of these, and a deploy without one is
-    refused. It isn't its apps' categories, which place each app in the App Library:
+    says what the app is for, and the App Store and the App Library group apps by it; it's one of these, and a
+    deploy without one is refused:
 
     | `category` | For |
     | --- | --- |
@@ -127,6 +127,7 @@ defmodule OneCore.App do
     | `Devices` | The machines themselves: their load, power, shells and containers |
     | `Developer tools` | Building, debugging and running code |
     | `Utilities` | Anything else |
+    | `Admin` | What other apps stand on, which only the network's owners manage: databases, encryption, sandboxes |
 
     Each is one line, as the directory reads it:
 
@@ -353,9 +354,9 @@ defmodule OneCore.App do
       @impl true
       def entrypoints, do: [%{name: "Hello", page: "client/index.html"}]
 
-  - An entrypoint may say its `category`, which One Core passes to the launcher as it is, as Android's app categories are:
-    which there are and what each means is the launcher's to say, in its skill (`category: "coding"`). One Core knows
-    one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one, installed
+  - An entrypoint may say its `category`, one of the app's categories above, where it's for something else than its
+    app (`category: "Devices"`); One Core passes it to the launcher as it is, which otherwise places it by its app's. One
+    Core knows one more, `launcher`: the app every client opens first, which draws the rest. A network has exactly one, installed
     for the network, so installing a second is refused, and so is uninstalling it; deploying another as its new
     version replaces it. A client knows one more, `app-store`: the App Store, which installs and removes apps, which it
     opens itself where there's no launcher yet.

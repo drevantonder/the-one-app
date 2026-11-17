@@ -28,7 +28,8 @@ defmodule OneCore.Apps.Deploy do
     "Agent tools",
     "Devices",
     "Developer tools",
-    "Utilities"
+    "Utilities",
+    "Admin"
   ]
 
   @doc "What an app may say it's for, its `category`, in the order a listing shows them."
