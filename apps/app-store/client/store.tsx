@@ -131,7 +131,6 @@ async function act(owner: Owner, app: string | null, what: string, run: () => Pr
 const install = (owner: Owner, listed: Listed) => act(owner, listed.app, "install", () => call("install", { app: listed.app }, { subject: owner.subject }))
 const retry = (owner: Owner, done: Install) => act(owner, done.app, "retry", () => call("apps_retry", { name: done.name }, { subject: owner.subject }))
 const update = (owner: Owner, done: Install) => act(owner, done.app, "update", () => call("apps_update", { name: done.name }, { subject: owner.subject }))
-const restore = (owner: Owner, done: Install) => act(owner, done.app, "restore", () => call("apps_restore", { name: done.name }, { subject: owner.subject }))
 
 /// Uninstalls, first warning where apps installed for them require it: they go too.
 async function uninstall(market: Market, owner: Owner, done: Install) {
@@ -297,8 +296,9 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
       <Match when={state() === "installing"}>
         <span class="busy"><Spinner /> Installing</span>
       </Match>
+      {/* Restoring is Recently Deleted's, as for everything deleted: one place, as iOS has it. */}
       <Match when={state() === "recently_deleted" && may()}>
-        <Button variant="secondary" loading={busy("restore")} onClick={() => restore(props.owner, now())}>Restore</Button>
+        <Button variant="secondary" onClick={() => open("soft-delete", { subject: props.owner.subject })}>Recently Deleted</Button>
       </Match>
       <Match when={state() === "installed"}>
         <span class="owner-end">
@@ -333,7 +333,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
     </Switch>
   )
   // Version numbers are the App Store's alone (DESIGN.md).
-  const text = () => (state() === "not_installed" ? "Couldn't install" : state() === "recently_deleted" ? "Recently Deleted" : state() === "installed" && now().version ? `Version ${now().version}` : !state() ? (only(props.all, props.owner) ?? "Not installed") : undefined)
+  const text = () => (state() === "not_installed" ? "Couldn't install" : state() === "recently_deleted" ? "Uninstalled" : state() === "installed" && now().version ? `Version ${now().version}` : !state() ? (only(props.all, props.owner) ?? "Not installed") : undefined)
   return <Row heading={props.owner.name} text={text()} end={end} />
 }
 

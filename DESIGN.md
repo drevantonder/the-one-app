@@ -67,7 +67,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Browsing and getting apps, quiet: managing what's installed is the App Library's (17 Nov), so there's no Installed.
 - Marketplace: one row for each of the nine app categories, cut so the next app shows, with See All; apps the size they are on the Home Screen.
 - An app's page has Get (17 Nov), which asks who to install it for, or installs it at once where there's only one owner you may install for; then a row for each owner, with Open and its state there, its version where it's installed; then Requires, each requirement's title and why, never "What you get", and Required by (17 Nov); then See All.
-- Trusted and untrusted are said plainly. An update available, a failed install with why and Try Again, and Recently Deleted for what was uninstalled.
+- Trusted and untrusted are said plainly. An update available, a failed install with why and Try Again, and for what was uninstalled, Uninstalled with a button to Recently Deleted, the one place things come back from.
 - Install installs what it requires too, saying why. Uninstalling one that others require warns first that they go too.
 - Uninstalling puts an app and its data in Recently Deleted, as one item, whose Restore brings both back for 30 days.
 - An owner you can't install for shows a plain line, "Only Andre can install for Everyone", with no button.
