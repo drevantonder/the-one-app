@@ -76,8 +76,8 @@ On a device that is also a server, `one update` asks the program keeping that se
 take the latest builds, the program's among them, and answers before it has. What it did is in that program's log,
 `journalctl --user -u one-server-<key's first 12>` on Linux: `one --version` then says the new build.
 
-Run an edge deploy under `flock -n "${XDG_RUNTIME_DIR:-/tmp}/one-release.lock" bun edge.js deploy <address>`, which
-refuses while a release publishes on the machine. The network's address and
+Run an edge deploy only while no release publishes on the machine, which `tooling/release` keeps as a pid file:
+`! { read -r pid _ <"${XDG_RUNTIME_DIR:-/tmp}/one-release.pid" && kill -0 "$pid"; } 2>/dev/null && bun edge.js deploy <address>`. The network's address and
 where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 ## What is live
