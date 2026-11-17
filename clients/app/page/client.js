@@ -578,17 +578,27 @@ function gestures() {
 /** @param {string | null} at */
 const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().matches("app_store") ? appStore : launcher))
 
+/// When the window last came on screen.
+let onScreenSince = 0
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) onScreenSince = performance.now()
+})
+
 /// Says how long an app took from the tap on its icon to its content on screen: the second frame after it's
-/// showing with what it drew from. The launcher's time is from when this page began to load.
+/// showing with what it drew from. The launcher's time is from when this page began to load. An open the window
+/// was hidden during isn't told: the system draws no frame for a hidden window, so it would be timed to whenever
+/// its person looked, as a Mac's app that started hidden was, at 23 minutes.
 /** @param {View} view */
 function opened(view) {
   if (view.tapped === undefined) return
   const tapped = view.tapped
   view.tapped = undefined
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    const name = view.entrypoint.split("/")[0]
-    const { duration } = performance.measure(`open ${name}`, { start: tapped })
-    invoke("opened", { view: name, ms: Math.round(duration) })
+    if (onScreenSince <= tapped) {
+      const name = view.entrypoint.split("/")[0]
+      const { duration } = performance.measure(`open ${name}`, { start: tapped })
+      invoke("opened", { view: name, ms: Math.round(duration) })
+    }
     // Their home has drawn over the steps.
     if (view.entrypoint === launcher) on({ type: "drawn" })
   }))
