@@ -21,9 +21,10 @@ that touches the same part, `fix!: <what broke>`, before it's released.
 
 Exactly two rules hold at runtime:
 
-- Parts talk only on the same 0.minor (`OneCore.Builds.talk?/2`). A server refuses a request of another
-  (`OneCore.Mcp`), which says why; a server asks one behind it nothing, as if it were off; the relay passes the edge's
-  calls only to servers on its own (`core/edge/relay/relay.ts`), apart from whether they're ready. What updates a
+- Parts one 0.minor apart talk, and two or more apart don't (`OneCore.Builds.talk?/2`). A server refuses a request
+  of one that far off (`OneCore.Mcp`), which says why; a server asks one that far behind it nothing, as if it were
+  off; the relay passes the edge's calls only to servers within one of its own (`core/edge/relay/relay.ts`), apart
+  from whether they're ready. What updates a
   part that's behind, `tools/list`, `builds`, `download` and `update`, is answered whatever it's on. `one builds` says each
   server's `build`, the `edge`'s, and `why` one doesn't talk.
 - An app runs on a server on its `requires`' `"core" => ">= 0.16.0"` or newer (`OneCore.Apps.Version.platform/1`,
@@ -41,14 +42,10 @@ published, in turn, saying what each took; the first that goes back stops the re
 Run it again to take on the servers still behind. Run no `one update --server` by hand for a release. Nothing is watched after a release: each server verifies a build answers before it keeps it, and a bug
 found later is fixed forward.
 
-A patch release mixes with what's live, in any order. A breaking one goes in this order, back to back, so the network
-is split only for minutes:
-
-1. The servers (`tooling/release server`, which updates them in turn). A server that goes back stops the release:
-   read its log.
-2. The apps that require the new platform, once every server is on it.
-3. The edge, from the commit the servers run.
-4. The clients (`tooling/release client`, `one update` on each device).
+Any release mixes with what's live, a breaking one too, since parts one 0.minor apart talk. Release the servers
+first, then the edge from the commit they run, then the clients; an app that requires the new platform is deployed
+once every server is on it. Release the next breaking change only once every part is on this one: two apart don't
+talk.
 
 | Changed | Release |
 | --- | --- |
@@ -94,8 +91,7 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 - A breaking release that apps' code can't run on (the plugin-to-app rename, 17 Nov) leaves sign-in not running on
   each server it reaches, so nobody is signed in there and nothing can be deployed to it: keep sign-in's new version
   first with the new build's own `OneCore.Apps.Store.keep/6` on a server's machine (as the bucket is reached without
-  the node) and restart that server. The installed `one` can't publish to servers on the new 0.minor either: publish
-  the clients with the `one-cli` just built (`~/.cache/the-one-app/release/target/builds/<build>/`), first on PATH, and the Mac's by its file.
+  the node) and restart that server.
 - Releasing everything when one app changed. A server release is minutes and restarts every server; an app is
   seconds.
 - Releasing a server build onto storage whose stored names it had renamed. A rename of anything kept (a blob prefix,
@@ -104,19 +100,21 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 - Releasing from a worktree behind `origin/main`, which `tooling/release` refuses once a newer build is published.
 - Releasing a server from a tree with changes not committed: the build is `.dirty`, and every server refuses it
   ("says it's ….dirty, not what was published").
-- Changing what servers ask each other (`hooks/call`, `apps/call`, what a call passed on says in `_meta`)
-  without marking it `!`: the servers on the version before read it wrongly while the release reaches them (`This
-  device isn't signed in here`, 240 times in three minutes). Marked, they refuse it instead, and are asked nothing
-  until they're updated. One that can't take its update for that (`permissions couldn't decide it`) is taken by hand,
-  as its program would: download the build `one download --target <kind>` links, unpack it in its
+- Changing what servers ask each other (`hooks/call`, `apps/call`, what a call passed on says in `_meta`) so the
+  version before reads it wrongly while the release reaches them (`This device isn't signed in here`, 240 times in
+  three minutes): keep it compatible for one release, the new beside the old. A server that can't take its update
+  (`permissions couldn't decide it`) is taken by hand, as its program would: download the build `one download --target <kind>` links, unpack it in its
   `server/builds/<build>` past `bin/one_core eval "OneCore.Release.check()"` saying that build, set `next` to
   `{"build": <it>, "program": <its one --version>}` and `server_update_status` to `verifying` in `server/state.json`,
   and restart its unit (`systemctl --user restart one-server-<key's first 12>`, or on a Mac
   `launchctl kickstart -k gui/$(id -u)/app.theone.server.<key's first 12>`); it goes back by itself if it doesn't
   answer.
 - Deploying the edge before the servers, from a commit they don't run: its relay took them all for gone and server
-  updates went back (17 Nov). It now sends those behind it nothing, which still pauses the network until they're
-  updated: the edge goes after the servers.
+  updates went back (17 Nov). It now sends nothing only to those more than one 0.minor behind it; the edge still
+  goes after the servers.
+- A breaking release that removed two app categories (17 Nov), when parts talked only on one 0.minor and apps
+  pinned one with `~>`: the network split in two and six apps waited for updates. Now parts talk across one, apps
+  say a minimum, and a removal is a deprecation.
 
 ## Report
 

@@ -50,7 +50,14 @@ before choosing.
   co-author or "Generated with" lines.
 - Mark with `!` (`feat(core)!: …`) a change that breaks whoever uses what the commit touches, such as a rename with
   no alias: the platform (core, the edge, the clients) or an app, each with its own version (the `release` skill).
-  The platform's next 0.minor doesn't talk with older parts.
+  It tells them, in the commit and the next 0.minor; it splits nothing.
+- Parts of the platform one 0.minor apart talk, and two apart refuse each other, saying why, as Kubernetes' version
+  skew policy has it. So a change to what parts say to each other stays compatible for one release: the new beside
+  the old, and the old removed in the next. No version gate until something needs one.
+- An app's `requires` says the lowest core it needs, `"core" => ">= 0.20.0"`, as Android's `minSdkVersion` does, and
+  runs on every version after.
+- Deprecate, don't remove. What an app says that the platform no longer lists is read as what replaced it, and its
+  deploy warns (`@deprecations` in `OneCore.Apps.Deploy`). It's never refused.
 - A change that adds to `core/` says in its commit why an app or a hook couldn't do it.
 - Never print a secret. Check a file that holds them by its names or hashes, never its values.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
