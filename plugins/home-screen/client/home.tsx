@@ -960,8 +960,11 @@ function HomeScreen(props: { owners: Owner[] }) {
     // The arrow keys move as a swipe does: up and down on a page that scrolls itself scroll it. Escape ends editing.
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey) return
-      if (event.key === "Escape" && home.getSnapshot().matches({ editing: "still" })) return home.send({ type: "done" })
+      // A key pressed in an alert or a sheet is its own: the browser closes it on Escape, and that's all Escape does.
+      if ((event.target as Element).closest?.("dialog")) return
+      // Escape closes the page overview, and otherwise ends editing, carrying something or not: nothing's open over it.
       if (event.key === "Escape" && home.getSnapshot().matches({ editing: "overview" })) return home.send({ type: "dismiss" })
+      if (event.key === "Escape" && (home.getSnapshot().matches({ editing: "still" }) || home.getSnapshot().matches({ editing: "dragging" }))) return home.send({ type: "done" })
       if (!home.getSnapshot().matches("nothing")) return
       const to = ({ ArrowRight: { page: rtl() }, ArrowLeft: { page: -rtl() }, ArrowDown: { owner: 1 }, ArrowUp: { owner: -1 } } as Record<string, { page: 1 | -1 } | { owner: 1 | -1 }>)[event.key]
       if (!to || ("owner" in to && kinds[kindOf(home.getSnapshot().context.at.owner)].scrolls)) return
