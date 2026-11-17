@@ -83,19 +83,20 @@ defmodule OneCore.Tools do
 
   @server_update_status %{
     type: "string",
-    enum: ["up_to_date", "downloading", "verifying"],
+    enum: ["up_to_date", "downloading", "checked", "verifying"],
     description:
-      "Where an update of it is: up_to_date, downloading the latest build and program while it answers on, or " <>
-        "verifying them, by loading the build into it or by starting both in its place, kept once it answers as " <>
-        "the new build and otherwise gone back from"
+      "Where an update of it is: up_to_date, downloading the latest build and program while it answers on and " <>
+        "checking how it takes them, checked and waiting for the network's update to say go, or verifying them, by " <>
+        "loading the build into it, kept once it's loaded, or by starting both in its place, kept once the build " <>
+        "says it's running at the edge, and otherwise gone back from"
   }
 
   @server_update_stage %{
     type: ["string", "null"],
     enum: ["checking", "loading", "starting", nil],
     description:
-      "Where verifying is: checking the build starts and whether it can be loaded into the server while it runs, " <>
-        "then loading it, which takes seconds, or starting it in the server's place"
+      "Where downloading is once it's downloaded, checking the build starts and whether it can be loaded into the " <>
+        "server while it runs, and where verifying is, loading it, which takes seconds, or starting it in the server's place"
   }
 
   @update_method %{
@@ -103,7 +104,8 @@ defmodule OneCore.Tools do
     enum: ["hot_load", "restart", nil],
     description:
       "How checking chose to take the build: hot_load, loaded into the server while it runs, or restart, started " <>
-        "in its place, for a new runtime, `one`, 0.minor, supervision tree, struct, macro or -on_load module"
+        "in its place, for a new runtime, `one`, 0.minor, supervision tree, struct, macro or -on_load module " <>
+        "(`update_method_reason`)"
   }
 
   @acts_for %{
@@ -761,6 +763,15 @@ defmodule OneCore.Tools do
                 build: %{type: "string"},
                 server_membership: %{
                   type: "string",
+          network: %{
+            type: ["object", "null"],
+            description:
+              "The network's update, as its updater says, if its edge has one: `network_update_status` (up_to_date, " <>
+                "preparing, updating_edge, loading, restarting or held), the `build` it takes every server to, how many " <>
+                "are `done` `of` those taking part, what it's `waiting_for` (quiet: a lone server that restarts waits " <>
+                "for no calls a while, or Update Now), why it's `held`, the servers `skipped` as asleep or gone, " <>
+                "those `behind` its build, and when each step was reached, in ms after the build was published (`timings`)"
+          },
                   enum: ["inactive", "joining", "active", "leaving"],
                   description: "Whether it's one of the network's servers: joining until it answers by its key, and leaving while it drains"
                 },
@@ -885,30 +896,27 @@ defmodule OneCore.Tools do
       name: "update",
       task_support: :optional,
       description: """
-      Has a server's machine take the latest builds, its server's and its program's together, if it isn't on them
-      already. It checks each before it runs it, hands its work to another server meanwhile, and goes back to the
-      pair it had if the new one doesn't answer. A build that only changed One Core's code is loaded into the server
-      while it runs, in seconds; one that must restart (`update_method`) takes minutes, and one under way already is
-      left to finish. It answers once `builds` says that server is ready on the build it was asked to take, as
-      `kubectl rollout status` does, or fails saying why: it went back, and why, it couldn't update, or it isn't
-      ready within 240 s. A server with no other ready to wait for it answers once a restart begins, since it can't
-      answer while it restarts.
+      Software Update's Update Now: has the network's update (`builds`' `network`) take every server to the latest
+      build published to the network now, where it waits, as a lone server that must restart waits for a quiet
+      moment, or try again where it's held. It answers once the network is up to date, or held, saying which server
+      didn't take it and why. Servers take each build published by themselves, so it's needed only for those.
+      With `server`, that server alone takes the latest builds, as before there was a network update.
       """,
       inputs: %{
         type: "object",
-        properties: %{server: %{type: "string", description: "The server's key. The server that answers, if left out"}}
+        properties: %{server: %{type: "string", description: "A server's key, to update that one alone"}}
       },
       outputs: %{
         type: "object",
         properties: %{
+          network: %{type: ["object", "null"], description: "The network's update, as `builds` says it"},
           server: %{type: "string", description: "The key of the server taking them"},
           build: %{type: "string", description: "The build it's on as it answers"},
           server_update_status: @server_update_status,
           server_update_stage: @server_update_stage,
           update_method: @update_method,
           went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
-        },
-        required: ["server", "server_update_status"]
+        }
       }
     }
   ]
@@ -966,8 +974,9 @@ defmodule OneCore.Tools do
 
   # A server asked to update itself may restart, and then can't answer when it's ready, or keep the task it runs
   # as: another of its owner's ready servers asks it and waits, if there is one. One passed on to it is its own.
-  defp waiter("update", inputs, {_actor, subject}, false) do
-    if inputs["server"] in [nil, Server.key()],
+  # Update Now, which names no server, is the network's update's.
+  defp waiter("update", %{"server" => key}, {_actor, subject}, false) do
+    if key == Server.key(),
       do: Enum.find(Servers.acting(User.owner(subject) || "network") -- [Server.key()], &Servers.ready?/1)
   end
 
@@ -1283,9 +1292,14 @@ defmodule OneCore.Tools do
     end
   end
 
-  defp run("update", inputs, principal, _pass, _request) do
-    key = inputs["server"]
-    if key in [nil, Server.key()], do: update(principal), else: rollout(key, principal)
+  defp run("update", %{"server" => key}, principal, _pass, _request) when is_binary(key) do
+    if key == Server.key(), do: update(principal), else: rollout(key, principal)
+  end
+
+  defp run("update", _inputs, principal, _pass, _request) do
+    reaches!(principal, "network", "owner")
+    network = Release.update_now()
+    {:content, %{network: network}, [%{type: "text", text: Release.software_update(network)}]}
   end
 
   # What takes the latest builds is the program that keeps an installed server running, which hears this said.

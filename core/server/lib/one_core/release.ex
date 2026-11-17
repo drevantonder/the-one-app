@@ -17,9 +17,13 @@ defmodule OneCore.Release do
     it one, until it answers by its key, `active`, and `leaving` while `one serve off` drains it.
   - `server_daemon_status`: `starting` until it answers by its key, `running`, and `stopping`. Stopped is what the
     network's edge says of one that's gone.
-  - `server_update_status`: `up_to_date`, `downloading` the latest build and `one` while this one answers on, and
-    `verifying` them, which starts them in this one's place: kept once they answer by their key, and otherwise the
-    pair before starts again, saying why in `went_back`.
+  - `server_update_status`: `up_to_date`, `downloading` the latest build and `one` while this one answers on and
+    checking how it's taken, `checked`, and `verifying` them once it's told to go, which loads the build into this
+    one, kept once it's loaded, or starts them in its place, kept once the build says it's running at the edge; and
+    otherwise the pair before is loaded or started again, saying why in `went_back`.
+
+  Its network's updater (`core/edge/updater/updater.ts`) says, through the relay, what each server is to do: prepare
+  the latest build, or go (`instructed/1`). This says it to that program, which does it.
 
   It's ready once it's active and running (`OneCore.Server.up?/0`), which it says at the network's edge
   (`OneCore.Servers.report/0`), so only a ready server is sent calls, and only a ready one takes on what others then
@@ -108,6 +112,8 @@ defmodule OneCore.Release do
     "server_update_status" => "up_to_date",
     "server_update_stage" => nil,
     "update_method" => nil,
+    "update_method_reason" => nil,
+    "next_build" => nil,
     "went_back" => nil
   }
 
@@ -125,7 +131,7 @@ defmodule OneCore.Release do
   def status do
     # A server that was running when this was hot loaded into it kept its status in the application's environment
     # until it next restarts.
-    :persistent_term.get({__MODULE__, :status}, nil) || Map.merge(@status, Application.get_env(:one_core, :status, %{}))
+    Map.merge(@status, :persistent_term.get({__MODULE__, :status}, nil) || Application.get_env(:one_core, :status, %{}))
   end
 
   @doc """
@@ -140,8 +146,10 @@ defmodule OneCore.Release do
     if now != was do
       # Not the application's environment, which can't be changed while the server stops, when it says so.
       :persistent_term.put({__MODULE__, :status}, now)
-      Builds.say(Server.key())
+      if now["server_update_status"] != was["server_update_status"], do: :persistent_term.erase({__MODULE__, :asked})
+      # The edge first: the network's updater waits on it.
       Servers.report()
+      Builds.say(Server.key())
 
       Registry.dispatch(OneCore.Waiting, :status, fn waiting ->
         for {process, _} <- waiting, do: send(process, :status)
@@ -190,6 +198,157 @@ defmodule OneCore.Release do
   end
 
   @doc """
+  Says to the program keeping this server running that the network's edge took what it said it is
+  (`OneCore.Servers.say/0`), as `build`: what it waits for to keep a build it started or loaded.
+  """
+  def reported(build) do
+    if Application.get_env(:one_core, :installed, false), do: say(%{"reported" => %{"build" => build}})
+    :ok
+  end
+
+  @doc """
+  What the network's updater last said of the network's update (`core/edge/updater/updater.ts`), as every server is
+  told: its `network_update_status`, the `build` it takes the network to, how many of its servers are `done` `of`
+  those taking part, and what it waits for or why it's held; `nil` until it has said.
+  """
+  def network, do: :persistent_term.get({__MODULE__, :network}, nil)
+
+  @doc """
+  What the network's updater says, `update`, as the relay tells every server: kept for whoever asks (`network/0`), and
+  what this server is to do of it said to the program keeping it running: to prepare the latest build where it isn't
+  on it or preparing it, and to go where it has checked the build the network takes, now or once it's quiet.
+  """
+  def instructed(update) do
+    if update != network() do
+      :persistent_term.put({__MODULE__, :network}, update)
+      Server.changed()
+
+      Registry.dispatch(OneCore.Waiting, :network, fn waiting ->
+        for {process, _} <- waiting, do: send(process, :network)
+      end)
+    end
+
+    %{"server_update_status" => at, "next_build" => next} = status()
+    checked = at == "checked" and next == update["build"]
+    behind = (at == "up_to_date" and Builds.build() != update["build"]) or (at == "checked" and not checked)
+
+    # Said once until the program says it began, though the updater says it again to every server as each moves on.
+    asked = :persistent_term.get({__MODULE__, :asked}, nil) == update["build"]
+
+    case Application.get_env(:one_core, :installed, false) && update["servers"][Server.key()] do
+      "prepare" when behind and not asked ->
+        :persistent_term.put({__MODULE__, :asked}, update["build"])
+        say("prepare")
+
+      "go" when checked ->
+        say("go")
+
+      "go_when_quiet" when checked ->
+        quiet()
+
+      _ ->
+        :ok
+    end
+  end
+
+  # How long Update Now waits for the network's update to finish, in milliseconds: a restart is seconds, and each server
+  # restarts in turn.
+  @update_now 600_000
+
+  @doc """
+  Update Now: tells the network's updater to take every server to the latest build now, or try again where it's held,
+  and gives what it says once it's up to date or held, as every server is told (`instructed/1`), or after
+  `@update_now`, as it is then.
+  """
+  def update_now do
+    Registry.register(OneCore.Waiting, :network, nil)
+
+    with {:ok, update} when update != nil <- Servers.network(%{now: true}) do
+      await_network(update, System.monotonic_time(:millisecond) + @update_now)
+    else
+      {:ok, nil} -> raise "This network's edge has no updater yet: deploy the edge from a build that has one."
+      {:error, why} -> raise "The network's updater wasn't told: #{why}"
+    end
+  after
+    Registry.unregister(OneCore.Waiting, :network)
+  end
+
+  defp await_network(update, until) do
+    left = until - System.monotonic_time(:millisecond)
+
+    if update["network_update_status"] in ["up_to_date", "held"] or left <= 0 do
+      update
+    else
+      receive do
+        :network -> await_network(network(), until)
+      after
+        left -> network()
+      end
+    end
+  end
+
+  @doc """
+  The network's update, `update`, as a person reads it, in Software Update's words: "Up to date · 0.20.1",
+  "Updating… 2 of 4", "Waiting for a quiet moment", "Update failed · linux: why".
+  """
+  def software_update(nil), do: "This network's edge has no updater yet."
+
+  def software_update(update) do
+    version = (update["build"] || "") |> String.split("+") |> hd()
+
+    case {update["network_update_status"], update["waiting_for"]} do
+      {"up_to_date", _} -> "Up to date · #{version}"
+      {"held", _} -> "Update failed · #{update["held"]["name"] || "a server"}: #{update["held"]["why"]}"
+      {_, "quiet"} -> "Waiting for a quiet moment · #{version}"
+      {"updating_edge", _} -> "Updating… the edge, then #{update["of"]} servers"
+      _ -> "Updating… #{update["done"]} of #{update["of"]}"
+    end
+  end
+
+  # How long this server goes without a call before it's quiet enough to restart, as the one ready server, in
+  # milliseconds.
+  @quiet 120_000
+
+  @doc "A client called one of its tools, so it isn't quiet (`instructed/1`)."
+  def called do
+    case :persistent_term.get({__MODULE__, :called}, nil) do
+      nil ->
+        :persistent_term.put({__MODULE__, :called}, :atomics.new(1, signed: true))
+        called()
+
+      calls ->
+        :atomics.put(calls, 1, System.monotonic_time(:millisecond))
+    end
+  end
+
+  # Says go once nothing has called this server for `@quiet`, and it still has the network's build checked: one
+  # waiting, which is all.
+  defp quiet do
+    if Process.whereis(OneCore.Release.Quiet) == nil do
+      Task.start(fn ->
+        Process.register(self(), OneCore.Release.Quiet)
+        waiting()
+      end)
+    end
+
+    :ok
+  end
+
+  defp waiting do
+    since =
+      case :persistent_term.get({__MODULE__, :called}, nil) do
+        nil -> @quiet
+        calls -> System.monotonic_time(:millisecond) - :atomics.get(calls, 1)
+      end
+
+    cond do
+      status()["server_update_status"] != "checked" -> :ok
+      since >= @quiet -> say("go")
+      true -> receive(after: (@quiet - since -> waiting()))
+    end
+  end
+
+  @doc """
   Says this server can reach the network again after it couldn't (`OneCore.Server.reconnected/0`), as after its
   machine slept, so the program keeping it running takes a release it may have missed.
   """
@@ -199,7 +358,11 @@ defmodule OneCore.Release do
 
   defp restarting?(status), do: status["update_method"] == "restart" or status["server_daemon_status"] == "stopping"
 
-  @doc "Says which build this is, once its code and NIFs have loaded: what's checked of a build before it's started."
+  @doc """
+  Says which build this is, once its code and NIFs have loaded: what's checked of a build before it's started. With
+  `ONE_FROM`, the build a server runs, it then compares this one with it in the same VM (`compare/2`), so preparing a
+  build starts one VM, not two.
+  """
   def check do
     Application.load(:one_core)
     for module <- Application.spec(:one_core, :modules), do: Code.ensure_loaded!(module)
@@ -209,6 +372,7 @@ defmodule OneCore.Release do
         do: OneCore.Nif.build(module)
 
     say(%{"checked" => %{"build" => Builds.build()}})
+    if from = System.get_env("ONE_FROM"), do: compare(from, to_string(:code.root_dir()))
   end
 
   @doc """

@@ -170,15 +170,42 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  Says at the network's edge this server's `server_membership` and `server_daemon_status`
-  (`OneCore.Release.status/0`), and its build, by which the relay knows whether it talks with the edge. It's ready
-  once it's active and running. Where the edge can't be reached or doesn't take it, it's said again until it does
-  (`Report`), as it is then, so that's no reason not to go on.
+  Tells the network's updater `said`, through its relay, `%{published: <the server build>}` or `%{now: true}`, or with
+  none asks it, and gives what it says of the network's update (`OneCore.Release.network/0`): `{:ok, update}`, or
+  `{:ok, nil}` from an edge that has no updater yet, or `{:error, why}`.
+  """
+  def network(said \\ nil) do
+    if at = Application.get_env(:one_core, :address) do
+      path = "/relay/update"
+      body = if said, do: JSON.encode!(said), else: ""
+      method = if said, do: :post, else: :get
+      response = Edge.send!(method: method, url: at <> path, body: body, headers: Edge.signed(path, body))
+
+      case response.status do
+        200 -> {:ok, response.body}
+        # An edge deployed before it had an updater, which takes its builds as it did then.
+        404 -> {:ok, nil}
+        status -> {:error, "the edge said #{status}: #{inspect(response.body)}"}
+      end
+    else
+      {:ok, nil}
+    end
+  rescue
+    error in Edge.Unreachable -> {:error, Exception.message(error)}
+  end
+
+  @doc """
+  Says at the network's edge what this server is (`OneCore.Release.status/0`): its `server_membership` and
+  `server_daemon_status`, by which it's ready once it's active and running, where its update is, which the relay
+  tells the network's updater, what its machine is called, and its build, by which the relay knows whether it talks
+  with the edge. Where the edge can't be reached or doesn't take it, it's said again until it does (`Report`), as it is
+  then, so that's no reason not to go on. Once it's taken, the program keeping this server running is told
+  (`OneCore.Release.reported/1`).
   """
   def report do
-    with {:error, why} <- say() do
-      Logger.warning("Couldn't say this server's status, so it's said again until the edge takes it: #{why}")
-      if reporting = Process.whereis(__MODULE__.Report), do: send(reporting, :failed)
+    case Process.whereis(__MODULE__.Report) do
+      nil -> say()
+      reporting -> send(reporting, :say)
     end
 
     :ok
@@ -188,10 +215,24 @@ defmodule OneCore.Servers do
   def say do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
-      said = Map.take(OneCore.Release.status(), ["server_membership", "server_daemon_status"])
-      body = JSON.encode!(Map.put(said, "version", Builds.build()))
+      build = Builds.build()
+
+      body =
+        JSON.encode!(
+          Map.merge(OneCore.Release.status(), %{
+            "version" => build,
+            "name" => Application.get_env(:one_core, :name),
+            "installed" => Application.get_env(:one_core, :installed, false)
+          })
+        )
+
       response = Edge.send!(method: :post, url: at <> path, body: body, headers: Edge.signed(path, body))
-      if response.status == 204, do: :ok, else: {:error, "the edge didn't take #{body}: #{inspect(response.body)}"}
+
+      if response.status == 204 do
+        OneCore.Release.reported(build)
+      else
+        {:error, "the edge didn't take #{body}: #{inspect(response.body)}"}
+      end
     else
       :ok
     end
@@ -201,11 +242,13 @@ defmodule OneCore.Servers do
 
   defmodule Report do
     @moduledoc """
-    Says this server's status at the edge again (`OneCore.Servers.report/0`) once saying it failed, as an edge that's
-    briefly unreachable or being deployed fails it, until it's taken: after a second, then twice as long each time, up
-    to a minute. Each try says the status as it is then, so the edge is told the latest, never one that's gone.
+    Says this server's status at the edge (`OneCore.Servers.report/0`), one at a time and never holding up what
+    changed it: what asks while it's saying one is said once that's done, as the status is then, so the edge is told
+    the latest, in order, never one that's gone. Where the edge doesn't take it, as one that's briefly unreachable or
+    being deployed, it's said again until it does: after a second, then twice as long each time, up to a minute.
     """
     use GenServer
+    require Logger
 
     @first 1_000
     @most 60_000
@@ -213,27 +256,46 @@ defmodule OneCore.Servers do
     def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
     # Its state is how long it waits before it tries again, or `nil` while there's nothing to say again. It says the
-    # status first as it starts, by its name already, so a first that fails is said again too.
+    # status first as it starts.
     @impl true
     def init(nil) do
-      OneCore.Servers.report()
+      send(self(), :say)
       {:ok, nil}
     end
 
     @impl true
-    def handle_info(:failed, nil), do: {:noreply, again(@first)}
-    def handle_info(:failed, wait), do: {:noreply, wait}
+    def handle_info(:say, wait) do
+      said()
+      say(wait, wait == nil)
+    end
 
-    def handle_info(:again, wait) do
+    # Said already since.
+    def handle_info(:again, nil), do: {:noreply, nil}
+    def handle_info(:again, wait), do: say(min(wait * 2, @most), true)
+
+    # Says it, and where the edge doesn't take it, tries again after `wait`, unless a try is waiting already.
+    defp say(wait, again) do
       case OneCore.Servers.say() do
-        :ok -> {:noreply, nil}
-        {:error, _why} -> {:noreply, again(min(wait * 2, @most))}
+        :ok ->
+          {:noreply, nil}
+
+        {:error, why} ->
+          Logger.warning(
+            "Couldn't say this server's status at the edge, so it's said again until the edge takes it: #{why}"
+          )
+
+          if again, do: Process.send_after(self(), :again, wait || @first)
+          {:noreply, wait || @first}
       end
     end
 
-    defp again(wait) do
-      Process.send_after(self(), :again, wait)
-      wait
+    # What asked meanwhile is said by this one, as the status is now.
+    defp said do
+      receive do
+        :say -> said()
+      after
+        0 -> :ok
+      end
     end
   end
 

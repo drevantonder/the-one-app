@@ -138,7 +138,19 @@ defmodule OneCore.Builds do
           into: %{},
           do: {name, Bucket.link(@builds <> sha256, :write)}
 
-    if missing == %{}, do: {:ok, latest(builds)}, else: {:send, missing}
+    if missing == %{}, do: published(latest(builds)), else: {:send, missing}
+  end
+
+  # The network's updater is told the latest server build, and takes the network's servers to it
+  # (`core/edge/updater/updater.ts`).
+  defp published(latest) do
+    case latest["server-code"] && Servers.network(%{published: latest["server-code"]["build"]}) do
+      {:error, why} ->
+        raise "The builds are published, and the network's updater wasn't told: #{why}. Publish them again."
+
+      _told ->
+        {:ok, latest}
+    end
   end
 
   defp latest(builds) do
@@ -211,6 +223,7 @@ defmodule OneCore.Builds do
     %{
       server: Server.key(),
       build: build(),
+      network: network(servers),
       edge: edge,
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
@@ -218,6 +231,16 @@ defmodule OneCore.Builds do
       apps: OneCore.Apps.synced(),
       waiting: waiting(owner)
     }
+  end
+
+  # The network's update, as its updater says it, with the servers that take builds and aren't on its build yet.
+  defp network(servers) do
+    with {:ok, %{} = network} <- Servers.network() do
+      behind = for server <- servers, server["installed"], server["build"] != network["build"], do: server["name"]
+      Map.put(network, "behind", behind)
+    else
+      _ -> nil
+    end
   end
 
   # The apps installed for `owner` whose version doesn't run on this server's platform, and why

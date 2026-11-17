@@ -95,8 +95,7 @@ defmodule OneCore.Mcp do
   def handle(message, from, ask \\ nil) do
     case JSON.decode(message) do
       # MCP's ping is about this server and nobody else, so it's answered whoever asks, on whatever version, before
-      # anyone is asked who they are, saying which build it is: it's how the program keeping a server running tells
-      # a build it started answers by its key, asking nothing of any other server (`clients/cli/src/serving.rs`).
+      # anyone is asked who they are, saying which build it is.
       {:ok, %{"method" => "ping", "id" => id}} ->
         JSON.encode!(%{
           jsonrpc: "2.0",
@@ -106,6 +105,7 @@ defmodule OneCore.Mcp do
 
       {:ok, %{"method" => method, "id" => id} = request} ->
         params = Map.get(request, "params", %{})
+        if method == "tools/call", do: OneCore.Release.called()
         # What a call it asks for is cancelled by, and where its progress is told.
         Process.put(:"$one_request", %{request: {from, User.device(from, meta(params)), id}, ask: ask})
 
@@ -162,6 +162,12 @@ defmodule OneCore.Mcp do
       # The relay at the network's address saying one of its servers came or went.
       {:ok, %{"method" => "notifications/one/seen"}} ->
         Servers.presence_again()
+        ""
+
+      # The network's updater, through the relay at the network's address, saying where the network's update is and
+      # what each server is to do: only the edge says it.
+      {:ok, %{"method" => "notifications/one/update", "params" => %{} = update}} when from == nil ->
+        OneCore.Release.instructed(update)
         ""
 
       # Another server, or an app's edge function, saying that what this one kept of some hooks

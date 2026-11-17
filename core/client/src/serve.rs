@@ -43,17 +43,19 @@ pub enum ServerDaemonStatus {
 }
 
 /// Where an update is: up to date, downloading the latest server build and `one` together while the server answers
-/// on, and verifying them.
+/// on, and checking how it's taken (preparing), checked and waiting to be told to go, and verifying them.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerUpdateStatus {
     #[default]
     UpToDate,
     Downloading,
+    Checked,
     Verifying,
 }
 
-/// Where verifying is: checking the build starts and how it's taken, then loading it or starting it.
+/// Where downloading is once it's downloaded, checking the build starts and how it's taken, and where verifying is,
+/// loading it or starting it.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerUpdateStage {
@@ -81,6 +83,10 @@ pub struct Status {
     pub server_update_stage: Option<ServerUpdateStage>,
     /// How the last update was taken, or is being.
     pub update_method: Option<UpdateMethod>,
+    /// Why it restarts, where `update_method` is `restart`.
+    pub update_method_reason: Option<String>,
+    /// The build being prepared, checked or verified.
+    pub next_build: Option<String>,
     /// Why the last update didn't take, which the server says until one does.
     pub went_back: Option<String>,
 }
@@ -103,8 +109,14 @@ pub enum Told {
 pub enum Said {
     /// It has started, and answers by this key.
     Running { key: String },
-    /// Someone asked it to take the latest builds.
+    /// Someone asked it to take the latest builds: to prepare them and go at once.
     UpdateAsked,
+    /// Its network's updater told it to prepare the latest builds: download and check them, and say how it takes them.
+    Prepare,
+    /// Its network's updater told it to take the builds it has checked.
+    Go,
+    /// The network's edge took what it said it is, as this build.
+    Reported { build: String },
     /// It can reach the network again after it couldn't, as after the machine slept, so it may have missed a release.
     Reconnected,
     /// The latest builds for the kind of machine it was asked, by what they are (`server-code`, `one`), each with a

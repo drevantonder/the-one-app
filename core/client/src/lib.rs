@@ -1441,24 +1441,6 @@ impl Client {
         }
     }
 
-    /// Which build the server whose key is `server` says it is, asked of it alone, through the relay at its network's
-    /// address, not of whichever of its user's servers answers first: MCP's `ping`, which a server answers whoever
-    /// asks. It's how the program keeping a server running tells a build it started answers by its key.
-    pub async fn ping(&self, server: &str) -> Result<String> {
-        let link = self.link();
-        let mut address = EndpointAddr::new(server.parse::<EndpointId>().context("that isn't a server's key")?);
-        if let Some(network) = &link.network {
-            address = address.with_relay_url(network.address.parse()?);
-        }
-        let open = Reached::connect(&link.endpoint, address, CONNECT).await.context("it couldn't be reached")?;
-        let ping = json!({"jsonrpc": "2.0", "id": request_id(), "method": "ping"});
-        let pong = open.ask(ping.to_string().as_bytes(), |_| {}).await;
-        open.connection().close(0u32.into(), b"done");
-        let pong: Value = serde_json::from_slice(&pong.map_err(|_| anyhow!("it didn't answer"))?)?;
-        let build = pong["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["version"].as_str();
-        build.map(str::to_owned).context("it didn't say which build it is")
-    }
-
     /// Asks the server for `method`, and gives its result.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         self.request_notified(request_id(), method, params, |_| {}).await
