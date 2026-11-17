@@ -84,8 +84,8 @@ defmodule OneCore.Servers do
   """
   def off(what, owner, []),
     do:
-      "#{what} runs on #{owner}'s own servers, and there are none. Set one up in Devices, or " <>
-        "#{OneCore.Plugins.Deploy.ask_to_install()}."
+      "#{what} runs on #{owner}'s own servers, and there are none. Set one up in Devices, or ask whoever may " <>
+        "install plugins for everyone to install it for everyone."
 
   def off(what, owner, servers),
     do:

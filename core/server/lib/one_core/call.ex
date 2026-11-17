@@ -249,8 +249,8 @@ defmodule OneCore.Call do
 
   @doc """
   Every plugin anyone in the network has deployed, whether or not it's installed for anyone now: each one's `plugin`,
-  as its artifact's name, its `title`, `icon`, `subtitle` and `about`, and its `apps` as its latest version has
-  them. An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
+  as its artifact's name, its `title`, `icon`, `subtitle` and `about`, its `apps` as its latest version has
+  them, and whether every network has it (`essential`). An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
   the network it's in use for (`OneCore.Tools`).
   """
   def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()

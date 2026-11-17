@@ -24,7 +24,7 @@ defmodule OneCore.Plugins.Version do
   `title` is its name where a person reads it, its first app's unless it says, and `icon` its icon as a `data:`
   address, the file it names (`OneCore.Plugin`), or its first app's. `apps` lists its apps: each one's `name`, its
   `page`, its `icon` as a `data:` address, its own or else the plugin's,
-  and its `category`, which is the plugin's to say and nil where it says none. `widgets` lists its widgets: each
+  its `category` and its `subject`, which are the plugin's to say and nil where it says none. `widgets` lists its widgets: each
   one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
 
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's
@@ -239,7 +239,7 @@ defmodule OneCore.Plugins.Version do
 
     description = %{
       tools: taken.(description["tools"], ~w(name description inputs outputs read_only by_link ui)),
-      apps: taken.(description["apps"], ~w(name page icon category)),
+      apps: taken.(description["apps"], ~w(name page icon category subject)),
       title: description["title"],
       icon: description["icon"],
       widgets: taken.(description["widgets"], ~w(name tool sizes)),
@@ -503,7 +503,7 @@ defmodule OneCore.Plugins.Version do
       not (is_list(apps) and Enum.all?(apps, &app?(&1, rest, icon))) ->
         {:error,
          "apps/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-           "here, which icon/0 gives instead where an app has none, and category, if it has one, is text"}
+           "here, which icon/0 gives instead where an app has none, and category and subject, if it has them, are text"}
 
       not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
         {:error,
@@ -602,7 +602,13 @@ defmodule OneCore.Plugins.Version do
   defp version(under, plugin, tools, apps, widgets, services, rest, icon) do
     apps =
       for %{name: name, page: page} = app <- apps,
-          do: %{name: name, page: page, icon: data(app[:icon] || icon, rest), category: app[:category]}
+          do: %{
+                name: name,
+                page: page,
+                icon: data(app[:icon] || icon, rest),
+                category: app[:category],
+                subject: app[:subject]
+              }
 
     widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
 
@@ -654,7 +660,7 @@ defmodule OneCore.Plugins.Version do
   defp app?(%{name: name, page: page} = app, rest, icon) when is_binary(name),
     do:
       page?(page, rest) and is_map_key(rest, app[:icon] || icon) and
-        (app[:category] == nil or is_binary(app[:category]))
+        (app[:category] == nil or is_binary(app[:category])) and (app[:subject] == nil or is_binary(app[:subject]))
 
   defp app?(_, _, _), do: false
 

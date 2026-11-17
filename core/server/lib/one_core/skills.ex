@@ -41,9 +41,7 @@ defmodule OneCore.Skills do
   limits where its data can go, not what it does with what it's given.
 
   Installing for the person themselves needs nothing more; for a group or the network, its owners or an `installer`
-  of it do it. Someone who isn't asks for it to be installed instead, with the repo, the plugin's name and why, by the
-  network's launcher, whose skill says how. An owner who approves such a request is answered the command to install
-  it, after reading it as below.
+  of it do it. Someone who isn't asks one of them to, themselves: the network takes no requests.
 
   `one install <owner>/<repo> --list` fetches the repo, lists its plugins and says the folder it's in on this device,
   and the commit: install `<owner>/<repo>@<commit>`, so what's installed is what you read. Then read it, and use

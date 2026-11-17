@@ -101,7 +101,7 @@ defmodule OneCore.Tools do
       running stays.
       The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
       or for the network, it's theirs. Its code runs on a server of yours, so you need one: set one up in Devices, or
-      ask for it to be installed for everyone, by the network's launcher (its skill says how). An untrusted plugin
+      ask whoever may install plugins for everyone to install it for everyone. An untrusted plugin
       (`trusted: false`) runs in a sandbox, a VM of its own on any of the network's servers, so it needs no server of
       yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0 names. It answers
       with them. One nobody has installed is removed as anything deleted is, by the plugin that keeps what's deleted,
@@ -231,8 +231,7 @@ defmodule OneCore.Tools do
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them. It answers with
       what the plugin may do beyond its own (its permissions).
       Its code runs on a server of yours, so you need one, unless it's untrusted; for the network, its owners
-      and installers add plugins, and anyone may ask them to, by the network's launcher (its skill says how), which
-      also puts an app of a plugin in use for the network on your page without installing anything.
+      and installers add plugins, and anyone else asks one of them to.
       `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
       It's the same plugin, at its latest version, with an artifact of its own for whoever it's installed for. One in
       use for a group you're in or for the network is open to you; one that isn't, whoever it belongs to shares
@@ -626,8 +625,9 @@ defmodule OneCore.Tools do
 
       Servers.running(owner) == [] ->
         raise "A plugin for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
-                "Set one up in Devices, #{Deploy.ask_to_install()}, or deploy it untrusted (trusted: false), " <>
-                "to run in a sandbox, which any of the network's servers runs for anyone."
+                "Set one up in Devices, ask whoever may install plugins for everyone to install it for everyone, " <>
+                "or deploy it untrusted (trusted: false), to run in a sandbox, which any of the network's servers " <>
+                "runs for anyone."
 
       true ->
         forward.({:running, owner})

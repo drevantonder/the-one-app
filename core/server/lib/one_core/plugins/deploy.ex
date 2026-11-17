@@ -85,9 +85,10 @@ defmodule OneCore.Plugins.Deploy do
   @doc """
   Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., description:
   its skill's, subtitle: ..., about: ..., icon: ..., apps: [...], tools: [names], permissions: [...], trusted:
-  ...}]`, what a person reads of it as `Version.listing/1` gives it, its permissions as `permissions/0` gives them and
-  whether it's trusted. It's what lists every app there is, whether or not it's on anyone's page
-  now. One that was removed, by the plugin that keeps what's deleted, has no latest version, and isn't listed.
+  ..., essential: ...}]`, what a person reads of it as `Version.listing/1` gives it, its permissions as
+  `permissions/0` gives them, whether it's trusted and whether every network has it (`essential`). It's what lists
+  every app there is, whether or not anyone has it now. One that was removed, by the plugin that keeps what's
+  deleted, has no latest version, and isn't listed.
 
   It's two trips to the bucket with a request for each plugin, and changes only when someone deploys, so it's kept:
   read again behind a request once it's five minutes old, as `OneCore.Plugins` looks at what's installed, and
@@ -135,7 +136,8 @@ defmodule OneCore.Plugins.Deploy do
           apps: apps,
           tools: description["tools"] || [],
           permissions: description["permissions"] || [],
-          trusted: description["trusted"] != false
+          trusted: description["trusted"] != false,
+          essential: description["essential"] == true
         }
       end
 
@@ -156,7 +158,8 @@ defmodule OneCore.Plugins.Deploy do
         icon: version.icon,
         tools: Enum.map(version.tools, & &1.name),
         permissions: version.permissions,
-        trusted: version.trusted
+        trusted: version.trusted,
+        essential: version.essential
       }
       |> Map.merge(Version.listing(version))
       |> JSON.encode!()
@@ -352,17 +355,6 @@ defmodule OneCore.Plugins.Deploy do
   has exactly one, installed for the network.
   """
   def launcher?(version), do: Enum.any?(version.apps, &(&1.category == "launcher"))
-
-  @doc """
-  How someone who may not install a plugin for everyone asks for it, to end a sentence: by the network's launcher,
-  which takes such requests, named as it's installed, whose skill says how.
-  """
-  def ask_to_install do
-    case for {name, version} <- Plugins.versions([@network]), launcher?(version), do: name do
-      [launcher | _] -> "ask for it to be installed for everyone, by the network's launcher, #{launcher} (its skill says how)"
-      [] -> "ask an owner of the network to install it for everyone"
-    end
-  end
 
   defp launcher(owner, name, version) do
     others = for {other, running} <- Plugins.versions([@network]), other != name, launcher?(running), do: other

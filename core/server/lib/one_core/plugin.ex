@@ -288,11 +288,14 @@ defmodule OneCore.Plugin do
       @impl true
       def apps, do: [%{name: "Hello", page: "client/index.html"}]
 
-  - An app may say its `category`, which One Core passes to clients as it is, as Android's intent categories are:
-    what each means is the launcher's to say, in its skill (`category: "settings"` puts an app in Settings). One
-    Core knows one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one,
-    installed for the network, so installing a second is refused, and so is uninstalling it; deploying another as
-    its new version replaces it.
+  - An app may say its `category`, which One Core passes to the launcher as it is, as Android's app categories are:
+    which there are and what each means is the launcher's to say, in its skill (`category: "coding"`). One Core knows
+    one, `launcher`: the app every client opens first, which draws the rest. A network has exactly one, installed
+    for the network, so installing a second is refused, and so is uninstalling it; deploying another as its new
+    version replaces it.
+  - An app may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
+    `subject: "user"` is an app about whoever opens it, as Vault and Devices are, which is opened for them wherever
+    it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
   - A plugin's name where a person reads it is `title/0`, and without one its first app's; one that names no icon
     is drawn with its first app's. One with no app gives `title/0`: `def title, do: "Gmail"`.
   - A plugin that signs a person in to an outside account (Gmail, WhatsApp) has accounts, as the launcher's skill
