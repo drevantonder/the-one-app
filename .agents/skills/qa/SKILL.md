@@ -68,7 +68,6 @@ The app keeps its client in its App Group, which the simulator gives it, so `mai
 
 ## Mistakes already made
 
-- Reading the codebase from scratch. Start from the files your task names; `rg` for the rest.
 - Checking again after rebasing onto other people's unrelated commits.
 - A check that read a log before the process had created it, and failed for that. Follow a log with `tail -F`, as
   `tooling/network` does, never by reading it once.

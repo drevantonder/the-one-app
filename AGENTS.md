@@ -56,5 +56,9 @@ before choosing.
 - Don't write wait loops (sleep, until, polling a log or a remote). Run the command in the foreground, or start it in
   the background and let your harness tell you when it ends. Don't end your turn while something you started runs:
   wait on it in the foreground, or with your harness's background wait.
+- Don't read the codebase from scratch. Start from the files your task names. For the rest, map it with the
+  ecosystem's own tools: `git grep -nP -A1 '^\s*(defmodule |def [a-z_?!]+|@moduledoc """)' -- core/server/lib` for core's
+  modules and functions, `mix xref graph --format stats` and `mix xref callers <Mod.fun>` for what depends on what,
+  `cargo tree` for the Rust side.
 - Stop what you start once you're done with it, since every thread shares these machines, and remove your worktree.
 - How to do the common things is in `.agents/skills/`.
