@@ -29,8 +29,6 @@ defmodule OneCore.Apps.Lifecycle do
   @network "network"
   @day :timer.hours(24)
   @kept :timer.hours(24 * 30)
-  # How long updating may take before it's taken as cut short, as by its server stopping.
-  @partway :timer.minutes(15)
   # What an install cut short says.
   @stopped "It stopped partway, as the server installing it did. Try again."
 
@@ -211,7 +209,7 @@ defmodule OneCore.Apps.Lifecycle do
         end
 
       %{"app" => artifact} = record ->
-        case Update.read(artifact) do
+        case settled(artifact) do
           %{"state" => "failed"} -> with nil <- update(artifact), do: Installed.read(owner)[name] || record
           _ -> {:error, "Nothing of #{name} failed for #{owner}, so there's nothing to try again."}
         end
@@ -381,24 +379,24 @@ defmodule OneCore.Apps.Lifecycle do
   trusted app takes it at once, and an untrusted one offers it. Gives where its updates are.
   """
   def check(artifact) do
-    record = Update.read(artifact)
-
-    cond do
-      match?(%{"state" => "updating"}, record) and record["at"] > System.system_time(:millisecond) - @partway ->
+    case settled(artifact) do
+      %{"state" => "updating"} = record ->
         record
 
-      true ->
-        if match?(%{"state" => "updating"}, record),
-          do: Update.change(artifact, {:fail, "It stopped partway, as the server updating it did. Try again."})
-
+      _ ->
         about = Store.about(artifact)
 
         with %{"source" => source, "commit" => commit} = from <- about["from"] || :none,
              false <- from["dirty"] == true,
              {:ok, offer} when offer != nil <- newer(source, from["ref"], commit, Path.basename(artifact)),
-             %{} = record <- Update.change(artifact, {:newer, offer, about["trusted"] != false, Server.key()}) do
-          told(artifact)
-          if mine?(record), do: updating(artifact, record), else: record
+             %{} = record <-
+               doing({:update, artifact}, fn ->
+                 with %{} = record <- Update.change(artifact, {:newer, offer, about["trusted"] != false, Server.key()}) do
+                   told(artifact)
+                   if mine?(record), do: updating(artifact, record), else: record
+                 end
+               end) do
+          record
         else
           {:error, why} ->
             Logger.warning("#{artifact}'s git source wasn't checked: #{why}")
@@ -407,6 +405,23 @@ defmodule OneCore.Apps.Lifecycle do
           _ ->
             Update.read(artifact)
         end
+    end
+  end
+
+  # Where the app's updates are, with one that stopped partway (`partway?/2`) ended: done where the version it took
+  # went live before its server stopped, and failed where it didn't.
+  defp settled(artifact) do
+    record = Update.read(artifact)
+
+    cond do
+      not match?(%{"state" => "updating"}, record) or not partway?({:update, artifact}, record["by"]) ->
+        record
+
+      (Store.about(artifact)["from"] || %{})["commit"] == record["commit"] ->
+        told(artifact, Update.change(artifact, :done))
+
+      true ->
+        told(artifact, Update.change(artifact, {:fail, "It stopped partway, as the server updating it did. Try again."}))
     end
   end
 
@@ -439,10 +454,12 @@ defmodule OneCore.Apps.Lifecycle do
   who has it. Gives where its updates are once done: `nil` for up to date, or `{:error, why}`.
   """
   def update(artifact) do
-    with %{} = record <- Update.change(artifact, {:update, Server.key()}) do
-      told(artifact)
-      updating(artifact, record)
-    end
+    doing({:update, artifact}, fn ->
+      with %{} = record <- Update.change(artifact, {:update, Server.key()}) do
+        told(artifact)
+        updating(artifact, record)
+      end
+    end)
   end
 
   # Fetches the commit an update takes, and deploys it as the app's next version, for everyone who has it.
@@ -465,6 +482,8 @@ defmodule OneCore.Apps.Lifecycle do
         end
       rescue
         error -> {:error, Exception.message(error)}
+      catch
+        :exit, why -> {:error, Exception.format_exit(why)}
       end
 
     case outcome do
