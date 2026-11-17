@@ -1,5 +1,5 @@
 // The Home Screen: yours, everyone's, then each of your groups', one owner above another, each a row of pages and then
-// their App Library's pages. Left and right moves between an owner's pages, as a phone's do, and up and down between
+// their App Library's pages, then the App Store. Left and right moves between an owner's pages, as a phone's do, and up and down between
 // owners, unless a page scrolls itself. The pages move by hand, as a phone's do (pager.ts). The
 // owner's name, in the bar at the bottom beside their page dots, opens a list of every owner. A page never scrolls:
 // it's a fixed grid, and what doesn't fit goes on to the next. A wide window shows as many whole pages of an owner's
@@ -8,14 +8,14 @@
 // hold it a while longer, or touch and hold a page's empty space. Where it is, what's open over it and the editing are
 // one state machine (machine.ts), whose snapshot is one signal here.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show } from "solid-js"
-import { render, type JSX } from "@solidjs/web"
+import { Dynamic, render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
 import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu, open, Problem, Row, Section, Sheet, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
 import { type At, type Editing, fitted, type Held, kinds, type Kind, machine, type Opened, pack, type Page, type Placed, shown, spans } from "./machine.ts"
-import type { Entrypoint, Category, Item, Pages, Size, Widget as WidgetItem } from "./types.ts"
+import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
 const HOME = "home-screen/client/index.html"
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
@@ -144,8 +144,10 @@ type Cell = { item: Item; index: number }
 /// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a press held still is a hold, as is
 /// a right-click; a press that moves while editing, or once held, lifts it, and so does one held still a while longer
 /// on a Home page. A mouse holds as a finger does, as an iPad's pointer does. `held` says what it is, as it is then. A
-/// hold on a page's empty space has nothing to lift or offer, so it edits the page at once, as a phone's does.
-function holds(held: () => Held | undefined, arranges: () => boolean) {
+/// hold on a page's empty space has nothing to lift or offer, so it edits the page at once, as a phone's does. Only
+/// whoever `arranges` lifts anything; a menu is held open for whoever it has one for (`menu`), as an App Library's has
+/// for everyone.
+function holds(held: () => Held | undefined, arranges: () => boolean, menu = arranges) {
   return (element: HTMLElement) => {
     let timer: ReturnType<typeof setTimeout> | undefined
     let start: PointerEvent | undefined
@@ -167,7 +169,7 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
     const lift = (at: PointerEvent, from: PointerEvent) => {
       clear()
       const what = held()
-      if (!what?.item) return
+      if (!what?.item || !arranges()) return
       grab = { x: from.clientX, y: from.clientY }
       pointer = { x: at.clientX, y: at.clientY }
       home.send({ type: "lift", held: { ...what, rect: rect() }, editing: state().matches("editing") ? undefined : pending?.() })
@@ -176,9 +178,9 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
     }
     const hold = () => {
       const what = held()
-      if (!arranges() || !what || !state().matches("nothing")) return
+      if (!menu() || !what || !state().matches("nothing")) return
       fired = !!start
-      if (!what.item) return pending?.() && home.send({ type: "edit", editing: pending()! })
+      if (!what.item && !what.listed) return arranges() && pending?.() && home.send({ type: "edit", editing: pending()! })
       home.send({ type: "hold", held: { ...what, rect: rect() } })
       const from = start
       if (from && what.from === "page") timer = setTimeout(() => state().matches("holding") && lift(from, from), LONGER)
@@ -208,7 +210,7 @@ function holds(held: () => Held | undefined, arranges: () => boolean) {
     })
     element.addEventListener("pointerdown", (event) => {
       // ⊖ is pressed, not held or lifted.
-      if (event.button || !arranges() || (event.target as Element).closest(".minus")) return
+      if (event.button || !menu() || (event.target as Element).closest(".minus")) return
       clear()
       start = event
       // Once held, the menu lies over what's held, and an iPhone's web view sends the press's moves and its end to
@@ -329,12 +331,12 @@ function Library(props: { owner: Owner; index: number; folders: Folder[]; places
               return (
                 <div class={["category", { wide: folder().wide }]}>
                   <div class="place" ref={(place) => props.places.set(`${props.index}:${category().category}`, place)} onClick={opening(category())}>
-                    <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint}>
+                    <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                       {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} index={props.index} />}
                     </For>
                     <Show when={category().entrypoints.length > room()}>
                       <button type="button" class="more" aria-label={`All of ${category().category}`}>
-                        <For each={category().entrypoints.slice(room() - 1, room() + 3)} keyed={(entrypoint) => entrypoint.entrypoint}>
+                        <For each={category().entrypoints.slice(room() - 1, room() + 3)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                           {(entrypoint) => <img src={entrypoint().icon} alt="" />}
                         </For>
                       </button>
@@ -351,19 +353,66 @@ function Library(props: { owner: Owner; index: number; folders: Folder[]; places
   )
 }
 
-/// An app's icon in an App Library: a tap opens it, and a finger that holds it lifts it onto the owner's Home pages.
-function LibraryEntrypoint(props: { entrypoint: Entrypoint; owner: Owner; index: number }) {
+/// An app's icon in an App Library: a tap opens it, or for an app with no entrypoint, its App Store page, and a finger
+/// that holds it opens its menu, from which whoever arranges the owner's pages lifts it onto them.
+function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; index: number }) {
   return (
     <button
       type="button"
       class="app"
-      ref={holds(() => ({ item: props.entrypoint, page: 0, index: -1, from: "library" }), () => props.owner.arranges)}
-      onPointerDown={() => state().matches("nothing") && launch(props.entrypoint, props.owner, true)}
-      onClick={(event) => (event.stopPropagation(), state().matches("nothing") && launch(props.entrypoint, props.owner))}
+      ref={holds(() => ({ item: opens(props.entrypoint), listed: props.entrypoint, page: 0, index: -1, from: "library" }), () => props.owner.arranges, () => true)}
+      onPointerDown={() => state().matches("nothing") && opens(props.entrypoint) && launch(opens(props.entrypoint)!, props.owner, true)}
+      onClick={(event) => (event.stopPropagation(), state().matches("nothing") && press(props.entrypoint, props.owner))}
     >
       <img src={props.entrypoint.icon} alt="" />
       <span>{props.entrypoint.name}</span>
     </button>
+  )
+}
+
+/// An app of an App Library as an entrypoint, which it opens, or nothing, for an app with none.
+const opens = (listed: Listed): Entrypoint | undefined => (listed.entrypoint ? (listed as Entrypoint) : undefined)
+/// Opens an app of an App Library: its entrypoint, or for an app with none, its App Store page over the Home Screen.
+const press = (listed: Listed, owner: Owner, behind?: boolean) => (opens(listed) ? launch(opens(listed)!, owner, behind) : !behind && setAbout(listed.app))
+
+/// Who a call about an install is for: a group or the network, or for a user's own, nobody said.
+const subjectOf = (installed: string) => (installed.startsWith("users/") ? undefined : installed)
+const and = (words: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(words)
+
+/// The app whose App Store page is open over the Home Screen, by its artifact.
+const [about, setAbout] = createSignal<string>()
+
+/// An app's App Store page, over the Home Screen, as the App Store draws it (its `Listing` export), for an app with no
+/// entrypoint of its own: whether it's installed, its version, Update, Uninstall, what it requires and what requires
+/// it. Back, or the device's own, closes it.
+function About(props: { app: string; store: string }) {
+  const listing = createMemo(() => import(/* @vite-ignore */ new URL(`../../${props.store}/client/store.js`, document.baseURI).href).then((module) => module.Listing))
+  onSettled(() => covers(() => setAbout()))
+  return (
+    <div class="about">
+      <Errored fallback={(error) => <Problem heading="Can't show it" text={error() as Error} />}>
+        <Loading>
+          <Dynamic component={listing()} app={props.app} onBack={() => setAbout()} />
+        </Loading>
+      </Errored>
+    </div>
+  )
+}
+
+/// The App Store's screen, the page after the App Library: the App Store app's own (its `store` export), beside this
+/// page where a client serves each app's. It's drawn only while its owner is the one shown, as it's the same for all.
+function StorePage(props: { name: string; shown: boolean }) {
+  const store = createMemo(() => (props.shown ? import(/* @vite-ignore */ new URL(`../../${props.name}/client/store.js`, document.baseURI).href).then((module) => module.default) : undefined))
+  return (
+    <section class="page store scrolls" aria-label="App Store">
+      <Show when={props.shown}>
+        <Errored fallback={(error) => <Problem heading="Can't show the App Store" text={error() as Error} />}>
+          <Loading>
+            <Dynamic component={store()} />
+          </Loading>
+        </Errored>
+      </Show>
+    </section>
   )
 }
 
@@ -406,10 +455,10 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
       <h2 ref={title}>{props.opened.name}</h2>
       <div class="panel" ref={panel} onClick={(event) => event.target === panel && close()}>
         <div class="grid" ref={grid}>
-          <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint}>
+          <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
             {(entrypoint) => (
               <div class="cell">
-                <Tile name={entrypoint().name} onPress={(behind) => phase() === "open" && launch(entrypoint(), props.owner, behind)}>
+                <Tile name={entrypoint().name} onPress={(behind) => phase() === "open" && press(entrypoint(), props.owner, behind)}>
                   <img src={entrypoint().icon} alt="" />
                 </Tile>
               </div>
@@ -449,11 +498,40 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
     const pages = editing.pages.map((page, index) => (index === at ? { ...page, items: page.items.toSpliced(held.index, 1) } : page))
     keep({ ...editing, pages: pages.filter((page) => page.items.length) }, owner)
   }
-  // The App Library holds every app that's installed: it goes from there by being uninstalled, which is the App Store's job.
+  // The App Library holds every app that's installed: it goes from there by being uninstalled, once its alert has
+  // said what goes with it, the app's other entrypoints and the apps that need it, into Recently Deleted.
   const uninstalls = async () => {
-    const name = props.held.item!.name
+    const listed = props.held.listed!
+    const subject = subjectOf(listed.installed.for)
     dismiss()
-    if (await confirm({ heading: `Can't Remove “${name}” Here`, text: "The App Library shows every app that's installed. To remove it, uninstall it in the App Store.", action: "Open Apps" })) open("apps/client/index.html").catch(toast)
+    try {
+      const { apps } = await json<{ apps: { name: string; for: string; required_by: string[] }[] }>("apps", {}, subject)
+      const needs = apps.find((one) => one.for === listed.installed.for && one.name === listed.installed.name)?.required_by ?? []
+      // Every app of every App Library shown here, as an app installed for everyone that's about whoever opens it is
+      // only in theirs.
+      const all = (owners() ?? [props.owner]).flatMap((owner) => owner.library.flatMap((category) => category.entrypoints))
+      const parts = [...new Set(all.filter((other) => other.app === listed.app && other.entrypoint && other.entrypoint !== listed.entrypoint).map((other) => other.name))]
+      const needing = [...new Set(needs.map((name) => all.find((other) => other.installed.for === listed.installed.for && other.installed.name === name)?.title ?? name))]
+      const text =
+        [
+          parts.length ? `${and(parts)} ${parts.length === 1 ? "is" : "are"} part of it and will be removed too.` : "",
+          needing.length ? `${and(needing)} ${needing.length === 1 ? "needs it, so it" : "need it, so they"}'ll be removed too.` : "",
+        ]
+          .filter(Boolean)
+          .join(" ") || "It stays in Recently Deleted for 30 days."
+      if (!(await confirm({ heading: `Remove ${listed.title}?`, text, action: "Remove App", destructive: true }))) return
+      await call("uninstall", { name: listed.installed.name, confirm: needs.length > 0 }, { subject })
+    } catch (error) {
+      toast(error as Error)
+    }
+    refresh(owners)
+  }
+  // Why whoever holds it can't remove it: it's a group's or everyone's, and they're not one of its owners.
+  const cant = () => {
+    const listed = props.held.listed
+    if (!listed || listed.installed.removes) return undefined
+    const name = owners()?.find((owner) => (owner.subject ?? owner.who) === listed.installed.for)?.name ?? listed.installed.for
+    return `This is ${name}'s, and you're not one of its owners.`
   }
   // From the App Library, it goes last on the owner's last page, as a phone's does.
   const adding = () => {
@@ -505,7 +583,7 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   const library = props.held.from === "library"
   return (
     <div class="holding" ref={veil} onClick={(event) => event.target === event.currentTarget && dismiss()}>
-      <Show when={item}>
+      <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
           <div class="lifted-copy" ref={copy} style={{ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}>
             <Show when={item().widget} fallback={library ? <img class="alone" src={(item() as Entrypoint).icon} alt="" /> : <Tile name={(item() as Entrypoint).name}><img src={(item() as Entrypoint).icon} alt="" /></Tile>}>
@@ -526,15 +604,18 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
             <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z" /></svg>
           </button>
         </Show>
-        <Show when={library && !added}>
+        <Show when={library && item && !added && props.owner.arranges}>
           <button type="button" role="menuitem" onClick={adding}>
             <span>Add to Home Screen</span>
             <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48-88a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z" /></svg>
           </button>
         </Show>
-        <Show when={item}>
-          <button type="button" role="menuitem" class="destructive" onClick={library ? uninstalls : removing}>
-            <span>{item?.widget ? "Remove Widget" : "Remove App"}</span>
+        <Show when={item || props.held.listed}>
+          <button type="button" role="menuitem" class={cant() ? undefined : "destructive"} disabled={!!cant()} onClick={library ? uninstalls : removing}>
+            <span class="label">
+              <span>{item?.widget ? "Remove Widget" : "Remove App"}</span>
+              <Show when={cant()}>{(why) => <small>{why()}</small>}</Show>
+            </span>
             <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48-88a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,128Z" /></svg>
           </button>
         </Show>
@@ -652,8 +733,14 @@ function Overview(props: { owner: Owner; index: number }) {
   )
 }
 
+/// Phosphor's squares-four, the App Library's mark, and storefront, the App Store's.
+const SQUARES =
+  "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z"
+const STOREFRONT =
+  "M232,96a7.89,7.89,0,0,0-.3-2.2L217.35,43.6A16.07,16.07,0,0,0,202,32H54A16.07,16.07,0,0,0,38.65,43.6L24.31,93.8A7.89,7.89,0,0,0,24,96h0v16a40,40,0,0,0,16,32v72a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V144a40,40,0,0,0,16-32V96ZM54,48H202l11.42,40H42.61Zm50,56h48v8a24,24,0,0,1-48,0Zm-16,0v8a24,24,0,0,1-35.12,21.26,7.88,7.88,0,0,0-1.82-1.06A24,24,0,0,1,40,112v-8ZM200,208H56V151.2a40.57,40.57,0,0,0,8,.8,40,40,0,0,0,32-16,40,40,0,0,0,64,0,40,40,0,0,0,32,16,40.57,40.57,0,0,0,8-.8Zm4.93-75.8a8.08,8.08,0,0,0-1.8,1.05A24,24,0,0,1,168,112v-8h48v8A24,24,0,0,1,204.93,132.2Z"
+
 /// An owner's page dots: one for each Home page, then the App Library's mark for its first page and a dot for each
-/// of the rest, the one shown current. Tapping one
+/// of the rest, and the App Store's mark last, the one shown current. Tapping one
 /// goes there, and so does sliding a finger along them, a page for every 28 points with a tick at each, as a phone's do. While the owner's
 /// pages are edited, they open the page overview.
 function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
@@ -681,9 +768,10 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
     dots.addEventListener("pointerup", up, { once: true })
     dots.addEventListener("pointercancel", up, { once: true })
   }
-  // The App Library's first page has its mark, and the rest of its pages are dots.
-  const glyph = (page: number) => props.kinds[page] === "library" && props.kinds.indexOf("library") === page
-  const label = (page: number) => (props.kinds[page] === "library" ? `App Library, page ${page - props.kinds.indexOf("library") + 1}` : `Page ${page + 1}`)
+  // The App Library's first page has its mark, and the rest of its pages are dots; the App Store has its own.
+  const glyph = (page: number) => (props.kinds[page] === "store" ? STOREFRONT : props.kinds[page] === "library" && props.kinds.indexOf("library") === page ? SQUARES : undefined)
+  const label = (page: number) =>
+    props.kinds[page] === "store" ? "App Store" : props.kinds[page] === "library" ? `App Library, page ${page - props.kinds.indexOf("library") + 1}` : `Page ${page + 1}`
   const press = (page: number) => () => {
     if (editingOwner(props.index)) return home.send({ type: "overview" })
     if (Date.now() > quiet) home.send({ type: "go", page })
@@ -695,9 +783,11 @@ function Dots(props: { owner: Owner; index: number; kinds: Kind[] }) {
           <Show when={!(editingOwner(props.index) && kind !== "home")}>
             <button type="button" class={glyph(page()) ? "library" : "dot"} aria-label={label(page())} aria-current={current() === page() ? "page" : undefined} onClick={press(page())}>
               <Show when={glyph(page())} fallback={<i />}>
-                <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
-                  <path d="M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z" />
-                </svg>
+                {(path) => (
+                  <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
+                    <path d={path()} />
+                  </svg>
+                )}
               </Show>
             </button>
           </Show>
@@ -792,7 +882,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
   /// Each owner's App Library, in its pages.
   const shelves = createMemo(() => props.owners.map((owner) => shelve(owner.library)))
-  const laid = createMemo(() => pages().map((homes, owner) => [...homes.map((): Kind => "home"), ...shelves()[owner].map((): Kind => "library")]), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
+  const laid = createMemo(() => pages().map((homes, owner) => [...homes.map((): Kind => "home"), ...shelves()[owner].map((): Kind => "library"), ...(props.owners[owner].store ? ["store" as Kind] : [])]), { equals: (a, b) => JSON.stringify(a) === JSON.stringify(b) })
   // What was just kept shows until the Home Screen has been asked again.
   createEffect(
     () => props.owners,
@@ -1133,6 +1223,7 @@ function HomeScreen(props: { owners: Owner[] }) {
                   <For each={shelves()[index()]} keyed={false}>
                     {(folders) => <Library owner={owner()} index={index()} folders={folders()} places={places} />}
                   </For>
+                  <Show when={owner().store}>{(name) => <StorePage name={name()} shown={seen().owner === index()} />}</Show>
                 </div>
               </div>
             </section>
@@ -1149,6 +1240,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} />}
       </Show>
       <Show when={editing()}>{(edited) => <Gallery owner={props.owners[edited().owner]} />}</Show>
+      <Show when={about() && props.owners.find((owner) => owner.store)?.store}>{(store) => <About app={about()!} store={store()} />}</Show>
     </div>
   )
 }

@@ -3,7 +3,7 @@
 // draws from it, tells it what happened, and does what it says: moves the pages (`slide`), and keeps what was edited
 // (`arrange`).
 import { assign, emit, setup } from "xstate"
-import type { Item } from "./types.ts"
+import type { Item, Listed } from "./types.ts"
 
 /// What a page is. Every owner (you, everyone, each of your groups) has a list of pages, each of a kind, and each kind
 /// says how it behaves: whether it scrolls up and down itself, which keeps a vertical swipe on it rather than moving
@@ -14,6 +14,8 @@ export const kinds = {
   home: { scrolls: false, one: false },
   /** A page of the App Library, after the Home pages: every app installed for them, by category. */
   library: { scrolls: false, one: true },
+  /** The App Store, the last page: its screen, which scrolls. */
+  store: { scrolls: true, one: true },
 } as const
 
 export type Kind = keyof typeof kinds
@@ -97,9 +99,10 @@ export interface Opened {
 }
 
 /** What a finger holds: an item of a Home page, by the page shown and where it is on it, or empty space there, or an
- * app of the App Library on its way to a page. `rect` is where it was. */
+ * app of the App Library (`listed`), which may be on its way to a page as an `item`. `rect` is where it was. */
 export interface Held {
   item?: Item
+  listed?: Listed
   page: number
   index: number
   from: "page" | "library"

@@ -154,6 +154,17 @@ body {
   text-align: center;
 }
 
+/* The App Store's page: its screen, from its own top, with a title as big as a page's, scrolling under the bar. */
+.page.store {
+  padding: 0 0 5rem;
+  --screen-height: 100%;
+}
+.page.store .ui-screen > header > h1 {
+  font-size: var(--text-title);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+}
+
 /* An App Library page: its categories two across and three down, each its icons in a square with its name under it,
    or a wide one across the page, its icons four across. An icon has its app's name under it, and is as big as the
    square leaves room for once the name is in; the square's padding and gaps follow its width. Three rows of squares
@@ -603,11 +614,26 @@ body {
   color: var(--destructive);
 }
 .hold-menu .ui-icon {
+  flex: none;
   width: 1.125rem;
   height: 1.125rem;
 }
+/* What can't be done is greyed, with why under it, and does nothing. */
+.hold-menu .label {
+  display: grid;
+  padding-block: 0.625rem;
+}
+.hold-menu small {
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  line-height: 1.3;
+}
+.hold-menu button:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+}
 @media (hover: hover) and (pointer: fine) {
-  .hold-menu button:hover {
+  .hold-menu button:not(:disabled):hover {
     background: var(--accent);
   }
 }
@@ -768,4 +794,15 @@ body {
   place-content: center;
   height: 100%;
   padding: 1.25rem;
+}
+
+/* An app's App Store page, over the whole Home Screen, as an app opened from it is. */
+.about {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--background);
+  --screen-height: 100%;
 }

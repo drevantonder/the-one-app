@@ -51,6 +51,22 @@ defmodule HomeScreen do
       required: ["entrypoint", "app", "name", "icon", "category"]
     }
 
+    # An app as the App Library has it: an entrypoint of its, or an app with none, which opens its App Store page.
+    listed =
+      entrypoint
+      |> put_in([:properties, :entrypoint], %{
+        type: ["string", "null"],
+        description: "Its app's name and its page: notes/client/index.html, or null for an app with none"
+      })
+      |> put_in([:properties, :title], %{type: "string", description: "Its app's name, as a person reads it"})
+      |> put_in([:properties, :installed], %{
+        type: "object",
+        description: "Who its app is installed for, by what name, and whether you may remove it: an owner of theirs",
+        properties: %{for: %{type: "string"}, name: %{type: "string"}, removes: %{type: "boolean"}},
+        required: ["for", "name", "removes"]
+      })
+      |> Map.update!(:required, &(&1 ++ ["title", "installed"]))
+
     widget = %{
       type: "object",
       properties: %{
@@ -92,7 +108,8 @@ defmodule HomeScreen do
         description: """
         Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
         Library, every app that runs for you by category, yours, your groups' and everyone's (`library`), the widgets
-        that could be put on a page (`widgets`), and whether you may arrange it. Asked for a group or for the network, it's theirs.
+        that could be put on a page (`widgets`), the App Store, whose page comes after the App Library (`store`), and
+        whether you may arrange it. Asked for a group or for the network, it's theirs.
         """,
         inputs: none,
         outputs: %{
@@ -125,14 +142,18 @@ defmodule HomeScreen do
                 type: "object",
                 properties: %{
                   category: %{type: "string", description: "One of an app's categories (the skill building-apps)"},
-                  entrypoints: %{type: "array", items: entrypoint}
+                  entrypoints: %{type: "array", items: listed}
                 },
                 required: ["category", "entrypoints"]
               }
             },
-            widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"}
+            widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"},
+            store: %{
+              type: ["string", "null"],
+              description: "The App Store, by the name it's installed by, whose screen is the page after the App Library"
+            }
           },
-          required: ["who", "arranges", "pages", "library", "widgets"]
+          required: ["who", "arranges", "pages", "library", "widgets", "store"]
         }
       },
       %{
@@ -245,7 +266,8 @@ defmodule HomeScreen do
       arranges: Call.owns?(call),
       pages: pages,
       library: library,
-      widgets: widgets
+      widgets: widgets,
+      store: Enum.find_value(apps, &(Enum.any?(&1.entrypoints, fn entrypoint -> entrypoint.category == "app-store" end) && &1.name))
     }
   end
 
@@ -337,16 +359,19 @@ defmodule HomeScreen do
   # listed (`OneCore.Apps.Deploy.categories/0`), Admin only for the network's owners. That's what's installed for them
   # and for each broader owner they're within: a user's has theirs, their groups' and the network's, a group's its own
   # and the network's. An app installed for more than one of them is there once, as the narrowest's. An app about
-  # whoever opens it is only in a user's.
+  # whoever opens it is only in a user's. Each is there as its entrypoints, but the launcher and the App Store, whose
+  # screen is the page after it, or with none, as itself, which opens its App Store page. Each says who it's
+  # `installed` for, by what name, and whether whoever asks may remove it: an owner of whoever that is.
   defp library(call) do
-    entrypoints =
+    entries =
       for scope <- scopes(call),
+          removes <- [Call.owns?(%{call | subject: scope})],
           app <- Call.apps(%{call | subject: scope}),
           app.installed == scope,
-          entrypoint <- app.entrypoints,
-          entrypoint.category != "launcher",
-          match?("users/" <> _, call.subject) or entrypoint[:subject] != "user" do
-        {{app.app, entrypoint.page}, opened(entry(app, entrypoint), call.subject, scope)}
+          entry <- shown(app),
+          match?("users/" <> _, call.subject) or entry[:subject] != "user" do
+        installed = %{for: scope, name: app.name, removes: removes}
+        {{app.app, entry.entrypoint}, opened(Map.merge(entry, %{title: app.title, installed: installed}), call.subject, scope)}
       end
       |> Enum.uniq_by(&elem(&1, 0))
       |> Enum.map(&elem(&1, 1))
@@ -355,10 +380,17 @@ defmodule HomeScreen do
 
     for category <- OneCore.Apps.Deploy.categories(),
         category != "Admin" or admins,
-        theirs = Enum.filter(entrypoints, &(&1.category == category)),
+        theirs = Enum.filter(entries, &(&1.category == category)),
         theirs != [],
         do: %{category: category, entrypoints: Enum.sort_by(theirs, &String.downcase(&1.name))}
   end
+
+  # An app as its App Library shows it: its entrypoints, or with none, itself.
+  defp shown(%{entrypoints: []} = app),
+    do: [%{entrypoint: nil, app: app.app, name: app.title, icon: app.icon, category: app.category}]
+
+  defp shown(app),
+    do: for(entrypoint <- app.entrypoints, entrypoint.category not in ["launcher", "app-store"], do: entry(app, entrypoint))
 
   # Whoever an App Library is for, then each broader owner they're within, narrowest first.
   defp scopes(%{subject: "network"}), do: ["network"]

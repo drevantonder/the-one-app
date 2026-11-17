@@ -25,17 +25,26 @@ export type Size = "2x2" | "4x2" | "4x4"
 /** Something on a page: an app or a widget. */
 export type Item = (Entrypoint & { widget?: undefined; size?: undefined }) | (Widget & { entrypoint?: undefined })
 
+/** An app as an App Library has it: an entrypoint of its, or an app with none (`entrypoint` null), which opens its App
+ * Store page; its app's name, and who its app is installed for, by what name, and whether you may remove it. */
+export interface Listed extends Omit<Entrypoint, "entrypoint"> {
+  entrypoint: string | null
+  title: string
+  installed: { for: string; name: string; removes: boolean }
+}
+
 /** A category of an App Library, as it shows it: its apps by name. */
 export interface Category {
   category: string
-  entrypoints: Entrypoint[]
+  entrypoints: Listed[]
 }
 
-/** A Home Screen, as `home-screen_pages` answers it: whose it is, its pages, each what's on it and whether it's hidden, and its App Library. */
+/** A Home Screen, as `home-screen_pages` answers it: whose it is, its pages, each what's on it and whether it's hidden, its App Library, and the App Store after it, by its app's name. */
 export interface Pages {
   who: string
   arranges: boolean
   pages: { items: Item[]; hidden: boolean }[]
   library: Category[]
   widgets: Widget[]
+  store: string | null
 }
