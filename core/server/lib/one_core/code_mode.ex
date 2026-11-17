@@ -3,9 +3,9 @@ defmodule OneCore.CodeMode do
   Code mode's `execute` and `call` over the web, as Executor has them. `execute` runs a short script that calls tools,
   by OpenCode's interpreter under this server's Bun (`core/codemode/run.js`), where nothing but `tools` reaches the
   world. Each call it makes comes back here and is run as whoever asked, exactly as their MCP call would be, its
-  inputs checked against what the tool takes. `call` makes one call or several at once with no script. The CLI does
-  both on its own device (`clients/cli/src/codemode.rs`), so that what a device fills in of a tool's inputs is filled
-  in there.
+  inputs checked against what the tool takes. `call` makes one call or several at once with no script. Every client
+  has both run here, `one mcp --code` too, and no device fills in a script's inputs: a secret comes from its person
+  through the Vault's `request`, and what needs a device's own key is a plain tool on that device.
 
   A run of one script, `codemode_run`, is in one of three states, and nothing it starts outlives it:
 
@@ -43,7 +43,8 @@ defmodule OneCore.CodeMode do
       call's answer feeds another, or to cut a large answer down; for one call or a few that don't depend on each \
       other, use call. Each call runs as you, as any tool does, so what sends or can't be undone waits for the \
       person's yes, as always. It runs until it's done or cancelled, and gives back up to 60 KB; one that takes long \
-      can run as a task.\
+      can run as a task. Never put a password, key or token in a script: for one the person pasted or must give, \
+      call vault.request, which has them type it on their own device.\
       """,
       task_support: :optional,
       inputSchema: %{
@@ -77,7 +78,8 @@ defmodule OneCore.CodeMode do
       exactly as search gives it, like tools.gmail.search. Answers each in the same order, with ok and its value or \
       its error; a picture comes back as one. Use execute instead where one call's answer feeds another, or to cut a \
       large answer down before it reaches you. Each call runs as you, as any tool does, so what sends or can't be \
-      undone waits for the person's yes, as always.\
+      undone waits for the person's yes, as always. Never put a password, key or token in an input: for one the \
+      person pasted or must give, call vault.request, which has them type it on their own device.\
       """,
       inputSchema: %{
         type: "object",

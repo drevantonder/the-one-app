@@ -179,7 +179,7 @@ defmodule Encryption do
       secret
     else
       _ ->
-        raise "That wasn't encrypted on a device for this server, so it isn't kept.\n\nA secret is typed on a device of yours, or given to `one` there: an assistant somewhere else asks its person for it instead."
+        raise "That wasn't encrypted on a device for this server, so it isn't kept.\n\nA secret is typed on a device of yours, or given there to `one`'s own tool, never in code mode. An assistant in code mode or anywhere else asks its person for it with `vault_request`, which has them type it on their device."
     end
   end
 

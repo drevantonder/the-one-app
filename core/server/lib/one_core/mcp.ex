@@ -164,7 +164,8 @@ defmodule OneCore.Mcp do
         State.cancel_request({from, User.device(from, meta(params)), id})
         ""
 
-      # The network's edge saying a client that asked over the web went away before its answer, by the request's id.
+      # A client going away before its answer, by the request's id: the network's edge says it for one over the web,
+      # and this server's connections (`one_core_iroh`) for one that asked here.
       {:ok, %{"method" => "notifications/one/gone", "params" => %{"requestId" => id} = params}} ->
         State.gone({from, User.device(from, meta(params)), id})
         ""
@@ -552,8 +553,15 @@ defmodule OneCore.Mcp do
   defp dotted(%{_meta: %{plugin: plugin}} = tool), do: plugin <> "." <> String.replace_prefix(tool.name, plugin <> "_", "")
   defp dotted(tool), do: tool.name
 
-  # The tools a script has, and that `search` finds among: those every client is listed but code mode's own.
-  defp scripted(who), do: [Skills.tool() | listed(who, false)]
+  # The tools a script has, and that `search` finds among: those every client is listed but code mode's own, and but
+  # those a device fills in with what only it holds, its own key or its copy of its owner's, which a script on a server
+  # has none of. An agent calls those as plain tools on the device (`one mcp`, `one encryption …`).
+  defp scripted(who), do: [Skills.tool() | Enum.reject(listed(who, false), &on_device?/1)]
+
+  @on_device ~w(device device-name owner-key artifact-keys)
+
+  defp on_device?(tool),
+    do: Enum.any?(Map.values(tool.inputSchema[:properties] || %{}), &(&1[:format] in @on_device))
 
   # How whoever asks calls tools: as MCP's tools, in a code mode script, or as commands.
   defp mode(params) do

@@ -14,7 +14,8 @@ can have contents too large for a field, kept sealed.
 
 Never ask for a password, key or token in the chat, and never paste one. `request` gives the person a link to
 their own device, where they pick or type it; `fetch` makes a web request with an item they let agents use, and
-you never see the secret. If someone pastes one anyway, keep it with `set` and don't repeat it.
+you never see the secret. If someone pastes one anyway, don't repeat it: in code mode, or over the web, ask for it
+with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) keep it with `set`.
 
 - `list` shows what's there: each item's fields, a secret one without its value, its sites, the plugins switched
   on for it, whether agents may use it, its state and its `artifact`, the requests still waiting, the plugins that
@@ -28,8 +29,9 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
   blotted out.
 - `set` keeps one field of an item, making the item if there's none. Say `secret: false` for what may be
   shown, as a username, and `hosts` for the sites its secrets go to. The value is encrypted on the device you
-  run on before it's sent, so `set` is for `one` or MCP on a device. An assistant that reaches the network
-  over the web has no device: it asks with `request` instead.
+  run on before it's sent, so `set` is for `one` or MCP on a device, as a plain tool. A script or `call` in code
+  mode runs on a server, where nothing encrypts it, so a secret given there is refused: in code mode, and over the
+  web, ask with `request` instead.
 - `use` switches a plugin on for an item, or off. A plugin that's switched on uses it through the Vault's tools
   without seeing it, or, one with a service, is handed the secret itself, which trusts its code with it. `agents` lets agents use an item with `fetch`: that's the person's to
   decide, in the Vault's app or by allowing a request, so ask with `request` and don't call it for yourself.

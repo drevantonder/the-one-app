@@ -213,7 +213,8 @@ defmodule Vault do
         description: """
         Keeps a key, token or password someone pasted (or any field) in an item, making the item if there's none by
         that name. Nobody reads a secret back, not you either. When the person has the value, use `request`
-        instead: never ask them to paste it into the chat.
+        instead: never ask them to paste it into the chat. A secret is kept only as a plain tool on a device, which
+        encrypts it: in code mode, or over the web, use `request` for one they pasted too.
         """,
         inputs: %{
           type: "object",

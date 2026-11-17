@@ -2,9 +2,8 @@
 //! tool is a command: the words before the first `--` input, joined by `_`, are the tool's name, so
 //! `one notes add --text milk` calls `notes_add`. `one notes` shows the plugin's skill and its tools, and
 //! `one mcp` serves MCP over stdio instead, or with `--code`, in code mode. `one search <words>` finds the tools for
-//! a task, and `one run <file>` runs a script that calls them (`codemode`). What isn't a tool is in `COMMANDS`.
+//! a task, and `one run <file>` runs a script that calls them, as code mode's `execute`. What isn't a tool is in `COMMANDS`.
 
-mod codemode;
 mod install;
 mod mcp;
 pub mod serving;
@@ -85,9 +84,10 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         }
         ["run", file] => {
             let code = fs::read_to_string(file).with_context(|| format!("couldn't read {file}"))?;
-            let (ok, text) = codemode::run(&client, &code).await?;
-            println!("{text}");
-            if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+            let request = json!({"name": "execute", "arguments": {"code": code}, "_meta": {"mode": "code"}});
+            let result = client.request("tools/call", request).await?;
+            println!("{}", result["structuredContent"]["text"].as_str().unwrap_or_default());
+            if result["isError"] == true { ExitCode::FAILURE } else { ExitCode::SUCCESS }
         }
         ["search", query @ ..] if !query.is_empty() && !query[0].starts_with("--") => {
             let request = json!({"name": "search", "arguments": {"query": query.join(" ")}, "_meta": {"mode": "cli"}});
