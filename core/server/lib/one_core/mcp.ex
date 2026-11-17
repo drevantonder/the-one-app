@@ -391,6 +391,8 @@ defmodule OneCore.Mcp do
     end
   end
 
+  defp resources(method, _params, _who), do: {:error, -32601, "This server has no method #{method}"}
+
   # A page, with the import map its modules are resolved by in its head, before anything loads: what every app shares
   # by name, the UI library's one copy, which an app's build already imports by where it's served (`core/ui/app.js`),
   # and as `<plugin>/` the client of its own plugin and of each plugin it uses, which a client serves beside it, at
@@ -412,8 +414,6 @@ defmodule OneCore.Mcp do
       [_page] -> map <> page
     end
   end
-
-  defp resources(method, _params, _who), do: {:error, -32601, "This server has no method #{method}"}
 
   # A file that isn't text, such as a picture or a font, is base64 as MCP's `blob`.
   defp content(data), do: if(String.valid?(data), do: %{text: data}, else: %{blob: Base.encode64(data)})
