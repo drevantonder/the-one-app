@@ -255,6 +255,16 @@ let pointer = { x: 0, y: 0 }
 let grab = { x: 0, y: 0 }
 addEventListener("pointermove", (event) => (pointer = { x: event.clientX, y: event.clientY }), { capture: true, passive: true })
 
+/// What an element is kept in, `where`, under `key`, for as long as it's drawn: it moves when its key changes.
+function registered<K extends string | number>(where: Record<K, HTMLElement>, key: () => K) {
+  let element!: HTMLElement
+  createEffect(key, (at) => {
+    where[at] = element
+    return () => delete where[at]
+  })
+  return (drawn: HTMLElement) => (element = drawn)
+}
+
 /// A Home page: its grid, each item where it was placed. While its owner's pages are edited, everything jiggles with
 /// its ⊖, and what's lifted leaves its place empty. An owner with nothing on their pages has one grey line.
 function HomePage(props: { owner: Owner; index: number; page: number; placed: Placed<Cell>[]; small?: boolean }) {
@@ -268,7 +278,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
     if (await confirm(removal(item))) home.send({ type: "remove", page: props.page, index })
   }
   return (
-    <section class={["page", { small: props.small }]} data-page={props.page} ref={props.small ? undefined : holds(() => (editingHere() ? undefined : { page: props.page, index: -1, from: "page" }), arranges)}>
+    <section class={["page", { small: props.small }]} data-page={props.page} ref={holds(() => (editingHere() ? undefined : { page: props.page, index: -1, from: "page" }), arranges)}>
       <Show when={props.placed.length || editingHere()} fallback={<Empty>No apps on this page.</Empty>}>
         <div class="grid">
           <For each={props.placed} keyed={({ item }) => (item.item.widget ?? item.item.entrypoint) + (item.item.size ?? "")}>
@@ -278,7 +288,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
                 data-index={placed().item.index}
                 data-size={placed().item.item.size}
                 style={{ "--column": placed().column, "--row": placed().row, "--width": placed().width, "--height": placed().height, "--wobble": `${(placed().item.index * 97) % 240}ms` }}
-                ref={props.small ? undefined : holds(() => ({ item: placed().item.item, page: props.page, index: placed().item.index, from: "page" }), arranges)}
+                ref={holds(() => ({ item: placed().item.item, page: props.page, index: placed().item.index, from: "page" }), arranges)}
               >
                 <Show when={placed().item.item}>
                   {(item) => (
@@ -333,7 +343,7 @@ function shelve(library: Category[]): Folder[][] {
 /// An App Library page: its categories, each its first four apps' icons with their names, or wide, its first eight,
 /// or with more than that, all but the last and the rest smaller in the last's place. Tapping an icon opens its app;
 /// tapping anywhere else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
-function Library(props: { owner: Owner; index: number; folders: Folder[]; places: Map<string, HTMLElement> }) {
+function Library(props: { owner: Owner; index: number; folders: Folder[]; places: Record<string, HTMLElement> }) {
   // Tapped again as it shrinks back into its place, it turns and grows again.
   const opening = (category: Category) => () => {
     const opened = state().context.category
@@ -351,7 +361,7 @@ function Library(props: { owner: Owner; index: number; folders: Folder[]; places
               const shown = () => (category().entrypoints.length > room() ? category().entrypoints.slice(0, room() - 1) : category().entrypoints)
               return (
                 <div class={["category", { wide: folder().wide }]}>
-                  <div class="place" ref={(place) => props.places.set(`${props.index}:${category().category}`, place)} onClick={opening(category())}>
+                  <div class="place" ref={registered(props.places, () => `${props.index}:${category().category}`)} onClick={opening(category())}>
                     <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                       {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} index={props.index} />}
                     </For>
@@ -443,7 +453,7 @@ function StorePage(props: { name: string; shown: boolean }) {
 /// where it got to. For whoever asked for less motion, it fades in and out where it is. It's a modal `<dialog>`, so
 /// focus stays in it and the rest is inert while it's open; as it shrinks it's a dialog that isn't modal, so the pages
 /// under it take a finger.
-function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string, HTMLElement> }) {
+function OpenCategory(props: { owner: Owner; opened: Opened; places: Record<string, HTMLElement> }) {
   let veil!: HTMLDialogElement
   let panel!: HTMLDivElement
   let title!: HTMLHeadingElement
@@ -463,7 +473,7 @@ function OpenCategory(props: { owner: Owner; opened: Opened; places: Map<string,
     }
     if (moving.some((one) => one.playState === "running")) for (const one of moving) one.reverse()
     else {
-      const place = props.places.get(`${props.opened.owner}:${props.opened.name}`)
+      const place = props.places[`${props.opened.owner}:${props.opened.name}`]
       if (!place || !panel.isConnected) return void home.send({ type: "zoomed" })
       for (const one of moving) one.cancel()
       const [from, to] = [place.getBoundingClientRect(), panel.getBoundingClientRect()]
@@ -967,8 +977,8 @@ function measure(width: number, height: number) {
 function HomeScreen(props: { owners: Owner[] }) {
   let root!: HTMLDivElement
   let main!: HTMLElement
-  const strips: HTMLElement[] = []
-  const places = new Map<string, HTMLElement>()
+  const strips: Record<number, HTMLElement> = {}
+  const places: Record<string, HTMLElement> = {}
   // A phone's until the Home Screen has been measured, which it is before it's first drawn.
   const [room, setRoom] = createSignal({ wide: false, fit: 1, scale: 1, side: 0, gap: 0 })
 
@@ -1010,7 +1020,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     return pages[owner]?.[owner === seen().owner ? seen().page : (last[owner] ?? 0)] ?? "home"
   }
   /// Each owner's pages, across: `strips` are the windows onto them, and `tracks` the rows that move in them.
-  const tracks: HTMLElement[] = []
+  const tracks: Record<number, HTMLElement> = {}
   const height = () => main.clientHeight || root.clientHeight
   /// How far apart an owner's pages are, and how far along their row can go before its last page's end shows.
   const pitch = (owner: number) => {
@@ -1328,8 +1338,8 @@ function HomeScreen(props: { owners: Owner[] }) {
         <For each={props.owners} keyed={(owner) => owner.key}>
           {(owner, index) => (
             <section class="owner" aria-label={owner().name}>
-              <div class="strip" ref={(strip) => (strips[index()] = strip)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }}>
-                <div class="track" ref={(track) => (tracks[index()] = track)}>
+              <div class="strip" ref={registered(strips, index)} style={{ "--pages": Math.min(room().fit, laid()[index()]?.length ?? 1) }}>
+                <div class="track" ref={registered(tracks, index)}>
                   <For each={pages()[index()] ?? [[]]} keyed={false}>
                     {(placed, page) => <HomePage owner={owner()} index={index()} page={page} placed={placed()} />}
                   </For>
