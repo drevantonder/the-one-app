@@ -1885,7 +1885,7 @@ async fn receive_notifications(connection: iroh::endpoint::Connection, notificat
 /// So is a plugin's native code but what a server loads: the clients are built with its `client/native/`, and the
 /// source of a NIF or a program, a folder of its `server/nif/` or `server/bin/`, stays here, but for what's built from
 /// it for each kind of machine, `<kind>.so` or `<kind>` there, which is deployed though git ignores it as built
-/// (`OneCore.Plugin`). A server reads the plugins it ships with this way too (`core/server/nif/folder`).
+/// (`OneCore.Plugin`). A server reads a plugin's folder this way too (`core/server/nif/folder`).
 pub fn files(folder: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
     let root = folder.to_owned();

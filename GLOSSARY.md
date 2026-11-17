@@ -1,6 +1,6 @@
 # Glossary
 
-A bundled plugin's own words are defined in that plugin's `SKILL.md`.
+A plugin's own words are defined in that plugin's `SKILL.md`.
 
 - **Network**: one user's, one family's or one workplace's whole: its users, its bucket, its servers and its clients. A
   trusted boundary, not a social network. It is an artifact.

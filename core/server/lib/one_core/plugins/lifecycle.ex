@@ -9,8 +9,7 @@ defmodule OneCore.Plugins.Lifecycle do
   after the commit it runs, so taking it loses nothing that's live: servers acting for whoever the plugin is look
   once a day, and when someone asks (`plugins_check`). A trusted plugin takes it at once; an untrusted one offers it,
   for someone who may to Update once an agent has read what changed. A failed update leaves the version that ran
-  running. A plugin the server ships updates with the server, and one deployed with changes not committed has no
-  newer commit to take.
+  running. One deployed with changes not committed has no newer commit to take.
 
   A plugin requires others (`OneCore.Plugins.Requires`). Installing it installs first each of its requirements that
   isn't there, as their own installs, and fails, naming it, where one can't be. Uninstalling one that others there are
@@ -155,17 +154,6 @@ defmodule OneCore.Plugins.Lifecycle do
     record = move(owner, name, {:fail, why})
     ran(owner)
     record
-  end
-
-  @doc """
-  Installs a plugin the server ships for `owner`, where another they install requires it: at once, as it updates with
-  the server. `:ok`, or `{:error, why}`.
-  """
-  def bring(owner, name, artifact) do
-    with %{} <- move(owner, name, {:deployed, artifact, nil}) do
-      ran(owner)
-      :ok
-    end
   end
 
   @doc """
@@ -333,9 +321,6 @@ defmodule OneCore.Plugins.Lifecycle do
     record = Update.read(artifact)
 
     cond do
-      bundled?(artifact) ->
-        nil
-
       match?(%{"state" => "updating"}, record) and record["at"] > System.system_time(:millisecond) - @partway ->
         record
 
@@ -491,10 +476,6 @@ defmodule OneCore.Plugins.Lifecycle do
 
   defp installed?(artifact),
     do: Installed.installed_for(artifact) != [] or Plugins.plugin(Store.whose(artifact), Path.basename(artifact)) == artifact
-
-  # A plugin the server ships, which updates with the server.
-  defp bundled?(@network <> "/plugins/" <> name), do: is_map_key(Application.get_env(:one_core, :bundled, %{}), name)
-  defp bundled?(_artifact), do: false
 
   # What runs for `owner` changed: it runs here, with what's loaded already, and their other servers look.
   defp ran(owner, loaded \\ []) do

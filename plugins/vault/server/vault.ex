@@ -30,9 +30,6 @@ defmodule Vault do
   @impl true
   def icon, do: "client/icon.svg"
 
-  @impl true
-  def essential, do: true
-
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are people's keys and sign-ins.
   @impl true
   def sensitive, do: true

@@ -544,8 +544,7 @@ defmodule OneCore.Tools do
       description: """
       Lists the build each of your servers runs, with what its machine is called and whether it's on, and the
       build each of your devices last said it is, and the latest for each kind of machine, so it says whether
-      everything is on the same build, and which plugins The One App ships with the server is still deploying, or
-      failed to deploy and why, under `bundled`.
+      everything is on the same build.
       A build is the version of the commit it was built from, Semantic Versioning's, with its commit's count and
       hash as build metadata: 0.15.2+2974.febd37350abc. Servers, the edge and clients talk only on the same 0.minor:
       `why` says what's on one that doesn't. With `server`, that server answers, saying its own.
@@ -591,14 +590,9 @@ defmodule OneCore.Tools do
               properties: %{device: %{type: "string", description: "The device's key"}, build: %{type: "string"}},
               required: ["device"]
             }
-          },
-          bundled: %{
-            type: "object",
-            additionalProperties: %{type: "string"},
-            description: "Each plugin it ships that it's still deploying, by its name: waiting, building, or why it failed"
           }
         },
-        required: ["server", "build", "edge", "latest", "servers", "devices", "bundled"]
+        required: ["server", "build", "edge", "latest", "servers", "devices"]
       }
     },
     %{

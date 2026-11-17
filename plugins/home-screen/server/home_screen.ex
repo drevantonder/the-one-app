@@ -20,9 +20,6 @@ defmodule HomeScreen do
   @impl true
   def icon, do: "client/home.svg"
 
-  @impl true
-  def essential, do: true
-
   alias OneCore.{Artifact, Call}
 
   # The categories an app says it's in, as freedesktop's menus have theirs, in the order an App Library shows them.
@@ -311,11 +308,11 @@ defmodule HomeScreen do
     %{pages: pages}
   end
 
-  # Every plugin anyone deployed that a person could add, whether or not anyone has it now: not one every network has.
+  # Every plugin anyone deployed that a person could add, whether or not anyone has it now.
   def call("store", _inputs, call) do
     plugins =
       for plugin <- Call.deployed(call),
-          plugin.icon != nil and plugin[:essential] != true,
+          plugin.icon != nil,
           do: Map.take(plugin, [:plugin, :title, :icon, :subtitle, :about, :category, :apps, :widgets])
 
     %{plugins: Enum.sort_by(plugins, &String.downcase(&1.title))}

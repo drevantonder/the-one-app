@@ -30,10 +30,9 @@ defmodule OneCore.Plugins.Version do
   `services` lists its services: each one's `name`, which is its module's as the plugin wrote it, what it's `called`
   where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the
   hooks it offers, each one's `name`, `kind` and `description`, and `jobs` lists its scheduled jobs: each one's `tool`,
-  the `inputs` it's called with, and `every` how many seconds. `essential` is whether a network can't work without it
-  (`OneCore.Plugins.Deploy`), `requires` the other plugins it needs, each by its name with why, and `core` the versions
-  of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any, both from its `requires/0`
-  (`OneCore.Plugin`). `exports` are the functions its module provides other plugins, as name/arity, which run inside
+  the `inputs` it's called with, and `every` how many seconds. `requires` names the other plugins it needs, each with
+  why, and `core` the versions of the platform it runs on, as an Elixir requirement (`~> 0.15.0`), or `nil` for any,
+  both from its `requires/0` (`OneCore.Plugin`). `exports` are the functions its module provides other plugins, as name/arity, which run inside
   each plugin that requires it. `artifact` is the plugin it's a version of, which whatever loaded it says.
 
   A version runs only on a server whose build its `core` allows: one that doesn't is refused where it's deployed, and
@@ -63,7 +62,6 @@ defmodule OneCore.Plugins.Version do
     :title,
     :icon,
     :core,
-    essential: false,
     requires: %{},
     exports: [],
     trusted: true
@@ -173,7 +171,6 @@ defmodule OneCore.Plugins.Version do
         :jobs,
         :code,
         :ui,
-        :essential,
         :title,
         :icon,
         :requires,
@@ -224,7 +221,6 @@ defmodule OneCore.Plugins.Version do
         :jobs,
         :code,
         :ui,
-        :essential,
         :title,
         :icon,
         :requires,
@@ -274,7 +270,6 @@ defmodule OneCore.Plugins.Version do
       hooks: description["hooks"],
       offers: offers,
       jobs: taken.(description["jobs"], ~w(tool every inputs)),
-      essential: false,
       requires: description["requires"]
     }
 
@@ -427,7 +422,6 @@ defmodule OneCore.Plugins.Version do
     hooks: [],
     offers: [],
     jobs: [],
-    essential: false,
     requires: %{}
   ]
 
@@ -464,7 +458,7 @@ defmodule OneCore.Plugins.Version do
   rescue
     error ->
       {:error,
-       "tools/0, apps/0, widgets/0, hooks/0, offers/0, jobs/0, essential/0, requires/0 or a service's " <>
+       "tools/0, apps/0, widgets/0, hooks/0, offers/0, jobs/0, requires/0 or a service's " <>
          "needs/0 or called/0 raised: " <>
          Exception.message(error)}
   end
@@ -551,7 +545,6 @@ defmodule OneCore.Plugins.Version do
                     hooks: Enum.uniq(hooks),
                     offers: offers,
                     jobs: jobs,
-                    essential: description.essential == true,
                     requires: Map.delete(requires, "core"),
                     core: requires["core"]
                 }}

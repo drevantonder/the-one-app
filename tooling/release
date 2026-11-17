@@ -24,8 +24,7 @@
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
-# with them, One Core's Rust NIFs built for that machine, the plugins The One App ships with, with their NIFs and
-# programs built for every kind of machine (both by `tooling/nifs`), and the UI library's build, and the Bun it
+# with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.App`). The builds are in
 # target/builds/<build>.
 set -euo pipefail
@@ -202,12 +201,9 @@ for kind in "${servers[@]}"; do
   # Windows' VM keeps its debugging symbols apart already.
   [[ $kind == windows-* ]] || "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"
 
-  # What it ships with: the plugins, which it deploys as a folder is (`client::files`), with their NIFs built beside
-  # their source, the UI library's build, which it builds apps against and serves, and the Bun it builds apps with.
-  mkdir -p "$release/bundled"
+  # What it ships with: the UI library's build, which it builds apps against and serves, and the Bun it builds apps
+  # with. What its NIFs were built from is beside them, for `tooling/nifs` to find a Mac's again.
   [[ ! -e $target/nifs/$kind ]] || cp "$target/nifs/$kind" "$release/nifs"
-  git archive HEAD plugins | tar -x -C "$release/bundled" --strip-components=1
-  for built in plugins/*/server/nif/*/*.so plugins/*/server/bin/*/{linux,macos,windows}-*; do cp "$built" "$release/bundled/${built#plugins/}"; done
   cp -R core/ui/dist "$release/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
 

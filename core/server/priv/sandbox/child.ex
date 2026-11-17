@@ -128,7 +128,6 @@ defmodule OneCore.Plugin do
   @callback offers() :: [map]
   @callback jobs() :: [map]
   @callback schedule(struct, [map], (map -> term)) :: term
-  @callback essential() :: boolean
   @callback requires() :: %{String.t() => String.t()}
   @callback sensitive() :: boolean
   @optional_callbacks tools: 0,
@@ -142,7 +141,6 @@ defmodule OneCore.Plugin do
                       offers: 0,
                       jobs: 0,
                       schedule: 3,
-                      essential: 0,
                       requires: 0,
                       sensitive: 0
 end

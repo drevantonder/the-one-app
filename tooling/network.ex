@@ -6,9 +6,8 @@ defmodule Mix.Tasks.Network do
       mix network <folder>
 
   The folder's `bucket` is the network's bucket, `server` is the server's home, and `client` is a client's home, told
-  where its servers are. `only-server` is a client that asks that one server and no other. A new network starts with
-  the plugins The One App ships with, as this repo has them. Starting it again in the same folder carries on with
-  what's there.
+  where its servers are. `only-server` is a client that asks that one server and no other. Starting it again in the
+  same folder carries on with what's there.
 
       mix network <folder> <server>
 
@@ -34,7 +33,9 @@ defmodule Mix.Tasks.Network do
       mix network <folder> --owner <name>
 
   makes the user of that name the network's first owner, which a network gets once (`OneCore.User`), and where
-  people sign in, says where they join.
+  people sign in, says where they join. Before it has one, every plugin of this repo is deployed for the network, as
+  their author publishes them, so it has them to install: making its first owner installs the ones a network starts
+  with. After that, a plugin changed here is deployed into it as any is (`one deploy`).
 
       mix network <folder> --development
 
@@ -52,7 +53,8 @@ defmodule Mix.Tasks.Network do
   `tooling/network`, at the root, starts a whole network with this.
   """
   use Mix.Task
-  alias OneCore.{Edge, Iroh, Server, Servers, User}
+  require Logger
+  alias OneCore.{Edge, Folder, Iroh, Server, Servers, User}
   alias OneCore.Plugins.Deploy
 
   @root Path.expand("..", __DIR__)
@@ -78,8 +80,20 @@ defmodule Mix.Tasks.Network do
     end
   end
 
-  # The plugins The One App ships with, as this repo has them: each one's folder.
-  defp bundled, do: Map.new(Path.wildcard(Path.join(@root, "plugins/*")), &{Path.basename(&1), &1})
+  # Deploys each of this repo's plugins for the network from its folder, as `one deploy --files-from` sends it,
+  # installing none: each is the network's to install.
+  defp publish do
+    for folder <- Enum.sort(Path.wildcard(Path.join(@root, "plugins/*"))),
+        name = Path.basename(folder),
+        {:ok, paths} <- [Folder.files(folder)] do
+      files = Map.new(paths, &{&1, File.read!(Path.join(folder, &1))})
+
+      case Deploy.deploy("network", name, files, nil, true, fn _version -> false end) do
+        {:ok, _number, _warnings} -> Logger.info("#{name} is deployed for the network")
+        {:error, why} -> Logger.error("#{name} wasn't deployed for the network: #{why}")
+      end
+    end
+  end
 
   defp start(folder, server, options) do
     address = options[:address]
@@ -91,7 +105,6 @@ defmodule Mix.Tasks.Network do
     Application.put_env(:one_core, :owner, options[:subject] || "network")
     Application.put_env(:one_core, :home, Path.join(folder, server))
     Application.put_env(:one_core, :name, options[:name])
-    Application.put_env(:one_core, :bundled, bundled())
     Application.put_env(:one_core, :ui, Path.join(@root, "core/ui/dist"))
     Mix.Task.run("app.config")
 
@@ -120,14 +133,12 @@ defmodule Mix.Tasks.Network do
       end
     end
 
-    # The plugins are there first, so the ones that keep who may do what and who signs in are told who the first
-    # owner is, and the server's log says where they join.
-    Deploy.await_bundled()
-
     if owner = options[:owner] do
+      if User.first_owner() == nil and Servers.here?("network"), do: publish()
+
       case User.make_first_owner("users/" <> owner) do
         :ok -> Mix.shell().info("users/#{owner} is the network's first owner.")
-        {:error, why} -> Mix.shell().error("users/#{owner} wasn't made the network's first owner: #{why}")
+        {:error, why} -> Mix.shell().error("users/#{owner}, the network's first owner: #{why}")
       end
     end
 

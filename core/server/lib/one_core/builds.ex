@@ -146,7 +146,7 @@ defmodule OneCore.Builds do
   sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more
   are removed: a machine downloads only the latest, and one whose update doesn't take goes back to the build it
   kept of its own. So are the files of every plugin's versions before its last few (`OneCore.Plugins.Store.prune/1`),
-  since each server release deploys the plugins it ships with again, each a new version with its apps and NIFs.
+  since each release deploys the plugins that changed again, each a new version with its apps and NIFs.
   """
   def publish(builds) do
     missing =
@@ -200,8 +200,7 @@ defmodule OneCore.Builds do
   @doc """
   Which build each of `owner`'s servers runs, with what its machine is called, whether it's on and where an update
   of it is (`say/1`), and which each of `by`'s devices last said it is, and the latest for each kind of machine: what
-  shows whether everything is on the same build. `bundled` says which of the plugins it ships the server asked is
-  still deploying for the network, or failed to, and why (`OneCore.Plugins.Deploy.deploying_bundled/0`).
+  shows whether everything is on the same build.
   """
   def list(by, owner) do
     keys = Servers.acting(owner)
@@ -229,8 +228,7 @@ defmodule OneCore.Builds do
       edge: edge,
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
-      devices: devices,
-      bundled: OneCore.Plugins.Deploy.deploying_bundled()
+      devices: devices
     }
   end
 

@@ -39,9 +39,6 @@ defmodule SoftDelete do
   @impl true
   def icon, do: "client/icon.svg"
 
-  @impl true
-  def essential, do: true
-
   require Logger
   alias OneCore.{Artifact, Bucket, Call, Hooks, Plugins, Servers, User}
   alias OneCore.Plugins.Lifecycle

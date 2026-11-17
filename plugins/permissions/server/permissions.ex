@@ -12,9 +12,6 @@ defmodule Permissions do
   @impl true
   def icon, do: "icon.svg"
 
-  @impl true
-  def essential, do: true
-
   # An owner is an editor, and an editor is a viewer: what each relation is enough for. An installer adds plugins
   # for a user, a group or the network, which their owner does too, and is nothing more.
   @enough %{

@@ -20,9 +20,6 @@ defmodule Sandbox do
   @impl true
   def icon, do: "icon.svg"
 
-  @impl true
-  def essential, do: true
-
   @doc """
   Starts `program` with `arguments` behind this machine's sandbox, and gives its standard input and output as a port
   the calling process owns, in stream mode: `{:ok, port}`, or `{:error, why}`. `policy` says what it has:

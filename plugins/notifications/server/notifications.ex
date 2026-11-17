@@ -16,9 +16,6 @@ defmodule Notifications do
   @impl true
   def icon, do: "client/icon.svg"
 
-  @impl true
-  def essential, do: true
-
   alias OneCore.{Call, Edge}
 
   @schema [

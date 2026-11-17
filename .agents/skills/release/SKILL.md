@@ -47,7 +47,7 @@ is split only for minutes:
 
 | Changed | Release |
 | --- | --- |
-| A plugin (`plugins/<name>/`, here or in a network's repo) | `ONE_SUBJECT=network one deploy --name <name> --files-from plugins/<name>`, from that repo (about 12 s). Refused, someone else's newer change is live: rebase and deploy again, never `--force` |
+| A plugin (`plugins/<name>/`, here or in a network's repo) | `ONE_SUBJECT=network one deploy --name <name> --files-from plugins/<name>`, from that repo, into each network it's released to (about 12 s). Refused, someone else's newer change is live: rebase and deploy again, never `--force` |
 | A plugin with a NIF (`server/nif/`) | `tooling/nifs`, then the same deploy. A Mac's NIF whose inputs haven't changed is the one last published (or cached here); one that changed is built on the Mac, which must be awake |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, a plugin's `edge/`, `clients/web/`) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
@@ -61,14 +61,16 @@ built only for a network with a Windows server or device. They haven't yet run o
 one has been installed and updated as a server on one, a Windows PC isn't made a server of the live network.
 
 A plugin change that uses something new in `core/server/` says so in its `requires`, `"core" => "~> 0.16.0"`, and is
-deployed once every server is on that version. A plugin someone deployed by hand isn't redeployed by the server.
+deployed once every server is on that version.
+
+A server release deploys no plugins. This repo's plugins are published as any author's are: deployed, each that
+changed, into each network the release serves, the owner's (its address is in Agent Memory), where they're the
+network's own trusted plugins, so every install of them takes the new version at once. A new network gets them from
+whoever makes it (`tooling/network`).
 
 On a device that is also a server, `one update` asks the program keeping that server running (`one serve run`) to
 take the latest builds, the program's among them, and answers before it has. What it did is in that program's log,
 `journalctl --user -u one-server-<key's first 12>` on Linux: `one --version` then says the new build.
-
-A server leaves a plugin deployed by hand as it is, so a plugin deploy is always safe beside a server release: deploy
-it even when the server is released too.
 
 One server or edge release on a machine at a time. `tooling/release` waits for another itself; run an edge deploy
 under `flock "${XDG_RUNTIME_DIR:-/tmp}/one-release.lock" bun edge.js deploy <address>`. The network's address and

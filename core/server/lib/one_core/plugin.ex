@@ -158,7 +158,7 @@ defmodule OneCore.Plugin do
     raises with the reason if it may not, which is then what the caller is told, and `OneCore.Call.reaches?/3`
     asks without raising. What the plugin made for whoever it runs for is reached without asking. Anything else
     is reached only if both the plugin and whoever it runs for have that relation to it, which the plugins that
-    decide `reach` say. `permissions` is the one The One App ships with, and its skill says how something is
+    decide `reach` say. `permissions` is one, which a network starts with, and its skill says how something is
     shared. With none, nothing is reached but by the network's first owner.
   - A tool runs for whoever asked, `call.subject`. Whoever asks
     can ask for a group they're a member of, or for the network: `call.subject` is then the group, what the tool
@@ -197,10 +197,6 @@ defmodule OneCore.Plugin do
     takes a `requestedSchema` for more (`%{message: ..., requestedSchema: %{type: "object", properties: ...}}`).
   - A tool that only reads says `read_only: true` beside its name. A client keeps its answers, shows them at
     once, and asks again behind them. After any other tool is called, every client is told that something changed.
-  - `essential/0`, if a plugin The One App ships with gives `true`, says a network can't work without it: every
-    server installs it for the network. One that doesn't is only available: deployed for the network, so it's in
-    the App Store, and installed for whoever adds it. Either way, the plugins it requires that the server ships
-    with are installed for whoever it's installed for, if they aren't there.
   - A plugin's module is what other plugins call, so its public functions besides these are what it provides
     them, and its code runs inside every plugin that requires it. One whose module has none runs only as itself,
     and is called by its tools. One that only provides functions leaves out `tools/0` and `call/3`.
@@ -608,7 +604,6 @@ defmodule OneCore.Plugin do
   @callback offers() :: [%{name: String.t(), kind: :observe | :mutate | :validate | :collect, description: String.t()}]
   @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
   @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-  @callback essential() :: boolean
   @callback title() :: String.t()
   @callback icon() :: String.t()
   @callback requires() :: %{String.t() => String.t()}
@@ -622,7 +617,6 @@ defmodule OneCore.Plugin do
                       offers: 0,
                       jobs: 0,
                       schedule: 3,
-                      essential: 0,
                       title: 0,
                       icon: 0,
                       requires: 0,

@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# Builds every NIF and program a server needs, One Core's and those of the plugins The One App ships with, for each
-# kind of machine a server runs on, or the kinds given, each beside its source: `core/server/nif/<crate>/<kind>.so`,
+# Builds every NIF and program a server needs, One Core's and those of this repo's plugins, for each kind of machine
+# a server runs on, or the kinds given, each beside its source: `core/server/nif/<crate>/<kind>.so`,
 # which `tooling/release` puts in a server, and as a plugin brings them (`OneCore.Plugin`),
 # `plugins/<name>/server/nif/<crate>/<kind>.so` and `plugins/<name>/server/bin/<crate>/<kind>`. A plugin is the same
 # files on every server of a network, so it's deployed with all of them:
 #
 #     tooling/nifs [kind...] && ONE_SUBJECT=network one deploy --name <name> --files-from plugins/<name>
 #
-# Each kind is built in one place, so every server build of a commit ships the same bytes, and a server finds the
-# plugins it ships unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM
+# Each kind is built in one place, so every build of a commit is the same bytes, and a plugin deployed again from
+# an unchanged folder is unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM
 # (`tooling/release`) and Windows' with cargo-xwin, as a DLL, which is kept under the same kind of name,
 # `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. From Linux, a Mac's are built on the Mac `ssh
 # mac` reaches, in its checkout ~/scratch/one-release, at the same commit, which is on GitHub, so what's built is
 # committed. The Mac sleeps, so only one whose inputs changed is built there: one that hasn't is the one built before,
-# from this machine's cache or from the latest server published for a Mac, whose `nifs` lists what each of its NIFs
-# was built from, as `$target/nifs/<kind>` does for the ones here, which `tooling/release` puts in a server.
+# from this machine's cache, or One Core's from the latest server published for a Mac, whose `nifs` lists what each
+# NIF was built from, as `$target/nifs/<kind>` does for the ones here, which `tooling/release` puts in a server, and
+# a plugin's from the plugin as the network deployed it.
 #
 # Each NIF is named for its build, what it's built from (`tooling/input-hash`), so a server loads a changed one beside
 # the one before (`OneCore.Nif`). The Mac is given the names this machine worked out, in NIF_BUILD_<CRATE>, so a
@@ -69,7 +70,13 @@ for kind in "${kinds[@]}"; do
       [[ ! -e $unpacked/nifs ]] || while read -r sum file; do
         case $file in
           core/*) crate=${file#core/server/nif/} && cp "$(echo "$unpacked"/lib/one_core-*/priv/native/"${crate%%/*}".so)" "$cache/$sum" ;;
-          plugins/*) cp "$unpacked/bundled/${file#plugins/}" "$cache/$sum" ;;
+          # A plugin's NIF says what it was built from in its module's name (`OneCore.Nif`), so the one the network
+          # deployed is taken where it's that. A program says nothing, so one that changed is built again.
+          plugins/*/server/nif/*)
+            plugin=${file#plugins/} && plugin=${plugin%%/*}
+            { ONE_SUBJECT=network one code --name "$plugin" 2>/dev/null || echo '{}'; } |
+              jq -r --arg path "${file#plugins/"$plugin"/}" '.files[$path].base64 // empty' | base64 -d >"$cache/$sum.new"
+            if grep -qaF "OneCore.Nifs.B$sum" "$cache/$sum.new"; then mv "$cache/$sum.new" "$cache/$sum"; else rm "$cache/$sum.new"; fi ;;
         esac
       done <"$unpacked/nifs"
       rm -r "$unpacked" "$unpacked.tar.gz"

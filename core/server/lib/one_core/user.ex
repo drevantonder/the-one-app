@@ -158,10 +158,18 @@ defmodule OneCore.User do
     end)
   end
 
+  # The plugins a network starts with, which whoever makes its first owner installs for it, each after the ones it
+  # uses: database and encryption keep what the others keep, permissions decides who may do what, sign-in says whose
+  # each device is, sandbox runs untrusted plugins, vault keeps accounts and secrets, soft-delete keeps what's
+  # deleted, notifications tells people things, and home-screen is the launcher every client opens first.
+  @starting ~w(database encryption permissions sign-in sandbox vault soft-delete notifications home-screen)
+
   @doc """
-  Makes the user `who` the network's first owner, which a network gets once: `:ok`, or `{:error, why}`. The
-  plugins that validate `owner` are asked, and the one that keeps who may do what writes it down then. Doing it
-  again for the same user finishes what an earlier try left undone.
+  Makes the user `who` the network's first owner, which a network gets once: `:ok`, or `{:error, why}`. Then the
+  plugins a network starts with are installed for it as the first owner installs any, from what the network has
+  deployed of them (`network/plugins/<name>`), and only then are the plugins that validate `owner` asked, so the one
+  that keeps who may do what is there to write it down, and the one that signs people in to say where they join.
+  Doing it again for the same user finishes what an earlier try left undone.
   """
   def make_first_owner(who) do
     if is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
@@ -170,12 +178,39 @@ defmodule OneCore.User do
 
       if wrote == :ok or first_owner() == who do
         Server.notify_servers(["network"])
-        with {:refuse, why} <- Hooks.validate("owner", %{"who" => who}, {nil, "network"}), do: {:error, why}
+        failed = for name <- @starting, why = starting(name, who), do: "#{name}: #{why}"
+
+        case Hooks.validate("owner", %{"who" => who}, {nil, "network"}) do
+          {:refuse, why} ->
+            {:error, why}
+
+          :ok when failed != [] ->
+            {:error,
+             "#{who} is the network's first owner, but these weren't installed for it: " <> Enum.join(failed, "; ")}
+
+          :ok ->
+            :ok
+        end
       else
         {:error, "The network's first owner is #{first_owner()}"}
       end
     else
       {:error, "The network's first owner is a user: users/<name>, in lowercase letters, digits and hyphens"}
+    end
+  end
+
+  # Installs one of the plugins a network starts with for it, unless it's there: `nil`, or why it wasn't.
+  defp starting(name, who) do
+    case OneCore.Plugins.Installed.read("network")[name] do
+      %{"state" => "installed"} ->
+        nil
+
+      _ ->
+        case OneCore.Plugins.Lifecycle.install("network", name, "network/plugins/#{name}", who) do
+          %{"state" => "installed"} -> nil
+          %{"state" => state} = record -> record["why"] || "it's #{state}"
+          {:error, why} -> why
+        end
     end
   end
 

@@ -50,8 +50,8 @@ defmodule OneCore.MixProject do
 
   # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` runs it: built as one, it
   # has one set of features, so nothing in it is built twice or again for nothing. Each is named for its build, as
-  # `tooling/nifs` names it (`OneCore.Nif`). One Core's go where the server loads them (`priv/native`), and those of the
-  # plugins The One App ships with beside their source, where a plugin brings them (`OneCore.Plugin`): here, its
+  # `tooling/nifs` names it (`OneCore.Nif`). One Core's go where the server loads them (`priv/native`), and those of this
+  # repo's plugins beside their source, where a plugin brings them (`OneCore.Plugin`): here, its
   # folder is what's deployed. `tooling/release` and `tooling/nifs` build them for every kind of machine, as a server
   # built for one is. A crash in a Rust NIF ends the VM: Rust panics are caught, and what's left is rare. Each is
   # removed before it's put there again, since a server running from this checkout has it loaded.

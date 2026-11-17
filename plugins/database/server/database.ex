@@ -5,12 +5,8 @@ defmodule Database do
   """
   @behaviour OneCore.Plugin
 
-  # Most plugins keep what they keep in it, the essential ones among them.
   @impl true
   def icon, do: "icon.svg"
-
-  @impl true
-  def essential, do: true
 
   alias Database.Lease
   alias OneCore.Call

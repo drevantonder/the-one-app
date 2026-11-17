@@ -41,8 +41,7 @@ const UPDATE_ASKED: &str = "Update asked";
 /// Which build of `one` this is, which an update takes the latest of: the app, with its window, or `one` built
 /// without it, for a Linux machine with no screen.
 const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
-/// How long a build being tried has to start and answer before the one before it is started again: a server
-/// acting for the network deploys what it ships with that the network has never had before it's running.
+/// How long a build being tried has to start and answer before the one before it is started again.
 const START: Duration = Duration::from_secs(180);
 
 /// Where an update of this device's server is, which this program tells the server on its input as it moves on,

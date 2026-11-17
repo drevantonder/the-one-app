@@ -5,13 +5,9 @@ defmodule OneCore.Application do
   alias OneCore.Plugins.Deploy
 
   # A server is started for its owner, its `:owner` setting: a user, a group or the network. One that isn't on
-  # their list doesn't start: `{:not_joined, key}` says so, with its key. The plugins The One App ships with are
-  # the network's, so a server acting for it deploys the ones the network has never had, and those whose
-  # latest version a server bundled from other files, once it's started (`OneCore.Plugins.Deploy.deploy_bundled/0`), saying
-  # each in the log and to `builds` as it goes: a build being tried may need them to answer at all. Then, once it's up
-  # (`OneCore.Server.up?/0`), one server builds again the apps built against another UI library than the one it ships
-  # with, for everyone (`OneCore.Plugins.Deploy.rebuild/0`), and `OneCore.Plugins.Deploy.await_bundled/0` waits for
-  # both.
+  # their list doesn't start: `{:not_joined, key}` says so, with its key. Once it's up (`OneCore.Server.up?/0`), one
+  # server builds again the apps built against another UI library than the one it ships with, for everyone
+  # (`OneCore.Plugins.Deploy.rebuild/0`).
 
   # How long a server that's starting may take to be up, in seconds, after which the edge takes it for on once it's
   # connected: a build being tried has three minutes to answer by its key, after its plugins have started.
@@ -29,13 +25,14 @@ defmodule OneCore.Application do
     if Servers.joined?(key, Application.get_env(:one_core, :owner, "network")) do
       # What state each call is in, which this process, the application's, keeps.
       OneCore.Call.State.table()
+      # What everyone has deployed (`OneCore.Plugins.Deploy.deployed/0`), which this process keeps too.
+      Deploy.table()
 
       # `OneCore.Waiting` is who waits for something to happen, by what: `:seen`, another server coming or going
       # (`OneCore.Servers.back/1`), and `:update`, this one's update moving on (`OneCore.Builds.await_update/1`).
       children = [
         {Registry, keys: :duplicate, name: OneCore.Waiting},
         {Task.Supervisor, name: OneCore.Asks},
-        Deploy,
         Plugins,
         Server,
         Services,
@@ -50,8 +47,7 @@ defmodule OneCore.Application do
 
       with {:ok, _supervisor} = started <-
              Supervisor.start_link(children, strategy: :one_for_one, name: OneCore.Supervisor) do
-        bundled = fn ->
-          if Servers.here?("network"), do: Deploy.deploy_bundled()
+        rebuild = fn ->
           Server.await_up()
           Deploy.rebuild()
         end
@@ -62,7 +58,7 @@ defmodule OneCore.Application do
           Servers.up()
         end
 
-        Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, bundled}, id: :bundled))
+        Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, rebuild}, id: :rebuild))
         Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, up}, id: :up))
         started
       end

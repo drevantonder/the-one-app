@@ -7,8 +7,10 @@
 # app's window is built on.
 #
 # It builds what isn't built, then starts the network's server in the folder, which is where everything the network
-# keeps goes: its bucket, each server's home, a client's home and the logs. A new network starts with the plugins
-# The One App ships with. Starting again in the same folder carries on with what's there, and Ctrl-C stops it.
+# keeps goes: its bucket, each server's home, a client's home and the logs. A new network has every plugin of this
+# repo deployed for it, and installs the ones a network starts with (`OneCore.User.make_first_owner/1`); after that,
+# deploy a plugin you change into it. Starting again in the same folder carries on with what's there, and Ctrl-C
+# stops it.
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
