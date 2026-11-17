@@ -35,10 +35,10 @@ defmodule OneCore.Jobs do
     if timer, do: Process.cancel_timer(timer)
     now = System.os_time(:second)
 
-    # A plugin in sandbox mode runs on any server acting for whoever it's installed for.
+    # An untrusted plugin runs on any server acting for whoever it's installed for.
     scheduled =
-      for {installed, name, jobs, sandbox} <- Plugins.scheduled(),
-          Servers.runs?(installed) or (sandbox and Servers.here?(installed)),
+      for {installed, name, jobs, trusted} <- Plugins.scheduled(),
+          Servers.runs?(installed) or (not trusted and Servers.here?(installed)),
           do: {installed, name, jobs}
 
     for {installed, name, jobs} <- scheduled, Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))) do

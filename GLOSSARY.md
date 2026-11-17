@@ -27,8 +27,11 @@ A bundled plugin's own words are defined in that plugin's `SKILL.md`.
   accounts: its sign-in page, if it has one, is its `sign_in` tool's.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
-- **Sandbox mode**: a plugin run in a VM of its own, for each user, group or network it's installed for, behind its
-  machine's sandbox, by any of the network's servers. So installing a stranger's plugin needs no server of one's own.
+- **Trusted**, **Untrusted**: the state of an installed plugin, apart from where it is in its lifecycle, and either
+  can become the other. A trusted plugin runs in its server's VM, on a server of whoever it's installed for. An
+  untrusted plugin runs in a sandbox: a VM of its own, for each user, group or network it's installed for, by any of
+  the network's servers. So installing a stranger's plugin needs no server of one's own. The sandbox is only where an
+  untrusted plugin runs (bubblewrap, Seatbelt, AppContainer), never what a plugin is. Avoid: sandboxed, sandbox mode.
 - **Widget**: what a plugin shows on a Home Screen page at a glance. The plugin returns a layout from a fixed list of parts, in
   a phone's own sizes, and each client draws it. So one widget shows in the client, on a phone's own home screen, and to
   an agent as text. A control in one calls a tool.

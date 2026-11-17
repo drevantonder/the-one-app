@@ -38,7 +38,7 @@ you never see the secret. If someone pastes one anyway, keep it with `set` and d
   to, and say what you did.
 
 A plugin uses an account through this plugin's tools, which act for the plugin that calls them (its `caller`),
-and never sees a secret, so a plugin in sandbox mode can use one too. It names them in its `permissions/0`:
+and never sees a secret, so an untrusted plugin can use one too. It names them in its `permissions/0`:
 
     def permissions, do: ~w(vault_fetch vault_items vault_sign_in vault_stop_using)
 

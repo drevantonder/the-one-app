@@ -297,7 +297,7 @@ async fn built(client: &Client, of: &str, name: &str, plugin: &Path) -> Result<(
 }
 
 /// Deploys the plugin `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked. With
-/// `sandbox` it runs in sandbox mode; left out, as the version before did. With `new` it's made where one by that
+/// `untrusted` it's untrusted, and runs in a sandbox; left out, it's as the version before was. With `new` it's made where one by that
 /// name is installed for someone else `of` is in, as `deploy`'s `new` says.
 async fn deploy(
     client: &Client,
@@ -306,7 +306,7 @@ async fn deploy(
     folder: &Path,
     from: &Source,
     commit: &str,
-    sandbox: bool,
+    untrusted: bool,
     new: bool,
 ) -> Result<Locked> {
     let plugin = folder.join("plugins").join(name);
@@ -324,7 +324,7 @@ async fn deploy(
     built(client, of, name, &plugin).await?;
     println!(
         "{name}'s code, from {} at {}, is in {}. Read it before installing (the skill installing-plugins): its \
-         server code runs with full access on {of}'s servers, or in sandbox mode with only what it's given.",
+         server code runs with full access on {of}'s servers, or untrusted, in a sandbox, with only what it's given.",
         from.spec,
         &commit[..12],
         plugin.display()
@@ -332,8 +332,8 @@ async fn deploy(
     let files = crate::read(&plugin, false)?;
     let mut deployed =
         json!({"name": name, "files": files, "from": {"source": from.spec, "ref": from.reference, "commit": commit}});
-    if sandbox {
-        deployed["sandbox"] = json!(true);
+    if untrusted {
+        deployed["trusted"] = json!(false);
     }
     if new {
         deployed["new"] = json!(true);
@@ -377,20 +377,20 @@ async fn report(from: &Source, name: &str, commit: &str) {
     let _ = tokio::time::timeout(Duration::from_secs(3), post).await;
 }
 
-/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--sandbox] [--new]`, for whoever `ONE_SUBJECT` says, or
-/// this device's user. `--sandbox` runs them in sandbox mode, which needs no server of the user's; `--new` makes a
+/// `one install <repo>[@<ref>] --plugin <name> ... [--list] [--untrusted] [--new]`, for whoever `ONE_SUBJECT` says, or
+/// this device's user. `--untrusted` makes them untrusted, run in a sandbox, which needs no server of the user's; `--new` makes a
 /// second copy where one by that name is installed for the network or a group they're in, which is refused without.
 pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
     let source = Source::parse(&args[0])?;
-    let (mut names, mut list, mut sandbox, mut new) = (Vec::new(), false, false, false);
+    let (mut names, mut list, mut untrusted, mut new) = (Vec::new(), false, false, false);
     let mut flags = args[1..].iter();
     while let Some(flag) = flags.next() {
         match flag.as_str() {
             "--list" => list = true,
-            "--sandbox" => sandbox = true,
+            "--untrusted" => untrusted = true,
             "--new" => new = true,
             "--plugin" => names.push(flags.next().context("--plugin needs a plugin's name")?.clone()),
-            other => bail!("`{other}` isn't something `one install` takes: --plugin <name>, --sandbox, --new or --list"),
+            other => bail!("`{other}` isn't something `one install` takes: --plugin <name>, --untrusted, --new or --list"),
         }
     }
     let (folder, commit) = source.fetch(None)?;
@@ -441,7 +441,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         None => BTreeMap::new(),
     };
     for name in &order {
-        let it = deploy(client, &of, name, &folder, &source, &commit, sandbox, new).await?;
+        let it = deploy(client, &of, name, &folder, &source, &commit, untrusted, new).await?;
         if let Some(file) = &lock {
             locked.insert(name.clone(), it);
             write_lock(file, &locked)?;

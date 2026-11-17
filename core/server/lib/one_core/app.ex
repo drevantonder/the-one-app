@@ -50,11 +50,11 @@ defmodule OneCore.App do
   library. `{:error, why}` says why it didn't build: the compiler's own words, a problem to a line, with its file and
   line.
 
-  A plugin in `sandbox` mode is a stranger's, whose app's build could otherwise read the server's files (an import of
-  any path) or run its own code. So its packages install without their scripts, and it's built behind the machine's
+  An untrusted plugin is a stranger's, whose app's build could otherwise read the server's files (an import of any
+  path) or run its own code. So unless it's `trusted`, its packages install without their scripts, and it's built in a
   sandbox (`OneCore.Sandbox.run/3`), which reads only Bun, the UI library's build and the app.
   """
-  def build(files, sandbox \\ false) do
+  def build(files, trusted) do
     {app, rest} = Map.split_with(files, fn {path, _} -> String.starts_with?(path, @client) end)
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
@@ -65,8 +65,8 @@ defmodule OneCore.App do
 
       with {:ok, bun} <- bun(),
            {:ok, builder} <- builder(bun),
-           :ok <- install(bun, source, sandbox),
-           :ok <- built(bun, builder, source, out, sandbox) do
+           :ok <- install(bun, source, trusted),
+           :ok <- built(bun, builder, source, out, trusted) do
         built =
           for path <- Path.wildcard(Path.join(out, "**"), match_dot: true), File.regular?(path), into: %{} do
             {@client <> Path.relative_to(path, out), File.read!(path)}
@@ -172,11 +172,11 @@ defmodule OneCore.App do
   end
 
   # An app's own packages, which it names in its package.json, and none for an app that names none.
-  defp install(bun, source, sandbox) do
+  defp install(bun, source, trusted) do
     with {:ok, text} <- File.read(Path.join(source, "package.json")),
          {:ok, about} <- JSON.decode(text),
          named when map_size(named) > 0 <- Map.merge(about["dependencies"] || %{}, about["devDependencies"] || %{}) do
-      scripts = if sandbox, do: ["--ignore-scripts"], else: []
+      scripts = if trusted, do: [], else: ["--ignore-scripts"]
       run(bun, ["install" | scripts], "The app's packages didn't install", source)
     else
       {:error, %JSON.DecodeError{}} -> {:error, "client/package.json isn't JSON."}
@@ -184,10 +184,10 @@ defmodule OneCore.App do
     end
   end
 
-  defp built(bun, builder, source, out, false),
+  defp built(bun, builder, source, out, true),
     do: run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder)
 
-  defp built(bun, builder, source, out, true) do
+  defp built(bun, builder, source, out, false) do
     File.mkdir_p!(out)
     bun = real(bun)
     policy = %{read: [Path.dirname(bun), builder], write: [source, out], env: %{"HOME" => "/tmp", "NO_COLOR" => "1"}, memory: nil}

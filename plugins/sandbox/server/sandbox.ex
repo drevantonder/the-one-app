@@ -1,6 +1,6 @@
 defmodule Sandbox do
   @moduledoc """
-  The wall a plugin in sandbox mode runs behind: this machine's own process sandbox, around a program One Core
+  The wall an untrusted plugin runs behind: this machine's own process sandbox, around a program One Core
   starts (`OneCore.Sandbox`). On Linux it's bubblewrap, the distro's own `bwrap` (Ubuntu's AppArmor lets that one
   make the namespaces it needs), in new namespaces with no network, under an address-space limit (`prlimit`). On a
   Mac it's a Seatbelt profile (`sandbox-exec`). On Windows it's an AppContainer, Windows' own sandbox for apps, under
@@ -15,8 +15,8 @@ defmodule Sandbox do
   """
   @behaviour OneCore.Plugin
 
-  # Without it no plugin runs in sandbox mode, and a network's members with no server of their own can run plugins
-  # only that way.
+  # Without it no untrusted plugin runs, and a network's members with no server of their own can run only untrusted
+  # plugins.
   @impl true
   def essential, do: true
 
@@ -139,7 +139,7 @@ defmodule Sandbox do
 
   defp found(name, package) do
     case System.find_executable(name) do
-      nil -> {:error, "Sandbox mode needs #{name} on this server, from the package #{package}"}
+      nil -> {:error, "An untrusted plugin's sandbox needs #{name} on this server, from the package #{package}"}
       path -> {:ok, path}
     end
   end

@@ -1,4 +1,4 @@
-# One Core inside a plugin's own VM, in sandbox mode (`OneCore.Sandbox`, which says the protocol). The plugin is
+# One Core inside an untrusted plugin's VM, in its sandbox (`OneCore.Sandbox`, which says the protocol). The plugin is
 # compiled against these modules, which have the names and functions of the server's own, and each of their
 # functions is a message to the server. This file is compiled by the VM it runs in, behind the wall.
 
@@ -80,7 +80,7 @@ end
 
 defmodule OneCore.Artifact do
   @moduledoc false
-  # An artifact as a plugin in sandbox mode holds it: a handle the server gave, which it looks up, and its name.
+  # An artifact as an untrusted plugin holds it: a handle the server gave, which it looks up, and its name.
   alias OneCore.Sandbox.Child
 
   defstruct [:handle, :prefix, :codec]
@@ -463,7 +463,7 @@ defmodule OneCore.Sandbox.Child do
   @doc "The behaviours a module says it follows, one `behaviour` attribute each."
   def behaviours(module), do: List.flatten(Keyword.get_values(module.module_info(:attributes), :behaviour))
 
-  # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what sandbox mode doesn't offer it.
+  # What the plugin says of itself, as `OneCore.Plugins.Version` takes it, with what an untrusted plugin isn't offered.
   defp described(plugin, main, modules, uses) do
     value = fn function, none ->
       if function_exported?(plugin, function, 0), do: apply(plugin, function, []), else: none
@@ -515,8 +515,8 @@ end
 
 defmodule OneCore.Sandbox.Check do
   @moduledoc false
-  # What a plugin's modules use that sandbox mode doesn't offer, a sentence each with its file and line and what to
-  # do instead. It reads the compiled code, after every macro, so it sees what will run. It's a check for the
+  # What a plugin's modules use that an untrusted plugin isn't offered, a sentence each with its file and line and what
+  # to do instead. It reads the compiled code, after every macro, so it sees what will run. It's a check for the
   # author, not the wall: the wall is the sandbox this VM runs in.
 
   @offered %{
@@ -540,7 +540,7 @@ defmodule OneCore.Sandbox.Check do
 
     using =
       for name <- uses, calls = calls(modules_of(name), loaded), calls != [] do
-        "#{where(plugin)}: it uses #{name}, whose code would run in its VM in sandbox mode, and can't there " <>
+        "#{where(plugin)}: it uses #{name}, whose code would run in its sandbox, and can't there " <>
           "(#{hd(calls)}#{if length(calls) > 1, do: " And #{length(calls) - 1} more."}) Call its tools instead, which " <>
           "permissions/0 names, and leave what can't run out of uses/0."
       end
@@ -549,21 +549,22 @@ defmodule OneCore.Sandbox.Check do
       for hook <- hooks,
           hook in @deciding,
           do:
-            "#{where(plugin)}: hooks/0 names `#{hook}`, which changes or decides what happens. In sandbox mode a " <>
-              "plugin only observes: hook `called` or `changed` instead, or run it on a server of its owner's."
+            "#{where(plugin)}: hooks/0 names `#{hook}`, which changes or decides what happens. An untrusted " <>
+              "plugin only observes: hook `called` or `changed` instead, or run it trusted, on a server of its owner's."
 
     offering =
       if offers == [],
         do: [],
         else: [
-          "#{where(plugin)}: offers/0 offers hooks, which sandbox mode doesn't: run it on a server of its owner's."
+          "#{where(plugin)}: offers/0 offers hooks, which an untrusted plugin doesn't: run it trusted, on a server " <>
+            "of its owner's."
         ]
 
     serving =
       for service <- services,
           do:
-            "#{service} is a service, which runs on particular machines: sandbox mode has none. A plugin with one " <>
-              "runs on a server of its owner's."
+            "#{service} is a service, which runs on particular machines: an untrusted plugin has none. A plugin " <>
+              "with one runs trusted, on a server of its owner's."
 
     calls ++ using ++ hooking ++ offering ++ serving
   end
@@ -632,19 +633,20 @@ defmodule OneCore.Sandbox.Check do
         nil
 
       Map.has_key?(@offered, m) ->
-        if f not in @offered[m], do: "#{name} isn't offered in sandbox mode. #{instead(m, f)}"
+        if f not in @offered[m], do: "#{name} isn't offered to an untrusted plugin. #{instead(m, f)}"
 
       m == OneCore.Service ->
-        "#{name} reaches a service, which sandbox mode has none of: a plugin with one runs on a server of its owner's."
+        "#{name} reaches a service, which an untrusted plugin has none of: a plugin with one runs trusted, on a " <>
+          "server of its owner's."
 
       String.starts_with?(inspect(m), "OneCore.") ->
         "#{name} is One Core's own, which a plugin doesn't call."
 
       {m, f} in @programs ->
-        "#{name} starts a program, which sandbox mode doesn't: it has none to start."
+        "#{name} starts a program, which an untrusted plugin doesn't: it has none to start."
 
       m in @network ->
-        "#{name} reaches the network, which sandbox mode doesn't. Fetch from the web with " <>
+        "#{name} reaches the network, which an untrusted plugin doesn't. Fetch from the web with " <>
           "`OneCore.Call.fetch(call, %{url: ...})`, from a host the plugin's permissions/0 names."
 
       m == Jason ->
@@ -653,8 +655,8 @@ defmodule OneCore.Sandbox.Check do
       not match?({:module, _}, Code.ensure_loaded(m)) ->
         plugin = m |> inspect() |> String.split(".") |> hd() |> Macro.underscore() |> String.replace("_", "-")
 
-        "#{name} is another plugin's function, or a package that isn't here. In sandbox mode another plugin is " <>
-          "called by its tool, as whoever the call runs for: `OneCore.Call.tool(call, \"#{plugin}\", \"#{f}\", " <>
+        "#{name} is another plugin's function, or a package that isn't here. An untrusted plugin calls " <>
+          "another by its tool, as whoever the call runs for: `OneCore.Call.tool(call, \"#{plugin}\", \"#{f}\", " <>
           "%{...})`, which permissions/0 names."
 
       true ->
@@ -662,7 +664,7 @@ defmodule OneCore.Sandbox.Check do
     end
   end
 
-  defp instead(OneCore.Call, :run_hook), do: "A plugin in sandbox mode offers no hooks."
+  defp instead(OneCore.Call, :run_hook), do: "An untrusted plugin offers no hooks."
   defp instead(OneCore.Call, f) when f in [:forward, :run_elsewhere, :refused], do: "One Core does that itself."
   defp instead(OneCore.Artifact, :link), do: "Answer a blob as `{:file, kind, artifact, name}` instead."
   defp instead(_m, _f), do: ""

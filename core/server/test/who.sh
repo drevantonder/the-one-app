@@ -5,7 +5,7 @@
 # only what both it and its user may. A plugin is whoever's deployed it, and has an artifact of its own for each
 # user, group and the network it's installed for, and its skill is seen by whoever it's installed for. Its code is open to
 # whoever it's in use for, and what it keeps isn't. Its code runs only on servers of whoever it's installed for, so
-# someone with none adds none for themselves but in sandbox mode, where it calls only the tools it's permitted and a
+# someone with none adds none for themselves but an untrusted one, which runs in a sandbox, where it calls only the tools it's permitted and a
 # stranger's plugin keeps nothing of one person's for another's call, and an installer of the network adds them for it and does nothing else an owner does, renaming one among them. One Core's own tools are whoever's may. Anyone brings a server,
 # which acts for them alone until its owner chooses who else and they agree, runs only their plugins and passes on
 # the rest. Whoever may deploy a plugin looks into it as it runs, at their own calls alone, and not into a sensitive
@@ -90,8 +90,8 @@ refused() { ! output=$("$@" 2>&1) && shown "refused" "$@" || { echo "this was an
 
 # The plugins this tests with. `notes` makes each note an artifact of whoever wrote it. `reader` reads notes it
 # didn't make. `gate` decides calls. `ticker` has a job, whose call takes a second before it writes when it was
-# due and which server made it. `boxed` runs in sandbox mode and may call only `notes`' `read`. `spy` runs in sandbox
-# mode and is hostile: it keeps what it's given, and its own artifact, in its VM, for a later call to use.
+# due and which server made it. `boxed` is untrusted and may call only `notes`' `read`. `spy` is untrusted
+# and hostile: it keeps what it's given, and its own artifact, in its VM, for a later call to use.
 mkdir -p "$folder"/{notes,reader,gate,approvals,ticker,diary,stuck,lost,boxed,spy}/server
 cat >"$folder/spy/server/spy.ex" <<'EOF'
 defmodule Spy do
@@ -392,14 +392,14 @@ may as alice permissions share --artifact "$note" --relation viewer --who networ
 may as alice reader read --note "$note"
 refused as dave reader read --note "$note"
 
-say "A plugin's code runs on a server of whoever it's for: with none, nobody adds one for them but in sandbox mode, and an installer adds them for the network"
+say "A plugin's code runs on a server of whoever it's for: with none, nobody adds one for them but an untrusted one, and an installer adds them for the network"
 refused as alice deploy --name diary --files-from "$folder/diary"
-may as alice deploy --name boxed --files-from "$folder/boxed" --sandbox
+may as alice deploy --name boxed --files-from "$folder/boxed" --no-trusted
 may as alice boxed read --plugin notes --note "$note"
 refused as alice boxed read --plugin reader --note "$note"
 # Installed by alice and by bob, it runs in a VM for each, so what it keeps in alice's call isn't there in bob's, and
 # what it was handed in alice's is refused in bob's. Each server has its VMs, so they're called through one.
-may as alice deploy --name spy --files-from "$folder/spy" --sandbox
+may as alice deploy --name spy --files-from "$folder/spy" --no-trusted
 may as alice permissions share --artifact users/alice/plugins/spy --relation viewer --who everyone
 may as bob install --plugin users/alice/plugins/spy
 may via server as alice spy keep --text "alice's secret"
@@ -413,7 +413,7 @@ refused via server as bob spy steal --handle "$handle" --name "$own"
 refused via server as bob spy reach --name "$own"
 may via server as alice spy steal --handle "$handle" --name "$own"
 # Another plugin of the same files is another plugin, in a VM of its own, which has nothing of the first's.
-may as alice deploy --name spy2 --files-from "$folder/spy" --sandbox
+may as alice deploy --name spy2 --files-from "$folder/spy" --no-trusted
 may via server as alice spy2 kept
 [[ $output != *"alice's secret"* ]]
 refused via server as alice spy2 steal --handle "$handle" --name "$own"

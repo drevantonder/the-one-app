@@ -59,7 +59,7 @@ defmodule OneCore.Plugins.Version do
     :icon,
     essential: false,
     permissions: [],
-    sandbox: false
+    trusted: true
   ]
 
   # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
@@ -215,11 +215,11 @@ defmodule OneCore.Plugins.Version do
   end
 
   @doc """
-  A version of the plugin `artifact` in sandbox mode, from its files as a server keeps them and what its code said of
-  itself in its own VM (`OneCore.Sandbox`): `{:ok, version}`, or `{:error, why}`. Its code never loads
+  A version of the untrusted plugin `artifact`, from its files as a server keeps them and what its code said of
+  itself in its sandbox (`OneCore.Sandbox`): `{:ok, version}`, or `{:error, why}`. Its code never loads
   here, so it's described as a version a server doesn't run is, and is checked as one that loads is.
   """
-  def sandboxed(artifact, files, description) do
+  def untrusted(artifact, files, description) do
     name = Path.basename(artifact)
     code = code(files)
     under = {:described, artifact, code}
@@ -262,7 +262,7 @@ defmodule OneCore.Plugins.Version do
           ui: App.ui(files),
           title: version.title || name,
           artifact: artifact,
-          sandbox: true
+          trusted: false
       }
 
       {:ok, version}
@@ -486,7 +486,7 @@ defmodule OneCore.Plugins.Version do
   end
 
   # A version from what its plugin said of itself, if that's what a plugin says: `plugin` is its module, or nil for
-  # one in sandbox mode, whose module is in its own VM.
+  # an untrusted one, whose module is in its sandbox's VM.
   defp checked(under, plugin, description, services, rest) do
     %{tools: tools, apps: apps, title: title, icon: icon, widgets: widgets, uses: uses, hooks: hooks} = description
     %{offers: offers, jobs: jobs, permissions: permissions} = description

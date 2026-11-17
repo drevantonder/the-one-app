@@ -42,8 +42,8 @@ defmodule OneCore.MixProject do
 
   # The program is One Core. On a developer's machine it's also `mix network`, which `tooling/network` runs, at the repo's
   # root.
-  # `OneCore.Redact` is compiled by a sandboxed plugin's VM too, which has none of the server's code, so it's where that
-  # VM finds it, in `priv/sandbox`.
+  # `OneCore.Redact` is compiled by an untrusted plugin's VM too, which has none of the server's code, so it's where
+  # that VM finds it, in `priv/sandbox`.
   defp elixirc_paths(:dev), do: ["lib", "priv/sandbox/redact.ex", Path.expand("../../tooling/network.ex", __DIR__)]
   defp elixirc_paths(_env), do: ["lib", "priv/sandbox/redact.ex"]
 

@@ -270,8 +270,8 @@ defmodule OneCore.Plugins.Calls do
       ask = {"hooks/call", %{installed: at, plugin: name, kind: kind, hook: hook, about: about}}
       call = called(at, name, versions, ask, principal, forwarded)
 
-      # A plugin in sandbox mode only observes: it mutates, validates and collects nothing.
-      if hook in version.hooks and observes?(call, about) and (kind == :observe or not version.sandbox),
+      # An untrusted plugin only observes: it mutates, validates and collects nothing.
+      if hook in version.hooks and observes?(call, about) and (kind == :observe or version.trusted),
         do:
           {:ok,
            Hooks.check_result(
@@ -340,10 +340,10 @@ defmodule OneCore.Plugins.Calls do
         Server.changed()
       end
 
-      # A plugin in sandbox mode has its jobs kept in its own VM, by the plugin it uses there.
-      if versions[name].sandbox,
-        do: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, scheduled),
-        else: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, versions[name].jobs, fire))
+      # An untrusted plugin has its jobs kept in its sandbox, by the plugin it uses there.
+      if versions[name].trusted,
+        do: for(keeper <- keepers(Map.delete(versions, name)), do: keeper.schedule(scheduled, versions[name].jobs, fire)),
+        else: Sandbox.call(versions, name, {:schedule, versions[name].jobs}, scheduled)
 
       {:ok, :ok}
     end)
@@ -364,11 +364,11 @@ defmodule OneCore.Plugins.Calls do
     end)
   end
 
-  # A plugin's tool or hook, run by its module here or, in sandbox mode, in its own VM.
+  # A plugin's tool or hook, run by its module here or, for an untrusted plugin, in its sandbox.
   defp invoked(versions, name, what, call) do
     running(call, fn ->
       case {versions[name], what} do
-        {%Version{sandbox: true}, what} -> Sandbox.call(versions, name, what, call)
+        {%Version{trusted: false}, what} -> Sandbox.call(versions, name, what, call)
         {version, {:tool, tool, inputs}} -> version.plugin.call(tool, inputs, call)
         {version, {:hook, hook, about}} -> version.plugin.hook(hook, about, call)
       end
@@ -394,11 +394,11 @@ defmodule OneCore.Plugins.Calls do
 
   # What a function of a plugin is called with: who asked, who it runs for, and what was asked, to pass on. It's run
   # by a server that runs the plugins of whoever it was installed for, or by any server acting for them where the
-  # plugin is in sandbox mode: this one, or one that it's passed on to.
+  # plugin is untrusted: this one, or one that it's passed on to.
   defp called(at, name, versions, ask, principal, forwarded) do
     call = new_call(at, name, versions, ask, principal, forwarded)
 
-    if Servers.runs?(at) or (versions[name].sandbox and Servers.here?(at)),
+    if Servers.runs?(at) or (not versions[name].trusted and Servers.here?(at)),
       do: call,
       else: Call.run_elsewhere(call, at)
   end

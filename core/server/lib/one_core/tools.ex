@@ -101,11 +101,11 @@ defmodule OneCore.Tools do
       running stays.
       The skill `building-plugins` says how to write a plugin. It's yours, and is installed for you: asked for a group
       or for the network, it's theirs. Its code runs on a server of yours, so you need one: set one up in Devices, or
-      ask for it to be installed for everyone, by the network's launcher (its skill says how). In sandbox mode
-      (`sandbox`) it runs in a VM of its own behind its machine's sandbox, on any of the network's servers, so it needs
-      no server of yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0
-      names. It answers with them. One nobody has installed is removed as anything deleted is, by the plugin that keeps
-      what's deleted, where there is one (recently-deleted).
+      ask for it to be installed for everyone, by the network's launcher (its skill says how). An untrusted plugin
+      (`trusted: false`) runs in a sandbox, a VM of its own on any of the network's servers, so it needs no server of
+      yours: it then reaches only what One Core hands it, and the tools and hosts its permissions/0 names. It answers
+      with them. One nobody has installed is removed as anything deleted is, by the plugin that keeps what's deleted,
+      where there is one (recently-deleted).
       `one install <owner>/<repo> --plugin <name>` deploys one from a git repo, saying where it came from (`from`).
       `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
       refused where the live version came from a commit that yours doesn't contain, unless `--force`.
@@ -133,10 +133,10 @@ defmodule OneCore.Tools do
             required: ["source", "commit"],
             additionalProperties: false
           },
-          sandbox: %{
+          trusted: %{
             type: "boolean",
             description:
-              "Whether it runs in sandbox mode. Left out, it runs as the version before did, and a new one doesn't"
+              "Whether it's trusted, or runs in a sandbox. Left out, it's as the version before was, and a new one is trusted"
           },
           new: %{
             type: "boolean",
@@ -151,11 +151,11 @@ defmodule OneCore.Tools do
         properties: %{
           name: %{type: "string", description: "The plugin's name"},
           version: %{type: "integer", description: "The version now running"},
-          sandbox: %{type: "boolean", description: "Whether it runs in sandbox mode"},
+          trusted: %{type: "boolean", description: "Whether it's trusted, or runs in a sandbox"},
           permissions: @permissions,
           warnings: %{type: ["string", "null"], description: "What the compiler warns of, if anything"}
         },
-        required: ["name", "version", "sandbox", "permissions", "warnings"]
+        required: ["name", "version", "trusted", "permissions", "warnings"]
       }
     },
     %{
@@ -183,7 +183,7 @@ defmodule OneCore.Tools do
       description: """
       Lists the plugins installed for you and for the network, as `npm ls` does packages: asked for a group, for it
       and the network. Each with the name it's installed by, who it's installed `for`, its artifact (`plugin`), its
-      latest version, whether it runs in sandbox mode (`sandbox`), what it may do beyond its own (`permissions`), the hash
+      latest version, whether it's `trusted` or runs in a sandbox, what it may do beyond its own (`permissions`), the hash
       of the files that version was deployed from (`source`), and, if it was installed from
       a git repo, where from (`from`): its `source`, the `ref` asked for, the `commit`, whether it had changes not
       committed (`dirty`), and the `hash` of the files as installed, which differs from `source` once it's changed since. `one plugins check` says which of those
@@ -203,7 +203,7 @@ defmodule OneCore.Tools do
                 for: %{type: "string", description: "Who it's installed for"},
                 plugin: %{type: "string", description: "Its artifact: users/alice/plugins/notes"},
                 version: %{type: ["integer", "null"], description: "Its latest version"},
-                sandbox: %{type: "boolean"},
+                trusted: %{type: "boolean"},
                 permissions: @permissions,
                 source: %{type: ["string", "null"], description: "The hash of the files its latest version was deployed from"},
                 from: %{
@@ -218,7 +218,7 @@ defmodule OneCore.Tools do
                   }
                 }
               },
-              required: ["name", "for", "plugin", "sandbox", "permissions"]
+              required: ["name", "for", "plugin", "trusted", "permissions"]
             }
           }
         },
@@ -230,7 +230,7 @@ defmodule OneCore.Tools do
       description: """
       Adds a plugin someone else deployed for you: asked for a group or for the network, for them. It answers with
       what the plugin may do beyond its own (its permissions).
-      Its code runs on a server of yours, so you need one, unless it runs in sandbox mode; for the network, its owners
+      Its code runs on a server of yours, so you need one, unless it's untrusted; for the network, its owners
       and installers add plugins, and anyone may ask them to, by the network's launcher (its skill says how), which
       also puts an app of a plugin in use for the network on your page without installing anything.
       `one install <owner>/<repo> --plugin <name>` installs one from a git repo instead, as a copy of your own.
@@ -626,8 +626,8 @@ defmodule OneCore.Tools do
 
       Servers.running(owner) == [] ->
         raise "A plugin for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
-                "Set one up in Devices, #{Deploy.ask_to_install()}, or run it in sandbox mode (deploy with " <>
-                "sandbox: true), which any of the network's servers runs for anyone."
+                "Set one up in Devices, #{Deploy.ask_to_install()}, or deploy it untrusted (trusted: false), " <>
+                "to run in a sandbox, which any of the network's servers runs for anyone."
 
       true ->
         forward.({:running, owner})
@@ -636,11 +636,11 @@ defmodule OneCore.Tools do
 
   # A plugin is whoever's deployed it. Deploying over one is changing it, and a new one is installed for whoever it's
   # deployed for. Either way it's loaded where it will run.
-  # A plugin in sandbox mode runs on any server acting for whoever it's for, the network's among them.
+  # An untrusted plugin runs on any server acting for whoever it's for, the network's among them.
   defp run("deploy", %{"name" => name, "files" => files} = inputs, {_actor, subject} = principal, forward) do
     plugin = Plugins.plugin(subject, name)
-    sandbox = Map.get(inputs, "sandbox", plugin != nil and Store.about(plugin)["sandbox"] == true)
-    if sandbox, do: at(subject, forward), else: runs(subject, forward)
+    trusted = Map.get(inputs, "trusted", plugin == nil or Store.about(plugin)["trusted"] != false)
+    if trusted, do: runs(subject, forward), else: at(subject, forward)
 
     case plugin do
       nil -> reaches!(principal, subject, "installer")
@@ -649,12 +649,12 @@ defmodule OneCore.Tools do
 
     if plugin == nil and inputs["new"] != true, do: elsewhere!(principal, name)
 
-    case Deploy.deploy(subject, name, Store.received(files), Map.get(inputs, "from", :stored), sandbox) do
+    case Deploy.deploy(subject, name, Store.received(files), Map.get(inputs, "from", :stored), trusted) do
       {:ok, number, warnings} ->
         %{
           name: name,
           version: number,
-          sandbox: sandbox,
+          trusted: trusted,
           permissions: permitted(Plugins.running(subject)[name]),
           warnings: if(warnings == "", do: nil, else: warnings)
         }
@@ -690,7 +690,7 @@ defmodule OneCore.Tools do
           for: at,
           plugin: version.artifact,
           version: about["number"],
-          sandbox: version.sandbox,
+          trusted: version.trusted,
           permissions: version.permissions,
           source: about["source"],
           from: about["from"]
@@ -702,7 +702,7 @@ defmodule OneCore.Tools do
 
   defp run("install", %{"plugin" => plugin} = inputs, {_actor, subject} = principal, forward) do
     name = Map.get(inputs, "name", Path.basename(plugin))
-    if Store.about(plugin)["sandbox"] == true, do: at(subject, forward), else: runs(subject, forward)
+    if Store.about(plugin)["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
     opens!(principal, plugin)
     reaches!(principal, subject, "installer")
     with {:error, why} <- Installed.install(subject, name, plugin), do: raise(why)
@@ -712,7 +712,7 @@ defmodule OneCore.Tools do
   # It's renamed where it runs, which is where it's deployed again.
   defp run("rename", %{"name" => name, "to" => to}, {_actor, subject} = principal, forward) do
     plugin = "#{subject}/plugins/#{name}"
-    if Store.about(plugin)["sandbox"] == true, do: at(subject, forward), else: runs(subject, forward)
+    if Store.about(plugin)["trusted"] == false, do: at(subject, forward), else: runs(subject, forward)
     reaches!(principal, plugin, "owner")
     with {:error, why} <- Rename.rename(subject, name, to, principal), do: raise(why)
     %{from: name, to: to}

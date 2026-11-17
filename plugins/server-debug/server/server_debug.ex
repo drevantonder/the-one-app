@@ -8,7 +8,7 @@ defmodule ServerDebug do
   network they own: a trace and a log show what a call was given, which is someone's. The plugin's own processes,
   kept between calls, are shown too where everyone it's installed for is that one. A plugin that says it's sensitive
   (`OneCore.Plugin`) is never looked into. The rule is kept here, on the server; what's shown is picked in the VM the
-  plugin's code runs in, the server's or its own in sandbox mode, by `ServerDebug.Probe`.
+  plugin's code runs in, the server's or, for an untrusted plugin, its sandbox's, by `ServerDebug.Probe`.
   """
   @behaviour OneCore.Plugin
 
@@ -204,7 +204,7 @@ defmodule ServerDebug do
   # The server to look on: the one asked for, or else this one if it runs the plugin, or else one that does. Another
   # runs this call instead, and it ends here with its answer.
   defp on!(call, inputs, %{name: name, at: at, version: version}) do
-    servers = if version.sandbox, do: Servers.acting(at), else: Servers.running(at)
+    servers = if version.trusted, do: Servers.running(at), else: Servers.acting(at)
 
     case inputs["server"] do
       nil ->
@@ -226,12 +226,12 @@ defmodule ServerDebug do
     end
   end
 
-  defp here?(%Version{sandbox: true}, at), do: Servers.here?(at)
+  defp here?(%Version{trusted: false}, at), do: Servers.here?(at)
   defp here?(version, _at), do: not Version.described?(version)
 
-  # What the plugin's VM answered: the server's own, or its own in sandbox mode, where only a running one is asked,
-  # but by a follow, which keeps it running.
-  defp probed(%{version: %Version{sandbox: true}} = target, request, start) do
+  # What the plugin's VM answered: the server's own, or an untrusted plugin's sandbox's, where only a running one is
+  # asked, but by a follow, which keeps it running.
+  defp probed(%{version: %Version{trusted: false}} = target, request, start) do
     request = %{
       "source" => Probe.source(),
       "request" => request,

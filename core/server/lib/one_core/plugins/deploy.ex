@@ -25,27 +25,27 @@ defmodule OneCore.Plugins.Deploy do
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
   if there's none it's a new plugin of theirs, installed for them. Its app, if it has one, is built first
   (`OneCore.App`). `from` is the git repo its files came from, as `OneCore.Plugins.Store.keep/6` takes it, and
-  `sandbox` whether it runs in sandbox mode (`OneCore.Sandbox`), each as the version before had it if `:stored`. Gives
-  its version's number and the compiler's warnings.
+  `trusted` whether it's trusted, where an untrusted plugin runs in a sandbox (`OneCore.Sandbox`), each as the version
+  before had it if `:stored`. Gives its version's number and the compiler's warnings.
   """
-  def deploy(owner, name, files, from \\ :stored, sandbox \\ :stored),
-    do: deploy(owner, name, files, from, sandbox, fn _version -> true end)
+  def deploy(owner, name, files, from \\ :stored, trusted \\ :stored),
+    do: deploy(owner, name, files, from, trusted, fn _version -> true end)
 
   @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
-  def deploy(owner, name, files, from, sandbox, install?) do
+  def deploy(owner, name, files, from, trusted, install?) do
     artifact = Plugins.plugin(owner, name) || "#{owner}/plugins/#{name}"
-    sandbox = if sandbox == :stored, do: Store.about(artifact)["sandbox"] == true, else: sandbox == true
+    trusted = if trusted == :stored, do: Store.about(artifact)["trusted"] != false, else: trusted != false
 
     with :ok <- check(name, files),
-         {:ok, built} <- built(owner, name, files, sandbox),
-         {:ok, version, warnings} <- loaded(artifact, built, sandbox) do
+         {:ok, built} <- built(owner, name, files, trusted),
+         {:ok, version, warnings} <- loaded(artifact, built, trusted) do
       version = %{version | artifact: artifact}
       install = install?.(version)
 
       with :ok <- outputs(version),
            :ok <- if(install, do: fits(owner, name, version), else: :ok),
-           {:ok, warnings} <- if(sandbox, do: Sandbox.check(owner, version, built), else: {:ok, warnings}),
-           {:ok, number} <- Store.keep(artifact, name, built, files, from, sandbox),
+           {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
+           {:ok, number} <- Store.keep(artifact, name, built, files, from, trusted),
            :ok <- Store.describe(version),
            :ok <- if(install, do: Installed.note(owner, &{:ok, Map.put(&1, name, artifact)}), else: :ok) do
         listed(artifact, version)
@@ -75,19 +75,18 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
-  # A version's code, compiled and loaded here, or in sandbox mode only described, by its own VM.
-  defp loaded(artifact, built, false), do: Version.load(Path.basename(artifact), built)
+  # A version's code, compiled and loaded here, or for an untrusted plugin only described, by its sandbox's VM.
+  defp loaded(artifact, built, true), do: Version.load(Path.basename(artifact), built)
 
-  defp loaded(artifact, built, true) do
+  defp loaded(artifact, built, false) do
     with {:ok, version} <- Sandbox.describe(artifact, built), do: {:ok, version, ""}
   end
 
   @doc """
   Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., description:
-  its skill's, subtitle: ..., about: ..., icon: ..., apps: [...], tools: [names], permissions: [...], sandbox:
-  ...}]`, what a person reads of it as `Version.listing/1` gives it, its permissions as
-  `permissions/0` gives them
-  and whether it runs in sandbox mode. It's what lists every app there is, whether or not it's on anyone's page
+  its skill's, subtitle: ..., about: ..., icon: ..., apps: [...], tools: [names], permissions: [...], trusted:
+  ...}]`, what a person reads of it as `Version.listing/1` gives it, its permissions as `permissions/0` gives them and
+  whether it's trusted. It's what lists every app there is, whether or not it's on anyone's page
   now. One that was removed, by the plugin that keeps what's deleted, has no latest version, and isn't listed.
 
   It's two trips to the bucket with a request for each plugin, and changes only when someone deploys, so it's kept:
@@ -136,7 +135,7 @@ defmodule OneCore.Plugins.Deploy do
           apps: apps,
           tools: description["tools"] || [],
           permissions: description["permissions"] || [],
-          sandbox: description["sandbox"] == true
+          trusted: description["trusted"] != false
         }
       end
 
@@ -157,7 +156,7 @@ defmodule OneCore.Plugins.Deploy do
         icon: version.icon,
         tools: Enum.map(version.tools, & &1.name),
         permissions: version.permissions,
-        sandbox: version.sandbox
+        trusted: version.trusted
       }
       |> Map.merge(Version.listing(version))
       |> JSON.encode!()
@@ -237,7 +236,7 @@ defmodule OneCore.Plugins.Deploy do
     with true <- files != %{} || {:error, "There are no files to deploy it from"},
          {installed, _tag} = Installed.read(@network),
          install? = &(&1.essential or is_map_key(installed, name)),
-         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, false, install?),
+         {:ok, number, _warnings} = deployed <- deploy(@network, name, files, nil, true, install?),
          :ok <- note_bundled("#{@network}/plugins/#{name}/bundled", source) do
       Logger.info("Shipped #{name} as version #{number} in #{System.monotonic_time(:millisecond) - started} ms")
       deploying(name, nil)
@@ -400,9 +399,9 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   # A plugin's app is built against this server's UI library (`OneCore.App`).
-  defp built(owner, name, files, sandbox) do
+  defp built(owner, name, files, trusted) do
     if App.app?(files),
-      do: built_before(Plugins.plugin(owner, name), files) || App.build(files, sandbox),
+      do: built_before(Plugins.plugin(owner, name), files) || App.build(files, trusted),
       else: {:ok, files}
   end
 
@@ -440,7 +439,7 @@ defmodule OneCore.Plugins.Deploy do
     stale =
       for %{plugin: artifact} <- if(newest?(), do: deployed(), else: []),
           whose = Store.whose(artifact),
-          Servers.runs?(whose) or (Store.about(artifact)["sandbox"] == true and Servers.here?(whose)),
+          Servers.runs?(whose) or (Store.about(artifact)["trusted"] == false and Servers.here?(whose)),
           built_with(artifact) not in [nil, code],
           do: {whose, artifact}
 

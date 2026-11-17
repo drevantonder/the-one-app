@@ -1,12 +1,12 @@
 defmodule OneCore.Sandbox do
   @moduledoc """
-  Sandbox mode: a plugin version whose code runs in an Erlang VM of its own, a child of this server's, behind this
-  machine's process sandbox, never in this server's VM. Any of the network's servers runs one for anyone, since
-  what it reaches is only what this server hands it. The wall is the plugin `sandbox`, which One Core asks one
-  thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it, no plugin
-  runs in sandbox mode, and a call to one says why.
+  The sandbox an untrusted plugin runs in: its version's code runs in an Erlang VM of its own, a child of this
+  server's, behind this machine's process sandbox, never in this server's VM. Any of the network's servers runs one
+  for anyone, since what it reaches is only what this server hands it. The wall is the plugin `sandbox`, which One
+  Core asks one thing of: start this program under this policy and give me its pipes (`Sandbox.start/3`). Without it,
+  no untrusted plugin runs, and a call to one says why.
 
-  There's one child for each version of a sandboxed plugin on a server and each user, group or network it's
+  There's one child for each version of an untrusted plugin on a server and each user, group or network it's
   installed for, with the versions of the plugins it uses, which run inside it as it (`database` among them, its
   SQLite too). So a child only ever runs one owner's calls, and what a stranger's plugin keeps from one person's call
   isn't there in another's: its handles are its own, and a request for an artifact or a call that isn't its own is
@@ -60,7 +60,7 @@ defmodule OneCore.Sandbox do
   def children, do: [{Registry, keys: :unique, name: @registry}, {DynamicSupervisor, name: @supervisor}]
 
   @doc """
-  What a set of a sandboxed plugin's files says of itself, from a child that compiles only them: `{:ok, version}`
+  What a set of an untrusted plugin's files says of itself, from a child that compiles only them: `{:ok, version}`
   of the plugin `artifact`, or `{:error, why}`. The files are as the server keeps them.
   """
   def describe(artifact, files) do
@@ -68,13 +68,13 @@ defmodule OneCore.Sandbox do
     sets = [{name, Map.reject(files, fn {path, _} -> Version.client?(path) end)}]
 
     with {:ok, description} <- once({:describe, name, Version.code(files)}, name, sets),
-         do: Version.sandboxed(artifact, files, description)
+         do: Version.untrusted(artifact, files, description)
   end
 
   @doc """
-  Checks a sandboxed version, from its `files` as the server keeps them, as it will run, with the plugins it uses as
-  `owner` finds them: `{:ok, warnings}`, or `{:error, why}` with each thing it uses that sandbox mode doesn't offer,
-  a sentence each with its file and line.
+  Checks an untrusted plugin's version, from its `files` as the server keeps them, as it will run, with the plugins it
+  uses as `owner` finds them: `{:ok, warnings}`, or `{:error, why}` with each thing it uses that the sandbox doesn't
+  offer, a sentence each with its file and line.
   """
   def check(owner, %Version{} = version, files) do
     with {:ok, used} <- used(owner, version),
@@ -84,8 +84,7 @@ defmodule OneCore.Sandbox do
           {:ok, warnings}
 
         _ ->
-          {:error,
-           "In sandbox mode, #{Path.basename(version.artifact)} can't run as it is:\n" <> Enum.join(problems, "\n")}
+          {:error, "Untrusted, #{Path.basename(version.artifact)} can't run as it is:\n" <> Enum.join(problems, "\n")}
       end
     end
   end
@@ -102,7 +101,7 @@ defmodule OneCore.Sandbox do
 
   @doc """
   Runs `program` with `arguments` to its end behind this machine's sandbox, under `policy` as the plugin `sandbox`
-  takes it: what a sandboxed plugin's app is built with, say. Gives `{output, status}`, or `{:error, why}` where it
+  takes it: what an untrusted plugin's app is built with, say. Gives `{output, status}`, or `{:error, why}` where it
   couldn't start. One that runs longer than five minutes is stopped.
   """
   def run(program, arguments, policy) do
@@ -139,7 +138,7 @@ defmodule OneCore.Sandbox do
         {:ok, port}
 
       {:error, "There's no plugin named sandbox"} ->
-        {:error, "Sandbox mode needs the plugin sandbox, which isn't installed for the network"}
+        {:error, "An untrusted plugin runs in a sandbox, which needs the plugin sandbox installed for the network"}
 
       {:error, why} ->
         {:error, why}
@@ -280,8 +279,8 @@ defmodule OneCore.Sandbox do
     if not permitted?(context.permissions, plugin, tool),
       do:
         raise(
-          "#{context.name} may not call #{plugin}_#{tool}: its permissions/0 doesn't name it. A plugin in sandbox " <>
-            "mode calls only the tools it says it uses."
+          "#{context.name} may not call #{plugin}_#{tool}: its permissions/0 doesn't name it. An untrusted plugin " <>
+            "calls only the tools it says it uses."
         )
 
     options = if is_map_key(request, "on_behalf_of"), do: [on_behalf_of: request["on_behalf_of"]], else: []
@@ -301,7 +300,7 @@ defmodule OneCore.Sandbox do
   defp op("plugins", _request, call, _context), do: Call.plugins(call)
   defp op("deployed", _request, call, _context), do: Call.deployed(call)
   defp op("forward_to", %{"server" => server}, call, _context) when is_binary(server), do: Call.forward_to(call, server)
-  defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered in sandbox mode")
+  defp op(op, _request, _call, _context), do: raise("#{inspect(op)} isn't offered to an untrusted plugin")
 
   defp named(context, artifact), do: [handle(context, artifact), Artifact.name(artifact)]
 
@@ -351,8 +350,8 @@ defmodule OneCore.Sandbox do
     if not sends_to?(context.permissions, url),
       do:
         raise(
-          "#{context.name} may not send data to #{url}: its permissions/0 doesn't name its host. A plugin in " <>
-            "sandbox mode fetches only from the hosts it says it sends data to."
+          "#{context.name} may not send data to #{url}: its permissions/0 doesn't name its host. An untrusted " <>
+            "plugin fetches only from the hosts it says it sends data to."
         )
 
     body = with body when is_binary(body) <- request["body"], do: Base.decode64!(body)

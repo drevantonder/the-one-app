@@ -128,7 +128,7 @@ unsafe fn container() -> Result<PSID> {
         CreateAppContainerProfile(
             name.as_ptr(),
             wide("The One App's sandbox").as_ptr(),
-            wide("Plugins in sandbox mode, behind The One App's wall").as_ptr(),
+            wide("Untrusted plugins, behind The One App's wall").as_ptr(),
             ptr::null(),
             0,
             &mut sid,

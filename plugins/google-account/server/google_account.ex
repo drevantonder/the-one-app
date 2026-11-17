@@ -9,7 +9,7 @@ defmodule GoogleAccount do
   to it. Signing in to it for another plugin adds that plugin's scopes to it (Google's incremental authorization) and
   switches the item on for that plugin too. Signing out of one plugin switches it off for that plugin alone. This plugin
   uses the Vault's tools on behalf of the plugin, so the Vault ties each account to the plugins it's switched on for, and
-  neither this plugin nor a Google plugin is ever handed a token: one in sandbox mode uses an account as safely as one
+  neither this plugin nor a Google plugin is ever handed a token: an untrusted one uses an account as safely as one
   that isn't.
 
   Every Google address is written here and in the Google plugins as Google's own: a test points them at a fake Google by

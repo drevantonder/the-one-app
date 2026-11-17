@@ -1,6 +1,6 @@
 defmodule ServerDebug.Probe do
   @moduledoc false
-  # What looks into a plugin as it runs, in the VM its code runs in: the server's, or in sandbox mode the plugin's own,
+  # What looks into a plugin as it runs, in the VM its code runs in: the server's, or an untrusted plugin's sandbox's,
   # which compiles this file's source itself and runs it there (`OneCore.Sandbox.debug/5`). So it uses nothing of One
   # Core's. What it's told of the plugin is `scope`:
   #

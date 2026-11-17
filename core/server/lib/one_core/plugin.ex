@@ -16,8 +16,9 @@ defmodule OneCore.Plugin do
   gets the new one. A plugin a program ships with can have native code that the clients are built with, in
   `client/native/`, which is never deployed, and nor is its `test/`.
 
-  A plugin can run in sandbox mode instead (`deploy` with `sandbox: true`): its server code runs in an Erlang VM of
-  its own, for each user, group or network it's installed for, behind its machine's sandbox, never in the server's.
+  A plugin can be untrusted instead (`deploy` with `trusted: false`), and an untrusted plugin runs in a sandbox: its
+  server code runs in an Erlang VM of its own, for each user, group or network it's installed for, behind its
+  machine's sandbox, never in the server's.
   Any of the network's servers runs it for anyone, so it needs no server of yours, and whatever its code tries, it
   reaches only what's offered it, as whoever it runs for. What's offered is this interface, each function a message
   to the server: `tools/0`, `call/3`, `apps/0`, `icon/0`, `title/0`, `widgets/0`, `uses/0`, `jobs/0` and
@@ -26,8 +27,8 @@ defmodule OneCore.Plugin do
   `forward_to` and `fetch`; `OneCore.Plugin.file/2` and `nif/2`; `Logger`; and hooks it observes. The plugins it uses
   run in its VM too, as it, `database` among them. It has no services, no hooks it mutates or validates, no other
   plugins' functions (it calls their tools), no programs, no network but `fetch`, and no files but its `folder`,
-  which goes when the VM stops, a minute after its last call. Deploying one that uses what sandbox mode doesn't offer
-  says each, with its file and line, and what to do instead.
+  which goes when the VM stops, a minute after its last call. Deploying an untrusted one that uses what isn't
+  offered says each, with its file and line, and what to do instead.
 
   One module in the plugin, in a file of `server/` such as `server/hello.ex`, says `@behaviour OneCore.Plugin`, and
   gives the plugin's tools:
@@ -184,7 +185,7 @@ defmodule OneCore.Plugin do
     the other plugins' tools it calls, by the plugin's name for all its tools or a tool's (`gmail`,
     `notifications_send`), and the hosts it sends data to (`https://api.example.com`, `https://*.googleapis.com`).
     `deploy`, `install` and `plugins` say them, and the App Store shows them: "Uses gmail · Sends data to
-    api.example.com". In sandbox mode they're enforced: a tool call or a fetch outside them is refused.
+    api.example.com". For an untrusted plugin they're enforced: a tool call or a fetch outside them is refused.
   - `OneCore.Call.fetch(call, %{url: "https://api.example.com/x", method: "POST", headers: %{...}, body: "..."})`
     makes a web request from the server running the call, and gives the answer's `status`, `headers` and `body`.
   - `OneCore.Call.process(call, Hello.Counter, key, argument)` gives a process that keeps running between calls on

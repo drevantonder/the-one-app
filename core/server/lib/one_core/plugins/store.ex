@@ -8,9 +8,9 @@ defmodule OneCore.Plugins.Store do
   `versions/<number>`; only the last few versions keep their files (`prune/1`). `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
-  version after keeps its `from`, so one whose `source` isn't that hash was changed since. `sandbox` says it runs in
-  sandbox mode (`OneCore.Sandbox`). What a set of files says of itself once loaded is kept at `described/<its hash>`,
-  for the servers that don't load it (`described/2`).
+  version after keeps its `from`, so one whose `source` isn't that hash was changed since. `trusted` says whether it's
+  trusted: an untrusted plugin runs in a sandbox (`OneCore.Sandbox`). What a set of files says of itself once loaded is
+  kept at `described/<its hash>`, for the servers that don't load it (`described/2`).
   """
   require Logger
   alias OneCore.Bucket
@@ -78,9 +78,9 @@ defmodule OneCore.Plugins.Store do
   Writes a set of files, and makes it the plugin's next version: `files` as the server keeps them, and `deployed`
   as they were deployed. The version being replaced goes to the plugin's history first, so every version but the
   latest is there, and `from`, the git repo its files came from, is kept with it (`:stored` keeps what the version
-  before said, and `nil` says they came from none), and whether it runs in `sandbox` mode. Gives the version's number.
+  before said, and `nil` says they came from none), and whether it's `trusted`. Gives the version's number.
   """
-  def keep(artifact, name, files, deployed, from, sandbox \\ false) do
+  def keep(artifact, name, files, deployed, from, trusted) do
     code = Version.code(files)
     for {path, text} <- files, do: Bucket.write("#{artifact}/code/#{code}/#{path}", text)
 
@@ -99,7 +99,7 @@ defmodule OneCore.Plugins.Store do
       end
 
     next =
-      %{number: number, code: code, source: source, from: from, sandbox: sandbox || nil}
+      %{number: number, code: code, source: source, from: from, trusted: trusted}
       |> Map.reject(&is_nil(elem(&1, 1)))
       |> JSON.encode!()
 
@@ -150,7 +150,7 @@ defmodule OneCore.Plugins.Store do
   @doc """
   The versions in the bucket of the plugins `artifacts` that are newer than the ones in `latest`: each one's
   plugin, its number, and the version loaded, which is `:error` for one this server can't compile, or with `load`
-  false the version described (`described/2`), leaving out one not described yet. One in sandbox mode is never
+  false the version described (`described/2`), leaving out one not described yet. An untrusted one is never
   loaded here, only described. Read at once: a bucket at an address is asked for each over the internet.
 
   One that couldn't be read or loaded, as when the bucket didn't give its blobs or refused them, is left out, as one
@@ -164,7 +164,7 @@ defmodule OneCore.Plugins.Store do
       with %{"number" => number, "code" => code} <- in_bucket,
            true <- number > Map.get(latest, artifact, 0),
            version when version != nil <-
-             unanswered(artifact, fn -> version(artifact, code, load, in_bucket["sandbox"] == true) end),
+             unanswered(artifact, fn -> version(artifact, code, load, in_bucket["trusted"] != false) end),
            true <- load or version != :error,
            do: [{artifact, number, version}],
            else: (_ -> [])
@@ -181,15 +181,15 @@ defmodule OneCore.Plugins.Store do
 
   @doc """
   The set of the plugin `artifact`'s files named `code`, as this server would run it: loaded, or described where
-  `load` is false, and in `sandbox` mode always described, as the server that deployed it described it in its own VM.
+  `load` is false, and an untrusted one always described, as the server that deployed it described it in its sandbox.
   `{:ok, version}`, or `:error`.
   """
-  def version(artifact, code, _load, true) do
-    with {:ok, version} <- described(artifact, code), do: {:ok, %{version | sandbox: true}}
+  def version(artifact, code, _load, false) do
+    with {:ok, version} <- described(artifact, code), do: {:ok, %{version | trusted: false}}
   end
 
-  def version(artifact, code, true, false), do: loaded(artifact, code)
-  def version(artifact, code, false, false), do: described(artifact, code)
+  def version(artifact, code, true, true), do: loaded(artifact, code)
+  def version(artifact, code, false, true), do: described(artifact, code)
 
   @doc """
   The set of the plugin `artifact`'s files named `code` as it described itself where it was loaded, without its

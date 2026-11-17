@@ -3,7 +3,7 @@ defmodule Fake do
   An app that signs its person in to an outside service, for the Vault's test (`plugins/vault/test/vault.sh`): all it
   says of the service is the service's own, its addresses, scopes and sites, and the Vault does the rest. The
   service is the fake one the test runs on this machine (`vault/service.js`), at the port written here as PORT. It
-  signs in and uses its account through the Vault's tools, as a plugin in sandbox mode does, and is handed secrets
+  signs in and uses its account through the Vault's tools, as an untrusted plugin does, and is handed secrets
   themselves through its functions, as one with a service is.
   """
   @behaviour OneCore.Plugin

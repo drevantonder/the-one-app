@@ -27,8 +27,8 @@ defmodule OneCore.Plugins do
   # How long after looking at someone a request for them has this server look again, behind it, in milliseconds.
   @looks_after :timer.minutes(5)
 
-  # This, and after it what runs plugins' processes, what tells the plugins that observe a hook, and the VMs of plugins in
-  # sandbox mode, which hold versions here.
+  # This, and after it what runs plugins' processes, what tells the plugins that observe a hook, and the sandboxes
+  # untrusted plugins run in, which hold versions here.
   def child_spec(_) do
     children = [%{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
     children = children ++ __MODULE__.Process.children() ++ Hooks.Observer.children() ++ OneCore.Sandbox.children()
@@ -139,7 +139,7 @@ defmodule OneCore.Plugins do
   @doc "The version running here of the plugin `artifact`, or `nil`: also where it's only described here."
   def version(artifact), do: ask({:version, artifact})
 
-  @doc "Every plugin this server has looked at that has scheduled jobs: who it was installed for, its name there, the jobs, and whether it runs in sandbox mode."
+  @doc "Every plugin this server has looked at that has scheduled jobs: who it was installed for, its name there, the jobs, and whether it's trusted."
   def scheduled, do: ask(:scheduled)
 
   @doc "What's installed for everyone this server has looked at, by who: each plugin's name there, with the plugin."
@@ -189,9 +189,9 @@ defmodule OneCore.Plugins do
     end
 
     for {artifact, number, {:ok, version}} <- loaded ++ newer, artifact in changed do
-      if Version.described?(version) and not version.sandbox,
+      if Version.described?(version) and version.trusted,
         do: Logger.info("#{artifact}: version #{number} is listed here, and runs on #{owner}'s own servers"),
-        else: Logger.info("#{artifact}: version #{number} runs here#{if version.sandbox, do: ", in sandbox mode"}")
+        else: Logger.info("#{artifact}: version #{number} runs here#{if not version.trusted, do: ", in a sandbox"}")
     end
 
     if any do
@@ -274,10 +274,10 @@ defmodule OneCore.Plugins do
   # What a look at someone compares the bucket with: for someone whose plugins run here, the versions loaded, and
   # otherwise the ones described, leaving out the plugins loaded here for someone else, which serve them too.
   def handle_call({:latest, true}, _from, state), do: {:reply, {state.latest, []}, state}
-  # A plugin in sandbox mode runs here for anyone, so it's compared as one described is.
+  # An untrusted plugin runs here for anyone, so it's compared as one described is.
   def handle_call({:latest, false}, _from, state) do
-    {sandboxed, loaded} = Map.split_with(state.latest, fn {artifact, _} -> sandboxed?(state.running[artifact]) end)
-    {:reply, {Map.merge(state.described, sandboxed), Map.keys(loaded)}, state}
+    {untrusted, loaded} = Map.split_with(state.latest, fn {artifact, _} -> untrusted?(state.running[artifact]) end)
+    {:reply, {Map.merge(state.described, untrusted), Map.keys(loaded)}, state}
   end
 
   def handle_call(:refresh, _from, state), do: {:reply, :ok, %{state | reloaded: %{}}}
@@ -303,8 +303,8 @@ defmodule OneCore.Plugins do
     scheduled =
       for {owner, installed} <- state.installed,
           {name, artifact} <- installed,
-          %Version{jobs: [_ | _] = jobs, sandbox: sandbox} <- [state.running[artifact]],
-          do: {owner, name, jobs, sandbox}
+          %Version{jobs: [_ | _] = jobs, trusted: trusted} <- [state.running[artifact]],
+          do: {owner, name, jobs, trusted}
 
     {:reply, scheduled, state}
   end
@@ -367,10 +367,10 @@ defmodule OneCore.Plugins do
     {state, changed, stale} =
       Enum.reduce(loaded, {state, [], []}, fn {artifact, number, loaded}, {state, changed, stale} ->
         version = with {:ok, version} <- loaded, do: version
-        # A version described is kept apart from the ones loaded, which it never takes over from. One in sandbox
-        # mode runs here as one loaded does.
+        # A version described is kept apart from the ones loaded, which it never takes over from. An untrusted
+        # one runs here as one loaded does.
         numbers =
-          if match?(%Version{}, version) and Version.described?(version) and not sandboxed?(version),
+          if match?(%Version{}, version) and Version.described?(version) and not untrusted?(version),
             do: :described,
             else: :latest
 
@@ -433,11 +433,11 @@ defmodule OneCore.Plugins do
 
   # A version that runs here, or `nil` for one only described.
   defp loaded(%Version{} = version),
-    do: if(Version.described?(version) and not sandboxed?(version), do: nil, else: version)
+    do: if(Version.described?(version) and not untrusted?(version), do: nil, else: version)
 
   defp loaded(nil), do: nil
 
-  defp sandboxed?(version), do: match?(%Version{sandbox: true}, version)
+  defp untrusted?(version), do: match?(%Version{trusted: false}, version)
 
   # The versions running of the plugins `installed`, by their names there.
   defp running(state, installed) do
