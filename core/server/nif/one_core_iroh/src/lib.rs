@@ -214,21 +214,28 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
                     // they know it's still running, however long it takes (`client::Reached::ask`). How far it
                     // is, is the seconds it's run, since nothing says how far a call is, and what it's doing is
                     // what the call last said (`stage`).
-                    let response = match client::progress_token(&message) {
-                        None => response.await,
-                        Some(token) => {
-                            let started = Instant::now();
-                            let mut every = interval_at(started + client::THERE, client::THERE);
-                            every.set_missed_tick_behavior(MissedTickBehavior::Delay);
-                            let mut telling = true;
-                            loop {
-                                tokio::select! {
-                                    response = &mut response => break response,
-                                    _ = every.tick(), if telling => {
-                                        let ran = started.elapsed().as_secs();
-                                        let doing = stage.lock().expect("no answer panics").clone();
-                                        telling = send.write_all(&client::progress(&token, ran, doing.as_deref())).await.is_ok();
-                                    }
+                    let token = client::progress_token(&message);
+                    let started = Instant::now();
+                    let mut every = interval_at(started + client::THERE, client::THERE);
+                    every.set_missed_tick_behavior(MissedTickBehavior::Delay);
+                    // Whoever asked going before its answer, by stopping the stream or losing the connection, is
+                    // told the Elixir as the network's edge tells it of a client over the web.
+                    let stopped = send.stopped();
+                    tokio::pin!(stopped);
+                    let (mut telling, mut there) = (token.is_some(), true);
+                    let response = loop {
+                        tokio::select! {
+                            response = &mut response => break response,
+                            _ = every.tick(), if telling => {
+                                let ran = started.elapsed().as_secs();
+                                let doing = stage.lock().expect("no answer panics").clone();
+                                let token = token.as_ref().expect("only told with a token");
+                                telling = send.write_all(&client::progress(token, ran, doing.as_deref())).await.is_ok();
+                            }
+                            _ = &mut stopped, if there => {
+                                (telling, there) = (false, false);
+                                if let Some(gone) = gone(&message) {
+                                    let _ = ask(&handler, Some(&from), &gone, Arc::default()).await;
                                 }
                             }
                         }
@@ -247,6 +254,15 @@ async fn accept(endpoint: Endpoint, handler: LocalPid, clients: Clients, asks: A
             }
         });
     }
+}
+
+/// What says whoever asked `message` went away before its answer: `notifications/one/gone` for its id, with what it
+/// said of itself, as the network's edge says it for a client over the web (`OneCore.Call.State.gone/1`). Nothing for
+/// a notification, which isn't answered.
+fn gone(message: &[u8]) -> Option<Vec<u8>> {
+    let request: serde_json::Value = serde_json::from_slice(message).ok()?;
+    let params = serde_json::json!({"requestId": request.get("id")?, "_meta": request["params"]["_meta"]});
+    Some(serde_json::json!({"jsonrpc": "2.0", "method": "notifications/one/gone", "params": params}).to_string().into_bytes())
 }
 
 /// Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes, the
