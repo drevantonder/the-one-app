@@ -276,7 +276,7 @@ function AccountsTile(props: { plugins: PluginWithAccounts[] }) {
 /// A dot while any account of the folder's plugins is not ok, as each plugin's `accounts` answers.
 function Attention(props: { plugins: PluginWithAccounts[] }) {
   const needed = createMemo(async () => {
-    const lists = await Promise.all(props.plugins.map((plugin) => json<Account[]>(`${plugin.name}_accounts`, {}, plugin.subject).catch((): Account[] => [])))
+    const lists = await Promise.all(props.plugins.map((plugin) => json<{ accounts: Account[] }>(`${plugin.name}_accounts`, {}, plugin.subject).then((listed) => listed.accounts, (): Account[] => [])))
     return lists.flat().some((account) => !account.ok)
   })
   onSettled(() => changed(() => refresh(needed)))

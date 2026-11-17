@@ -33,7 +33,7 @@ const signIn = (plugin: PluginWithAccounts, account?: string) =>
 
 /// A plugin's section: its accounts, once its `accounts` answers, or why it couldn't. With none, Add Account is all.
 function Accounts(props: { plugin: PluginWithAccounts }) {
-  const accounts = createMemo(() => json<Account[]>(`${props.plugin.name}_accounts`, {}, props.plugin.subject))
+  const accounts = createMemo(() => json<{ accounts: Account[] }>(`${props.plugin.name}_accounts`, {}, props.plugin.subject).then((listed) => listed.accounts))
   changed(() => refresh(accounts))
   const signOut = async (account: string) => {
     const sure = await confirm({ heading: `Sign out of ${account}?`, text: `${props.plugin.title} can't use it until it's signed in again.`, action: "Sign Out", destructive: true })

@@ -34,7 +34,7 @@ instead, on no page. `launcher` is this one's.
 An account is a person's account at an outside service (a Gmail address, a WhatsApp number) that they sign a
 plugin in to, so its tools act there as them. A plugin that does has accounts, and says so with three tools:
 
-- `accounts` lists them, the default first: `[%{account: "sam@example.com", ok: true}]`, and when `ok` is false,
+- `accounts` lists them, the default first: `%{accounts: [%{account: "sam@example.com", ok: true}]}`, and when `ok` is false,
   `why`, a few words saying what's wrong. It may add fields of its own.
 - `sign_in` signs one in, or with `account` signs that one in again. It answers `%{url: ...}`, the web address
   the person signs in at. One whose signing in needs a screen of its own (a QR code, a device to pick) gives
