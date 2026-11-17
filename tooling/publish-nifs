@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Publishes the builds of this repo's plugins' NIFs and programs, as Elixir's rustler_precompiled publishes a
+# library's, so a server installing or updating one from git has them (`OneCore.Plugins.Precompiled`): each build
+# whose inputs changed (`tooling/input-hash`) is built (`tooling/nifs`) and uploaded as a file of the GitHub Release
+# `nifs-<commit>`, named `<crate>-<input hash>-<kind>`, and its plugin's `server/checksums.json` names it by its path
+# in the plugin, with its URL and SHA-256. This commits that and pushes it to main, so main pins exactly which builds
+# are trusted. Run it on Linux, from a commit on main, once a plugin's native code changed there:
+#
+#     tooling/publish-nifs
+#
+# A Mac's are built on the Mac, as `tooling/nifs` builds them, unless it's busy (a load above 20) or doesn't answer:
+# then on GitHub's macOS runner (`.github/workflows/nifs.yml`), which uploads them to the same Release.
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+# The tools this needs are the ones `mise.toml` names.
+command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+cd "$root"
+
+[[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: what's published is a commit's." >&2 && exit 1; }
+git fetch -q origin main
+commit=$(git rev-parse HEAD)
+git merge-base --is-ancestor "$commit" origin/main || { echo "Push $commit to main first: a Mac's are built from it there." >&2 && exit 1; }
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+release=nifs-${commit:0:12}
+
+# Each build of each plugin's crates, by its path, with its name in a Release, and those not published yet.
+declare -A named=() kinds=() uploaded=()
+files=() plugins=() unpublished=()
+for crate in $(dirname plugins/*/server/nif/*/Cargo.toml plugins/*/server/bin/*/Cargo.toml); do
+  plugin=${crate#plugins/} && plugin=${plugin%%/*}
+  [[ " ${plugins[*]} " == *" $plugin "* ]] || plugins+=("$plugin")
+  for kind in linux-x86_64 linux-aarch64 windows-x86_64 macos-aarch64; do
+    case $kind in
+      linux-*) triple=${kind#*-}-unknown-linux-gnu ;;
+      windows-*) triple=x86_64-pc-windows-msvc ;;
+      macos-*) triple=aarch64-apple-darwin ;;
+    esac
+    extension= && [[ $crate == */bin/* ]] || extension=.so
+    file=$crate/$kind$extension
+    named[$file]=$(basename "$crate")-$(tooling/input-hash "$crate" "$triple")-$kind$extension
+    files+=("$file")
+    url=$(jq -r --arg path "${file#plugins/"$plugin"/}" '.[$path].url // empty' "plugins/$plugin/server/checksums.json" 2>/dev/null || true)
+    [[ ${url##*/} == "${named[$file]}" ]] || { unpublished+=("$file") && kinds[$kind]=1; }
+  done
+done
+((${#unpublished[@]})) || { echo "Every build is published already." && exit 0; }
+echo "Publishing ${unpublished[*]} to $release" >&2
+
+gh release view "$release" >/dev/null 2>&1 ||
+  gh release create "$release" --target "$commit" --prerelease --title "NIFs at ${commit:0:12}" \
+    --notes "Builds of plugins' NIFs and programs at $commit, which each plugin's server/checksums.json names."
+
+linux=() && for kind in linux-x86_64 linux-aarch64 windows-x86_64; do [[ -z ${kinds[$kind]-} ]] || linux+=("$kind"); done
+((${#linux[@]} == 0)) || tooling/nifs "${linux[@]}"
+
+if [[ -n ${kinds[macos-aarch64]-} ]]; then
+  load=$(ssh -o ConnectTimeout=15 mac uptime 2>/dev/null | sed -E 's/.*load averages?: *([0-9]+).*/\1/' || true)
+  if [[ -n $load ]] && ((load < 20)); then
+    tooling/nifs macos-aarch64
+  else
+    echo "The Mac is busy or doesn't answer (load ${load:-unknown}), so GitHub's macOS runner builds its NIFs." >&2
+    builds=() mac=()
+    for file in "${unpublished[@]}"; do
+      [[ $file == */macos-* ]] || continue
+      mac+=("$file=${named[$file]}")
+      [[ $file != */nif/* ]] || {
+        crate=$(basename "$(dirname "$file")") && hash=${named[$file]#"$crate"-} && builds+=("NIF_BUILD_${crate^^}=${hash%%-*}")
+      }
+    done
+    run=$(gh workflow run nifs.yml -f commit="$commit" -f release="$release" -f rust="$(rustc -V | cut -d' ' -f2)" \
+      -f builds="${builds[*]}" -f files="${mac[*]}" 2>&1 | grep -o 'actions/runs/[0-9]*' | cut -d/ -f3)
+    gh run watch "$run" --exit-status >/dev/null || { echo "GitHub's macOS build failed: gh run view $run --log-failed" >&2 && exit 1; }
+    for pair in "${mac[@]}"; do
+      gh release download "$release" -p "${pair#*=}" -O "${pair%%=*}" --clobber && uploaded[${pair%%=*}]=1
+    done
+  fi
+fi
+
+# Each is uploaded under its name in the Release, from a folder of its own.
+upload=$(mktemp -d)
+trap 'rm -r "$upload"' EXIT
+for file in "${unpublished[@]}"; do [[ -n ${uploaded[$file]-} ]] || cp "$file" "$upload/${named[$file]}"; done
+[[ -z $(ls "$upload") ]] || gh release upload "$release" --clobber "$upload"/*
+
+# Each plugin's checksums: its builds just published, and the rest as they were.
+for plugin in "${plugins[@]}"; do
+  checksums=plugins/$plugin/server/checksums.json
+  for file in "${files[@]}"; do
+    [[ $file == plugins/$plugin/* ]] || continue
+    path=${file#plugins/"$plugin"/}
+    if [[ " ${unpublished[*]} " == *" $file "* ]]; then
+      jq -nc --arg path "$path" --arg url "https://github.com/$repo/releases/download/$release/${named[$file]}" \
+        --arg sha256 "$(sha256sum "$file" | cut -d' ' -f1)" '{($path): {url: $url, sha256: $sha256}}'
+    else
+      jq -c --arg path "$path" '{($path): .[$path]}' "$checksums"
+    fi
+  done | jq -s 'add' -S >"$checksums.new"
+  mv "$checksums.new" "$checksums"
+done
+
+git add plugins/*/server/checksums.json
+git commit -qm "chore: publish the builds of plugins' NIFs and programs at ${commit:0:12}, in the Release $release"
+git fetch -q && git rebase -q origin/main && git push -q origin HEAD:main
+echo "Published to https://github.com/$repo/releases/tag/$release, and pushed $(git rev-parse --short HEAD)."

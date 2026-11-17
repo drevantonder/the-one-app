@@ -23,8 +23,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-# The tools this needs are the ones `mise.toml` names.
-command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
+# The tools Linux needs are the ones `mise.toml` names; a Mac needs only Rust.
+[[ $(uname -s) != Linux ]] || command -v cargo-zigbuild >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
 kinds=("$@")

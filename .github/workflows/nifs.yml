@@ -1,0 +1,48 @@
+# Builds this repo's NIFs and programs for a Mac on GitHub's macOS runner, as `tooling/nifs macos-aarch64` builds them
+# on the Mac, and uploads the plugins' to a Release: what `tooling/publish-nifs` asks for when that Mac is busy or
+# asleep. Each input is as `tooling/publish-nifs` gives it.
+name: Mac NIFs
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: The commit to build
+        required: true
+      release:
+        description: The Release to upload them to
+        required: true
+      rust:
+        description: The Rust to build with, as `rustc -V` names it on the machine publishing
+        required: true
+      builds:
+        description: Each NIF's build, NIF_BUILD_<CRATE>=<input hash>, as the machine publishing worked them out
+        required: true
+      files:
+        description: Each file to upload, <path>=<its name in the Release>
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - run: rustup toolchain install "$RUST" --profile minimal --target aarch64-apple-darwin && rustup default "$RUST"
+        env:
+          RUST: ${{ inputs.rust }}
+      - run: env $BUILDS tooling/nifs macos-aarch64
+        env:
+          BUILDS: ${{ inputs.builds }}
+      - run: |
+          mkdir "$RUNNER_TEMP/release"
+          for file in $FILES; do cp "${file%%=*}" "$RUNNER_TEMP/release/${file#*=}"; done
+          gh release upload "$RELEASE" "$RUNNER_TEMP"/release/* --clobber
+        env:
+          FILES: ${{ inputs.files }}
+          RELEASE: ${{ inputs.release }}
+          GH_TOKEN: ${{ github.token }}
