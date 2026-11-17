@@ -4,6 +4,7 @@ description: Read before putting an app or a widget on a Home Screen page, arran
 metadata:
   subtitle: "Your pages of apps"
   about: "Your Home Screen, everyone's and your groups': pages of apps and widgets, arranged your way, and an App Library of every app you have, by category."
+  category: Utilities
 ---
 
 Home Screen is the network's launcher: the app every client opens first, which draws the rest. It keeps how each

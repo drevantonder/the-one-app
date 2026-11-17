@@ -4,6 +4,7 @@ description: Read before running a command on one of the user's own devices with
 metadata:
   subtitle: "Run commands on your devices"
   about: "Lets your AI run a command on one of your own devices, from anywhere. Every command is logged on the device it ran on."
+  category: Devices
 ---
 
 Run a shell command on one of your own devices with `run`; give `device`, a name `services` gives the servers

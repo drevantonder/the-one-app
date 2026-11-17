@@ -4,6 +4,7 @@ description: Read before inviting someone to a network or taking someone out, wh
 metadata:
   subtitle: "People, devices and passkeys"
   about: "Invite people to your network, who sign in with a passkey and no password. See and remove your devices and the AI assistants you let in."
+  category: "Privacy & Security"
 ---
 
 Sign-in is how people get into a network, and what acts as each of them: their devices, and the assistants they

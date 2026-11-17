@@ -4,6 +4,7 @@ description: Read when someone wants back something they deleted, asks what they
 metadata:
   subtitle: "Restore what you deleted"
   about: "Keeps what's deleted for 30 days, then deletes it for good. Restore anything before then, even an app you uninstalled, with what it kept."
+  category: Data
 ---
 
 Soft delete keeps what's deleted for 30 days, as it was, and then purges it for good. People see it as Recently

@@ -4,6 +4,7 @@ description: Read before making, cloning, pushing to or reading a git repo in th
 metadata:
   subtitle: "Code, kept in your network"
   about: "Git hosting of your own: repos for you, your groups or everyone, with branches, history and pull requests, on every device you use."
+  category: Developer tools
 ---
 
 Git Repos is git hosting in the network. A repo is a person's, a group's or the network's, and is named as any artifact

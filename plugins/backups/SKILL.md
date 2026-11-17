@@ -4,6 +4,7 @@ description: Read when someone asks about backups, wants their network backed up
 metadata:
   subtitle: "Copies of everything, kept safe"
   about: "Backs up your whole network, everyone's, to a disk on one of your machines or to cloud storage. Bring back anything you lost, or everything at once."
+  category: Data
 ---
 
 Backups are copies of the whole network, every person's and group's data, to a folder on one of the network's

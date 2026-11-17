@@ -4,6 +4,7 @@ description: Read before running an iPhone app for the user in Xcode's iOS Simul
 metadata:
   subtitle: "iPhones on your Mac"
   about: "Runs iPhones in Xcode's Simulator on your Mac, to try apps and sites on. Watch and use one live from any device, and let your AI tap through it."
+  category: Agent tools
 ---
 
 A simulator is an iPhone in Xcode's iOS Simulator, the newest iPhone Pro on the newest iOS the Mac's Xcode has, with

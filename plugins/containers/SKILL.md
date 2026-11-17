@@ -4,6 +4,7 @@ description: Read before creating or using a Linux container on the user's machi
 metadata:
   subtitle: "Linux machines when you need one"
   about: "Starts Linux containers on your own machines: somewhere to install, build and try things without touching your devices. Open one's desktop to watch."
+  category: Devices
 ---
 
 Containers are Linux containers on the user's own machines, run by Podman. Use one when you need a machine of

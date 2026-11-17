@@ -4,6 +4,7 @@ description: Read before a plugin keeps something that whoever stores the networ
 metadata:
   subtitle: "Data only you can read"
   about: "Encrypts what your apps keep, so whoever stores your network's data can't read it. Your Vault is kept this way."
+  category: "Privacy & Security"
 ---
 
 Encryption keeps an artifact's blobs encrypted in the bucket, so whoever runs the bucket can't read them, and nor

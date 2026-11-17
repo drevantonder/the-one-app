@@ -4,6 +4,7 @@ description: Read before reading, making or writing in the person's Google Docs.
 metadata:
   subtitle: "Your Google Docs"
   about: "Your AI reads your Google Docs, writes in them and makes new ones."
+  category: Productivity
 ---
 
 Google Docs is the person's documents. Signing in is the skill `google-account`'s.

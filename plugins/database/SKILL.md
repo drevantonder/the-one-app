@@ -4,6 +4,7 @@ description: Read before writing a plugin that keeps data or has scheduled jobs,
 metadata:
   subtitle: "Where apps keep their data"
   about: "Gives every app here a database of its own, so what it keeps for you is yours, and what it keeps for a group is the group's."
+  category: Data
 ---
 
 A plugin keeps its data in a database by using this plugin. The database is SQLite, kept in the plugin's own

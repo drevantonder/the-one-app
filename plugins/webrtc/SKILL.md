@@ -4,6 +4,7 @@ description: Read before making a plugin stream a screen or other live video to 
 metadata:
   subtitle: "Live video of your screens"
   about: "Shows the screens your apps open, like a browser you sign in on or your AI's desktop, as smooth live video you can click and type on, through Cloudflare's relays."
+  category: Developer tools
 ---
 
 WebRTC gives a plugin's code `ice_servers` for one stream: TURN credentials from Cloudflare Realtime, short-lived,

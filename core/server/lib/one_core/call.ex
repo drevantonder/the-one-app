@@ -237,36 +237,32 @@ defmodule OneCore.Call do
 
   @doc """
   The plugins whoever this call runs for finds, theirs and then the network's: each one's `name` there, the
-  `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle` and `about`, its
-  `apps`, its `widgets` and its `tools`' names, pages (`ui`) and whether each is a task (`task_support`). A Home
-  Screen page is drawn from these.
+  `plugin` it is, as its artifact's name, who it was `installed` for, its `title`, `icon`, `subtitle`, `about` and
+  `category`, its `apps`, its `widgets` and its `tools`' names, pages (`ui`) and whether each is a task
+  (`task_support`). A Home Screen page is drawn from these.
   """
   def plugins(%__MODULE__{subject: subject}) do
     for at <- Enum.reverse(Plugins.chain(subject)), {name, version} <- Plugins.versions([at]), into: %{} do
       tools = for tool <- version.tools, do: Map.take(tool, [:name, :ui, :task_support])
 
       {name,
-       Map.merge(
-         %{
-           name: name,
-           plugin: version.artifact,
-           installed: at,
-           title: version.title,
-           icon: version.icon,
-           apps: version.apps,
-           widgets: version.widgets,
-           tools: tools
-         },
-         OneCore.Plugins.Version.listing(version)
-       )}
+       Map.merge(OneCore.Plugins.Version.listing(version), %{
+         name: name,
+         plugin: version.artifact,
+         installed: at,
+         apps: version.apps,
+         widgets: version.widgets,
+         tools: tools
+       })}
     end
     |> Map.values()
   end
 
   @doc """
   Every plugin anyone in the network has deployed, whether or not it's installed for anyone now: each one's `plugin`,
-  as its artifact's name, its `title`, `icon`, `subtitle` and `about`, its `apps` as its latest version has
-  them, and whether every network has it (`essential`). An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
+  as its artifact's name, what a person reads of it where it's listed (`OneCore.Plugins.Version.listing/1`: its
+  `title`, `icon`, `subtitle`, `about`, `category`, `apps` and `widgets`) as its latest version has it, and whether
+  every network has it (`essential`). An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
   the network it's in use for (`OneCore.Tools`).
   """
   def deployed(%__MODULE__{}), do: OneCore.Plugins.Deploy.deployed()

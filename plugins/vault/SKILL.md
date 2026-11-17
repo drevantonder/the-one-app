@@ -4,6 +4,7 @@ description: Read whenever someone mentions or pastes a key, token or password, 
 metadata:
   subtitle: "Passwords and keys, kept safe"
   about: "Keeps your passwords, keys and sign-ins, and lets your apps and your AI use them without ever seeing them. You choose who may use each one."
+  category: "Privacy & Security"
 ---
 
 The Vault is the one place for everything a person has given access to: keys, passwords, sign-ins, accounts and

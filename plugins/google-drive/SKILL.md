@@ -4,6 +4,7 @@ description: Read before finding, uploading, renaming, moving or trashing files 
 metadata:
   subtitle: "Your Drive files"
   about: "Your AI finds, uploads, renames, moves and trashes files in your Google Drive."
+  category: Productivity
 ---
 
 Google Drive is the person's Drive, through Drive's own API (v3) by its own names. Signing in is the skill

@@ -191,7 +191,7 @@ defmodule HomeScreen do
         name: "store",
         read_only: true,
         description:
-          "Lists every plugin anyone has deployed that a person could add: one with an icon that not every network has. Each with what a person reads of it (`subtitle`, `about`)",
+          "Lists every plugin anyone has deployed that a person could add: one with an icon that not every network has. Each as it's listed: what a person reads of it (`subtitle`, `about`), what it's for (`category`), and its apps and widgets",
         inputs: none,
         outputs: %{
           type: "object",
@@ -205,9 +205,12 @@ defmodule HomeScreen do
                   title: %{type: "string", description: "Its name, as a person reads it"},
                   icon: %{type: "string", description: "A data: address"},
                   subtitle: %{type: ["string", "null"]},
-                  about: %{type: ["string", "null"]}
+                  about: %{type: ["string", "null"]},
+                  category: %{type: ["string", "null"], description: "What it's for: Communication, Productivity, ..."},
+                  apps: %{type: "array", description: "Each one's name, icon and App Library category"},
+                  widgets: %{type: "array", description: "Each one's name and sizes"}
                 },
-                required: ["plugin", "title", "icon", "subtitle", "about"]
+                required: ["plugin", "title", "icon", "subtitle", "about", "category", "apps", "widgets"]
               }
             }
           },
@@ -333,13 +336,7 @@ defmodule HomeScreen do
     plugins =
       for plugin <- Call.deployed(call),
           plugin.icon != nil and plugin[:essential] != true,
-          do: %{
-            plugin: plugin.plugin,
-            title: plugin.title,
-            icon: plugin.icon,
-            subtitle: plugin.subtitle,
-            about: plugin.about
-          }
+          do: Map.take(plugin, [:plugin, :title, :icon, :subtitle, :about, :category, :apps, :widgets])
 
     %{plugins: Enum.sort_by(plugins, &String.downcase(&1.title))}
   end

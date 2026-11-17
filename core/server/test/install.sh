@@ -248,6 +248,7 @@ defmodule Hello do
 end
 EOF
 echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>' >"$folder/hello/client/icon.svg"
+printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' hello hello >"$folder/hello/SKILL.md"
 echo '<!doctype html><title>Hello</title><script type="module" src="./app.jsx"></script>' >"$folder/hello/client/index.html"
 cat >"$folder/hello/client/app.jsx" <<'EOF'
 import { render } from "@solidjs/web"

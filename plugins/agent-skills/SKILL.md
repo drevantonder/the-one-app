@@ -4,6 +4,7 @@ description: Read before giving a device the network's skills, so its agent tool
 metadata:
   subtitle: "Your AI's skills, on every device"
   about: "Gives the AI tools on your devices, like Claude Code and Codex, what they need to use your apps here, even when they aren't connected. It keeps them up to date as your apps change."
+  category: AI
 ---
 
 It puts a skill for each plugin its person can use, and One Core's own, where every agent tool on a device reads

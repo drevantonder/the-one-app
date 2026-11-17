@@ -313,6 +313,8 @@ cat >"$folder/diary/SKILL.md" <<'EOF'
 ---
 name: diary
 description: Read before writing in someone's diary.
+metadata:
+  category: Utilities
 ---
 
 Use `write` when someone says what happened today, in their own words.
@@ -358,6 +360,12 @@ defmodule Ticker do
   end
 end
 EOF
+# Each says what it's for, as every plugin does; spy2 and recipes are copies of spy and notes, under their names.
+cp -r "$folder/spy" "$folder/spy2"
+cp -r "$folder/notes" "$folder/recipes"
+for plugin in notes reader gate approvals ticker stuck lost boxed spy spy2 recipes; do
+  printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' $plugin $plugin >"$folder/$plugin/SKILL.md"
+done
 # They're deployed for the network, so they're everyone's.
 for plugin in notes reader ticker chores; do as owner for network deploy --name $plugin --files-from "$folder/$plugin" >/dev/null; done
 
@@ -448,7 +456,7 @@ refused via server as bob spy steal --handle "$handle" --name "$own"
 refused via server as bob spy reach --name "$own"
 may via server as alice spy steal --handle "$handle" --name "$own"
 # Another plugin of the same files is another plugin, in a VM of its own, which has nothing of the first's.
-may as alice deploy --name spy2 --files-from "$folder/spy" --no-trusted
+may as alice deploy --name spy2 --files-from "$folder/spy2" --no-trusted
 may via server as alice spy2 kept
 [[ $output != *"alice's secret"* ]]
 refused via server as alice spy2 steal --handle "$handle" --name "$own"
@@ -521,7 +529,7 @@ may as bob plugins restore --name diary
 may as bob diary write --text "Mine again"
 
 say "A plugin's code is open to everyone it's in use for, and to nobody else, and what it keeps stays whoever's it is"
-may as alice deploy --name recipes --files-from "$folder/notes"
+may as alice deploy --name recipes --files-from "$folder/recipes"
 recipe=$(as alice recipes write --id soup --text "Leek and potato" | grep -o '"note":"[^"]*"' | cut -d'"' -f4)
 echo "  alice wrote $recipe with it"
 may as alice code --name recipes

@@ -4,6 +4,7 @@ description: Read before opening, reading or acting on a web page in a browser o
 metadata:
   subtitle: "A browser for your AI"
   about: "Gives your AI a Chrome of its own on your machine, signed in to nothing, to open pages, click and fill in forms. You can watch it as it goes."
+  category: Agent tools
 ---
 
 Chrome is a Google Chrome of your own, in a container on the user's machine, signed in to nothing, on a screen of its

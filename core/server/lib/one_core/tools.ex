@@ -18,7 +18,7 @@ defmodule OneCore.Tools do
   """
   alias OneCore.{Artifact, Bucket, Builds, Call, Hooks, Plugins, Release, Server, Servers, Services, User}
   alias OneCore.Call.State
-  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Store}
+  alias OneCore.Plugins.{Installed, Calls, Deploy, Lifecycle, Rename, Store, Version}
 
   # What a plugin may do beyond its own, as `permissions/0` says it.
   @permissions %{
@@ -215,9 +215,14 @@ defmodule OneCore.Tools do
           version: %{type: "integer", description: "The version now running"},
           trusted: %{type: "boolean", description: "Whether it's trusted, or runs in a sandbox"},
           permissions: @permissions,
-          warnings: %{type: ["string", "null"], description: "What the compiler warns of, if anything"}
+          warnings: %{type: ["string", "null"], description: "What the compiler warns of, if anything"},
+          listing: %{
+            type: "object",
+            description:
+              "What a person reads of it where it's listed, as the plugin directory takes it: its title, icon, subtitle, about, category, apps and widgets"
+          }
         },
-        required: ["name", "version", "trusted", "permissions", "warnings"]
+        required: ["name", "version", "trusted", "permissions", "warnings", "listing"]
       }
     },
     %{
@@ -827,7 +832,8 @@ defmodule OneCore.Tools do
           version: number,
           trusted: trusted,
           permissions: permitted(Plugins.running(subject)[name]),
-          warnings: if(warnings == "", do: nil, else: warnings)
+          warnings: if(warnings == "", do: nil, else: warnings),
+          listing: Version.listing(Plugins.running(subject)[name])
         }
 
       {:error, why} ->

@@ -21,6 +21,21 @@ defmodule OneCore.Plugins.Deploy do
   @deployed "network/deployed/"
   @outputs "Each tool gives its outputs beside its inputs: a JSON Schema of the object it answers, which the skill " <>
              "building-plugins says how to write."
+  # What a plugin is for, as its skill's `metadata` says (`OneCore.Plugin`): one of these.
+  @categories [
+    "Communication",
+    "Productivity",
+    "Privacy & Security",
+    "Data",
+    "AI",
+    "Agent tools",
+    "Devices",
+    "Developer tools",
+    "Utilities"
+  ]
+
+  @doc "What a plugin may say it's for, its `category`, in the order a listing shows them."
+  def categories, do: @categories
 
   @doc """
   Deploys a plugin for `owner` from its files by their paths: the plugin that `name` is for them is updated, and
@@ -66,6 +81,7 @@ defmodule OneCore.Plugins.Deploy do
       install = install?.(version)
 
       with :ok <- outputs(version),
+           :ok <- categorized(version),
            :ok <- if(install, do: fits(owner, name, version), else: :ok),
            {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
            _ = stage.("Keeping it in the bucket"),
@@ -193,6 +209,18 @@ defmodule OneCore.Plugins.Deploy do
     end
   end
 
+  defp categorized(version) do
+    case Version.listing(version).category do
+      category when category in @categories ->
+        :ok
+
+      category ->
+        {:error,
+         "Its skill's metadata says its category is #{inspect(category)}. It says one of: " <>
+           Enum.join(@categories, ", ") <> " (the skill building-plugins)."}
+    end
+  end
+
   # A version's code, compiled and loaded here, or for an untrusted plugin only described, by its sandbox's VM.
   defp loaded(artifact, built, true), do: Version.load(Path.basename(artifact), built)
 
@@ -201,12 +229,12 @@ defmodule OneCore.Plugins.Deploy do
   end
 
   @doc """
-  Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, title: ..., description:
-  its skill's, subtitle: ..., about: ..., icon: ..., apps: [...], tools: [names], permissions: [...], trusted:
-  ..., essential: ...}]`, what a person reads of it as `Version.listing/1` gives it, its permissions as
-  `permissions/0` gives them, whether it's trusted and whether every network has it (`essential`). It's what lists
-  every app there is, whether or not anyone has it now. One that was removed, by the plugin that keeps what's
-  deleted, has no latest version, and isn't listed.
+  Every plugin anyone has deployed, as its latest version has it: `[%{plugin: artifact, description: its skill's,
+  tools: [names], permissions: [...], trusted: ..., essential: ..., title: ..., icon: ..., subtitle: ..., about:
+  ..., category: ..., apps: [...], widgets: [...]}]`, what a person reads of it as `Version.listing/1` gives it, its
+  permissions as `permissions/0` gives them, whether it's trusted and whether every network has it (`essential`).
+  It's what lists every app there is, whether or not anyone has it now. One that was removed, by the plugin that
+  keeps what's deleted, has no latest version, and isn't listed.
 
   It's two trips to the bucket with a request for each plugin, and changes only when someone deploys, so it's kept:
   read again behind a request once it's five minutes old, as `OneCore.Plugins` looks at what's installed, and
@@ -240,18 +268,16 @@ defmodule OneCore.Plugins.Deploy do
       for {[owner, name], {:ok, description, _tag}, {:ok, _latest, _}} <- Enum.zip([named, descriptions, latest]) do
         description = JSON.decode!(description)
 
-        apps =
-          for app <- description["apps"],
-              do: %{name: app["name"], page: app["page"], icon: app["icon"], category: app["category"]}
-
         %{
           plugin: "#{owner}/plugins/#{name}",
           title: description["title"] || name,
           description: description["description"] || "",
           subtitle: description["subtitle"],
           about: description["about"],
+          category: description["category"],
           icon: description["icon"],
-          apps: apps,
+          apps: for(app <- description["apps"], do: %{name: app["name"], icon: app["icon"], category: app["category"]}),
+          widgets: for(widget <- description["widgets"] || [], do: %{name: widget["name"], sizes: widget["sizes"]}),
           tools: description["tools"] || [],
           permissions: description["permissions"] || [],
           trusted: description["trusted"] != false,
@@ -270,10 +296,7 @@ defmodule OneCore.Plugins.Deploy do
 
     listing =
       %{
-        apps: version.apps,
-        title: version.title,
         description: OneCore.Search.described(version),
-        icon: version.icon,
         tools: Enum.map(version.tools, & &1.name),
         permissions: version.permissions,
         trusted: version.trusted,

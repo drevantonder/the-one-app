@@ -137,6 +137,7 @@ defmodule Notes do
 end
 EOF
 on desk as owner for network deploy --name locker --files-from "$root/plugins/vault/test/plugins/locker" >/dev/null
+printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' notes notes >"$folder/notes/SKILL.md"
 on desk as owner for network deploy --name notes --files-from "$folder/notes" >/dev/null
 
 say "Alice's key is made on her phone, which then chooses the server to open her Vault and her locker"
@@ -248,7 +249,10 @@ refused on laptop as alice vault fetch --item Pasted --url "http://127.0.0.1:$se
 say "A plugin uses an item that's switched on for it, and another is refused"
 mkdir -p "$folder/fake/server"
 sed "s/PORT/$service/g" "$root/plugins/vault/test/plugins/fake/server/fake.ex" >"$folder/fake/server/fake.ex"
-for plugin in fake nosy; do on desk as owner for network deploy --name $plugin --files-from "$folder/fake" >/dev/null; done
+for plugin in fake nosy; do
+  printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' $plugin $plugin >"$folder/fake/SKILL.md"
+  on desk as owner for network deploy --name $plugin --files-from "$folder/fake" >/dev/null
+done
 may on phone as alice vault use --item GitHub --plugin fake
 may on phone as alice fake digest --item GitHub --field token
 [[ $output == *"\"$(sha256sum <"$folder/secrets/github" | cut -d' ' -f1)\""* ]] && echo "  which is the SHA-256 of the token she typed: the plugin's program was handed the secret itself"

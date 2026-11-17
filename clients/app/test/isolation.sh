@@ -69,7 +69,10 @@ end
 PLUGIN
 cp "$here/prober.html" "$folder/prober/client/app.html"
 cp "$here/prober.js" "$folder/prober/client/app.js"
-for plugin in kept prober; do echo '<svg xmlns="http://www.w3.org/2000/svg"/>' >"$folder/$plugin/client/icon.svg"; done
+for plugin in kept prober; do
+  echo '<svg xmlns="http://www.w3.org/2000/svg"/>' >"$folder/$plugin/client/icon.svg"
+  printf -- '---\nname: %s\ndescription: Read before testing with %s.\nmetadata:\n  category: Utilities\n---\n' a-$plugin a-$plugin >"$folder/$plugin/SKILL.md"
+done
 
 say "A network whose first two apps are Kept and Prober"
 start a

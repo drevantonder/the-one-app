@@ -110,8 +110,23 @@ defmodule OneCore.Plugin do
     tools by too. Its `metadata`, which Agent Skills leaves to whoever reads
     it, is what a person reads where the plugin's listed (the App Store, the plugin directory): its `subtitle`, a
     few words under its name, as an App Store app's is, and `about`, a few plain sentences on its page, as Google
-    Play's "About this app" is. Both say what it does for a person, with no word of an agent's; each is one line, as
-    the directory reads it:
+    Play's "About this app" is. Both say what it does for a person, with no word of an agent's. Its `category`
+    says what the plugin is for, and a listing groups plugins by it; it's one of these, and a deploy without one is
+    refused. It isn't its apps' categories, which place each app in the App Library:
+
+    | `category` | For |
+    | --- | --- |
+    | `Communication` | Email, messages, chats and notifications |
+    | `Productivity` | Accounts, calendars, documents, files, reminders and contacts |
+    | `Privacy & Security` | Signing in, keeping secrets, encryption and who may reach what |
+    | `Data` | Keeping data, backing it up and getting it back |
+    | `AI` | Models, what agents remember and what they're told |
+    | `Agent tools` | What an agent uses to act: browsers, screens, phones |
+    | `Devices` | The machines themselves: their load, power, shells and containers |
+    | `Developer tools` | Building, debugging and running code |
+    | `Utilities` | Anything else |
+
+    Each is one line, as the directory reads it:
 
         ---
         name: hello
@@ -119,6 +134,7 @@ defmodule OneCore.Plugin do
         metadata:
           subtitle: Hello to whoever arrives
           about: Says hello to each person who arrives, by name, and counts how many it has greeted.
+          category: Utilities
         ---
 
         Use `greet` when someone arrives, once for each of them.
@@ -151,8 +167,8 @@ defmodule OneCore.Plugin do
     group or the network as its `owner`. A tool that changes what's a group's as a whole asks it.
   - `OneCore.Call.plugins(call)` lists the plugins whoever the call runs for finds, theirs and the network's,
     each with who it was installed for, its apps and its widgets. A Home Screen page is drawn from it.
-  - `OneCore.Call.deployed(call)` lists every plugin anyone in the network has deployed, with its apps, whether or
-    not it's installed for anyone now: an app store is drawn from it.
+  - `OneCore.Call.deployed(call)` lists every plugin anyone in the network has deployed, as it's listed (its icon,
+    subtitle, category, apps and widgets), whether or not it's installed for anyone now: an app store is drawn from it.
   - Make a tool an MCP task ([Tasks](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks))
     with `task_support: :optional` when it can take more than a few seconds, works through stages, or waits on a
     person. Callers can then start it, carry on, check back, and cancel it. `Call.stage` sets the task's

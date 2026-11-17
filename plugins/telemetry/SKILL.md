@@ -4,6 +4,7 @@ description: Read when someone asks what's failing, slow or broken in their netw
 metadata:
   subtitle: "What's slow, failing or costly"
   about: "Shows what's failing or slow in your network, and what AI costs, for the last 14 days. It keeps names and timings, never what anyone wrote."
+  category: Developer tools
 ---
 
 Telemetry keeps what the network's servers, clients and plugins did: a span for each tool call, numbers such as how

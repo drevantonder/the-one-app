@@ -4,6 +4,7 @@ description: Read before sharing something, making a group or a sharing link, or
 metadata:
   subtitle: "Who can see and change what"
   about: "Share what you make with people, groups or a link, and choose who can see or change it. Make groups for your family or team."
+  category: "Privacy & Security"
 ---
 
 Permissions says who may do what, as relation tuples: an artifact, a relation, and who. A plugin reaches an
