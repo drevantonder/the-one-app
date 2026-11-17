@@ -1,229 +1,187 @@
-/* An app's icon, as big as on a Home Screen, with its name under it, as small as a phone's own labels. */
-.tile {
-  display: grid;
-  align-content: start;
-  justify-items: center;
-  gap: 0.4375rem;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1.25;
-  text-align: center;
-}
-button.tile {
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.tile img,
-.tile .blank {
-  display: block;
-  width: 3.75rem;
-  height: 3.75rem;
-  border-radius: 22.5%;
-  transition: scale var(--move-quick) var(--ease-quick), opacity var(--move-quick) var(--ease-quick);
-}
-.tile .blank,
-.page .blank {
-  background: var(--muted);
-}
-button.tile:active img {
-  scale: 0.94;
-  opacity: 0.85;
-  transition-duration: 0s;
-}
-button.tile:focus-visible {
-  outline: none;
-}
-button.tile:focus-visible img {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-.tile > span:last-child {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.apps [data-tabs-root] {
-  justify-self: stretch;
-}
-.apps [data-tabs-list] {
-  justify-self: stretch;
-}
-@container (min-width: 40rem) {
-  .apps [data-tabs-list] {
-    justify-self: start;
-    min-width: 24rem;
+/* The App Store's look, all under `.app-store`, the element its screen is drawn in, wherever that is. */
+.app-store {
+  /* An app's icon, as big as on a Home Screen, with its name under it, as small as a phone's own labels. */
+  .app-tile {
+    display: grid;
+    align-content: start;
+    justify-items: center;
+    gap: 0.4375rem;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 0.75rem;
+    line-height: 1.25;
+    text-align: center;
   }
-}
-/* An update's count, as a Home Screen's badge is. */
-.count {
-  display: inline-grid;
-  place-content: center;
-  min-width: 1.25rem;
-  height: 1.25rem;
-  margin-inline-start: 0.375rem;
-  padding: 0 0.375rem;
-  border-radius: 999px;
-  background: var(--destructive);
-  color: white;
-  font-size: 0.75rem;
-  font-style: normal;
-  font-variant-numeric: tabular-nums;
-}
+  button.app-tile {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .app-tile img,
+  .app-tile .blank {
+    display: block;
+    width: 3.75rem;
+    height: 3.75rem;
+    border-radius: 22.5%;
+    transition: scale var(--move-quick) var(--ease-quick), opacity var(--move-quick) var(--ease-quick);
+  }
+  .app-tile .blank,
+  .app-page .blank {
+    background: var(--muted);
+  }
+  button.app-tile:active img {
+    scale: 0.94;
+    opacity: 0.85;
+    transition-duration: 0s;
+  }
+  button.app-tile:focus-visible {
+    outline: none;
+  }
+  button.app-tile:focus-visible img {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .app-tile > span:last-child {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
-/* The categories, sideways. */
-.chips {
-  display: flex;
-  gap: 0.5rem;
-  margin-inline: calc(-1 * var(--gutter));
-  padding-inline: var(--gutter);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.chips > .ui-button {
-  flex: none;
-  border-radius: 999px;
-}
+  /* The categories, sideways. */
+  .chips {
+    display: flex;
+    gap: 0.5rem;
+    margin-inline: calc(-1 * var(--gutter));
+    padding-inline: var(--gutter);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .chips > .ui-button {
+    flex: none;
+    border-radius: 999px;
+  }
 
-/* A row for each category, two across where there's room. */
-.shelves {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
-  gap: 1.75rem 2.5rem;
-}
-.shelf {
-  display: grid;
-  gap: 0.75rem;
-  min-width: 0;
-  container-type: inline-size;
-}
-.shelf > header,
-.group > header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  min-height: var(--control);
-}
-.shelf h2 {
-  font-size: var(--text-lg);
-  font-weight: var(--title-weight);
-  letter-spacing: var(--title-tracking);
-}
-/* See All and Update All: a link at the row's end, smaller than the title, on its baseline, with no padding of its
-   own so its text ends where the row's content does. */
-:is(.shelf, .group) > header > .ui-button[data-variant="ghost"] {
-  padding-inline: 0;
-  background: none;
-  color: var(--foreground);
-  font-size: var(--text-sm);
-}
-/* Cut so the next icon shows: four and a half across a phone. */
-.shelf-row {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: min(6.5rem, (100cqi - 4 * 0.75rem) / 4.5);
-  gap: 0.75rem;
-  margin-inline-end: calc(-1 * var(--gutter));
-  padding-inline-end: var(--gutter);
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  scrollbar-width: none;
-}
-.shelf-row > .tile {
-  scroll-snap-align: start;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
-  gap: 1.5rem 0.75rem;
-}
+  /* A row for each category, two across where there's room. */
+  .shelves {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
+    gap: 1.75rem 2.5rem;
+  }
+  .shelf {
+    display: grid;
+    gap: 0.75rem;
+    min-width: 0;
+    container-type: inline-size;
+  }
+  .shelf > header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    min-height: var(--control);
+  }
+  .shelf h2 {
+    font-size: var(--text-lg);
+    font-weight: var(--title-weight);
+    letter-spacing: var(--title-tracking);
+  }
+  /* See All: a link at the row's end, smaller than the title, on its baseline, with no padding of its
+     own so its text ends where the row's content does. */
+  .shelf > header > .ui-button[data-variant="ghost"] {
+    padding-inline: 0;
+    background: none;
+    color: var(--foreground);
+    font-size: var(--text-sm);
+  }
+  /* Cut so the next icon shows: four and a half across a phone. */
+  .shelf-row {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: min(6.5rem, (100cqi - 4 * 0.75rem) / 4.5);
+    gap: 0.75rem;
+    margin-inline-end: calc(-1 * var(--gutter));
+    padding-inline-end: var(--gutter);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .shelf-row > .app-tile {
+    scroll-snap-align: start;
+  }
+  .app-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr));
+    gap: 1.5rem 0.75rem;
+  }
 
-/* An app's page. */
-.page {
-  display: grid;
-  gap: 1.5rem;
-  max-width: var(--readable);
-}
-.page .head {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-}
-.page .icon {
-  flex: none;
-  width: 4.5rem;
-  height: 4.5rem;
-  border-radius: 22.5%;
-}
-.page h2 {
-  font-size: var(--text-title);
-  font-weight: var(--title-weight);
-  letter-spacing: var(--title-tracking);
-  line-height: 1.15;
-}
-.page .head p,
-.quiet {
-  color: var(--muted-foreground);
-}
-.owner-end,
-.busy {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-.busy {
-  color: var(--muted-foreground);
-}
-.facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 1rem 1.5rem;
-  max-width: var(--readable);
-}
-.facts dt {
-  color: var(--muted-foreground);
-}
-.facts dd {
-  display: grid;
-  gap: 0.5rem;
-  min-width: 0;
-}
-.facts .entrypoints {
-  grid-template-columns: repeat(auto-fill, 5rem);
-  gap: 1rem 0.75rem;
-}
-.facts .code {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-}
+  /* An app's page. */
+  .app-page {
+    display: grid;
+    gap: 1.5rem;
+    max-width: var(--readable);
+  }
+  .app-page .head {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .app-page .icon {
+    flex: none;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: 22.5%;
+  }
+  .app-page h2 {
+    font-size: var(--text-title);
+    font-weight: var(--title-weight);
+    letter-spacing: var(--title-tracking);
+    line-height: 1.15;
+  }
+  .app-page .head p,
+  .quiet {
+    color: var(--muted-foreground);
+  }
+  .owner-end,
+  .busy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .busy {
+    color: var(--muted-foreground);
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 1rem 1.5rem;
+    max-width: var(--readable);
+  }
+  .facts dt {
+    color: var(--muted-foreground);
+  }
+  .facts dd {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .facts .entrypoints {
+    grid-template-columns: repeat(auto-fill, 5rem);
+    gap: 1rem 0.75rem;
+  }
+  .facts .code {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+  }
 
-/* Installed. */
-.group {
-  display: grid;
-  gap: 0.5rem;
-}
-.group h2 {
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
-  font-weight: var(--label-weight);
-}
-.list-icon {
-  display: block;
-  width: 2.25rem;
-  height: 2.25rem;
-  border-radius: 22.5%;
-}
+  /* What the Marketplace is while an app's page is over it: still there, not drawn. */
+  .under[hidden] {
+    display: none;
+  }
 
-/* What the Marketplace is while an app's page is over it: still there, not drawn. */
-.under[hidden] {
-  display: none;
 }
