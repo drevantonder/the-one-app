@@ -26,7 +26,7 @@
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
 # with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with named by its SHA-256, which it downloads the first time (`OneCore.Entrypoint`). The builds are in
-# target/builds/<build>.
+# target/builds/<build> of the checkout it builds in, on Linux ~/.cache/the-one-app/release.
 #
 # A server for a kind of machine, `server/<kind>`, is published in two parts, which a machine puts together (`one
 # serve run`): `server-code`, One Core's own code, its release's `releases/` and the UI library, the same for every kind of
@@ -192,6 +192,14 @@ if [[ $(uname) == Linux ]]; then
     echo "$$ $build" >"$lock"
   fi
   trap 'rm -f "$lock"' EXIT
+
+  # It builds in one checkout kept for releasing on this machine, put at the commit released, so each release builds,
+  # downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does, rather
+  # than all of it again in each new worktree (most of a server's build, 17 Nov).
+  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release
+  [[ -d $kept ]] || { git worktree prune && git worktree add -q --detach "$kept" "$commit"; }
+  git -C "$kept" checkout -q --detach -f "$commit"
+  root=$kept && cd "$root"
 fi
 
 servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
@@ -223,9 +231,6 @@ for name in "${mine[@]}"; do
   clients+=($!)
 done
 
-# The servers' NIFs, for the kinds of machine they're built for.
-((${#servers[@]})) && tooling/nifs "${servers[@]}"
-
 cache=$target/release-cache
 mkdir -p "$cache"
 
@@ -238,16 +243,23 @@ fetched() {
 }
 
 if ((${#servers[@]})); then
+  # The servers' NIFs, for the kinds of machine they're built for, and the UI library, each while the rest gets ready.
+  tooling/nifs "${servers[@]}" &
+  nifs=$!
+  (cd core/ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null) &
+  ui=$!
   otp=$(erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(string:trim(V)), halt().')
   bun=$(bun --version)
   # What strips the VM's debugging symbols, for any kind of machine: Rust's own LLVM tools.
   objcopy=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-objcopy
   [[ -x $objcopy ]] || rustup component add llvm-tools
-  (cd core/ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null)
   (cd core/server && mix deps.get --only prod >/dev/null)
   bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
+  wait "$nifs" || { echo "The servers' NIFs weren't built." >&2 && exit 1; }
+  wait "$ui" || { echo "The UI library wasn't built." >&2 && exit 1; }
 fi
 
+packing=() code=()
 for kind in "${servers[@]}"; do
   echo "Building the server for $kind"
   case $kind in
@@ -259,21 +271,21 @@ for kind in "${servers[@]}"; do
   esac
 
   # The VM and OTP for that machine, from Hex's builds for Linux, Erlang/OTP's own for Windows and the Erlang
-  # Ecosystem Foundation's for a Mac.
-  if [[ $kind == linux-* ]]; then
-    sum=$(curl -fsSL "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/builds.txt" | awk -v v="OTP-$otp" '$1 == v { print $4 }')
-    archive=$(fetched "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/OTP-$otp.tar.gz" "otp-$otp-$kind.tar.gz" "$sum")
-  elif [[ $kind == windows-* ]]; then
-    zip=otp_win64_$otp.zip
-    sum=$(curl -fsSL "https://api.github.com/repos/erlang/otp/releases/tags/OTP-$otp" | jq -r --arg z "$zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
-    archive=$(fetched "https://github.com/erlang/otp/releases/download/OTP-$otp/$zip" "otp-$otp-$kind.zip" "$sum")
-  else
-    url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-aarch64-apple-darwin.tar.gz"
-    [[ -e $cache/otp-$otp-$kind.tar.gz ]] || curl -fsSL -o "$cache/otp-$otp-$kind.tar.gz" "$url"
-    archive=$cache/otp-$otp-$kind.tar.gz
-  fi
+  # Ecosystem Foundation's for a Mac, fetched once.
   vm=$cache/otp-$otp-$kind
   if [[ ! -d $vm ]]; then
+    if [[ $kind == linux-* ]]; then
+      sum=$(curl -fsSL "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/builds.txt" | awk -v v="OTP-$otp" '$1 == v { print $4 }')
+      archive=$(fetched "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/OTP-$otp.tar.gz" "otp-$otp-$kind.tar.gz" "$sum")
+    elif [[ $kind == windows-* ]]; then
+      zip=otp_win64_$otp.zip
+      sum=$(curl -fsSL "https://api.github.com/repos/erlang/otp/releases/tags/OTP-$otp" | jq -r --arg z "$zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
+      archive=$(fetched "https://github.com/erlang/otp/releases/download/OTP-$otp/$zip" "otp-$otp-$kind.zip" "$sum")
+    else
+      url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-aarch64-apple-darwin.tar.gz"
+      [[ -e $cache/otp-$otp-$kind.tar.gz ]] || curl -fsSL -o "$cache/otp-$otp-$kind.tar.gz" "$url"
+      archive=$cache/otp-$otp-$kind.tar.gz
+    fi
     rm -rf "$vm.part" && mkdir -p "$vm.part"
     if [[ $kind == windows-* ]]; then
       unzip -q "$archive" -d "$vm.part" -x 'doc/*' '*.pdb' '*/doc/*' '*/src/*' '*/examples/*' '*/beam.debug.smp.dll'
@@ -334,11 +346,17 @@ for kind in "${servers[@]}"; do
     echo "$inputs" >"$out/server-runtime-$kind.inputs"
     (cd "$release" && find . -type f ! -path './releases/*' ! -path './ui/*' \
       \( ! -path './lib/one_core-*' -o -path './lib/one_core-*/priv/native/*' \) -print0 |
-      tar -czf "$out/server-runtime-$kind.tar.gz" --null --no-recursion -T -)
+      tar -czf "$out/server-runtime-$kind.tar.gz" --null --no-recursion -T -) &
+    packing+=($!)
   fi
-  [[ -e $out/server-code.tar.gz ]] ||
-    tar -czf "$out/server-code.tar.gz" -C "$release" --exclude='./lib/one_core-*/priv/native' ./releases ./ui $(cd "$release" && echo ./lib/one_core-*)
+  # One Core's own code is the same for every kind, so it's packed from the first.
+  ((${#code[@]})) || {
+    tar -czf "$out/server-code.tar.gz" -C "$release" --exclude='./lib/one_core-*/priv/native' ./releases ./ui $(cd "$release" && echo ./lib/one_core-*) &
+    code=($!) && packing+=($!)
+  }
 done
+# Each is packed while the next kind builds.
+for pack in "${packing[@]}"; do wait "$pack" || { echo "A server wasn't packed." >&2 && exit 1; }; done
 
 for client in "${clients[@]}"; do wait "$client" || { echo "A client wasn't built." >&2 && exit 1; }; done
 
@@ -365,11 +383,11 @@ if ((${#mine[@]})); then
     };
     let published = publish();
     if (published.send) {
-      for (const { file, name } of builds.filter(({ name }) => published.send[name])) {
+      await Promise.all(builds.filter(({ name }) => published.send[name]).map(async ({ file, name }) => {
         const { method, url, headers } = published.send[name];
         const sent = await fetch(url, { method, headers, body: Bun.file(`${OUT}/${file}`) });
         if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
-      }
+      }));
       published = publish();
     }
     if (published.send) throw new Error("The network didn'"'"'t take them");
