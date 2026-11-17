@@ -54,17 +54,29 @@ defmodule Database do
   # it sends again by then (`client::THERE`).
   @waited 1_000
 
+  # How long, in milliseconds, the server holding the lease has to run a call passed on to it that's safe to ask
+  # again, a hook or a tool that only reads, before it's taken as gone. One that's there but stuck keeps the call
+  # open, saying it's still running it, and a hook gives up at 10 s (`OneCore.Hooks`): so every hook passed to a
+  # stuck holder gave up before anything took the lease back, and the next did the same. A holder that's up runs one
+  # in well under a second, and this leaves a hook time to take the lease over and answer.
+  @reach 4_000
+
   # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
   # that needs what only another server has can't be passed on again (a Vault item only some servers open, say).
   # Either way this server takes the lease, if the log still names that one, and runs the call itself. But not
   # reaching it just now isn't its being gone: a network loses a connection now and then, and what this server knew
   # of it may be from before it came back. So one given up on at once is asked once more first. One that was waited
-  # for has had what it was sent sent again by then (`@waited`).
+  # for has had what it was sent sent again by then (`@waited`). A server that isn't up takes no lease, so the call
+  # fails here, for whoever asked to ask another.
   defp taken_over(call, lease, server) do
     began = System.monotonic_time(:millisecond)
-    Call.forward_to(call, server)
-    if System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server)
-    :ok = :gen_statem.call(lease, {:take_over, server})
+    if server, do: Call.forward_to(call, server, @reach)
+    if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
+
+    with :not_up <- :gen_statem.call(lease, {:take_over, server}) do
+      held = if server, do: "#{OneCore.Servers.name(server) || server} holds it and didn't answer", else: "nobody holds it"
+      raise "This server is starting or stopping, so it doesn't take a database over, and #{held}. Try again in a moment."
+    end
   end
 
   @doc """

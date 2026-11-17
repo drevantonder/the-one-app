@@ -32,6 +32,7 @@ defmodule Database.Lease do
 
   - `{:following, server}`: `server` holds the lease. A transaction is answered with who holds it, to be passed on
     to them, and one they didn't run has this server read the log again and take the lease if it still names them.
+    `nil` is nobody: the log is empty, and this server isn't up to take it.
   - `:settling`: this server has just opened the database. It answers from its copy, and writes nothing until
     `@writes_after` has passed.
   - `{:settling, written}`: a transaction wrote while settling. What it wrote is committed to the copy, and is
@@ -41,6 +42,10 @@ defmodule Database.Lease do
   It moves between them by reading the log (`look/1`): to `:settling` with the database opened if the log names
   this server, after taking the lease if the log is empty, and otherwise to following the server it names. One that
   finds another server wrote the log's next entry has lost the lease, and reads the log again.
+
+  Only a server that's up takes the lease (`OneCore.Server.up?/0`): a build being tried that can't be reached by its
+  key, or a server that's stopping, would have everyone pass their calls to it and wait. It still holds the lease
+  the log gave it before it started, which everyone passes their calls to already.
 
   Whether a server may answer from its copy isn't a state of its own. It's the time since it last saw the log's next
   entry free, read after the transaction ran by both its clocks, since a state timeout fires only between events,
@@ -104,12 +109,16 @@ defmodule Database.Lease do
   def handle_event(:state_timeout, :settled, :settling, data), do: {:next_state, :holding, data}
 
   # The server this one took to hold the lease didn't run a call passed on to it. If the log still names it, this
-  # server takes the lease, and otherwise it has learnt who holds it now.
+  # server takes the lease, and otherwise it has learnt who holds it now. One that isn't up takes nothing, and says so.
   def handle_event({:call, from}, {:take_over, server}, {:following, _server}, data) do
     case look(data) do
       {{:following, ^server}, data} ->
-        Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
-        moved(take(data), [{:reply, from, :ok}])
+        if OneCore.Server.up?() do
+          Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
+          moved(take(data), [{:reply, from, :ok}])
+        else
+          {:next_state, {:following, server}, data, {:reply, from, :not_up}}
+        end
 
       looked ->
         moved(looked, [{:reply, from, :ok}])
@@ -295,7 +304,7 @@ defmodule Database.Lease do
 
     case List.last(entries) || Log.entry(data.artifact, snapshot) do
       nil ->
-        take(data)
+        if OneCore.Server.up?(), do: take(data), else: {{:following, nil}, data}
 
       %{server: server} when server == data.server ->
         Logger.info("#{data.artifact.prefix}: holds its lease, from snapshot #{snapshot} and the log to #{data.number}")
