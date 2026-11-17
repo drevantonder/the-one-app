@@ -7,7 +7,7 @@
 // touch and hold an app or a widget (press and hold it, or right-click it, with a mouse), then Edit Home Screen, or
 // hold it a while longer, or touch and hold a page's empty space. Where it is, what's open over it and the editing are
 // one state machine (machine.ts), whose snapshot is one signal here.
-import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { Dynamic, render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
 import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, Problem, Row, Section, Sheet, toast, Widget } from "ui"
@@ -345,10 +345,10 @@ function shelve(library: Category[]): Folder[][] {
 /// tapping anywhere else in a category opens it. Touching and holding an app lifts it, to drag onto a Home page.
 function Library(props: { owner: Owner; index: number; folders: Folder[]; places: Record<string, HTMLElement> }) {
   // Tapped again as it shrinks back into its place, it turns and grows again.
-  const opening = (category: Category) => () => {
+  const opening = (category: () => Category) => () => {
     const opened = state().context.category
-    const back = state().matches({ category: "closing" }) && opened?.owner === props.index && opened.name === category.category
-    if (state().matches("nothing") || back) home.send({ type: "open", category: { owner: props.index, name: category.category } })
+    const back = state().matches({ category: "closing" }) && opened?.owner === props.index && opened.name === category().category
+    if (state().matches("nothing") || back) home.send({ type: "open", category: { owner: props.index, name: category().category } })
   }
   return (
     <section class="page library" aria-label={`${props.owner.name}'s App Library`}>
@@ -361,7 +361,7 @@ function Library(props: { owner: Owner; index: number; folders: Folder[]; places
               const shown = () => (category().entrypoints.length > room() ? category().entrypoints.slice(0, room() - 1) : category().entrypoints)
               return (
                 <div class={["category", { wide: folder().wide }]}>
-                  <div class="place" ref={registered(props.places, () => `${props.index}:${category().category}`)} onClick={opening(category())}>
+                  <div class="place" ref={registered(props.places, () => `${props.index}:${category().category}`)} onClick={opening(category)}>
                     <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                       {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} index={props.index} />}
                     </For>
@@ -373,7 +373,7 @@ function Library(props: { owner: Owner; index: number; folders: Folder[]; places
                       </button>
                     </Show>
                   </div>
-                  <button type="button" class="name" onClick={opening(category())}>{category().category}</button>
+                  <button type="button" class="name" onClick={opening(category)}>{category().category}</button>
                 </div>
               )
             }}
@@ -979,6 +979,8 @@ function HomeScreen(props: { owners: Owner[] }) {
   let main!: HTMLElement
   const strips: Record<number, HTMLElement> = {}
   const places: Record<string, HTMLElement> = {}
+  // The owners as they are when a spring, a gesture or what the machine sends asks, outside anything that tracks them.
+  const owned = () => untrack(() => props.owners)
   // A phone's until the Home Screen has been measured, which it is before it's first drawn.
   const [room, setRoom] = createSignal({ wide: false, fit: 1, scale: 1, side: 0, gap: 0 })
 
@@ -1012,7 +1014,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     reflow(cells(), now && wasEditing)
     wasEditing = now
   })
-  pending = () => (props.owners[state().context.at.owner]?.arranges ? draft(props.owners[state().context.at.owner], state().context.at.owner) : undefined)
+  pending = () => (owned()[state().context.at.owner]?.arranges ? draft(owned()[state().context.at.owner], state().context.at.owner) : undefined)
 
   /// The kind of the page an owner is on: the one shown, for whoever's shown.
   const kindOf = (owner: number) => {
@@ -1048,7 +1050,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     }))
   /// The owner and page nearest where they are, which the dots and the owner's name follow.
   const look = () => {
-    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(down.value / height())))
+    const owner = Math.max(0, Math.min(owned().length - 1, Math.round(down.value / height())))
     setSeen({ owner, page: Math.round(sideways(owner).value / pitch(owner)) })
   }
 
@@ -1070,7 +1072,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (event.pointerType === "mouse" || event.button || !on.closest(".owners")) return
     // A category shrinking back into its place lets the pages under it have the finger.
     if (!state().matches("nothing") && !state().matches({ category: "closing" }) && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
-    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(down.value / height())))
+    const owner = Math.max(0, Math.min(owned().length - 1, Math.round(down.value / height())))
     // A finger that lands while they move catches them.
     stop(down)
     stop(sideways(owner))
@@ -1092,7 +1094,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     }
     const x = swipe.axis === "x"
     const moved = x ? -(event.clientX - swipe.x) * rtl() : -(event.clientY - swipe.y)
-    const end = x ? furthest(swipe.owner) : (props.owners.length - 1) * height()
+    const end = x ? furthest(swipe.owner) : (owned().length - 1) * height()
     const size = x ? strips[swipe.owner].clientWidth : height()
     const value = swipe.base + moved
     swipe.moves.push({ time: event.timeStamp, value })
@@ -1114,7 +1116,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       glide(moving, Math.min(furthest(done.owner), page * pitch(done.owner)), velocity)
       home.send({ type: "settled", at: { owner: done.owner, page } })
     } else {
-      const owner = settle(done.from, down.value / height(), velocity, props.owners.length)
+      const owner = settle(done.from, down.value / height(), velocity, owned().length)
       glide(down, owner * height(), velocity)
       home.send({ type: "settled", at: { owner, page: Math.round(sideways(owner).value / pitch(owner)) } })
     }
@@ -1244,7 +1246,7 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   onSettled(() => {
     const sliding = home.on("slide", ({ at, smooth }) => slide(at, smooth))
-    const arranging = home.on("arrange", ({ editing }) => keep(editing, props.owners[editing.owner]))
+    const arranging = home.on("arrange", ({ editing }) => keep(editing, owned()[editing.owner]))
     // The room it's given may have changed since it was first drawn, and every owner's pages stay on the page they
     // were. It's laid out for the new size first, so where the pages are is measured from what's drawn.
     const resized = () => {
@@ -1253,7 +1255,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       // Once it's drawn again for the new size, where each cell is is where it is.
       requestAnimationFrame(() => reflow(cells(), false))
       const { at, last } = home.getSnapshot().context
-      props.owners.forEach((_, owner) => jump(sideways(owner), Math.min(furthest(owner), (owner === at.owner ? at.page : (last[owner] ?? 0)) * pitch(owner))))
+      owned().forEach((_, owner) => jump(sideways(owner), Math.min(furthest(owner), (owner === at.owner ? at.page : (last[owner] ?? 0)) * pitch(owner))))
       jump(down, at.owner * height())
     }
     const watched = new ResizeObserver(resized)
