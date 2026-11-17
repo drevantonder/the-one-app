@@ -319,13 +319,19 @@ defmodule OneCore.Servers do
 
   @doc """
   A server that started says how to reach it now, what its machine is called and which build it is, and who it's for
-  if it has never said.
+  if it has never said. Each is its own blob, so they're written at once: each is a round trip to the bucket, which a
+  server's start waits for.
   """
   def started(key, address, name, owner) do
-    say("servers/#{key}/address", address)
-    say("servers/#{key}/name", JSON.encode!(name))
-    Builds.say(key)
-    Bucket.write("servers/#{key}/members", JSON.encode!([owner]))
+    [
+      fn -> say("servers/#{key}/address", address) end,
+      fn -> say("servers/#{key}/name", JSON.encode!(name)) end,
+      fn -> Builds.say(key) end,
+      fn -> Bucket.write("servers/#{key}/members", JSON.encode!([owner])) end
+    ]
+    |> Task.async_stream(& &1.(), timeout: :infinity)
+    |> Stream.run()
+
     invalidate()
   end
 
