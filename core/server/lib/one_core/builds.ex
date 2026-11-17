@@ -22,13 +22,14 @@ defmodule OneCore.Builds do
   @plugin ~r{^((?:network|(?:users|groups)/[^/]+)/plugins/[^/]+)/latest$}
 
   # The build this is, as `tooling/version` names the commit it's built from: compiled in, and again whenever the
-  # commit changes, as git's HEAD or the branch it's on says, as a client's is (`core/client/build.rs`). Its `.dirty`
-  # is what was uncommitted when the commit last changed.
+  # commit changes, as git's HEAD or the branch it's on says, as a client's is (`core/client/build.rs`), and not when
+  # a `git fetch` in any worktree rewrites `packed-refs`. Its `.dirty` is what was uncommitted when the commit last
+  # changed.
   @root Path.expand("../../../..", __DIR__)
   git = fn args -> String.trim(elem(System.cmd("git", args, cd: @root, stderr_to_stdout: true), 0)) end
   branch = git.(["symbolic-ref", "-q", "HEAD"])
 
-  for watched <- ["HEAD", "packed-refs", branch], watched != "",
+  for watched <- ["HEAD", branch], watched != "",
       do: @external_resource(git.(["rev-parse", "--path-format=absolute", "--git-path", watched]))
 
   @build String.trim(elem(System.cmd("sh", [Path.join(@root, "tooling/version")]), 0))
