@@ -235,7 +235,8 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
 }
 
 /// Takes the latest builds for this device, as `one update` does, and starts again on them, as an app does once
-/// it has updated. Gives what it says. On a device that's also a server, the program keeping its server running
+/// it has updated. Gives what it says, which it gives only where it isn't starting again (a restart never returns):
+/// the window then asks its network whether it's still behind. On a device that's also a server, the program keeping its server running
 /// takes them, this program's among them, and says where that is in `builds`: this starts again once its file is a
 /// newer build than it runs.
 #[tauri::command]
@@ -295,14 +296,16 @@ fn close(views: State<'_, Views>, view: String) {
     views.subscriptions.lock().expect("no view panics").remove(&view);
 }
 
-/// Asks the network again now, which didn't answer, as its person does with Try Again. A client that couldn't open
-/// at all is opened again.
+/// Asks the network again now, which didn't answer or refused this client for being behind it, as its person does
+/// with Try Again (`Client::retry`), and answers once it has, failing where it still isn't answered. A client that
+/// couldn't open at all is opened again.
 #[tauri::command]
-fn retry(app: AppHandle) {
-    match app.try_state::<Views>() {
-        Some(views) => views.client.retry(),
-        None => drop(tauri::async_runtime::spawn(opens(app))),
+async fn retry(app: AppHandle) -> Result<(), String> {
+    if app.try_state::<Views>().is_none() {
+        tauri::async_runtime::spawn(opens(app));
+        return Ok(());
     }
+    app.state::<Views>().client.retry().await.map_err(|error| error.to_string())
 }
 
 /// Signs this device out once its person has removed it from their devices (Devices' Sign Out): what it kept of

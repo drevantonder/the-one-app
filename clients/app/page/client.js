@@ -106,128 +106,23 @@ function keyboard() {
 }
 visualViewport?.addEventListener("resize", keyboard)
 
-/// What the window shows of itself, one state at a time: while it opens, until it can start the launcher; the
-/// launcher, once it has drawn; signing in, where the device isn't in its network; why there's no launcher to show,
-/// with Apps to install one; and an update, which is all it shows once a server has refused this client for being
-/// behind it (`behind` from core/client), as an app that requires an update does. Only `on` moves it, by the moves `machine` has, and a move that isn't
-/// there is refused. A link to an app (`one:`) is kept until the launcher has drawn, and then opened over it. While it
-/// opens or updates, the window is busy (`aria-busy`). Whether its network answers is the client's (`Connection` in core/client), which the
-/// window follows and never decides: it says it as it opens, and as a banner over the launcher.
-const { assign, createActor, fromPromise, setup } = XState
-const machine = setup({
-  types: /** @type {{ context: Context, events: Moved }} */ ({}),
-  actors: {
-    // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
-    update: fromPromise(() => invoke("update")),
-  },
-  guards: {
-    signIn: ({ event }) => event.type === "session" && event.told.session.state === "signIn",
-    online: ({ event }) => event.type === "connection" && event.connection === "online",
-    waiting: ({ context }) => !context.starting,
-    updateReady: ({ context }) => context.updateReady,
-    // A phone's app is its network's, which its owner builds and updates.
-    updates: () => !phone,
-    appStore: () => Boolean(appStore),
-  },
-  actions: {
-    told: assign({ told: ({ event, context }) => (event.type === "session" ? event.told : context.told) }),
-    connection: assign(({ event, context }) => {
-      if (event.type !== "connection") return {}
-      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { connection: event.connection } })
-      return { connection: event.connection, lost: context.lost || event.connection === "offline" }
-    }),
-    updateReady: assign(({ event, context }) => {
-      if (event.type !== "updateReady" || event.ready === context.updateReady) return {}
-      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { updateReady: event.ready } })
-      return { updateReady: event.ready }
-    }),
-    // Its apps are listed once it's told where its device is, unless it's to sign in.
-    list: ({ context }) => void (context.told && context.told.session.state !== "signIn" && list()),
-    start: () => start(),
-    signIn: ({ context }) => void (context.told?.link && location.replace(context.told.link)),
-    // The device hears its person's notifications once they see their home.
-    listen: () => void invoke("listen"),
-    openAppStore: () => openAppStore(),
-    link: assign({ link: ({ event, context }) => (event.type === "link" ? event.link : context.link) }),
-    follow: assign({ link: ({ context }) => void (context.link && go(context.link)) }),
-  },
-}).createMachine({
-  id: "window",
-  initial: "opening",
-  context: { connection: "connecting", lost: false, starting: false, updateReady: false },
-  on: {
-    session: { actions: "told" },
-    connection: { actions: "connection" },
-    updateReady: { actions: "updateReady" },
-    link: { actions: "link" },
-  },
-  states: {
-    // Waits until it can start the launcher: its device in its network and its network answering, or a launcher
-    // kept from before.
-    opening: {
-      entry: [assign({ starting: false }), "list"],
-      on: {
-        session: [{ guard: "signIn", target: "sign_in", actions: "told" }, { actions: ["told", "list"] }],
-        connection: [{ guard: "online", actions: ["connection", "list"] }, { actions: "connection" }],
-        listed: { guard: "waiting", actions: [assign({ starting: true }), "start"] },
-        drawn: "launcher",
-        none: { target: "no_launcher", actions: assign({ only: ({ event }) => event.only }) },
-        tooOld: "needs_updating",
-        failed: { target: "launcher_failed", actions: assign({ why: ({ event }) => event.why }) },
-      },
-    },
-    // The network's own sign-in page, which the client brings the window back from once its person has approved
-    // it, where it opens again (`follows` in `src/lib.rs`).
-    sign_in: { entry: "signIn" },
-    launcher: {
-      entry: ["listen", "follow"],
-      on: { update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
-    },
-    no_launcher: {
-      on: { openAppStore: { guard: "appStore", target: "app_store" }, tooOld: "needs_updating" },
-    },
-    // The App Store, shown with no launcher under it, until a launcher is installed.
-    app_store: {
-      entry: "openAppStore",
-      on: { listed: "opening", tooOld: "needs_updating" },
-    },
-    // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
-    launcher_failed: {
-      on: { retry: "opening", drawn: "launcher", tooOld: "needs_updating" },
-    },
-    needs_updating: {
-      on: { update: { guard: "updates", target: "updating" } },
-    },
-    // It starts again on the new build once it has updated, as an app does: a device that's also a server once the
-    // program keeping its server running has taken it, which says so meanwhile.
-    updating: {
-      entry: assign({ message: undefined }),
-      invoke: {
-        src: "update",
-        onDone: { actions: assign({ message: ({ event }) => event.output }) },
-        onError: { target: "update_failed", actions: assign({ why: ({ event }) => `${event.error}` }) },
-      },
-    },
-    update_failed: {
-      on: { retry: "updating" },
-    },
-  },
-})
-const shown = createActor(machine)
-/** @param {Moved} event */
-const on = (event) => shown.send(event)
+const { assign, createActor, enqueueActions, fromPromise, sendParent, sendTo, setup, spawnChild } = XState
 
-/// Each open app's page, one state at a time, as its person's owner signed it off: loading, then current until its
-/// app or the UI library is updated under it, which makes it stale. A stale page loads again by itself only at a
-/// boundary, as an iPhone updates an app while it's closed and a web app loads its new version on the next
-/// navigation: once it's off screen (another app over it, the window hidden), or as it's opened again. On screen,
-/// it says so quietly, "Updated · Reload", and loads again only once its person presses Reload: nothing is reloaded
-/// under them. One that's showing an error loads again at once, as its old version meeting what's new is likely why,
-/// and there's nothing of theirs under it. A page that doesn't draw in 15 s on screen has failed, with Try Again,
-/// until it draws after all, as a page loaded again behind another app may only once it's shown, when it's current.
-/// Only time it's on screen counts: while it's behind another app or the window is hidden, the 15 s wait (`away`),
-/// and go on from where they were once it's in front again (`seen`). The launcher's page is one too.
-/// Its frame is busy (`aria-busy`) while it loads.
+/// Each open app's page, one state at a time, as its person's owner signed it off, a child of the window's
+/// (`machine`), which starts it as the app opens and tells it whether it's in front of its person: loading, then
+/// current until its app or the UI library is updated under it, which makes it stale. A stale page loads again by
+/// itself only at a boundary, as an iPhone updates an app while it's closed and a web app loads its new version on the
+/// next navigation: once it's off screen (another app over it, the window hidden, or the window showing something of
+/// its own over every app, as Update Required), or as it's opened again. On screen, it says so quietly, "Updated ·
+/// Reload", and loads again only once its person presses Reload: nothing is reloaded under them. One that's showing an
+/// error loads again at once, as its old version meeting what's new is likely why, and there's nothing of theirs under
+/// it. A page that doesn't draw in 15 s on screen has failed, with Try Again, until it draws after all, as a page
+/// loaded again behind another app may only once it's shown, when it's current. Only time it's on screen counts: while
+/// it's off screen, the 15 s wait (`away`), and go on from where they were once it's in front again (`seen`). It tells
+/// the window as it draws and as it fails, and the window follows each of its moves (`syncSnapshot`), which it says
+/// what the page needs of its person by. One that hasn't drawn loads again as it's tried again (`retry`), as once its
+/// network talks with this client again, which refused what it asked meanwhile. The launcher's page is one too. Its
+/// frame is busy (`aria-busy`) while it loads.
 /// While a page is loading, as its parts: on screen, where the 15 s it has to draw in run, or not, where they wait.
 /** @type {any} */
 const waiting = {
@@ -261,11 +156,10 @@ const pageMachine = setup({
       // How long it took to open is told only of an open that ended with it drawn.
       view.tapped = undefined
       report("one.client.open", why ?? "", { "one.view": view.entrypoint.split("/")[0] })
-      // A launcher that never draws leaves nothing to show.
-      if (view.entrypoint === launcher) on({ type: "failed", why: why ?? "" })
-      notes()
     },
-    notes: () => notes(),
+    // The window hears it drew, or didn't: a launcher that never draws leaves it nothing to show.
+    drawn: sendParent(({ context }) => ({ type: "drawn", key: context.view.key })),
+    tellFailed: sendParent(({ context }) => ({ type: "failed", key: context.view.key, why: context.why ?? "" })),
     // The wait for it to draw starts afresh as it's loaded, counts while it's on screen, and stops while it isn't.
     unwaited: assign({ waited: 0 }),
     counts: assign({ since: () => performance.now() }),
@@ -286,15 +180,15 @@ const pageMachine = setup({
     loading: {
       entry: ["unwaited", "busy"],
       exit: "idle",
-      on: { drawn: "current", stale: "reloading" },
+      on: { drawn: "current", stale: "reloading", retry: "reloading" },
       ...waiting,
     },
+    // Tried again, as the window opens again, it says again that it's drawn.
     current: {
-      on: { stale: "stale" },
+      entry: "drawn",
+      on: { stale: "stale", retry: { actions: "drawn" } },
     },
     stale: {
-      entry: "notes",
-      exit: "notes",
       always: [
         { guard: "away", target: "reloading" },
         { guard: "errored", target: "reloading" },
@@ -304,25 +198,205 @@ const pageMachine = setup({
     reloading: {
       entry: ["clear", "load", "unwaited", "busy"],
       exit: "idle",
-      on: { drawn: "current", stale: { target: "reloading", reenter: true } },
+      on: { drawn: "current", stale: { target: "reloading", reenter: true }, retry: { target: "reloading", reenter: true } },
       ...waiting,
     },
     failed: {
-      entry: "failed",
-      exit: "notes",
+      entry: ["failed", "tellFailed"],
       on: { drawn: "current", retry: { target: "loading", actions: ["clear", "load"] } },
     },
   },
 })
-/** @param {View} view @param {Paged} event */
-const page = (view, event) => view.page.send(event)
-// The window hidden, every page is off screen; shown again, the one in front is on screen.
-document.addEventListener("visibilitychange", () => {
-  for (const view of open.values()) page(view, { type: document.hidden ? "away" : "seen" })
+
+/// What the window shows, one state at a time: while it opens, until it can start the launcher; the launcher, once
+/// it has drawn; signing in, where the device isn't in its network; why there's no launcher to show, with Apps to
+/// install one; and an update, which is all it shows once a server has refused this client for being behind it
+/// (`behind` from core/client), as an app that requires an update does. Only `on` moves it, by the moves `machine`
+/// has, and a move that isn't there is refused. A link to an app (`one:`) is kept until the launcher has drawn, and
+/// then opened over it. While it opens or updates, the window is busy (`aria-busy`). Whether its network answers is
+/// the client's (`Connection` in core/client), which the window follows and never decides: it says it as it opens,
+/// and as a banner over the launcher.
+///
+/// Each open app's page is its child (`pageMachine`), which it starts as the app is loaded (`load`) and passes
+/// what's said of it (`page`). It alone owns the screen: in the states that show apps (tagged `pages`), the page in
+/// front is on screen (`seen`); in every other, whatever it shows covers them all, so every page is off screen
+/// (`away`), and says nothing over it.
+///
+/// Refused for being behind, it needs updating, and is asked again whether it is (`checking`) as its person presses
+/// Try Again, as its network answers again, and as the window comes back on screen, as an iPhone app checks as it
+/// comes back to the foreground: a server updated or rolled back since may talk with it again. A computer's app
+/// updates itself; a phone's is its network's, which its owner updates. An update that leaves this app running, as a
+/// device that's also a server takes its build without starting again, is checked the same way.
+/// The window's children that are pages, by their apps' keys: not what it invokes, as an update.
+/** @param {import("xstate").AnyActorRef} window @returns {string[]} */
+const pages = (window) => Object.keys(window.getSnapshot()?.children ?? {}).filter((child) => open.has(child))
+/** @param {Moved} event */
+const loaded = (event) => /** @type {Extract<Moved, { type: "load" }>} */ (event).view
+/** @param {Moved} event */
+const paged = (event) => /** @type {Extract<Moved, { type: "page" }>} */ (event)
+const machine = setup({
+  types: /** @type {{ context: Context, events: Moved }} */ ({}),
+  actors: {
+    page: pageMachine,
+    // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
+    update: fromPromise(() => invoke("update")),
+    // Asks its network again, as itself, which a server refuses where this client is still behind it.
+    retry: fromPromise(() => invoke("retry")),
+  },
+  guards: {
+    signIn: ({ event }) => event.type === "session" && event.told.session.state === "signIn",
+    online: ({ event }) => event.type === "connection" && event.connection === "online",
+    waiting: ({ context }) => !context.starting,
+    updateReady: ({ context }) => context.updateReady,
+    // A phone's app is its network's, which its owner builds and updates.
+    updates: () => !phone,
+    appStore: () => Boolean(appStore),
+    launcher: ({ event }) => (event.type === "drawn" || event.type === "failed") && event.key === key(launcher),
+  },
+  actions: {
+    told: assign({ told: ({ event, context }) => (event.type === "session" ? event.told : context.told) }),
+    connection: assign(({ event, context }) => {
+      if (event.type !== "connection") return {}
+      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { connection: event.connection } })
+      return { connection: event.connection, lost: context.lost || event.connection === "offline" }
+    }),
+    updateReady: assign(({ event, context }) => {
+      if (event.type !== "updateReady" || event.ready === context.updateReady) return {}
+      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { updateReady: event.ready } })
+      return { updateReady: event.ready }
+    }),
+    // Its apps are listed once it's told where its device is, unless it's to sign in.
+    list: ({ context }) => void (context.told && context.told.session.state !== "signIn" && list()),
+    start: () => start(),
+    signIn: ({ context }) => void (context.told?.link && location.replace(context.told.link)),
+    // The device hears its person's notifications once they see their home.
+    listen: () => void invoke("listen"),
+    openAppStore: () => openAppStore(),
+    link: assign({ link: ({ event, context }) => (event.type === "link" ? event.link : context.link) }),
+    follow: assign({ link: ({ context }) => void (context.link && go(context.link)) }),
+    // An app's page starts as its app is loaded, and is told what's said of it.
+    load: spawnChild("page", { id: ({ event }) => loaded(event).key, input: ({ event }) => loaded(event), syncSnapshot: true }),
+    page: sendTo(({ event }) => paged(event).key, ({ event }) => paged(event).paged),
+    // Every page is told whether it might be on screen, and each works out whether it's the one in front.
+    away: enqueueActions(({ enqueue, self }) => {
+      for (const child of pages(self)) enqueue.sendTo(child, { type: "away" })
+    }),
+    // Talked with again, every page that couldn't load meanwhile loads again.
+    retry: enqueueActions(({ enqueue, self }) => {
+      for (const child of pages(self)) enqueue.sendTo(child, { type: "retry" })
+    }),
+    seen: enqueueActions(({ enqueue, self }) => {
+      for (const child of pages(self)) enqueue.sendTo(child, { type: "seen" })
+    }),
+  },
+}).createMachine({
+  id: "window",
+  initial: "opening",
+  context: { connection: "connecting", lost: false, starting: false, updateReady: false },
+  on: {
+    session: { actions: "told" },
+    connection: { actions: "connection" },
+    updateReady: { actions: "updateReady" },
+    link: { actions: "link" },
+    load: { actions: "load" },
+    page: { actions: "page" },
+    // The window hidden, every page is off screen; shown again, the one in front is on screen, where it shows apps.
+    away: { actions: "away" },
+    seen: { actions: "seen" },
+  },
+  states: {
+    // Waits until it can start the launcher: its device in its network and its network answering, or a launcher
+    // kept from before.
+    opening: {
+      tags: "pages",
+      entry: [assign({ starting: false }), "list", "seen"],
+      on: {
+        session: [{ guard: "signIn", target: "sign_in", actions: "told" }, { actions: ["told", "list"] }],
+        connection: [{ guard: "online", actions: ["connection", "list"] }, { actions: "connection" }],
+        listed: { guard: "waiting", actions: [assign({ starting: true }), "start"] },
+        drawn: { guard: "launcher", target: "launcher" },
+        none: { target: "no_launcher", actions: assign({ only: ({ event }) => event.only }) },
+        tooOld: "needs_updating",
+        failed: { guard: "launcher", target: "launcher_failed", actions: assign({ why: ({ event }) => event.why }) },
+      },
+    },
+    // The network's own sign-in page, which the client brings the window back from once its person has approved
+    // it, where it opens again (`follows` in `src/lib.rs`).
+    sign_in: { entry: ["signIn", "away"] },
+    launcher: {
+      tags: "pages",
+      entry: ["listen", "follow", "seen"],
+      on: { update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
+    },
+    // A launcher installed meanwhile, as by an agent, is listed as its network says something changed.
+    no_launcher: {
+      entry: "away",
+      on: { openAppStore: { guard: "appStore", target: "app_store" }, listed: "opening", tooOld: "needs_updating" },
+    },
+    // The App Store, shown with no launcher under it, until a launcher is installed: it's the page in front.
+    app_store: {
+      tags: "pages",
+      entry: ["openAppStore", "seen"],
+      on: { listed: "opening", tooOld: "needs_updating" },
+    },
+    // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
+    launcher_failed: {
+      tags: "pages",
+      entry: "seen",
+      on: { retry: "opening", drawn: { guard: "launcher", target: "launcher" }, tooOld: "needs_updating" },
+    },
+    // Update Required: Update on a computer, and everywhere, Try Again, as the window comes back on screen, and
+    // as its network answers again.
+    needs_updating: {
+      entry: [assign({ behind: true }), "away"],
+      on: {
+        update: { guard: "updates", target: "updating" },
+        retry: "checking",
+        seen: "checking",
+        connection: [{ guard: "online", target: "checking", actions: "connection" }, { actions: "connection" }],
+      },
+    },
+    // Asks its network again: where it talks with this client, the window opens again; refused, it still needs updating.
+    checking: {
+      entry: "away",
+      invoke: {
+        src: "retry",
+        onDone: { target: "opening", actions: [assign({ behind: false }), "retry"] },
+        onError: "needs_updating",
+      },
+    },
+    // It starts again on the new build once it has updated, as an app does: a device that's also a server once the
+    // program keeping its server running has taken it, which says so meanwhile. One that takes its build without
+    // starting again, or whose update was under way already, carries on here, asked again whether it's behind.
+    updating: {
+      entry: [assign({ message: undefined }), "away"],
+      invoke: {
+        src: "update",
+        onDone: { target: "checking", actions: assign({ message: ({ event }) => event.output }) },
+        onError: { target: "update_failed", actions: assign({ why: ({ event }) => `${event.error}` }) },
+      },
+    },
+    update_failed: {
+      entry: "away",
+      on: { retry: "updating" },
+    },
+  },
 })
-/// Whether an app's page is in front of its person: the one showing, in a window that's on screen.
+const shown = createActor(machine)
+/** @param {Moved} event */
+const on = (event) => shown.send(event)
+
+/** @param {View} view @param {Paged} event */
+const page = (view, event) => on({ type: "page", key: view.key, paged: event })
+/// Where an app's page is now, as the window's child.
 /** @param {View} view */
-const onScreen = (view) => !document.hidden && view === showing(history.state)
+const pageOf = (view) => /** @type {import("xstate").SnapshotFrom<typeof pageMachine> | undefined} */ (shown.getSnapshot().children[view.key]?.getSnapshot())
+// The window hidden, every page is off screen; shown again, the one in front is on screen.
+document.addEventListener("visibilitychange", () => on({ type: document.hidden ? "away" : "seen" }))
+/// Whether an app's page is in front of its person: the window's answer, the one showing while it shows apps, in a
+/// window that's on screen.
+/** @param {View} view @returns {boolean} */
+const onScreen = (view) => !document.hidden && shown.getSnapshot().hasTag("pages") && view === showing(history.state)
 
 /// What the window says as it opens: the steps it takes to its person's home, the first of which says whether its
 /// network answers. With a launcher kept from before, it's starting that alone.
@@ -368,17 +442,23 @@ function draw() {
       }),
     )
   }
-  byId("status").hidden = !now.matches("updating")
+  // Behind, it's asked again under the alert; updated, under the spinner, with what the update said.
+  const behind = now.matches("needs_updating") || (now.matches("checking") && context.behind === true)
+  const updating = now.matches("updating") || (now.matches("checking") && !behind)
+  byId("status").hidden = !updating
   byId("status-text").textContent = context.message ?? ""
-  byId("status-text").hidden = !(now.matches("updating") && context.message)
+  byId("status-text").hidden = !(updating && context.message)
   byId("empty").hidden = !now.matches("no_launcher")
   byId("empty-text").textContent = context.only ?? (appStore ? "" : "Ask your AI to install a Home Screen")
   byId("empty-text").hidden = !byId("empty-text").textContent
   byId("open-app-store").hidden = Boolean(context.only) || !appStore
-  // Being behind isn't a problem: it's an alert, as iOS's Update Required. A phone's app is updated by its owner, so there it has no button.
+  // Being behind isn't a problem: it's an alert, as iOS's Update Required, which always has a way on. A computer's
+  // app updates itself, with Update; a phone's is updated by its network's owner, so there it has Try Again.
   const required = /** @type {HTMLDialogElement} */ (byId("update-required"))
-  const behind = now.matches("needs_updating")
   byId("update-button").hidden = phone
+  byId("update-owner").hidden = byId("try-again-button").hidden = !phone
+  byId("try-again-button").toggleAttribute("disabled", now.matches("checking"))
+  byId("try-again-button").ariaBusy = now.matches("checking") ? "true" : null
   if (behind && !required.open) required.showModal()
   if (!behind && required.open) required.close()
   const problem = problemOf(now)
@@ -396,6 +476,7 @@ function draw() {
   const said = behind ? "Update Required: This version of The One App no longer works with your network." : problem && `${problem[0]}: ${problem[1]}`
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
+  notes()
   // Over the launcher: its network not answering, and trying again once it has lost it. Answering, nothing.
   const banner = now.matches("launcher") && (context.connection === "offline" || (context.connection === "connecting" && context.lost))
   if (byId("banner").hidden === banner) {
@@ -525,10 +606,10 @@ function reloadPage(view) {
 }
 
 /// Says over the app that's showing what its page needs of its person, if anything: that it's been updated, with
-/// Reload, or that it didn't open, with Try Again.
+/// Reload, or that it didn't open, with Try Again: only while the window shows its apps, as it alone owns the screen.
 function notes() {
   const view = showing(history.state)
-  const now = view?.page.getSnapshot()
+  const now = view && shown.getSnapshot().hasTag("pages") ? pageOf(view) : undefined
   byId("update").hidden = !now?.matches("stale")
   byId("page-problem").hidden = !now?.matches("failed")
   if (view && now?.matches("failed")) {
@@ -559,10 +640,7 @@ function load(entrypoint, subject, fragment) {
   const place = { key: at, entrypoint, subject, host: host(entrypoint, subject) }
   const frame = Object.assign(document.createElement("iframe"), { src: `${located(place)}${fragment ? `#${fragment}` : ""}`, inert: true })
   /** @type {View} */
-  const view = Object.assign({ ...place, frame }, { page: /** @type {View["page"]} */ (/** @type {unknown} */ (undefined)) })
-  view.page = createActor(pageMachine, { input: view })
-  view.page.subscribe(() => notes())
-  view.page.start()
+  const view = { ...place, frame }
   view.frame.setAttribute("sandbox", sandbox)
   if (entrypoint === launcher) view.frame.className = "launcher"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`),
@@ -570,6 +648,7 @@ function load(entrypoint, subject, fragment) {
   view.frame.allow = "clipboard-write; web-share; fullscreen"
   open.set(at, view)
   document.body.append(view.frame)
+  on({ type: "load", view })
   return view
 }
 
@@ -630,7 +709,7 @@ function show(at, tapped) {
   // Opened again, a stale page loads its new version as it opens.
   page(view, { type: "opened" })
   notes()
-  if (!view.page.getSnapshot().matches("current")) return
+  if (!pageOf(view)?.matches("current")) return
   // Its user returned to it.
   invoke("refresh", { view: view.key })
   opened(view)
@@ -696,8 +775,6 @@ function opened(view) {
       const { duration } = performance.measure(`open ${name}`, { start: tapped })
       invoke("opened", { view: name, ms: Math.round(duration) })
     }
-    // Their home has drawn over the steps.
-    if (view.entrypoint === launcher) on({ type: "drawn" })
   }))
 }
 
@@ -851,7 +928,7 @@ addEventListener("message", async ({ source, data }) => {
   }
   // It has what it draws from once the client has answered it something.
   if (method.startsWith("ui/") || method.startsWith("one/")) return
-  if (view.page.getSnapshot().matches("current")) return
+  if (pageOf(view)?.matches("current")) return
   page(view, { type: "drawn" })
   if (!view.frame.inert) opened(view)
 })
@@ -932,10 +1009,10 @@ addEventListener("popstate", (event) => {
 
 listen("connection", ({ payload }) => on({ type: "connection", connection: payload }))
 // Its network is tried again now, rather than when it next would be.
-for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry"))
-byId("problem-button").addEventListener("click", () => on({ type: "retry" }))
+for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry").catch(() => {}))
+for (const retry of ["problem-button", "try-again-button"]) byId(retry).addEventListener("click", () => on({ type: "retry" }))
 byId("update-button").addEventListener("click", () => on({ type: "update" }))
-// Nothing dismisses it: the window works again once it's updated.
+// Nothing dismisses it: the window works again once it's updated, or its network talks with it again.
 byId("update-required").addEventListener("cancel", (event) => event.preventDefault())
 byId("open-app-store").addEventListener("click", () => on({ type: "openAppStore" }))
 
@@ -944,8 +1021,8 @@ byId("open-app-store").addEventListener("click", () => on({ type: "openAppStore"
 function returned() {
   if (!shown.getSnapshot().matches("launcher")) return
   invoke("visible", { onScreen: !document.hidden })
-  // Put away, the window's stale pages load their new versions.
-  if (document.hidden) return void open.forEach((view) => page(view, { type: "away" }))
+  // Put away, the window's pages are off screen (`away`), where its stale ones load their new versions.
+  if (document.hidden) return
   for (const subject of listed) list(subject)
   invoke("refresh", { view: key(launcher) })
   if (open.has(history.state)) invoke("refresh", { view: history.state })

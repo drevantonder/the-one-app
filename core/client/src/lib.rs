@@ -1062,9 +1062,14 @@ impl Client {
         })
     }
 
-    /// Asks its network again now, where it didn't answer, as its person does by trying again.
-    pub fn retry(&self) {
+    /// Asks its network again now, as its person does by trying again: where it didn't answer, and where a server
+    /// refused it for being behind (`behind`), which it's no longer taken to be until a server refuses it again, as
+    /// one updated or rolled back since may talk with it. What it asks is the list of its files, as itself, which a
+    /// server refuses while it's behind: it answers once it has, failing with why where it wasn't answered.
+    pub async fn retry(&self) -> Result<()> {
         self.again.notify_one();
+        self.behind.send_replace(None);
+        self.fresh("resources/list", &json!({})).await.map(drop)
     }
 
     /// Signs this device out, as its person does once they've removed it from their devices: what it kept of

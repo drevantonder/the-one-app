@@ -41,8 +41,6 @@ export interface View {
   from?: Rect
   /** Whether the device's status bar shows while it does: unless it asked otherwise (`client({ statusBar })`). */
   statusBar?: boolean
-  /** Where its page is, one state at a time (`client.js`'s `pageMachine`). */
-  page: import("xstate").AnyActorRef
 }
 
 /** What moves an open app's page (`client.js`): it drew, didn't, showed an error, was loaded against a version that's
@@ -99,6 +97,8 @@ export interface Context {
   only?: string
   why?: string
   message?: string
+  /** Whether a server refused this client for being behind it, until one talks with it again. */
+  behind?: boolean
 }
 
 /** What moves the window (`client.js`). */
@@ -108,8 +108,12 @@ export type Moved =
   | { type: "listed" }
   | { type: "none"; only?: string }
   | { type: "tooOld" }
-  | { type: "drawn" }
-  | { type: "failed"; why: string }
+  | { type: "drawn"; key: string }
+  | { type: "failed"; key: string; why: string }
+  | { type: "load"; view: View }
+  | { type: "page"; key: string; paged: Paged }
+  | { type: "away" }
+  | { type: "seen" }
   | { type: "openAppStore" }
   | { type: "retry" }
   | { type: "update" }
@@ -128,7 +132,7 @@ export interface Commands {
   client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown }
   upload(file: ArrayBuffer, options: { headers: { app: string } }): { upload: string }
   /** Asks the network again now, which didn't answer. */
-  retry(): void
+  retry(): Promise<void>
   /** Signs this device out, once it's removed from its person's devices. */
   sign_out(): void
   /** Has a phone whose push failed try again, saying where it is once that try has ended. */

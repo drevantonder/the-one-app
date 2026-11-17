@@ -147,8 +147,9 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
     // The newest notification there was, once the inbox has answered: what's after it is new.
     let mut latest = None;
     loop {
-        // Behind its servers, it's refused for asking, until it's updated, so it stops asking (`Client::behind`).
-        if client.behind().borrow().is_some() {
+        // Behind its servers, it's refused for asking, so it stops asking until they talk with it again
+        // (`Client::behind`), as once it's updated or they are.
+        if client.behind().borrow().is_some() && client.behind().wait_for(Option::is_none).await.is_err() {
             return;
         }
         match (latest, inbox(&client, latest.unwrap_or(0)).await) {
