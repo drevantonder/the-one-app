@@ -936,7 +936,9 @@ pub struct Client {
     connection: watch::Sender<Connection>,
     /// Why a server refused it for being on a version before the server's that doesn't talk with it (`OneCore.Mcp`),
     /// once one has: from then on it asks only what brings it up to date (`updates`), as an app that requires an
-    /// update does nothing but offer it, rather than being refused again for everything it asks.
+    /// update does nothing but offer it, rather than being refused again for everything it asks. It's behind until a
+    /// server talks with it again, which it asks afresh as it reconnects and as its person tries again (`retry`):
+    /// a reason kept from before is never taken for a server's answer now.
     behind: watch::Sender<Option<String>>,
     /// What the native code of the apps the program ships with fills in of a tool's inputs (`resolve`).
     resolvers: Vec<Arc<dyn InputResolver>>,
@@ -1217,7 +1219,7 @@ impl Client {
         self.connection.subscribe()
     }
 
-    /// Why its servers refused it for being behind them, once one has, which lasts until it's updated (`behind`).
+    /// Why its servers refused it for being behind them, once one has, until one talks with it again (`behind`).
     pub fn behind(&self) -> watch::Receiver<Option<String>> {
         self.behind.subscribe()
     }
@@ -1237,6 +1239,8 @@ impl Client {
         match next {
             Connection::Offline if moved => drop(since.get_or_insert_with(Instant::now)),
             Connection::Online if moved => {
+                // Back, it asks its servers afresh whether they talk with it, as one may have been updated meanwhile.
+                self.behind.send_replace(None);
                 if let Some(since) = since.take().filter(|since| since.elapsed() > UNNOTICED) {
                     self.report(json!({
                         "name": "one.client.unanswered",
@@ -1375,10 +1379,12 @@ impl Client {
         };
         let response = request.await;
         self.answered(response.is_ok());
+        // Refused for being behind, it's behind; answered what only a server it talks with answers, it isn't.
         if let Ok(response) = &response
-            && let Some(why) = left_behind(response)
+            && !updates(&message)
         {
-            self.behind.send_if_modified(|now| now.is_none() && now.replace(why).is_none());
+            let why = left_behind(response);
+            self.behind.send_if_modified(|now| now.is_some() != why.is_some() && { *now = why; true });
         }
         if let Some(mut span) = span {
             let refused = match &response {
@@ -1770,11 +1776,13 @@ fn keep(home: &Path, record: &Value) {
 /// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
 /// A refusal is short, and a long answer isn't read twice to find it isn't one.
 /// Whether `message` asks what a server answers whatever version asks it, as it's how a client catches up: the list
-/// of tools, which builds there are, downloading one, and updating (`talks` in `OneCore.Mcp`).
+/// of tools, which builds there are, downloading one, updating, and following an update's task (`talks` in
+/// `OneCore.Mcp`).
 fn updates(message: &[u8]) -> bool {
     let Ok(request) = serde_json::from_slice::<Value>(message) else { return false };
     let tool = request["params"]["name"].as_str().unwrap_or_default();
-    request["method"] == "tools/list" || (request["method"] == "tools/call" && ["builds", "download", "update"].contains(&tool))
+    ["tools/list", "tasks/get"].contains(&request["method"].as_str().unwrap_or_default())
+        || (request["method"] == "tools/call" && ["builds", "download", "update"].contains(&tool))
 }
 
 /// Why a server refused this client, where it's for this client being on a version before the server's that doesn't

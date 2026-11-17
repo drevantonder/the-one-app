@@ -226,7 +226,8 @@ const pageMachine = setup({
 /// Try Again, as its network answers again, and as the window comes back on screen, as an iPhone app checks as it
 /// comes back to the foreground: a server updated or rolled back since may talk with it again. A computer's app
 /// updates itself; a phone's is its network's, which its owner updates. An update that leaves this app running, as a
-/// device that's also a server takes its build without starting again, is checked the same way.
+/// device that's also a server takes its build without starting again, is checked the same way, and so is one that
+/// failed, as its person tries again: what it said before is never shown as its network's answer now.
 /// The window's children that are pages, by their apps' keys: not what it invokes, as an update.
 /** @param {import("xstate").AnyActorRef} window @returns {string[]} */
 const pages = (window) => Object.keys(window.getSnapshot()?.children ?? {}).filter((child) => open.has(child))
@@ -248,6 +249,7 @@ const machine = setup({
     online: ({ event }) => event.type === "connection" && event.connection === "online",
     waiting: ({ context }) => !context.starting,
     updateReady: ({ context }) => context.updateReady,
+    behind: ({ context }) => context.behind === true,
     // A phone's app is its network's, which its owner builds and updates.
     updates: () => !phone,
     appStore: () => Boolean(appStore),
@@ -356,14 +358,16 @@ const machine = setup({
         connection: [{ guard: "online", target: "checking", actions: "connection" }, { actions: "connection" }],
       },
     },
-    // Asks its network again: where it talks with this client, the window opens again; refused, it still needs updating.
+    // Asks its network again: where it talks with this client, the window opens again; refused, it needs updating.
+    // Not answered, it opens again where it wasn't behind, and says why there (`steps`).
     checking: {
       entry: "away",
       invoke: {
         src: "retry",
         onDone: { target: "opening", actions: [assign({ behind: false }), "retry"] },
-        onError: "needs_updating",
+        onError: [{ guard: "behind", target: "needs_updating" }, { target: "opening" }],
       },
+      on: { tooOld: "needs_updating" },
     },
     // It starts again on the new build once it has updated, as an app does: a device that's also a server once the
     // program keeping its server running has taken it, which says so meanwhile. One that takes its build without
@@ -376,9 +380,11 @@ const machine = setup({
         onError: { target: "update_failed", actions: assign({ why: ({ event }) => `${event.error}` }) },
       },
     },
+    // Try Again asks its network afresh, as `checking` does, never repeating what an update said before: where
+    // it talks with this app now, it opens; where it doesn't, Update Required, with Update.
     update_failed: {
       entry: "away",
-      on: { retry: "updating" },
+      on: { retry: "checking" },
     },
   },
 })
