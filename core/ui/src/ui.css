@@ -1038,6 +1038,21 @@ button.ui-box {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Each runs the way its own words do (Arabic right to left), and lines up where the app's language does, as an
+     iPhone's lists line it up. */
+  unicode-bidi: plaintext;
+  text-align: left;
+}
+.ui-row .words > span:dir(rtl) {
+  text-align: right;
+}
+/* The grey line says up to two lines of what it says, as a phone's lists do, so a long email or a link in it can be
+   read. */
+.ui-row .words > .text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
 }
 .ui-row .heading {
   font-weight: var(--label-weight);
@@ -1091,8 +1106,17 @@ button.ui-box {
   overflow: hidden;
   font-size: var(--text-lg);
   line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* A long name, which may be all the screen says of what it's about, takes two lines, as Android's bars do, and
+     runs the way its own words do, where the app's language lines it up. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  padding-block: 0.25rem;
+  unicode-bidi: plaintext;
+  text-align: left;
+}
+:is(.ui-screen > header > h1, .ui-dialog header h2):dir(rtl) {
+  text-align: right;
 }
 .ui-screen > header > .back {
   /* Beside the list it came from, a screen has nowhere to go back to (the split's). */
@@ -1372,9 +1396,12 @@ button.ui-box {
   padding-inline: var(--gutter) 0.5rem;
 }
 .ui-dialog header h2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  unicode-bidi: plaintext;
+  text-align: left;
 }
 .ui-dialog header button {
   display: grid;
