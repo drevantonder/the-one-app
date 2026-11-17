@@ -34,7 +34,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - The App Library has neither the dots nor the owner switcher. It holds only what's installed, only its owner's, by category as an iPhone's App Library: four small icons, one opening its app, anywhere else opening the category. An opened category has no owner above it, and grows from its place and back into it, as an iOS folder does.
 - New apps land in the App Library, not on a page: pages hold only what's put there. An app about you (Colour Mode, Vault, Sign-In & Security, Devices, Notifications, Connect Your AI, AI Usage and the device apps) is in your App Library even when it's installed for everyone, and no app is in two.
 - Desktop and tablet: no sidebar. As many whole pages side by side as fit, one to three, with the dots only when not every page fits. Up and down moves between owners, and the same owner switcher works. Nothing there the phone doesn't have.
-- Editing Home pages follows iOS's own, in its gestures, states and look. Touch and hold an app or empty space, then Edit Home Screen (right-click on a computer). Icons jiggle, each with ⊖, which takes it off the Home Screen and leaves it in the App Library; uninstalling is the App Store's. Drag to reorder, and hold at a page's edge to move to the next page, a new one past the last. + opens the widget gallery: pick a widget and its size, then place it. Tapping the page dots opens the page overview, to reorder, hide or delete Home pages. Done, or a tap on empty space, leaves. From the App Library, touch and hold an app, then drag it onto a Home page. A computer has the same edit mode, as Launchpad does.
+- Editing Home pages follows iOS's own, in its gestures, states and look. Touch and hold an app or empty space, then Edit Home Screen (right-click on a computer). Icons jiggle, each with ⊖, which takes it off the Home Screen and leaves it in the App Library; uninstalling is the Plugins app's. Drag to reorder, and hold at a page's edge to move to the next page, a new one past the last. + opens the widget gallery: pick a widget and its size, then place it. Tapping the page dots opens the page overview, to reorder, hide or delete Home pages. Done, or a tap on empty space, leaves. From the App Library, touch and hold an app, then drag it onto a Home page. A computer has the same edit mode, as Launchpad does.
 - Whoever may arrange an owner's pages edits them; anyone else gets only the app's own menu on touch and hold, with no Edit Home Screen. An owner's pages are one layout: editing everyone's or a group's changes them for everyone who sees them.
 - Settings isn't a place: its apps are ordinary apps, each in its category.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.
@@ -47,10 +47,14 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Deleting an item is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
 - An item a plugin keeps opens beside the list on a desktop, drawn by that plugin itself (a Chrome profile by Chrome Profiles).
 
-## App Store
+## Plugins (17 Nov)
 
-- A tile's button is "Add to", then "Manage" once an owner has it. Both change which owners have it.
-- Taking an app off puts it and its data in Recently Deleted, as one item, whose Restore brings both back for 30 days.
+- Two parts, Marketplace and Installed, in one app, and quiet.
+- Marketplace: one row for each of the nine plugin categories, cut so the next app shows, with See All; apps the size they are on the Home Screen.
+- A plugin's page has a row for each owner, with Install, Open and its state there; then Requires, each requirement's title and why, never "What you get"; then See All.
+- Trusted and untrusted are said plainly. An update available, a failed install with why and Try Again, and Recently Deleted for what was uninstalled.
+- Install installs what it requires too, saying why. Uninstalling one that others require warns first that they go too.
+- Uninstalling puts a plugin and its data in Recently Deleted, as one item, whose Restore brings both back for 30 days.
 - An owner you can't install for shows a plain line, "Only Andre can install for Everyone", with no button.
 
 ## Devices, Sign-In & Security and Connect Your AI
