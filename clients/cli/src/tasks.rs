@@ -47,6 +47,29 @@ pub async fn call(client: &Client, name: &str, inputs: Value, task: bool) -> Res
     followed(client, &id, result).await
 }
 
+/// Calls the tool `name` with `inputs` as `call` does, and gives its answer once it's done, as MCP's `tools/call`
+/// answers it, for whatever shows it itself.
+pub async fn result(client: &Client, name: &str, inputs: Value) -> Result<Value> {
+    let params = json!({"name": name, "arguments": inputs, "_meta": takes_tasks()});
+    let mut task = client.request("tools/call", params).await?;
+    if task["resultType"] != "task" {
+        return Ok(task);
+    }
+    let id = task["taskId"].as_str().unwrap_or_default().to_owned();
+    loop {
+        match task["status"].as_str().unwrap_or_default() {
+            "completed" => return Ok(task["result"].take()),
+            "failed" => {
+                bail!("{}", task["error"]["message"].as_str().or(task["statusMessage"].as_str()).unwrap_or("It failed"))
+            }
+            "cancelled" => bail!("It was cancelled."),
+            _ => {}
+        }
+        tokio::time::sleep(Duration::from_millis(task["pollIntervalMs"].as_u64().unwrap_or(2_000))).await;
+        task = get(client, &id).await?;
+    }
+}
+
 /// Says how the task `id` is going, or with `result`, follows it to its answer and prints that.
 pub async fn show(client: &Client, id: &str, result: bool) -> Result<ExitCode> {
     let task = get(client, id).await?;

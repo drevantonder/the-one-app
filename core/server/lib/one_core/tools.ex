@@ -888,9 +888,11 @@ defmodule OneCore.Tools do
       Has a server's machine take the latest builds, its server's and its program's together, if it isn't on them
       already. It checks each before it runs it, hands its work to another server meanwhile, and goes back to the
       pair it had if the new one doesn't answer. A build that only changed One Core's code is loaded into the server
-      while it runs, in seconds, and it answers once that's done, with the build it's on and, if it went back, why.
-      One that must restart (`update_method`) answers once it begins, and one under way already is left to finish:
-      `builds` then says it as it moves on, which build it's on once it's done, and if it went back, why.
+      while it runs, in seconds; one that must restart (`update_method`) takes minutes, and one under way already is
+      left to finish. It answers once `builds` says that server is ready on the build it was asked to take, as
+      `kubectl rollout status` does, or fails saying why: it went back, and why, it couldn't update, or it isn't
+      ready within 240 s. A server with no other ready to wait for it answers once a restart begins, since it can't
+      answer while it restarts.
       """,
       inputs: %{
         type: "object",
@@ -914,6 +916,10 @@ defmodule OneCore.Tools do
   # What each takes and gives is read once here, as the schemas its inputs and answers are checked against on every
   # call.
   @taking Enum.map(@tools, &OneCore.Apps.Version.schemas/1)
+
+  # How long `update` waits for another server to be ready on the build it takes: the 180 s every start of a build
+  # has to say it's running (`START` in `clients/cli/src/serving.rs`), and a minute more for it to stop first.
+  @ready :timer.seconds(240)
 
   # The tools an app has no say in for itself: how one that breaks is undone.
   @apart ~w(deploy uninstall apps_restore apps_update apps_retry apps_trust)
@@ -946,9 +952,26 @@ defmodule OneCore.Tools do
         # An app has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
         apart = if name in @apart, do: {User.owner(elem(principal, 1)), inputs["name"]}
 
-        State.run(fn -> Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward, request), apart) end)
+        State.run(fn ->
+          if waiter = waiter(name, inputs, principal, forwarded) do
+            # Before it's accepted, so that it's made a task there, which outlasts this server's restart.
+            ask = {"tools/call", %{name: name, arguments: Map.put(inputs, "server", Server.key())}}
+            Apps.held([], fn -> Call.run_on(ask, principal, waiter) end)
+          else
+            Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward, request), apart)
+          end
+        end)
     end
   end
+
+  # A server asked to update itself may restart, and then can't answer when it's ready, or keep the task it runs
+  # as: another of its owner's ready servers asks it and waits, if there is one. One passed on to it is its own.
+  defp waiter("update", inputs, {_actor, subject}, false) do
+    if inputs["server"] in [nil, Server.key()],
+      do: Enum.find(Servers.acting(User.owner(subject) || "network") -- [Server.key()], &Servers.ready?/1)
+  end
+
+  defp waiter(_name, _inputs, _principal, _forwarded), do: nil
 
   defp requires(nil), do: %{}
   defp requires(version), do: version.requires
@@ -1260,19 +1283,84 @@ defmodule OneCore.Tools do
     end
   end
 
-  # What takes the latest builds is the program that keeps an installed server running, which hears this said.
   defp run("update", inputs, principal, _pass, _request) do
-    on(inputs["server"], "update", inputs, principal, fn ->
-      reaches!(principal, owner(), "owner")
+    key = inputs["server"]
+    if key in [nil, Server.key()], do: update(principal), else: rollout(key, principal)
+  end
 
-      if not Application.get_env(:one_core, :installed, false),
-        do: raise("#{here()} can't update itself.\n\nIt wasn't installed with `one serve on`, so it doesn't update itself.")
+  # What takes the latest builds is the program that keeps an installed server running, which hears this said.
+  defp update(principal) do
+    reaches!(principal, owner(), "owner")
 
-      status = Release.update()
+    if not Application.get_env(:one_core, :installed, false),
+      do: raise("#{here()} can't update itself.\n\nIt wasn't installed with `one serve on`, so it doesn't update itself.")
 
-      %{server: Server.key(), build: OneCore.Builds.build()}
-      |> Map.merge(Map.take(status, ~w(server_update_status server_update_stage update_method went_back)))
-    end)
+    status = Release.update()
+
+    %{server: Server.key(), build: OneCore.Builds.build()}
+    |> Map.merge(Map.take(status, ~w(server_update_status server_update_stage update_method went_back)))
+  end
+
+  # Has the server whose key is `key` take the latest builds, and answers once it's ready on the build it takes, as it
+  # takes it (`latest`): the latest server's, where there's a runtime for its kind of machine, and otherwise the one
+  # it's on.
+  defp rollout(key, {actor, subject} = principal) do
+    now = Builds.list(actor, User.owner(subject) || "network")
+    server = Enum.find(now.servers, &(&1["server"] == key)) || raise "None of your servers has the key #{key}."
+    name = server["name"] || key
+    runtime = now.latest["server-runtime/#{server["target"]}"]
+    build = if(is_map(runtime), do: now.latest["server-code"], else: server)["build"]
+    State.stage(State.id(), "Waiting for #{name} to be ready on #{build}")
+    Registry.register(OneCore.Waiting, :seen, nil)
+
+    try do
+      ready(key, name, build, asked(key, principal), System.monotonic_time(:millisecond) + @ready)
+    after
+      Registry.unregister(OneCore.Waiting, :seen)
+    end
+  end
+
+  # Why the server whose key is `key` didn't begin to update when asked, or `nil`. One that restarts to take the
+  # builds may stop before it answers: then what it says of itself decides.
+  defp asked(key, principal) do
+    Call.run_on({"tools/call", %{name: "update", arguments: %{"server" => key}}}, principal, key, ready: :any)
+  catch
+    :throw, {Call, {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}}} -> why
+    :throw, {Call, {:forwarded, _answered}} -> nil
+    :error, error -> Exception.message(error)
+  end
+
+  # Waits until the server whose key is `key` is ready and up to date: on `build`, or not, saying why. It looks each
+  # time a server comes or goes, and every 2 s, since what it says of its build isn't told.
+  defp ready(key, name, build, asked, until) do
+    info = with {:ok, info, _tag} <- Bucket.read("servers/#{key}/build"), do: JSON.decode!(info), else: (_ -> %{})
+    server = Map.merge(info, Servers.presence_again(key) || %{})
+    settled = server["server_ready"] == true and server["server_update_status"] == "up_to_date"
+
+    cond do
+      settled and server["went_back"] != nil ->
+        raise "#{name} didn't take #{build}: #{server["went_back"]}"
+
+      settled and server["build"] == build ->
+        answer = Map.take(server, ~w(build server_update_status server_update_stage update_method went_back))
+        {:content, Map.put(answer, "server", key), [%{type: "text", text: "#{name} is ready on #{build}."}]}
+
+      settled and asked != nil ->
+        raise "#{name} didn't take #{build}: #{asked}"
+
+      System.monotonic_time(:millisecond) >= until ->
+        raise "#{name} isn't ready on #{build} after #{div(@ready, 1000)} s: it's on #{server["build"]}, " <>
+                "#{server["server_update_status"]}, ready: #{server["server_ready"]}."
+
+      true ->
+        receive do
+          :seen -> :ok
+        after
+          2_000 -> :ok
+        end
+
+        ready(key, name, build, asked, until)
+    end
   end
 
   # Each install as `apps` lists it, with its app's version, trust, update and where it came from, read at once.
