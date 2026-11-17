@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS plugins (
   description TEXT NOT NULL, -- its SKILL.md's, for agents
   subtitle TEXT, -- its metadata's, for people: a few words under its name
   about TEXT, -- its metadata's, for people: a few sentences on its page
+  category TEXT, -- its metadata's: what it's for, as the building-plugins skill lists them
+  listing TEXT, -- JSON: its title, icon, apps, widgets and requires, as a network that installed it said (worker.ts' Listing)
   checked TEXT NOT NULL, -- when its SKILL.md was last read, ISO 8601
   PRIMARY KEY (owner, repo, name)
 );

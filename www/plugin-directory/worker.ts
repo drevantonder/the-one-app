@@ -1,6 +1,7 @@
 // The plugin directory: every plugin anyone has installed, ranked by installs. Its pages, its API (README.md) and
 // its counts, in D1. A plugin is listed the first time an installer says it installed it, once its SKILL.md is
-// found on GitHub.
+// found on GitHub. Each is listed as a network's marketplace lists it (`Listing`): what its SKILL.md says, read from
+// GitHub, and what its code says (its title, icon, apps and widgets), as the network that installed it gave it.
 
 const OWNER = /^[A-Za-z0-9-]{1,39}$/;
 const REPO = /^[A-Za-z0-9._-]{1,100}$/;
@@ -8,11 +9,41 @@ const NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const COMMIT = /^[0-9a-f]{7,40}$/;
 const DAY = 24 * 60 * 60 * 1000;
 
-/** A SKILL.md's front matter: its `name:` and `description:` lines, and its `metadata`'s `subtitle:` and `about:`. */
-export function frontMatter(text: string): { name?: string; description?: string; subtitle?: string; about?: string } {
+/** A SKILL.md's front matter: its `name:` and `description:` lines, and its `metadata`'s `subtitle:`, `about:` and
+ * `category:`. */
+export function frontMatter(text: string): { name?: string; description?: string; subtitle?: string; about?: string; category?: string } {
   const block = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
   const field = (key: string, indent = "") => block.match(new RegExp(`^${indent}${key}:\\s*(.+)$`, "m"))?.[1].trim().replace(/^(["'])(.*)\1$/, "$2");
-  return { name: field("name"), description: field("description"), subtitle: field("subtitle", "[ \\t]+"), about: field("about", "[ \\t]+") };
+  return { name: field("name"), description: field("description"), subtitle: field("subtitle", "[ \\t]+"), about: field("about", "[ \\t]+"), category: field("category", "[ \\t]+") };
+}
+
+/** What a network's server says of a plugin where it's listed (`OneCore.Plugins.Version.listing/1`), as its
+ * marketplace and this directory show it, beside what its SKILL.md says. */
+export interface Listing {
+  title: string;
+  icon: string | null;
+  apps: { name: string; icon: string | null; category: string | null }[];
+  widgets: { name: string; sizes: string[] }[];
+  requires: string[];
+}
+
+const ICON = /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+=*$/;
+const text = (value: unknown, most = 200) => (typeof value === "string" && value.length <= most ? value : null);
+const icon = (value: unknown) => (typeof value === "string" && value.length <= 65536 && ICON.test(value) ? value : null);
+const each = <T,>(value: unknown, one: (item: any) => T | null) =>
+  (Array.isArray(value) ? value.slice(0, 50) : []).map(one).filter((item): item is T => item !== null);
+
+/** What an installer said of a plugin, as a `Listing`, or `null` where it said nothing that is one. */
+export function listing(value: any): Listing | null {
+  const title = text(value?.title);
+  if (!title) return null;
+  return {
+    title,
+    icon: icon(value.icon),
+    apps: each(value.apps, (app) => (text(app?.name) ? { name: app.name, icon: icon(app.icon), category: text(app.category) } : null)),
+    widgets: each(value.widgets, (widget) => (text(widget?.name) ? { name: widget.name, sizes: each(widget.sizes, (size) => text(size, 20)) } : null)),
+    requires: each(value.requires, (name) => (typeof name === "string" && NAME.test(name) ? name : null)),
+  };
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -27,31 +58,36 @@ interface Row {
   description: string;
   subtitle: string | null;
   about: string | null;
+  category: string | null;
+  listing: string | null;
   installs: number;
 }
 
-type Plugin = Row & { source: string };
+/** A plugin as it's listed, by where its code is, with its installs. */
+type Plugin = Omit<Row, "listing"> & Listing & { source: string };
+
+const UNLISTED: Listing = { title: "", icon: null, apps: [], widgets: [], requires: [] };
 
 /** Plugins with their installs since a day, most first. */
 async function ranked(env: Env, period: Period): Promise<Plugin[]> {
   const since = period === "week" ? day(Date.now() - 6 * DAY) : "";
   const { results } = await env.DB.prepare(
-    `SELECT p.owner, p.repo, p.name, p.description, p.subtitle, p.about, COALESCE(SUM(i.count), 0) AS installs
+    `SELECT p.owner, p.repo, p.name, p.description, p.subtitle, p.about, p.category, p.listing, COALESCE(SUM(i.count), 0) AS installs
      FROM plugins p LEFT JOIN installs i ON i.owner = p.owner AND i.repo = p.repo AND i.name = p.name AND i.day >= ?1
      GROUP BY p.owner, p.repo, p.name ORDER BY installs DESC, p.name`,
   ).bind(since).all<Row>();
-  return results.map((p) => ({ ...p, source: `${p.owner}/${p.repo}` }));
+  return results.map(({ listing, ...p }) => ({ ...p, ...UNLISTED, title: p.name, ...(listing ? JSON.parse(listing) : {}), source: `${p.owner}/${p.repo}` }));
 }
 
-const code = (p: Row) => `https://github.com/${p.owner}/${p.repo}/tree/HEAD/plugins/${p.name}`;
-const command = (p: Row) => `one install ${p.owner}/${p.repo} --plugin ${p.name}`;
+const code = (p: Plugin) => `https://github.com/${p.owner}/${p.repo}/tree/HEAD/plugins/${p.name}`;
+const command = (p: Plugin) => `one install ${p.owner}/${p.repo} --plugin ${p.name}`;
 
 async function install(request: Request, env: Env): Promise<Response> {
   // Rate limited per address at the edge; the address is a key to Cloudflare's counter only, and never kept.
   const { success } = await env.INSTALLS.limit({ key: request.headers.get("cf-connecting-ip") ?? "" });
   if (!success) return Response.json({ error: "Too many installs from here. Try again in a minute." }, { status: 429 });
 
-  const body: Partial<Record<"source" | "plugin" | "commit", unknown>> | null = await request.json<{}>().catch(() => null);
+  const body: Partial<Record<"source" | "plugin" | "commit" | "listing", unknown>> | null = await request.json<{}>().catch(() => null);
   const [owner = "", repo = "", extra] = String(body?.source ?? "").split("/");
   const name = String(body?.plugin ?? "");
   const commit = body?.commit === undefined ? undefined : String(body.commit);
@@ -63,17 +99,19 @@ async function install(request: Request, env: Env): Promise<Response> {
   const known = await env.DB.prepare("SELECT checked FROM plugins WHERE owner = ?1 AND repo = ?2 AND name = ?3").bind(...key).first<{ checked: string }>();
   if (!known || Date.parse(known.checked) < Date.now() - DAY) {
     const response = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${commit ?? "HEAD"}/plugins/${name}/SKILL.md`);
-    const { description, subtitle, about } = response.ok ? frontMatter(await response.text()) : {};
+    const { description, subtitle, about, category } = response.ok ? frontMatter(await response.text()) : {};
     if (description) {
       await env.DB.prepare(
-        `INSERT INTO plugins (owner, repo, name, description, subtitle, about, checked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT DO UPDATE SET description = excluded.description, subtitle = excluded.subtitle, about = excluded.about, checked = excluded.checked`,
-      ).bind(...key, description, subtitle ?? null, about ?? null, new Date().toISOString()).run();
+        `INSERT INTO plugins (owner, repo, name, description, subtitle, about, category, checked) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT DO UPDATE SET description = excluded.description, subtitle = excluded.subtitle, about = excluded.about, category = excluded.category, checked = excluded.checked`,
+      ).bind(...key, description, subtitle ?? null, about ?? null, category ?? null, new Date().toISOString()).run();
     } else if (!known) {
       return Response.json({ error: `No plugins/${name}/SKILL.md with a description in github.com/${owner}/${repo}.` }, { status: 404 });
     }
     // A plugin already listed is still counted when GitHub doesn't answer; its description is read again tomorrow.
   }
+  const listed = listing(body?.listing);
+  if (listed) await env.DB.prepare("UPDATE plugins SET listing = ?4 WHERE owner = ?1 AND repo = ?2 AND name = ?3").bind(...key, JSON.stringify(listed)).run();
 
   await env.DB.prepare(
     `INSERT INTO installs (owner, repo, name, day, count) VALUES (?1, ?2, ?3, ?4, 1)
@@ -140,14 +178,26 @@ ${TRUST}
     { headers: { "content-type": "text/html; charset=utf-8" } },
   );
 
-function list(plugins: Plugin[], period: Period) {
-  const tab = (value: Period, label: string) => `<a href="/plugins${value === "all" ? "" : `?period=${value}`}"${period === value ? ' aria-current="page"' : ""}>${label}</a>`;
+/** A plugin's icon, or a blank square where it has none. */
+const image = (src: string | null, size = "") => (src ? `<img class="icon${size}" src="${escape(src)}" alt="">` : `<span class="icon${size}"></span>`);
+
+function list(plugins: Plugin[], period: Period, category: string | null) {
+  const link = (period: Period, category: string | null) => {
+    const query = new URLSearchParams({ ...(period === "all" ? {} : { period }), ...(category ? { category } : {}) }).toString();
+    return `/plugins${query ? `?${query}` : ""}`;
+  };
+  const tab = (value: Period, label: string) => `<a href="${escape(link(value, category))}"${period === value ? ' aria-current="page"' : ""}>${label}</a>`;
+  // What plugins are for, most installed first.
+  const categories = [...new Set(plugins.map((p) => p.category).filter((c): c is string => !!c))];
+  const chip = (value: string | null, label: string) => `<a href="${escape(link(period, value))}"${category === value ? ' aria-current="page"' : ""}>${escape(label)}</a>`;
   const rows = plugins
+    .filter((p) => !category || p.category === category)
     .map(
-      (p, i) => `<li data-search="${escape(`${p.name} ${p.source} ${p.subtitle ?? ""} ${p.about ?? ""}`.toLowerCase())}">
+      (p, i) => `<li data-search="${escape(`${p.name} ${p.title} ${p.source} ${p.category ?? ""} ${p.subtitle ?? ""} ${p.about ?? ""}`.toLowerCase())}">
   <a href="/plugins/${p.source}/${p.name}">
     <span class="rank">${i + 1}</span>
-    <span class="what"><span class="name">${escape(p.name)}</span> <span class="source">${escape(p.source)}</span><span class="subtitle">${escape(p.subtitle ?? "")}</span></span>
+    ${image(p.icon)}
+    <span class="what"><span class="name">${escape(p.title)}</span> <span class="source">${escape(p.source)}</span><span class="subtitle">${escape(p.subtitle ?? "")}</span></span>
     <span class="count">${number(p.installs)}</span>
   </a>
 </li>`,
@@ -161,6 +211,7 @@ function list(plugins: Plugin[], period: Period) {
   <input type="search" placeholder="Search" aria-label="Search plugins" autocomplete="off">
   <nav class="tabs">${tab("all", "All Time")}${tab("week", "This Week")}</nav>
 </div>
+<nav class="categories">${chip(null, "All")}${categories.map((c) => chip(c, c)).join("")}</nav>
 <ol class="plugins">
 ${rows}
 </ol>
@@ -174,17 +225,20 @@ ${rows}
     document.querySelector(".empty").hidden = rows.some((row) => !row.hidden);
   });
 </script>`,
-    ["Plugins for The One App, from any git repo, ranked by installs.", "/plugins"],
+    ["Plugins for The One App, from any git repo, ranked by installs.", link(period, category)],
   );
 }
 
 function plugin(p: Plugin) {
+  const apps = p.apps.map((app) => `<li>${image(app.icon, " small")}<span>${escape(app.name)}</span></li>`).join("");
+  const widgets = p.widgets.map((widget) => `<li><span>${escape(widget.name)}</span> <span class="source">${escape(widget.sizes.join(", "))}</span></li>`).join("");
   return page(
-    `${p.name} · Plugins · The One App`,
+    `${p.title} · Plugins · The One App`,
     `<p class="back"><a href="/plugins">Plugins</a></p>
-<h1>${escape(p.name)}</h1>
-${p.subtitle ? `<p class="subtitle">${escape(p.subtitle)}</p>\n` : ""}<p class="source"><a href="https://github.com/${p.source}">${escape(p.source)}</a> · ${installs(p.installs)}</p>
-${p.about ? `<p>${escape(p.about)}</p>\n` : ""}<h2>Install</h2>
+<div class="heading">${image(p.icon, " large")}<div><h1>${escape(p.title)}</h1>
+${p.subtitle ? `<p class="subtitle">${escape(p.subtitle)}</p>` : ""}</div></div>
+<p class="source">${p.category ? `<a href="/plugins?category=${encodeURIComponent(p.category)}">${escape(p.category)}</a> · ` : ""}<a href="https://github.com/${p.source}">${escape(p.source)}</a> · ${installs(p.installs)}</p>
+${p.about ? `<p>${escape(p.about)}</p>\n` : ""}${apps ? `<h2>Apps</h2>\n<ul class="parts">${apps}</ul>\n` : ""}${widgets ? `<h2>Widgets</h2>\n<ul class="parts">${widgets}</ul>\n` : ""}${p.requires.length ? `<h2>Requires</h2>\n<p>${escape(p.requires.join(", "))}</p>\n` : ""}<h2>Install</h2>
 <div class="command"><code>${escape(command(p))}</code><button type="button">Copy</button></div>
 <h2>Code</h2>
 <p><a href="${code(p)}">${escape(`github.com/${p.source}/tree/HEAD/plugins/${p.name}`)}</a></p>
@@ -212,10 +266,13 @@ export default {
     }
     if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405, headers: { allow: "GET" } });
     if (path === "/plugins/api/plugins") {
-      const plugins = (await ranked(env, period)).map((p) => ({ source: p.source, name: p.name, description: p.description, subtitle: p.subtitle, about: p.about, installs: p.installs, code: code(p), install: command(p) }));
+      const plugins = (await ranked(env, period)).map((p) => ({
+        source: p.source, name: p.name, title: p.title, icon: p.icon, subtitle: p.subtitle, about: p.about, category: p.category,
+        apps: p.apps, widgets: p.widgets, requires: p.requires, description: p.description, installs: p.installs, code: code(p), install: command(p),
+      }));
       return Response.json({ period, plugins }, { headers: { "access-control-allow-origin": "*" } });
     }
-    if (path === "/plugins") return list(await ranked(env, period), period);
+    if (path === "/plugins") return list(await ranked(env, period), period, url.searchParams.get("category"));
 
     const [owner, repo, name, extra] = path.split("/").slice(2);
     const found = extra === undefined && (await ranked(env, "all")).find((p) => p.owner === owner?.toLowerCase() && p.repo === repo?.toLowerCase() && p.name === name);
