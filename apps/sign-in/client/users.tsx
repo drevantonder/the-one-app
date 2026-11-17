@@ -267,7 +267,7 @@ function UsersAndGroups(props: { all: All }) {
               </List>
             </Section>
           </Show>
-          <Section heading={<span class="heading"><span>Groups</span><Button variant="secondary" onClick={() => setAdding("group")}>New Group</Button></span>}>
+          <Section heading={<span class="groups"><span>Groups</span><Button variant="secondary" onClick={() => setAdding("group")}>New Group</Button></span>}>
             <Show when={props.all.groups.length} fallback={<Empty>You're in no groups yet.</Empty>}>
               <List>
                 <For each={props.all.groups} keyed={({ group }) => group}>
@@ -289,7 +289,7 @@ function UsersAndGroups(props: { all: All }) {
 render(
   () => (
     <>
-      <style>{".heading { display: flex; align-items: center; gap: 0.75rem; max-width: var(--readable); } .heading > span { flex: 1; min-width: 0; }"}</style>
+      <style>{".groups { display: flex; align-items: center; gap: 0.75rem; max-width: var(--readable); } .groups > span { flex: 1; min-width: 0; }"}</style>
       <Errored fallback={(error) => <Screen heading="Users & Groups" back onBack={leave}><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
         <Loading fallback={<Screen heading="Users & Groups" back onBack={leave}><Skeleton rows={3} /></Screen>}>
           <UsersAndGroups all={all()} />
