@@ -147,11 +147,13 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
   )
 }
 
-/// A question that stops everything until it's answered: the one the page has, asked through `confirm`.
-function Alert(props: { question: Question | null; onResult: (yes: boolean, reset: false) => void }) {
+/// A question that stops everything until it's answered: the one the page has, asked through `confirm`. It keeps
+/// showing the question as it fades out. Its two buttons sit side by side while both fit, and otherwise one over the
+/// other, the action above Cancel, as iOS lays them out (ui.css).
+function Alert(props: { question?: Question; open: boolean; onResult: (yes: boolean, reset: false) => void }) {
   let confirmed = false
   return (
-    <Dialog class="ui-dialog alert" role="alertdialog" labelledby="ui-alert-heading" describedby="ui-alert-text" open={!!props.question} onClose={() => props.onResult(confirmed, (confirmed = false))}>
+    <Dialog class="ui-dialog alert" role="alertdialog" labelledby="ui-alert-heading" describedby="ui-alert-text" open={props.open} onClose={() => props.onResult(confirmed, (confirmed = false))}>
       <div class="panel">
         <h2 id="ui-alert-heading">{props.question?.heading}</h2>
         <Show when={props.question?.text}>
@@ -185,11 +187,12 @@ let ask: ((question: Question) => Promise<boolean>) | undefined
 /// press outside are no.
 export function confirm(question: Question): Promise<boolean> {
   if (!ask) {
-    const [question, setQuestion] = createSignal<Question | null>(null)
+    const [question, setQuestion] = createSignal<Question>()
+    const [open, setOpen] = createSignal(false)
     let resolve: (yes: boolean) => void
     const host = document.body.appendChild(document.createElement("div"))
-    render(() => <Alert question={question()} onResult={(yes) => (setQuestion(null), resolve(yes))} />, host)
-    ask = (question) => new Promise<boolean>((done) => ((resolve = done), setQuestion(question)))
+    render(() => <Alert question={question()} open={open()} onResult={(yes) => (setOpen(false), resolve(yes))} />, host)
+    ask = (question) => new Promise<boolean>((done) => ((resolve = done), setQuestion(question), setOpen(true)))
   }
   return ask(question)
 }

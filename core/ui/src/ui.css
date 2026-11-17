@@ -1445,11 +1445,17 @@ button.ui-box {
 .ui-dialog.alert p {
   color: var(--muted-foreground);
 }
+/* Cancel and the action side by side while each fits in half, and otherwise each a row of its own, the action
+   above Cancel, as iOS lays them out: lines wrap from the foot up. */
 .ui-dialog.alert footer {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-wrap: wrap-reverse;
   gap: 0.5rem;
   margin-top: 0.75rem;
+}
+.ui-dialog.alert footer .ui-button {
+  flex: 1 1 calc(50% - 0.25rem);
+  min-width: max-content;
 }
 
 /* An empty screen, what's coming, and a problem. */
