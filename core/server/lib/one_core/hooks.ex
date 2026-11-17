@@ -237,7 +237,7 @@ defmodule OneCore.Hooks do
   # hooks they offer, by their full names. An owner this server hasn't looked at is looked at first.
   defp installed(owner) do
     with [] <- :ets.lookup(__MODULE__, owner),
-         _ = Plugins.reload(owner),
+         _ = Plugins.sync(owner),
          [] <- :ets.lookup(__MODULE__, owner) do
       {%{}, %{}}
     else

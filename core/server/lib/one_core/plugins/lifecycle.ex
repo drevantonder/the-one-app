@@ -487,7 +487,7 @@ defmodule OneCore.Plugins.Lifecycle do
 
   # What runs for `owner` changed: it runs here, with what's loaded already, and their other servers look.
   defp ran(owner, loaded \\ []) do
-    Plugins.reload(owner, loaded)
+    Plugins.sync(owner, loaded)
     Server.notify_servers([owner])
   end
 

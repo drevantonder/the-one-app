@@ -190,7 +190,7 @@ defmodule OneCore.Server do
     Servers.reload(owner)
     OneCore.Plugins.Deploy.forget()
     if owner == "network", do: Hooks.invalidate(["device"])
-    if Plugins.reload(owner), do: changed()
+    if Plugins.sync(owner), do: changed()
     # A plugin updated by a server elsewhere may require what isn't installed for them yet.
     if Servers.here?(owner), do: Task.start(fn -> OneCore.Plugins.Lifecycle.required(owner) end)
     :ok

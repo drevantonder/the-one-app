@@ -157,7 +157,8 @@ defmodule OneCore.Builds do
   Which build each of `owner`'s servers runs, with what its machine is called and what it is (`say/1`), as it says
   it and, where the network's edge says it now, whether it's ready (`OneCore.Servers.presence/1`), and which each
   of `by`'s devices last said it is, and the latest for each kind of machine: what shows whether everything is on
-  the same build.
+  the same build; and `plugins`, whether what runs on the server that answers is what's installed, `synced`, or it's
+  `syncing` (`OneCore.Plugins.sync/2`).
   """
   def list(by, owner) do
     keys = Servers.acting(owner)
@@ -186,7 +187,8 @@ defmodule OneCore.Builds do
       edge: edge,
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
-      devices: devices
+      devices: devices,
+      plugins: OneCore.Plugins.synced()
     }
   end
 

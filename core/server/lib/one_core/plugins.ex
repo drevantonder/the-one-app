@@ -115,7 +115,7 @@ defmodule OneCore.Plugins do
   @doc "The plugins installed for `owners`, by name, the first's found first. One this server hasn't looked at is first."
   def versions(owners) do
     with :unknown <- ask({:running, owners}) do
-      Enum.each(owners, &reload/1)
+      Enum.each(owners, &sync/1)
       ask({:running, owners})
     end
   end
@@ -173,23 +173,43 @@ defmodule OneCore.Plugins do
   end
 
   @doc """
-  Looks in the bucket at what runs for `owner` (`OneCore.Plugins.Installed.running/1`), and runs each plugin's latest version. Gives whether anything
-  changed. `loaded` are versions already loaded here, each as `OneCore.Plugins.Store.newer/3` gives one, held by the caller. A plugin
-  whose latest version took over has its processes follow it, and its services installed here that weren't
-  running start.
+  Says what's installed for `owner` changed, and returns once a sync that read it after that has finished: whether
+  anything that runs here changed. A sync reads what runs for them (`OneCore.Plugins.Installed.running/1`), and runs
+  each plugin's latest version. `loaded` are versions already loaded here, each as `OneCore.Plugins.Store.newer/3`
+  gives one, held by the caller. A plugin whose latest version took over has its processes follow it, and its services installed here
+  that weren't running start.
+
+  Each owner's plugins are in one state, `plugin_sync`, with one sync in flight, as a Kubernetes controller's work
+  queue has one per key: compiling takes seconds, and a sync that read what was installed before another's would
+  otherwise land after it, and run what was installed before.
+
+      synced ─installs changed─► syncing ─done─► synced
+      syncing ─installs changed─► out_of_sync ─done─► syncing   (reads what's installed again)
   """
-  def reload(owner, loaded \\ []) do
+  def sync(owner, loaded \\ []) do
+    case ask({:sync, owner, loaded}) do
+      {:crashed, why} -> exit(why)
+      any -> any
+    end
+  end
+
+  @doc "Whether this server's plugins are `synced`, or `syncing` for anyone, as `sync/2` says."
+  def synced, do: if(ask(:syncing) == [], do: "synced", else: "syncing")
+
+  # One sync: what runs for `owner` is read, the versions newer than what's here are loaded, and they take over.
+  defp sync_once(owner, loaded) do
     installed = Installed.running(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
     runs = Servers.runs?(owner)
     {latest, here} = ask({:latest, runs})
     newer = Store.newer(Enum.uniq(Map.values(installed)) -- (known ++ here), latest, runs)
-    {changed, any} = ask({:looked, owner, installed, loaded ++ newer})
+    {changed, any} = ask({:looked, owner, installed, loaded ++ newer, Map.keys(latest) ++ here})
+    # A process waiting for a sync, as one whose own code brought the newer version in does, can't follow until it ends.
+    waiting = ask(:waiting)
     LoadedVersion.release(for {_artifact, _number, {:ok, version}} <- newer, do: version)
 
     for artifact <- changed do
-      # A process whose own code brought the newer version in is the one that can't wait for itself.
-      for process <- __MODULE__.Process.all(artifact), process != self(), do: __MODULE__.Process.follow(process)
+      for process <- __MODULE__.Process.all(artifact), process not in waiting, do: __MODULE__.Process.follow(process)
       Services.start(artifact)
     end
 
@@ -211,7 +231,7 @@ defmodule OneCore.Plugins do
   # plugin this server doesn't run is looked for first.
   defp begin(owners, name) do
     with {:absent, _missing} <- ask({:begin, owners, name}),
-         _ = Enum.each(Enum.uniq(owners ++ [@network]), &reload(&1)),
+         _ = Enum.each(Enum.uniq(owners ++ [@network]), &sync/1),
          {:absent, _missing} <- ask({:begin, owners, name}),
          do: {:error, "There's no plugin named #{name}"}
   end
@@ -225,11 +245,13 @@ defmodule OneCore.Plugins do
 
   # A server starts with the latest version of every plugin it runs whether or not it's asked for them. `installed` is
   # what's installed for each owner it has looked at, and `looked` when it last did; `running` and `latest` are by
-  # plugin.
+  # plugin. `syncs` is each owner whose plugins aren't synced (`sync/2`): the sync in flight, by its task's reference,
+  # who waits for it and what they loaded, and with `next` who waits for the one after and what they loaded, while
+  # it's out of sync. What they loaded is held by this until the sync that takes it has, however they end meanwhile.
   @impl true
   def init(nil) do
     Hooks.keep()
-    {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}}, {:continue, :start}}
+    {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}, syncs: %{}}, {:continue, :start}}
   end
 
   @impl true
@@ -261,7 +283,7 @@ defmodule OneCore.Plugins do
 
     # Whoever else something loaded here is installed for, this looked at before it restarted: they're looked at
     # again beside this, as reading what's installed for them may call a plugin, and what's theirs is adopted.
-    Task.start(fn -> for owner <- LoadedVersion.owners() -- here, do: reload(owner) end)
+    Task.start(fn -> for owner <- LoadedVersion.owners() -- here, do: sync(owner) end)
     {:noreply, state}
   end
 
@@ -273,8 +295,29 @@ defmodule OneCore.Plugins do
   @impl true
   def handle_call(:started, _from, state), do: {:reply, :ok, state}
 
-  def handle_call({:looked, owner, installed, loaded}, _from, state) do
+  def handle_call({:sync, owner, loaded}, from, state) do
+    LoadedVersion.hold(handed(loaded), self())
+
+    case state.syncs do
+      %{^owner => %{next: {waiting, more}} = sync} -> {:noreply, put_in(state.syncs[owner], %{sync | next: {[from | waiting], more ++ loaded}})}
+      %{^owner => sync} -> {:noreply, put_in(state.syncs[owner], %{sync | next: {[from], loaded}})}
+      _ -> {:noreply, syncing(state, owner, [from], loaded)}
+    end
+  end
+
+  def handle_call(:syncing, _from, state), do: {:reply, Map.keys(state.syncs), state}
+
+  def handle_call(:waiting, _from, state) do
+    waiting = for {_owner, sync} <- state.syncs, {pid, _tag} <- sync.waiting ++ elem(sync.next || {[], []}, 0), do: pid
+    {:reply, waiting, state}
+  end
+
+  # A plugin the sync took to be here already, `here`, that another owner's sync dropped meanwhile, isn't running:
+  # the owner is out of sync, and the next sync reads it.
+  def handle_call({:looked, owner, installed, loaded, here}, _from, state) do
     {state, changed, any} = took_over(state, owner, installed, loaded)
+    gone = for artifact <- Map.values(installed), artifact in here, not is_map_key(state.running, artifact), do: artifact
+    state = if gone != [] and state.syncs[owner].next == nil, do: put_in(state.syncs[owner].next, {[], []}), else: state
     {:reply, {changed, any}, state}
   end
 
@@ -341,6 +384,38 @@ defmodule OneCore.Plugins do
 
       nil ->
         {:reply, :absent, state}
+    end
+  end
+
+  @impl true
+  def handle_info({ref, any}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    if sync?(state, ref), do: {:noreply, done(state, ref, any)}, else: {:noreply, state}
+  end
+
+  def handle_info({:DOWN, ref, :process, _, why}, state) do
+    if sync?(state, ref), do: {:noreply, done(state, ref, {:crashed, why})}, else: {:noreply, state}
+  end
+
+  defp handed(loaded), do: for({_artifact, _number, {:ok, version}} <- loaded, do: version)
+
+  defp sync?(state, ref), do: Enum.any?(state.syncs, fn {_owner, sync} -> sync.ref == ref end)
+
+  # A sync runs beside this, which it asks what it needs, so whatever's asked meanwhile is answered.
+  defp syncing(state, owner, waiting, loaded) do
+    task = Task.Supervisor.async_nolink(OneCore.Asks, fn -> sync_once(owner, loaded) end)
+    put_in(state.syncs[owner], %{ref: task.ref, waiting: waiting, loaded: loaded, next: nil})
+  end
+
+  # A sync ended: whoever waited for it is told what it gave, and an owner out of sync syncs again.
+  defp done(state, ref, outcome) do
+    {owner, sync} = Enum.find(state.syncs, fn {_owner, sync} -> sync.ref == ref end)
+    for from <- sync.waiting, do: GenServer.reply(from, outcome)
+    LoadedVersion.release(handed(sync.loaded))
+
+    case sync.next do
+      nil -> %{state | syncs: Map.delete(state.syncs, owner)}
+      {waiting, loaded} -> syncing(state, owner, waiting, loaded)
     end
   end
 
