@@ -7,10 +7,17 @@
 # before a first `cargo build`. Of the worktrees beside it, one that builds from the same Cargo manifests is copied
 # first, as only its own crates differ, and then the one that built last.
 #
+# The build of Android's app comes with it, when the worktree it's copied from built one: Cargo's builds for Android's
+# targets are in `target/`, and Gradle's (`gen/android/.gradle`, `build`, `app/build`, `buildSrc/build`) and the project
+# Tauri generates are the folders git ignores in `clients/app/gen/android`. A worktree is chosen by what it built last;
+# `--android` chooses by its debug APK, so the first `cargo tauri android build` rebuilds only what changed too.
+#
 # It isn't a post-checkout hook, which it was: a worktree is made at the commit of the checkout it's made from, which
 # on a machine whose main checkout nobody moves is older than the hook, and a `git reset` to origin/main after it runs
 # no hook (18 Nov: three first networks of 10–12 minutes).
 set -euo pipefail
+marker=target/debug/one
+[[ ${1:-} != --android ]] || marker=clients/app/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 here=$(git rev-parse --show-toplevel)
 cd "$here"
 [[ ! -e target ]] || { echo "$here has a build already." >&2 && exit 1; }
@@ -22,7 +29,7 @@ differs() { git -C "$1" diff --no-renames --name-only -z HEAD && git -C "$1" ls-
 
 head=$(git rev-parse HEAD)
 git worktree list --porcelain | sed -n 's/^worktree //p' | while read -r there; do
-  [[ $there != "$here" ]] && built=$(stat -c %Y "$there/target/debug/one" 2>/dev/null) || continue
+  [[ $there != "$here" ]] && built=$(stat -c %Y "$there"/$marker 2>/dev/null) || continue
   same=0 && git -C "$there" diff --quiet "$head" -- Cargo.lock ':(glob)**/Cargo.toml' && same=1
   echo "$same $built $there"
 done | sort -k1,1nr -k2,2nr | cut -d' ' -f3- | while read -r there; do
@@ -30,7 +37,7 @@ done | sort -k1,1nr -k2,2nr | cut -d' ' -f3- | while read -r there; do
   lock=$there/target/debug/.cargo-build-lock
   [[ -e $lock ]] || continue
   # What's here already, as `mix deps.get` fetches `deps/`, stays.
-  folders=$(git -C "$there" ls-files -oi --exclude-standard --directory | grep -E '(^|/)(target|_build|deps|node_modules)/$' |
+  folders=$(git -C "$there" ls-files -oi --exclude-standard --directory | grep -E '(^|/)(target|_build|deps|node_modules)/$|^clients/app/gen/android/' |
     while read -r folder; do [[ -e $folder ]] || echo "$folder"; done || true)
   # shellcheck disable=SC2086 # one folder per word
   if flock -n -s "$lock" sh -c 'from=$1 && shift && for folder; do
