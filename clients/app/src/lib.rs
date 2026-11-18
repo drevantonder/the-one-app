@@ -970,6 +970,10 @@ pub fn run() {
         .setup(move |app| {
             app.manage(Start(tokio::sync::watch::Sender::new(None)));
             app.manage(started);
+            // Windows groups this app's windows under its identifier, and each app's here under its own
+            // (`shortcuts::app_user_model_id`), which a start from that app's shortcut would otherwise give it.
+            #[cfg(windows)]
+            unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(&app.config().identifier)) }?;
             // The window opens at its own page at once, which draws the mark until the client has opened behind it,
             // and then follows where the device is: a device that isn't in its network to the page that signs it
             // in. A phone opens the window again at the same address as it's made again (a change of text size),

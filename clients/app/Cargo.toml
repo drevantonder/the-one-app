@@ -39,6 +39,8 @@ window = [
   "dep:webkit2gtk",
   "dep:gtk",
   "dep:resvg",
+  "dep:windows",
+  "dep:ico",
   "cli/window",
 ]
 
@@ -81,6 +83,17 @@ tauri-plugin-haptics = { version = "2.4", optional = true }
 # hands it to, and on an iPhone what Spotlight or its App Shortcut opens (`shortcuts`).
 tauri-plugin-deep-link = { version = "2.6", optional = true }
 
+# Each app's icon where the device lists it (`shortcuts`), which is an SVG or a PNG, drawn as a PNG of the size it
+# wants there.
+[target.'cfg(any(target_os = "ios", windows))'.dependencies]
+resvg = { version = "0.47", default-features = false, optional = true }
+
+# Each app's shortcut in Windows' Start menu, made as the shell's own are (`IShellLinkW`), with its own AppUserModelID,
+# and its icon file.
+[target.'cfg(windows)'.dependencies]
+ico = { version = "0.6", optional = true }
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"], optional = true }
+
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
 
@@ -99,5 +112,3 @@ libc = "=0.2.189"
 # takes an app home (`edge`).
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"], optional = true }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIGeometry", "UIGestureRecognizer", "UIInterface", "UIPanGestureRecognizer", "UIResponder", "UIScreenEdgePanGestureRecognizer", "UIScrollView", "UIView", "UIWindow"], optional = true }
-# Each app's icon where Spotlight and the App Shortcut show it (`shortcuts`), which is an SVG or a PNG, drawn as a PNG.
-resvg = { version = "0.47", default-features = false, optional = true }

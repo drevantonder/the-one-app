@@ -1,6 +1,6 @@
 //! Each app with a screen of its own, where the device lists its own apps, so it's found and opened as they are: an
 //! iPhone's Spotlight and the app's one App Shortcut, Open [app] in The One App, which Siri, Shortcuts and the Action
-//! button have too (`gen/apple/Sources/app/Shortcuts.swift`). Each opens its app here by its
+//! button have too (`gen/apple/Sources/app/Shortcuts.swift`), and Windows' Start menu. Each opens its app here by its
 //! `one:` link (`links`). They follow what's listed for this device's person (`apps`), so an app installed is added,
 //! one uninstalled goes, and a device that's signed out has none.
 
@@ -61,7 +61,7 @@ pub fn keep(app: &AppHandle, shortcuts: Vec<Shortcut>) {
 
 /// An icon as a square PNG `side` pixels across, from its `data:` address: an SVG drawn at that size, or a PNG
 /// scaled to it.
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", windows))]
 fn png(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
     use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
     use resvg::usvg;
@@ -120,10 +120,129 @@ mod device {
     }
 }
 
+/// Windows' are shortcuts in the Start menu, in a folder named for this app, each to this program with its `one:` link,
+/// and with its icon and an AppUserModelID of its own (`app_user_model_id`), so a window of its own groups under its own
+/// icon in the taskbar, apart from this app's.
+#[cfg(windows)]
+mod device {
+    use std::path::Path;
+
+    use tauri::Manager;
+    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
+    use windows::Win32::System::Com::StructuredStorage::{
+        PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+    };
+    use windows::Win32::System::Com::{
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile,
+    };
+    use windows::Win32::System::Variant::VT_LPWSTR;
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{HSTRING, Interface, PWSTR};
+
+    use super::Shortcut;
+
+    pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+        let identifier = &app.config().identifier;
+        let start = app.path().data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(&app.package_info().name);
+        let icons = app.path().app_local_data_dir()?.join("shortcuts");
+        std::fs::create_dir_all(&start)?;
+        std::fs::create_dir_all(&icons)?;
+        let program = std::env::current_exe()?;
+        // The shell's COM objects are its thread's, which is this one, made for this.
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok()?;
+        let mut made = Vec::new();
+        for shortcut in shortcuts {
+            // A file's name has none of what Windows keeps out of one.
+            let name: String =
+                shortcut.name.chars().filter(|c| !r#"<>:"/\|?*"#.contains(*c) && !c.is_control()).collect();
+            let file = format!("{}.lnk", name.trim().trim_end_matches('.'));
+            if name.trim().is_empty() || made.contains(&file) {
+                continue;
+            }
+            let icon = icons.join(format!("{}.ico", shortcut.entrypoint.replace(['/', '.'], "-")));
+            let drawn = match super::png(&shortcut.icon, 256) {
+                Ok(drawn) => drawn,
+                Err(error) => {
+                    eprintln!("{}'s icon isn't one a device can show: {error:#}", shortcut.entrypoint);
+                    continue;
+                }
+            };
+            std::fs::write(&icon, ico(&drawn)?)?;
+            let id = super::app_user_model_id(identifier, &shortcut.entrypoint);
+            link(&start.join(&file), &program, &format!("one:{}", shortcut.entrypoint), &icon, &shortcut.name, &id)?;
+            made.push(file);
+        }
+        // What's no longer listed goes, its icon with it.
+        for kept in std::fs::read_dir(&start)?.flatten() {
+            if !made.iter().any(|file| kept.file_name() == file.as_str()) {
+                std::fs::remove_file(kept.path())?;
+            }
+        }
+        for kept in std::fs::read_dir(&icons)?.flatten() {
+            let named = kept.path().file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+            if !shortcuts.iter().any(|shortcut| shortcut.entrypoint.replace(['/', '.'], "-") == named) {
+                std::fs::remove_file(kept.path())?;
+            }
+        }
+        Ok(())
+    }
+
+    /// An icon file of one picture, a PNG, which Windows reads from Vista on.
+    fn ico(png: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let mut icon = ico::IconDir::new(ico::ResourceType::Icon);
+        icon.add_entry(ico::IconDirEntry::encode_as_png(&ico::IconImage::read_png(std::io::Cursor::new(png))?)?);
+        let mut file = Vec::new();
+        icon.write(&mut file)?;
+        Ok(file)
+    }
+
+    /// Saves a shortcut at `file` to `program` with `arguments`, its `icon`, `description` and AppUserModelID `id`.
+    fn link(
+        file: &Path,
+        program: &Path,
+        arguments: &str,
+        icon: &Path,
+        description: &str,
+        id: &str,
+    ) -> anyhow::Result<()> {
+        unsafe {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            link.SetPath(&HSTRING::from(program))?;
+            link.SetArguments(&HSTRING::from(arguments))?;
+            link.SetIconLocation(&HSTRING::from(icon), 0)?;
+            link.SetDescription(&HSTRING::from(description))?;
+            let mut id: Vec<u16> = id.encode_utf16().chain([0]).collect();
+            let value = PROPVARIANT {
+                Anonymous: PROPVARIANT_0 {
+                    Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
+                        vt: VT_LPWSTR,
+                        Anonymous: PROPVARIANT_0_0_0 { pwszVal: PWSTR(id.as_mut_ptr()) },
+                        ..Default::default()
+                    }),
+                },
+            };
+            // The store copies what it's given, and `id` is this function's own, so the value isn't cleared.
+            let store: IPropertyStore = link.cast()?;
+            store.SetValue(&PKEY_AppUserModel_ID, &value)?;
+            store.Commit()?;
+            link.cast::<IPersistFile>()?.Save(&HSTRING::from(file), true)?;
+        }
+        Ok(())
+    }
+}
+
 /// Any other device lists nothing of the apps in this one.
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", windows)))]
 mod device {
     pub fn keep(_app: &tauri::AppHandle, _shortcuts: &[super::Shortcut]) -> anyhow::Result<()> {
         Ok(())
     }
+}
+
+/// The AppUserModelID of an app here, by its entrypoint's app, which Windows groups its windows under, in the taskbar,
+/// apart from this app's own (its identifier, `run`): `<identifier>.<app>`.
+#[cfg(windows)]
+pub fn app_user_model_id(identifier: &str, entrypoint: &str) -> String {
+    format!("{identifier}.{}", entrypoint.split('/').next().unwrap_or(entrypoint))
 }
