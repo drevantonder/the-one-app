@@ -222,12 +222,12 @@ export const open = (app: string, { subject, behind, from }: Subject & { behind?
 export const pinShortcut = (entrypoint: string): Promise<unknown> => greet().then(() => ask("one/pin-shortcut", { entrypoint }))
 
 /// `const { device, network, build, server, push } = await client()`: this device's key, as Devices lists it, the
-/// network's address, if it has one, the build it's on, its server's key if it's a server, and on a phone, whether
-/// it's woken by its notifications. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
+/// network's address, if it has one, the build it's on, its server's key if it's a server, and on a phone or in a
+/// browser, whether it's woken by its notifications. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
 /// `null` as the device is, and `client({ leave: true })` signs this device out once it's been removed from its
 /// person's devices. `client({ serve: true })` makes this device a server of its person's and `false` stops it being
 /// one, `client({ update: true })` has it take the latest builds, and `client({ push: true })` has a phone whose push
-/// failed try again: each answers `{ message }`, what it did, or throws why it couldn't. `client({ statusBar: false })`
+/// failed try again, or a browser turn its notifications on, from its person's tap: each answers `{ message }`, what it did, or throws why it couldn't. `client({ statusBar: false })`
 /// hides the device's status bar while this app is showing, as an iPhone's Home Screen does while it's edited, and
 /// `true` shows it again; a device with none, or whose app can't, keeps what it has. An update shows over every app
 /// as it's under way, and the app starts again on the new build. On Android, `client({ settings: "accessibility" })`
@@ -244,8 +244,8 @@ export interface Client {
   network?: string
   build: string
   server?: string
-  /** Where a phone is with being woken by its notifications: nothing on a computer or in a browser. */
-  push?: { state: "notAsked" | "denied" | "registering" | "registered" } | { state: "failed"; why: string }
+  /** Where a phone or a browser is with being woken by its notifications, `homeScreen` in an iPhone's browser, which is only from its Home Screen: nothing on a computer. */
+  push?: { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
   /** Whether a phone's person turned on Computer Use in its Accessibility settings: nothing where a device has none. */
   computerUse?: { on: boolean }
   /** What `client({ theme })` chose for every app here: `null` where it's as the device is. */

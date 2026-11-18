@@ -1,7 +1,7 @@
 # Cloudflare's headers for the web client's files (developers.cloudflare.com/workers/static-assets/headers).
 # The page loads only its own files, and frames only apps' pages, which are at this address too.
 /
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; base-uri 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'
 # An app's page has an origin of its own (`host.js`), and loads the UI library from here as one from elsewhere.
 /ui/*
   Access-Control-Allow-Origin: *

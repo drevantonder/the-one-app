@@ -62,7 +62,9 @@ const web = `${root}/clients/web`;
 rmSync(`${web}/dist`, { recursive: true, force: true });
 const app = `${root}/clients/app`;
 for (const file of (await Bun.file(`${app}/tauri.conf.json`).json()).build.frontendDist) cpSync(`${app}/${file}`, `${web}/dist/${basename(file)}`);
-for (const file of readdirSync(web).filter((file) => file !== "dist")) cpSync(`${web}/${file}`, `${web}/dist/${file}`, { recursive: true });
+for (const file of readdirSync(web).filter((file) => !["dist", "node_modules"].includes(file))) cpSync(`${web}/${file}`, `${web}/dist/${file}`, { recursive: true });
+// Its service worker is built, with what it imports, over its source.
+await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile dist/sw.js`.cwd(web).quiet();
 // Built here, so a deploy never ships whatever build of the UI library was left on disk.
 await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).quiet();
 cpSync(`${root}/core/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true });

@@ -1,0 +1,6 @@
+{
+  "name": "the One App",
+  "start_url": "/",
+  "display": "standalone",
+  "icons": [{ "src": "Logo.png", "sizes": "336x336", "type": "image/png" }]
+}

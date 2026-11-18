@@ -1,6 +1,6 @@
 // Notifications: what you've been told, newest first, and the apps that have told you
-// something, each of which you hear from or not. Tapping one marks it read and opens the app it's from. A phone that
-// isn't woken by them says so first, and why.
+// something, each of which you hear from or not. Tapping one marks it read and opens the app it's from. A phone or a
+// browser that isn't woken by them says so first, and why, and a browser turns them on here.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import { Button, call, changed, client, confirm, Empty, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Spinner, Switch, toast } from "ui"
@@ -26,8 +26,8 @@ interface App {
   allowed: boolean
 }
 
-/** Where this phone is with being woken by its notifications, as `client()` says: nothing on a computer or in a browser. */
-type Push = { state: "notAsked" | "denied" | "registering" | "registered" } | { state: "failed"; why: string }
+/** Where this phone or browser is with being woken by its notifications, as `client()` says: nothing on a computer. */
+type Push = { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
 
 const inbox = createMemo(async () => {
   const [{ notifications }, apps, { push }]: [{ notifications: Received[] }, App[], { push?: Push }] = await Promise.all([
@@ -58,7 +58,8 @@ async function change(tool: string, input = {}) {
   refresh(inbox)
 }
 
-/// Has this phone try again to be woken by its notifications, and shows where that left it.
+/// Has this phone try again to be woken by its notifications, or this browser turn them on, as its person taps to
+/// (a browser asks them only then), and shows where that left it.
 async function tryPush() {
   try {
     await client({ push: true })
@@ -68,8 +69,9 @@ async function tryPush() {
   refresh(inbox)
 }
 
-/// Where this phone is with being woken by its notifications, said only where it isn't: fine is silent, and so is a
-/// computer, which shows them while the app runs, and a browser.
+/// Where this phone or browser is with being woken by its notifications, said only where it isn't: fine is silent,
+/// and so is a computer, which shows them while the app runs. A phone asks its person by itself; a browser waits for
+/// them to turn them on, and an iPhone's only from its Home Screen, as Safari has it.
 function PushState(props: { push: Push }) {
   return (
     <>
@@ -79,11 +81,21 @@ function PushState(props: { push: Push }) {
           <span>Turning on notifications…</span>
         </p>
       </Show>
+      <Show when={props.push.state === "notAsked"}>
+        <List>
+          <Row heading="Notifications are off here" text="Turn them on to hear from your apps while this isn't open." action={<Button onClick={tryPush}>Turn On</Button>} />
+        </List>
+      </Show>
+      <Show when={props.push.state === "homeScreen"}>
+        <List>
+          <Row heading="Notifications need the Home Screen" text="In Safari, tap Share, then Add to Home Screen, and open it from there." />
+        </List>
+      </Show>
       <Show when={props.push.state === "denied"}>
-        <Problem warn heading="Notifications are off for this phone" text="Turn them on for this app in its Settings." />
+        <Problem warn heading="Notifications are off here" text="Turn them on in Settings for this app, or for this site in your browser." />
       </Show>
       <Show when={props.push.state === "failed"}>
-        <Problem warn heading="This phone isn't woken by notifications" text={"why" in props.push ? props.push.why : undefined} action={<Button variant="outline" onClick={tryPush}>Try Again</Button>} />
+        <Problem warn heading="This device isn't woken by notifications" text={"why" in props.push ? props.push.why : undefined} action={<Button variant="outline" onClick={tryPush}>Try Again</Button>} />
       </Show>
     </>
   )

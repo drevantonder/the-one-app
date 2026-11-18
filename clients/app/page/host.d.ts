@@ -76,6 +76,9 @@ export type Session =
   | { state: "signIn"; code?: { link: string; code: string }; why?: "denied" | "expired" | "removed" | null }
 
 /** Whether the client reaches its network, beside its session (`Connection` in core/client). */
+/** Where a phone or a browser is with being woken by its notifications (`Push` in apps/notifications/client/native), and an iPhone's browser that can be only from its Home Screen. */
+export type Push = { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
+
 export type Connection = "connecting" | "online" | "offline" | "reconnecting"
 
 /** What the page is told of the device's session: the session, its place in the order the page hears them in, and while it's signing in, where the window goes. */
@@ -146,13 +149,13 @@ export interface Commands {
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
-  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown; computerUse?: unknown }
+  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: Push; computerUse?: unknown }
   upload(file: ArrayBuffer, options: { headers: { app: string } }): { upload: string }
   /** Asks the network again now, which didn't answer. */
   retry(): Promise<void>
   /** Signs this device out, once it's removed from its person's devices. */
   sign_out(): void
-  /** Has a phone whose push failed try again, saying where it is once that try has ended. */
+  /** Has a phone whose push failed try again, saying where it is once that try has ended, or a browser turn its notifications on, as its person taps to. */
   push(): { message: string }
   serve(args: { on: boolean }): string
   update(): string

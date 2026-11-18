@@ -293,6 +293,11 @@ async function opened() {
   ;({ apps, device, key } = await response.json())
   answered(true)
   listTools().catch(() => {})
+  // Its person may have turned its notifications on or off in the browser's settings since.
+  if (push && push.state !== "homeScreen") {
+    if (Notification.permission === "granted") registerPush()
+    else pushed({ state: Notification.permission === "denied" ? "denied" : "notAsked" })
+  }
   return { session: { state: "signedIn" } }
 }
 /// Asks again, while it's still opening, and tells the page where it is now, if it's moved.
@@ -301,11 +306,59 @@ async function opening() {
   if (now.session.state !== "opening") emit("session", { seq: ++told, ...now })
 }
 
+/// Where this browser is with being woken by its notifications, as a phone's is (`Push` in
+/// apps/notifications/client/native): nothing where a browser has no push, and on an iPhone or iPad until the web
+/// client is on its Home Screen, where Safari gives one push (webkit.org/blog/13878), `homeScreen`. Unlike a phone's
+/// app, a browser asks its person only as they turn notifications on (`push`), as browsers ask that a site does.
+/** @type {import("../app/page/host.js").Push | undefined} */
+let push =
+  "PushManager" in window && "serviceWorker" in navigator
+    ? { state: Notification.permission === "denied" ? "denied" : "notAsked" }
+    : os() === "ios" && !(/** @type {{ standalone?: boolean }} */ (navigator).standalone)
+      ? { state: "homeScreen" }
+      : undefined
+/// Moves its push on to `next`, and has every open app ask again, as Notifications shows it.
+/** @param {import("../app/page/host.js").Push} next */
+function pushed(next) {
+  push = next
+  for (const view of views.keys()) emit("changed", view)
+}
 /// Each operating system, as a person calls it, by `os()`'s names: what a browser is called, beside its own name.
 /** @type {Record<string, string>} */
 const SYSTEMS = { ios: "iPhone", android: "Android", macos: "Mac", windows: "Windows", chromeos: "ChromeOS", linux: "Linux" }
 /// What this browser is called, as Sign-In calls it: "Chrome on Linux".
 const called = () => `${browser() ?? "Browser"} on ${SYSTEMS[os() ?? ""] ?? "this device"}`
+/// Gives the network this browser's push subscription, made with the network's VAPID key (`/notifications/key`), with
+/// its notification key, which its service worker holds (`sw.js`), as a phone gives its push token: each time it's
+/// signed in, so a network that lost it gets it again, and registering again is an upsert. A subscription made with
+/// another VAPID key is made again.
+async function registerPush() {
+  if (push?.state !== "registered") pushed({ state: "registering" })
+  try {
+    const registration = await navigator.serviceWorker.register("/sw.js")
+    const { vapid } = await (await fetch("/notifications/key")).json()
+    if (!vapid) throw new Error("This network can't wake browsers yet.")
+    const { port1, port2 } = new MessageChannel()
+    const notificationKey = new Promise((resolve) => (port1.onmessage = ({ data }) => resolve(data)))
+    ;(await navigator.serviceWorker.ready).active?.postMessage("key", [port2])
+    let subscription = await registration.pushManager.getSubscription()
+    const made = subscription?.options.applicationServerKey
+    if (made && btoa(String.fromCharCode(...new Uint8Array(made))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") !== vapid) {
+      await subscription?.unsubscribe()
+      subscription = null
+    }
+    subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapid })
+    const result = await mcp("tools/call", { name: "notifications_register", arguments: { via: "webpush", token: JSON.stringify(subscription), name: called(), key: await notificationKey } })
+    if (result.isError) throw new Error(result.content?.[0]?.text ?? "The network didn't take it.")
+    pushed({ state: "registered" })
+  } catch (error) {
+    pushed({ state: "failed", why: /** @type {Error} */ (error).message })
+  }
+}
+// A notification tapped while a window of this address is open opens its app here (`sw.js`).
+navigator.serviceWorker?.addEventListener("message", ({ data }) => data?.open && emit("open", data.open))
+// Safari puts the web client on an iPhone's Home Screen as an app of its own, which a push reaches, by its manifest.
+document.head.append(Object.assign(document.createElement("link"), { rel: "manifest", href: "manifest.webmanifest" }))
 
 /// What a browser can't do, as it's said where it's asked.
 /** @param {string} why */
@@ -348,7 +401,14 @@ const commands = {
   },
   refresh: ({ view }) => refresh(view),
   close: ({ view }) => void views.delete(view),
-  client: () => ({ device, network: location.origin }),
+  client: () => ({ device, network: location.origin, push }),
+  /// Turns on its notifications, as its person taps to: the browser asks them first, which it does only for a tap.
+  async push() {
+    if (push?.state === "homeScreen") throw new Error("Add this to your Home Screen first.")
+    if ((await Notification.requestPermission()) !== "granted") pushed({ state: "denied" })
+    else await registerPush()
+    return { message: "" }
+  },
   /// A file too large to go in a call goes where the network keeps it, by the link a server gives for it.
   async upload(file, { headers: { app } }) {
     const { content, isError } = await mcp("tools/call", { name: "upload", arguments: { app } })
@@ -359,7 +419,12 @@ const commands = {
     return { upload: to.upload }
   },
   retry: () => tryAgain(true),
-  sign_out: () => location.reload(),
+  /// Its session is gone, and with it what the network kept of this browser (`sign-in.device_removed`): what its push
+  /// service kept goes too.
+  async sign_out() {
+    await (await navigator.serviceWorker?.getRegistration())?.pushManager.getSubscription().then((subscription) => subscription?.unsubscribe())
+    location.reload()
+  },
   serve: cannot("A browser can't be a server. Make your phone or computer one in its app."),
   update: cannot("A browser has the latest each time it opens."),
   recovery_key: cannot(NO_KEY),
