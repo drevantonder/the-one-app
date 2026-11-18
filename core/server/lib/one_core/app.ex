@@ -375,7 +375,7 @@ defmodule OneCore.App do
     one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:
     having them makes no entrypoint. An app has an entrypoint only for a screen a person opens for something else.
   - Its item is in one of three states, which the app says (`vault_state`) and the Vault shows: `ready`, usable,
-    which shows nothing; `busy`, with a message ("Saving…"); or `action_required`, with why and the one action that
+    which shows nothing; `busy`, with a message ("Saving…"); or `needs_action`, with why and the one action that
     fixes it ("Signed out on your phone", Sign In). It keeps its own detailed states and says only which of these it's
     in. Deleting, restoring and purging an item are soft delete's, which the Vault doesn't add to.
   - Two things are the app's to choose, deliberately, and nothing chooses for it. Whether its person is also

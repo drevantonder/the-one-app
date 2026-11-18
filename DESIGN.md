@@ -89,7 +89,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 
 - The one place for everything a person has given access to, in sections: Asked for, Passwords and keys, Accounts, then one for each other kind of item an app keeps there (Chrome Profiles).
 - Accounts are every app's, in one list, each with its app's logo; Add Account under them.
-- An item is ready, busy or action_required, as its app says: ready shows nothing; busy shows a spinner and what's under way; action_required shows a dot, why and the one action that fixes it (Sign In, Try Again). Signing out is that, or deleting the item.
+- An item is ready, busy or needs_action, as its app says: ready shows nothing; busy shows a spinner and what's under way; needs_action shows a dot, why and the one action that fixes it (Sign In, Try Again). Signing out is that, or deleting the item.
 - Deleting an item is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
 - An item an app keeps opens beside the list on a desktop, drawn by that app itself (a Chrome profile by Chrome Profiles).
 
