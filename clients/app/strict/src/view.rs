@@ -505,7 +505,7 @@ impl Screen {
 
     /// The topmost node that takes the pointer at `at`, and what it's in, the innermost first.
     fn under(&self, at: Point<f32>) -> Vec<Id> {
-        let Some(top) = self.placed.iter().rev().find(|(_, placed)| placed.shown.contains(&at)).map(|(id, _)| *id) else { return Vec::new() };
+        let Some(top) = self.placed.iter().rev().find(|(_, placed)| placed.pointer && placed.shown.contains(&at)).map(|(id, _)| *id) else { return Vec::new() };
         let mut chain = vec![top];
         while let Some(parent) = chain.last().and_then(|id| self.placed(*id)).and_then(|placed| placed.parent) {
             chain.push(parent);
@@ -1011,6 +1011,8 @@ pub(crate) struct Placed {
     pub scroll: Option<(f32, f32, bool)>,
 }
 
+    /// Whether it takes the pointer (`pointerEvents`): what doesn't is still in the chain of what's in it.
+    pub pointer: bool,
 struct Painter<'a> {
     tree: &'a Tree,
     taffy: TaffyTree<()>,
@@ -1268,7 +1270,7 @@ impl Painter<'_> {
         });
         let shown = self.turned(bounds).intersect(&mask);
         let root = id == 0;
-        let pointer = pointer && look.pointer_events;
+        let pointer = look.pointer_events.unwrap_or(pointer);
         if node.str("aria-modal") == Some("true") {
             self.modal = Some(id);
         }
@@ -1313,7 +1315,7 @@ impl Painter<'_> {
         if pressable && (node.kind == Kind::Input || node.str("tabindex") != Some("-1") && node.prop("tabindex").and_then(Value::as_i64) != Some(-1)) {
             self.tab_order.push(id);
         }
-        let mut placed = Placed { parent, shown, cursor: look.cursor, pressable, input: node.kind == Kind::Input, scroll: None };
+        let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, scroll: None };
         match node.kind {
             Kind::Text | Kind::RawText => {
                 let words = if node.kind == Kind::Text { tree.text(id) } else { node.value.clone().unwrap_or_default() };
@@ -1352,9 +1354,7 @@ impl Painter<'_> {
                         placed.shown = child_mask;
                     }
                 }
-                if pointer {
-                    self.placed.push((id, placed));
-                }
+                self.placed.push((id, placed));
                 // Its children in order, those with a higher `zIndex` later, and positioned ones after the rest of theirs.
                 let mut children: Vec<(usize, NodeId, i32, bool)> = self
                     .taffy
@@ -1371,7 +1371,7 @@ impl Painter<'_> {
                 for (_, child, _, _) in children {
                     if self.nodes[&child].fixed {
                         let window = self.window;
-                        self.paint(child, point(0.0, 0.0), Transform::NONE, window, 1.0, Some(id), true);
+                        self.paint(child, point(0.0, 0.0), Transform::NONE, window, 1.0, Some(id), pointer);
                     } else {
                         self.paint(child, child_offset, transform, child_mask, opacity, Some(id), pointer);
                     }
@@ -1379,9 +1379,7 @@ impl Painter<'_> {
                 return;
             }
         }
-        if pointer {
-            self.placed.push((id, placed));
-        }
+        self.placed.push((id, placed));
     }
 
     /// An input: its text, or its placeholder while it's empty, clipped to its box; with the keyboard, what's selected

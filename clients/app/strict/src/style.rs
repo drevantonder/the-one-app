@@ -236,7 +236,9 @@ pub struct Look {
     pub scale: f32,
     pub rotate: f32,
     pub z_index: i32,
-    pub pointer_events: bool,
+    /// Whether it takes the pointer, as its style says (`pointerEvents`), or as what it's in does (`None`), as CSS's
+    /// `pointer-events` is inherited: a layer that says `none` lets presses through, and what in it says `auto` takes them.
+    pub pointer_events: Option<bool>,
     pub cursor: Option<Cursor>,
     /// A path's paint, where it says, and its stroke's width.
     pub fill: Paint,
@@ -287,7 +289,7 @@ impl Default for Look {
             scale: 1.0,
             rotate: 0.0,
             z_index: 0,
-            pointer_events: true,
+            pointer_events: None,
             cursor: None,
             fill: Paint::Current,
             stroke: Paint::None,
@@ -753,7 +755,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         scale: number("scale").unwrap_or(1.0),
         rotate: number("rotate").unwrap_or(0.0),
         z_index: number("zIndex").unwrap_or(0.0) as i32,
-        pointer_events: word("pointerEvents") != Some("none"),
+        pointer_events: word("pointerEvents").map(|events| events != "none"),
         cursor: match word("cursor") {
             Some("pointer") => Some(Cursor::Pointer),
             Some("text") => Some(Cursor::Text),
