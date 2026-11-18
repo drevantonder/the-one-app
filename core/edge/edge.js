@@ -35,6 +35,13 @@ const [what, ...rest] = process.argv.slice(2);
 if (!["dev", "deploy"].includes(what)) throw new Error("bun edge.js dev, or bun edge.js deploy [https://<address>]");
 const at = what === "deploy" && rest[0] ? new URL(rest[0]) : null;
 if (at && (at.protocol !== "https:" || at.pathname !== "/")) throw new Error("A network's address is https://<name>, with no path");
+// Wrangler reads the Cloudflare token from the environment: CLOUDFLARE_API_TOKEN when it's set, else 1Password's, read
+// into this process only.
+if (what === "deploy" && !process.env.CLOUDFLARE_API_TOKEN) {
+  const read = await $`op read ${"op://van-tonder-nosudo/CLOUDFLARE_API_TOKEN/credential"}`.quiet().nothrow();
+  if (read.exitCode !== 0 || !read.text().trim()) throw new Error("No Cloudflare token: set CLOUDFLARE_API_TOKEN, or sign in to 1Password (`op`) for van-tonder-nosudo/CLOUDFLARE_API_TOKEN");
+  process.env.CLOUDFLARE_API_TOKEN = read.text().trim();
+}
 
 /** The pieces every edge has, each by the first part of the paths it answers. The web client's files are the rest. */
 const PIECES = {
