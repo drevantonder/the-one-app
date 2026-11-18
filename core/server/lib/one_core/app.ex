@@ -543,6 +543,9 @@ defmodule OneCore.App do
   - What a service keeps on its machine goes in `OneCore.Service.folder(self())`, a folder of its own there,
     which stays through its app's updates and goes when it's removed from that server. It runs as whoever
     runs its server there, with their files and their programs.
+  - A service removed from a server, or whose app is uninstalled, stops with `{:shutdown, :removed}`: its
+    `terminate/2` removes what it put on the machine outside its folder, such as a launchd agent, systemd unit or
+    scheduled task. Any other reason, as when its server stops, leaves them.
   - When the app is updated, the service's process carries on in the new code with what it holds, and
     whatever it has open stays open. `code_change/3` is given the state, or a `:gen_statem`'s `code_change/4`
     its state and data, if the new code keeps them in another shape. Keep them in a struct with a default for

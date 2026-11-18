@@ -78,7 +78,7 @@ defmodule OneCore.Services do
   @doc "Stops running an app's service on this server."
   def remove(app, service) do
     with {:ok, instance} <- call({:remove, {app, service}}) do
-      if instance, do: Apps.Process.stop(instance)
+      if instance, do: Apps.Process.stop(instance, {:shutdown, :removed})
       Server.notify_servers(Servers.acts_for(Server.key()))
     end
   end
@@ -93,7 +93,7 @@ defmodule OneCore.Services do
     moving = call({:supersede, app})
 
     for {{copy, name}, to, instance} <- moving do
-      if instance, do: Apps.Process.stop(instance)
+      if instance, do: Apps.Process.stop(instance, :shutdown)
       {from, into} = {folder(copy, name), folder(to, name)}
 
       if File.exists?(from) and not File.exists?(into) do

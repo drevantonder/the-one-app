@@ -32,7 +32,7 @@ defmodule OneCore.Apps.Process.Statem do
     :keep_state_and_data
   end
 
-  def handle_event(:cast, {Process, :stop, _from, _monitor}, _state, _process), do: {:stop, :normal}
+  def handle_event(:cast, {Process, {:stop, why}, _from, _monitor}, _state, _process), do: {:stop, why}
 
   def handle_event(:cast, {Process, :follow, from, monitor}, state, %{held: was_held, module: was} = process) do
     case Process.held(process.app, process.name, process.key) do
@@ -64,7 +64,7 @@ defmodule OneCore.Apps.Process.Statem do
         end
 
       :absent ->
-        {:stop, :normal}
+        {:stop, {:shutdown, :removed}}
     end
   end
 

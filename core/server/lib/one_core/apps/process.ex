@@ -10,7 +10,8 @@ defmodule OneCore.Apps.Process do
   a newer one it holds that instead, gives what it holds to the new module's `code_change`, and lets go of the old
   one, which is unloaded once no call holds it either. The process is the same one throughout, so what it has open
   stays open. One whose module is the other behaviour in the newer version stops, and whatever asks for it next
-  starts it afresh.
+  starts it afresh. One whose app no longer has it here, uninstalled or without the module, stops with
+  `{:shutdown, :removed}`, as a service removed from this server does (`OneCore.Service`).
 
   It's registered by its app, its module's name as the app wrote it, and a key that tells it from the
   module's other processes, with the version it's at, so all are known without asking it.
@@ -73,8 +74,11 @@ defmodule OneCore.Apps.Process do
   """
   def follow(process), do: request(process, :follow, @within)
 
-  @doc "Stops a process that is no longer to run here, and waits until it has."
-  def stop(process), do: request(process, :stop, @within)
+  @doc """
+  Stops a process, and waits until it has: `why` is what its `terminate` is given, `{:shutdown, :removed}` for
+  one that is no longer to run here, or `:shutdown` for one whose place another takes.
+  """
+  def stop(process, why), do: request(process, {:stop, why}, @within)
 
   # Tells a process something, and waits for it to say it's done or to stop. One that does neither in time is
   # stopped.
@@ -150,7 +154,7 @@ defmodule OneCore.Apps.Process do
     {:noreply, process}
   end
 
-  def handle_cast({__MODULE__, :stop, _from, _monitor}, process), do: {:stop, :normal, process}
+  def handle_cast({__MODULE__, {:stop, why}, _from, _monitor}, process), do: {:stop, why, process}
 
   def handle_cast({__MODULE__, :follow, from, monitor}, %{held: was_held, module: was} = process) do
     case held(process.app, process.name, process.key) do
@@ -182,7 +186,7 @@ defmodule OneCore.Apps.Process do
         end
 
       :absent ->
-        {:stop, :normal, process}
+        {:stop, {:shutdown, :removed}, process}
     end
   end
 

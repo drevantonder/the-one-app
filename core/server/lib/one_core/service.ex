@@ -5,6 +5,9 @@ defmodule OneCore.Service do
   A service is a module of its app that says `@behaviour OneCore.Service`, and `use GenServer` or, when it has
   stages, `@behaviour :gen_statem`. Its process runs on each server whose owner installed it, and its public
   functions are what the rest of its app calls there.
+
+  One no longer to run on its server, removed from it or its app uninstalled, stops with `{:shutdown, :removed}`,
+  which its `terminate/2` is given while its folder is still there, to remove what it put on the machine.
   """
   alias OneCore.{Call, Apps, Server, Servers, Services}
   alias OneCore.Apps.{Calls, Installed, Store, Version}
