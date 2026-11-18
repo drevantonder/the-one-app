@@ -1,5 +1,5 @@
 # The Rust packages build as one workspace, so they share one lockfile and one `target` folder: One Core's in a
-# client and its server's NIFs, the clients, and the native code of the apps The One App ships with.
+# client and its server's NIFs, the clients, and the native code of the apps the One App ships with.
 [workspace]
 resolver = "3"
 members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "apps/*/server/nif/*", "apps/*/server/bin/*", "apps/*/client/native"]

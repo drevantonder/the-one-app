@@ -1,4 +1,4 @@
-# Building The One App
+# Building the One App
 
 Read `VISION.md`, `GLOSSARY.md` and `PRIOR-ART.md` first. Where they leave something open, ask
 before choosing.

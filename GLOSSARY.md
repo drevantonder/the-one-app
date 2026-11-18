@@ -2,6 +2,9 @@
 
 An app's own words are defined in that app's `SKILL.md`.
 
+- **the One App**: the product's name, spelled with a lowercase "the" everywhere, even at the start of a sentence or a
+  title, as iPhone and eBay keep their first letter: "open the One App", "the PTC App". "One App" alone, "The One App"
+  and "one app" are wrong. Only the App Store listing, "One App to rule them all", is a different name.
 - **Network**: one user's, one family's or one workplace's whole: its users, its bucket, its servers and its clients. A
   trusted boundary, not a social network. It is an artifact.
 - **User**: someone in the network, as relation tuples name them. How they sign in is not part of who they are.

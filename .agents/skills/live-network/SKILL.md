@@ -3,7 +3,7 @@ name: live-network
 description: Use before you run the installed `one`, or anything else, against the owner's live network rather than one you started yourself: what you may and may not do there.
 ---
 
-The installed `one` (and The One App's MCP tools) act on the owner's live network, as the owner. The machines here
+The installed `one` (and the One App's MCP tools) act on the owner's live network, as the owner. The machines here
 run it alongside your work: never install over the installed `one`, stop it, or run it with your own build. For
 anything you build, use a network of your own (`local-network`).
 

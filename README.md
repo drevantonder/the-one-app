@@ -2,7 +2,7 @@
   <img src="icons/ring.png" width="200" alt="">
 </p>
 
-<h1 align="center">The One App</h1>
+<h1 align="center">the One App</h1>
 
 <p align="center"><i>
 One app to rule them all, one app to find them,<br>

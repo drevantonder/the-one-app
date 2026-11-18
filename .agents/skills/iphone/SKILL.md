@@ -24,7 +24,7 @@ An app is a network's: the commands that build it are in that repo's `app/README
 
 - No Apple account is signed in to Xcode, so `xcodebuild -allowProvisioningUpdates` and `cargo tauri ios build`'s
   own signing and export fail (`errSecInternalComponent`).
-- The team is X96JC3HCV7, the owner's own (Individual), which signs The One App (`app.theone.client`) and The PTC
+- The team is X96JC3HCV7, the owner's own (Individual), which signs the One App (`app.theone.client`) and The PTC
   App. Its identities are in a keychain of their own, `ptc-build`, not the login keychain: Apple Development, and
   Apple Distribution for TestFlight. Its password is the 1Password item "Mac build keychain (ptc-build)" in the
   `ptc-nosudo` vault, and on the Mac in `~/.config/ptc/build-keychain-pw`.
@@ -75,7 +75,7 @@ refuses (`Locked`). `one builds` shows the phone's new build only once the app h
 
 ## TestFlight
 
-The owner's phone takes The One App from TestFlight, which updates it by itself; its Update Required's Update opens
+The owner's phone takes the One App from TestFlight, which updates it by itself; its Update Required's Update opens
 TestFlight. To publish main:
 
 1. Build it as above with `--export-method app-store-connect`, at main with nothing of your own on it, since its
