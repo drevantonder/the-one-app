@@ -76,7 +76,7 @@ impl Telemetry {
     /// log line, an error if it has an `error`.
     pub(crate) fn record(&self, record: &Value) {
         let name = record["name"].as_str().unwrap_or("record").to_owned();
-        let said = record["attributes"].as_object().map(|said| attributes(said)).unwrap_or_default();
+        let said = record["attributes"].as_object().map(attributes).unwrap_or_default();
         let error = record["error"].as_str().map(short);
         if let Some(value) = record["value"].as_f64() {
             let mut histograms = self.histograms.lock().expect("no record panics");
@@ -118,8 +118,11 @@ impl Telemetry {
 
     /// Exports what's gathered and not yet exported: the numbers, which are exported a minute at a time.
     pub(crate) fn flush(&self) {
-        let _ = self.metrics.force_flush();
-        let _ = (self.traces.force_flush(), self.logs.force_flush());
+        for flushed in [self.metrics.force_flush(), self.traces.force_flush(), self.logs.force_flush()] {
+            if let Err(error) = flushed {
+                failed("export", error);
+            }
+        }
     }
 }
 
@@ -189,7 +192,16 @@ pub(crate) fn keep(home: &std::path::Path, line: &Value) {
     }
     let line = format!("{line}\n");
     let log = fs::OpenOptions::new().create(true).append(true).open(&file);
-    let _ = log.and_then(|mut log| log.write_all(line.as_bytes()));
+    if let Err(error) = log.and_then(|mut log| log.write_all(line.as_bytes())) {
+        failed("report", error);
+    }
+}
+
+/// Says where the client logs (its stderr) that telemetry failed, once: a full disk or an exporter that's down fails
+/// every time, and telemetry about telemetry would be as much noise as that.
+fn failed(what: &str, error: impl std::fmt::Display) {
+    static SAID: std::sync::Once = std::sync::Once::new();
+    SAID.call_once(|| eprintln!("telemetry's {what} failed, and it won't say again: {error}"));
 }
 
 /// Attributes as OpenTelemetry holds them, each text cut short.

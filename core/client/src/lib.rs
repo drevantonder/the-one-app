@@ -212,7 +212,7 @@ pub enum Session {
     /// word alone never decides. It shows `code`, and is in once its person approves it where they sign in. What it
     /// kept stays until someone else signs in on it (`NetworkConfig::store_token`). `why` says why it's out, if
     /// it says: its last code was denied or expired, or it was removed.
-    SignIn { code: DeviceAuthorization, why: Option<NotApproved> },
+    SignIn { code: Box<DeviceAuthorization>, why: Option<NotApproved> },
 }
 
 impl Session {
@@ -1184,7 +1184,7 @@ impl Client {
                 let removed = config.who.is_some().then_some(NotApproved::Removed);
                 match config.device_code(&self.key, &self.home).await {
                     Ok(code) => {
-                        self.moved(Session::SignIn { code, why: why.or(removed) });
+                        self.moved(Session::SignIn { code: Box::new(code), why: why.or(removed) });
                         self.answered(true);
                         return AGAIN;
                     }
