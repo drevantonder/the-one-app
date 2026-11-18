@@ -4,7 +4,9 @@
 # its person for a permission in the helper's name and keeps what they allow it (Computer Use's). It's built on the
 # Mac `ssh mac` reaches, with the app's icon (`client/icon.svg`, or `icon.png` or `icon.svg` beside its SKILL.md) made a helper's (`tooling/helper-icon`), and signed with the owner's
 # Developer ID, so macOS keeps what's allowed through every build of it: an app that isn't signed by a developer is
-# known by its build, and asked for again with each. The keychain holding the identity, `ptc-build`, is unlocked
+# known by its build, and asked for again with each. A developer's signature has the hardened runtime, under which
+# macOS won't even ask for calendars, contacts or control of another app (Automation) without the
+# entitlement for it, so each helper's are in its folder, as `<CFBundleExecutable>.entitlements`. The keychain holding the identity, `ptc-build`, is unlocked
 # and locked again in the same connection, its password read there.
 #
 # The build is the app bundle as a .tar.gz, at `server/bin/<name>/macos-aarch64`, which a deploy from this checkout
@@ -53,7 +55,8 @@ keychain=$HOME/Library/Keychains/ptc-build.keychain-db
 trap 'security lock-keychain "$keychain"' EXIT
 # The password goes to security on its standard input, never in a command line, where ps and logs see it.
 printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
-codesign --force --options runtime --timestamp --keychain "$keychain" --sign "Developer ID Application" "$bundle" >&2
+codesign --force --options runtime --entitlements "helper/$program.entitlements" --timestamp --keychain "$keychain" \
+  --sign "Developer ID Application" "$bundle" >&2
 codesign --verify --strict "$bundle" >&2
 tar -czf - --no-mac-metadata --no-xattrs -C out "$name.app"
 BUILD

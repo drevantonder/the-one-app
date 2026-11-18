@@ -13,5 +13,6 @@
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>So your agents can use the apps on this Mac as you do.</string>
 </dict>
 </plist>
