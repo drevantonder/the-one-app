@@ -192,10 +192,9 @@ defmodule OneCore.Bucket.S3 do
 
   # At most this many requests to the presigner, and as many to the bucket, are sent at once, and the rest wait their
   # turn, however long. A server that starts asks for hundreds at once, and an uplink at home that's sent them all
-  # stalls every one of them past its timeout. Each one's timeout runs from when it's sent. A request Req sends again
-  # (`retry`) says so only in this server's own log: one that failed every time raises, which is the error.
+  # stalls every one of them past its timeout. Each one's timeout runs from when it's sent.
   @at_once 16
-  @pool [finch: [size: @at_once, pool_timeout: :infinity], retry_log_level: :info]
+  @pool [finch: [size: @at_once, pool_timeout: :infinity]]
 
   defp sent(request), do: Edge.send!(request ++ @pool)
 

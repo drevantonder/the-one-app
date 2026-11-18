@@ -9,13 +9,27 @@ defmodule OneCore.Edge do
   # The list this server is on: its owner's, whom it was started for.
   defp list, do: Application.get_env(:one_core, :owner, "network") <> "/"
 
+  # A connection kept open with nothing sent on it for this many milliseconds is closed rather than used again
+  # (Finch's `conn_max_idle_time`), as AWS's SDKs close theirs after a minute. Cloudflare, the edge's and R2's, closes
+  # one that's idle for somewhere between 200 and 400 seconds (18 Nov), and a request sent as it does meets the close
+  # ("closed the connection partway"). What's between a server and Cloudflare may forget an idle connection without
+  # saying so, as a home router's NAT, or a laptop that slept or changed networks does, and a request sent on it is
+  # answered by nothing ("didn't answer in time"). A new connection would have been answered at once, so one idle
+  # this long costs a handshake rather than a failed try.
+  @pool [conn_max_idle_time: 60_000]
+
   @doc """
   Sends `request`, as `Req.request!/1` takes it, to the network's edge or to what it hands out a link to, and
   gives the answer. Raises `Unreachable` with a sentence for whoever asked if it couldn't be reached
-  or didn't answer, which isn't the fault of whatever asked.
+  or didn't answer, which isn't the fault of whatever asked. A request Req sends again (`retry`) says so only in
+  this server's own log, at `info`: one answered at a later try worked, and one that failed every time raises,
+  which is the error.
   """
   def send!(request) do
-    Req.request!(request)
+    request
+    |> Keyword.update(:finch, @pool, &Keyword.merge(@pool, &1))
+    |> Keyword.put(:retry_log_level, :info)
+    |> Req.request!()
   rescue
     error in Req.TransportError ->
       host = URI.parse(to_string(request[:url])).host
