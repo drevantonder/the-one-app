@@ -437,6 +437,7 @@ defmodule Vault do
               description: "Like {\"authorization\": \"Bearer {{token}}\"}"
             },
             body: %{type: "string", description: "The request's body, with {{<field>}} where a value goes"},
+            body_base64: %{type: "string", description: "Or a body that isn't text, in base64, as it's sent"},
             timeout: %{type: "integer", description: "How many seconds it may take to answer. 15 if left out"}
           },
           required: ["item", "url"]
@@ -1186,6 +1187,7 @@ defmodule Vault do
       method: Map.get(inputs, "method", "GET"),
       headers: Map.get(inputs, "headers", %{}),
       body: inputs["body"],
+      bytes: inputs["body_base64"] && Base.decode64!(inputs["body_base64"]),
       timeout: inputs["timeout"]
     }
 

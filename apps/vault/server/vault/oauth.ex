@@ -105,6 +105,8 @@ defmodule Vault.OAuth do
     # In a JSON body a value is written inside a string, so it's escaped as a JSON string's text is.
     json? = Enum.any?(headers, fn {name, value} -> String.downcase(name) == "content-type" and value =~ ~r/json/i end)
     body = request[:body] && if(json?, do: fill.(request.body, &String.slice(JSON.encode!(&1), 1..-2//1)), else: plain.(request.body))
+    # A body that isn't text is sent as it is.
+    body = request[:bytes] || body
 
     case Req.request(
            method: method,
