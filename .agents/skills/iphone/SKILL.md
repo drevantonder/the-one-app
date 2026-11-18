@@ -80,19 +80,10 @@ refuses (`Locked`). `one builds` shows the phone's new build only once the app h
 ## TestFlight
 
 The owner's phone takes the One App from TestFlight, which updates it by itself; its Update Required's Update opens
-TestFlight. To publish main:
-
-1. Build it as above with `--export-method app-store-connect`, at main with nothing of your own on it, since its
-   build number is main's count of commits.
-2. Sign it as above with the App Store profiles and Apple Distribution: their entitlements are `production`, with
-   `beta-reports-active`.
-3. `mkdir Payload && cp -R <app> Payload/ && zip -qry app.ipa Payload`, then
-   `xcrun altool --upload-app -f app.ipa -t ios --apiKey R49QVKSHMK --apiIssuer <issuer>`, with the key at
-   `~/.appstoreconnect/private_keys/AuthKey_R49QVKSHMK.p8` for that command only. The app's `Info.plist` already
-   answers export compliance.
-4. Once Apple has processed it (`/v1/builds?filter[app]=<id>`, `processingState` `VALID`), the internal group "The
-   One App" has every build (`hasAccessToAllBuilds`), and the owner, an internal tester in it, takes it
-   automatically.
+TestFlight. `tooling/testflight <the network's repo>` publishes main, as `tooling/release client` does whenever the
+phone's native code changed: it builds as above with `--export-method app-store-connect`, signs with the App Store
+profiles and Apple Distribution, uploads with the API key, and waits for Apple's processing, after which the internal
+group "The One App" has the build (`hasAccessToAllBuilds`) and its testers take it automatically.
 
 ## Mistakes already made
 

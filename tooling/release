@@ -98,6 +98,23 @@ part=server
 # Each line says how many seconds into the release it is, so where a release's time goes is in what it printed.
 [[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
 
+# A network's iPhone app goes to TestFlight beside its computers' clients, where its native code changed
+# (`tooling/testflight`), built from the network's repo, which ONE_NETWORK_REPO names (Agent Memory says where it is).
+# The release ends once it's there, and fails if it doesn't get there.
+iphone=
+if [[ $part == client && " ${wanted[*]} " == *" client "* && -z $dry ]]; then
+  if [[ -z ${ONE_NETWORK_REPO:-} ]]; then
+    echo "The iPhone's app isn't built: ONE_NETWORK_REPO names the network's repo, which it's built from"
+  elif one builds | jq -e '[.devices[] | select(.target | startswith("ios-"))] | length > 0' >/dev/null; then
+    tooling/testflight "$ONE_NETWORK_REPO" > >(sed 's/^/iphone: /') 2>&1 &
+    iphone=$!
+  fi
+fi
+iphone_done() {
+  [[ -z $iphone ]] || wait "$iphone" || { echo "The iPhone's app didn't reach TestFlight." >&2 && exit 1; }
+}
+trap iphone_done EXIT
+
 # A build is named by its commit's version (`tooling/version`), so what's built is all committed.
 [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
 build=$(tooling/version)
@@ -249,7 +266,7 @@ if [[ -z $dry && $(uname) == Linux ]]; then
   done
   echo "$build, pid $$" >"$kept.lock"
   echo "$build $commit ${wanted[*]}" >"$kept.releasing"
-  trap 'rm -f "$kept.releasing"' EXIT
+  trap 'rm -f "$kept.releasing"; iphone_done' EXIT
   # What the release before this one published.
   survey && covered
 fi
