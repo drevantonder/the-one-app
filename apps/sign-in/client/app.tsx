@@ -100,9 +100,9 @@ const mine = createMemo(async () => {
     json<{ waiting: Waiting[] }>("sign-in_waiting"),
     client() as Promise<{ device: string; build: string; server?: Here }>,
     json<Builds>("builds"),
-    json<Builds>("builds", {}, "network").catch(() => undefined),
+    json<Builds>("builds", {}, "network"),
     json<{ services: Service[] }>("services"),
-    json<{ services: Service[] }>("services", {}, "network").catch(() => undefined),
+    json<{ services: Service[] }>("services", {}, "network"),
   ])
   const latest = { ...network?.latest, ...builds.latest }
   /// Whether something is behind the latest build for its kind of machine, or `undefined` where there's none.
