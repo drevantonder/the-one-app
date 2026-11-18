@@ -79,10 +79,16 @@ defmodule Database.Lease do
   defstruct [:artifact, :server, :folder, :db, :proved, :settled, number: 0, logged: 0, pages: 0, firing: %{}]
 
   @doc """
-  The scheduled job this process is the call of, `{job, at}`, until a transaction it made has marked it as run
-  (`marked/0`), or `nil`.
+  The scheduled job of the database `lease` that this process is the call of, `{job, at}`, until a transaction it
+  made there has marked it as run (`marked/0`), or `nil`. A job's call may write to other apps' databases too, as
+  one keeping something in its person's Vault does, and those have no schedule of its.
   """
-  def job, do: Process.get(__MODULE__)
+  def job(lease) do
+    case Process.get(__MODULE__) do
+      {^lease, job, at} -> {job, at}
+      _ -> nil
+    end
+  end
 
   @doc "This process's scheduled job is marked as run."
   def marked, do: Process.delete(__MODULE__)
@@ -249,11 +255,13 @@ defmodule Database.Lease do
   defp done({{:call, from}, {_codec, {:schedule, _jobs, fire, _now}}}, {:ok, due} = ran, data) do
     calling = for {_caller, %{job: job, marked: false}} <- data.firing, do: job
 
+    lease = self()
+
     firing =
       for {job, at, called} <- due, job not in calling, into: data.firing do
         {caller, _monitor} =
           spawn_monitor(fn ->
-            Process.put(__MODULE__, {job, at})
+            Process.put(__MODULE__, {lease, job, at})
             fire.(called)
           end)
 
