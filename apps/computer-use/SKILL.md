@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Read before looking at or acting on a screen (a desktop, an app, anything that isn't only a web page), by screenshot, click, type, scroll and keys.
+description: Read before looking at or acting on a screen (a desktop, an app, a person's own Mac, anything that isn't only a web page), by screenshot, click, type, scroll and keys, or when a Mac's screen says macOS doesn't allow Screen Recording or Accessibility.
 metadata:
   title: "Computer Use"
   subtitle: "Your AI uses a screen"
@@ -12,8 +12,8 @@ Computer Use is how you see a screen and act on it like a person: take a screens
 press keys at what you see. Its person watches in the Computer Use app.
 
 - `screens` lists the screens you can use: each one's name, what it is, its size, and what it was last used for.
-  Other apps bring the screens: a container made from the image `desktop` is one (Containers' `create`). If
-  you have none, make one first. Two of the same name, from two apps, are named `app/name`. An app that
+  A person's own Mac is one (below), and other apps bring more: a container made from the image `desktop` is one
+  (Containers' `create`). If you have none, make one first. Two of the same name, from two apps, are named `app/name`. An app that
   couldn't list its screens (its machine is asleep, say) is in `failed`, with why, and the rest are still listed.
 - `screenshot` shows the screen. x and y in every other tool are pixels of that picture, from its top left.
 - `click` (button left, right or middle), `double_click`, `move`, `drag` (a path of points), `scroll` (up, down,
@@ -30,6 +30,35 @@ loads.
 
 A screen is its owner's: you use only your person's, and whatever is signed in on it is theirs. Don't sign in,
 buy, send or delete there without them asking for it.
+
+## A person's own Mac
+
+Each Mac running Computer Use's service is a screen, called what the Mac is called: its main display, the one with
+the menu bar, with everything on it, signed in as its person. You act as them, so do only what they asked.
+
+- Never type a password or a code (a one-time code, a passkey's PIN). Ask the person to type it on the Mac. `type`
+  refuses while a password field has the focus.
+- A screenshot is the display scaled down to what a model sees unshrunk (at most 1568 pixels on its long side and
+  about 1.15 megapixels). On a large display text is small: zoom in the app you're using (⌘+ in a browser) rather
+  than guessing.
+- `ctrl` with a letter, digit or punctuation is ⌘, as a shortcut means on a Mac (`ctrl+l`, `ctrl+c`, `ctrl+t`), and
+  with anything else ⌃ (`ctrl+Tab`). `super`, `cmd` and `meta` are ⌘, `alt` is ⌥, and `control` is always ⌃
+  (`control+c` in Terminal).
+- It has no live video yet: `stream` refuses.
+
+Only the Mac's person, the user its server is for, and the network's owner may use it. A Mac gets it with
+`install_service --app computer-use --service ComputerUse.Mac --server <key>`, and needs Xcode or its Command Line
+Tools to build the small app the service runs there, Computer Use for The One App.
+
+macOS lets that app see the screen only with Screen Recording, and use the mouse and keyboard only with
+Accessibility, which only the Mac's person can allow. `screens` says in the Mac's description which is missing,
+asking macOS nothing. The first time an action needs one, macOS asks them on the Mac and the action says what's
+missing. They allow it in System Settings → Privacy & Security → Screen & System Audio Recording, and →
+Accessibility, by turning on Computer Use for The One App in each. macOS keeps that through the server's updates; it
+asks again when the app's own source changes, and now and then for Screen Recording, as it does of every app that
+records the screen.
+
+## Other apps' screens
 
 An app with screens hooks into `computer-use.screens`: its hook's description (offers, in its code) says what it
 answers and what its tool is called with.
