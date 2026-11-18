@@ -1,7 +1,7 @@
 // A Chrome profile, as the Vault draws it beside its list (the item type `vault.types` gives): the extensions installed
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
-import { createMemo, createSignal, For, refresh, Show } from "solid-js"
+import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, confirm, Empty, Field, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, toast } from "ui"
 
 /** A profile, as `chrome-profiles_list` answers it. */
@@ -59,6 +59,14 @@ export function Summary(props: Props) {
   return <>{line()}</>
 }
 
+/// How far the browsers' image is being built, where a machine is building it, as Containers says it ("Installing
+/// packages: 40%"), asked again as it changes. Nothing while none is: then a browser takes a few seconds.
+function Building(props: { subject?: string }) {
+  const machines = createMemo(() => call("containers_machines", {}, { subject: props.subject }).then((text): { desktop?: string | null }[] => JSON.parse(text).machines))
+  changed(() => refresh(machines))
+  return <>{machines().find((m) => m.desktop)?.desktop}</>
+}
+
 /// The profile's browser, open for its person, in the state its update is in: its steps while it starts, then the
 /// browser as it is, with its own address bar and tabs, then Save.
 function Updating(props: { profile: Profile; subject?: string }) {
@@ -88,7 +96,13 @@ function Updating(props: { profile: Profile; subject?: string }) {
           <Steps
             steps={["Getting a browser ready", `Opening ${p().profile}`]}
             at={u().state === "starting" ? 0 : 1}
-            text={u().state === "starting" ? "The first time on a device takes a few minutes." : undefined}
+            text={
+              u().state === "starting" ? (
+                <Loading>
+                  <Building subject={props.subject} />
+                </Loading>
+              ) : undefined
+            }
           />
         </Show>
         <Show when={u().state === "saving" || u().state === "discarding"}>
