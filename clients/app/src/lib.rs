@@ -35,6 +35,8 @@ mod shortcuts;
 #[cfg(desktop)]
 pub mod computer;
 #[cfg(desktop)]
+mod discard;
+#[cfg(desktop)]
 pub mod host;
 #[cfg(desktop)]
 mod hosts;

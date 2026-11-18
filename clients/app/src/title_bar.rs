@@ -203,9 +203,14 @@ mod windows {
 
 /// Puts a GNOME header bar over `webview`, in its window: GTK's own window buttons, as the desktop lays them out,
 /// over the page, which takes every other click (an overlay that passes them through). It tells `changed` where
-/// the title bar is, now and as it changes. Call before the window is shown.
+/// the title bar is, now and as it changes. Call before the window is shown. → The overlay the page is in, where a
+/// page loaded again goes too.
 #[cfg(target_os = "linux")]
-pub fn header_bar(window: &gtk::Window, webview: &impl gtk::glib::IsA<gtk::Widget>, changed: impl Fn(Area) + 'static) {
+pub fn header_bar(
+    window: &gtk::Window,
+    webview: &impl gtk::glib::IsA<gtk::Widget>,
+    changed: impl Fn(Area) + 'static,
+) -> gtk::Overlay {
     use std::cell::Cell;
 
     use gtk::prelude::*;
@@ -248,6 +253,7 @@ pub fn header_bar(window: &gtk::Window, webview: &impl gtk::glib::IsA<gtk::Widge
             changed(area);
         }
     });
+    overlay
 }
 
 /// Does what a double-click on a Linux window's title bar does, as the desktop says (`gtk-titlebar-double-click`):

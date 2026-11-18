@@ -7,6 +7,8 @@
 //! own. Its page is the app window's own (`page/`), which shows the one app, and asks what it asks of the app's
 //! window, over the local channel (`hosts`), which answers it as it answers its Home Screen. The app's window is
 //! started first if it isn't running. Closing this window ends this process, and the app's window ending ends it too.
+//! Minimised or hidden a while, it discards its page (`discard`), which loads again as it's brought back, at the
+//! link it was last opened at.
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -21,7 +23,9 @@ use tao::window::{Theme, WindowBuilder};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use wry::http::{Request, Response, StatusCode, header};
-use wry::{RequestAsyncResponder, WebViewBuilder, WebViewId};
+use wry::{RequestAsyncResponder, WebViewId};
+
+use crate::discard::{Discarding, Page};
 
 /// What the window's page reaches of Tauri's in an app's own window, where there's no Tauri (`invoke` and `listen`),
 /// by a key no app's frame knows, which replaces `__KEY__`.
@@ -43,6 +47,8 @@ enum Told {
     DoubleClick,
     /// Brings the Home Screen forward, its window kept open (the page's Home and Window → Home Screen).
     Home,
+    /// Whether its page is on screen.
+    Shown(bool),
     Quit,
 }
 
@@ -91,11 +97,11 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     #[cfg(not(target_os = "linux"))]
     let _ = class;
     let proxy = event_loop.create_proxy();
-    let key = format!("{:016x}{:016x}", random(), random());
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     // Where the window's title bar is over its page (`title_bar`), which it's told as it starts and as that changes.
     let title_bar: Arc<Mutex<Option<crate::title_bar::Area>>> = Arc::default();
-    let to = channel(&home, opened.clone(), proxy.clone(), asked.clone(), title_bar.clone())?;
+    let link = Arc::new(Mutex::new(opened.link.clone()));
+    let to = channel(&home, opened.clone(), link.clone(), proxy.clone(), asked.clone(), title_bar.clone())?;
 
     let name = opened.entrypoint.split('/').next().unwrap_or_default().to_owned();
     #[cfg(target_os = "macos")]
@@ -113,106 +119,12 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     };
     let window = window.build(&event_loop)?;
 
-    // The page's own files, which are this program's, as the launcher serves them.
     #[cfg(target_os = "macos")]
     let home_screen = ::client::NAME;
-    let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
-
-    // An app's files, which the app's window has (`Views::file`).
-    let (files, files_to, next) = (asked.clone(), to.clone(), Arc::new(AtomicU64::new(0)));
-    let apps_file = move |_: WebViewId, request: Request<Vec<u8>>, responder: RequestAsyncResponder| {
-        let id = format!("f{}", next.fetch_add(1, Ordering::Relaxed));
-        files.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(responder));
-        let _ = files_to.send(json!({"id": id, "file": request.uri().to_string()}));
-    };
-
-    // What the page asks: what's this window's own is answered here, and the rest by the app's window.
-    let (pages, page_to, page_key, told) = (asked.clone(), to.clone(), key.clone(), proxy.clone());
-    let started = opened.entrypoint.clone();
-    let ipc = move |request: Request<String>| {
-        let Ok(message) = serde_json::from_str::<Value>(request.body()) else { return };
-        if message["key"] != page_key.as_str() {
-            return;
-        }
-        let (id, command, args) = (message["id"].clone(), message["command"].as_str().unwrap_or_default(), &message["args"]);
-        let mine = match command {
-            "theme" => Some(Told::Theme(match args["theme"].as_str() {
-                Some("dark") => Some(Theme::Dark),
-                Some("light") => Some(Theme::Light),
-                _ => None,
-            })),
-            "navigation_gestures" => Some(Told::Gestures(args["on"].as_bool() == Some(true))),
-            "plugin:window|start_dragging" => Some(Told::Drag),
-            "title_bar_double_click" => Some(Told::DoubleClick),
-            "front" => Some(Told::Home),
-            // A phone's status bar and haptics, which a computer has neither of.
-            "status_bar" => Some(Told::Run(String::new())),
-            command if command.starts_with("plugin:") => Some(Told::Run(String::new())),
-            _ => None,
-        };
-        // Colour Mode is the device's, so the app's window is told it too.
-        let shared = command == "theme";
-        match mine {
-            Some(mine) if !shared => {
-                let _ = told.send_event(mine);
-                let _ = told.send_event(Told::Run(answer(&id, Ok(Value::Null))));
-            }
-            mine => {
-                if let Some(mine) = mine {
-                    let _ = told.send_event(mine);
-                }
-                let at = format!("p{id}");
-                pages.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Page(id, command == "start"));
-                // `start` is told which app this window is, whose name it answers with.
-                let args = if command == "start" { json!({"entrypoint": started}) } else { args.clone() };
-                let _ = page_to.send(json!({"id": at, "command": command, "args": args}));
-            }
-        }
-    };
-
-    // Anywhere but its own pages and its apps' is the device's own browser's to open.
-    let browser = to.clone();
-    let stays = move |to: String| {
-        let own = ["tauri:", "oneapp:", "about:", "data:", "blob:"].iter().any(|scheme| to.starts_with(scheme))
-            || url::Url::parse(&to).is_ok_and(|to| to.host_str().is_some_and(|host| host.ends_with(".localhost")));
-        if !own {
-            let _ = browser.send(json!({"id": "browser", "command": "open_url", "args": {"url": to}}));
-        }
-        own
-    };
-
-    let titled = proxy.clone();
-    // WebDriver drives it as it does Tauri's windows, which tauri-driver says by this.
+    let pages = Pages { entrypoint: opened.entrypoint, to: to.clone(), asked, proxy: proxy.clone(), next: Arc::default(), loaded: 0 };
+    let mut page = Discarding::new(&window, pages)?;
     #[cfg(target_os = "linux")]
-    let builder = {
-        let mut context = wry::WebContext::default();
-        context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
-        WebViewBuilder::new_with_web_context(Box::leak(Box::new(context)))
-    };
-    #[cfg(not(target_os = "linux"))]
-    let builder = WebViewBuilder::new();
-    let builder = builder
-        .with_custom_protocol("tauri".into(), own)
-        .with_asynchronous_custom_protocol("oneapp".into(), apps_file)
-        .with_ipc_handler(ipc)
-        .with_initialization_script_for_main_only(BRIDGE.replace("__KEY__", &key), true)
-        .with_navigation_handler(stays)
-        .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-        .with_document_title_changed_handler(move |title| drop(titled.send_event(Told::Run(format!("/*title*/{}", Value::from(title))))))
-        .with_back_forward_navigation_gestures(true)
-        .with_devtools(cfg!(debug_assertions))
-        .with_url(crate::HOME);
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let builder = builder.with_initialization_script_for_main_only(crate::INITIALIZATION_SCRIPT, false);
-    #[cfg(not(target_os = "linux"))]
-    let webview = builder.build(&window)?;
-    #[cfg(target_os = "linux")]
-    let webview = {
-        use tao::platform::unix::WindowExtUnix;
-        use wry::WebViewBuilderExtUnix;
-        keys(&window, proxy.clone());
-        builder.build_gtk(window.default_vbox().expect("tao gives a window a box"))?
-    };
+    keys(&window, proxy.clone());
 
     let (area, told) = (title_bar.clone(), proxy.clone());
     let title_bar_changed = move |changed: crate::title_bar::Area| {
@@ -229,30 +141,45 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
         use gtk::prelude::*;
         use tao::platform::unix::WindowExtUnix;
         use wry::WebViewExtUnix;
-        crate::title_bar::header_bar(window.gtk_window().upcast_ref(), &webview.webview(), title_bar_changed);
+        let webview = page.webview().expect("it's just loaded").webview();
+        let overlay = crate::title_bar::header_bar(window.gtk_window().upcast_ref(), &webview, title_bar_changed);
+        // A page loaded again goes under the header bar too.
+        page.load_in(overlay.upcast());
         window.set_visible(true);
     }
     #[cfg(target_os = "macos")]
     title_bar_changed(crate::title_bar::MAC);
 
     event_loop.run(move |event, _, flow| {
-        *flow = ControlFlow::Wait;
         #[cfg(target_os = "macos")]
         let _ = &menu;
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } | Event::UserEvent(Told::Quit) => *flow = ControlFlow::Exit,
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } | Event::UserEvent(Told::Quit) => {
+                *flow = ControlFlow::Exit
+            }
+            Event::WindowEvent { event, .. } => page.heard(&window, &event),
             Event::UserEvent(Told::Run(script)) => match script.strip_prefix("/*title*/") {
                 Some(title) => window.set_title(&serde_json::from_str::<String>(title).unwrap_or_default()),
-                None if !script.is_empty() => drop(webview.evaluate_script(&script)),
+                None if !script.is_empty() => {
+                    if let Some(webview) = page.webview() {
+                        drop(webview.evaluate_script(&script))
+                    }
+                }
                 None => {}
             },
             Event::UserEvent(Told::Front) => {
                 window.set_minimized(false);
                 window.set_visible(true);
                 window.set_focus();
+                page.shown(&window, true);
             }
             Event::UserEvent(Told::Theme(theme)) => window.set_theme(theme),
-            Event::UserEvent(Told::Gestures(on)) => gestures(&webview, on),
+            Event::UserEvent(Told::Gestures(on)) => {
+                if let Some(webview) = page.webview() {
+                    gestures(webview, on)
+                }
+            }
+            Event::UserEvent(Told::Shown(on)) => page.shown(&window, on),
             Event::UserEvent(Told::Drag) => drop(window.drag_window()),
             #[cfg(target_os = "macos")]
             Event::UserEvent(Told::DoubleClick) => {
@@ -273,7 +200,125 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
             }
             _ => {}
         }
+        if *flow != ControlFlow::Exit {
+            *flow = page.discard_due(&window);
+        }
     })
+}
+
+/// What the window's page is made from, each time it's loaded.
+struct Pages {
+    entrypoint: String,
+    to: UnboundedSender<Value>,
+    asked: Arc<Mutex<HashMap<String, Asked>>>,
+    proxy: EventLoopProxy<Told>,
+    next: Arc<AtomicU64>,
+    /// How many times it's been loaded, which names what each asks, so an answer to a page that's gone is dropped.
+    loaded: u64,
+}
+
+impl Page for Pages {
+    /// The app's page, made new.
+    fn make<'a>(&mut self, builder: wry::WebViewBuilder<'a>) -> wry::WebViewBuilder<'a> {
+        self.discarded();
+        self.loaded += 1;
+        let key = format!("{:016x}{:016x}", random(), random());
+        // The page's own files, which are this program's, as the launcher serves them.
+        let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
+
+        // An app's files, which the app's window has (`Views::file`).
+        let (files, files_to, next, loaded) = (self.asked.clone(), self.to.clone(), self.next.clone(), self.loaded);
+        let apps_file = move |_: WebViewId, request: Request<Vec<u8>>, responder: RequestAsyncResponder| {
+            let id = format!("f{loaded}.{}", next.fetch_add(1, Ordering::Relaxed));
+            files.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(responder));
+            let _ = files_to.send(json!({"id": id, "file": request.uri().to_string()}));
+        };
+
+        // What the page asks: what's this window's own is answered here, and the rest by the app's window.
+        let (pages, page_to, page_key, told) = (self.asked.clone(), self.to.clone(), key.clone(), self.proxy.clone());
+        let started = self.entrypoint.clone();
+        let ipc = move |request: Request<String>| {
+            let Ok(message) = serde_json::from_str::<Value>(request.body()) else { return };
+            if message["key"] != page_key.as_str() {
+                return;
+            }
+            let (id, command, args) =
+                (message["id"].clone(), message["command"].as_str().unwrap_or_default(), &message["args"]);
+            let mine = match command {
+                "theme" => Some(Told::Theme(match args["theme"].as_str() {
+                    Some("dark") => Some(Theme::Dark),
+                    Some("light") => Some(Theme::Light),
+                    _ => None,
+                })),
+                "navigation_gestures" => Some(Told::Gestures(args["on"].as_bool() == Some(true))),
+                "plugin:window|start_dragging" => Some(Told::Drag),
+                "title_bar_double_click" => Some(Told::DoubleClick),
+                "front" => Some(Told::Home),
+                // Whether it's on screen, which the app's window hears too.
+                "visible" => Some(Told::Shown(args["onScreen"].as_bool() == Some(true))),
+                // A phone's status bar and haptics, which a computer has neither of.
+                "status_bar" => Some(Told::Run(String::new())),
+                command if command.starts_with("plugin:") => Some(Told::Run(String::new())),
+                _ => None,
+            };
+            // Colour Mode is the device's, and what's on screen counts there, so the app's window is told them too.
+            let shared = command == "theme" || command == "visible";
+            match mine {
+                Some(mine) if !shared => {
+                    let _ = told.send_event(mine);
+                    let _ = told.send_event(Told::Run(answer(&id, Ok(Value::Null))));
+                }
+                mine => {
+                    if let Some(mine) = mine {
+                        let _ = told.send_event(mine);
+                    }
+                    let at = format!("p{loaded}.{id}");
+                    pages
+                        .lock()
+                        .expect("nothing panics holding it")
+                        .insert(at.clone(), Asked::Page(id, command == "start"));
+                    // `start` is told which app this window is, whose name it answers with.
+                    let args = if command == "start" { json!({"entrypoint": started}) } else { args.clone() };
+                    let _ = page_to.send(json!({"id": at, "command": command, "args": args}));
+                }
+            }
+        };
+
+        // Anywhere but its own pages and its apps' is the device's own browser's to open.
+        let browser = self.to.clone();
+        let stays = move |to: String| {
+            let own = ["tauri:", "oneapp:", "about:", "data:", "blob:"].iter().any(|scheme| to.starts_with(scheme))
+                || url::Url::parse(&to)
+                    .is_ok_and(|to| to.host_str().is_some_and(|host| host.ends_with(".localhost")));
+            if !own {
+                let _ = browser.send(json!({"id": "browser", "command": "open_url", "args": {"url": to}}));
+            }
+            own
+        };
+
+        let titled = self.proxy.clone();
+        let builder = builder
+            .with_custom_protocol("tauri".into(), own)
+            .with_asynchronous_custom_protocol("oneapp".into(), apps_file)
+            .with_ipc_handler(ipc)
+            .with_initialization_script_for_main_only(BRIDGE.replace("__KEY__", &key), true)
+            .with_navigation_handler(stays)
+            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+            .with_document_title_changed_handler(move |title| {
+                drop(titled.send_event(Told::Run(format!("/*title*/{}", Value::from(title)))))
+            })
+            .with_back_forward_navigation_gestures(true)
+            .with_devtools(cfg!(debug_assertions))
+            .with_url(crate::HOME);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let builder = builder.with_initialization_script_for_main_only(crate::INITIALIZATION_SCRIPT, false);
+        builder
+    }
+
+    /// Forgets what the page that's gone asked and hasn't been answered, which no one is there to hear.
+    fn discarded(&mut self) {
+        self.asked.lock().expect("nothing panics holding it").clear();
+    }
 }
 
 /// Connects to the app's window, starting it if it isn't running, says hello, and talks with it on a thread of its
@@ -281,6 +326,7 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
 fn channel(
     home: &std::path::Path,
     opened: Opened,
+    link: Arc<Mutex<String>>,
     proxy: EventLoopProxy<Told>,
     asked: Arc<Mutex<HashMap<String, Asked>>>,
     title_bar: Arc<Mutex<Option<crate::title_bar::Area>>>,
@@ -310,7 +356,11 @@ fn channel(
                     break;
                 }
                 if let Some(event) = message["event"].as_str() {
+                    // Opened again, it comes forward, and loads at that link if its page is discarded.
                     if event == "open" {
+                        if let Some(opens) = message["payload"].as_str() {
+                            *link.lock().expect("nothing panics holding it") = opens.to_owned();
+                        }
                         let _ = proxy.send_event(Told::Front);
                     }
                     let _ = proxy.send_event(Told::Run(format!("window.__ONE_HOST__.event({}, {})", Value::from(event), message["payload"])));
@@ -327,7 +377,7 @@ fn channel(
                         // Where the app's window is with its network, and this window's own app.
                         let result = result.map(|mut started| {
                             if start {
-                                started["open"] = json!(opened.link);
+                                started["open"] = json!(*link.lock().expect("nothing panics holding it"));
                                 started["window"] = json!({"entrypoint": opened.entrypoint, "subject": opened.subject, "name": started["name"]});
                                 if let Some(area) = *title_bar.lock().expect("nothing panics holding it") {
                                     started["titleBar"] = area.into();
