@@ -1,14 +1,24 @@
 // The strict primitives, as the DOM draws them: a box, a scroll, a text, an image and a path, each a plain element with
 // the semantic props the strict protocol has (protocol.ts). The input is the UI library's `Input`. A native host draws
-// the same props from the ops Solid's universal renderer sends it. Version 1's `style` is drawn as inline CSS.
+// the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
+// drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
 import { omit } from "solid-js"
 import { Dynamic, render as mount, type JSX } from "@solidjs/web"
-import type { Props, Version1Style as Style } from "./protocol.ts"
+import type { Props, Version1Style } from "./protocol.ts"
 import type { Located, Pressed, Wheeled } from "./types/ui.d.ts"
+import { classes, type Styles } from "../styles.ts"
 
 /// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's
 /// window on a native host. → what takes it away again.
 export const render = (code: () => JSX.Element): (() => void) => mount(code, document.body)
+
+/** A primitive's `style`: styles, or version 1's one object. */
+type Style = Styles | Version1Style
+/** Whether `style` is version 1's. */
+const v1 = (style: Style | undefined): style is Version1Style => !!style && !Array.isArray(style) && typeof style === "object" && !("$id" in style)
+/** What a primitive's element has of its `style`: its classes after the primitive's own, its inline CSS, and a version
+ * 1 type style's `data-font`. */
+const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : { class: `${own} ${classes(style as Styles)}` })
 
 /** What a primitive takes of the protocol's props: its role and states, with what it listens for. */
 type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>
@@ -70,10 +80,8 @@ export function Box(props: BoxProps) {
       type={button() ? "button" : undefined}
       {...own}
       {...moves}
-      class="ui-strict-box"
-      data-font={props.style?.font}
-      data-scrolls={props.style?.overflow === "scroll" ? "" : undefined}
-      style={css(props.style)}
+      data-scrolls={v1(props.style) && props.style.overflow === "scroll" ? "" : undefined}
+      {...drawn("ui-strict-box", props.style)}
     >
       {props.children}
     </Dynamic>
@@ -92,7 +100,7 @@ export function Scroll(props: ScrollProps) {
   const own = omit(props, "style", "children", ...moved)
   const moves = movable(props)
   return (
-    <div {...own} {...moves} class="ui-strict-box ui-strict-scroll" data-scrolls="" data-font={props.style?.font} style={css(props.style)}>
+    <div {...own} {...moves} data-scrolls="" {...drawn("ui-strict-box ui-strict-scroll", props.style)}>
       {props.children}
     </div>
   )
@@ -171,7 +179,7 @@ export function Text(props: TextProps) {
   const own = omit(props, "style", "children")
   const tag = () => (props.role === "heading" ? `h${props["aria-level"] ?? 2}` : "span")
   return (
-    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} class="ui-strict-text" data-font={props.style?.font} style={css(props.style)}>
+    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} {...drawn("ui-strict-text", props.style)}>
       {props.children}
     </Dynamic>
   )
@@ -189,7 +197,7 @@ export interface ImageProps extends Pick<Semantics, "aria-hidden"> {
 /// `<Image src="icon.svg" alt="" style={{ width: 24, height: 24 }} />`: a picture, from a `data:` address or the app's
 /// own files, named by `alt`, scaled to fit its box.
 export function Image(props: ImageProps) {
-  return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} class="ui-strict-image" style={css(props.style)} />
+  return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} {...drawn("ui-strict-image", props.style)} />
 }
 
 /** A path's props. */
@@ -206,7 +214,7 @@ export interface PathProps extends Pick<Semantics, "role" | "aria-label" | "aria
 /// `role="img"` with `aria-label` names one that says something.
 export function Path(props: PathProps) {
   return (
-    <svg viewBox={props.viewBox} preserveAspectRatio="none" role={props.role} aria-label={props["aria-label"]} aria-hidden={props["aria-hidden"] ?? (props.role ? undefined : "true")} class="ui-strict-path" style={css(props.style)}>
+    <svg viewBox={props.viewBox} preserveAspectRatio="none" role={props.role} aria-label={props["aria-label"]} aria-hidden={props["aria-hidden"] ?? (props.role ? undefined : "true")} {...drawn("ui-strict-path", props.style)}>
       <path d={props.d} vector-effect="non-scaling-stroke" />
     </svg>
   )
@@ -220,10 +228,10 @@ const tokens: Record<string, string> = { gutter: "var(--gutter)", control: "var(
 
 /** A strict style as CSS: its tokens as the custom properties they name, its pixels as `px`. Its `font` is the
  * element's `data-font` (ui.css). */
-export function css(style: Style | undefined): JSX.CSSProperties | undefined {
+export function css(style: Version1Style | undefined): JSX.CSSProperties | undefined {
   if (!style) return
   const out: Record<string, string | number> = {}
-  for (const [name, value] of Object.entries(style) as [keyof Style, string | number][]) {
+  for (const [name, value] of Object.entries(style) as [keyof Version1Style, string | number][]) {
     const property = name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
     if (name === "font" || value === undefined) continue
     else if (name === "translateX" || name === "translateY") out.translate = `${style.translateX ?? 0}px ${style.translateY ?? 0}px`

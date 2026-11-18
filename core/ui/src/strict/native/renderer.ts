@@ -3,7 +3,9 @@
 // from the host, to the handler it's for. A native host loads it as `/ui/client/web.js`, in place of Solid's DOM
 // renderer: a strict page's bundle, built for the DOM, imports only what both have (`createComponent`, `memo`).
 import { createRenderer } from "@solidjs/universal"
+import { dynamicComponent, omit, type Component } from "solid-js"
 import { VERSION, type Event, type Host, type Op, type Type } from "../protocol.ts"
+import { flat, type Styles } from "../../styles.ts"
 
 /** A node as the sandbox keeps it: where it is in the tree, and the handlers the host's events go to, by the event's
  * name (`keydown` for `onKeyDown`). */
@@ -67,6 +69,9 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
       if (typeof value === "function") node.handlers[event] = value as (event: object) => void
       else delete node.handlers[event]
       queue({ op: "set", id: node.id, name: name as "onClick", value: typeof value === "function" ? true : null })
+    } else if (name === "style" && value && (Array.isArray(value) || "$id" in (value as object))) {
+      // Styles go by their ids, from the tables the host has (../protocol.ts's `Styles`), the last winning.
+      queue({ op: "set", id: node.id, name: "style", value: flat(value as Styles).map((style) => style.$id) })
     } else queue({ op: "set", id: node.id, name: name as "role", value: value ?? null })
   },
   insertNode(parent, node, anchor) {
@@ -100,3 +105,17 @@ export function event({ id, name, editing, action, key, shiftKey, altKey, ctrlKe
 
 /** Draws a page at the root. */
 export const render = (code: () => Node) => mount(code, root)
+
+/** Solid's own `dynamic`, whose third argument, at runtime, draws a source that's a type rather than a component. */
+const core = dynamicComponent as unknown as (source: () => unknown, options: object | undefined, type: (type: string, props: object) => Node) => Component<any>
+
+/** A component chosen as it runs, as `@solidjs/web`'s `dynamic`: `source` gives a component, or a primitive's type. */
+export const dynamic = (source: () => Component<any> | string | undefined, options?: object) =>
+  core(source, options, (type: string, props: object) => {
+    const made = createElement(type)
+    spread(made, props)
+    return made
+  })
+
+/** `<Dynamic component={…} />`, as `@solidjs/web`'s. */
+export const Dynamic = (props: { component: Component<any> | string | undefined } & Record<string, unknown>) => createComponent(dynamic(() => props.component) as never, omit(props, "component") as never)

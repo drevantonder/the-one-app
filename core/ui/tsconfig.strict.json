@@ -19,8 +19,9 @@
     "paths": {
       "ui": ["./src/strict/types/ui.d.ts"],
       "ui/jsx-runtime": ["./src/strict/types/jsx-runtime.d.ts"],
-      "solid-js": ["./node_modules/solid-js"]
+      "solid-js": ["./node_modules/solid-js"],
+      "@solidjs/web": ["./src/strict/types/web.d.ts"]
     }
   },
-  "files": ["./src/strict/types/globals.d.ts"]
+  "files": ["./src/strict/types/globals.d.ts", "./src/strict/types/solid.d.ts"]
 }

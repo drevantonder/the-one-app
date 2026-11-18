@@ -19,18 +19,23 @@
 /// everywhere else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its
 /// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
 /// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the protocol version it's written for:
-/// `%{page: "client/index.html", host: 1}`. It's written with the UI library alone: its components and the primitives,
-/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `Input`, laid out and
-/// coloured by their `style`, which is CSS's names with the design tokens' values: `{ flexDirection: "row", gap:
-/// "gap", padding: 12, backgroundColor: "muted", color: "muted-foreground", borderRadius: "md", font: "label" }`.
-/// There's no element of the DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window`
-/// or other Web API; `render(() => <App />)` from `ui` draws the page. Words are in a `Text`, or in a component that
-/// takes them (a `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
+/// `%{page: "client/index.html", host: 2}`. It's written with the UI library alone: its components and the primitives,
+/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `Input`, each styled by
+/// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from
+/// core/ui/src/tokens.ts), never a raw colour, size or font, which the typecheck refuses:
+/// `const look = styles({ row: { flexDirection: "row", gap: tokens.space.md, paddingInline: tokens.length.gutter,
+/// backgroundColor: { default: tokens.colour.card, hover: tokens.colour.muted }, font: tokens.type.label } })`, then
+/// `<Box style={[look.row, open() && look.open]} />`, the last to say a property winning. The build makes each
+/// `styles()` ahead of time, so what it's given is written out: literals, `tokens.…` and `negative(…)`. A component
+/// lets a caller change only what it names: `style?: Styles<"marginTop" | "alignSelf">`. There's no element of the
+/// DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window` or other Web API;
+/// `render(() => <App />)` from `ui` draws the page. Words are in a `Text`, or in a component that takes them (a
+/// `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
 /// setText(event.currentTarget.value)}`, a key `onKeyDown={(event) => event.key === "Enter" && save()}`, a switch's
 /// `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
 /// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
-/// there (a component, a prop, a style) adds it there, with only what every host can draw (`protocol.ts`), and
-/// core/ui's `bun run typecheck` then says whether the DOM's component takes it.
+/// there adds it there, with only what every host can draw (`protocol.ts`), and core/ui's `bun run typecheck` then says
+/// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
 export { call, changed, client, component, connection, covers, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { pace, seen, share } from "./shared.ts"
 export { words } from "./words.ts"
@@ -53,3 +58,5 @@ export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
 export { Box, Image, Path, render, Scroll, Text } from "./strict/primitives.tsx"
+export { negative, styles } from "./styles.ts"
+export { tokens } from "./tokens.ts"

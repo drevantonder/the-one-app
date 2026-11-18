@@ -8,20 +8,23 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
-import { tokensCss, tokensTable } from "./tables.ts"
+import { VERSION } from "./src/strict/protocol.ts"
+import { stylesCss, stylesPlugin, tokensCss, tokensTable } from "./tables.ts"
 import { $ } from "bun"
 
 const here = (path) => new URL(path, import.meta.url).pathname
 const text = (path) => readFileSync(here(path), "utf8")
 
 rmSync(here("dist"), { recursive: true, force: true })
+// The UI library's styles (src/styles.ts), made as each module is built, for both builds alike.
+const made = { css: new Map(), table: {} }
 await build({
   configFile: false,
   root: here("."),
   // Its files find each other wherever the client serves them.
   base: "./",
   logLevel: "warn",
-  plugins: [solid()],
+  plugins: [stylesPlugin(made), solid()],
   build: {
     outDir: "dist/client",
     sourcemap: true,
@@ -42,7 +45,7 @@ await build({
   root: here("."),
   base: "./",
   logLevel: "warn",
-  plugins: [solid()],
+  plugins: [stylesPlugin(made), solid()],
   resolve: { alias: { "@solidjs/web": here("src/strict/native/renderer.ts") } },
   build: {
     outDir: "dist/client/native",
@@ -61,7 +64,8 @@ await build({
 // (clients/app/tauri.conf.json), and as a native host's table.
 writeFileSync(here("src/tokens.css"), tokensCss())
 writeFileSync(here("dist/client/tokens.json"), JSON.stringify(tokensTable()))
-const css = text("src/tokens.css") + text("src/ui.css")
+writeFileSync(here("dist/client/styles.json"), JSON.stringify({ v: VERSION, styles: made.table }))
+const css = text("src/tokens.css") + text("src/ui.css") + stylesCss(made)
 writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 // The typeface, beside the stylesheet that names it (tokens.css), and what puts a page in its Colour Mode before it
 // draws, which every page loads first (app.js).
@@ -91,7 +95,7 @@ await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emi
 // And the UI library as a strict app's tsconfig names it (tsconfig.strict.json), which is declarations already.
 cpSync(here("src/strict/types"), here("dist/types/strict/types"), { recursive: true })
 
-for (const file of ["app.js", "package.json", "bun.lock", "tsconfig.json"]) cpSync(here(file), here(`dist/build/${file}`))
+for (const file of ["app.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "src/tokens.ts", "src/styles.ts", "src/strict/protocol.ts"]) cpSync(here(file), here(`dist/build/${file}`))
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.
 cpSync(here("node_modules/solid-js/skills"), here("dist/skills"), { recursive: true })

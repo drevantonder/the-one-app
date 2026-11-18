@@ -96,6 +96,8 @@ const lengths = {
    * and forms stop growing. */
   gutter: length({ default: rem(1), phone: px(16) }),
   readable: length(rem(42)),
+  /** A border: a hairline. */
+  hairline: length(px(1)),
 }
 
 /** Space between and around things, a scale of steps from 4px. */

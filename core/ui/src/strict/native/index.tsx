@@ -15,6 +15,8 @@ import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.
 
 export { words } from "../../words.ts"
 export { createListCollection } from "../../collection.ts"
+export { negative, styles } from "../../styles.ts"
+export { tokens } from "../../tokens.ts"
 
 /** A primitive: a node of its type, with its props. */
 const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {

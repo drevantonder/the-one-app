@@ -5,9 +5,18 @@
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Props, Rect, Version1Style as Style } from "../protocol.ts"
+import type { Props, Rect, Version1Style } from "../protocol.ts"
+import type { Look, Styled, Styles } from "../../styles.ts"
+import type { tokens as Tokens } from "../../tokens.ts"
 
-export type { Element, Rect, Style }
+export type { Element, Look, Rect, Styled, Styles }
+
+/** A primitive's `style`: styles (`styles()`), or, on a page written for version 1, one style object. */
+export type Style = Styles | Version1Style
+
+// Styles and tokens (../../styles.ts, ../../tokens.ts).
+export { styles, negative } from "../../styles.ts"
+export declare const tokens: typeof Tokens
 
 /** What a node says it is, and its states, as ARIA has them. */
 export type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>

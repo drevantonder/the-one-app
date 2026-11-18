@@ -7,16 +7,21 @@
 // serves a page with names the same (`OneCore.Mcp`), for what's imported by name as it runs. A page the edge serves
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
 // exits with 1.
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, extname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
 import { build, parseAst } from "vite"
+import { VERSION } from "./src/strict/protocol.ts"
+import { stylesCss, stylesPlugin } from "./tables.ts"
 
 const [source, out] = process.argv.slice(2)
 
 // What an app imports that the app `ui` serves, by where it's served (ui/build.js).
 const shared = { "solid-js": "/ui/client/solid.js", "@solidjs/web": "/ui/client/web.js", "@zag-js/solid": "/ui/client/zag.js", ui: "/ui/client/ui.js" }
+
+/** The app's styles (src/styles.ts), made as each module is built. */
+const made = { css: new Map(), table: {} }
 
 const pages = readdirSync(source, { recursive: true }).filter((path) => path.endsWith(".html") && !path.split("/").includes("node_modules"))
 // The modules it exports, by their names: `./profile` is `profile`.
@@ -34,14 +39,20 @@ try {
     base: "./",
     logLevel: "silent",
     plugins: [
+      stylesPlugin(made),
       solid(),
-      // Every page has the UI library's look before any of it has run, in the Colour Mode its client chose.
+      // Every page has the UI library's look before any of it has run, in the Colour Mode its client chose, and its
+      // app's styles' after it (styles.css, beside it, which is written once every module is built).
       {
         name: "ui",
         transformIndexHtml: () => [
           { tag: "script", attrs: { src: "/ui/client/colour-mode.js" }, injectTo: "head-prepend" },
           { tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" },
         ],
+      },
+      {
+        name: "styles",
+        transformIndexHtml: { order: "post", handler: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "styles.css" }, injectTo: "head" }] },
       },
       // A module another page imports brings its own look: the stylesheets it imports, which a page links in its
       // HTML, it links in the page that imports it as it runs.
@@ -76,6 +87,13 @@ try {
 } catch (error) {
   for (const problem of error.errors ?? [error]) console.error(describe(problem))
   process.exit(1)
+}
+
+// Its styles, beside each page: as CSS for the web, and as the strict protocol's style table for a native host.
+for (const page of pages) {
+  const folder = join(out, dirname(page))
+  writeFileSync(join(folder, "styles.css"), stylesCss(made))
+  writeFileSync(join(folder, "styles.json"), JSON.stringify({ v: VERSION, styles: made.table }))
 }
 
 /// A problem as the compiler says it, with where: the file as the app's source names it, its line and column, and
