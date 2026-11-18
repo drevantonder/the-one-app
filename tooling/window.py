@@ -5,7 +5,9 @@
     with opened("one:vault") as driver:
         driver.save_screenshot("vault.png")
 
-Run it as the qa skill's Screens says, under `dbus-run-session -- xvfb-run`, with `ONE_HOME` set.
+Run it as the qa skill's Screens says, under `dbus-run-session -- xvfb-run`, with `ONE_HOME` set. It starts `openbox`
+(apt's) in that desktop, as a person's has a window manager: without one, X gives a window focus and takes it back
+as the launcher resizes, so the launcher puts itself away, and a hidden window draws no frame.
 
 Each window is a process of its own, and WebKitWebDriver reaches one by the inspector port its environment names
 (`WEBKIT_INSPECTOR_SERVER`), which every window the app starts inherits and only the first can take. So the app is
@@ -44,6 +46,7 @@ def opened(link, size=(390, 844), log=os.devnull, timeout=60):
         held.close()
     env = {**os.environ, "TAURI_WEBVIEW_AUTOMATION": "true", "WEBKIT_INSPECTOR_SERVER": f"127.0.0.1:{port}"}
     args = [PROGRAM, link] if app == "home-screen" else [PROGRAM]
+    manager = subprocess.Popen(["openbox"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     started = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     drawn = {name: threading.Event() for name in ("home-screen", app)}
 
@@ -81,6 +84,8 @@ def opened(link, size=(390, 844), log=os.devnull, timeout=60):
             service.stop()
         started.terminate()
         started.wait()
+        manager.terminate()
+        manager.wait()
 
 
 def settled(driver, timeout=30):

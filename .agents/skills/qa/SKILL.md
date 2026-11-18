@@ -45,7 +45,7 @@ and run it in a desktop of its own, so nothing is shared with other agents and n
     ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1280x900x24" \
       sh -c 'exec uv run -q --with selenium python3 "$@" 2>&1' _ <script> 2>/dev/null
 
-A picture takes about a second; an app's first open after the UI library is built again, 10 to 15 s. Without
+`window.py` starts `openbox` in that desktop, as a person's has a window manager: without one the launcher loses its focus as it resizes and puts itself away, and a hidden window draws nothing, so the picture never comes. A picture takes about a second; an app's first open after the UI library is built again, 10 to 15 s. Without
 `dbus-run-session` GTK waits half a minute for a desktop that isn't there, and its own noise is what `2>/dev/null`
 drops.
 
