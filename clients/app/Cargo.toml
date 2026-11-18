@@ -61,6 +61,9 @@ tokio = { workspace = true, optional = true }
 tauri = { version = "2", features = ["custom-protocol"], optional = true }
 # Opens the sign-in page in the device's own browser, where a passkey works.
 tauri-plugin-opener = { version = "2", optional = true }
+# A `one:` link opens the app at what it links to (`links`): on a computer one app, the only one, which a second start
+# with a link hands it to, and on a phone what Spotlight, an App Shortcut or an Android shortcut opens.
+tauri-plugin-deep-link = { version = "2.6", optional = true }
 
 # The native code of the apps it ships with that only the window uses, beside the CLI's, which is never deployed
 # (`client::files`).
@@ -81,9 +84,6 @@ tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"], opti
 # the web view instead (`MainActivity`), as this plugin's Vibrator there doesn't follow the system's Touch feedback.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri-plugin-haptics = { version = "2.4", optional = true }
-# A `one:` link opens the app at what it links to (`links`): one app, the only one, which a second start with a link
-# hands it to, and on an iPhone what Spotlight or its App Shortcut opens (`shortcuts`).
-tauri-plugin-deep-link = { version = "2.6", optional = true }
 
 # Each app's icon where the device lists it (`shortcuts`), which is an SVG or a PNG, drawn as a PNG of the size it
 # wants there.

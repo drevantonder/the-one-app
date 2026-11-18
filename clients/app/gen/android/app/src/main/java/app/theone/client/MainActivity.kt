@@ -2,6 +2,7 @@ package app.theone.client
 
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
@@ -9,6 +10,7 @@ import android.os.Build
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Base64
 import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
@@ -17,10 +19,15 @@ import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
+import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONObject
 
 /** The app's window: the web view, kept clear of the system's bars and of the keyboard, with the window showing behind them. */
 class MainActivity : TauriActivity() {
@@ -94,6 +101,24 @@ class MainActivity : TauriActivity() {
         }
         startActivity(opened)
       }
+      // An app put on the device's own home screen, as its person asked from its menu on the Home Screen (`one/pin-shortcut`
+      // in client.js): Android asks them where, and opens it here by its `one:` link.
+      WebViewCompat.addWebMessageListener(webView, "androidPin", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
+        ShortcutManagerCompat.requestPinShortcut(this, shortcut(JSONObject(message.data ?: return@addWebMessageListener)), null)
+      }
+      // The apps used lately on this device, newest first, which a long press on the app's icon lists, as many as
+      // Android shows; and every app installed, so a shortcut put on the home screen to one that's gone is greyed
+      // out, and comes back if it's installed again (`shortcuts` in client.js).
+      WebViewCompat.addWebMessageListener(webView, "androidShortcuts", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
+        val told = JSONObject(message.data ?: return@addWebMessageListener)
+        val recent = told.getJSONArray("recent")
+        val most = minOf(recent.length(), ShortcutManagerCompat.getMaxShortcutCountPerActivity(this))
+        ShortcutManagerCompat.setDynamicShortcuts(this, (0 until most).map { shortcut(recent.getJSONObject(it), it) })
+        val installed = told.getJSONArray("installed").let { all -> (0 until all.length()).map(all::getString).toSet() }
+        val pinned = ShortcutManagerCompat.getShortcuts(this, ShortcutManagerCompat.FLAG_MATCH_PINNED).map { it.id }
+        ShortcutManagerCompat.disableShortcuts(this, pinned.filter { it !in installed }, "This app isn't installed")
+        ShortcutManagerCompat.enableShortcuts(this, ShortcutManagerCompat.getShortcuts(this, ShortcutManagerCompat.FLAG_MATCH_PINNED).filter { it.id in installed && !it.isEnabled })
+      }
       // A haptic an app asked for, by iOS's name (`one/haptic` in client.js), played as Android's own, which follows
       // the system's Touch feedback. Flutter's choices for iOS's impacts and selection.
       WebViewCompat.addWebMessageListener(webView, "androidHaptic", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
@@ -128,6 +153,21 @@ class MainActivity : TauriActivity() {
         }
       }
     })
+  }
+
+  /**
+   * An app's shortcut, as the page tells it: its entrypoint (`<app>/<page>`), name and icon, a PNG of its square, which
+   * Android cuts to the home screen's shape as it does an app's own. It opens the app here by its `one:` link.
+   */
+  private fun shortcut(app: JSONObject, rank: Int = 0): ShortcutInfoCompat {
+    val id = app.getString("id")
+    val icon = Base64.decode(app.getString("icon"), Base64.DEFAULT)
+    return ShortcutInfoCompat.Builder(this, id)
+      .setShortLabel(app.getString("name"))
+      .setIcon(IconCompat.createWithAdaptiveBitmap(BitmapFactory.decodeByteArray(icon, 0, icon.size)))
+      .setIntent(Intent(Intent.ACTION_VIEW, "one:$id".toUri(), this, MainActivity::class.java))
+      .setRank(rank)
+      .build()
   }
 
   /**

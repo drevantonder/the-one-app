@@ -230,4 +230,8 @@ declare global {
   /** Where Android's app hears where the rail's handle is, `left,top,right,bottom` in the page's pixels, or "" while
    * it's not there, which its back gesture leaves to it (`MainActivity`). */
   var androidEdge: { postMessage(message: string): void } | undefined
+  /** Where Android's app puts an app on the device's home screen, its shortcut as JSON (`MainActivity`). */
+  var androidPin: { postMessage(message: string): void } | undefined
+  /** Where Android's app hears the apps used lately and those installed, as JSON, for its shortcuts (`MainActivity`). */
+  var androidShortcuts: { postMessage(message: string): void } | undefined
 }

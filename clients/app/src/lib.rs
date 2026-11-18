@@ -345,7 +345,6 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     told["testflight"] = json!(testflight());
     let connection = app.try_state::<Views>().map(|views| *views.client.connection().borrow());
     told["connection"] = json!(connection.unwrap_or(Connection::Offline));
-    #[cfg(not(target_os = "android"))]
     {
         use tauri_plugin_deep_link::DeepLinkExt;
         let started = app.deep_link().get_current().ok().flatten().unwrap_or_default();
@@ -375,7 +374,6 @@ fn testflight() -> bool {
 
 /// What a `one:` link opens, as the window's page opens it (`go`): `<app>[/<page>][#<fragment>]`, an app, or a page
 /// of one, and the place in it its fragment names, which the app follows (`one:home-screen#library`).
-#[cfg(not(target_os = "android"))]
 fn link(url: &Url) -> Option<String> {
     (url.scheme() == "one").then(|| url.as_str()["one:".len()..].to_owned())
 }
@@ -383,8 +381,7 @@ fn link(url: &Url) -> Option<String> {
 /// Opens what each `one:` link the device hands the app links to, over whatever's showing, as a tap on a notification
 /// does, and brings the window forward. The link the app was started with is the page's to ask for (`start`). A
 /// computer's program that isn't a developer's build takes the device's `one:` links: Linux and Windows have a
-/// program say so itself (a Mac's and an iPhone's say so in their bundles).
-#[cfg(not(target_os = "android"))]
+/// program say so itself (a Mac's and an iPhone's say so in their bundles, and Android's in its manifest).
 fn links(app: &tauri::App) -> tauri::Result<()> {
     use tauri_plugin_deep_link::DeepLinkExt;
     #[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
@@ -960,7 +957,6 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }));
-    #[cfg(not(target_os = "android"))]
     let builder = builder.plugin(tauri_plugin_deep_link::init());
     #[cfg(desktop)]
     let builder = builder
@@ -990,7 +986,6 @@ pub fn run() {
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center().build()?;
             #[cfg(desktop)]
             opens_as_it_was(&window)?;
-            #[cfg(not(target_os = "android"))]
             links(app)?;
             #[cfg(mobile)]
             let window = window.build()?;

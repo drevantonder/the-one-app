@@ -783,6 +783,7 @@ async function list(subject) {
         ;({ resources } = await invoke("apps", { subject }))
       }
       launcher = launcherIn(resources) || launcher
+      shortcuts()
       if (launcher) on({ type: "listed" })
       else if (shown.getSnapshot().context.connection === "online") on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "none", only: await only() })
       on({ type: "updateReady", ready: !phone && (await behind().catch(() => false)) })
@@ -1111,6 +1112,7 @@ function used(view) {
   try {
     localStorage.setItem("recent", JSON.stringify(recent))
   } catch {}
+  shortcuts()
 }
 /// What the rail lists after Home: the apps used lately that are still this user's, the open ones first.
 function recents() {
@@ -1118,6 +1120,34 @@ function recents() {
     .map((at) => ({ key: at, subject: at.slice(0, at.indexOf("|")) || undefined, entrypoint: at.slice(at.indexOf("|") + 1) }))
     .filter(({ entrypoint }) => names.has(entrypoint) && entrypoint !== launcher)
   return [...listed.filter(({ key }) => open.has(key)), ...listed.filter(({ key }) => !open.has(key))]
+}
+
+/// Android's shortcuts to apps here (`MainActivity`): the apps used lately, newest first, which a long press on the
+/// app's icon lists, and every app installed, so one put on the home screen greys out once it's gone. An app opened
+/// for a group has no link of its own to open it by, so it isn't among them.
+let posted = ""
+async function shortcuts() {
+  if (!globalThis.androidShortcuts) return
+  const ones = recents().filter(({ subject }) => !subject)
+  const now = JSON.stringify([ones.map(({ entrypoint }) => entrypoint), [...names.keys()]])
+  if (now === posted) return
+  posted = now
+  const recent = await Promise.all(ones.map(({ entrypoint }) => shortcut(entrypoint)))
+  globalThis.androidShortcuts.postMessage(JSON.stringify({ recent: recent.filter(Boolean), installed: [...names.keys()] }))
+}
+
+/// An app's shortcut as Android takes one: its entrypoint, name, and icon as a PNG of its square, 108 dp across at
+/// the densest screens, as an adaptive icon is drawn, since Android draws no SVG. → nothing where it has no icon.
+/** @param {string} entrypoint @returns {Promise<{ id: string, name: string, icon: string } | undefined>} */
+async function shortcut(entrypoint) {
+  const src = icons.get(entrypoint)
+  if (!src) return undefined
+  const picture = new Image()
+  picture.src = src
+  await picture.decode()
+  const canvas = Object.assign(document.createElement("canvas"), { width: 432, height: 432 })
+  canvas.getContext("2d")?.drawImage(picture, 0, 0, 432, 432)
+  return { id: entrypoint, name: names.get(entrypoint) || entrypoint, icon: canvas.toDataURL("image/png").slice("data:image/png;base64,".length) }
 }
 
 const sidebar = byId("rail")
@@ -1449,6 +1479,14 @@ async function respond(view, method, params) {
     openLink(params.url)
     return {}
   }
+  // An app put on the device's own home screen, which Android's app does (`MainActivity`): by its entrypoint.
+  if (method === "one/pin-shortcut") {
+    const pin = globalThis.androidPin
+    const app = pin && (await shortcut(params.entrypoint))
+    if (!pin || !app) throw new Error("This device can't put that app on its home screen")
+    pin.postMessage(JSON.stringify(app))
+    return {}
+  }
   // A haptic plays here, not in the app's frame: only this page reaches the device's, and Chrome lets no frame of
   // another address vibrate.
   if (method === "one/haptic") {
@@ -1488,7 +1526,7 @@ async function respond(view, method, params) {
       else localStorage.removeItem("theme")
       dress()
     }
-    return { ...(await invoke("client")), theme: chosen() }
+    return { ...(await invoke("client")), theme: chosen(), pinsShortcuts: !!globalThis.androidPin }
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   // An app opened from a group's page is answered for the group.
