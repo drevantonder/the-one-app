@@ -582,6 +582,13 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Erlang's VM on Windows works local time out from its zone's rules itself, and misses daylight saving where it
+    // spans the new year, as in Australia, so its log ran an hour behind. Told its zone by its IANA name, as TZ is on
+    // Linux and a Mac, it finds no rules of its own by that name and asks Windows instead; Bun reads it as it is.
+    #[cfg(windows)]
+    if let Some(zone) = jiff::tz::TimeZone::try_system().ok().and_then(|zone| zone.iana_name().map(str::to_owned)) {
+        server.env("TZ", zone);
+    }
     let spawned = Instant::now();
     let mut server = match server.spawn() {
         Ok(server) => server,
