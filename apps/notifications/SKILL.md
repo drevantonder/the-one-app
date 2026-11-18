@@ -11,7 +11,8 @@ metadata:
 Notifications reach a person on their devices and stay in their inbox until they clear them.
 
 - `send` notifies whoever you're asking for, or `to` a user, a group you're in, or the network. `app` is the
-  app whose app a tap opens; leave it out when nothing should open. It says who was notified, who silenced
+  app whose app a tap opens, and `page` one of its pages it opens instead of its first, with what follows `#`
+  there; leave them out when nothing should open. It says who was notified, who silenced
   that app, and any phone that wasn't woken.
 - An app notifies with `OneCore.Call.app(call, "notifications").send(call, %{"title" => ...})`, after
   `requires/0` names `notifications`. It's sent as that app's entrypoint.

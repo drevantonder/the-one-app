@@ -176,7 +176,10 @@ pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(Strin
                     let from = notification["from"].as_str();
                     let text = notification["text"].as_str();
                     let body = [from, text].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-                    let opens = notification["app"].as_str().map(str::to_owned);
+                    let opens = match (notification["app"].as_str(), notification["page"].as_str()) {
+                        (Some(app), Some(page)) => Some(format!("{app}/{page}")),
+                        (app, _) => app.map(str::to_owned),
+                    };
                     let tapped = tapped.clone();
                     // The system's call waits on its notification service, and on Linux for the tap.
                     tokio::task::spawn_blocking(move || show(&title, &body, opens, tapped));

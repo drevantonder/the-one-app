@@ -56,7 +56,9 @@ defmodule Notifications do
     )
     """,
     "create index devices_by_user on devices (user)",
-    "create index devices_by_device on devices (device)"
+    "create index devices_by_device on devices (device)",
+    # Where in its app a tap opens, where it isn't the app's first page.
+    "alter table notifications add column page text"
   ]
 
   # The most of a person's notifications an inbox shows, newest first.
@@ -137,7 +139,12 @@ defmodule Notifications do
               type: "string",
               description: "users/<name>, groups/<name> or network. Whoever you're asking for, if left out"
             },
-            app: Map.put(app, :description, "The app whose app a tap opens, and that its person can silence")
+            app: Map.put(app, :description, "The app whose app a tap opens, and that its person can silence"),
+            page: %{
+              type: "string",
+              description:
+                "With `app`, one of its pages a tap opens instead of its first, and what follows # there: client/index.html#waiting"
+            }
           },
           required: ["title"]
         },
@@ -179,13 +186,14 @@ defmodule Notifications do
                 properties: %{
                   id: %{type: "integer"},
                   app: %{type: ["string", "null"], description: "The app whose app a tap opens"},
+                  page: %{type: ["string", "null"], description: "Its page a tap opens, where it isn't its first"},
                   from: %{type: ["string", "null"], description: "What its app is called"},
                   title: %{type: "string"},
                   text: %{type: ["string", "null"]},
                   at: %{type: "string", description: "When, ISO 8601"},
                   read: %{type: "boolean"}
                 },
-                required: ["id", "app", "from", "title", "text", "at", "read"]
+                required: ["id", "app", "page", "from", "title", "text", "at", "read"]
               }
             }
           },
@@ -315,9 +323,10 @@ defmodule Notifications do
         sent = users -- quiet
 
         for user <- sent do
-          query(db, "insert into notifications (user, app, title, text, at) values (?, ?, ?, ?, ?)", [
+          query(db, "insert into notifications (user, app, page, title, text, at) values (?, ?, ?, ?, ?, ?)", [
             user,
             app,
+            app && inputs["page"],
             title,
             inputs["text"],
             at
@@ -333,7 +342,9 @@ defmodule Notifications do
     # Said as Notifications' change: one sent from a job, a service or another app's call is otherwise told as
     # nobody's, or that app's, and a device asks its inbox again only for Notifications'.
     if sent != [], do: Call.changed(call)
-    %{sent: sent, muted: quiet, unwoken: push(call, devices, %{title: title, text: inputs["text"], app: app})}
+    # A phone opens what it's told to as a link to an app's page (`open` in the UI library), its page too.
+    opens = if app && inputs["page"], do: "#{app}/#{inputs["page"]}", else: app
+    %{sent: sent, muted: quiet, unwoken: push(call, devices, %{title: title, text: inputs["text"], app: opens})}
   end
 
   def call("inbox", inputs, call) do
@@ -347,7 +358,7 @@ defmodule Notifications do
         query(
           db,
           """
-          select id, app, title, text, at, read from notifications where user = ? and id > ?
+          select id, app, page, title, text, at, read from notifications where user = ? and id > ?
           order by id desc limit ?
           """,
           [user, Map.get(inputs, "after", 0), @shown]

@@ -13,6 +13,8 @@ interface Received {
   text?: string
   from?: string
   app?: string
+  /// Its app's page a tap opens, where it isn't its first.
+  page?: string
   at: string
   read: boolean
 }
@@ -89,7 +91,7 @@ function PushState(props: { push: Push }) {
 
 function tapped(notification: Received) {
   if (!notification.read) change("notifications_read", { id: notification.id })
-  if (notification.app) open(notification.app)
+  if (notification.app) open(notification.page ? `${notification.app}/${notification.page}` : notification.app)
 }
 
 async function clearAll() {
