@@ -15,7 +15,7 @@ defmodule OneCore.Services do
   @behaviour :gen_statem
   require Logger
   alias OneCore.{Apps, Server, Servers, User}
-  alias OneCore.Apps.{Calls, Version}
+  alias OneCore.Apps.{Calls, Installed, Version}
 
   # The least time between two starts of one service, in milliseconds. What a service needs can be gone for a
   # while (a program that won't build, a device unplugged), and it would otherwise be started as fast as it stops.
@@ -83,8 +83,28 @@ defmodule OneCore.Services do
     end
   end
 
-  @doc "An app has a newer version: its services installed here that it didn't have before start."
-  def start(app), do: call({:start, app})
+  @doc """
+  An app has a newer version, or runs for someone else here: its services installed here that it didn't have before
+  start. Where it's a copy of an app that's superseded by another (`OneCore.Apps.Lifecycle.supersede/2`), or the
+  copy that superseded one, each service of the superseded copy installed here moves to the one that stays, with its
+  folder, as its installs did.
+  """
+  def start(app) do
+    moving = call({:supersede, app})
+
+    for {{copy, name}, to, instance} <- moving do
+      if instance, do: Apps.Process.stop(instance)
+      {from, into} = {folder(copy, name), folder(to, name)}
+
+      if File.exists?(from) and not File.exists?(into) do
+        File.mkdir_p!(Path.dirname(into))
+        File.rename!(from, into)
+      end
+    end
+
+    for app <- Enum.uniq([app | for({_service, to, _instance} <- moving, do: to)]), do: call({:start, app})
+    :ok
+  end
 
   @doc """
   Calls a function of an app's service running here, with the service's process and then `arguments`. Gives
@@ -239,6 +259,28 @@ defmodule OneCore.Services do
     end
   end
 
+  # The services installed here of a copy of `app` that's in use for nobody now, while another copy runs by its name for
+  # whoever this server acts for, with that service: each moves to that one, and is no longer watched as the copy's.
+  defp called(from, {:supersede, app}, stages) do
+    moving =
+      for {copy, name} = service <- here(),
+          Path.basename(copy) == Path.basename(app),
+          to = successor(copy, name),
+          to != nil,
+          Installed.in_use_for(copy) == [],
+          do: {service, to}
+
+    moved = Map.new(moving)
+    if moving != [], do: Servers.install(Enum.uniq(for({_copy, name} = service <- here(), do: if(to = moved[service], do: {to, name}, else: service))))
+
+    for {service, _to} <- moving, match?({:running, _, _, _}, stages[service]),
+        do: Process.demonitor(elem(stages[service], 2), [:flush])
+
+    replies = for {service, to} <- moving, do: {service, to, process(stages[service])}
+    cancel = for {service, _to} <- moving, do: {{:timeout, service}, :cancel}
+    {:next_state, Map.drop(stages, Map.keys(moved)), nil, [{:reply, from, replies} | cancel]}
+  end
+
   defp called(from, {:start, app}, stages) do
     starting = for {^app, name} = service <- here(), Apps.Process.whereis(app, name) == nil, do: service
     cancel = for service <- starting, do: {{:timeout, service}, :cancel}
@@ -265,6 +307,20 @@ defmodule OneCore.Services do
 
   # The services installed on this server.
   defp here, do: Servers.installed(Server.key())
+
+  # The other copy of the app `copy` that runs by its name for whoever this server acts for, and has the service
+  # `name`, or `nil`.
+  defp successor(copy, name) do
+    Enum.find_value(Servers.acts_for(Server.key()), fn owner ->
+      case Apps.running(owner)[Path.basename(copy)] do
+        %Version{artifact: to, services: services} when to != copy ->
+          if Enum.any?(services, &(&1.name == name)), do: to
+
+        _ ->
+          nil
+      end
+    end)
+  end
 
   defp process({:running, process, _monitor, _at}), do: process
   defp process(_stage), do: nil
