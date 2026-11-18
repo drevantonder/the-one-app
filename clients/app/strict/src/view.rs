@@ -454,7 +454,7 @@ impl Screen {
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
         let insets = [self.insets.top, self.insets.right, self.insets.bottom, self.insets.left].map(|inset| inset.round().max(0.0) as u16);
-        Conditions { dark: self.dark(), reduced_motion: self.reduced_motion, insets, ..Conditions::default() }
+        Conditions { dark: self.dark(), touch: self.touch, reduced_motion: self.reduced_motion, insets, ..Conditions::default() }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).
@@ -564,7 +564,7 @@ impl Screen {
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.styled();
-        let (body, background) = if version2 { Text::root(conditions) } else { (Text::body(conditions.dark), Some(colour("background", conditions.dark))) };
+        let (body, background) = if version2 { Text::root(conditions) } else { (Text::body(conditions), Some(colour("background", conditions.dark))) };
         match self.panel {
             // A panel's background is the host's: a popover's colour, or nothing over the system's glass, rounded.
             Some(panel) => {
@@ -1201,7 +1201,8 @@ pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixe
         border_widths: Edges::default(),
         transformation: TransformationMatrix::unit(),
     });
-    let body = Text::body(dark);
+    // A host's own message, in a computer's size: it has no window's conditions.
+    let body = Text::body(Conditions { dark, ..Conditions::default() });
     let width = (window.size.width - 32.0).max(1.0);
     let paragraph = text.paragraph(words, &body.style, &[], Some(width), None);
     let top = (window.size.height - paragraph.size().height) / 2.0;
@@ -1566,9 +1567,16 @@ impl Painter<'_> {
         self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();
+        // A version 1 page's `Text` with no type style is body text; in a version 2 page it inherits what it's in, as
+        // CSS does, whatever style object it has.
         let text = match &node.styles {
             Some(_) => inherited.with(&computed),
-            None => inherited.of(&node.style, node.kind == Kind::Text, self.conditions.dark),
+            None => inherited.of(&node.style, node.kind == Kind::Text && !tree.styled(), self.conditions),
+        };
+        let level = node.prop("aria-level").and_then(|level| level.as_u64().or_else(|| level.as_str()?.parse().ok())).unwrap_or(2);
+        let text = match node.kind == Kind::Text && node.styles.is_none() && node.str("role") == Some("heading") && level <= 3 {
+            true => text.heading(node.style.font.is_some(), self.conditions),
+            false => text,
         };
         if root {
             // The window, which places what's fixed, and what's absolute with nothing positioned around it.
@@ -1661,7 +1669,7 @@ impl Painter<'_> {
                     let computed = style::of(inner, self.states.of(*child, false), self.conditions);
                     let set = match &inner.styles {
                         Some(_) => text.with(&computed),
-                        None => text.of(&inner.style, false, self.conditions.dark),
+                        None => text.of(&inner.style, false, self.conditions),
                     };
                     let at = spans.len();
                     spans.push(Span { id: *child, start, end: start, cursor: computed.look.cursor, pointer: computed.look.pointer_events });

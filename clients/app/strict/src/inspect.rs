@@ -247,7 +247,7 @@ pub fn tree(tree: &Tree, rects: &Rects) -> Value {
 }
 
 /// The nodes a `query` matches, each with all the inspector knows of it.
-pub fn query(tree: &Tree, rects: &Rects, dark: bool, request: &Request) -> Value {
+pub fn query(tree: &Tree, rects: &Rects, conditions: crate::tokens::Conditions, request: &Request) -> Value {
     let described = semantics(tree);
     let nodes: Vec<Value> = select(tree, request)
         .into_iter()
@@ -270,7 +270,7 @@ pub fn query(tree: &Tree, rects: &Rects, dark: bool, request: &Request) -> Value
                     out.insert("resolved".into(), Value::Object(crate::style::resolve(ids, crate::style::State::default())));
                 }
                 None => {
-                    out.insert("resolved".into(), resolved(&style, dark));
+                    out.insert("resolved".into(), resolved(&style, conditions));
                     out.insert("style".into(), style);
                 }
             }
@@ -290,18 +290,18 @@ pub fn query(tree: &Tree, rects: &Rects, dark: bool, request: &Request) -> Value
 }
 
 /// A node's style with each design token it names as what it is now: a colour as `#rrggbbaa`, a length in pixels.
-fn resolved(style: &Value, dark: bool) -> Value {
+fn resolved(style: &Value, conditions: crate::tokens::Conditions) -> Value {
     let tokens = crate::tokens::tokens();
     let Value::Object(style) = style else { return json!({}) };
     let out: Map<String, Value> = style
         .iter()
         .filter_map(|(name, value)| {
             let word = value.as_str()?;
-            let colour = tokens.colour(word, dark).map(|rgba| {
+            let colour = tokens.colour(word, conditions.dark).map(|rgba| {
                 let byte = |n: f32| (n.clamp(0.0, 1.0) * 255.0).round() as u8;
                 json!(format!("#{:02x}{:02x}{:02x}{:02x}", byte(rgba.r), byte(rgba.g), byte(rgba.b), byte(rgba.a)))
             });
-            Some((name.clone(), colour.or_else(|| tokens.length(word).map(|px| json!(px)))?))
+            Some((name.clone(), colour.or_else(|| tokens.length(word, conditions.touch).map(|px| json!(px)))?))
         })
         .collect();
     Value::Object(out)

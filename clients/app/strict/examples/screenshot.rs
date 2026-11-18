@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p strict --example screenshot -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
-//!       [--safe-area <top>,<right>,<bottom>,<left>]
+//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -12,7 +12,7 @@
 //! lavapipe, where there's no GPU), or on Windows Direct3D 11's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`strict::inspect`), as a strict window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
-//! `step` moves it.
+//! `step` moves it. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`).
 
 use std::path::PathBuf;
 
@@ -35,6 +35,7 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or((480.0, 360.0));
     let scale: f32 = flag("--scale").and_then(|scale| scale.parse().ok()).unwrap_or(2.0);
     let dark = args.iter().any(|arg| arg == "--dark");
+    let touch = args.iter().any(|arg| arg == "--touch");
     // What the window keeps for itself at each edge, as a phone's status bar and home indicator, or a title bar.
     let safe: Vec<f32> = flag("--safe-area").map(|edges| edges.split(',').filter_map(|edge| edge.parse().ok()).collect()).unwrap_or_default();
     let insets = match safe[..] {
@@ -103,6 +104,7 @@ fn main() -> anyhow::Result<()> {
     });
     let mut screen = Screen::new(js, Some(asked), Size { width, height }, insets);
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
+    screen.touch = touch;
     // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.
     screen.idle();
     let ran = started.elapsed();

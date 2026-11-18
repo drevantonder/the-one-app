@@ -1,8 +1,8 @@
 //! The design tokens, which aren't the host's: they come with the UI library, over the air, as the app's page does,
 //! and are read as it opens (`load`). The host knows only kinds of token (a colour, light and dark, a length, a
 //! number), never their names or values. For a page written for version 1, which has no token table,
-//! it's read from the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's (the
-//! touch and iPhone rules after it are a phone's), and `:root.dark`'s `--lighter`. This module is the only one that
+//! it's read from the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's, the
+//! one in `@media (pointer: coarse)`, which a touch screen's lengths are, and `:root.dark`'s `--lighter`. This module is the only one that
 //! knows that, so the table replaces it here alone.
 
 use std::collections::HashMap;
@@ -16,6 +16,8 @@ const REM: f32 = 16.0;
 /// The tokens, light and dark.
 pub struct Tokens {
     declared: HashMap<String, String>,
+    /// What a touch screen declares in place of a computer's (`@media (pointer: coarse)`).
+    touch: HashMap<String, String>,
     lighter: f32,
 }
 
@@ -33,10 +35,10 @@ pub fn tokens() -> &'static Tokens {
 
 impl Tokens {
     fn parse(css: &str) -> Tokens {
-        // A rule's declarations, by its selector exactly, as written or minified (`:root {` or `:root{`).
-        let rule = |selector: &str| -> HashMap<String, String> {
+        // A rule's declarations in `css`, by its selector exactly, as written or minified (`:root {` or `:root{`).
+        let rule = |css: &str, selector: &str| -> HashMap<String, String> {
             let Some(start) = [format!("{selector} {{"), format!("{selector}{{")].iter().filter_map(|open| {
-                css.match_indices(open.as_str()).find(|(at, _)| *at == 0 || matches!(css.as_bytes()[at - 1], b'\n' | b'}'))
+                css.match_indices(open.as_str()).find(|(at, _)| *at == 0 || matches!(css.as_bytes()[at - 1], b'\n' | b'}' | b'{' | b' '))
             }).map(|(at, _)| at).min() else { return HashMap::new() };
             let body = &css[start..];
             let body = &body[body.find('{').unwrap_or(0) + 1..body.find('}').unwrap_or(body.len())];
@@ -48,9 +50,14 @@ impl Tokens {
                 })
                 .collect()
         };
-        let declared = rule(":root");
-        let lighter = rule(":root.dark").get("lighter").and_then(|value| value.parse().ok()).unwrap_or(0.0);
-        Tokens { declared, lighter }
+        let declared = rule(css, ":root");
+        let touch = ["@media (pointer: coarse)", "@media (pointer:coarse)"]
+            .iter()
+            .find_map(|media| css.find(media))
+            .map(|at| rule(&css[at..], ":root"))
+            .unwrap_or_default();
+        let lighter = rule(css, ":root.dark").get("lighter").and_then(|value| value.parse().ok()).unwrap_or(0.0);
+        Tokens { declared, touch, lighter }
     }
 
     /// A colour token (`muted-foreground`), as it is in light or dark.
@@ -66,9 +73,10 @@ impl Tokens {
         oklch(value.trim())
     }
 
-    /// A length token (`gutter`, `radius-sm`, `text-base`), in pixels.
-    pub fn length(&self, name: &str) -> Option<f32> {
-        self.evaluate(self.declared.get(name)?, false)
+    /// A length token (`gutter`, `radius-sm`, `text-base`), in pixels, a touch screen's where `touch`.
+    pub fn length(&self, name: &str, touch: bool) -> Option<f32> {
+        let value = self.touch.get(name).filter(|_| touch).or_else(|| self.declared.get(name))?;
+        self.evaluate(value, false)
     }
 
     /// A number token (`body-weight`), as it is in light or dark: a weight is lighter in dark.
@@ -181,11 +189,11 @@ pub struct TypeStyle {
     pub tabular: bool,
 }
 
-/// `body`, `label`, `title`, `figure`, `subheadline`, `footnote`, `caption-1` or `caption-2`.
-pub fn type_style(font: &str, dark: bool) -> TypeStyle {
+/// `body`, `label`, `title`, `figure`, `subheadline`, `footnote`, `caption-1` or `caption-2`, where `conditions` hold.
+pub fn type_style(font: &str, conditions: Conditions) -> TypeStyle {
     let tokens = tokens();
-    let weight = |name: &str| tokens.number(name, dark).unwrap_or(450.0);
-    let size = |name: &str| tokens.length(name).unwrap_or(14.0);
+    let weight = |name: &str| tokens.number(name, conditions.dark).unwrap_or(450.0);
+    let size = |name: &str| tokens.length(name, conditions.touch).unwrap_or(14.0);
     let (size, weight, tracking, line_height, tabular) = match font {
         "label" => (size("text-base"), weight("label-weight"), 0.0, 1.5, false),
         "title" => (size("text-title"), weight("title-weight"), tokens.em("title-tracking").unwrap_or(0.0), 1.2, false),

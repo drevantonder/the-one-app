@@ -24,10 +24,10 @@ pub fn colour(name: &str, dark: bool) -> Hsla {
 }
 
 /// A space or a size in pixels: a number, or a token (`gap`, `gutter`, `control`, `icon`, `readable`).
-fn pixels(length: &Length) -> Option<f32> {
+fn pixels(length: &Length, touch: bool) -> Option<f32> {
     match length {
         Length::Px(px) => Some(*px),
-        Length::Word(word) => tokens().length(word),
+        Length::Word(word) => tokens().length(word, touch),
     }
 }
 
@@ -35,26 +35,26 @@ fn percent_of(word: &str) -> Option<f32> {
     word.strip_suffix('%')?.parse::<f32>().ok().map(|percent| percent / 100.0)
 }
 
-fn dimension(length: &Length) -> Dimension {
+fn dimension(length: &Length, touch: bool) -> Dimension {
     match length {
         Length::Word(word) if word == "auto" => Dimension::auto(),
         Length::Word(word) if word.ends_with('%') => Dimension::percent(percent_of(word).unwrap_or(0.0)),
-        length => Dimension::length(pixels(length).unwrap_or(0.0)),
+        length => Dimension::length(pixels(length, touch).unwrap_or(0.0)),
     }
 }
 
-fn auto_or(length: &Length) -> LengthPercentageAuto {
+fn auto_or(length: &Length, touch: bool) -> LengthPercentageAuto {
     match length {
         Length::Word(word) if word == "auto" => LengthPercentageAuto::auto(),
         Length::Word(word) if word.ends_with('%') => LengthPercentageAuto::percent(percent_of(word).unwrap_or(0.0)),
-        length => LengthPercentageAuto::length(pixels(length).unwrap_or(0.0)),
+        length => LengthPercentageAuto::length(pixels(length, touch).unwrap_or(0.0)),
     }
 }
 
-fn definite(length: &Length) -> LengthPercentage {
+fn definite(length: &Length, touch: bool) -> LengthPercentage {
     match length {
         Length::Word(word) if word.ends_with('%') => LengthPercentage::percent(percent_of(word).unwrap_or(0.0)),
-        length => LengthPercentage::length(pixels(length).unwrap_or(0.0)),
+        length => LengthPercentage::length(pixels(length, touch).unwrap_or(0.0)),
     }
 }
 
@@ -67,7 +67,7 @@ pub fn borders(style: &Style) -> Edges<f32> {
 
 /// How a node is laid out: flex, by default a column, as React Native's views are, and as GPUI's `div` with
 /// `flex_col` was.
-pub fn layout(style: &Style) -> taffy::Style {
+pub fn layout(style: &Style, touch: bool) -> taffy::Style {
     let mut out = taffy::Style {
         display: match style.display.as_deref() {
             Some("none") => Display::None,
@@ -92,7 +92,7 @@ pub fn layout(style: &Style) -> taffy::Style {
         out.flex_shrink = shrink;
     }
     if let Some(basis) = &style.flex_basis {
-        out.flex_basis = dimension(basis);
+        out.flex_basis = dimension(basis, touch);
     }
     if let Some(align) = match style.align_items.as_deref() {
         Some("flex-start") => Some(AlignItems::FLEX_START),
@@ -144,9 +144,9 @@ pub fn layout(style: &Style) -> taffy::Style {
     if let Some(span) = style.grid_column.as_deref().and_then(|span| span.strip_prefix("span ")?.parse::<u16>().ok()) {
         out.grid_column = Line { start: taffy::style_helpers::span(span), end: GridPlacement::Auto };
     }
-    let gap = style.gap.as_ref().and_then(pixels);
-    let row_gap = style.row_gap.as_ref().and_then(pixels).or(gap);
-    let column_gap = style.column_gap.as_ref().and_then(pixels).or(gap);
+    let gap = style.gap.as_ref().and_then(|length| pixels(length, touch));
+    let row_gap = style.row_gap.as_ref().and_then(|length| pixels(length, touch)).or(gap);
+    let column_gap = style.column_gap.as_ref().and_then(|length| pixels(length, touch)).or(gap);
     out.gap = Size { width: LengthPercentage::length(column_gap.unwrap_or(0.0)), height: LengthPercentage::length(row_gap.unwrap_or(0.0)) };
 
     let mut padding = Rect::<Option<&Length>> { left: None, right: None, top: None, bottom: None };
@@ -168,36 +168,36 @@ pub fn layout(style: &Style) -> taffy::Style {
         }
     }
     out.padding = Rect {
-        left: padding.left.map_or(LengthPercentage::length(0.0), definite),
-        right: padding.right.map_or(LengthPercentage::length(0.0), definite),
-        top: padding.top.map_or(LengthPercentage::length(0.0), definite),
-        bottom: padding.bottom.map_or(LengthPercentage::length(0.0), definite),
+        left: padding.left.map_or(LengthPercentage::length(0.0), |length| definite(length, touch)),
+        right: padding.right.map_or(LengthPercentage::length(0.0), |length| definite(length, touch)),
+        top: padding.top.map_or(LengthPercentage::length(0.0), |length| definite(length, touch)),
+        bottom: padding.bottom.map_or(LengthPercentage::length(0.0), |length| definite(length, touch)),
     };
     let (inline, block) = (style.margin_inline.as_ref().or(style.margin.as_ref()), style.margin_block.as_ref().or(style.margin.as_ref()));
     let zero = LengthPercentageAuto::length(0.0);
     out.margin = Rect {
-        left: inline.map_or(zero, auto_or),
-        right: inline.map_or(zero, auto_or),
-        top: block.map_or(zero, auto_or),
-        bottom: block.map_or(zero, auto_or),
+        left: inline.map_or(zero, |length| auto_or(length, touch)),
+        right: inline.map_or(zero, |length| auto_or(length, touch)),
+        top: block.map_or(zero, |length| auto_or(length, touch)),
+        bottom: block.map_or(zero, |length| auto_or(length, touch)),
     };
     if let Some(width) = &style.width {
-        out.size.width = dimension(width);
+        out.size.width = dimension(width, touch);
     }
     if let Some(height) = &style.height {
-        out.size.height = dimension(height);
+        out.size.height = dimension(height, touch);
     }
     if let Some(width) = &style.min_width {
-        out.min_size.width = auto_or(width);
+        out.min_size.width = auto_or(width, touch);
     }
     if let Some(height) = &style.min_height {
-        out.min_size.height = auto_or(height);
+        out.min_size.height = auto_or(height, touch);
     }
     if let Some(width) = &style.max_width {
-        out.max_size.width = auto_or(width);
+        out.max_size.width = auto_or(width, touch);
     }
     if let Some(height) = &style.max_height {
-        out.max_size.height = auto_or(height);
+        out.max_size.height = auto_or(height, touch);
     }
     out.aspect_ratio = style.aspect_ratio;
     out.overflow = match style.overflow.as_deref() {
@@ -307,10 +307,11 @@ impl Default for Look {
     }
 }
 
-pub fn look(style: &Style, dark: bool) -> Look {
+pub fn look(style: &Style, conditions: Conditions) -> Look {
+    let dark = conditions.dark;
     let radius = match &style.border_radius {
         Some(Length::Word(full)) if full == "full" => 9999.0,
-        Some(Length::Word(token)) => tokens().length(&format!("radius-{token}")).unwrap_or(0.0),
+        Some(Length::Word(token)) => tokens().length(&format!("radius-{token}"), conditions.touch).unwrap_or(0.0),
         Some(Length::Px(px)) => *px,
         None => 0.0,
     };
@@ -345,19 +346,34 @@ pub struct Text {
 
 impl Text {
     /// The body's, as a page's `body` is (ui.css).
-    pub fn body(dark: bool) -> Text {
-        Text { style: text_style("body", false, dark), color: colour("foreground", dark), align: 0.0, wrap: true, underline: false }
+    pub fn body(conditions: Conditions) -> Text {
+        Text { style: text_style("body", false, conditions), color: colour("foreground", conditions.dark), align: 0.0, wrap: true, underline: false }
+    }
+
+    /// A heading's, as the DOM draws a `Text` that's one, an `<h1>` to `<h3>`: a title's weight and tracking (ui.css),
+    /// where its type style doesn't say its own; a type style's weight always does (`[data-font]`).
+    pub fn heading(self, typed: bool, conditions: Conditions) -> Text {
+        let title = text_style("title", false, conditions);
+        let mut out = self;
+        if !typed {
+            out.style.weight = title.weight;
+        }
+        if out.style.tracking == 0.0 {
+            out.style.tracking = title.tracking;
+        }
+        out
     }
 
     /// What `style` makes of the text it's given: its own type style and colour, or what it inherits. A `text`
     /// with no type style of its own is body text, as the UI library's are.
-    pub fn of(self, style: &Style, text: bool, dark: bool) -> Text {
+    pub fn of(self, style: &Style, text: bool, conditions: Conditions) -> Text {
+        let dark = conditions.dark;
         let mut out = self;
         if let Some(color) = &style.color {
             out.color = colour(color, dark);
         }
         if style.font.is_some() || text || style.font_variant_numeric.is_some() {
-            out.style = text_style(style.font.as_deref().unwrap_or("body"), style.font_variant_numeric.as_deref() == Some("tabular-nums"), dark);
+            out.style = text_style(style.font.as_deref().unwrap_or("body"), style.font_variant_numeric.as_deref() == Some("tabular-nums"), conditions);
         }
         match style.text_align.as_deref() {
             Some("center") => out.align = 0.5,
@@ -369,8 +385,8 @@ impl Text {
     }
 }
 
-fn text_style(font: &str, tabular: bool, dark: bool) -> TextStyle {
-    let font = type_style(font, dark);
+fn text_style(font: &str, tabular: bool, conditions: Conditions) -> TextStyle {
+    let font = type_style(font, conditions);
     TextStyle {
         size: font.size,
         weight: font.weight.round() as u16,
@@ -516,8 +532,8 @@ impl Text {
         out
     }
 
-    /// The root's, as its page's root style says (`Styles.root`), or the background's colour, `label` and
-    /// `type-medium` until the table says.
+    /// The root's, as its page's root style says (`Styles.root`), or as the DOM's `body` is (ui.css): the
+    /// background's colour, `label` and `type-body`.
     pub fn root(conditions: Conditions) -> (Text, Option<Hsla>) {
         let root = ROOT.read().expect("nothing panics holding it").clone();
         let computed = match root {
@@ -526,7 +542,7 @@ impl Text {
                 let mut style = Map::new();
                 style.insert("backgroundColor".into(), serde_json::json!({"token": "background"}));
                 style.insert("color".into(), serde_json::json!({"token": "label"}));
-                style.insert("font".into(), serde_json::json!({"token": "type-medium"}));
+                style.insert("font".into(), serde_json::json!({"token": "type-body"}));
                 computed(&style, conditions)
             }
         };
@@ -824,8 +840,8 @@ pub fn of(node: &Node, state: State, conditions: Conditions) -> Computed {
     match &node.styles {
         Some(ids) => compute(ids, state, conditions),
         None => Computed {
-            layout: layout(&node.style),
-            look: look(&node.style, conditions.dark),
+            layout: layout(&node.style, conditions.touch),
+            look: look(&node.style, conditions),
             text: TextChange::default(),
             line_clamp: node.style.line_clamp,
             fixed: false,

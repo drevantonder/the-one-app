@@ -166,7 +166,7 @@ function native(built, scene, folder) {
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
-    [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", ...(dark ? ["--dark"] : []), ...(requests ? ["--requests", "-"] : [])],
+    [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(requests ? ["--requests", "-"] : [])],
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env: { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" } },
   )
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing" }
@@ -204,7 +204,9 @@ function compared(said, them, treeA, treeB, pictureA, pictureB, diff) {
   said.push(`  ${them}: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
 }
 
-const browser = await chromium.launch()
+// Text laid out by its fonts' own advances, as Chrome lays it out on a Mac, Windows, an iPhone and Android: Linux's
+// headless Chrome hints by default, rounding each glyph's advance to a whole pixel, which no device people use does.
+const browser = await chromium.launch({ args: ["--font-render-hinting=none"] })
 const report = []
 for (const target of targets) {
   const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)

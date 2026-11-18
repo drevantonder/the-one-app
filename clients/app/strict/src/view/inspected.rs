@@ -42,7 +42,6 @@ impl Screen {
     }
 
     fn act(&mut self, request: &Request) -> anyhow::Result<Value> {
-        let dark = self.dark();
         Ok(match request.op.as_str() {
             "window" => {
                 let (size, scale) = self.painted;
@@ -57,7 +56,7 @@ impl Screen {
             }
             "tree" => inspect::tree(&self.tree, &self.rects),
             "query" => {
-                let mut found = inspect::query(&self.tree, &self.rects, dark, request);
+                let mut found = inspect::query(&self.tree, &self.rects, self.conditions(), request);
                 // An input's editing state as the host has it, which is ahead of what its app set.
                 for node in found["nodes"].as_array_mut().into_iter().flatten() {
                     if let Some(field) = node["node"].as_u64().and_then(|id| self.fields.get(&id)) {
