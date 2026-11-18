@@ -26,6 +26,12 @@ defmodule Chrome do
 
   A running browser is a screen in Computer Use, as every container with a display is, and `screen` acts on it for an
   app that lets its person use the browser: to sign in, or to get an agent past a captcha.
+
+  A secret on a page, or in a file the browser downloaded, goes to whoever keeps it by `upload`, as a profile does:
+  what each element holds is written to a file in the container by Playwright's `browser_evaluate` (its `filename`),
+  so it's never in the server's answer, gathered into one JSON file there, and sent sealed by Containers' `upload`. The
+  file goes once it's sent, and the download once it's taken from. `snapshot` blots out what password fields and the
+  elements taken hold, so an agent doesn't read them back.
   """
   @behaviour OneCore.App
   alias OneCore.{Artifact, Call}
@@ -67,6 +73,64 @@ defmodule Chrome do
     properties: %{text: %{type: "string", description: "What Playwright said, the page's state and the result among it"}},
     required: ["text"]
   }
+
+  # Where `upload` gathers what it sends: Playwright's MCP server writes a file only under its own folder.
+  @saving "/tmp/.playwright-mcp"
+  # Where Chrome saves what it downloads.
+  @downloads "/root/Downloads"
+  # What an element holds, as `upload` takes it, marking it as taken so `snapshot` blots it out from then on.
+  @take """
+  (e) => {
+    e.setAttribute("data-one-saved", "")
+    return (e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement || e instanceof HTMLSelectElement ? e.value : e.innerText).trim()
+  }
+  """
+  # What `snapshot` blots out: what password fields and the elements taken hold, but what's too short to be a secret.
+  @hidden """
+  () => [...document.querySelectorAll("input[type=password], [data-one-saved]")]
+    .map((e) => (e instanceof HTMLInputElement || e instanceof HTMLTextAreaElement ? e.value : e.innerText).trim())
+    .filter((value) => value.length >= 4)
+  """
+  # Gathers what `upload` sends, given its nonce and what to take, into one JSON file, {site, values}: each field from
+  # the file Playwright wrote for it, or from the download, the whole of it or a value in its JSON at a dotted path. It
+  # says only what's wrong in its own words, never what it read, and leaves only the gathered file.
+  @gather """
+  const fs = require("fs")
+  const [nonce, spec] = process.argv.slice(1)
+  const { download, fields } = JSON.parse(spec)
+  const piece = (name) => `#{@saving}/one-save-${nonce}-${name}`
+  class Said extends Error {}
+  try {
+    const read = (name) => JSON.parse(fs.readFileSync(piece(name), "utf8"))
+    const file = download && `#{@downloads}/${download}`
+    if (file && !fs.existsSync(file)) {
+      const there = fs.existsSync("#{@downloads}") ? fs.readdirSync("#{@downloads}") : []
+      throw new Said(`There's no ${download} in the browser's downloads. ${there.length ? `There's ${there.join(", ")}.` : "It has none."}`)
+    }
+    const whole = file && fs.readFileSync(file, "utf8")
+    const values = {}
+    for (const [name, { json }] of Object.entries(fields)) {
+      let value = file ? whole : read(`f-${name}`)
+      if (file && json) {
+        try { value = JSON.parse(whole) } catch { throw new Said(`${download} isn't JSON.`) }
+        for (const key of json.split(".")) value = value?.[key]
+        if (value === undefined || value === null) throw new Said(`${download} has no ${json}.`)
+        if (typeof value !== "string") value = JSON.stringify(value)
+      }
+      if (typeof value !== "string" || value.trim() === "") throw new Said(`What's there for ${name} is empty.`)
+      values[name] = value
+    }
+    const all = JSON.stringify({ site: read("site"), values })
+    if (Buffer.byteLength(all) > 65536) throw new Said("That's more than 64 KB, more than a secret is.")
+    fs.writeFileSync(piece("all"), all, { mode: 0o600 })
+  } catch (e) {
+    console.error(e instanceof Said ? e.message : `Couldn't gather it (${e.code ?? e.name}).`)
+    process.exitCode = 1
+  } finally {
+    for (const name of fs.readdirSync("#{@saving}"))
+      if (name.startsWith(`one-save-${nonce}-`) && name !== `one-save-${nonce}-all`) fs.rmSync(`#{@saving}/${name}`, { force: true })
+  }
+  """
 
   @impl true
   def icon, do: "icon.svg"
@@ -166,6 +230,40 @@ defmodule Chrome do
             size: %{type: "integer", description: "The tarball's size in bytes"}
           },
           required: ["session", "container", "user_data", "size"]
+        }
+      },
+      %{
+        name: "upload",
+        description:
+          "For an app's code, which keeps secrets: send what elements on the page hold, or what's in a file the " <>
+            "browser downloaded, to the bucket by `link`, which writes one blob, sealed with `key`, as one JSON " <>
+            "object: {site, values}, `site` the page's host and `values` each field's, by its name. Never through a " <>
+            "tool's result. The download is deleted from the browser once it's sent.",
+        inputs:
+          object(
+            %{
+              link: %{type: "object", description: "Where it goes: a link that writes one blob"},
+              key: %{type: "string", contentEncoding: "base64", description: "The 32-byte key it's sealed with, made for this one blob"},
+              download: %{type: "string", description: "A file the browser downloaded, by its name, to take the fields from"},
+              fields: %{
+                type: "object",
+                description: "What to take, by the field's name: {\"client_secret\": {\"target\": \"e12\"}}, or with `download`, {\"client_secret\": {\"json\": \"web.client_secret\"}}",
+                minProperties: 1,
+                additionalProperties: %{
+                  type: "object",
+                  properties: %{
+                    target: Map.put(@target, :description, "the element that holds it: its ref from the snapshot, like e12, or a unique selector"),
+                    json: %{type: "string", description: "with `download`, where it is in the file's JSON, like web.client_secret; the whole file if left out"}
+                  }
+                }
+              }
+            },
+            ["link", "key", "fields"]
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{session: @session, size: %{type: "integer", description: "What was sent, in bytes"}},
+          required: ["session", "size"]
         }
       },
       %{
@@ -435,6 +533,58 @@ defmodule Chrome do
   end
 
   def call("screen", %{"session" => session} = inputs, call), do: containers(call, "screen", session, Map.delete(inputs, "session"))
+
+  def call("upload", _inputs, %Call{caller: nil}),
+    do: raise("chrome_upload is for an app's code, which says where what it takes goes and what it's sealed with.")
+
+  # Each piece is written in the container, and only the gathered file leaves it, sealed (the moduledoc).
+  def call("upload", %{"session" => session, "link" => link, "key" => key, "fields" => fields} = inputs, call) do
+    download = inputs["download"]
+    nonce = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+    piece = &"#{@saving}/one-save-#{nonce}-#{&1}"
+
+    for {name, _field} <- fields, not (name =~ ~r/^[A-Za-z0-9_]+$/), do: raise("A field's name is letters, digits and _.")
+
+    if download && (download != Path.basename(download) or download in [".", ".."]),
+      do: raise("Name the download as Chrome saved it, like client_secret_123.json.")
+
+    mcp(call, session, "browser_evaluate", %{"function" => "() => location.host", "filename" => piece.("site")})
+
+    if !download do
+      for {name, field} <- fields do
+        target = field["target"] || raise("Say which element holds #{name}, as its `target`, or take it from a `download`.")
+        mcp(call, session, "browser_evaluate", %{"function" => @take, "target" => target, "filename" => piece.("f-" <> name)})
+      end
+    end
+
+    spec = JSON.encode!(%{download: download, fields: Map.new(fields, fn {name, field} -> {name, %{json: field["json"]}} end)})
+    gathered = containers(call, "exec", session, %{"command" => "node -e #{shell(@gather)} #{nonce} #{shell(spec)}"})
+    if gathered["exit"] != 0, do: raise(String.trim(gathered["stderr"]))
+
+    try do
+      sent = containers(call, "upload", session, %{"path" => piece.("all"), "link" => link, "key" => key})
+      if download, do: containers(call, "exec", session, %{"command" => "rm -f #{shell("#{@downloads}/#{download}")}"})
+      %{session: session, size: sent["size"]}
+    after
+      containers(call, "exec", session, %{"command" => "rm -f #{shell(piece.("all"))}"})
+    end
+  end
+
+  # The page as its accessibility tree, with what password fields and the elements taken hold blotted out.
+  def call("snapshot", %{"session" => session} = inputs, call) do
+    hidden = mcp(call, session, "browser_evaluate", %{"function" => @hidden})
+
+    hidden =
+      with [_, values] <- Regex.run(~r/\A### Result\n(.*?)\n###/s, hidden.text),
+           {:ok, values} when is_list(values) <- JSON.decode(values) do
+        values
+      else
+        _ -> raise "Couldn't find what the page's password fields hold, to hide it."
+      end
+
+    snapshot = mcp(call, session, "browser_snapshot", Map.delete(inputs, "session"))
+    %{snapshot | text: Enum.reduce(hidden, snapshot.text, &String.replace(&2, &1, "••••••"))}
+  end
 
   def call(tool, %{"session" => session} = inputs, call) do
     mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session"))
