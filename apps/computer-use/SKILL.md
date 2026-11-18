@@ -57,9 +57,10 @@ server does, so it can't use a window of a program run as administrator.
 
 On a Mac it runs inside a small app, Computer Use for The One App, which macOS lets see the screen only with Screen
 Recording and use the mouse and keyboard only with Accessibility, which only the Mac's person can allow. `screens`
-says in the Mac's description which is missing, asking macOS nothing. The first time an action needs one, macOS asks
-them on the Mac and the action says what's missing. They allow it in System Settings → Privacy & Security → Screen &
-System Audio Recording, and → Accessibility, by turning on Computer Use for The One App in each. macOS keeps that
+says in the Mac's description which is missing, asking macOS nothing. The first time an action needs one, System
+Settings opens on the Mac where it's turned on, and the action says what's missing, with the link that opens it there.
+They allow it in System Settings → Privacy & Security → Screen & System Audio Recording, and → Accessibility, by
+turning on Computer Use for The One App in each. macOS keeps that
 through the app's updates and Cua Driver's, and asks again now and then for Screen Recording, as it does of every
 app that records the screen.
 

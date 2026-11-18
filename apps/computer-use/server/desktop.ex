@@ -35,8 +35,13 @@ defmodule ComputerUse.Desktop do
   @helper "Computer Use for The One App.app"
   @id "app.theone.computer-use"
 
-  # Where in System Settings → Privacy & Security each permission is turned on, and what it's for.
+  # Where in System Settings → Privacy & Security each permission is turned on, the link that opens it there, and
+  # what it's for.
   @panes %{"Screen Recording" => "Screen & System Audio Recording", "Accessibility" => "Accessibility"}
+  @links %{
+    "Screen Recording" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    "Accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+  }
   @uses %{"Screen Recording" => "see this Mac's screen", "Accessibility" => "use this Mac's mouse and keyboard"}
   @needed %{"screenshot" => "Screen Recording"}
 
@@ -255,12 +260,13 @@ defmodule ComputerUse.Desktop do
 
     cond do
       permission in missing(service) ->
-        asked = GenServer.call(service, {:ask, permission})
+        where = "System Settings → Privacy & Security → #{@panes[permission]} (#{@links[permission]})"
 
-        raise "macOS doesn't let Computer Use for The One App #{@uses[permission]} yet. " <>
-                if(asked == :now, do: "It's asking on the Mac now. ", else: "") <>
-                "On the Mac, in System Settings → Privacy & Security → #{@panes[permission]}, turn on Computer Use for The One App." <>
-                "\n\nOnly the Mac's person can allow it: ask them, then try again."
+        raise "macOS doesn't let Computer Use for The One App #{@uses[permission]} yet, and only the Mac's person can allow it. " <>
+                case GenServer.call(service, {:ask, permission}) do
+                  :opened -> "#{where} is open on the Mac: they turn on Computer Use for The One App there, then try again."
+                  :before -> "On the Mac, they open #{where} and turn on Computer Use for The One App, then try again."
+                end
 
       action == "type" and :os.type() == {:unix, :darwin} and secure_input?(service) ->
         raise "A password field has the focus on the Mac. Its person types passwords and codes themselves."
@@ -330,15 +336,18 @@ defmodule ComputerUse.Desktop do
   def handle_call(:takes, _from, state), do: {:reply, state.takes, state}
   def handle_call(:helper, _from, state), do: {:reply, state.helper, state}
 
-  # Asks macOS for `permission` the first time it's missing while this runs; after that, starts Cua Driver again, so
-  # it reads what macOS allows now.
+  # The first time `permission` is missing while this runs, asks macOS for it, which lists the helper in its pane of
+  # Privacy & Security, and opens System Settings there, where it's turned on: macOS never gives it from its own
+  # question, which may or may not show, and whose only button goes there too. After that, starts Cua Driver again,
+  # so it reads what macOS allows now.
   def handle_call({:ask, permission}, _from, state) do
     if permission in state.asked do
       launchctl(["kickstart", "-k", "#{domain()}/#{label()}"])
       {:reply, :before, state}
     else
       System.cmd("open", ["-n", "-g", state.helper, "--args", "ask", permission])
-      {:reply, :now, %{state | asked: MapSet.put(state.asked, permission)}}
+      {_, opened} = System.cmd("open", [@links[permission]])
+      {:reply, if(opened == 0, do: :opened, else: :before), %{state | asked: MapSet.put(state.asked, permission)}}
     end
   end
 
