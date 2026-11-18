@@ -1,5 +1,5 @@
 // A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
-import { children, createContext, createEffect, createMemo, createSignal, For, onCleanup, Show, useContext } from "solid-js"
+import { children, createContext, createEffect, createMemo, createSignal, flush, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
 import { direction, reducedMotion, touch, viewport } from "#bridge"
@@ -79,13 +79,25 @@ const settle = duration(tokens.motion.settle)
 
 /** A row as the list draws it: coming (its height opening up from none), there, or going (closing up), and the
  * height it's held at while it does. */
-type Slot = { node: JSX.Element; state: () => State; setState: (state: State) => void; to: () => number | undefined; setTo: (to: number | undefined) => void; height?: number }
+type Slot = {
+  node: JSX.Element
+  state: () => State
+  setState: (state: State) => void
+  to: () => number | undefined
+  setTo: (to: number | undefined) => void
+  height?: number
+  /** Whether its row is drawn, and whether it's waiting to be (`List`). */
+  drawn: () => boolean
+  setDrawn: (drawn: boolean) => void
+  waiting?: boolean
+}
 type State = "coming" | "there" | "going"
 
 const slot = (node: JSX.Element, state: State, to?: number): Slot => {
   const [now, setState] = createSignal(state)
   const [held, setTo] = createSignal(to)
-  return { node, state: now, setState, to: held, setTo }
+  const [drawn, setDrawn] = createSignal(false)
+  return { node, state: now, setState, to: held, setTo, drawn, setDrawn }
 }
 
 /** Whether a row is an option of a listbox, which its list's slot is for it. */
@@ -96,9 +108,11 @@ const InListbox = createContext(false)
 type Drawing = Map<unknown, (drawn: boolean) => void>
 const Drawing = createContext<Drawing>()
 
-/** How many rows a list draws or doesn't together, and how tall a row not drawn yet is held, until one is: a row's on
- * a computer. */
+/** How many rows a list draws or doesn't together, how many of those coming near the window it draws in a frame and
+ * for how long at most (at least one), and how tall a row not drawn yet is held, until one is: a row's on a computer. */
 const CHUNK = 8
+const PER_FRAME = 3
+const BUDGET = 4
 const ROW = 38
 
 /** A listbox: which of its rows is chosen, and what's typed in that drives it. */
@@ -203,6 +217,7 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
   )
   /// A row's height as it's laid out: a coming one opens up to it, then is as tall as it is.
   const laid = (one: Slot, height: number) => {
+    if (!one.drawn()) return
     if (one.state() === "coming" && one.height === undefined) {
       requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(height)))
       setTimeout(() => (one.setState("there"), one.setTo(undefined)), settle)
@@ -211,6 +226,33 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
     tall = height
   }
   let tall = ROW
+  /// Draws a row, or puts it away. What comes near the window as it's scrolled is drawn for a few milliseconds a
+  /// frame, those nearest it first, as React Native's FlatList draws in batches and React's scheduler in slices, so a
+  /// frame stays within its time; it's near the window half a window ahead, so it's drawn before it shows.
+  const draw = (one: Slot, now: boolean) => {
+    one.waiting = false
+    one.setDrawn(now)
+    drawing.get(one.node)?.(now)
+  }
+  let waiting: Slot[] = []
+  const next = () => {
+    const until = performance.now() + BUDGET
+    waiting = waiting.filter((one) => one.waiting)
+    // Each drawn as it's set (`flush`), so the time it took is what's counted.
+    for (let drawn = 0; waiting.length && drawn < PER_FRAME && (!drawn || performance.now() < until); drawn++) {
+      draw(waiting.shift()!, true)
+      flush()
+    }
+    if (waiting.length) requestAnimationFrame(next)
+  }
+  const wait = (ones: Slot[]) => {
+    if (!ones.length) return
+    if (!waiting.length) requestAnimationFrame(next)
+    for (const one of ones) one.waiting = true
+    waiting.push(...ones)
+  }
+  /// Where each part of the list drawn starts, so one coming near above them is drawn from its foot up.
+  const shown = new Set<number>()
   /// Each part of the list, by where it starts: drawn as it comes near the window (those that fill it at once), and
   /// held at its height while it's far from it; the one chosen in a listbox stays drawn.
   const chunks = createMemo(() => Array.from({ length: Math.ceil(slots().length / CHUNK) }, (_, at) => at * CHUNK))
@@ -219,9 +261,24 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
     const [near, setNear] = createSignal(chunk.start < Math.ceil(viewport().height / 32))
     const chosen = () => !!props.listbox && Math.floor(props.listbox.chosen() / CHUNK) * CHUNK === chunk.start
     const drawn = () => near() || chosen()
+    // What fills the window as the list fills, and a row added to a part that's drawn, is drawn at once; a part
+    // that comes near as it's scrolled, a few rows a frame. What isn't a Row of the UI library's is drawn as it comes.
+    let was: boolean | undefined
     createEffect(
       () => [drawn(), mine()] as const,
-      ([now, ones]) => ones.forEach((one) => drawing.get(one.node)?.(now)),
+      ([now, ones]) => {
+        const scrolled = now && was === false && !chosen()
+        was = now
+        if (!now) {
+          shown.delete(chunk.start)
+          return ones.forEach((one) => draw(one, false))
+        }
+        const coming = ones.filter((one) => !one.drawn() && !one.waiting)
+        const later = coming.filter((one) => scrolled && drawing.has(one.node))
+        coming.filter((one) => !later.includes(one)).forEach((one) => draw(one, true))
+        wait([...shown].some((start) => start > chunk.start) ? later.reverse() : later)
+        shown.add(chunk.start)
+      },
     )
     return (
       <Box onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && { height: mine().reduce((sum, one) => sum + (one.height ?? tall), 0) }]}>
@@ -232,7 +289,7 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
     )
   }
   const slotted = (one: Slot, at: () => number) => (
-              <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }]}>
+              <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }, !one.drawn() && { height: one.height ?? tall }]}>
                 <Show
                   when={props.listbox}
                   fallback={<Box onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</Box>}
