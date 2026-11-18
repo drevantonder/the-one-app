@@ -25,10 +25,12 @@
 // and as one comes or goes, and a build published and Update Now (`/relay/update`), and tells every server what the
 // updater answers it's to do.
 //
-// Parts of the platform talk across one 0.minor and no more (`OneCore.Builds.talk?/2`): a server says its build as it
-// says what it is. A call from outside goes only to a server that talks with the edge, and says the edge's build: a
-// rule apart from being ready.
+// Parts of the platform talk where the protocols they speak overlap (`OneCore.Protocol`): a server says the range it
+// speaks, and its build, as it says what it is. A call from outside goes only to a server that talks with the edge,
+// and says the edge's protocol and build: a rule apart from being ready.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+/** The protocols the edge speaks, from `oldest` to `newest`. */
+import SPEAKS from "../../protocol.json";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
 import type { Input, Reported } from "../updater/updater.ts";
@@ -75,30 +77,24 @@ const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
  * 15 seconds.
  */
 const SWITCH = 12_000;
+/** The protocols a part speaks, from `oldest` to `newest` (`core/protocol.json`). */
+type Protocol = { oldest: number; newest: number };
 /**
- * A build's breaking release, as Semantic Versioning's 0.x reads at Cargo, npm and Hex: its 0.minor, or from 1.0 its
- * major.
+ * The protocols a part speaks, as it `said`, or where it said none, as its build, `version`, says: none known for
+ * one that says neither. Parts built before they said theirs, as phones whose people haven't updated them are, speak
+ * 1 from 0.24, whose wire it is unchanged, as `OneCore.Protocol.of/2` says; this goes once no part seen in 90 days
+ * says none.
  */
-function series(version: string): [number, number] {
-  const [major, minor] = version.split(".").map(Number);
-  return major === 0 ? [0, minor] : [major, 0];
+function spoken(said: unknown, version: string | undefined): Protocol | undefined {
+  const { oldest, newest } = (said ?? {}) as Partial<Protocol>;
+  if (Number.isInteger(oldest) && Number.isInteger(newest) && oldest! <= newest!) return { oldest: oldest!, newest: newest! };
+  const [major, minor] = (version ?? "").split(".").map(Number);
+  return major > 0 || minor >= 24 ? { oldest: 1, newest: 1 } : undefined;
 }
-/**
- * Whether the build `a` talks with `b`, the edge's: one breaking release apart at most, as `OneCore.Builds.talk?/2`
- * says. One that doesn't say its version is too old to talk with any.
- */
-const talk = (a: string | undefined, b: string) => {
-  if (!a) return false;
-  const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
-  if (major === 0 && otherMajor === 0) return Math.abs(minor - otherMinor) <= 1;
-  return major > 0 && otherMajor > 0 && Math.abs(major - otherMajor) <= 1;
-};
-/** Whether the build `a` is a breaking release before `b`, the edge's: one that doesn't say its version is. */
-const before = (a: string | undefined, b: string) => {
-  if (!a) return true;
-  const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
-  return major < otherMajor || (major === otherMajor && minor < otherMinor);
-};
+/** Whether a part that speaks `theirs` talks with the edge: their ranges overlap. */
+const talk = (theirs: Protocol | undefined) => !!theirs && theirs.oldest <= SPEAKS.newest && SPEAKS.oldest <= theirs.newest;
+/** What a range is, said: `1`, `1 to 2`, or `none`. */
+const named = (protocol: Protocol | undefined) => (!protocol ? "none" : protocol.oldest === protocol.newest ? `${protocol.oldest}` : `${protocol.oldest} to ${protocol.newest}`);
 
 /** A W3C `traceparent`: its trace and span. */
 const TRACE = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
@@ -292,13 +288,13 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const call = JSON.parse(message);
     const parent: string | undefined = call.params?._meta?.traceparent;
     const traceparent = `00-${TRACE.exec(parent ?? "")?.[1] ?? hex.encode(crypto.getRandomValues(new Uint8Array(16)))}-${hex.encode(crypto.getRandomValues(new Uint8Array(8)))}-01`;
-    message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent, version: this.env.VERSION } } });
+    message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent, protocol: SPEAKS, version: this.env.VERSION } } });
 
     // Only a server that talks with the edge is asked, and only one that's ready, or isn't known not to be.
-    const versions = await this.relay((relay) => relay.versions(servers));
-    const talking = servers.filter((server) => talk(versions[server], this.env.VERSION));
+    const protocols = await this.relay((relay) => relay.protocols(servers));
+    const talking = servers.filter((server) => talk(protocols[server]));
     if (!talking.length) {
-      const error = `None of its ${servers.length} servers is on a version that talks with the edge's ${this.env.VERSION}: ${servers.map((server) => `${server.slice(0, 8)} ${versions[server]}`).join(", ")}`;
+      const error = `None of its ${servers.length} servers speaks a protocol the edge's ${named(SPEAKS)} does: ${servers.map((server) => `${server.slice(0, 8)} ${named(protocols[server])}`).join(", ")}`;
       console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length }, error } }));
       return null;
     }
@@ -340,8 +336,9 @@ export default class extends WorkerEntrypoint<RelayEnv> {
 
   /**
    * A server or a device of the network's asks who's here, of the keys it names: `?keys=<key>,<key>`, and is told
-   * `{"presence": {<key>: <Presence>}}` and the edge's build as `one-version`. A server says what it is with a POST of
-   * `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>}`, as that changes.
+   * `{"presence": {<key>: <Presence>}, "protocol": <the edge's>}` and the edge's build as `one-version`. A server says
+   * what it is with a POST of `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>,
+   * "protocol": <its>}`, as that changes.
    */
   async handleSeen(request: Request, url: URL) {
     const admitted = await admit(this.env.NETWORK, request, request.method === "POST" ? await request.text() : "");
@@ -349,8 +346,9 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     const { key } = admitted;
     if (request.method === "POST") {
       if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says what it is");
-      const said = admitted.said as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown } & Reported;
+      const said = admitted.said as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown; protocol?: unknown } & Reported;
       const version = typeof said.version === "string" ? said.version : undefined;
+      const protocol = spoken(said.protocol, version);
       const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
         ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
         : undefined;
@@ -358,17 +356,16 @@ export default class extends WorkerEntrypoint<RelayEnv> {
         version,
         ...Object.fromEntries(Object.entries(said).filter(([name]) => UPDATE.includes(name as keyof Reported))),
       };
-      const behind = !talk(version, this.env.VERSION) && before(version, this.env.VERSION);
-      const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build that doesn't say its version"}, more than one breaking release before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
-      if (!version) return refuse(400, error!);
-      const now = await this.relay((relay) => relay.report(key, version, status, update));
+      const error = !talk(protocol) ? `${key.slice(0, 8)} speaks protocol ${named(protocol)} and the edge ${named(SPEAKS)}, so the edge sends it nothing until one is updated` : undefined;
+      if (!version) return refuse(400, `A server says its build, {"version": <it>}`);
+      const now = await this.relay((relay) => relay.report(key, version, protocol, status, update));
       const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
       console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes, error } }));
       if (!status) return refuse(400, `A server says what it is with {"server_membership": ${MEMBERSHIPS.join("|")}, "server_daemon_status": ${SAID.join("|")}}`);
       return new Response(null, { status: 204 });
     }
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
-    return Response.json({ presence: await this.presence(keys.slice(0, 1000)) }, { headers: { "one-version": this.env.VERSION } });
+    return Response.json({ presence: await this.presence(keys.slice(0, 1000)), protocol: SPEAKS }, { headers: { "one-version": this.env.VERSION } });
   }
 
   /**
@@ -464,10 +461,11 @@ export class Relay extends DurableObject<RelayEnv> {
   }
 
   /**
-   * A server says what it is, `status`, and its build, `version`. The other servers are told. Gives its presence now.
+   * A server says what it is, `status`, its build, `version`, and the protocols it speaks. The other servers are told.
+   * Gives its presence now.
    */
-  async report(key: string, version: string, status?: ServerStatus, update?: Reported) {
-    await this.ctx.storage.put({ [`version ${key}`]: version, ...(status && { [`presence ${key}`]: status }) });
+  async report(key: string, version: string, protocol: Protocol | undefined, status?: ServerStatus, update?: Reported) {
+    await this.ctx.storage.put({ [`version ${key}`]: version, [`protocol ${key}`]: protocol ?? null, ...(status && { [`presence ${key}`]: status }) });
     if (status) this.notify(SEEN);
     if (update) await this.updated({ reported: { key, ...update } });
     return (await this.presence([key]))[key];
@@ -491,6 +489,12 @@ export class Relay extends DurableObject<RelayEnv> {
       console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes: { "one.updater": Object.keys(input)[0] }, error: `The network's updater wasn't told: ${error}` } }));
       return null;
     }
+  }
+
+  /** The protocols each of `keys` that's a server speaks (`spoken`), by its key, leaving out one that never said what it is. */
+  async protocols(keys: string[]): Promise<Record<string, Protocol | undefined>> {
+    const [versions, said] = await Promise.all([this.versions(keys), this.ctx.storage.get<Protocol | null>(keys.map((key) => `protocol ${key}`))]);
+    return Object.fromEntries(Object.entries(versions).map(([key, version]) => [key, spoken(said.get(`protocol ${key}`), version)]));
   }
 
   /** The build each of `keys` that's a server said it is, by its key, leaving out one that never said. */
