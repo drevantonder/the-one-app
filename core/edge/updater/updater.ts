@@ -31,6 +31,13 @@
 // nothing to do.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 
+declare global {
+  interface UpdaterEnv {
+    /** The edge's build, as `tooling/version` names the commit it was deployed from, which `edge.js` sets. */
+    VERSION?: string;
+  }
+}
+
 type NetworkUpdateStatus = "up_to_date" | "preparing" | "loading" | "restarting" | "held";
 type ServerUpdateStatus = "up_to_date" | "downloading" | "checked" | "verifying";
 /** What a server is told to do: prepare the build, take it now, or take it once it has had no calls for a while. */
@@ -100,6 +107,11 @@ interface State {
   until?: number | null;
   /** When each step of the whole was reached, in ms after the build was published. */
   timings: Record<string, number>;
+  /**
+   * The edge's build, which serves the app's window page (`clients/app/src/page.rs`): every server is told again
+   * once it's deployed, as it first hears from the relay, and tells the apps watching it, which take a newer page.
+   */
+  edge?: string;
 }
 
 /** How long every server has to prepare, and a server that restarts to be back, as `serving.rs`'s `START`, and more. */
@@ -133,6 +145,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     for (const [key, here] of Object.entries(presence)) reported[key] ??= { version: here?.version, server_update_status: "up_to_date" };
     const before = JSON.stringify([state, this.instructions(state, reported)]);
     let concerned = false;
+    state.edge = this.env.VERSION ?? state.edge;
 
     if ("published" in input) {
       // Only a newer build moves it: one published again, as a release run again publishes, changes nothing.
@@ -331,6 +344,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       waiting_for: state.waiting_for ?? null,
       held: state.held ?? null,
       skipped: state.skipped.map(name),
+      edge: state.edge ?? null,
       servers: this.instructions(state, reported),
       timings: {
         ...state.timings,

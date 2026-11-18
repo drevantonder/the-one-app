@@ -161,9 +161,11 @@ const config = {
   web: "web/wrangler.jsonc",
   presigner: "presigner/wrangler.jsonc",
 };
-// The network's updater, which the relay is bound to, and which is told its tail parts as the relay is.
+// The network's updater, which the relay is bound to, and which is told its tail parts and the edge's build as the relay
+// is.
 {
   const worker = (await import(`${here}/updater/wrangler.jsonc`)).default;
+  worker.vars = { ...worker.vars, VERSION: version };
   await Bun.write(`${built}/updater.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/updater/${worker.main}`) }), null, 2));
   config.updater = relative(here, `${built}/updater.jsonc`);
 }

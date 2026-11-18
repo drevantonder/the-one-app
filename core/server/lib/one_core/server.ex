@@ -32,11 +32,16 @@ defmodule OneCore.Server do
 
       params = %{library: OneCore.Entrypoint.library().code, apps: apps}
       params = if app, do: Map.put(params, :app, app), else: params
-      notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/changed", params: params})
-      GenServer.cast(__MODULE__, {:notify, notification})
+      tell("changed", params)
     end)
 
     :ok
+  end
+
+  @doc "Tells every client watching this server `notifications/one/<what>`, with `params`."
+  def tell(what, params) do
+    notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
+    GenServer.cast(__MODULE__, {:notify, notification})
   end
 
   @doc """

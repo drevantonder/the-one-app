@@ -193,8 +193,9 @@ defmodule OneCore.Release do
   def network, do: :persistent_term.get({__MODULE__, :network}, nil)
 
   @doc """
-  What the network's updater says, `update`, as the relay tells every server: kept for whoever asks (`network/0`), and
-  what this server is to do of it said to the program keeping it running: to prepare the latest pair, its build and
+  What the network's updater says, `update`, as the relay tells every server: kept for whoever asks (`network/0`), told
+  to the clients watching this server (`notifications/one/update`), and what this server is to do of it said to the
+  program keeping it running: to prepare the latest pair, its build and
   `one`, where it isn't on it or preparing it, and to go where it has checked the pair the network takes, now or once
   it's quiet.
   """
@@ -202,6 +203,8 @@ defmodule OneCore.Release do
     if update != network() do
       :persistent_term.put({__MODULE__, :network}, update)
       Server.changed()
+      # The apps watching this server hear it too, as each takes a newer build of itself, or of its page, by itself.
+      Server.tell("update", update)
 
       Registry.dispatch(OneCore.Waiting, :network, fn waiting ->
         for {process, _} <- waiting, do: send(process, :network)
