@@ -122,7 +122,13 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     #[cfg(target_os = "macos")]
     let home_screen = ::client::NAME;
     let pages = Pages { entrypoint: opened.entrypoint, to: to.clone(), asked, proxy: proxy.clone(), next: Arc::default(), loaded: 0 };
-    let mut page = Discarding::new(&window, pages)?;
+    // Windows' WebView2 keeps its data in the launcher's folder, so one browser process, with its GPU and network
+    // processes, serves the launcher and every app window rather than each starting its own.
+    #[cfg(windows)]
+    let data_directory = crate::shortcuts::local_data_dir().ok();
+    #[cfg(not(windows))]
+    let data_directory = None;
+    let mut page = Discarding::new(&window, pages, data_directory)?;
     #[cfg(target_os = "linux")]
     keys(&window, proxy.clone());
 

@@ -8,7 +8,7 @@
 //!
 //! It's only a window and a web view (tao and wry), as each app's own window is: its page is the window's own
 //! (`page/`), which shows the Home Screen, and asks what it asks of the app (`hosts::command`) through the same bridge
-//! an app's window has (`host-initialization-script.js`).
+//! an app's window has (`host-initialization-script.js`). Put away a while, it discards its page (`discard`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -21,6 +21,7 @@ use tao::window::{Theme, Window, WindowBuilder};
 use wry::http::Request;
 use wry::{RequestAsyncResponder, WebView, WebViewBuilder, WebViewId};
 
+use crate::discard::Discarding;
 use crate::{hosts, notifications};
 
 /// The launcher's size, in points: two of a phone's pages side by side and the dots under them, drawn smaller
@@ -188,7 +189,14 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
 
     // The page, whose own pages and apps' it asks the app for, and has nothing else load.
     let page_started = Arc::new(AtomicBool::new(false));
-    let webview = page(&window, page_started.clone())?;
+    #[cfg(target_os = "linux")]
+    keys(&window);
+    // Its data is where Tauri kept it, which Windows' WebView2 shares with each app's window.
+    #[cfg(any(target_os = "linux", windows))]
+    let data_directory = crate::shortcuts::local_data_dir().ok();
+    #[cfg(target_os = "macos")]
+    let data_directory = None;
+    let mut page = Discarding::new(&window, Page { started: page_started.clone() }, data_directory)?;
 
     crate::spawn(crate::opens());
     hosts::serve(&home)?;
@@ -211,28 +219,32 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     let mut shown = false;
     let mut focused = false;
     if std::env::var_os("ONE_HIDDEN").is_none() {
-        show(&window, &webview);
+        show(&window, &mut page);
         shown = true;
+    } else {
+        page.shown(&window, false);
     }
     event_loop.run(move |event, _, flow| {
-        *flow = ControlFlow::Wait;
+        if let Event::WindowEvent { event, .. } = &event {
+            page.heard(&window, event);
+        }
         match event {
             Event::WindowEvent { event: WindowEvent::Focused(true), .. } => focused = true,
             // Something else was clicked, or came in front: it goes, as Spotlight does.
             Event::WindowEvent { event: WindowEvent::Focused(false), .. } if shown && focused => {
                 focused = false;
                 shown = false;
-                put_away(&window, false);
+                put_away(&window, &mut page, false);
             }
             // Alt-F4, which closes nothing but puts it away.
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 shown = false;
-                put_away(&window, true);
+                put_away(&window, &mut page, true);
             }
             // The Dock's icon clicked.
             #[cfg(target_os = "macos")]
             Event::Reopen { .. } => {
-                show(&window, &webview);
+                show(&window, &mut page);
                 shown = true;
             }
             // A `one:` link opened, as a Mac tells the app that takes them.
@@ -242,20 +254,24 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                     tell(Told::Open(link));
                 }
             }
-            Event::UserEvent(Told::Script(script)) => drop(webview.evaluate_script(&script)),
+            Event::UserEvent(Told::Script(script)) => {
+                if let Some(webview) = page.webview() {
+                    drop(webview.evaluate_script(&script))
+                }
+            }
             Event::UserEvent(Told::Toggle) if shown => {
                 shown = false;
-                put_away(&window, true);
+                put_away(&window, &mut page, true);
             }
             Event::UserEvent(Told::Toggle | Told::Summon) => {
-                show(&window, &webview);
+                show(&window, &mut page);
                 shown = true;
                 focused = false;
             }
             Event::UserEvent(Told::Hide(give_back)) => {
                 shown = false;
                 focused = false;
-                put_away(&window, give_back);
+                put_away(&window, &mut page, give_back);
             }
             Event::UserEvent(Told::Theme(theme)) => window.set_theme(theme.map(|theme| match theme {
                 crate::Theme::Light => Theme::Light,
@@ -263,14 +279,18 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             })),
             Event::UserEvent(Told::Reload) => {
                 page_started.store(false, Ordering::Relaxed);
-                let _ = webview.load_url(crate::HOME);
+                if let Some(webview) = page.webview() {
+                    let _ = webview.load_url(crate::HOME);
+                }
             }
             // The page opens it once it's there to (`start`), and if it isn't yet, once it asks where it is.
             Event::UserEvent(Told::Open(link)) => {
-                if page_started.load(Ordering::Relaxed) {
+                if let Some(webview) = page.webview().filter(|_| page_started.load(Ordering::Relaxed)) {
                     let _ = webview.evaluate_script(&format!("window.__ONE_HOST__.event(\"open\", {})", Value::from(link)));
                 } else {
                     *OPENED.lock().expect("nothing panics holding it") = Some(link);
+                    // Discarded, its page loads again to open it, out of sight if it's put away.
+                    page.needed(&window);
                 }
             }
             #[cfg(target_os = "macos")]
@@ -279,11 +299,16 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             Event::UserEvent(Told::Quit) => *flow = ControlFlow::Exit,
             _ => {}
         }
+        if *flow != ControlFlow::Exit {
+            *flow = page.discard_due(&window);
+        }
     })
 }
 
 /// Shows the launcher, centred near the top of the screen the pointer is on, with the keyboard.
-fn show(window: &Window, webview: &WebView) {
+fn show(window: &Window, page: &mut Discarding<Page>) {
+    // Discarded while it was put away, its page loads again.
+    page.shown(window, true);
     let pointer = window.cursor_position().ok();
     let screen = pointer
         .and_then(|at| {
@@ -308,12 +333,15 @@ fn show(window: &Window, webview: &WebView) {
     #[cfg(target_os = "macos")]
     activate();
     window.set_focus();
-    let _ = webview.focus();
+    if let Some(webview) = page.webview() {
+        let _ = webview.focus();
+    }
 }
 
 /// Puts the launcher away. Given back, the keyboard goes to the app that had it before, as a Mac hides an app.
-fn put_away(window: &Window, give_back: bool) {
+fn put_away(window: &Window, page: &mut Discarding<Page>, give_back: bool) {
     window.set_visible(false);
+    page.shown(window, false);
     #[cfg(target_os = "macos")]
     if give_back {
         unsafe {
@@ -328,81 +356,81 @@ fn put_away(window: &Window, give_back: bool) {
 
 /// The page's web view: its own files and its apps', what it asks (`hosts::command`), and the device's own browser for
 /// anywhere else, as an app's own window has them (`host`).
-fn page(window: &Window, started: Arc<AtomicBool>) -> anyhow::Result<WebView> {
-    let key = format!("{:016x}{:016x}", crate::host::random(), crate::host::random());
-    let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
-    let apps_file = |_: WebViewId, request: Request<Vec<u8>>, responder: RequestAsyncResponder| {
-        let address = request.uri().to_string();
-        crate::spawn(async move {
-            let file = match crate::views() {
-                Ok(views) => views.file(&address).await.map_err(|error| format!("{error:#}")),
-                Err(error) => Err(error),
-            };
-            responder.respond(crate::host::app_file(file));
-        });
-    };
-    let page_key = key.clone();
-    let ipc = move |request: Request<String>| {
-        let Ok(message) = serde_json::from_str::<Value>(request.body()) else { return };
-        if message["key"] != page_key.as_str() {
-            return;
-        }
-        let (id, command, args) = (message["id"].clone(), message["command"].as_str().unwrap_or_default().to_owned(), message["args"].clone());
-        if command == "start" {
-            started.store(true, Ordering::Relaxed);
-        }
-        crate::spawn(async move {
-            let answer = hosts::command("main", &command, args).await;
-            tell(Told::Script(crate::host::answer(&id, answer.map_err(Value::from))));
-        });
-    };
-    #[cfg(target_os = "linux")]
-    let builder = {
-        // WebDriver drives it as it did Tauri's windows, which tauri-driver says by this.
-        let mut context = wry::WebContext::new(crate::shortcuts::local_data_dir().ok());
-        context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
-        WebViewBuilder::new_with_web_context(Box::leak(Box::new(context)))
-    };
-    // Windows' WebView2 keeps its data where Tauri's did, which each app's window shares.
-    #[cfg(windows)]
-    let builder = WebViewBuilder::new_with_web_context(Box::leak(Box::new(wry::WebContext::new(crate::shortcuts::local_data_dir().ok()))));
-    #[cfg(target_os = "macos")]
-    let builder = WebViewBuilder::new();
-    let builder = builder
-        .with_custom_protocol("tauri".into(), own)
-        .with_asynchronous_custom_protocol("oneapp".into(), apps_file)
-        .with_ipc_handler(ipc)
-        .with_initialization_script_for_main_only(crate::host::BRIDGE.replace("__KEY__", &key), true)
-        // The page draws the launcher's own glass where the window has none (`data-launcher` in client.css).
-        .with_initialization_script_for_main_only(format!("document.documentElement.dataset.launcher = {:?}", if cfg!(target_os = "linux") { "solid" } else { "glass" }), true)
-        .with_navigation_handler(|to| crate::stays(&to))
-        .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-        .with_transparent(!cfg!(target_os = "linux"))
-        .with_devtools(cfg!(debug_assertions))
-        .with_url(crate::HOME);
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let builder = builder.with_initialization_script_for_main_only(crate::INITIALIZATION_SCRIPT, false);
-    #[cfg(not(target_os = "linux"))]
-    let webview = builder.build(window)?;
-    #[cfg(target_os = "linux")]
-    let webview = {
-        use tao::platform::unix::WindowExtUnix;
-        use wry::WebViewBuilderExtUnix;
-        keys(window);
-        let webview = builder.build_gtk(window.default_vbox().expect("tao gives a window a box"))?;
-        // A developer's build writes what its pages say to their console to its stdout, as WebKitGTK offers: its web
-        // view has no other console to read without a window of its own.
-        #[cfg(debug_assertions)]
+struct Page {
+    /// Whether the page has asked where it is (`start`), once it's there to open a link.
+    started: Arc<AtomicBool>,
+}
+
+impl crate::discard::Page for Page {
+    fn make<'a>(&mut self, builder: WebViewBuilder<'a>) -> WebViewBuilder<'a> {
+        let key = format!("{:016x}{:016x}", crate::host::random(), crate::host::random());
+        let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
+        let apps_file = |_: WebViewId, request: Request<Vec<u8>>, responder: RequestAsyncResponder| {
+            let address = request.uri().to_string();
+            crate::spawn(async move {
+                let file = match crate::views() {
+                    Ok(views) => views.file(&address).await.map_err(|error| format!("{error:#}")),
+                    Err(error) => Err(error),
+                };
+                responder.respond(crate::host::app_file(file));
+            });
+        };
+        let (page_key, started) = (key.clone(), self.started.clone());
+        let ipc = move |request: Request<String>| {
+            let Ok(message) = serde_json::from_str::<Value>(request.body()) else { return };
+            if message["key"] != page_key.as_str() {
+                return;
+            }
+            let (id, command, args) =
+                (message["id"].clone(), message["command"].as_str().unwrap_or_default().to_owned(), message["args"].clone());
+            if command == "start" {
+                started.store(true, Ordering::Relaxed);
+            }
+            crate::spawn(async move {
+                let answer = hosts::command("main", &command, args).await;
+                tell(Told::Script(crate::host::answer(&id, answer.map_err(Value::from))));
+            });
+        };
+        let builder = builder
+            .with_custom_protocol("tauri".into(), own)
+            .with_asynchronous_custom_protocol("oneapp".into(), apps_file)
+            .with_ipc_handler(ipc)
+            .with_initialization_script_for_main_only(crate::host::BRIDGE.replace("__KEY__", &key), true)
+            // The page draws the launcher's own glass where the window has none (`data-launcher` in client.css).
+            .with_initialization_script_for_main_only(
+                format!(
+                    "document.documentElement.dataset.launcher = {:?}",
+                    if cfg!(target_os = "linux") { "solid" } else { "glass" }
+                ),
+                true,
+            )
+            .with_navigation_handler(|to| crate::stays(&to))
+            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+            .with_transparent(!cfg!(target_os = "linux"))
+            .with_devtools(cfg!(debug_assertions))
+            .with_url(crate::HOME);
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        let builder = builder.with_initialization_script_for_main_only(crate::INITIALIZATION_SCRIPT, false);
+        builder
+    }
+
+    /// A developer's build writes what its pages say to their console to its stdout, as WebKitGTK offers: its web
+    /// view has no other console to read without a window of its own.
+    fn loaded(&mut self, _webview: &WebView) {
+        #[cfg(all(target_os = "linux", debug_assertions))]
         {
             use webkit2gtk::{SettingsExt, WebViewExt};
             use wry::WebViewExtUnix;
-            if let Some(settings) = webview.webview().settings() {
+            if let Some(settings) = _webview.webview().settings() {
                 settings.set_enable_write_console_messages_to_stdout(true);
             }
         }
-        webview
-    };
-    Ok(webview)
+    }
+
+    /// Gone, it opens a link once it's loaded again and asks where it is.
+    fn discarded(&mut self) {
+        self.started.store(false, Ordering::Relaxed);
+    }
 }
 
 /// The launcher's glass, the system's own material under its page, rounded: a Mac's Liquid Glass where it has it

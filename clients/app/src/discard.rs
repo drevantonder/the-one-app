@@ -1,6 +1,7 @@
 //! A computer's window of web content discards its page once it's been minimised or hidden a while, as a browser
 //! discards a tab and a phone ends an app in the background: its web view goes, and with it its web content process,
-//! and the page loads again as the window comes back. Each app's own window has one (`host`).
+//! and the page loads again as the window comes back. Each app's own window has one (`host`), and the launcher
+//! (`computer`).
 
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,9 @@ pub(crate) trait Page {
     /// The page, in a web view's builder.
     fn make<'a>(&mut self, builder: wry::WebViewBuilder<'a>) -> wry::WebViewBuilder<'a>;
 
+    /// Its web view is made, for what's set on one once it is.
+    fn loaded(&mut self, _webview: &wry::WebView) {}
+
     /// Its web view is gone: what it asked and wasn't answered is no one's.
     fn discarded(&mut self) {}
 }
@@ -26,6 +30,8 @@ pub(crate) struct Discarding<P> {
     loaded: Option<Loaded>,
     /// Since when the window may have been out of sight.
     away: Option<Instant>,
+    /// Where its web view keeps its data, if not where wry does.
+    data_directory: Option<std::path::PathBuf>,
     /// Where in a Linux window its page goes, if not in the window's own box.
     #[cfg(target_os = "linux")]
     parent: Option<gtk::Container>,
@@ -39,12 +45,13 @@ struct Loaded {
 }
 
 impl<P: Page> Discarding<P> {
-    /// The window's page, loaded.
-    pub(crate) fn new(window: &Window, page: P) -> anyhow::Result<Self> {
+    /// The window's page, loaded, keeping its data in `data_directory`.
+    pub(crate) fn new(window: &Window, page: P, data_directory: Option<std::path::PathBuf>) -> anyhow::Result<Self> {
         let mut discarding = Self {
             page,
             loaded: None,
             away: None,
+            data_directory,
             #[cfg(target_os = "linux")]
             parent: None,
         };
@@ -75,6 +82,20 @@ impl<P: Page> Discarding<P> {
             && let Err(error) = self.load(window)
         {
             eprintln!("this window's page didn't load again: {error:#}");
+        }
+    }
+
+    /// Loads a discarded page to do something, though its window may stay out of sight, where it's discarded again
+    /// in time.
+    pub(crate) fn needed(&mut self, window: &Window) {
+        if self.loaded.is_some() {
+            return;
+        }
+        if let Err(error) = self.load(window) {
+            eprintln!("this window's page didn't load again: {error:#}");
+        }
+        if window.is_minimized() || !window.is_visible() {
+            self.away = Some(Instant::now());
         }
     }
 
@@ -109,7 +130,9 @@ impl<P: Page> Discarding<P> {
     }
 
     fn load(&mut self, window: &Window) -> anyhow::Result<()> {
-        let mut context = Box::new(web_context());
+        let mut context = Box::new(wry::WebContext::new(self.data_directory.clone()));
+        // WebDriver drives it as it does Tauri's windows, which tauri-driver says by this.
+        context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
         let builder = self.page.make(wry::WebViewBuilder::new_with_web_context(&mut context));
         #[cfg(not(target_os = "linux"))]
         let webview = builder.build(window)?;
@@ -125,20 +148,8 @@ impl<P: Page> Discarding<P> {
                 )?,
             }
         };
+        self.page.loaded(&webview);
         self.loaded = Some(Loaded { webview, _context: context });
         Ok(())
     }
-}
-
-/// Where a page keeps its data: on Windows the app's WebView2 data folder, the launcher's, so every window is a client
-/// of one browser process, with its GPU and network processes, rather than starting its own. WebDriver drives
-/// it as it does Tauri's windows, which tauri-driver says by its variable.
-fn web_context() -> wry::WebContext {
-    #[cfg(windows)]
-    let folder = crate::shortcuts::local_data_dir().ok();
-    #[cfg(not(windows))]
-    let folder = None;
-    let mut context = wry::WebContext::new(folder);
-    context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
-    context
 }
