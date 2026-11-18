@@ -167,6 +167,13 @@ impl Sandbox {
         let runtime = Runtime::new()?;
         runtime.set_memory_limit(MEMORY);
         runtime.set_max_stack_size(STACK);
+        // A promise nothing handles is an error a browser reports (`unhandledrejection`), where QuickJS says nothing.
+        let unhandled = page.to_string();
+        runtime.set_host_promise_rejection_tracker(Some(Box::new(move |_, _, reason, handled| {
+            if !handled {
+                eprintln!("{unhandled} error: unhandled rejection: {}", reason.get::<rquickjs::Coerced<String>>().map_or_else(|_| "?".into(), |reason| reason.0));
+            }
+        })));
         runtime.set_loader(Resolve, Modules { files, cache });
         let context = Context::full(&runtime)?;
         let posted: Rc<RefCell<Vec<Posted>>> = Rc::default();
