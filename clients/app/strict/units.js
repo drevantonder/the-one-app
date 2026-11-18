@@ -1,4 +1,5 @@
-// `bun units.js`: writes src/units.json, how each locale says a number of each unit ECMA-402 sanctions for
+// `bun units.js`: writes src/units.json, how each English locale (`en` and its regional variants, the only ones intl.rs
+// has data for) says a number of each unit ECMA-402 sanctions for
 // Intl.NumberFormat's `style: "unit"`, from CLDR's own JSON (unicode-org/cldr-json) at the version ICU4X's data is
 // built from (49.0.0), as ICU4X formats only some of them (lengths, areas, masses, volumes and durations, not bytes,
 // temperatures or percentages). Each locale keeps only what differs from its parent's, as CLDR's own data does:
@@ -21,7 +22,8 @@ const json = async (path) => {
   if (!response.ok) throw new Error(`${path}: ${response.status}`)
   return response.json()
 }
-const locales = (await json("cldr-core/availableLocales.json")).availableLocales.full
+const english = (locale) => locale === "und" || /^en(-|$)/.test(locale)
+const locales = (await json("cldr-core/availableLocales.json")).availableLocales.full.filter(english)
 const { parentLocale } = (await json("cldr-core/supplemental/parentLocales.json")).supplemental.parentLocales
 // CLDR's JSON calls its root locale `und`, and its parentLocales `root`.
 const parentOf = (locale) => {
@@ -61,6 +63,6 @@ for (const locale of Object.keys(whole).sort()) {
   }
   if (Object.keys(differs).length) kept[locale] = differs
 }
-const parents = Object.fromEntries(Object.entries(parentLocale).map(([locale, parent]) => [locale, parent === "root" ? "und" : parent]))
+const parents = Object.fromEntries(Object.entries(parentLocale).filter(([locale]) => english(locale)).map(([locale, parent]) => [locale, parent === "root" ? "und" : parent]))
 writeFileSync(new URL("src/units.json", import.meta.url), JSON.stringify({ parents, locales: kept }))
 console.log(`${Object.keys(kept).length} of ${locales.length} locales differ from their parents`)

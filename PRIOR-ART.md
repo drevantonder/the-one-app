@@ -68,8 +68,9 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   - **FormatJS's Intl polyfills**: set aside. In QuickJS they took 45 ms to load as bytecode and 89 ms to add one
     locale's data, every time a sandbox starts, and their data for CLDR's 421 modern locales is 130 MB (2.7 MB
     compressed together).
-  - **ICU4X 2.4**: chosen for Intl, with every locale's data built in (about 11 MB), each formatter made in under
-    0.1 ms. Its `unstable` `DateTimeFieldBag` mirrors ECMA-402's date options. icu_experimental 0.7 formats only
+  - **ICU4X 2.4**: chosen for Intl, each formatter made in under 0.1 ms. Every locale's data built in is about
+    8.5 MB of each binary, so only English's is (`en` and its regional variants), and any other locale falls back to
+    English. Its `unstable` `DateTimeFieldBag` mirrors ECMA-402's date options. icu_experimental 0.7 formats only
     lengths, areas, masses, volumes and durations as units, not bytes, temperatures or percentages, so units come from
     CLDR's JSON (`clients/app/strict/units.js`). It has no DisplayNames for Intl, number ranges or plural ranges yet.
 

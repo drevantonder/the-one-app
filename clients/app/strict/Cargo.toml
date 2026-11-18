@@ -36,7 +36,7 @@ futures-lite = "2"
 # The host's language and time zone, which the sandbox's JS formats in.
 sys-locale = "0.3"
 iana-time-zone = "0.1"
-# Intl, as ECMA-402 says (intl.rs, intl.js), formatted by ICU4X with the data for every locale built in, as Boa formats
+# Intl, as ECMA-402 says (intl.rs, intl.js), formatted by ICU4X with the data for English built in, as Boa formats
 # it: its experimental crate formats currencies, percentages and relative times, its `unstable` field bag mirrors
 # ECMA-402's date options, and each time zone's rules are jiff's.
 icu = { version = "2.4", features = ["compiled_data", "unstable"] }

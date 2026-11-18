@@ -1,5 +1,5 @@
 //! What ECMA-402's `Intl` formats with, for the sandbox's own `Intl` (intl.js): ICU4X's formatters, with the data for
-//! every locale built in, each held by a class intl.js makes once its options are resolved as ECMA-402 says, and the
+//! English built in (`en` and its regional variants: ICU4X_DATA_DIR, `.cargo/config.toml`), each held by a class intl.js makes once its options are resolved as ECMA-402 says, and the
 //! patterns CLDR has for the units ICU4X doesn't format (units.json, from units.js). Every number reaches it as a
 //! number or a decimal string, never NaN or an infinity, which intl.js says itself.
 

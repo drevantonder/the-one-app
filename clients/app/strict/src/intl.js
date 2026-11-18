@@ -23,12 +23,9 @@
     return Math.floor(value)
   }
 
-  // Locales (CanonicalizeLocaleList, ResolveLocale): a locale is one ICU4X has data for, which it knows the likely
-  // script and region of.
-  const known = (tag) => {
-    const base = tag.split("-u-")[0]
-    return base.split("-").length >= 3 || native.maximize(base) !== base
-  }
+  // Locales (CanonicalizeLocaleList, ResolveLocale): a locale is one ICU4X has data for, which is English's only,
+  // `en` and its regional variants (intl.rs), so any other falls back to English.
+  const known = (tag) => /^en(-|$)/.test(tag)
   const canonical = (locales) => {
     if (locales === undefined) return []
     const list = typeof locales === "string" || locales instanceof Locale ? [locales] : [...Object(locales)]
@@ -42,10 +39,10 @@
   }
   const host = (() => {
     try {
-      return native.canonicalize(navigator.language)
-    } catch {
-      return "en-US"
-    }
+      const tag = native.canonicalize(navigator.language)
+      if (known(tag)) return tag
+    } catch {}
+    return "en-US"
   })()
   const unicode = (tag) => {
     const keys = {}
