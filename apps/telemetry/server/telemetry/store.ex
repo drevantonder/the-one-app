@@ -17,6 +17,7 @@ defmodule Telemetry.Store do
   past `most_bytes/0`, are let go. What was kept before it was OTLP, under `batches/`, isn't read, and is let go as
   it ages.
   """
+  require Logger
   alias Telemetry.Otlp
   alias OneCore.Artifact
 
@@ -141,9 +142,18 @@ defmodule Telemetry.Store do
 
   defp list(own), do: Artifact.list(own, "otlp/") ++ Artifact.list(own, "batches/")
 
-  # Each kept export laid flat, by its signal.
-  defp decode(own, names),
-    do: for({name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), do: Otlp.decode(signal(name), data))
+  # Each kept export laid flat, by its signal. One that isn't OTLP, as a device may send anything, is passed over.
+  defp decode(own, names) do
+    for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), batch = export(name, data), do: batch
+  end
+
+  defp export(name, data) do
+    Otlp.decode(signal(name), data)
+  rescue
+    ErlangError ->
+      Logger.warning("Telemetry couldn't read #{name}, #{byte_size(data)} bytes starting #{inspect(binary_part(data, 0, min(8, byte_size(data))))}: it isn't OTLP")
+      nil
+  end
 
   defp folder(name), do: name |> Path.dirname() |> String.replace_prefix("batches/", "otlp/")
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")
