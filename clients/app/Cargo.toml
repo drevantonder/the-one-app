@@ -24,6 +24,7 @@ window = [
   "dep:data-encoding",
   "dep:semver",
   "dep:sha2",
+  "dep:ed25519-dalek",
   "dep:serde_json",
   "dep:tokio",
   "dep:tauri",
@@ -72,6 +73,8 @@ data-encoding = { version = "2", optional = true }
 # The window's page the network has: its version, the lowest build it runs on, and its files' hashes (`page`).
 semver = { version = "1", features = ["serde"], optional = true }
 sha2 = { version = "0.11", optional = true }
+# Its `update.json`'s signature, by the platform's key (`page`).
+ed25519-dalek = { version = "3", optional = true }
 serde_json = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 url = { version = "2", optional = true }

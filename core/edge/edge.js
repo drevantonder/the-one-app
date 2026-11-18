@@ -24,6 +24,7 @@
 // A part whose `package.json` says `"tail": true` is a Tail Worker: every other Worker here that handles requests
 // for the network is given it as a tail consumer, so it hears what each did. The gateway only passes each on, and
 // the web client's are files; the presigner isn't either, since such a part is bound to it and so is deployed after.
+import { createPrivateKey, sign } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { $, Glob } from "bun";
@@ -70,7 +71,11 @@ await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).qu
 cpSync(`${root}/core/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true });
 // The app's own page, as its window has it, at `/page/`, which the app keeps and loads from its next start if it's
 // newer than its own and it runs on it (`clients/app/src/page.rs`), with what's said of it in `update.json`: its
-// version, the lowest build of the app it runs on (`clients/app/page/update.json`), and each file's SHA-256.
+// version, the lowest build of the app it runs on (`clients/app/page/update.json`), and each file's SHA-256. As
+// Tauri's updater and Sparkle do, the app takes it only with `update.json.sig`, the platform's Ed25519 signature of
+// `update.json`, whose public half it has built in, so neither whoever runs the network's edge nor anything in front
+// of it can give the app a page of their own. PAGE_SIGNING_KEY is its private half, a PKCS#8 DER in base64 (in
+// 1Password, "The One App page signing key"); without it the page isn't signed, and apps keep the one they have.
 const version = (await $`sh ${root}/tooling/version`.text()).trim();
 {
   const files = {};
@@ -79,7 +84,12 @@ const version = (await $`sh ${root}/tooling/version`.text()).trim();
     files[basename(file)] = new Bun.CryptoHasher("sha256").update(await Bun.file(`${app}/${file}`).bytes()).digest("hex");
   }
   const update = { version, ...(await Bun.file(`${app}/page/update.json`).json()), files };
-  await Bun.write(`${web}/dist/page/update.json`, JSON.stringify(update));
+  const said = Buffer.from(JSON.stringify(update));
+  await Bun.write(`${web}/dist/page/update.json`, said);
+  if (process.env.PAGE_SIGNING_KEY) {
+    const key = createPrivateKey({ key: Buffer.from(process.env.PAGE_SIGNING_KEY, "base64"), format: "der", type: "pkcs8" });
+    await Bun.write(`${web}/dist/page/update.json.sig`, sign(null, said, key).toString("base64"));
+  } else console.warn("PAGE_SIGNING_KEY isn't set, so the window's page isn't signed and apps keep the one they have");
 }
 
 const built = `${root}/target/edge`;

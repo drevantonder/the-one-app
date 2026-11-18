@@ -102,6 +102,7 @@ dependencies = [
  "computer_use_client",
  "data-encoding",
  "dirs 6.0.0",
+ "ed25519-dalek",
  "embed-manifest",
  "encryption_client",
  "global-hotkey",

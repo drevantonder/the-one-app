@@ -4,12 +4,18 @@
 //! (`native`, from `page/update.json`) and each file's SHA-256. As the app opens it asks for that, and keeps a newer
 //! one it runs on in its home (`update`), which it loads from its next start (`load`), as Expo does by default. It
 //! loads the copy built into it while it keeps none newer that it runs on, so with no network too.
+//!
+//! As Tauri's updater and Sparkle do, it takes a page only with the platform's Ed25519 signature of its `update.json`
+//! (`update.json.sig`, made at the edge's deploy), checked with the public half built in here, `KEY`, as it's
+//! downloaded and again each time a kept one is loaded. That page can reach everything the app can, the recovery key
+//! among it, so neither whoever runs the network's edge nor anything in front of it may choose it.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::{Context, bail};
+use ed25519_dalek::{Signature, VerifyingKey};
 use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -18,6 +24,10 @@ use sha2::{Digest, Sha256};
 // Tauri's.
 #[cfg(desktop)]
 include!(concat!(env!("OUT_DIR"), "/page.rs"));
+
+/// The public half of the key the platform signs the page's `update.json` with, PAGE_SIGNING_KEY at the edge's
+/// deploy (in 1Password, "The One App page signing key").
+const KEY: &str = "9cca32185c88e006a2479367c5c24d69bfd06c29471d873b722ba3ef454e1841";
 
 /// What a network says of its page, and what a page kept here says of itself: its `update.json`.
 #[derive(Deserialize)]
@@ -68,10 +78,30 @@ pub fn kept(path: &str) -> Option<&'static [u8]> {
     KEPT.get()?.as_ref()?.get(path.trim_start_matches('/')).map(Vec::as_slice)
 }
 
-/// The pages kept in `home`, each with its folder.
+/// The pages kept in `home` whose `update.json` is signed, each with its folder. One still being downloaded
+/// (`.<version>`) isn't one.
 fn copies(home: &Path) -> impl Iterator<Item = (Update, std::path::PathBuf)> {
-    let folders = std::fs::read_dir(home.join("page")).into_iter().flatten().flatten().map(|entry| entry.path());
-    folders.filter_map(|folder| Some((serde_json::from_slice(&std::fs::read(folder.join("update.json")).ok()?).ok()?, folder)))
+    let folders = std::fs::read_dir(home.join("page")).into_iter().flatten().flatten();
+    let folders = folders.filter(|entry| !entry.file_name().to_string_lossy().starts_with('.')).map(|entry| entry.path());
+    folders.filter_map(|folder| {
+        let read = |name| std::fs::read(folder.join(name)).with_context(|| format!("{name} isn't there"));
+        match read("update.json").and_then(|said| signed(&said, &read("update.json.sig")?)) {
+            Ok(update) => Some((update, folder)),
+            Err(error) => {
+                eprintln!("the page kept in {} isn't the platform's: {error:#}", folder.display());
+                None
+            }
+        }
+    })
+}
+
+/// What `update.json` says, if `sig` is the platform's signature of it.
+fn signed(said: &[u8], sig: &[u8]) -> anyhow::Result<Update> {
+    let sig = data_encoding::BASE64.decode(sig.trim_ascii()).context("update.json.sig isn't base64")?;
+    let sig = Signature::from_slice(&sig).context("update.json.sig isn't a signature")?;
+    let key = data_encoding::HEXLOWER.decode(KEY.as_bytes()).ok().and_then(|key| VerifyingKey::try_from(key.as_slice()).ok());
+    key.expect("KEY is a public key").verify_strict(said, &sig).context("update.json isn't signed by the platform")?;
+    serde_json::from_slice(said).context("update.json")
 }
 
 /// A kept page's files, each as its `update.json` says it is.
@@ -101,7 +131,8 @@ pub async fn update(client: &::client::Client, home: &Path) -> anyhow::Result<()
         Ok(web.get(format!("{at}{name}")).send().await?.error_for_status()?.bytes().await?.to_vec())
     };
     let said = get("update.json").await?;
-    let update: Update = serde_json::from_slice(&said).context("the network's update.json")?;
+    let sig = get("update.json.sig").await?;
+    let update = signed(&said, &sig).context("the network's page")?;
     let newest = copies(home).map(|(kept, _)| kept.version).chain([build()]).max().expect("there's the build");
     if !update.newer(&newest) {
         return Ok(());
@@ -121,7 +152,10 @@ pub async fn update(client: &::client::Client, home: &Path) -> anyhow::Result<()
         std::fs::write(partial.join(name), file)?;
     }
     std::fs::write(partial.join("update.json"), said)?;
+    std::fs::write(partial.join("update.json.sig"), sig)?;
+    // One of this version that isn't the platform's may be there.
     let whole = folder.join(update.version.to_string());
+    let _ = std::fs::remove_dir_all(&whole);
     std::fs::rename(&partial, &whole)?;
     for older in std::fs::read_dir(&folder)?.flatten().map(|entry| entry.path()).filter(|path| *path != whole) {
         let _ = std::fs::remove_dir_all(older);
