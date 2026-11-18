@@ -46,10 +46,13 @@ defmodule OneCore.Server do
   def watch(client, address, device) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
     Iroh.watch(endpoint, client, address && JSON.encode!(address), device)
+
+    if address && device,
+      do: Registry.dispatch(OneCore.Waiting, {:watching, device}, &for({process, _} <- &1, do: send(process, {:watching, device})))
   end
 
   @doc """
-  The devices whose app is watching this server, by their keys: each is reached by `ask_device/2` while it runs.
+  The devices whose app is watching this server, by their keys: each is reached by `ask_device/3` while it runs.
   None with no server started.
   """
   def devices do
@@ -59,16 +62,56 @@ defmodule OneCore.Server do
     end
   end
 
+  # How long a device that was woken has to watch again: a push reaches a phone in a second or two, and its app
+  # starts and connects in a few more.
+  @wakes 20_000
+
   @doc """
   Asks the device whose key is `device` one JSON-RPC request, `message`, as its app runs: a device's app answers a
   call of a tool that acts on the device itself (`client::DeviceTools`), as MCP's `tools/call`. Gives `{:ok, answer}`,
   `:unreachable` where its app isn't watching this server or didn't answer, so it was asked nothing, or `:stopped`
   where it stopped answering after it was asked, so it may have done it. Who may ask it what is the asking app's to
   decide: the device answers any server acting for its person.
+
+  A device whose app isn't running is woken first: the apps installed for the network that can wake one (the hook
+  `wake`, as Notifications does by a push) are asked to, and it's asked once its app watches again, within
+  #{div(@wakes, 1000)} seconds. One that no app woke, or that didn't watch in time, is `:unreachable`. With
+  `wake: false` it isn't, as for what's only asked of devices that are awake.
   """
-  def ask_device(device, message) do
+  def ask_device(device, message, options \\ []) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
-    await(&Iroh.ask_client(endpoint, device, message, self(), &1))
+    ask = fn -> await(&Iroh.ask_client(endpoint, device, message, self(), &1)) end
+
+    with :unreachable <- ask.(),
+         true <- Keyword.get(options, :wake, true),
+         :watching <- wake(device) do
+      ask.()
+    else
+      false -> :unreachable
+      outcome -> outcome
+    end
+  end
+
+  # Has the apps that can wake a device wake it, and waits for it to watch this server again: `:watching`, or
+  # `:unreachable` where none woke it or it didn't watch in time.
+  defp wake(device) do
+    Registry.register(OneCore.Waiting, {:watching, device}, nil)
+
+    try do
+      {:ok, woken, _failed} = Hooks.collect("wake", %{"device" => device}, {nil, "network"})
+
+      if Enum.any?(woken, fn {_app, part} -> part["woken"] == true end) do
+        receive do
+          {:watching, ^device} -> :watching
+        after
+          @wakes -> :unreachable
+        end
+      else
+        :unreachable
+      end
+    after
+      Registry.unregister(OneCore.Waiting, {:watching, device})
+    end
   end
 
   @doc "The folder this server keeps what's its own on this machine in."

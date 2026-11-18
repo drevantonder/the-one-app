@@ -31,7 +31,8 @@ defmodule OneCore.Application do
       Deploy.table()
 
       # `OneCore.Waiting` is who waits for something to happen, by what: `:seen`, another server coming or going
-      # (`OneCore.Servers.back/1`), and `:status`, what this one is changing (`OneCore.Release.await/1`).
+      # (`OneCore.Servers.back/1`), `:status`, what this one is changing (`OneCore.Release.await/1`), and
+      # `{:watching, device}`, a device's app watching again once it was woken (`OneCore.Server.ask_device/3`).
       children = [
         {Registry, keys: :duplicate, name: OneCore.Waiting},
         {Task.Supervisor, name: OneCore.Asks},
