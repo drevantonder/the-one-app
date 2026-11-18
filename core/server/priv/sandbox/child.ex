@@ -499,7 +499,7 @@ defmodule OneCore.Sandbox.Check do
           hook in @deciding,
           do:
             "#{where(app)}: hooks/0 names `#{hook}`, which changes or decides what happens. An untrusted " <>
-              "app only observes: hook `called` or `changed` instead, or run it trusted, on a server of its owner's."
+              "app only observes: hook `changed` instead, or run it trusted, on a server of its owner's."
 
     offering =
       if offers == [],

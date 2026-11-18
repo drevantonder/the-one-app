@@ -168,10 +168,9 @@ defmodule OneCore.Apps.Calls do
   end
 
   # Runs a call as a span of its trace, OpenTelemetry's, which the SDK exports (`OneCore.Otlp`), with how long it took
-  # as `one.tool.duration`, and tells the apps that observe calls how it went: whether it answered, and whether
-  # another server ran it, which measures it there. Its span says the app, the tool, whose call it was as an owner's
+  # as `one.tool.duration`, unless another server ran it, which measures it there. Its span says the app, the tool, whose call it was as an owner's
   # prefix (`users/alice`), and how it ended: never what it was given or answered.
-  defp observed(about, {_actor, subject} = principal, call) do
+  defp observed(about, {_actor, subject}, call) do
     app = about["app"] || "one"
     attributes = %{"one.app" => app, "one.tool" => about["tool"]}
     attributes = if about["task"] == true, do: Map.put(attributes, "one.task", true), else: attributes
@@ -195,13 +194,6 @@ defmodule OneCore.Apps.Calls do
         if error, do: Tracer.set_status(:error, String.slice(error, 0, 1000))
         outcome = if error, do: "error", else: "ok"
         if not forwarded, do: Histogram.record(:"one.tool.duration", took / 1000, Map.put(attributes, "one.outcome", outcome))
-
-        if Hooks.hooking("called", subject) != [] do
-          span = Tracer.current_span_ctx()
-          trace = %{"traceId" => OpenTelemetry.Span.hex_trace_id(span), "spanId" => OpenTelemetry.Span.hex_span_id(span)}
-          about = Map.merge(about, %{"trace" => trace, "took" => took, "error" => error, "forwarded" => forwarded})
-          Hooks.observe("called", about, principal)
-        end
       end
 
       ended

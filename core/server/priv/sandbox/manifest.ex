@@ -206,13 +206,6 @@ defmodule OneCore.App.Manifest do
      The network is about to have its first owner. It's about `who` they are. An app that keeps who may do what
      writes that down before it answers, and refuses if it can't: nothing else tells it.
      """},
-    {"called", :observe,
-     """
-     A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
-     which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `forwarded`
-     to another server to run, whether its app makes it an MCP `task` (`OneCore.Tasks`), and its `trace`: its span's
-     `traceId` and `spanId`, OpenTelemetry's. A call passed on is observed on both servers.
-     """},
     {"changed", :observe,
      """
      A blob of an artifact that an app made or reached was written or removed. It's about the `artifact`'s name, the
