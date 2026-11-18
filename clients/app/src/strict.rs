@@ -266,7 +266,12 @@ fn respond(
     asked: &Arc<Mutex<HashMap<String, Asked>>>,
 ) -> Option<Value> {
     let method = message["method"].as_str()?;
-    // A notification, which needs no answer: none is heard here yet.
+    // The app asks to be left (`leave`): on a computer, where its window stays open, Home, as its breadcrumb's is.
+    if method == "ui/notifications/request-teardown" {
+        crate::computer::summon();
+        return None;
+    }
+    // Any other notification needs no answer, and none is heard here yet.
     let id = message.get("id").cloned()?;
     let params = &message["params"];
     let mut state = state.lock().expect("nothing panics holding it");
