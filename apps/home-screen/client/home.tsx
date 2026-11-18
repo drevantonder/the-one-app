@@ -404,11 +404,12 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
   const apps = () => sorted(props.owner.library, false)
   const background = () => sorted(props.owner.library, true)
   const open = () => (searching() ? !shut() : unfolded())
-  const categories = (list: Category[], prefix: string) => (
+  // Components, not JSX made again whenever the App Library's asked again: its rows stay, each with its icon.
+  const Categories = (inner: { list: Category[]; prefix: string }) => (
     <div class="categories">
-      <For each={list} keyed={(category) => category.category}>
+      <For each={inner.list} keyed={(category) => category.category}>
         {(category) => {
-          const key = () => prefix + category().category
+          const key = () => inner.prefix + category().category
           const shown = () => (category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
           return (
             <div class="category">
@@ -431,9 +432,9 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
       </For>
     </div>
   )
-  const results = (list: Listed[]) => (
+  const Found = (inner: { list: Listed[] }) => (
     <div class="found">
-      <For each={list} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
+      <For each={inner.list} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
         {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} />}
       </For>
     </div>
@@ -443,8 +444,8 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
       <div class="shelf">
         <Search placeholder="App Library" aria-label="Search the App Library" value={query()} onInput={(event) => (setQuery(event.currentTarget.value), setShut(false))} />
         <Show when={searching() ? found(false).length || found(true).length : props.owner.library.length} fallback={<Empty>{searching() ? "No apps match." : "No apps yet."}</Empty>}>
-          <Show when={searching()} fallback={<Show when={apps().length}>{categories(apps(), "")}</Show>}>
-            <Show when={found(false).length}>{results(found(false))}</Show>
+          <Show when={searching()} fallback={<Show when={apps().length}><Categories list={apps()} prefix="" /></Show>}>
+            <Show when={found(false).length}><Found list={found(false)} /></Show>
           </Show>
           <Show when={searching() ? found(true).length : background().length}>
             <section class="background" aria-labelledby="background-apps">
@@ -452,7 +453,11 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
                 <span>Background Apps</span>
                 <Icon name="caret-right" along />
               </button>
-              <Show when={open()}>{searching() ? results(found(true)) : categories(background(), BEHIND)}</Show>
+              <Show when={open()}>
+                <Show when={searching()} fallback={<Categories list={background()} prefix={BEHIND} />}>
+                  <Found list={found(true)} />
+                </Show>
+              </Show>
             </section>
           </Show>
         </Show>
