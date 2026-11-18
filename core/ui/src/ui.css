@@ -974,6 +974,10 @@ button.ui-box {
 .ui-row:has(> .control, > .action) {
   display: flex;
 }
+/* An action that would leave the words less than 12rem goes under them, so the name always reads. */
+.ui-row:has(> .action) {
+  flex-wrap: wrap;
+}
 .ui-row > .control {
   flex: none;
   justify-content: center;
@@ -989,10 +993,13 @@ button.ui-box {
   display: flex;
   flex: none;
   align-items: center;
+  /* Wrapped under the words, it ends the row at their end. */
+  margin-inline-start: auto;
+  padding-block-end: 0.5rem;
   padding-inline-end: 0.75rem;
 }
 .ui-row > .row:has(+ .action) {
-  flex: 1;
+  flex: 1 1 12rem;
   min-width: 0;
 }
 .ui-row > .row {
