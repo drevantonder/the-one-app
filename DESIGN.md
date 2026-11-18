@@ -34,7 +34,10 @@ What users see, as the project's owner decided it. Only their decisions are here
 
 ## Strict (18 Nov)
 
-- Every app's screens and the launcher are written in strict mode (Solid Strict DOM), so they run natively on a computer (GPUI) and on Android (Lynx), and unchanged on the DOM on the web, an iPhone and in MCP Apps. Strict is the UI library's components and four primitives (box, text, image, input), styled only by the design tokens: flex and grid, spacing, colour by token, radius and the type styles. Nothing else is strict.
+- Every app's screens and the launcher are written in strict mode (Solid Strict DOM), so they run natively on a computer (GPUI) and on Android (Lynx), and unchanged on the DOM on the web, an iPhone and in MCP Apps.
+- The strict contract (18 Nov) is built from low-level primitives the way GPUI is: a box (GPUI's `div`), a scroll (a box that scrolls), text, an image, a path (a vector shape) and a text input, with events (click, hover, focus, keys, scroll), focus, and transitions and animations. Hosts (the DOM, GPUI, Lynx) draw only these.
+- Their style is GPUI's `Styled` vocabulary, which is Tailwind's, named as Tailwind names it and by the design tokens only: flex and grid, gap, padding and margin (negative too), sizes, position with inset and z-order, overflow, colours, borders, radius, shadows, opacity, fonts (sans, mono), the type styles and weights, line height, tracking, text alignment, truncation and line clamps, cursor, and motion at the tokens' paces. Nothing arbitrary.
+- Every UI library component is written once, in strict, on those primitives, and is the same code on every host; its look stays exactly the one described here.
 - Everything written in strict updates over the air.
 
 ## App windows (18 Nov)

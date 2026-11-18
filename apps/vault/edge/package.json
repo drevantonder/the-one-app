@@ -7,7 +7,7 @@
     "vault"
   ],
   "scripts": {
-    "build": "bun ../../../core/ui/app.js \"$PWD/page\" \"$PWD/files/vault\"",
+    "build": "bun ../../../core/ui/dist/build/app.js \"$PWD/page\" \"$PWD/files/vault\"",
     "typecheck": "tsc && tsc -p page"
   },
   "devDependencies": {

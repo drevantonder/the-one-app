@@ -1,0 +1,187 @@
+/* The strict style vocabulary on the DOM: Tailwind's utilities, with only the design tokens as its theme
+   (tokens.css), so a class names a token and never a value of its own. `inline` puts each token in the utility as
+   `var(--token)`, and `reference` adds no variables of its own beside the tokens. What a strict page may name is
+   style.ts; app.js builds the utilities a page uses with this, and build.js the UI library's own. */
+@theme inline reference {
+  --*: initial;
+
+  --spacing: 0.25rem;
+  --spacing-gutter: var(--gutter);
+  --spacing-gap: var(--gap);
+  --spacing-control: var(--control);
+  --spacing-icon: var(--icon);
+  --spacing-readable: var(--readable);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-pressed: var(--pressed);
+  --color-destructive: var(--destructive);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-overlay: var(--overlay);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-white: #fff;
+  --color-black: #000;
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-icon: var(--radius-icon);
+
+  --shadow-xs: var(--shadow-xs);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --font-weight-normal: var(--body-weight);
+  --font-weight-medium: var(--label-weight);
+  --font-weight-semibold: var(--figure-weight);
+  --font-weight-bold: var(--title-weight);
+
+  --tracking-tight: var(--title-tracking);
+  --tracking-tighter: var(--figure-tracking);
+  --tracking-normal: 0;
+
+  --leading-none: 1;
+  --leading-tight: 1.2;
+  --leading-normal: 1.5;
+
+  --transition-duration-quick: var(--move-quick);
+  --transition-duration-settle: var(--move-settle);
+  --transition-duration-travel: var(--move-travel);
+  --default-transition-duration: var(--move-quick);
+  --default-transition-timing-function: var(--ease-quick);
+  --ease-quick: var(--ease-quick);
+  --ease-settle: var(--ease-settle);
+  --ease-travel: var(--ease-travel);
+
+  --animate-spin: spin 1s linear infinite;
+  --animate-pulse: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  @keyframes spin {
+    to {
+      rotate: 360deg;
+    }
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  --aspect-video: 16 / 9;
+
+  --container-3xs: 16rem;
+  --container-2xs: 18rem;
+  --container-xs: 20rem;
+  --container-sm: 24rem;
+  --container-md: 28rem;
+  --container-lg: 32rem;
+  --container-xl: 36rem;
+  --container-2xl: 42rem;
+  --container-3xl: 48rem;
+  --container-4xl: 56rem;
+  --container-5xl: 64rem;
+}
+
+/* The type styles (DESIGN.md: text is one of a few), each a size, a weight, a tracking and a line height from the
+   tokens. */
+@utility text-body {
+  font-size: var(--text-base);
+  font-weight: var(--body-weight);
+  line-height: 1.5;
+}
+@utility text-label {
+  font-size: var(--text-base);
+  font-weight: var(--label-weight);
+  line-height: 1.5;
+}
+@utility text-headline {
+  font-size: var(--text-lg);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+  line-height: 1.5;
+}
+@utility text-title {
+  font-size: var(--text-title);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+  line-height: 1.2;
+}
+@utility text-figure {
+  font-size: var(--text-title);
+  font-weight: var(--figure-weight);
+  letter-spacing: var(--figure-tracking);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+@utility text-subheadline {
+  font-size: var(--text-subheadline);
+  font-weight: var(--body-weight);
+  line-height: 1.5;
+}
+@utility text-footnote {
+  font-size: var(--text-footnote);
+  font-weight: var(--body-weight);
+  line-height: 1.5;
+}
+@utility text-caption-1 {
+  font-size: var(--text-caption-1);
+  font-weight: var(--body-weight);
+  line-height: 1.5;
+}
+@utility text-caption-2 {
+  font-size: var(--text-caption-2);
+  font-weight: var(--body-weight);
+  line-height: 1.5;
+}
+
+/* As many columns as fit, each at least so wide (from the spacing scale), filling the room: `grid-cols-fill-20`. */
+@utility grid-cols-fill-* {
+  grid-template-columns: repeat(auto-fill, minmax(--spacing(--value(integer)), 1fr));
+}
+
+/* Hovering shows only under a mouse or a trackpad: a touch screen says it hovers too, and leaves what was tapped
+   looking hovered. */
+@custom-variant hover {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+/* Dark, as the page's `dark` class says (a client sets it from Colour Mode), or the device's own where nothing
+   says (tokens.css). */
+@custom-variant dark {
+  :root.dark & {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) & {
+      @slot;
+    }
+  }
+}

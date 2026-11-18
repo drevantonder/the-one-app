@@ -379,7 +379,7 @@ defmodule OneCore.App do
     Devices counts the devices waiting to sign in as them (`badge: "waiting"`). A Home Screen asks it again whenever
     something changed, so it only reads what the app keeps.
   - An entrypoint may say its `host`, the version of the strict protocol its page is written for
-    (`core/ui/src/strict/protocol.ts`, `host: 1`): its page is in strict mode (the UI library's skill), so a native
+    (`core/ui/src/strict/protocol.ts`, `host: 2`): its page is in strict mode (the UI library's skill), so a native
     host that speaks that version draws it itself, and an older host, or a browser, opens it as any other page.
   - An app that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
     registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
@@ -613,7 +613,7 @@ defmodule OneCore.App do
   - The app's server-side code asks it over the web, signing what it asks as its server does at the edge
     (`OneCore.Edge.signed/2`). `env.NETWORK.verifiedKey(url, headers, body)` gives the key that signed it, or `null`.
   - Its `package.json`'s packages are installed and its `build` script run where the edge is deployed from. A
-    page it serves is built there as an app's is, against the UI library (`bun ../../../core/ui/app.js <source> <out>`), which
+    page it serves is built there as an app's is, against the UI library (`bun ../../../core/ui/dist/build/app.js <source> <out>`, which `bun edge.js deploy` builds first), which
     the edge serves at `/ui/` as every client has it. `sign-in` does all of this.
 
   Undo follows what people ordinarily expect of an app. An app that wants more keeps its own history. What a tool

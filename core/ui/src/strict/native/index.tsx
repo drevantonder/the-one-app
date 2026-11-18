@@ -6,7 +6,7 @@ import { createContext, createSignal, For, Show, useContext } from "solid-js"
 import type { Element } from "solid-js"
 import { createElement, event, render as draw, spread } from "./renderer.ts"
 import { messages, readable, whole } from "../../words.ts"
-import type { Props } from "../protocol.ts"
+import type { Props, Type } from "../protocol.ts"
 import type * as Strict from "../types/ui.d.ts"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
@@ -17,13 +17,15 @@ export { words } from "../../words.ts"
 export { createListCollection } from "../../collection.ts"
 
 /** A primitive: a node of its type, with its props. */
-const primitive = (type: "box" | "text" | "image" | "input") => (props: object) => {
+const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {
   const node = createElement(type)
   spread(node, props)
   return node as unknown as Element
 }
 
 export const Box: typeof Strict.Box = primitive("box")
+export const Scroll: typeof Strict.Scroll = primitive("scroll")
+export const Path: typeof Strict.Path = primitive("path")
 export const Text: typeof Strict.Text = primitive("text")
 export const Image: typeof Strict.Image = primitive("image")
 export const Input: typeof Strict.Input = primitive("input")

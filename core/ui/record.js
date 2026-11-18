@@ -70,7 +70,7 @@ export function semantic(node) {
   for (const [name, value] of Object.entries(props)) if (name.startsWith("aria-") && value !== null && name !== "aria-label") states[name.slice(5)] = String(value)
   if (props.disabled) states.disabled = "true"
   const role = props.role ?? (type === "input" ? (props.type === "search" ? "searchbox" : "textbox") : type === "image" && props.alt ? "img" : undefined)
-  const hidden = props["aria-hidden"] === "true" || (type === "image" && !props.alt)
+  const hidden = props["aria-hidden"] === "true" || (type === "image" && !props.alt) || (type === "path" && !props.role)
   return hidden ? { states: {}, children: [] } : { role, name: props["aria-label"] ?? (type === "image" ? props.alt : undefined), states, children: node.children.map(semantic) }
 }
 

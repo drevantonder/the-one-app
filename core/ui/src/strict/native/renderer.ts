@@ -5,7 +5,8 @@
 import { createRenderer } from "@solidjs/universal"
 import { VERSION, type Event, type Host, type Op, type Type } from "../protocol.ts"
 
-/** A node as the sandbox keeps it: where it is in the tree, and the handlers the host's events go to. */
+/** A node as the sandbox keeps it: where it is in the tree, and the handlers the host's events go to, by the event's
+ * name (`keydown` for `onKeyDown`). */
 export interface Node {
   id: number
   type: Type
@@ -47,11 +48,11 @@ function node(type: Type, value?: string): Node {
   return made
 }
 
-const types = new Set<Type>(["box", "text", "image", "input"])
+const types = new Set<Type>(["box", "scroll", "text", "image", "path", "input"])
 
 export const { render: mount, effect, memo, createComponent, createElement, createTextNode, insertNode, insert, spread, setProp, mergeProps, applyRef, ref } = createRenderer<Node>({
   createElement(tag) {
-    if (!types.has(tag as Type)) throw new Error(`A strict page draws a box, a text, an image or an input, not a ${tag}`)
+    if (!types.has(tag as Type)) throw new Error(`A strict page draws a box, a scroll, a text, an image, a path or an input, not a ${tag}`)
     return node(tag as Type)
   },
   createTextNode: (value) => node("raw-text", value),
@@ -61,8 +62,9 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
   isTextNode: (node) => node.type === "raw-text",
   setProperty(node, name, value) {
     if (/^on[A-Z]/.test(name)) {
-      if (typeof value === "function") node.handlers[name] = value as (event: object) => void
-      else delete node.handlers[name]
+      const event = name.slice(2).toLowerCase()
+      if (typeof value === "function") node.handlers[event] = value as (event: object) => void
+      else delete node.handlers[event]
       queue({ op: "set", id: node.id, name: name as "onClick", value: typeof value === "function" ? true : null })
     } else queue({ op: "set", id: node.id, name: name as "role", value: value ?? null })
   },
@@ -83,12 +85,13 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
   getNextSibling: (node) => node.parent?.children[node.parent.children.indexOf(node) + 1],
 })
 
-/** What the person did, from the host, to the handler it's for: `click` to `onClick`. An `input` is told what's in
- * it now, as the DOM's `event.currentTarget.value`. */
-export function event({ id, name, value }: Event) {
-  const handler = nodes.get(id)?.deref()?.handlers[`on${name[0].toUpperCase()}${name.slice(1)}`]
-  const target = { value: value ?? "" }
-  handler?.({ currentTarget: target, target })
+/** What the person did, from the host, to the handler it's for: `click` to `onClick`, `keydown` to `onKeyDown`, with
+ * what the DOM's event would say of it: an `input`'s text as `currentTarget.value`, a key as `key` with its modifiers,
+ * and how far a `scroll` has scrolled as `currentTarget.scrollTop`. */
+export function event({ id, name, value, key, shiftKey, altKey, ctrlKey, metaKey, scrollTop, scrollLeft }: Event) {
+  const handler = nodes.get(id)?.deref()?.handlers[name]
+  const target = { value: value ?? "", scrollTop: scrollTop ?? 0, scrollLeft: scrollLeft ?? 0 }
+  handler?.({ currentTarget: target, target, key: key ?? "", shiftKey: !!shiftKey, altKey: !!altKey, ctrlKey: !!ctrlKey, metaKey: !!metaKey })
 }
 
 /** Draws a page at the root. */

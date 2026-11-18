@@ -7,11 +7,19 @@
 // serves a page with names the same (`OneCore.Mcp`), for what's imported by name as it runs. A page the edge serves
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
 // exits with 1.
+//
+// A page's classes in the strict style vocabulary (src/strict/style.ts), and the UI library's, are drawn as Tailwind
+// draws them, from the tokens (src/strict/tailwind.js), in one stylesheet after the UI library's: every word in the
+// app's source that's in the vocabulary, as Tailwind's own scanner finds them, and the UI library's (`classes.txt`,
+// which build.js writes beside this). One stylesheet, so each class's place among the others is Tailwind's, whoever
+// named it.
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { dirname, extname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
 import { build, parseAst } from "vite"
+import { named } from "./src/strict/style.ts"
+import { utilities } from "./src/strict/tailwind.js"
 
 const [source, out] = process.argv.slice(2)
 
@@ -22,6 +30,12 @@ const pages = readdirSync(source, { recursive: true }).filter((path) => path.end
 // The modules it exports, by their names: `./profile` is `profile`.
 const manifest = join(source, "package.json")
 const exported = Object.entries((existsSync(manifest) && JSON.parse(readFileSync(manifest, "utf8")).exports) || {}).map(([name, file]) => [name.replace(/^\.\//, ""), join(source, file)])
+
+const here = (path) => fileURLToPath(new URL(path, import.meta.url))
+const words = (text) => text.split(/[\s"'`{}()<>,;=]+/)
+const code = readdirSync(source, { recursive: true }).filter((path) => /\.[jt]sx?$/.test(path) && !path.split("/").includes("node_modules"))
+const classes = [...words(readFileSync(here("classes.txt"), "utf8")), ...named(code.flatMap((path) => words(readFileSync(join(source, path), "utf8"))))]
+const strict = await utilities(classes)
 
 try {
   await build({
@@ -42,6 +56,14 @@ try {
           { tag: "script", attrs: { src: "/ui/client/colour-mode.js" }, injectTo: "head-prepend" },
           { tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" },
         ],
+      },
+      // Its classes, after the UI library's look and before the app's own.
+      {
+        name: "strict",
+        enforce: "pre",
+        resolveId: (id) => (id === "/strict.css" ? "\0strict.css" : undefined),
+        load: (id) => (id === "\0strict.css" ? strict : undefined),
+        transformIndexHtml: { order: "pre", handler: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "/strict.css" }, injectTo: "head-prepend" }] },
       },
       // A module another page imports brings its own look: the stylesheets it imports, which a page links in its
       // HTML, it links in the page that imports it as it runs.
