@@ -93,10 +93,11 @@ for kind in "${kinds[@]}"; do
     mac=($(changed))
     ((${#mac[@]})) || continue
     [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: GitHub builds the commit." >&2 && exit 1; }
-    echo "Building ${mac[*]} on GitHub's macOS runner" >&2
+    echo "Building ${mac[*]} on a Mac" >&2
     downloaded=$(mktemp -d -p "$target")
-    (run=$(tooling/github-run nifs.yml -f commit="$(git rev-parse HEAD)" -f rust="$(rustc -V | cut -d' ' -f2)" \
-      -f builds="${builds[*]}" -f files="${mac[*]}") && gh run download "$run" -n nifs -D "$downloaded" &&
+    (tooling/on-mac nifs.yml nifs.tar "$downloaded" \
+      'export RUSTUP_TOOLCHAIN=$RUST && env $BUILDS tooling/nifs macos-aarch64 && tar -cf nifs.tar $FILES' \
+      -f rust="$(rustc -V | cut -d' ' -f2)" -f builds="${builds[*]}" -f files="${mac[*]}" &&
       tar -xf "$downloaded/nifs.tar" && rm -r "$downloaded") &
     on_github=$!
     continue
@@ -121,6 +122,6 @@ for kind in "${kinds[@]}"; do
   done
 done
 if [[ -n ${on_github-} ]]; then
-  wait "$on_github" || { echo "${mac[*]} changed since the last build of it, and GitHub's macOS runner didn't build it." >&2 && exit 1; }
+  wait "$on_github" || { echo "${mac[*]} changed since the last build of it, and no Mac built it." >&2 && exit 1; }
   for file in "${mac[@]}"; do keep "$file"; done
 fi

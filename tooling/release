@@ -17,7 +17,7 @@
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
 # the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac's `one` needs
-# its system's frameworks: from Linux, it's built on GitHub's macOS runner (`.github/workflows/mac-client.yml`), from
+# its system's frameworks: from Linux, it's built on a Mac (`tooling/on-mac`: GitHub's runner, or the owner's), from
 # the same commit with the same Rust, and published with the rest. A server release and a client release run at once,
 # each in a checkout of its own, but a second of the same kind is refused while the first builds. One published while
 # the network's update of the one before is under way takes its place there. A commit older than one
@@ -212,7 +212,7 @@ servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 # `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
 # which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
 # that machine's system libraries, so each kind builds its own. Each builds at once, beside the servers, in a target
-# folder of its own: cargo holds one folder for one build at a time. A Mac's is built on GitHub's macOS runner, with
+# folder of its own: cargo holds one folder for one build at a time. A Mac's is built on a Mac (`tooling/on-mac`), with
 # this machine's Rust, so it's what `client_inputs` says it's built from.
 target=${CARGO_TARGET_DIR:-$root/target}
 
@@ -251,9 +251,11 @@ clients=() windows=()
 for name in "${mine[@]}"; do
   file=$(tr / - <<<"$name")
   if [[ $name == one/macos-* && $here != macos-* ]]; then
-    (echo "Building $name on GitHub's macOS runner" && run=$(tooling/github-run mac-client.yml -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)") &&
-      gh run download "$run" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
-      { echo "$name wasn't built on GitHub." >&2 && exit 1; }) &
+    (echo "Building $name on a Mac" &&
+      tooling/on-mac mac-client.yml "$file.gz" "$out" \
+        'export RUSTUP_TOOLCHAIN=$RUST && cargo build --release -p app && gzip -9 -c target/release/one >'"$file.gz" \
+        -f rust="$(rustc -V | cut -d' ' -f2)" &&
+      client_inputs "${name#*/}" >"$out/$file.inputs" || { echo "$name wasn't built." >&2 && exit 1; }) &
     clients+=($!)
   elif [[ $name == one/windows-* || $name == one-cli/windows-* ]]; then
     windows+=("$name")
