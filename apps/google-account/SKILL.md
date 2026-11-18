@@ -26,5 +26,7 @@ The first sign-in needs the item "Google client" in the person's Vault: `client_
 network's address followed by `/vault/callback`, with `oauth2.googleapis.com` its site, where its secret goes. When
 you make the client in a browser of yours, save it straight from there with `vault_save_from_browser` (the client's
 JSON download, `client_id` from `web.client_id` with `secret: false` and `client_secret` from `web.client_secret`,
-`hosts: ["oauth2.googleapis.com"]`), never reading it. When the person has it, ask for it with `vault_request`;
+`hosts: ["oauth2.googleapis.com"]`), never reading it. On its OAuth consent screen (Google Auth Platform, Branding), the Privacy policy link is
+the network's address followed by `/privacy`, the page every network serves naming its owner; once that's set,
+publish the app In production (Audience), unverified, so Google stops signing its accounts out every 7 days. When the person has it, ask for it with `vault_request`;
 never ask for it in the chat.

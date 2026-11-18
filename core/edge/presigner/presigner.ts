@@ -110,6 +110,14 @@ export class Network extends WorkerEntrypoint<PresignerEnv> {
     return admits(reader(this.env), key, token);
   }
 
+  /** The network's first owner, `users/<name>`, as One Core keeps it (`OneCore.User.first_owner/0`), or null while it has none. */
+  async owner(): Promise<string | null> {
+    const got = await bucket(this.env).fetch(blob(this.env, `${NETWORK}owner`));
+    if (got.status === 404) return null;
+    if (!got.ok) throw new Error(`The bucket answered ${got.status} for ${NETWORK}owner`);
+    return got.text();
+  }
+
   /** The key that signed what was asked at `url` with `body`, by the `one-` headers it came with, or null. */
   verifiedKey(url: string, headers: HeadersInit, body: string): Promise<string | null> {
     return verifiedKey(new Request(url, { headers }), body);

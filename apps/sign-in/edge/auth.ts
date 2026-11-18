@@ -33,6 +33,7 @@ declare global {
       NETWORK: {
         verifiedKey(url: string, headers: Record<string, string>, body: string): Promise<string | null>;
         servers(of: string): Promise<string[]>;
+        owner(): Promise<string | null>;
       };
       RELAY: {
         notify(message: string): Promise<void>;
