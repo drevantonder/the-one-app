@@ -37,6 +37,7 @@ const look = styles({
   glass: { backgroundColor: tokens.colour.panel, backdropFilter: tokens.material.glass },
   shrunk: { opacity: 0, scale: 0.97 },
   pulled: { transitionProperty: [] },
+  dragged: (translateY: number) => ({ translateY }),
   grabber: { alignSelf: "center", width: tokens.grid[10], height: tokens.length.grabber, marginTop: tokens.length.grabberGap, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quaternaryLabel },
   header: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingBlock: tokens.grid[2], paddingStart: tokens.length.gutter, paddingEnd: tokens.grid[2] },
   heading: { flexGrow: 1, minWidth: 0, font: tokens.type.large, fontWeight: tokens.weight.semibold, lineClamp: 2 },
@@ -130,7 +131,7 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
             onPointerMove={move}
             onPointerUp={lift}
             onPointerCancel={() => setPull(undefined)}
-            style={[look.panel, wide() && look.floating, !touch() && look.glass, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && { translateY: pull()!.down }]}
+            style={[look.panel, wide() && look.floating, !touch() && look.glass, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && look.dragged(pull()!.down)]}
           >
             <Show when={!wide()}>
               <Box aria-hidden="true" style={look.grabber} />

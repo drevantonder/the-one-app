@@ -65,7 +65,7 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
     } else if (name === "style" && value && (Array.isArray(value) || "$id" in (value as object))) {
       // Styles go by their ids, from the tables the host has (../renderer.ts's `Styles`), the last winning, each dynamic one's
       // values after it.
-      mutations.set(node.id, "style", flat(value as Styles).flatMap((style) => ("$id" in style ? (style.$dynamic ? [style.$id, style.$dynamic] : [style.$id]) : [style])))
+      mutations.set(node.id, "style", flat(value as Styles).flatMap((style) => (style.$dynamic ? [style.$id, style.$dynamic] : [style.$id])))
     } else mutations.set(node.id, name as "role", (value ?? null) as never)
   },
   insertNode(parent, node, anchor) {

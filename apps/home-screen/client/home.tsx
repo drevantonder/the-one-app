@@ -110,6 +110,21 @@ const looks = styles({
   lifted: { position: "absolute", boxShadow: tokens.shadow.lifted, opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   liftedIcon: { borderRadius: tokens.radius.icon },
   liftedWidget: { borderRadius: tokens.radius.large },
+  // What a page measures and moves as it runs: where it is, how big, how opaque, how far moved.
+  at: (start: number, top: number, width: number, height: number) => ({ start, top, width, height }),
+  fill: (top: number, start: number, end: number) => ({ top, start, end }),
+  top: (top: number) => ({ top }),
+  bottom: (bottom: number) => ({ bottom }),
+  square: (size: number) => ({ width: size, height: size }),
+  wide: (width: number) => ({ width }),
+  tall: (height: number) => ({ height }),
+  scaled: (width: number, height: number, scale: number) => ({ width, height, scale }),
+  opacity: (opacity: number) => ({ opacity }),
+  faded: (opacity: number, scale: number) => ({ opacity, scale }),
+  drifted: (opacity: number, translateY: number) => ({ opacity, translateY }),
+  shifted: (translateX: number) => ({ translateX }),
+  moved: (translateX: number, translateY: number) => ({ translateX, translateY }),
+  popup: (start: number, width: number, opacity: number, scale: number) => ({ start, width, opacity, scale }),
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
 })
 
@@ -315,7 +330,7 @@ function Tile(props: { name: string; icon: string; size: number; scale: number; 
       onClick={(event) => tapping() && props.onPress?.(false, from(event))}
       style={{ alignItems: "center", gap: 7, minWidth: 0, width: "100%" }}
     >
-      <Box style={[looks.icon, { width: props.size, height: props.size }]}>
+      <Box style={[looks.icon, looks.square(props.size)]}>
         <Image src={src(props.icon)} alt="" style={{ width: props.size, height: props.size, borderRadius: "xl" }} />
         <Count count={props.badge} />
       </Box>
@@ -911,12 +926,12 @@ function OpenCategory(props: { owner: Owner; opened: string; within?: Rect }) {
       style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 10, pointerEvents: phase() === "closing" ? "none" : "auto" }}
     >
       {/* What's behind blurs through a veil. */}
-      <Box aria-hidden="true" onClick={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within ? { start: area().x, top: area().y, width: area().width, height: area().height, opacity: t() } : { opacity: t() }]} />
+      <Box aria-hidden="true" onClick={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height), looks.opacity(t())]} />
       <Text role="heading" aria-level={2} style={{ position: "absolute", left: area().x, width: area().width, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
         {category()?.category}
       </Text>
-      <Box style={[looks.panel, { start: shape().x, top: shape().y, width: shape().width, height: shape().height, opacity: moving() ? 1 : t() }]}>
-        <Box style={[looks.inPanel, { start: (shape().width - panel().width) / 2, top: (shape().height - panel().height) / 2, width: panel().width, height: panel().height }]}>
+      <Box style={[looks.panel, looks.at(shape().x, shape().y, shape().width, shape().height), looks.opacity(moving() ? 1 : t())]}>
+        <Box style={[looks.inPanel, looks.at((shape().width - panel().width) / 2, (shape().height - panel().height) / 2, panel().width, panel().height)]}>
           <Box style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
             <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
               {(entrypoint) => (
@@ -1022,7 +1037,7 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   return (
     <Box style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 20 }}>
       {/* The Home Screen blurs through a veil under what's held, and its menu floats in glass, as a window does. */}
-      <Box aria-hidden="true" onClick={dismiss} style={[looks.cover, looks.frosted, { opacity: Math.min(1, grow.value() * 2) }]} />
+      <Box aria-hidden="true" onClick={dismiss} style={[looks.cover, looks.frosted, looks.opacity(Math.min(1, grow.value() * 2))]} />
       <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
           <Box aria-hidden="true" style={{ position: "absolute", display: "grid", left: held.x + (held.width - copyWidth) / 2, top: held.y + (held.height - copyHeight) / 2, width: copyWidth, height: copyHeight, scale: scale * (1 + 0.06 * motion()), pointerEvents: "none" }}>
@@ -1037,13 +1052,8 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
         aria-label={(item ?? props.held.listed)?.name}
         style={[
           looks.menu,
-          {
-            start: left,
-            ...(below ? { top: held.y + held.height + 12 } : { bottom: height - held.y + 12 }),
-            width: 240,
-            opacity: Math.min(1, grow.value() * 3),
-            scale: reducedMotion() ? 1 : 0.25 + 0.75 * motion(),
-          },
+          looks.popup(left, 240, Math.min(1, grow.value() * 3), reducedMotion() ? 1 : 0.25 + 0.75 * motion()),
+          below ? looks.top(held.y + held.height + 12) : looks.bottom(height - held.y + 12),
         ]}
       >
         <Show when={library && props.held.listed}>
@@ -1282,28 +1292,28 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
   const scale = MINIATURE / THUMB.width
   return (
     // Over the blurred Home Screen, it fades out as it closes; its miniatures float, with a window's shadow.
-    <Box role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, { top: 0, start: 0, width: room().width, height: viewport().height }]}>
+    <Box role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, room().width, viewport().height)]}>
       <Box style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: room().safe.top, height: room().safe.top + TOP_ROW, paddingInline: 16 }}>
         <Button variant="secondary" onClick={() => home.send({ type: "dismiss" })}>Done</Button>
       </Box>
       <Box style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingTop: 16, paddingInline: 24, paddingBottom: 48 + room().safe.bottom }}>
         {/* Each in its place by where it is in the pages, so that, as one's dragged past the others, they glide to theirs. */}
-        <Box style={[looks.slots, { height: Math.ceil(pages().length / across()) * pitch().y - 24 }]}>
+        <Box style={[looks.slots, looks.tall(Math.ceil(pages().length / across()) * pitch().y - 24)]}>
           <For each={pages()}>
             {(page, index) => (
               <Box
                 style={[
                   looks.slot,
                   carried() === page ? looks.carried : looks.gliding,
-                  { width: pitch().x - 16 },
-                  { translateX: place(index()).x + (carried() === page ? moved().x : 0), translateY: place(index()).y + (carried() === page ? moved().y : 0) },
+                  looks.wide(pitch().x - 16),
+                  looks.moved(place(index()).x + (carried() === page ? moved().x : 0), place(index()).y + (carried() === page ? moved().y : 0)),
                 ]}
               >
                 <Box
                   role="button"
                   aria-label={`Page ${index() + 1}`}
                   {...drag(page, index())}
-                  style={[looks.miniature, { width: MINIATURE, height: (MINIATURE * 16) / 9, scale: dragging() === page ? 1.05 : 1 }]}
+                  style={[looks.miniature, looks.scaled(MINIATURE, (MINIATURE * 16) / 9, dragging() === page ? 1.05 : 1)]}
                 >
                   <Box style={{ position: "absolute", left: (MINIATURE - THUMB.width) / 2, top: ((MINIATURE * 16) / 9 - THUMB.height) / 2, scale, opacity: page.hidden ? 0.4 : 1, pointerEvents: "none" }}>
                     <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} laid={THUMB} scale={scale} small />
@@ -1346,7 +1356,7 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
       </Box>
       <For each={Array.from({ length: props.count }, (_, index) => index)}>
         {(index) => (
-          <Box inert={index !== nearest() || undefined} style={[looks.row, rolling(), { top: 0, translateY: (index - rolled()) * props.height, height: props.height, opacity: Math.max(0, 1 - Math.abs(index - rolled()) * 1.5) }]}>
+          <Box inert={index !== nearest() || undefined} style={[looks.row, rolling(), looks.top(0), looks.drifted(Math.max(0, 1 - Math.abs(index - rolled()) * 1.5), (index - rolled()) * props.height), looks.tall(props.height)]}>
             {props.row(index)}
           </Box>
         )}
@@ -1580,7 +1590,7 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: numb
   return (
     // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
     // footer, which is flat.
-    <Box style={[looks.pill, !props.flat && looks.glass, { height: height() }]}>
+    <Box style={[looks.pill, !props.flat && looks.glass, looks.tall(height())]}>
       <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} shows={props.pages ? 2 : 1} />} />
       <Box
         role="button"
@@ -2406,12 +2416,12 @@ function HomeScreen(props: { owners: Owner[] }) {
       >
         {/* A click beside the search and the card puts the launcher away, as one on another app's window would. */}
         <Box aria-hidden="true" onClick={() => state().matches("nothing") && void leave()} style={looks.cover} />
-        <Box style={[looks.surface, looks.search, { top: MARGIN, start: (viewport().width - SEARCH) / 2, width: SEARCH, height: SEARCH_HEIGHT }]}>
+        <Box style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, MARGIN, SEARCH, SEARCH_HEIGHT)]}>
           <LauncherSearch />
         </Box>
-        <Box onWheel={wheel} style={[looks.surface, looks.card, { top: CARD_TOP, start: 0, width: card().width, height: card().height, translateX: cardLeft() }]}>
+        <Box onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
           {/* Home: each owner's pages, the owner shown's in place, the others rolled above and below it, faded. */}
-          <Box role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, { opacity: showing() === "home" ? 1 : 0, scale: showing() === "home" ? 1 : 1.03 }]}>
+          <Box role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(showing() === "home" ? 1 : 0, showing() === "home" ? 1 : 1.03)]}>
             <For each={props.owners} keyed={(owner) => owner.key}>
               {(owner, index) => {
                 const shown = () => index() === state().context.at.owner
@@ -2427,9 +2437,9 @@ function HomeScreen(props: { owners: Owner[] }) {
                     role="region"
                     aria-label={owner().name}
                     inert={!shown() || undefined}
-                    style={[looks.owner, looks.rolling, !shown() && looks.inert, { top: PILLS, start: INSET, width: pagesAcross(index()) * PAGE, height: halves(index()) ? halfHeight(room()) : room().height, translateY: (index() - state().context.at.owner) * 40, opacity: shown() ? 1 : 0 }]}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, pagesAcross(index()) * PAGE, halves(index()) ? halfHeight(room()) : room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
-                    <Box style={[looks.track, looks.rolling, { translateX: -shownFrom(index()) * PAGE }]}>
+                    <Box style={[looks.track, looks.rolling, looks.shifted(-shownFrom(index()) * PAGE)]}>
                       <For each={pages()[index()] ?? []} keyed={false}>
                         {(placed, at) => (
                           <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>
@@ -2447,18 +2457,18 @@ function HomeScreen(props: { owners: Owner[] }) {
             </For>
           </Box>
           {/* The App Library, in the same card, which grows to it as it cross-fades in. */}
-          <Box inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, { top: INSET, start: 0, end: 0, opacity: showing() === "library" ? 1 : 0, scale: showing() === "library" ? 1 : 0.965 }]}>
+          <Box inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
             <Library owner={props.owners[0]} size={{ width: LIBRARY, height: tallest() - INSET - PILLS }} />
           </Box>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
-          <Box inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, { top: INSET, start: INSET, end: INSET, opacity: showing() === "search" ? 1 : 0, translateY: showing() === "search" ? 0 : -8 }]}>
+          <Box inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.fill(INSET, INSET, INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
             <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
           </Box>
           {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
-          <Box inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, { top: 0, height: PILLS, opacity: showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0 }]}>
+          <Box inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>
             <OwnerPill owners={props.owners} />
           </Box>
-          <Box inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, { bottom: 0, height: PILLS, opacity: showing() === "search" ? 0 : 1 }]}>
+          <Box inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
             <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
           </Box>
         </Box>
@@ -2490,7 +2500,7 @@ function HomeScreen(props: { owners: Owner[] }) {
                 pointerEvents: "none",
               }}
             >
-              <Box aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && { opacity: 0 }, widget() ? { top: 0, start: 0, width, height } : { top: 0, start: (width - tile()) / 2, width: tile(), height: tile() }]} />
+              <Box aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && looks.opacity(0), widget() ? looks.at(0, 0, width, height) : looks.at((width - tile()) / 2, 0, tile(), tile())]} />
               <Show when={now().held.item}>
                 {(item) => (
                   <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={laidPage().tile} scale={scale()} />}>

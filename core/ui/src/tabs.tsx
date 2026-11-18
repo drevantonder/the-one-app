@@ -39,7 +39,7 @@ const look = styles({
   // What marks the chosen tab: the tab itself, until the indicator knows where the tabs are, and then the indicator,
   // which slides to the one chosen.
   mark: { backgroundColor: tokens.colour.card, boxShadow: tokens.shadow.edge },
-  indicator: {
+  indicator: (translateX: number, translateY: number, width: number, height: number) => ({
     position: "absolute",
     top: 0,
     left: 0,
@@ -48,7 +48,11 @@ const look = styles({
     pointerEvents: "none",
     transitionProperty: ["translateX", "translateY", "width", "height"],
     transition: tokens.motion.settle,
-  },
+    translateX,
+    translateY,
+    width,
+    height,
+  }),
   label: { lineClamp: 1 },
   content: { gap: tokens.length.gutter },
 })
@@ -161,7 +165,7 @@ export const Tabs = {
     onCleanup(tabs.indicate())
     return (
       <Show when={tabs.chosen()}>
-        {(at) => <Box aria-hidden="true" style={[look.indicator, look.mark, { translateX: at().x, translateY: at().y, width: at().width, height: at().height }]} />}
+        {(at) => <Box aria-hidden="true" style={[look.indicator(at().x, at().y, at().width, at().height), look.mark]} />}
       </Show>
     )
   },

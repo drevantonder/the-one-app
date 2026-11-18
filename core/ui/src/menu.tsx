@@ -57,7 +57,7 @@ const Opened = createContext<{
 
 const look = styles({
   catcher: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, pointerEvents: "auto" },
-  anchor: { position: "absolute" },
+  anchor: (top: number, start: number, width: number, height: number) => ({ position: "absolute", top, start, width, height }),
   closed: { display: "none" },
   below: { position: "absolute", top: "100%", end: 0, marginTop: tokens.grid[1], pointerEvents: "auto" },
   above: { position: "absolute", bottom: "100%", end: 0, marginBottom: tokens.grid[1], pointerEvents: "auto" },
@@ -175,7 +175,7 @@ export const Menu = {
         {(at) => (
           <Layer modal>
             <Box style={look.catcher} onClick={() => menu.open(undefined)} />
-            <Box style={[look.anchor, { top: at().y, start: direction() === "rtl" ? viewport().width - at().x - at().width : at().x, width: at().width, height: at().height }]}>
+            <Box style={look.anchor(at().y, direction() === "rtl" ? viewport().width - at().x - at().width : at().x, at().width, at().height)}>
               <Box style={above() ? look.above : look.below} onKeyDown={(event) => event.key === "Escape" && menu.open(undefined)}>
                 {inside()}
               </Box>

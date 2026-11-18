@@ -3,7 +3,7 @@
 // atomic CSS classes on the web and to a style table for a native host, each style an id. Nothing about a style is
 // worked out as a page runs but which apply: a node's `style` is a list of them, and the last to say a property is
 // all it is, with no cascade and no specificity.
-import type { Dynamic, Inline, Properties, State, Varies } from "./strict/renderer.ts"
+import type { Dynamic, Properties, State, Varies } from "./strict/renderer.ts"
 import type { Token } from "./tokens.ts"
 
 /** A token of one kind, or its negative (`negative(tokens.space.lg)`, a margin pulling outward). */
@@ -124,11 +124,8 @@ export type Styled<P extends keyof Look = keyof Look> = {
   readonly properties?: P
 }
 
-export type { Inline }
-
-/** What a primitive's `style` takes: styles, inline ones (`{ translateY: 40 }`, worked out as the page runs), and a
- * condition's `false` or `undefined` for one that doesn't apply. */
-export type Styles<P extends keyof Look = keyof Look> = Styled<P> | Inline | false | null | undefined | readonly Styles<P>[]
+/** What a primitive's `style` takes: styles, and a condition's `false` or `undefined` for one that doesn't apply. */
+export type Styles<P extends keyof Look = keyof Look> = Styled<P> | false | null | undefined | readonly Styles<P>[]
 
 /** What `styles()` takes: each style an object, or a function of its values that returns one (`(height: number) => ({
  * height })`), whose values are its parameters, as they are. */
@@ -175,9 +172,9 @@ export function createTheme<T extends Record<string, Token<"colour"> | Token<"le
 export const negative = (token: Token<"length">): Pull => ({ token, negative: true })
 
 /** The styles that apply, in order, as one list: what a list of `Styles` says, its falsy ones left out. */
-export function flat(style: Styles | undefined, into: (Styled | Inline)[] = []): (Styled | Inline)[] {
+export function flat(style: Styles | undefined, into: Styled[] = []): Styled[] {
   if (Array.isArray(style)) for (const one of style) flat(one, into)
-  else if (style) into.push(style as Styled | Inline)
+  else if (style) into.push(style as Styled)
   return into
 }
 
@@ -194,17 +191,8 @@ export function web(style: Styles | undefined): { class: string; style?: Record<
   const by: Record<string, string> = {}
   const inline: Record<string, string> = {}
   for (const one of flat(style)) {
-    if ("$id" in one) {
-      for (const [property, names] of Object.entries(one)) property !== "$id" && property !== "$dynamic" && property !== "properties" && (by[property] = names as string)
-      for (const [property, value] of Object.entries(one.$dynamic ?? {})) inline[`--${one.$id}-${property}`] = cssValue(property, value)
-    } else for (const [property, value] of Object.entries(one)) {
-      const css = property === "start" ? "inset-inline-start" : property === "end" ? "inset-inline-end" : property
-      if (property === "translateX") inline["--ui-x"] = `${value}px`
-      else if (property === "translateY") inline["--ui-y"] = `${value}px`
-      else if (property === "rotate") inline.rotate = `${value}deg`
-      else inline[css] = property === "scale" || property === "opacity" ? String(value) : `${value}px`
-      if (property === "translateX" || property === "translateY") inline.translate = "var(--ui-x, 0) var(--ui-y, 0)"
-    }
+    for (const [property, names] of Object.entries(one)) property !== "$id" && property !== "$dynamic" && property !== "properties" && (by[property] = names as string)
+    for (const [property, value] of Object.entries(one.$dynamic ?? {})) inline[`--${one.$id}-${property}`] = cssValue(property, value)
   }
   return { class: Object.values(by).join(" "), style: Object.keys(inline).length ? inline : undefined }
 }

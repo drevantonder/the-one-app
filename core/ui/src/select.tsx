@@ -40,7 +40,7 @@ const look = styles({
   placeholder: { color: tokens.colour.secondaryLabel },
   caret: { color: tokens.colour.secondaryLabel },
   catcher: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, pointerEvents: "auto" },
-  anchor: { position: "absolute" },
+  anchor: (top: number, start: number, width: number, height: number) => ({ position: "absolute", top, start, width, height }),
   below: { top: "100%", marginTop: tokens.grid[1] },
   above: { bottom: "100%", marginBottom: tokens.grid[1] },
   list: {
@@ -181,7 +181,7 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
         {(face) => (
           <Layer>
             <Box style={look.catcher} onClick={() => setOpen(false)} />
-            <Box style={[look.anchor, { top: face().y, start: face().x, width: face().width, height: face().height }]}>
+            <Box style={look.anchor(face().y, face().x, face().width, face().height)}>
               <Box role="listbox" style={[look.list, face().y + face().height / 2 > viewport().height / 2 ? look.above : look.below]}>
                 <For each={items()}>
                   {(item, i) => {

@@ -47,7 +47,8 @@ const look = styles({
   middle: { flexGrow: 1, alignItems: "center", justifyContent: "center", padding: tokens.length.gutter, backgroundColor: tokens.colour.quinaryLabel },
   // Where what's typed on its picture goes: unseen, but focused, so a phone shows its keyboard.
   keys: { position: "absolute", bottom: 0, start: 0, width: tokens.length.hairline, height: tokens.length.hairline, opacity: 0, pointerEvents: "none", font: tokens.type.field },
-  leave: { position: "absolute", opacity: 0.85 },
+  leave: (top: number, end: number) => ({ position: "absolute", opacity: 0.85, top, end }),
+  tall: (height: number) => ({ height }),
   bar: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: tokens.grid[2] },
   note: { flexGrow: 1, flexShrink: 1, minWidth: 0, color: tokens.colour.secondaryLabel, font: tokens.type.small },
 })
@@ -83,7 +84,7 @@ export function LiveScreen(props: { label: string; screen?: (inputs: ScreenInput
       keyed
       fallback={
         <Box style={look.root}>
-          <Box style={[look.view, { height: Math.max(256, viewport().height - 240) }]}>
+          <Box style={[look.view, look.tall(Math.max(256, viewport().height - 240))]}>
             <Box style={look.middle}>{props.children}</Box>
           </Box>
         </Box>
@@ -328,7 +329,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       onKeyDown={(event) => fullScreen(event) && (event.preventDefault(), toggle())}
       style={[
         look.view,
-        full() ? look.full : { height: watch && size() && place() ? Math.min((place()!.width * size()![1]) / size()![0], viewport().height - 128) : Math.max(256, viewport().height - 240) },
+        full() ? look.full : look.tall(watch && size() && place() ? Math.min((place()!.width * size()![1]) / size()![0], viewport().height - 128) : Math.max(256, viewport().height - 240)),
       ]}
     >
       <Box
@@ -402,7 +403,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       </Show>
       {/* Full screen has no Escape, which is the screen's: it has its own way out. */}
       <Show when={full()}>
-        <Box style={[look.leave, { top: Math.max(8, safeArea().top), end: Math.max(8, safeArea().right) }]}>
+        <Box style={look.leave(Math.max(8, safeArea().top), Math.max(8, safeArea().right))}>
           <Button variant="secondary" size="icon" aria-label={messages.exitFullScreen} onClick={toggle}>
             <Icon name="corners-in" />
           </Button>

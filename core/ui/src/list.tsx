@@ -81,6 +81,10 @@ const look = styles({
   swipe: { position: "absolute", top: 0, bottom: 0, end: 0, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: tokens.colour.red, color: tokens.colour.onAccent, cursor: "pointer" },
   chevron: { flexShrink: 0, color: tokens.colour.tertiaryLabel },
   // A row coming or going: it opens up where it goes, or closes up, fading as it does.
+  // How tall a part that isn't drawn is, held as it was.
+  tall: (height: number) => ({ height }),
+  moved: (translateX: number) => ({ translateX }),
+  swiped: (width: number) => ({ width }),
   slot: { overflow: "hidden", transitionProperty: ["height", "opacity"], transition: tokens.motion.settle },
   entering: { opacity: { default: 1, entering: 0 } },
   leaving: { opacity: 0, transitionProperty: ["height", "opacity"], transition: tokens.motion.settle },
@@ -305,7 +309,7 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
       },
     )
     return (
-      <Box onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && { height: mine().reduce((sum, one) => sum + (one.height ?? tall), 0) }]}>
+      <Box onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && look.tall(mine().reduce((sum, one) => sum + (one.height ?? tall), 0))]}>
         <Show when={drawn()}>
           <For each={mine()}>{(one, at) => slotted(one, () => chunk.start + at())}</For>
         </Show>
@@ -313,7 +317,7 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
     )
   }
   const slotted = (one: Slot, at: () => number) => (
-              <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }, !one.drawn() && { height: one.height ?? tall }]}>
+              <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && look.tall(one.to()!), !one.drawn() && look.tall(one.height ?? tall)]}>
                 <Show
                   when={props.listbox}
                   fallback={<Box onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</Box>}
@@ -503,7 +507,7 @@ function Drawn(props: RowProps) {
       </Show>
     </>
   )
-  const moving = () => [settling() && look.settling, swiped() > 0 && { translateX: direction() === "rtl" ? swiped() : -swiped() }]
+  const moving = () => [settling() && look.settling, swiped() > 0 && look.moved(direction() === "rtl" ? swiped() : -swiped())]
   return (
     <RowMenu value={setMenu}>
       <Box
@@ -532,7 +536,7 @@ function Drawn(props: RowProps) {
         </Show>
         <Show when={menu()?.destructive()}>
           {(item) => (
-            <Box aria-hidden="true" onClick={() => (menu()?.select(item().value), aside(0, true))} style={[look.swipe, settling() && look.settling, { width: swiped() }]}>
+            <Box aria-hidden="true" onClick={() => (menu()?.select(item().value), aside(0, true))} style={[look.swipe, settling() && look.settling, look.swiped(swiped())]}>
               <Text>{item().label}</Text>
             </Box>
           )}

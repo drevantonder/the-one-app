@@ -36,6 +36,11 @@ const look = styles({
   column: { gap: tokens.grid[1], minWidth: 0, minHeight: 0 },
   row: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], minWidth: 0, minHeight: 0 },
   root: { flexGrow: 1 },
+  // A part's own size, which it says as it's drawn.
+  width: (width: number) => ({ width }),
+  height: (height: number) => ({ height }),
+  square: (size: number) => ({ width: size, height: size }),
+  corner: (top: number, start: number, width: number, height: number) => ({ top, start, width, height }),
   centre: { alignItems: "center" },
   // What every part may say of itself: that it takes the room that's left, that it's a width of its own, that it's
   // faded, and its tone.
@@ -195,12 +200,7 @@ const Card = createContext<{ width: () => number | undefined; onCall?: OnCall; t
 /// What every part may say of itself: how much room it takes, whether it's faded, and its tone; and its `width`.
 const room = (part: Layout) => [!!part.grow && look.grow, !!part.dim && look.dim, tone(part), number(part.width) !== undefined && look.fixed]
 const tone = (part: Layout) => (part.tone ? tones[part.tone] : undefined)
-const sized = (part: Layout, height?: number) => {
-  const inline: { width?: number; height?: number } = {}
-  if (number(part.width) !== undefined) inline.width = number(part.width)
-  if (height !== undefined) inline.height = height
-  return inline
-}
+const sized = (part: Layout, height?: number) => [number(part.width) !== undefined && look.width(number(part.width)!), height !== undefined && look.height(height)]
 
 /** Points along a box `width` by `height`, one for each value up to `max`, from the left edge to the right. */
 const along = (values: number[], max: number, width: number, height: number) =>
@@ -288,7 +288,7 @@ function Chart(props: { part: Layout }) {
       .join("")
   }
   return (
-    <Box style={[look.chart, ...room(props.part), { height: number(props.part.height, 70) }]}>
+    <Box style={[look.chart, ...room(props.part), look.height(number(props.part.height, 70))]}>
       <Drawn
         label={props.part.label}
         style={look.bars}
@@ -341,7 +341,7 @@ function Gauge(props: { part: Layout }) {
     return `M${point(outer, 0)}A${outer} ${outer} 0 ${large} 1 ${point(outer, part)}L${point(inner, part)}A${at(inner)} ${at(inner)} 0 ${large} 0 ${point(inner, 0)}Z${end(0)}${end(part)}`
   }
   return (
-    <Box role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share(props.part.value) * 100)} aria-label={props.part.label} style={[look.gauge, tone(props.part), { width: size(), height: size() }]}>
+    <Box role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share(props.part.value) * 100)} aria-label={props.part.label} style={[look.gauge, tone(props.part), look.square(size())]}>
       <Path viewBox={`0 0 ${size()} ${size()}`} d={ring()} style={[look.over, look.track]} />
       <Path viewBox={`0 0 ${size()} ${size()}`} d={filled()} style={look.over} />
       <Show when={props.part.label && size() >= 36}>
@@ -480,7 +480,7 @@ function Part(props: { part: Layout; root?: boolean; row?: boolean; first?: bool
         </Show>
       </Match>
       <Match when={part().part === "icon"}>
-        <Box aria-hidden="true" style={[look.icon, tone(part()), { width: number(part().width, 16), height: number(part().width, 16) }]}>
+        <Box aria-hidden="true" style={[look.icon, tone(part()), look.square(number(part().width, 16))]}>
           <Show when={part().path}>
             <Path viewBox="0 0 24 24" d={String(part().path)} style={look.over} />
           </Show>
@@ -489,7 +489,7 @@ function Part(props: { part: Layout; root?: boolean; row?: boolean; first?: bool
             <Path
               viewBox="0 0 24 24"
               d={String(part().badge)}
-              style={[look.over, part().path ? { top: (number(part().width, 16) * 13) / 24, start: (number(part().width, 16) * 13) / 24, width: (number(part().width, 16) * 11) / 24, height: (number(part().width, 16) * 11) / 24 } : undefined]}
+              style={[look.over, part().path ? look.corner((number(part().width, 16) * 13) / 24, (number(part().width, 16) * 13) / 24, (number(part().width, 16) * 11) / 24, (number(part().width, 16) * 11) / 24) : undefined]}
             />
           </Show>
         </Box>

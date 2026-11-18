@@ -218,9 +218,9 @@ export interface Props {
   "aria-controls"?: string
   /** The option the keyboard is on while it stays in what's typed in, by its `id` (WAI-ARIA's combobox). */
   "aria-activedescendant"?: string
-  /** How it's laid out and looks: its styles (`Styles`) by id, and inline ones worked out as the page runs, the last
+  /** How it's laid out and looks: its styles (`Styles`) by id, each dynamic one's values (`Dynamic`) after it, the last
    * winning where two say the same property. A page written for 1 sends one `Version1Style` instead. */
-  style?: (StyleId | Inline | Dynamic)[] | Version1Style
+  style?: (StyleId | Dynamic)[] | Version1Style
   /** `image`: a `data:` address, or a file of the app's own by its path. */
   src?: string
   /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
@@ -462,11 +462,6 @@ export type Token =
   /** How a change moves: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points; or a spring,
    * by its `bounce` (SwiftUI's `.spring(duration:bounce:)`), which a host that draws only Béziers draws by `easing`. */
   | { kind: "motion"; value: { duration: Varies<number>; easing: Varies<[x1: number, y1: number, x2: number, y2: number]>; bounce?: number } }
-
-/** What a style can't know ahead: where something is as the page runs, a finger moving it or a menu placed under
- * what opened it, in CSS pixels (`rotate` in degrees, `scale` and `opacity` as numbers), as React Native's inline
- * styles are. */
-export type Inline = { [P in "top" | "bottom" | "start" | "end" | "width" | "height" | "translateX" | "translateY" | "scale" | "rotate" | "opacity"]?: number }
 
 /** What a dynamic style (`styles()` with a function) was called with: its values by property, a number of pixels for
  * a length (unitless for `opacity`, `scale`, `flexGrow`, and degrees for `rotate`), a hex colour, or a percentage or
