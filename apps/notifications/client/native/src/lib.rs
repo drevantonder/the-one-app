@@ -19,21 +19,26 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Runtime};
 use tokio::sync::{Notify, watch};
 
-/// Where a phone is with being woken by its notifications, which Notifications says on it (`push`). It moves only as
-/// `moves_to` says, by `listen`. A computer isn't woken: it shows them while the app runs, and has none of this.
+/// Where a phone is with being woken by its notifications, which Notifications says on it (`push`). It's the child of
+/// its client's session: it registers each time the device is signed in, and again whenever what it registered
+/// changes, its push token or whether its person allows notifications. It moves only as `moves_to` says, by
+/// `listen`. A computer isn't woken: it shows them while the app runs, and has none of this.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
 pub enum Push {
     /// Its person hasn't been asked yet, which they are once they see their home (`listen`).
     NotAsked,
-    /// Its person, or its system, said it may not show notifications.
+    /// Its person, or its system, said it may not show notifications. It registers once they allow them, as in the
+    /// phone's Settings, which it looks at again each time the app is back in front.
     Denied,
     /// Giving the network where its push service reaches it.
     Registering,
-    /// The network wakes it.
+    /// The network wakes it, until the device is signed in again, its push token changes or its person turns
+    /// notifications off.
     Registered,
     /// It couldn't be: an app built without push, or no server answered or took it. It's tried again once a server
-    /// answers again or the device is signed in again, and at once when its person tries again (`retry`).
+    /// answers again, the device is signed in again or the app is back in front, and at once when its person tries
+    /// again (`retry`).
     Failed { why: String },
 }
 
@@ -44,14 +49,25 @@ impl Push {
         use Push::*;
         matches!(
             (self, next),
-            (NotAsked, Denied | Registering | Failed { .. }) | (Registering, Registered | Failed { .. }) | (Failed { .. }, Registering)
+            // Its person was asked, or it couldn't ask.
+            (NotAsked, Denied | Registering | Failed { .. })
+            // The network took it, or didn't.
+            | (Registering, Registered | Failed { .. })
+            // Signed in again, a new token, or allowed now: it registers again.
+            | (Registered | Failed { .. } | Denied, Registering)
+            // Its person turned notifications off.
+            | (Registered | Failed { .. }, Denied)
+            // Its system couldn't say whether it may.
+            | (Registered | Denied, Failed { .. })
         )
     }
 }
 
-/// Where this phone is with its push (`Push`), and its person asking to try again.
+/// Where this phone is with its push (`Push`), and what tells it to look again: its person asking to try again, the
+/// app back in front, and the push token its push service gave it last (`heard`).
 static PUSH: LazyLock<watch::Sender<Push>> = LazyLock::new(|| watch::Sender::new(Push::NotAsked));
 static AGAIN: LazyLock<Notify> = LazyLock::new(Notify::new);
+static TOKEN: LazyLock<watch::Sender<Option<String>>> = LazyLock::new(|| watch::Sender::new(None));
 
 /// Moves this phone's push on to `next`, if that's a move there is from where it is.
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -69,6 +85,21 @@ fn moved(next: Push) {
 /// Where this phone is with being woken by its notifications, for its own row in Notifications: nothing on a computer.
 pub fn push() -> Option<Push> {
     cfg!(any(target_os = "android", target_os = "ios")).then(|| PUSH.borrow().clone())
+}
+
+/// Where this phone's push is, as it moves.
+pub fn pushes() -> watch::Receiver<Push> {
+    PUSH.subscribe()
+}
+
+/// Has a phone look again at whether it may show notifications, as once the app is back in front.
+pub fn look_again() {
+    AGAIN.notify_one();
+}
+
+/// The push token a phone's push service just gave it, which it registers if it isn't the one it registered.
+pub fn token(token: String) {
+    TOKEN.send_replace(Some(token));
 }
 
 /// Has a phone whose push failed try again now, as its person does with Try Again, and gives where it is once that
@@ -205,52 +236,80 @@ pub fn opens(tapped: &Value) -> Option<&str> {
     tapped["data"]["app"].as_str().filter(|app| !app.is_empty())
 }
 
-/// Asks its person whether this phone may show notifications, and gives the app the token its push service
-/// reaches it by: Apple's on an iPhone and Google's on Android (`Push`). What fails, as on a first open with no
-/// server answering yet, is tried again once a server answers again or the device is signed in again, or its person
-/// tries again. An app built without push (no Firebase config, or no Push Notifications capability) says why it
-/// isn't woken, and still shows the inbox.
+/// Asks its person whether this phone may show notifications, and gives the network the token its push service
+/// reaches it by: Apple's on an iPhone and Google's on Android (`Push`). It follows the device's session for as long
+/// as the app runs: each time the device is signed in, it registers again, and as its token changes, and once its
+/// person allows notifications after all. What fails, as on a first open with no server answering yet, is tried again
+/// once a server answers again, or its person tries again. An app built without push (no Firebase config, or no Push
+/// Notifications capability) says why it isn't woken, and still shows the inbox.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn listen(app: AppHandle, client: Arc<Client>) {
-    use tauri_plugin_notifications::{NotificationsExt, PermissionState};
+    use client::{Connection, Session};
+    use tauri_plugin_notifications::NotificationsExt;
 
     let notifications = app.notifications();
-    match notifications.request_permission().await {
-        Ok(PermissionState::Granted) => {}
-        Ok(_) => return moved(Push::Denied),
-        Err(error) => return moved(Push::Failed { why: format!("This phone wasn't asked to show notifications: {error}") }),
-    }
-    let (mut connection, mut session) = (client.connection(), client.session());
+    let (mut connection, mut session, mut heard) = (client.connection(), client.session(), TOKEN.subscribe());
+    // The token the network was last given, and whether it's to be given again whatever it's at.
+    let (mut given, mut again) = (None, true);
     loop {
-        moved(Push::Registering);
-        match register(&notifications, &client).await {
-            Ok(()) => return moved(Push::Registered),
-            Err(why) => moved(Push::Failed { why }),
-        }
-        let answering = async {
-            while connection.changed().await.is_ok() {
-                if *connection.borrow_and_update() == client::Connection::Online {
-                    return;
+        if *session.borrow_and_update() == Session::SignedIn {
+            match allowed(&notifications).await {
+                Err(why) => moved(Push::Failed { why }),
+                Ok(false) => moved(Push::Denied),
+                Ok(true) if again || *PUSH.borrow() != Push::Registered => {
+                    moved(Push::Registering);
+                    match register(&notifications, &client).await {
+                        Ok(token) => {
+                            given = Some(token);
+                            moved(Push::Registered)
+                        }
+                        Err(why) => moved(Push::Failed { why }),
+                    }
                 }
+                Ok(true) => {}
             }
-            std::future::pending().await
-        };
-        // Out of its network, if it isn't already, and then in again.
-        let signed_in_again = async {
-            let _ = session.wait_for(|session| *session != client::Session::SignedIn).await;
-            let _ = session.wait_for(|session| *session == client::Session::SignedIn).await;
-        };
-        tokio::select! {
-            _ = answering => {}
-            _ = signed_in_again => {}
-            _ = AGAIN.notified() => {}
         }
+        // Until something it registered may have changed.
+        again = loop {
+            tokio::select! {
+                // Signed in again, after it was out of its network, it registers again.
+                changed = session.changed() => {
+                    let Ok(()) = changed else { return };
+                    break *session.borrow() == Session::SignedIn;
+                }
+                // A server answers again, which may take what failed.
+                changed = connection.changed() => {
+                    let Ok(()) = changed else { return };
+                    if *connection.borrow_and_update() == Connection::Online {
+                        break false;
+                    }
+                }
+                changed = heard.changed() => {
+                    let Ok(()) = changed else { return };
+                    break heard.borrow_and_update().as_ref() != given.as_ref();
+                }
+                _ = AGAIN.notified() => break false,
+            }
+        };
     }
 }
 
-/// Gives the app the token this phone's push service reaches it by, with the key what it's sent is encrypted to.
+/// Whether this phone may show notifications, asking its person if they haven't said.
 #[cfg(any(target_os = "android", target_os = "ios"))]
-async fn register<R: Runtime>(notifications: &tauri_plugin_notifications::Notifications<R>, client: &Client) -> Result<(), String> {
+async fn allowed<R: Runtime>(notifications: &tauri_plugin_notifications::Notifications<R>) -> Result<bool, String> {
+    use tauri_plugin_notifications::PermissionState::*;
+    let asked = |error| format!("This phone wasn't asked to show notifications: {error}");
+    match notifications.permission_state().await.map_err(asked)? {
+        Granted => Ok(true),
+        Denied => Ok(false),
+        Prompt | PromptWithRationale => Ok(notifications.request_permission().await.map_err(asked)? == Granted),
+    }
+}
+
+/// Gives the network the token this phone's push service reaches it by, with the key what it's sent is encrypted to,
+/// and says which token that was.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+async fn register<R: Runtime>(notifications: &tauri_plugin_notifications::Notifications<R>, client: &Client) -> Result<String, String> {
     let (via, name) = if cfg!(target_os = "ios") { ("apns", "iPhone") } else { ("fcm", "Android phone") };
     let token = notifications.register_for_push_notifications().await.map_err(|error| error.to_string())?;
     let register =
@@ -259,7 +318,7 @@ async fn register<R: Runtime>(notifications: &tauri_plugin_notifications::Notifi
     if response["isError"] == true {
         return Err(response["content"][0]["text"].as_str().unwrap_or("The network didn't take it.").to_owned());
     }
-    Ok(())
+    Ok(token)
 }
 
 /// The key this device's notifications are encrypted to, which it registers with its push token.

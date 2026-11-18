@@ -417,12 +417,21 @@ async fn push() -> Result<Value, ()> {
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
-/// it may show any, over what they came for and not over signing in.
+/// it may show any, over what they came for and not over signing in. Each time after, as its home is back in front,
+/// a phone looks again at whether it may (`notifications::Push`), as its person may have allowed them in its Settings.
 #[tauri::command]
 fn listen(app: AppHandle, views: State<'_, Views>) {
-    if !views.hearing.swap(true, Ordering::Relaxed) {
-        tauri::async_runtime::spawn(notifications::listen(app, views.client.clone()));
+    if views.hearing.swap(true, Ordering::Relaxed) {
+        return notifications::look_again();
     }
+    tauri::async_runtime::spawn(notifications::listen(app, views.client.clone()));
+}
+
+/// A phone's push service gave it a push token, as its push plugin said to the window's page (`push-token`), which
+/// it registers if it isn't the one it registered.
+#[tauri::command]
+fn push_token(token: String) {
+    notifications::token(token);
 }
 
 /// A notification was tapped on a phone, which its push plugin said to the window's page (`notificationClicked`), so
@@ -698,6 +707,19 @@ async fn opens(app: AppHandle) {
         }
     });
 
+    // Where a phone is with its push is what this device says of itself (`client`), so its views ask again as it
+    // moves, as Notifications shows it.
+    let (handle, mut push) = (app.clone(), notifications::pushes());
+    tauri::async_runtime::spawn(async move {
+        while push.changed().await.is_ok() {
+            let views = handle.state::<Views>();
+            let shown: Vec<_> = views.subscriptions.lock().expect("no view panics").keys().cloned().collect();
+            for view in shown.iter().filter(|view| *view != "client") {
+                drop(handle.emit("changed", view));
+            }
+        }
+    });
+
     // A server refused this client for being behind it: the window says only that it needs updating, as an app that
     // requires an update does.
     let (handle, mut behind) = (app.clone(), client.behind());
@@ -912,6 +934,7 @@ pub fn run() {
             start,
             push,
             listen,
+            push_token,
             tapped,
             opened,
             navigation_gestures,

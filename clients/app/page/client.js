@@ -469,7 +469,8 @@ const machine = setup({
     list: ({ context }) => void (context.told && context.told.session.state !== "signIn" && list()),
     start: () => start(),
     signIn: ({ context }) => void (context.told?.link && location.replace(context.told.link)),
-    // The device hears its person's notifications once they see their home.
+    // The device hears its person's notifications once they see their home, and a phone looks again at whether it
+    // may show them each time its home is back in front.
     listen: () => void invoke("listen"),
     openAppStore: () => openAppStore(),
     link: assign({ link: ({ event, context }) => (event.type === "link" ? event.link : context.link) }),
@@ -536,7 +537,14 @@ const machine = setup({
     launcher: {
       tags: "pages",
       entry: ["listen", "follow", "seen"],
-      on: { show: { actions: "move" }, ...fingers, update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
+      on: {
+        show: { actions: "move" },
+        ...fingers,
+        update: { guard: "updateReady", target: "updating" },
+        tooOld: "needs_updating",
+        link: { actions: ["link", "follow"] },
+        seen: { actions: ["seen", "listen"] },
+      },
     },
     // A launcher installed meanwhile, as by an agent, is listed as its network says something changed.
     no_launcher: {
@@ -1255,8 +1263,10 @@ function go(link, subject, behind, from) {
 // A notification from an app was tapped, or a `one:` link opened (`links` in src/lib.rs).
 listen("open", ({ payload: link }) => on({ type: "link", link }))
 /// A phone's push plugin says a notification was tapped, even the tap that started the app, once this page hears
-/// it, which is once there are apps to open.
+/// it, which is once there are apps to open; and each push token its push service gives it, which it registers if
+/// it's new.
 async function hearTaps() {
+  await window.__TAURI__.core.addPluginListener("notifications", "push-token", ({ token }) => invoke("push_token", { token }))
   await window.__TAURI__.core.addPluginListener("notifications", "notificationClicked", (tapped) => invoke("tapped", { tapped }))
   await invoke("plugin:notifications|set_click_listener_active", { active: true })
 }
