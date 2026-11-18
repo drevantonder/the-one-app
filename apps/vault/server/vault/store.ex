@@ -11,54 +11,24 @@ defmodule Vault.Store do
 
   alias OneCore.{Artifact, Call, Server}
 
+  # A database runs the statements it hasn't, as many as its `user_version` counts (`Database.transaction/3`): the
+  # Vaults made before these were squashed ran 20, so a statement added to them is only run once there are more.
   @schema [
-    """
-    create table items (
-      id text primary key, name text not null unique, hosts text not null, agents integer not null default 0,
-      oauth text, changed integer not null
-    ) without rowid
-    """,
-    "create table fields (item text not null, name text not null, value text not null, secret integer not null, unique (item, name))",
-    "create table uses (item text not null, plugin text not null, primary key (item, plugin)) without rowid",
+    # Which item each name is, as each item is an artifact of its own.
+    "create table artifacts (id text primary key, name text not null)",
     """
     create table requests (
-      id text primary key, title text not null, fields text not null, hosts text not null, plugin text, why text,
-      state text not null, at integer not null
+      id text primary key, title text not null, fields text not null, hosts text not null, app text, why text,
+      state text not null, at integer not null, by text
     ) without rowid
     """,
+    # Where each sign-in began, the apps it's for, and how it ended, which its page says (`Vault.SignIns`).
     """
     create table sign_ins (
-      state text primary key, verifier text not null, service text not null, plugin text not null,
-      item text not null, at integer not null
+      state text primary key, verifier text not null, service text not null, app text not null,
+      item text not null, at integer not null, began text, apps text, ended text, ending text
     ) without rowid
-    """,
     """
-    create table contents (
-      item text not null, name text not null, blob text not null, key text not null, size integer not null,
-      at integer not null, primary key (item, name)
-    ) without rowid
-    """,
-    # Which item each name is, now that each item is an artifact of its own.
-    "create table artifacts (id text primary key, name text not null)",
-    # What was a plugin is an app.
-    "alter table uses rename column plugin to app",
-    "alter table requests rename column plugin to app",
-    "alter table sign_ins rename column plugin to app",
-    # Where each sign-in began, the apps it's for, and how it ended, which its page says (`Vault.SignIns`).
-    "alter table sign_ins add column began text",
-    "alter table sign_ins add column apps text",
-    "alter table sign_ins add column ended text",
-    "alter table sign_ins add column ending text",
-    # The agent that asked, by its name, where an agent did.
-    "alter table requests add column by text",
-    # A request allowed is `allowed`, as `Vault.Requests` names its states, and one that waited too long is kept
-    # `expired` by the job that finds it.
-    "update requests set state = 'allowed' where state = 'set'",
-    # What was kept before each item was an artifact of its own, which every item was copied out of.
-    "drop table items",
-    "drop table fields",
-    "drop table uses",
-    "drop table contents"
   ]
 
   # Someone's Vault is theirs alone: no relation tuple has anyone else ask for a user, the network's owner included.
