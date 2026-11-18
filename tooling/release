@@ -26,7 +26,8 @@
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
 # with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
-# builds apps with named by its SHA-256, which it downloads the first time (`OneCore.Entrypoint`). The builds are in
+# builds apps with, and on Windows Git, named by their SHA-256, which it downloads the first time (`OneCore.Programs`).
+# A Mac's VM is signed on the Mac, which must be awake. The builds are in
 # target/builds/<build> of the checkout it builds in, on Linux ~/.cache/the-one-app/release.
 #
 # A server for a kind of machine, `server/<kind>`, is published in two parts, which a machine puts together (`one
@@ -300,6 +301,22 @@ for kind in "${servers[@]}"; do
   # they have.
   if [[ $kind == windows-* ]]; then tooling/windows-name "$(echo "$release"/erts-*/bin/erl.exe)"; else
     "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
+  # A Mac's VM is signed with the Developer ID, on the Mac and in the background there, as macOS's firewall lets
+  # signed software take connections without asking. Without the hardened runtime, which would need entitlements for
+  # its JIT. The keychain is the one `tooling/mac-helper` signs with.
+  if [[ $kind == macos-* ]]; then
+    beam=$(echo "$release"/erts-*/bin/beam.smp)
+    ssh -o ConnectTimeout=15 mac "bash -c $(printf %q "$(cat <<'SIGN'
+keychain=$HOME/Library/Keychains/ptc-build.keychain-db
+d=$(mktemp -d) && trap 'rm -r "$d"; security lock-keychain "$keychain"' EXIT && cat >"$d/beam.smp"
+# The password goes to security on its standard input, never in a command line, where ps and logs see it.
+printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
+taskpolicy -b codesign --force --timestamp --keychain "$keychain" --sign "Developer ID Application" "$d/beam.smp" >&2
+codesign --verify --strict "$d/beam.smp" >&2 && cat "$d/beam.smp"
+SIGN
+)")" <"$beam" >"$beam.signed"
+    cat "$beam.signed" >"$beam" && rm "$beam.signed"
+  fi
 
   # What it ships with: the UI library's build, which it builds apps against and serves, and the Bun it builds apps
   # with. What its NIFs were built from is beside them, for `tooling/nifs` to find a Mac's again.
