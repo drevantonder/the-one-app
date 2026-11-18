@@ -385,7 +385,7 @@ defmodule SignIn do
   end
 
   @impl true
-  def hooks, do: ["device", "owner"]
+  def hooks, do: ["device", "owner", "settings.sections"]
 
   @impl true
   def hook("device", %{"device" => device}, call) do
@@ -396,6 +396,18 @@ defmodule SignIn do
       # A device it doesn't know is nobody's. A read that failed raises: that's not knowing, not nobody's.
       not_known when not_known in [false, :absent] -> %{}
     end
+  end
+
+  # Its sections of Settings: whoever's looking (Sign In & Security under their name), Devices, with the devices waiting
+  # to sign in as its red count, AI, and People & Groups, an admin thing, for the network's owners alone.
+  def hook("settings.sections", _about, call) do
+    people = %{in: "settings", name: "People & Groups", component: "people", icon: "client/users.svg", group: "network", order: 2}
+
+    [
+      %{in: "settings", name: "Sign In & Security", component: "passkeys", icon: "client/security.svg", group: "you", order: 0},
+      %{in: "settings", name: "Devices", component: "devices", icon: "client/icon.svg", group: "network", order: 1, badge: "waiting"},
+      %{in: "settings", name: "AI", component: "ai", icon: "client/connect.svg", group: "general", order: 3}
+    ] ++ if(Call.owns?(%{call | subject: "network"}), do: [people], else: [])
   end
 
   # Only a network that has an address and isn't being built has people sign in. One being built acts as whoever a

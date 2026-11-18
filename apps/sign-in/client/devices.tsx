@@ -1,5 +1,5 @@
 // Devices: everything that acts as whoever's looking, and the servers that run their apps. This device says whether an
-// update is ready for it, and is updated here; the build itself is for agents, in `builds`. The servers take each
+// update is ready for it, and is updated here; its page says its build under About. The servers take each
 // build by themselves, as the network's update says (`core/edge/updater/updater.ts`), which Software Update heads
 // them with, in Apple's words: up to date, updating, waiting for a quiet moment (Update Now), or failed (Try Again).
 // This device becomes a server and stops being one; a server's services are switched on and off; and a device is
@@ -8,7 +8,7 @@
 // each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
 // number it shows, as Microsoft Authenticator has it, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Box, Button, call, changed, client, confirm, Empty, Field, haptic, Input, link, List, Problem, render, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, toast, tokens } from "ui"
+import { Box, Button, call, changed, client, confirm, Empty, Field, haptic, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, type Element } from "ui"
 import { on } from "./mine.tsx"
 
 /** A build a machine is on, as `builds` answers it. */
@@ -80,6 +80,9 @@ interface Waiting {
   at: string
   place: string | null
 }
+
+/** What Settings draws of what other apps add to a place a section offers: a device's page (`settings.sections`). */
+type Groups = (props: { in: "device"; device: string }) => Element
 
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
@@ -239,6 +242,7 @@ const look = styles({
   /// What isn't a list stops at the width a list does, so a button isn't a line across a wide window.
   readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable },
   answer: { gap: tokens.length.gutter },
+  muted: { color: tokens.colour.secondaryLabel },
   /// The number typed, big as figures are.
   number: { height: "auto", paddingBlock: tokens.grid[4], font: tokens.type.largeTitle, fontVariantNumeric: "tabular-nums", textAlign: "center" },
 })
@@ -247,7 +251,7 @@ const look = styles({
 /** Everything Devices shows. */
 type All = Awaited<ReturnType<typeof mine>>
 
-function Detail(props: { thing: Thing; all: All }) {
+function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
   const thing = () => props.thing
   const server = () => (thing().kind ? props.all.servers.find((server) => server.here && thing().here) : thing())
   const serve = async (now: boolean) => {
@@ -320,6 +324,14 @@ function Detail(props: { thing: Thing; all: All }) {
           </List>
         </Section>
       </Show>
+      <Show when={props.groups} keyed>{(Groups) => <Groups in="device" device={thing().id} />}</Show>
+      <Section heading="About">
+        <List>
+          <Row heading="Kind" end={<Text style={look.muted}>{kinds[thing().kind ?? "server"]}</Text>} />
+          <Show when={presence(thing())}>{(seen) => <Row heading="Last Seen" end={<Text style={look.muted}>{seen()}</Text>} />}</Show>
+          <Show when={thing().build}>{(build) => <Row heading="Build" end={<Text style={look.muted}>{build().split("+")[0]}</Text>} />}</Show>
+        </List>
+      </Section>
       <Box style={look.readable}>
         <Show when={thing().kind} fallback={<Button variant="destructive" onClick={() => removeServer(thing())}>Remove</Button>}>
           <Button variant={thing().here ? "outline" : "destructive"} onClick={() => remove(thing())}>{thing().here ? "Sign Out" : "Remove"}</Button>
@@ -328,6 +340,9 @@ function Detail(props: { thing: Thing; all: All }) {
     </Screen>
   )
 }
+
+/// What kind of thing a device is, as About says it.
+const kinds = { app: "the One App", assistant: "Assistant", browser: "Browser", server: "Server" }
 
 /// When a device named whoever's looking, as a person says it: just now, or how long ago.
 const named = (at: string) => {
@@ -394,13 +409,13 @@ function Answer(props: { device?: Waiting }) {
   )
 }
 
-function Devices(props: { all: All }) {
+function Things(props: { all: All; groups?: Groups }) {
   const opened = () => [...props.all.devices, ...props.all.servers].find((thing) => thing.id === open())
   const row = (thing: () => Thing) => <Row heading={thing().name ?? "Server"} text={about(thing())} current={open() === thing().id} onClick={() => setOpen(thing().id)} />
   const said = () => props.all.update && softwareUpdate(props.all.update)
   return (
-    <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} /></Show>}>
-      <Screen heading="Devices">
+    <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} groups={props.groups} /></Show>}>
+      <Screen heading="Devices" back>
         <Show when={props.all.waiting.length}>
           <Section heading="Waiting to sign in">
             <List>
@@ -448,10 +463,13 @@ function Devices(props: { all: All }) {
   )
 }
 
-render(() => (
-  <Errored fallback={(error) => <Screen heading="Devices"><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
-    <Loading fallback={<Screen heading="Devices"><Skeleton rows={3} /></Screen>}>
-      <Devices all={mine()} />
+/// Devices, as Settings draws it, with what other apps add to a device's page (`groups`).
+export default function Devices(props: { groups?: Groups }) {
+  return (
+  <Errored fallback={(error) => <Screen heading="Devices" back><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
+    <Loading fallback={<Screen heading="Devices" back><Skeleton rows={3} /></Screen>}>
+      <Things all={mine()} groups={props.groups} />
     </Loading>
   </Errored>
-))
+)
+}

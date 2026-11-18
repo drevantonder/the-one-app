@@ -1,6 +1,6 @@
-// Connect Your AI: one short prompt that points an assistant at the network's llms.txt, which says how it comes in.
+// AI: one short prompt that points an assistant at the network's llms.txt, which says how it comes in.
 import { createMemo, Errored, Loading, Show } from "solid-js"
-import { Box, Button, client, Empty, Field, Problem, render, Screen, share, Skeleton, styles, Textarea, toast, tokens } from "ui"
+import { Box, Button, client, Empty, Field, Problem, Screen, share, Skeleton, styles, Textarea, toast, tokens } from "ui"
 
 const look = styles({ readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable } })
 
@@ -26,8 +26,10 @@ function Connect(props: { network: string }) {
   )
 }
 
-render(() => (
-  <Screen heading="Connect Your AI">
+/// AI, as Settings draws it: how to connect an AI to the network.
+export default function AI() {
+  return (
+  <Screen heading="AI" back>
     <Errored fallback={(error) => <Problem heading="Can't show how to connect" text={error() as Error} />}>
       <Loading fallback={<Skeleton rows={1} />}>
         <Show when={network()} fallback={<Empty>This network has no address, so an AI elsewhere can't reach it.</Empty>}>
@@ -36,4 +38,5 @@ render(() => (
       </Loading>
     </Errored>
   </Screen>
-))
+)
+}

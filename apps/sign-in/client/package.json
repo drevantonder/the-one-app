@@ -1,0 +1,8 @@
+{
+  "exports": {
+    "./passkeys": "./passkeys.tsx",
+    "./devices": "./devices.tsx",
+    "./people": "./people.tsx",
+    "./ai": "./ai.tsx"
+  }
+}

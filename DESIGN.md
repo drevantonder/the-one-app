@@ -128,7 +128,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Passkeys are managed inside the app.
 - Connect Your AI is one short prompt pointing the AI at the network's llms.txt.
 - Devices: a device is approved with no code typed, by one of the user's own clients; browsers are in the one list of devices; Priority is cards; removing a device offers "Also erase its data".
-- A device that's behind says "Update ready", with Update, and never its build, which is for agents (`builds`). Servers take each build by themselves, under Software Update at the top of Servers, in Apple's words: "Up to date · 0.20.1", "Updating… 2 of 4", "Waiting for a quiet moment" with Update Now, "Update failed · linux: why" with Try Again. There is no automatic-update switch. A desktop app's Update button runs `one update`.
+- A device that's behind says "Update ready", with Update. Its build shows only on its own page, under About, with its kind and when it was last seen (Andre's Settings mockup, 18 Nov). Servers take each build by themselves, under Software Update at the top of Servers, in Apple's words: "Up to date · 0.20.1", "Updating… 2 of 4", "Waiting for a quiet moment" with Update Now, "Update failed · linux: why" with Try Again. There is no automatic-update switch. A desktop app's Update button runs `one update`.
 - A device an outside program approved says "Approved by <program>", and removing a program offers to remove what it approved.
 
 ## Signing in and joining

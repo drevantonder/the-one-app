@@ -1,10 +1,10 @@
-// Users & Groups: everyone in the network and whoever's invited and hasn't joined yet, then the groups whoever's
+// People & Groups: everyone in the network and whoever's invited and hasn't joined yet, then the groups whoever's
 // looking is in, and who's in each. Whoever may invite makes a link someone joins by, shared the device's way, and
 // takes someone out; each person changes the name they go by here, from their own row. Anyone makes a group, which
 // has a Home Screen of its own that its members see, and its owners add someone in the network to it and take members
 // out. Groups are each person's own, so they're asked for as the person, wherever the app was opened.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Box, Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, render, Row, Screen, Section, share, Sheet, Skeleton, Split, styles, Text, toast, tokens } from "ui"
+import { Box, Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, styles, Text, toast, tokens } from "ui"
 
 const look = styles({
   form: { gap: tokens.length.gutter },
@@ -259,7 +259,7 @@ function UsersAndGroups(props: { all: All }) {
   return (
     <>
       <Split open={!!group()} onClose={() => setOpened()} detail={<Show when={group()}><GroupScreen group={group()!} all={props.all} /></Show>}>
-        <Screen heading="Users & Groups" action={props.all.invites ? <Button onClick={() => setInviting(true)}>Invite</Button> : undefined}>
+        <Screen heading="People & Groups" back action={props.all.invites ? <Button onClick={() => setInviting(true)}>Invite</Button> : undefined}>
           <Section heading="Users">
             <List>
               <For each={props.all.joined} keyed={(person) => person.who}>
@@ -302,10 +302,13 @@ function UsersAndGroups(props: { all: All }) {
   )
 }
 
-render(() => (
-  <Errored fallback={(error) => <Screen heading="Users & Groups"><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
-    <Loading fallback={<Screen heading="Users & Groups"><Skeleton rows={3} /></Screen>}>
+/// People & Groups, as Settings draws it.
+export default function PeopleAndGroups() {
+  return (
+  <Errored fallback={(error) => <Screen heading="People & Groups" back><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
+    <Loading fallback={<Screen heading="People & Groups" back><Skeleton rows={3} /></Screen>}>
       <UsersAndGroups all={all()} />
     </Loading>
   </Errored>
-))
+)
+}
