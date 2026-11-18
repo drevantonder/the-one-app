@@ -581,29 +581,31 @@ function FieldSheet() {
     if (!(await confirm({ heading: `Delete ${label(field.name)}?`, text: "It can't be brought back.", action: "Delete", destructive: true }))) return
     if (await does("vault_remove_field", { item: item.name, field: field.name })) shut()
   }
+  /** Return saves what's ready, as Save does. */
+  const submit = () => ready() && save()
   const hidden = () => (at()!.field ? at()!.field!.secret : secret())
   return (
     <Sheet heading={at()?.field ? label(at()!.field!.name) : at()?.item ? "Add Field" : "Add Item"} open={!!at()} onClose={shut}>
       <Show when={at()}>
         <Show when={!at()!.item}>
           <Field label="Name">
-            <Input placeholder="GitHub" required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} />
+            <Input placeholder="GitHub" required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={submit} />
           </Field>
         </Show>
         <Show when={!at()!.field}>
           <Field label="Field" error={field() && !named() ? "Only letters, digits and _." : undefined}>
-            <Input placeholder="token" required value={field()} onInput={(event) => setField(event.currentTarget.value)} />
+            <Input placeholder="token" required autocapitalize="none" autocorrect={false} spellcheck={false} value={field()} onInput={(event) => setField(event.currentTarget.value)} onAction={submit} />
           </Field>
         </Show>
         <Field label={at()!.field ? "New value" : "Value"} hint={hidden() ? "It's encrypted on this device, and never shown again." : undefined}>
-          <Input type={hidden() ? "password" : "text"} required autofocus={!!at()!.item} value={value()} onInput={(event) => setValue(event.currentTarget.value)} />
+          <Input type={hidden() ? "password" : "text"} autocomplete="off" autocapitalize="none" autocorrect={false} spellcheck={false} required autofocus={!!at()!.item} value={value()} onInput={(event) => setValue(event.currentTarget.value)} onAction={submit} />
         </Field>
         <Show when={!at()!.field}>
           <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.currentTarget.checked)} />
         </Show>
         <Show when={!at()!.item}>
           <Field label="Websites" hint="Where its secrets may be sent, like api.github.com.">
-            <Input value={hosts()} onInput={(event) => setHosts(event.currentTarget.value)} />
+            <Input type="url" autocapitalize="none" autocorrect={false} spellcheck={false} value={hosts()} onInput={(event) => setHosts(event.currentTarget.value)} onAction={submit} />
           </Field>
         </Show>
         <Button disabled={!ready()} onClick={save}>
@@ -663,7 +665,7 @@ function CreateSheet() {
   return (
     <Sheet heading={type() ? `Add ${titled(type()!.name)}` : ""} open={!!type()} onClose={shut}>
       <Field label="Name">
-        <Input required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} />
+        <Input required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={() => name().trim() && make()} />
       </Field>
       <Button loading={busy()} disabled={!name().trim()} onClick={make}>
         Add
@@ -770,6 +772,7 @@ function RequestAlert() {
                   autofocus={at() === 0}
                   value={typed()[field.name] ?? ""}
                   onInput={(event) => setTyped((all) => ({ ...all, [field.name]: event.currentTarget.value }))}
+                  onAction={() => filled() && !busy() && allow()}
                 />
               </Field>
             )}

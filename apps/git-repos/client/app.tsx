@@ -112,9 +112,8 @@ function NewRepo() {
   }
   return (
     <Sheet heading="New Repo" open={adding()} onClose={() => setAdding(false)}>
-      {/* TODO: Return creates it too, once a strict input can say it was submitted (the strict contract). */}
       <Field label="Name" hint="Lowercase letters, digits, - and _." error={sent() && !NAME.test(name()) ? "Use lowercase letters, digits, - and _, starting with a letter or digit." : undefined}>
-        <Input name="name" required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} />
+        <Input required autofocus autocapitalize="none" autocorrect={false} spellcheck={false} value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={make} />
       </Field>
       <Loading>
         <Show when={groups().length}>

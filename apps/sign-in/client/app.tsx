@@ -380,7 +380,7 @@ function Answer(props: { device?: Waiting }) {
                   autofocus
                   value={number()}
                   onInput={(event) => (setNumber(event.currentTarget.value.replace(/[^0-9]/g, "").slice(0, 2)), setError())}
-                  onKeyDown={(event) => event.key === "Enter" && yes()}
+                  onAction={yes}
                   style={look.number}
                 />
               </Field>

@@ -164,9 +164,8 @@ function Rename(props: Props & { asking: boolean; done: () => void }) {
   }
   return (
     <Sheet heading="Rename Profile" open={props.asking} onClose={props.done}>
-      {/* TODO: Return renames too, once a strict input can say it was submitted (the strict contract). */}
       <Field label="Name">
-        <Input name="value" required autofocus value={typed()} onInput={(event) => setTyped(event.currentTarget.value)} />
+        <Input required autofocus value={typed()} onInput={(event) => setTyped(event.currentTarget.value)} onAction={send} />
       </Field>
       <Button loading={busy()} onClick={send}>Rename</Button>
     </Sheet>

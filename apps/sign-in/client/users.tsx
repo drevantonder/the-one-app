@@ -104,7 +104,7 @@ function Name(props: { open: boolean; onClose: () => void; called?: string }) {
     <Sheet heading="Your Name" open={props.open} onClose={() => (props.onClose(), setError())}>
       <Box style={look.form}>
         <Field label="Name" hint="As people here know you." error={error()}>
-          <Input name="called" required autofocus autocomplete="name" value={called()} onInput={(event) => setCalled(event.currentTarget.value)} onKeyDown={(event) => event.key === "Enter" && save()} />
+          <Input name="called" required autofocus autocomplete="name" value={called()} onInput={(event) => setCalled(event.currentTarget.value)} onAction={save} />
         </Field>
         <Button loading={working()} onClick={save}>Save</Button>
       </Box>
@@ -147,7 +147,7 @@ function Invite(props: { open: boolean; onClose: () => void }) {
         fallback={
           <Box style={look.form}>
             <Field label="Name" hint="Lowercase letters, digits and hyphens. It's who they are here, for good." error={error()}>
-              <Input name="name" required autofocus autocapitalize="none" spellcheck={false} value={name()} onInput={(event) => setName(event.currentTarget.value)} onKeyDown={(event) => event.key === "Enter" && make()} />
+              <Input name="name" required autofocus autocapitalize="none" spellcheck={false} value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={make} />
             </Field>
             <Button loading={working()} onClick={make}>Create Link</Button>
           </Box>
@@ -175,7 +175,7 @@ function NewGroup(props: { open: boolean; onClose: () => void; me: string }) {
     <Sheet heading="New Group" open={props.open} onClose={close}>
       <Box style={look.form}>
         <Field label="Name">
-          <Input name="name" required autofocus autocapitalize="words" value={name()} onInput={(event) => setName(event.currentTarget.value)} onKeyDown={(event) => event.key === "Enter" && send()} />
+          <Input name="name" required autofocus autocapitalize="words" value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={send} />
         </Field>
         <Button onClick={send}>New Group</Button>
       </Box>

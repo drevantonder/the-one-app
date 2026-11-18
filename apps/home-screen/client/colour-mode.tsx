@@ -11,7 +11,6 @@ render(() => (
     <Show when={mode()}>
       <Field hint="For every app on this device.">
         <RadioGroup
-          name="mode"
           value={mode()}
           onChange={choose}
           options={[
