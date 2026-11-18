@@ -540,19 +540,40 @@ pub(crate) fn link(url: &str) -> Option<String> {
     url.strip_prefix("one:").map(str::to_owned)
 }
 
-/// Opens what each `one:` link the device hands the app links to, over whatever's showing, as a tap on a notification
+/// Opens what each link the device hands the app links to, over whatever's showing, as a tap on a notification
 /// does, and brings the window forward. The link the app was started with is the page's to ask for (`start`). A
 /// computer's program that isn't a developer's build takes the device's `one:` links: Linux and Windows have a
-/// program say so itself (a Mac's and an iPhone's say so in their bundles, and Android's in its manifest).
+/// program say so itself (a Mac's and an iPhone's say so in their bundles, and Android's in its manifest). A phone
+/// takes some of its network's own links too, its app links (`APP_LINKS` in `apps/sign-in/edge/wrangler.jsonc`).
 #[cfg(mobile)]
 fn links(app: &tauri::App) -> tauri::Result<()> {
     use tauri_plugin_deep_link::DeepLinkExt;
     app.deep_link().on_open_url(move |event| {
-        for opens in event.urls().iter().filter_map(|url| link(url.as_str())) {
-            crate::app().shell.emit("open", json!(opens));
+        for url in event.urls() {
+            open_link(url.to_string());
         }
     });
     Ok(())
+}
+
+/// Opens what `url` links to: a `one:` link says so itself, and one of the network's own pages leads there, as the
+/// network's edge sends it on to the web client's link to an app's place (`/?open=<one: link>`), as a request's link
+/// in Vault does (`apps/vault/edge/worker.ts`).
+#[cfg(mobile)]
+fn open_link(url: String) {
+    if let Some(opens) = link(&url) {
+        return app().shell.emit("open", json!(opens));
+    }
+    spawn(async move {
+        let led = async { anyhow::Ok(::client::web()?.get(&url).send().await?.url().clone()) };
+        match led.await {
+            Ok(to) => match to.query_pairs().find(|(name, _)| name == "open") {
+                Some((_, opens)) => app().shell.emit("open", json!(opens)),
+                None => eprintln!("{url} leads to no app's place, but {to}"),
+            },
+            Err(error) => eprintln!("couldn't learn where {url} leads: {error:#}"),
+        }
+    });
 }
 
 /// What the window's page is told of where this device is now: its session, the session's place in the order the
@@ -1105,7 +1126,12 @@ impl Shell for Phone {
     fn opened_at(&self) -> Option<String> {
         use tauri_plugin_deep_link::DeepLinkExt;
         let started = self.0.deep_link().get_current().ok().flatten().unwrap_or_default();
-        started.iter().find_map(|url| link(url.as_str()))
+        let opens = started.iter().find_map(|url| link(url.as_str()));
+        // One of the network's own links is opened once it's learned where it leads.
+        if opens.is_none() {
+            started.iter().for_each(|url| open_link(url.to_string()));
+        }
+        opens
     }
 
     fn listen(&self, client: Arc<Client>) {

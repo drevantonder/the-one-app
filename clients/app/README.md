@@ -3,9 +3,11 @@
 There's no app of the One App's own: each network has its own, built from this folder with the settings in its
 repo's `app/`, whose `README.md` gives the commands. They're Tauri's CLI's (`cargo tauri`), run here, with the
 network's repo checked out beside this one. A network's app is a Tauri config of its own (`app/tauri.conf.json`)
-merged over `tauri.conf.json` with `--config`, for a name, identifier and icon of its own, and its network's address
-(`app/address`) given to the build as `TAURI_ONE_ADDRESS`. A network's app with the One App's own name and icon has
-no config of its own. `tooling/network` starts a network on this machine and opens an app built from here on it.
+merged over `tauri.conf.json` with `--config`, and its network's address (`app/address`) given to the build as
+`TAURI_ONE_ADDRESS`. The config names its network's domain, as the host of its app links (`plugins.deep-link.mobile`:
+Tauri's deep-link plugin), so the app opens those links and its web view uses that network's passkeys, as the
+network's edge says it may (`apps/sign-in/edge/wrangler.jsonc`), and it may give the app a name, identifier and icon
+of its own. `tooling/network` starts a network on this machine and opens an app built from here on it.
 
 Android needs an Android SDK and its NDK (`ANDROID_HOME`, `NDK_HOME`), and iPhone a Mac with Xcode, `xcodegen` and
 Rust's iOS targets, signed by an Apple team (`APPLE_DEVELOPMENT_TEAM`). Their projects are `gen/android` and

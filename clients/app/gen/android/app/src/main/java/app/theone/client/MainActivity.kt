@@ -25,6 +25,7 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONObject
@@ -85,6 +86,11 @@ class MainActivity : TauriActivity() {
    * the page draws an app going home with it, where that's where back goes (`backStarted` in client.js).
    */
   override fun onWebViewCreate(webView: WebView) {
+    // The network's sign-in page asks for a passkey in the web view, which Credential Manager gives for a site that
+    // says this app is its own (`/.well-known/assetlinks.json`).
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+      WebSettingsCompat.setWebAuthenticationSupport(webView.settings, WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP)
+    }
     if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
       WebViewCompat.addWebMessageListener(webView, "androidTheme", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
         theme = message.data ?: ""

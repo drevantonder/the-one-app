@@ -50,7 +50,7 @@ An app is a network's: the commands that build it are in that repo's `app/README
 ## Building and signing
 
 1. Turn signing off in your checkout: `CODE_SIGNING_ALLOWED: NO` in `gen/apple/project.yml`'s settings for both
-   targets, `app_iOS` and `Notifications`, then `gen/apple/generate` (with the network's config if it has one).
+   targets, `app_iOS` and `Notifications`, then `gen/apple/generate` with the network's config.
    An `.xcconfig` doesn't do it: `cargo tauri ios build` takes none. Then the network's iPhone build command: its
    archive succeeds and its export fails (`errSecInternalComponent`), and the app is
    `gen/apple/build/app_iOS.xcarchive/Products/Applications/<name>.app`. Or build for the simulator with
@@ -59,7 +59,10 @@ An app is a network's: the commands that build it are in that repo's `app/README
    less `keychain-access-groups` (a wildcard, which a signature can't hold) and an empty
    `com.apple.security.application-groups`: `security cms -D -i <profile> > p.plist`,
    `plutil -extract Entitlements xml1 -o e.plist p.plist`, then `/usr/libexec/PlistBuddy -c "Delete :<key>" e.plist`
-   (`plutil` reads the dots in `com.apple...` as a path). Sign
+   (`plutil` reads the dots in `com.apple...` as a path). A profile's `com.apple.developer.associated-domains` is `*`,
+   which a signature can't hold either: set it to the app's own, as `gen/apple/generate` and the build wrote them in
+   `gen/apple/app_iOS/app_iOS.entitlements` (`webcredentials:` and `applinks:` its network's domain), or its web view
+   offers no passkeys. Sign
    `PlugIns/Notifications.appex` first, then the app; with no profile for the extension, remove `PlugIns/` instead.
 3. Unlock the keychain and `codesign` in the same ssh connection: `security -i` reads `unlock-keychain -p ...` on
    stdin, then `codesign --force --keychain <it> --sign "Apple Development" --entitlements <file> <app>`. The
