@@ -19,7 +19,7 @@ export { styles, negative } from "../../styles.ts"
 export declare const tokens: typeof Tokens
 
 /** What a node says it is, and its states, as ARIA has them. */
-export type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>
+export type Semantics = Pick<Props, Extract<keyof Props, "role" | "id" | `aria-${string}`>>
 
 // The primitives.
 
@@ -150,7 +150,7 @@ export type Acted = {
   action: TextInputAction
 }
 
-export type EditableTextProps = Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> & {
+export type EditableTextProps = Pick<Semantics, "role" | "aria-label" | "aria-description" | "aria-invalid" | "aria-controls" | "aria-activedescendant" | "aria-expanded"> & {
   name?: string
   value?: string
   type?: Props["type"]
@@ -186,13 +186,23 @@ export declare function render(code: () => Element): () => void
 export declare function Screen(props: { heading?: Element; action?: Element; back?: boolean; onBack?: () => void; children?: Element }): Element
 export declare function Section(props: { heading?: Element; children?: Element }): Element
 export declare function Split(props: { open?: boolean; onClose?: () => void; detail?: Element; children?: Element }): Element
-export declare function List(props: { children?: Element }): Element
+/** A listbox: which of its rows is chosen, and what's typed in that drives it (`createListbox`). */
+export interface Listbox {
+  readonly id: string
+  chosen: () => number
+  choose: (index: number) => void
+  field: () => { role: "combobox"; "aria-controls": string; "aria-expanded": "true" | "false"; "aria-activedescendant"?: string }
+  keys: (event: Keyed) => boolean
+}
+export declare function createListbox(): Listbox
+export declare function List(props: { listbox?: Listbox; label?: string; children?: Element }): Element
 export declare function Row(props: {
   heading?: Element
   text?: Element
   start?: Element
   end?: Element
-  onClick?: () => void
+  /** Pressed, with where it's drawn; Return in a listbox opens it with none. */
+  onClick?: (event?: Located) => void
   current?: boolean
   control?: Element
   action?: Element

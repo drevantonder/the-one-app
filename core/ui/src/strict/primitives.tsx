@@ -231,7 +231,7 @@ const v1 = (style: Style | undefined): style is Version1Style => !!style && !Arr
 export const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style as Styles)))
 
 /** What a primitive takes of the protocol's props: its role and states, with what it listens for. */
-type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>
+type Semantics = Pick<Props, Extract<keyof Props, "role" | "id" | `aria-${string}`>>
 
 /** What a key pressed is told, as the DOM's `KeyboardEvent`: `preventDefault()` keeps what the key does by itself
  * in a field (a caret moved, the focus moved on by Tab) from happening, on the DOM. */
@@ -466,7 +466,7 @@ export interface Acted {
 }
 
 /** An editable text's props. */
-export interface EditableTextProps extends Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> {
+export interface EditableTextProps extends Pick<Semantics, "role" | "aria-label" | "aria-description" | "aria-invalid" | "aria-controls" | "aria-activedescendant" | "aria-expanded"> {
   name?: string
   value?: string
   type?: Props["type"]

@@ -22,7 +22,7 @@ export { seen } from "../../seen.ts"
 export { Screen, Section, Split } from "../../screen.tsx"
 export { Empty, Problem, Skeleton, Status, Steps } from "../../states.tsx"
 
-export { List, Row } from "../../list.tsx"
+export { createListbox, List, Row } from "../../list.tsx"
 export { Metadata } from "../../metadata.tsx"
 
 export { Menu } from "../../menu.tsx"

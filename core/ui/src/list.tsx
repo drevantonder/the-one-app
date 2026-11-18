@@ -1,5 +1,5 @@
 // A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
-import { children, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
+import { children, createContext, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
 import { direction, reducedMotion, touch } from "#bridge"
@@ -9,7 +9,7 @@ import { messages } from "./words.ts"
 import type { Action } from "./actions.tsx"
 import { negative, styles } from "./styles.ts"
 import { duration, tokens } from "./tokens.ts"
-import type { Located, Pressed } from "./strict/types/ui.d.ts"
+import type { Keyed, Located, Pressed } from "./strict/types/ui.d.ts"
 
 const look = styles({
   list: {
@@ -30,6 +30,11 @@ const look = styles({
   flatRow: { borderTopWidth: 0, borderRadius: tokens.radius.medium },
   wraps: { flexWrap: "wrap" },
   current: { backgroundColor: tokens.colour.selection },
+  // A listbox's option, the one chosen highlighted as a row open beside its list is.
+  option: { borderRadius: tokens.radius.medium },
+  chosen: { backgroundColor: tokens.colour.selection },
+  // Its row has no highlight of its own under the pointer: the pointer chooses it, which highlights the option.
+  quiet: { backgroundColor: tokens.colour.transparent },
   held: { userSelect: "none", touchAction: "pan-y" },
   inside: {
     flexGrow: 1,
@@ -83,14 +88,75 @@ const slot = (node: JSX.Element, state: State, to?: number): Slot => {
   return { node, state: now, setState, to: held, setTo }
 }
 
+/** Whether a row is an option of a listbox, which its list's slot is for it. */
+const InListbox = createContext(false)
+
+/** A listbox: which of its rows is chosen, and what's typed in that drives it. */
+export interface Listbox {
+  /** The list's id, which the field's `aria-controls` names. */
+  readonly id: string
+  chosen: () => number
+  choose: (index: number) => void
+  /** What the field that has the keyboard says of it, as WAI-ARIA's combobox: spread on it. */
+  field: () => { role: "combobox"; "aria-controls": string; "aria-expanded": "true" | "false"; "aria-activedescendant"?: string }
+  /** The field's keys: ↑ ↓ choose the row before and after, Home and End the first and last, Return opens the one
+   * chosen (`onOpen`). → whether it took the key. */
+  keys: (event: Keyed) => boolean
+}
+
+/** What its list tells it, how many rows there are, and an option's id by where it is. */
+type Inside = { option: (index: number) => string; rows: (count: number) => void }
+const insides = new WeakMap<Listbox, Inside>()
+
+let listboxes = 0
+
+/// `const results = createListbox()`, then `<Search {...results.field()} onKeyDown={results.keys} … />` and
+/// `<List listbox={results} label="Results">…rows…</List>`: a list of rows to choose from while what's typed in keeps
+/// the keyboard, as a search's results are (WAI-ARIA's combobox and listbox): ↑ ↓, Home and End in the field choose a
+/// row, Return calls `onOpen` with the one chosen, the pointer over a row chooses it (a press opens it, as its
+/// `onClick` says), and a screen reader hears which. `results.chosen()` is the
+/// one chosen, first unless it's moved; `results.choose(0)` goes back to the first, as a search does once it's typed in.
+export function createListbox({ onOpen }: { onOpen?: (index: number) => void } = {}): Listbox {
+  const id = `listbox-${++listboxes}`
+  const [chosen, setChosen] = createSignal(0)
+  const [count, setCount] = createSignal(0)
+  const option = (index: number) => `${id}-${index}`
+  const choose = (index: number) => setChosen(Math.max(0, Math.min(count() - 1, index)))
+  const keys = (event: Keyed) => {
+    if (event.altKey || event.metaKey || event.ctrlKey || !count()) return false
+    const to = { ArrowDown: chosen() + 1, ArrowUp: chosen() - 1, Home: 0, End: count() - 1 }[event.key]
+    if (to !== undefined) choose(to)
+    else if (event.key === "Enter" && onOpen) onOpen(chosen())
+    else return false
+    event.preventDefault()
+    return true
+  }
+  const listbox: Listbox = {
+    id,
+    chosen,
+    choose,
+    keys,
+    field: () => ({ role: "combobox", "aria-controls": id, "aria-expanded": count() ? "true" : "false", "aria-activedescendant": count() ? option(chosen()) : undefined }),
+  }
+  insides.set(listbox, {
+    option,
+    rows: (rows) => {
+      setCount(rows)
+      if (chosen() >= rows) setChosen(Math.max(0, rows - 1))
+    },
+  })
+  return listbox
+}
+
 /// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
 /// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
 /// row added to a list that has some opens up where it goes, and one taken out closes up, the rest making room or
 /// closing the gap, at the settle pace; for whoever asked for less motion a new row fades in and one taken out just
 /// goes. A list that changes in any other way (filled, a row changed for another) just shows what it's given.
-export function List(props: { children?: JSX.Element }) {
-  const rows = children(() => props.children)
+export function List(props: { listbox?: Listbox; label?: string; children?: JSX.Element }) {
+  const rows = children(() => <InListbox value={!!props.listbox}>{props.children}</InListbox>)
   const [slots, setSlots] = createSignal<Slot[]>([])
+  createEffect(() => slots().filter((one) => one.state() !== "going").length, (count) => void (props.listbox && insides.get(props.listbox)!.rows(count)))
   createEffect(
     () => rows.toArray(),
     (next) => {
@@ -127,12 +193,28 @@ export function List(props: { children?: JSX.Element }) {
   }
   return (
     <Show when={slots().length}>
-      <Box role="list" style={[look.list, !touch() && look.flat]}>
+      <Box role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, !touch() && look.flat]}>
         <Box style={[look.rows, !touch() && look.flatRows]}>
           <For each={slots()}>
-            {(one) => (
+            {(one, at) => (
               <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }]}>
-                <Box onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</Box>
+                <Show
+                  when={props.listbox}
+                  fallback={<Box onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</Box>}
+                >
+                  {(listbox) => (
+                    <Box
+                      role="option"
+                      id={insides.get(listbox())!.option(at())}
+                      aria-selected={listbox().chosen() === at() ? "true" : "false"}
+                      onPointerEnter={() => listbox().choose(at())}
+                      onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}
+                      style={[look.option, listbox().chosen() === at() && look.chosen]}
+                    >
+                      {one.node}
+                    </Box>
+                  )}
+                </Show>
               </Box>
             )}
           </For>
@@ -162,7 +244,7 @@ export function Row(props: {
   text?: JSX.Element
   start?: JSX.Element
   end?: JSX.Element
-  onClick?: () => void
+  onClick?: (event?: Located) => void
   current?: boolean
   control?: JSX.Element
   action?: JSX.Element
@@ -230,10 +312,12 @@ export function Row(props: {
     start = undefined
   }
   // What a press that was a swipe, a held press, or put the row back would otherwise do as it lifts: open the row.
-  const pressed = (event: Located) => event.timeStamp - moved >= 600 && props.onClick?.()
+  const pressed = (event: Located) => event.timeStamp - moved >= 600 && props.onClick?.(event)
 
   // On a computer, what it can do is the screen's action panel's while it's chosen: under the pointer, as Raycast's
   // rows are, or open beside the list. Open, then its menu's items.
+  // In a listbox its list's slot is the option, which says so.
+  const inListbox = useContext(InListbox)
   const choose = useContext(Choose)
   const actions = (): Action[] => [
     ...(props.onClick ? [{ label: messages.open, onAction: () => props.onClick!() }] : []),
@@ -265,7 +349,7 @@ export function Row(props: {
   return (
     <RowMenu value={setMenu}>
       <Box
-        role="listitem"
+        role={inListbox ? undefined : "listitem"}
         onPointerDown={down}
         onPointerMove={move}
         onPointerUp={up}
@@ -281,7 +365,7 @@ export function Row(props: {
           when={props.onClick}
           fallback={<Box style={[look.inside, !touch() && look.flatInside, !!props.control && look.after, moving()]}>{inside()}</Box>}
         >
-          <Box role="button" aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, !touch() && look.flatInside, look.pressable, !!props.control && look.after, moving()]}>
+          <Box role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, !touch() && look.flatInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
             {inside()}
           </Box>
         </Show>

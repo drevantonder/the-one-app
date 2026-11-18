@@ -217,6 +217,13 @@ export interface Props {
   "aria-haspopup"?: Bool | "menu" | "listbox" | "dialog"
   /** Left out of the semantic tree: it's only how it looks. */
   "aria-hidden"?: Bool
+  /** What it's known by, which `aria-controls` and `aria-activedescendant` name it by. Like them it's only what it
+   * is, never how it's drawn, so a host that doesn't read it yet draws the page the same. */
+  id?: string
+  /** What this drives, by its `id`: the listbox what's typed in narrows (WAI-ARIA's combobox). */
+  "aria-controls"?: string
+  /** The option the keyboard is on while it stays in what's typed in, by its `id` (WAI-ARIA's combobox). */
+  "aria-activedescendant"?: string
   /** How it's laid out and looks: its styles (`Styles`) by id, and inline ones worked out as the page runs, the last
    * winning where two say the same property. A page written for 1 sends one `Version1Style` instead. */
   style?: (StyleId | Inline)[] | Version1Style
