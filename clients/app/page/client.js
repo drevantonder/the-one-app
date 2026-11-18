@@ -985,7 +985,7 @@ const home = () => depth > 0 && front?.first === true && !front.over
 /// move is the fingers again, which catch the move where it is. Up and down is never taken, nor a swipe that scrolls
 /// something of the app's own that way, or one while the app has its own screens to go back to, whose web view's
 /// swipe it is.
-/** @type {{ x: number, y: number, at: number, from: number, p: number, velocity: number, speed: number, slowing: number, began: number, own: boolean, taken?: boolean, lifted?: boolean } | undefined} */
+/** @type {{ x: number, y: number, from: number, recent: [number, number][], velocity: number, speed: number, slowing: number, began: number, own: boolean, taken?: boolean, lifted?: boolean } | undefined} */
 let swipe
 /// How long the wheel is still before the fingers are taken to have lifted: it says nothing while they're still.
 const LIFTED = 150
@@ -1002,8 +1002,8 @@ function wheel({ x, y, at, own }) {
   const speed = Math.abs(x) + Math.abs(y)
   // A move quicker than the one before, by more than a wheel's moves wander, is the fingers'.
   const quicker = !!swipe && speed > swipe.speed * 1.15
-  if (swipe?.lifted && !quicker) return void Object.assign(swipe, { speed, at })
-  if (!swipe || swipe.lifted) swipe = { x: 0, y: 0, at, from: 0, p: 0, velocity: 0, speed, slowing: 0, began: speed, own: false }
+  if (swipe?.lifted && !quicker) return void (swipe.speed = speed)
+  if (!swipe || swipe.lifted) swipe = { x: 0, y: 0, from: 0, recent: [], velocity: 0, speed, slowing: 0, began: speed, own: false }
   // Slowing over several moves, never quicker, from a swipe's speed, is what's left once the fingers lift.
   if (quicker) Object.assign(swipe, { slowing: 0, began: speed })
   else swipe.slowing += 1
@@ -1022,16 +1022,16 @@ function wheel({ x, y, at, own }) {
     if (Math.abs(swipe.x) <= Math.abs(swipe.y) || swipe.own || !(caught || (swipe.x * end < 0 && home()))) return
     on({ type: "grab" })
     swipe.taken = moving()?.matches("tracking") === true
-    swipe.from = swipe.p = move?.context.move?.p ?? 0
-    swipe.at = at
+    swipe.from = move?.context.move?.p ?? 0
   }
   if (!swipe.taken) return
   if (swipe.slowing >= 6 && swipe.began >= 4 && speed <= swipe.began * 0.8) return lift()
   const p = swipe.from - (swipe.x * end) / innerWidth
-  const dt = (at - swipe.at) / 1000
-  if (dt > 0) swipe.velocity = 0.6 * ((p - swipe.p) / dt) + 0.4 * swipe.velocity
-  swipe.p = p
-  swipe.at = at
+  // How fast it goes, over its last tenth of a second, which a page too busy to hear each move as it came leaves as
+  // it was.
+  swipe.recent = [...swipe.recent.filter(([then]) => at - then <= 100), [at, p]]
+  const [[since, was]] = swipe.recent
+  if (at - since >= 20) swipe.velocity = ((p - was) / (at - since)) * 1000
   on({ type: "drag", p: Math.min(1, Math.max(0, p)) })
 }
 /// The fingers have lifted: a move they took is let go, as fast as it was going.
