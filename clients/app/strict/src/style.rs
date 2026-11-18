@@ -1,6 +1,6 @@
 //! How a node looks and is laid out, from what its page says, resolved against the tokens (`tokens`): its layout as
 //! Taffy's style, its box (`Look`) and its text (`Text`), together `Computed`. A page written for version 2 names its
-//! styles by id (`Styles` in core/ui/src/strict/protocol.ts), each a style table's, merged in order, each property's
+//! styles by id (`Styles` in core/ui/src/strict/renderer.ts), each a style table's, merged in order, each property's
 //! value by the node's state (`State`); one written for 1 sends one style object (`tree::Style`). The one place that
 //! knows how styles are written.
 
@@ -381,7 +381,7 @@ fn text_style(font: &str, tabular: bool, dark: bool) -> TextStyle {
 
 // Version 2.
 
-/// A node's state, which a style's value may depend on, as `State` in the protocol has it.
+/// A node's state, which a style's value may depend on, as `State` in core/ui/src/strict/renderer.ts has it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub hover: bool,
@@ -395,7 +395,7 @@ static STYLES: RwLock<Option<HashMap<String, Value>>> = RwLock::new(None);
 static ROOT: RwLock<Option<String>> = RwLock::new(None);
 
 /// Takes a style table (`Styles`): the UI library's (`/ui/client/styles.json`), or an app's (`styles.json` beside
-/// its page). → the version of the protocol it needs.
+/// its page). → the runtime version it needs.
 pub fn load_styles(json: &str) -> anyhow::Result<u32> {
     let parsed: Value = serde_json::from_str(json)?;
     let mut styles = STYLES.write().expect("nothing panics holding it");
@@ -613,7 +613,7 @@ fn align_content(word: &str) -> Option<AlignContent> {
     })
 }
 
-/// A resolved style's properties (`Properties` in the protocol) as layout, look and text.
+/// A resolved style's properties (`Properties` in core/ui/src/strict/renderer.ts) as layout, look and text.
 fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     let get = |name: &str| style.get(name).filter(|value| !value.is_null());
     let word = |name: &str| get(name).and_then(Value::as_str);

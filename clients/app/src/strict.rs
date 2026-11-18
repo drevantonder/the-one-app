@@ -1,9 +1,8 @@
-//! An app's window drawn natively, where its entrypoint's page is in strict mode (`host` in
-//! core/ui/src/strict/protocol.ts) and of a version this program speaks (`strict::VERSION`): this process, the One
-//! App's, draws it on its strict thread (`strict::platform`) beside every other strict app's window, so another open
+//! An app's window drawn natively, where its entrypoint's page is in strict mode and needs a runtime version this
+//! program has (`runtimeVersion`, core/ui/src/strict/renderer.ts's `RUNTIME_VERSION`, `strict::RUNTIME_VERSION`):
+//! this process, the One App's, draws it on its strict thread (`strict::platform`) beside every other strict app's window, so another open
 //! app costs a few MB, and its JS runs in a QuickJS sandbox of its own. Any other app's window is a web view in a
-//! process of its own, as before (`host`), and so is a strict one whose app sends a version this program doesn't
-//! speak.
+//! process of its own, as before (`host`), and so is a strict one that needs a later runtime version.
 //!
 //! It asks what a page would, over the same channel a web view's window does (`hosts`), here an in-memory one: its
 //! files, and what the page asks of its client, which an MCP App asks its host (JSON-RPC). What a web view's window
@@ -81,7 +80,7 @@ fn module_script(html: &str) -> Option<String> {
 }
 
 /// What a strict page is drawn with: the module it loads, whether its app is trusted, and the tables its styles
-/// come from: the UI library's tokens and styles and its app's styles (`Tokens` and `Styles` in protocol.ts).
+/// come from: the UI library's tokens and styles and its app's styles (`Tokens` and `Styles` in core/ui/src/strict/renderer.ts).
 struct Page {
     /// Its page's address, which what it names by a relative address is from, and the module it loads.
     page: Url,
@@ -93,7 +92,7 @@ struct Page {
     icon: Option<String>,
 }
 
-/// Whether `entrypoint`'s page is strict and of a version this program speaks, its tables too, and if it is, what
+/// Whether `entrypoint`'s page is strict and needs a runtime version this program has, its tables too, and if it is, what
 /// it's drawn with.
 async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option<Page>> {
     let listed = crate::hosts::command("strict", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
@@ -104,7 +103,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
     }) else {
         return Ok(None);
     };
-    if !resource["_meta"]["host"].as_u64().is_some_and(|host| host <= u64::from(strict::VERSION)) {
+    if !resource["_meta"]["runtimeVersion"].as_u64().is_some_and(|needed| needed <= u64::from(strict::RUNTIME_VERSION)) {
         return Ok(None);
     }
     let trusted = resource["_meta"]["trusted"] == true;
@@ -118,7 +117,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
-    // Its tables, each of a version this program speaks, or it's a web view's. An app with no styles of its own has
+    // Its tables, each needing a runtime version this program has, or it's a web view's. An app with no styles of its own has
     // no table of them.
     let mut tables = Vec::new();
     for (table, needed) in [(page.join("/ui/client/tokens.json")?, true), (page.join("/ui/client/styles.json")?, true), (page.join("styles.json")?, false)] {
@@ -129,7 +128,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
         };
         let text = String::from_utf8(file)?;
         let v = serde_json::from_str::<Value>(&text).map(|table| table["v"].as_u64().unwrap_or(0)).unwrap_or(0);
-        if v > u64::from(strict::VERSION) {
+        if v > u64::from(strict::RUNTIME_VERSION) {
             return Ok(None);
         }
         tables.push(text);

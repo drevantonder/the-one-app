@@ -37,13 +37,14 @@ let appStore = ""
 /// Home Screen's window shows the launcher alone, and an app's own window shows that app (`own`), each where the
 /// launcher is in a phone's. Either opens every other app in its own window.
 let windows = false
-/// On Android, the version of the strict protocol the app draws natively, over this page (`strict` in src/hosts.rs):
-/// an app whose page is strict and of that version or older opens there, any other in a frame here. 0 where it doesn't.
-let strict = 0
-/// Each app's page's version of the strict protocol, by its entrypoint, as its `host` says, and the apps that opened
-/// in a frame here as their strict window couldn't.
+/// On Android, the runtime version of the renderer the app draws natively with, over this page (`runtimeVersion` in
+/// src/lib.rs): an app whose page is strict and needs that version or an older one opens there, any other in a frame
+/// here. 0 where it doesn't.
+let runtimeVersion = 0
+/// The runtime version each app's strict page needs, by its entrypoint, as its `runtimeVersion` says, and the apps
+/// that opened in a frame here as their strict window couldn't.
 /** @type {Map<string, number>} */
-let hosts = new Map()
+let needs = new Map()
 const framed = new Set()
 /** @type {{ entrypoint: string, subject?: string, name?: string | null } | undefined} */
 let own
@@ -916,7 +917,7 @@ function launcherIn(resources) {
   first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
   names = new Map(pages.map(({ uri, name }) => [named(uri), name ?? ""]))
   icons = new Map(pages.flatMap(({ uri, icons }) => (icons?.[0] ? [[named(uri), icons[0].src]] : [])))
-  hosts = new Map(pages.flatMap(({ uri, _meta }) => (typeof _meta?.host === "number" ? [[named(uri), _meta.host]] : [])))
+  needs = new Map(pages.flatMap(({ uri, _meta }) => (typeof _meta?.runtimeVersion === "number" ? [[named(uri), _meta.runtimeVersion]] : [])))
   const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
   appStore = found("app-store") ? named(/** @type {string} */ (found("app-store"))) : ""
   const home = found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
@@ -1580,8 +1581,8 @@ function go(link, subject, behind, from) {
   }
   // On Android, a strict app opens natively, over this page; one whose window couldn't open opens in a frame here.
   const at = key(page, subject)
-  const host = hosts.get(page) ?? 0
-  if (strict && host && host <= strict && !framed.has(at) && at !== baseKey()) {
+  const needed = needs.get(page) ?? 0
+  if (runtimeVersion && needed && needed <= runtimeVersion && !framed.has(at) && at !== baseKey()) {
     if (behind) return true
     invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page }).then(
       (opened) => opened || (framed.add(at), go(link, subject, behind, from)),
@@ -1850,11 +1851,11 @@ await listen("title_bar", ({ payload }) => titled(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
-const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, strict: drawsStrict, window: ownWindow, titleBar: overTitleBar, theme: kept, ...told } = await invoke("start")
+const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, runtimeVersion: drawn, window: ownWindow, titleBar: overTitleBar, theme: kept, ...told } = await invoke("start")
 phone = Boolean(taps)
 testflight = Boolean(fromTestflight)
 windows = Boolean(inWindows)
-strict = Number(drawsStrict) || 0
+runtimeVersion = Number(drawn) || 0
 own = ownWindow ?? undefined
 if (own?.name) document.title = own.name
 if (overTitleBar) titled(overTitleBar)

@@ -5,7 +5,7 @@
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Ice, Props, Rect, Version1Style } from "../protocol.ts"
+import type { Ice, Props, Rect, Version1Style } from "../renderer.ts"
 import type { Look, Styled, Styles } from "../../styles.ts"
 import type { tokens as Tokens } from "../../tokens.ts"
 
@@ -23,7 +23,7 @@ export type Semantics = Pick<Props, Extract<keyof Props, "role" | "id" | `aria-$
 
 // The primitives.
 
-// What a page moved by hand is told (protocol.ts's `Moved`), each a part of the DOM's event of that name, which is
+// What a page moved by hand is told (renderer.ts's `Moved`), each a part of the DOM's event of that name, which is
 // what it's given on the DOM.
 
 /** Where it happened, in the window, and where the node is drawn there (`getBoundingClientRect()`): a click's, a
@@ -117,7 +117,7 @@ export type PathProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> &
 }
 export declare function Path(props: PathProps): Element
 
-/** A screen's live video over WebRTC, which sends what's done on it to the screen itself (protocol.ts's `video`): the
+/** A screen's live video over WebRTC, which sends what's done on it to the screen itself (renderer.ts's `video`): the
  * page does its signalling, a new `ice` connecting, its `offer` answered with the screen's `answer`. */
 export type VideoProps = {
   ice?: Ice

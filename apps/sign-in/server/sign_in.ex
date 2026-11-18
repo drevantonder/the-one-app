@@ -33,7 +33,7 @@ defmodule SignIn do
   @impl true
   def entrypoints do
     [
-      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "Admin", host: 2},
+      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "Admin", runtime_version: 3},
       %{
         name: "Devices",
         page: "client/index.html",
@@ -41,13 +41,13 @@ defmodule SignIn do
         category: "Devices",
         subject: "user",
         badge: "waiting",
-        host: 2
+        runtime_version: 3
       },
       %{
         name: "Sign-In & Security",
         page: "client/security.html",
         subject: "user",
-        host: 2
+        runtime_version: 3
       },
       %{
         name: "Connect Your AI",
@@ -55,7 +55,7 @@ defmodule SignIn do
         icon: "client/connect.svg",
         category: "AI",
         subject: "user",
-        host: 2
+        runtime_version: 3
       }
     ]
   end

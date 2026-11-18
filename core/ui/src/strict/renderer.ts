@@ -1,22 +1,29 @@
 // How an app written in strict mode draws natively, on our renderer on a computer and Android: its JS runs in a
-// sandbox of its own (rquickjs), and Solid's universal renderer (@solidjs/universal) sends the host what changes in its
-// tree as ops, which the host draws. What the person does comes back as events. On the web, iOS and in MCP Apps the
-// same app draws to the DOM instead, and none of this is used.
+// sandbox of its own (rquickjs), and Solid's universal renderer (@solidjs/universal) tells the host what changes in its
+// tree as mutations, which the host applies and draws. What the person does comes back as events. On the web, iOS and
+// in MCP Apps the same app draws to the DOM instead, and none of this is used.
 //
-// This file is the protocol. A host speaks one `VERSION`; an app's entrypoint says the version it needs (`host`), and
-// a host that speaks an older one, or none, opens it in a web view. A change a host of this version couldn't draw (a
-// new type, prop, op, token kind, style property or condition) is a new version. A host draws every version up to its
-// own.
+// This file is the renderer's bridge: what crosses between the sandbox and the host to draw. Its other channel, what a
+// page asks its client (calls.ts), is MCP Apps' JSON-RPC, the same on every host. This one is ours and made to be fast,
+// as React Native's JSI is: each mutation is a direct call of a host function (`Mutations`), with numbers, strings and
+// plain values as they are, never JSON, and the host applies what a turn of the sandbox's event loop changed once it
+// has run, as one commit. Each event is a direct call the other way (`Events`).
 //
-// Version 2 is the strict contract: a host draws only the primitives (`Type`), each styled by styles (`Styles`) whose
-// values are design tokens (`Tokens`), and sends back what the person does to them (`EventName`). Every component of
-// the UI library is written once on them, so a host draws no component of its own. Both tables come with the UI
-// library and with each app, over the air, and a host knows only the kinds of token, the conditions and the style
-// properties, never a token's or a style's name or value. Version 1's `style` objects are still drawn, for pages
-// written for 1, until they're written for 2.
+// A host has one runtime version (`RUNTIME_VERSION`), as Expo's native runtime has, which an app's entrypoint names
+// (`runtime_version`); a host whose version is older, or that has none, opens it in a web view. A change a host of this
+// version couldn't draw (a new type, prop, mutation, token kind, style property or condition, or a change to how they
+// cross) is a new version. A host draws every version up to its own.
+//
+// A host draws only the primitives (`Type`), each styled by styles (`Styles`) whose values are design tokens
+// (`Tokens`), and sends back what the person does to them (`EventName`). Every component of the UI library is written
+// once on them, so a host draws no component of its own. Both tables come with the UI library and with each app, over
+// the air, and a host knows only the kinds of token, the conditions and the style properties, never a token's or a
+// style's name or value. A page written for version 1 sends `style` objects (`Version1Style`), which are still drawn
+// until it's written on the tables.
 
-/** The protocol's version, which a host says it speaks, an entrypoint's `host` names, and the tables say they need. */
-export const VERSION = 2
+/** The runtime version: what the host's side of the renderer is, which a host says it has, an entrypoint names
+ * (`runtime_version`), and the tables say they need. 3 made each mutation and event a direct call. */
+export const RUNTIME_VERSION = 3
 
 /** A node, as the host knows it. `0` is the root, which the host makes: an app's window, or its frame. */
 export type Id = number
@@ -49,35 +56,42 @@ export type Id = number
  *   down and up (1 to 3) and a wheel's steps (4 to 7) with the modifiers held, the keys that aren't text (as X names
  *   them), and what's typed or pasted, which takes a field of its own so a phone's keyboard comes up as it's pressed,
  *   or as its `autofocus` is set. The device's full screen keys (F11, ⌃⌘F) aren't sent: they go on as `keydown` to the node it's in. A host that
- *   doesn't draw it says so (`Host.video`), and the page that uses it is opened another way.
+ *   doesn't draw it says so (`Mutations.video`), and the page that uses it is opened another way.
  * A `raw-text` outside a `text` is drawn as if in one. */
 export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "raw-text"
 
-/** JS → host: what changed since the last update, in order, as one batch. The host draws once it has the batch. */
-export interface Update {
-  v: typeof VERSION
-  ops: Op[]
-}
-
-export type Op =
+/** What a native host gives an app's sandbox, as `globalThis.mutations`, before it loads the app's page: a function for
+ * each mutation of its tree, called as Solid's renderer makes it, in order. The host applies what a turn of the
+ * sandbox's event loop changed once it has run, and draws it. The page's module, as its entrypoint names it, imports
+ * the UI library (`/ui/client/web.js`, `/ui/client/ui.js`), which the host loads from `/ui/client/native/`, the same
+ * names, built for it. */
+export interface Mutations {
   /** A new node, not yet in the tree. A `raw-text` has its `value`. */
-  | { op: "create"; id: Id; type: Type; value?: string }
+  create(id: Id, type: Type, value?: string): void
   /** One of a node's props (`Props`), or `null` for none. A `raw-text`'s only prop is its `value`. */
-  | { op: "set"; id: Id; name: keyof Props; value: unknown }
+  set<Name extends keyof Props>(id: Id, name: Name, value: Props[Name] | null): void
   /** Puts `id` into `parent` before `before`, or at its end: a node already in the tree moves. */
-  | { op: "insert"; parent: Id; id: Id; before?: Id }
+  insert(parent: Id, id: Id, before?: Id): void
   /** Takes `id`, with what's in it, out of `parent`. It may be inserted again. */
-  | { op: "remove"; parent: Id; id: Id }
+  remove(parent: Id, id: Id): void
   /** JS no longer holds `id` (it was garbage collected), so it's never inserted again and the host frees it. */
-  | { op: "drop"; id: Id }
+  drop(id: Id): void
   /** The page uses `what`, a part of the UI library a native host doesn't draw yet, so the host opens it another way:
    * a computer's or a phone's in a web view. */
-  | { op: "unsupported"; what: string }
+  unsupported(what: string): void
+  /** Whether it draws `video`. A page that uses one where it doesn't tells it `unsupported`, so it's opened another
+   * way. */
+  video?: boolean
+}
+
+/** What the UI library gives the host, as `globalThis.ui` (with calls.ts's `Sandbox`), once it's loaded. */
+export interface Events {
+  /** Something the person did, called directly by the host with the event as a plain object. */
+  event(event: Event): void
+}
 
 /** Host → JS: what the person did to a node that listens for it (its `on…` prop), one at a time. */
 export interface Event {
-  v: typeof VERSION
-  op: "event"
   id: Id
   name: EventName
   /** An `input`'s editing state, with `input`: what's typed, selected and composed now. */
@@ -126,29 +140,6 @@ export interface Rect {
   height: number
 }
 
-/** What a native host gives an app's sandbox, as `globalThis.host`, before it loads the app's page: the module its
- * entrypoint's page names, whose imports of the UI library (`/ui/client/web.js`, `/ui/client/ui.js`) the host loads
- * from `/ui/client/native/`, the same names, built for it. */
-export interface Host {
-  /** Takes a batch of ops, to draw. */
-  update(update: Update): void
-  /** Takes a JSON-RPC message for the app's client, as a page on the DOM posts one to its frame's parent (MCP Apps):
-   * `ui/initialize`, `tools/call` and the rest, which the client answers as it answers a page. */
-  post(message: object): void
-  /** Whether it draws `video`. A page that uses one where it doesn't tells it `unsupported`, so it's opened another
-   * way, as a host of version 2 before it drew video doesn't know the type. */
-  video?: boolean
-}
-
-/** What the UI library gives the host, as `globalThis.ui`, once it's loaded. */
-export interface Sandbox {
-  /** Something the person did. */
-  event(event: Event): void
-  /** A JSON-RPC message from the client, as a page on the DOM gets one in its `message` event: an answer to what it
-   * posted, or a notification (`notifications/one/changed`, `ui/notifications/host-context-changed`). */
-  message(message: object): void
-}
-
 /** What a node can listen for, as its `on…` prop: `click` is `onClick`, `pointerenter` `onPointerEnter`, as the DOM
  * names them. `click` is a press, by a pointer, a finger, or Enter or Space where the keyboard is; `pointerenter` and
  * `pointerleave` are a mouse or a trackpad's pointer coming over it and going, never a finger; `keydown` a key pressed
@@ -186,7 +177,7 @@ export interface Editing {
  * (a multiline input's Enter), `done`, `go`, `next`, `previous`, `search`, `send`. */
 export type TextInputAction = "newline" | "done" | "go" | "next" | "previous" | "search" | "send"
 
-/** Every node's props, as `set` sends them, named as a strict app's JSX names them, which are the DOM's. One semantic
+/** Every node's props, as `set` takes them, named as a strict app's JSX names them, which are the DOM's. One semantic
  * tree, which a screen reader and an agent both read: a node's role, its name (`aria-label`, or what a `text` says),
  * its value, its states (`aria-…`, `disabled`) and its actions (which `on…` it has), as ARIA has them and a
  * host maps them to AccessKit's. A listener is sent as `true` while there is one, `null` once there isn't. */
@@ -410,8 +401,9 @@ export interface Version1Style {
 // The tables. The UI library's build makes both from its own TypeScript (core/ui/src/tokens.ts, and each component's
 // styles), as it makes the web's CSS from them; each app's build makes its styles' the same way. A host fetches them
 // as it fetches a page's modules: the tokens and the UI library's styles at `/ui/client/tokens.json` and
-// `/ui/client/styles.json`, an app's styles at `styles.json` beside its page's `index.html`. Each says the protocol
-// `v`ersion it needs; a host that speaks an older one opens the page in a web view, as for an entrypoint's `host`.
+// `/ui/client/styles.json`, an app's styles at `styles.json` beside its page's `index.html`. Each says the runtime
+// version it needs (`v`); a host whose version is older opens the page in a web view, as for an entrypoint's
+// `runtime_version`.
 
 /** A token's id, as its table names it. A host never knows one by name: a style says which it uses. */
 export type TokenId = string

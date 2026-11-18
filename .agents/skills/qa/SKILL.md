@@ -38,8 +38,8 @@ It draws every scene, or those of the folders named, on the DOM in headless Chro
 `bunx playwright-core install chromium` fetches where it's missing) and on a native host by its headless harness
 (`cargo build -p strict --example screenshot`), and says for each where the DOM's and the native host's trees and
 pictures differ, and what changed since `--against`: a tree that differs, or pictures more than 2% apart, is looked
-at in the folder it names (`dom.png`, `native.png`, `diff.png`, `changed.png`). A native host that doesn't speak the
-UI library's protocol yet draws nothing, which it says. A difference that's meant is said in the commit; one that
+at in the folder it names (`dom.png`, `native.png`, `diff.png`, `changed.png`). A native host that hasn't the
+runtime version the UI library needs draws nothing, which it says. A difference that's meant is said in the commit; one that
 isn't is fixed.
 
 ### Which to use
@@ -92,7 +92,7 @@ drops.
 
 ### Strict windows
 
-A strict app's window (its entrypoint's `host`) is drawn natively on Linux and Windows by the launcher's process, not in a web
+A strict app's window (its entrypoint's `runtime_version`) is drawn natively on Linux and Windows by the launcher's process, not in a web
 view, so WebDriver doesn't reach it: drive it with the inspector, which every strict window answers (`clients/app/strict/src/inspect.rs` is its
 protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never a sleep:
 

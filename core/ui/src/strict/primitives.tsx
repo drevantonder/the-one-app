@@ -1,12 +1,12 @@
 // The strict primitives, as the DOM draws them: a box, a scroll, a text, an image, a path and an editable text, each a
-// plain element with the semantic props the strict protocol has (protocol.ts). A native host draws
-// the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
+// plain element with the semantic props a native host's renderer has (renderer.ts). A native host draws
+// the same props from the mutations Solid's universal renderer tells it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
 import { createEffect, For, omit, onCleanup, onSettled, Show } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
 import { tellDrawn } from "../bridge.ts"
 import { layer } from "./layer.ts"
-import type { Ice, Props, TextInputAction, Version1Style } from "./protocol.ts"
+import type { Ice, Props, TextInputAction, Version1Style } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
 import { web, type Styles } from "../styles.ts"
@@ -44,7 +44,7 @@ export interface PickerProps {
   style?: Style
 }
 
-/// The device's own picker of one of a few, as a phone's wheel or sheet is (protocol.ts's `picker`): on the DOM a
+/// The device's own picker of one of a few, as a phone's wheel or sheet is (renderer.ts's `picker`): on the DOM a
 /// `<select>`, see-through over its box, which the browser opens as its own.
 export function Picker(props: PickerProps) {
   return (
@@ -72,7 +72,7 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform)
 /** How far a wheel turns for one of its steps, in pixels. */
 const STEP = 60
 
-/// A screen's live video over WebRTC (protocol.ts's `video`): on the DOM a `<video>`, its peer connection and its
+/// A screen's live video over WebRTC (renderer.ts's `video`): on the DOM a `<video>`, its peer connection and its
 /// data channel, which what's done on it goes down, and a field, unseen, that what's typed goes to, focused as it's
 /// pressed, or as its `autofocus` is set, so a phone shows its keyboard. Each `ice` is a connection, the last one closed; its `offer` is told once
 /// its candidates are gathered, and its `answer` is set as it comes.
@@ -230,7 +230,7 @@ const v1 = (style: Style | undefined): style is Version1Style => !!style && !Arr
  * 1 type style's `data-font`. */
 export const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style as Styles)))
 
-/** What a primitive takes of the protocol's props: its role and states, with what it listens for. */
+/** What a primitive takes of the renderer's props: its role and states, with what it listens for. */
 type Semantics = Pick<Props, Extract<keyof Props, "role" | "id" | `aria-${string}`>>
 
 /** What a key pressed is told, as the DOM's `KeyboardEvent`: `preventDefault()` keeps what the key does by itself
@@ -340,7 +340,7 @@ function watched(element: HTMLElement, props: BoxProps) {
   onCleanup(() => (sized.disconnect(), window.removeEventListener("resize", report)))
 }
 
-/** What a page moved by hand listens for (protocol.ts's `Moved`), which `movable` draws. */
+/** What a page moved by hand listens for (renderer.ts's `Moved`), which `movable` draws. */
 const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel"] as const
 
 /// A box's or a scroll's `ref` and `onContextMenu` for what it moves by hand: its pointers (`follows`), and a
@@ -350,7 +350,7 @@ const movable = (props: BoxProps) => ({
   onContextMenu: (event: MouseEvent) => props.onContextMenu && (event.preventDefault(), event.stopPropagation(), props.onContextMenu(event as unknown as Located)),
 })
 
-/// A box's pointers, as the protocol has them: a pointer's moves over it, a mouse's too, and once one is down on it,
+/// A box's pointers, as the renderer has them: a pointer's moves over it, a mouse's too, and once one is down on it,
 /// its moves and its end wherever it goes, as a touch's are, each told where the box is (`currentTarget`). While a
 /// finger that's down on it moves, the browser scrolls nothing for it, unless it's in something in the box that
 /// scrolls (an iPhone's web view would bounce the page). A wheel over it is its own, unless it's up and down over

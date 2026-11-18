@@ -1,8 +1,8 @@
 // The key names from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_linux/src/linux/platform.rs,
 // `keystroke_from_xkb`, `get_xkb_compose_state` and `keystroke_underlying_dead_key`, and x11/client.rs,
 // `xkb_state_for_key_event`) at commit
-// 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, named here as the DOM's `KeyboardEvent.key` names them, which the strict
-// protocol's `keydown` and the inspector speak.
+// 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, named here as the DOM's `KeyboardEvent.key` names them, which the
+// renderer's `keydown` and the inspector speak.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 

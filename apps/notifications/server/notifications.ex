@@ -104,7 +104,7 @@ defmodule Notifications do
   @impl true
   def entrypoints do
     [
-      %{page: "client/index.html", subject: "user", host: 2}
+      %{page: "client/index.html", subject: "user", runtime_version: 3}
     ]
   end
 

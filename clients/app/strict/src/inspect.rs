@@ -376,6 +376,6 @@ impl Key {
 
     /// The `keydown` event of it, for node `id`.
     pub fn event(&self, id: Id) -> Value {
-        json!({"v": crate::VERSION, "op": "event", "id": id, "name": "keydown", "key": self.key, "shiftKey": self.shift, "altKey": self.alt, "ctrlKey": self.ctrl, "metaKey": self.meta})
+        json!({"id": id, "name": "keydown", "key": self.key, "shiftKey": self.shift, "altKey": self.alt, "ctrlKey": self.ctrl, "metaKey": self.meta})
     }
 }

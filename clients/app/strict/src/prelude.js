@@ -1,13 +1,10 @@
-// The sandbox's own globals, run after LLRT's Web APIs and before the app's code. `__update`, `__post`, `__now`,
-// `__log`, `FIXED` (ms since 1970 for a fixed clock, or null), `LOCALE` and `shim` (event-target-shim.js) are the
-// host's (js.rs). It evaluates to what the host itself calls: its timers, and what it tells of promises nothing
+// The sandbox's own globals, run after LLRT's Web APIs and before the app's code. `__post`, `__now`, `__log`, `FIXED`
+// (ms since 1970 for a fixed clock, or null), `LOCALE` and `shim` (event-target-shim.js) are the host's (js.rs), and
+// so is `mutations`, what the renderer draws with. It evaluates to what the host itself calls: its timers, and what it tells of promises nothing
 // handled. What throws in a timer or a listener is reported (`reportError`), as a browser does, and runs nothing less.
 const timers = new Map()
 let nextTimer = 1
-globalThis.host = {
-  update: (update) => __update(JSON.stringify(update)),
-  post: (message) => __post(JSON.stringify(message)),
-}
+globalThis.host = { post: (message) => __post(JSON.stringify(message)) }
 globalThis.setTimeout = (callback, delay = 0, ...args) => {
   const id = nextTimer++
   timers.set(id, { due: __now() + Math.max(0, delay), run: () => callback(...args) })

@@ -1,10 +1,10 @@
 // The strict primitives on a native host: each a node of its type, with its props, which Solid's universal renderer
-// sends the host as ops (renderer.ts). The UI library's components import them as `#primitives`, which is these in
+// tells the host as mutations (renderer.ts). The UI library's components import them as `#primitives`, which is these in
 // the native build and the DOM's (../primitives.tsx) in the DOM's, so each component is the same code on both.
 import { merge, omit, onCleanup, type Element } from "solid-js"
 import { createElement, detach, insert, insertNode, render as draw, root, spread, unsupported } from "./renderer.ts"
 import { layer } from "../layer.ts"
-import type { Host, Type } from "../protocol.ts"
+import type { Mutations, Type } from "../renderer.ts"
 import type * as Strict from "../types/ui.d.ts"
 import type { PickerProps } from "../primitives.tsx"
 
@@ -34,16 +34,16 @@ export const EditableText: typeof Strict.EditableText = (props) =>
     }),
   )
 
-/** The device's own picker (../protocol.ts's `picker`), which the UI library's Select draws under a finger. */
+/** The device's own picker (../renderer.ts's `picker`), which the UI library's Select draws under a finger. */
 export const Picker = primitive("picker") as (props: PickerProps) => Element
 
-/** A screen's live video, which the host connects, plays and sends what's done on it to (../protocol.ts's `video`),
- * where it draws one (`Host.video`). Where it doesn't, it's told so, which opens the page another way, and it throws,
+/** A screen's live video, which the host connects, plays and sends what's done on it to (../renderer.ts's `video`),
+ * where it draws one (`Mutations.video`). Where it doesn't, it's told so, which opens the page another way, and it throws,
  * as a part of the UI library a native host doesn't draw does (./index.tsx). */
 export const Video: typeof Strict.Video = (props) => {
-  if ((globalThis as { host?: Host }).host?.video) return primitive("video")(props)
+  if ((globalThis as { mutations?: Mutations }).mutations?.video) return primitive("video")(props)
   unsupported("Video")
-  throw new Error("Video isn't drawn by this native host (core/ui/src/strict/protocol.ts's `video`)")
+  throw new Error("Video isn't drawn by this native host (core/ui/src/strict/renderer.ts's `video`)")
 }
 
 export const render: typeof Strict.render = (code) => draw(code as never)

@@ -3,7 +3,7 @@
 //! drawn on the app's UI thread, where its views are: a job for the windows' thread (`Strict::run`) wakes that thread's
 //! looper, as Android's own Handler does, and what a view hears (its surface, a finger, the keyboard, autofill, the
 //! screen reader) comes in through JNI on it. The keyboard bridge is Flutter's (`app.theone.strict.editing`), and
-//! speaks the protocol's editing state, which the screen's editing model keeps (`editing`); the screen reader's is
+//! speaks the renderer's editing state, which the screen's editing model keeps (`editing`); the screen reader's is
 //! AccessKit's (`a11y`).
 //!
 //! Rust asks the view to do something (show the keyboard for a field, give it the field's state, hide it) by

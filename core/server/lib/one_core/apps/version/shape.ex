@@ -43,10 +43,10 @@ defmodule OneCore.Apps.Version.Shape do
         "category" => @text,
         "subject" => @text,
         "badge" => %{"type" => "string", "description" => "the name of one of this app's tools that only reads"},
-        "host" => %{
+        "runtime_version" => %{
           "type" => "integer",
           "minimum" => 1,
-          "description" => "the strict protocol's version its page is written for (core/ui/src/strict/protocol.ts)"
+          "description" => "the runtime version its strict page needs of a native host (core/ui/src/strict/renderer.ts)"
         }
       }
     },

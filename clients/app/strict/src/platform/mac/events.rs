@@ -1,6 +1,6 @@
 // The key names from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/mac/events.rs,
 // `parse_keystroke`) at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), named here as the
-// DOM's `KeyboardEvent.key` names them, which the strict protocol's `keydown` and the inspector speak, and read with
+// DOM's `KeyboardEvent.key` names them, which the renderer's `keydown` and the inspector speak, and read with
 // objc2's AppKit bindings. What a key types is what AppKit says it types (`characters`), not GPUI's own layout
 // lookup: the strict host has no key bindings to match.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0

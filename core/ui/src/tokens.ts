@@ -1,6 +1,6 @@
 // The design tokens: every colour, length, radius, shadow, material, font, weight, type style and pace the UI library
 // and every app draw with, as typed values, each the same everywhere or varying by condition (dark, touch, phone,
-// reduced motion: strict/protocol.ts's `Condition`). This is their one source. `tokens` are by role, as Raycast's
+// reduced motion: strict/renderer.ts's `Condition`). This is their one source. `tokens` are by role, as Raycast's
 // model has them (text at 100, 60, 40, 20 and 10%, a background, a selection, a loader, seven accents each with a
 // tint, a 4px grid, three radii, a window's shadow and edge, three sizes of text and a large title), and strict code
 // names only those, so their values change here alone. `legacy` are what the UI library's components drawn with CSS
@@ -16,7 +16,7 @@
 //   pyftsubset allo.ttf --layout-features='*' --flavor=woff2 --output-file=Allo-Variable.woff2 --unicodes=U+0000-00FF,
 //     U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
 //     U+2193,U+2212,U+2215,U+FEFF,U+FFFD
-import type { Condition, Length, Varies } from "./strict/protocol.ts"
+import type { Condition, Length, Varies } from "./strict/renderer.ts"
 
 /** A token of a kind, whose `value` a style never reads: it names the token, and the build resolves it. */
 export interface Token<Kind extends string = string> {
@@ -50,7 +50,7 @@ const motion = (duration: Varies<number>, easing: Varies<[number, number, number
 
 // Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-black blue-grey or a near-white
 // window, one text colour, and Apple's accents but red, orange and blue, which are the mockup's. Colours CSS names
-// are written in OKLCH, which a native host reads from tokens.css for pages written for protocol 1.
+// are written in OKLCH, which a native host reads from tokens.css for pages written for version 1.
 const ink = ["oklch(0.224 0.008 285.76)", "oklch(1 0 0)"] as const
 const red = ["oklch(0.614 0.204 25.56)", "oklch(0.7 0.191 23.4)"] as const
 const orange = ["oklch(0.677 0.164 57.12)", "oklch(0.782 0.171 67.22)"] as const

@@ -254,7 +254,7 @@ impl Screen {
 
     /// Tells the app what the person did to node `id`, and takes what it changed.
     pub fn event(&mut self, id: Id, name: &str, value: Option<String>) {
-        let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": name, "value": value});
+        let event = json!({"id": id, "name": name, "value": value});
         if let Err(error) = self.sandbox.send("event", &event) {
             self.threw(error);
         }
@@ -266,7 +266,7 @@ impl Screen {
     pub(crate) fn click(&mut self, id: Id, at: Option<Point<f32>>) {
         let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
         let at = at.unwrap_or(point(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0));
-        let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "click", "clientX": at.x, "clientY": at.y,
+        let event = json!({"id": id, "name": "click", "clientX": at.x, "clientY": at.y,
             "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
         if let Err(error) = self.sandbox.send("event", &event) {
             self.threw(error);
@@ -341,10 +341,9 @@ impl Screen {
             for posted in self.sandbox.take() {
                 match posted {
                     // What comes after what this host can't draw goes to the web view it opens in instead.
-                    Posted::Update(_) if self.mismatched.is_some() => {}
-                    Posted::Update(update) => {
-                        let applied = serde_json::from_str(&update).map_err(anyhow::Error::from).and_then(|update| self.tree.apply(update));
-                        match applied {
+                    Posted::Mutation(_) if self.mismatched.is_some() => {}
+                    Posted::Mutation(mutation) => {
+                        match self.tree.apply([mutation]) {
                             Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = Some(error.to_string()),
                             Err(error) => self.threw(error),
                             Ok(()) => {}
@@ -557,7 +556,7 @@ impl Screen {
             .collect();
         for (id, rect) in listening {
             self.laid_out.insert(id, rect);
-            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "layout", "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
+            let event = json!({"id": id, "name": "layout", "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
             if let Err(error) = self.sandbox.send("event", &event) {
                 self.threw(error);
             }
@@ -617,7 +616,7 @@ impl Screen {
             }
             let rect = self.rects.get(id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
             let mut event = json!({
-                "v": crate::VERSION, "op": "event", "id": id, "name": name, "timeStamp": time,
+                "id": id, "name": name, "timeStamp": time,
                 "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": if self.touch { "touch" } else { "mouse" }, "button": button,
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
@@ -816,7 +815,7 @@ impl Screen {
         }
         let scrolled = *now;
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("scroll")) {
-            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "scroll", "scrollTop": scrolled.y, "scrollLeft": scrolled.x});
+            let event = json!({"id": id, "name": "scroll", "scrollTop": scrolled.y, "scrollLeft": scrolled.x});
             if let Err(error) = self.sandbox.send("event", &event) {
                 self.threw(error);
             }
@@ -909,7 +908,7 @@ impl Screen {
         if outcome.action && self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
             let node = &self.tree.nodes[&id];
             let action = node.str("action").unwrap_or(if node.is("multiline") { "newline" } else { "done" }).to_owned();
-            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "action", "action": action});
+            let event = json!({"id": id, "name": "action", "action": action});
             if let Err(error) = self.sandbox.send("event", &event) {
                 self.threw(error);
             }
@@ -990,7 +989,7 @@ impl Screen {
         self.blink = self.sandbox.clock().now();
         let Some(value) = self.fields.get(&id).map(Field::value).filter(|value| *value != before) else { return };
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
-            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "input", "editing": value, "value": value.text});
+            let event = json!({"id": id, "name": "input", "editing": value, "value": value.text});
             if let Err(error) = self.sandbox.send("event", &event) {
                 self.threw(error);
             }
@@ -1006,7 +1005,7 @@ impl Screen {
         }
     }
 
-    /// Each input's editing as its node says, after the app's ops: what it is (several lines, a password, read
+    /// Each input's editing as its node says, after the app's mutations: what it is (several lines, a password, read
     /// only, what Return does), and its editing state where the app set a new one.
     fn sync_fields(&mut self) {
         let tree = &self.tree;

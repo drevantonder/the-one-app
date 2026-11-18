@@ -1,5 +1,6 @@
-//! The tree an app's ops build (`core/ui/src/strict/protocol.ts`), which the window draws and which is its semantic
-//! tree: each node's role, name, value, states and actions.
+//! The tree an app's mutations build (`Mutations` in core/ui/src/strict/renderer.ts), as React Native's mounting
+//! layer applies Fabric's, which the window draws and which is its semantic tree: each node's role, name, value,
+//! states and actions.
 
 use std::collections::HashMap;
 
@@ -10,43 +11,15 @@ use serde_json::{Map, Value, json};
 /// A node, as the app names it. `0` is the root, which the window makes.
 pub type Id = u64;
 
-/// JS → host: one batch of ops.
-#[derive(Deserialize)]
-pub struct Update {
-    pub v: u32,
-    pub ops: Vec<Op>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "op", rename_all = "lowercase")]
-pub enum Op {
-    Create {
-        id: Id,
-        #[serde(rename = "type")]
-        kind: Kind,
-        value: Option<String>,
-    },
-    Set {
-        id: Id,
-        name: String,
-        value: Value,
-    },
-    Insert {
-        parent: Id,
-        id: Id,
-        before: Option<Id>,
-    },
-    Remove {
-        parent: Id,
-        id: Id,
-    },
-    Drop {
-        id: Id,
-    },
+/// JS → host: one mutation of the tree, as the app's JS called it (`js::Sandbox`).
+pub enum Mutation {
+    Create { id: Id, kind: Kind, value: Option<String> },
+    Set { id: Id, name: String, value: Value },
+    Insert { parent: Id, id: Id, before: Option<Id> },
+    Remove { parent: Id, id: Id },
+    Drop { id: Id },
     /// The page uses `what`, which a native host doesn't draw yet.
-    Unsupported {
-        what: String,
-    },
+    Unsupported { what: String },
 }
 
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -74,7 +47,7 @@ pub enum Length {
     Word(String),
 }
 
-/// The strict style subset, as the protocol has it.
+/// Version 1's strict style subset (`Version1Style` in core/ui/src/strict/renderer.ts).
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Style {
@@ -125,7 +98,7 @@ pub struct Style {
     pub font_variant_numeric: Option<String>,
     pub line_clamp: Option<usize>,
     /// `absolute` takes it out of its parent's flow, placed by `top`, `right`, `bottom` and `left` in its parent
-    /// (protocol.ts's `Style`), over what's drawn before it, or under what's drawn before it with a higher `zIndex`.
+    /// (renderer.ts's `Version1Style`), over what's drawn before it, or under what's drawn before it with a higher `zIndex`.
     pub position: Option<String>,
     pub top: Option<f32>,
     pub right: Option<f32>,
@@ -151,11 +124,13 @@ pub struct Node {
     /// A version 2 page's styles, each by id or an object of its own, merged in order (`style::resolve`).
     pub styles: Option<Vec<Value>>,
     pub children: Vec<Id>,
+    /// What it's in, so it's taken out of only that as it moves.
+    parent: Option<Id>,
 }
 
 impl Node {
     fn new(kind: Kind, value: Option<String>) -> Node {
-        Node { kind, value, props: Map::new(), style: Style::default(), styles: None, children: Vec::new() }
+        Node { kind, value, props: Map::new(), style: Style::default(), styles: None, children: Vec::new(), parent: None }
     }
 
     pub fn prop(&self, name: &str) -> Option<&Value> {
@@ -205,8 +180,7 @@ impl Node {
     }
 }
 
-/// What a page uses that this host can't draw, so its window opens in a web view instead, and why: a version of the
-/// strict protocol it doesn't speak, or what it doesn't draw yet.
+/// What a page uses that this host can't draw yet, so its window opens in a web view instead, and why.
 #[derive(Debug)]
 pub struct Mismatch(pub String);
 
@@ -233,19 +207,16 @@ impl Tree {
         &self.nodes[&0]
     }
 
-    /// Applies one batch, in order. A batch of a version above this host's is refused whole, and one that uses what
-    /// this host doesn't draw yet is refused from there (`Mismatch`).
-    pub fn apply(&mut self, update: Update) -> anyhow::Result<()> {
-        if update.v > crate::VERSION {
-            return Err(Mismatch(format!("this host speaks version {} of the strict protocol, not {}", crate::VERSION, update.v)).into());
-        }
-        for op in update.ops {
-            match op {
-                Op::Unsupported { what } => return Err(Mismatch(format!("it uses {what}, which a native host doesn't draw yet")).into()),
-                Op::Create { id, kind, value } => {
+    /// Applies the app's mutations, in order. One that uses what this host doesn't draw yet is refused, and so is what
+    /// comes after it (`Mismatch`).
+    pub fn apply(&mut self, mutations: impl IntoIterator<Item = Mutation>) -> anyhow::Result<()> {
+        for mutation in mutations {
+            match mutation {
+                Mutation::Unsupported { what } => return Err(Mismatch(format!("it uses {what}, which a native host doesn't draw yet")).into()),
+                Mutation::Create { id, kind, value } => {
                     self.nodes.insert(id, Node::new(kind, value));
                 }
-                Op::Set { id, name, value } => {
+                Mutation::Set { id, name, value } => {
                     let node = self.nodes.get_mut(&id).with_context(|| format!("there's no node {id}"))?;
                     match name.as_str() {
                         "style" => match value {
@@ -257,18 +228,16 @@ impl Tree {
                         _ => drop(node.props.insert(name, value)),
                     }
                 }
-                Op::Insert { parent, id, before } => {
+                Mutation::Insert { parent, id, before } => {
+                    anyhow::ensure!(self.nodes.contains_key(&id), "there's no node {id}");
                     self.detach(id);
-                    let parent = self.nodes.get_mut(&parent).with_context(|| format!("there's no node {parent}"))?;
-                    let at = before.and_then(|before| parent.children.iter().position(|child| *child == before));
-                    parent.children.insert(at.unwrap_or(parent.children.len()), id);
+                    let into = self.nodes.get_mut(&parent).with_context(|| format!("there's no node {parent}"))?;
+                    let at = before.and_then(|before| into.children.iter().position(|child| *child == before));
+                    into.children.insert(at.unwrap_or(into.children.len()), id);
+                    self.nodes.get_mut(&id).expect("it's there").parent = Some(parent);
                 }
-                Op::Remove { parent, id } => {
-                    if let Some(parent) = self.nodes.get_mut(&parent) {
-                        parent.children.retain(|child| *child != id);
-                    }
-                }
-                Op::Drop { id } => {
+                Mutation::Remove { id, .. } => self.detach(id),
+                Mutation::Drop { id } => {
                     self.detach(id);
                     self.nodes.remove(&id);
                 }
@@ -277,10 +246,11 @@ impl Tree {
         Ok(())
     }
 
-    /// Takes `id` out of wherever it is, as a node inserted again moves.
+    /// Takes `id` out of what it's in, as a node inserted again moves.
     fn detach(&mut self, id: Id) {
-        for node in self.nodes.values_mut() {
-            node.children.retain(|child| *child != id);
+        let Some(parent) = self.nodes.get_mut(&id).and_then(|node| node.parent.take()) else { return };
+        if let Some(parent) = self.nodes.get_mut(&parent) {
+            parent.children.retain(|child| *child != id);
         }
     }
 

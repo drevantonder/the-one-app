@@ -30,13 +30,13 @@ defmodule HomeScreen do
   @impl true
   def entrypoints do
     [
-      %{page: "client/index.html", category: "launcher", host: 2},
+      %{page: "client/index.html", category: "launcher", runtime_version: 3},
       %{
         name: "Colour Mode",
         page: "client/colour-mode.html",
         icon: "client/colour-mode.svg",
         subject: "user",
-        host: 2
+        runtime_version: 3
       }
     ]
   end

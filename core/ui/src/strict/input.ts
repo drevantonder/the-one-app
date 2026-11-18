@@ -1,4 +1,4 @@
-// What's done on a screen, as it's sent to it: down a `video`'s data channel (protocol.ts), or as Computer Use's
+// What's done on a screen, as it's sent to it: down a `video`'s data channel (renderer.ts), or as Computer Use's
 // actions where there's only a picture of it (../live-screen.tsx).
 
 /** What the person does on a stream, as its data channel carries it to the screen. */

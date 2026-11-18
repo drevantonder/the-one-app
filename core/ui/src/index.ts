@@ -18,8 +18,8 @@
 /// **Strict mode.** A strict page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
 /// everywhere else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its
 /// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
-/// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the protocol version it's written for:
-/// `%{page: "client/index.html", host: 2}`. It's written with the UI library alone: its components and the primitives,
+/// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the runtime version it needs:
+/// `%{page: "client/index.html", runtime_version: 3}`. It's written with the UI library alone: its components and the primitives,
 /// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape), `EditableText` (bare text to
 /// type, which `Input` draws in a field's box) and `Video` (a screen's live video, which `LiveScreen` draws), each styled by
 /// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from
@@ -38,7 +38,7 @@
 /// setText(event.currentTarget.value)}`, Return in it `onAction={save}`, a key `onKeyDown={(event) => event.key ===
 /// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
 /// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
-/// there adds it there, with only what every host can draw (`protocol.ts`), and core/ui's `bun run typecheck` then says
+/// there adds it there, with only what every host can draw (`strict/renderer.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
 export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { pace, share } from "./shared.ts"

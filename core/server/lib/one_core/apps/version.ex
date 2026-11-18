@@ -21,7 +21,7 @@ defmodule OneCore.Apps.Version do
   `title` is its name where a person reads it, which its skill's metadata says (`title/1`), and `icon` its icon as a `data:`
   address, the file it names (`OneCore.App`). `entrypoints` lists its entrypoints: each one's `name`, its
   `page`, its `icon` as a `data:` address, its own or else the app's,
-  its `category`, its `subject`, its `badge` and its `host`, which are the app's to say and nil where it says none. `widgets` lists its widgets: each
+  its `category`, its `subject`, its `badge` and its `runtime_version`, which are the app's to say and nil where it says none. `widgets` lists its widgets: each
   one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
 
   `services` lists its services: each one's `name`, which is its module's as the app wrote it, what it's `called`

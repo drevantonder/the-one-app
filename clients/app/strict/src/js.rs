@@ -1,9 +1,11 @@
 //! An app's JS, in a QuickJS sandbox of its own (rquickjs), with the Web APIs a Worker has, the WinterTC Minimum Common
 //! API's, but the network's (`fetch`): AWS LLRT's implementations of them, the sandbox's own clock, timers and
 //! `console` (`prelude.js`), and `Intl` on ICU4X (`intl.js`, `intl.rs`); core/ui/src/strict/types/globals.d.ts says
-//! which. It talks with its host as `Host` and
-//! `Sandbox` in core/ui/src/strict/protocol.ts say: `globalThis.host` takes its ops and what it posts its client, and
-//! the UI library gives `globalThis.ui`, which takes what the person did and the client's messages. Its page's module
+//! which. It talks with its host over two channels. What it draws is the renderer's (core/ui/src/strict/renderer.ts):
+//! `globalThis.mutations` is the host's functions it calls with each mutation of its tree, with its values as they are,
+//! never JSON, as React Native's JSI calls its host, and the UI library's `ui.event` is called the same way with each
+//! event. What it asks its client is MCP Apps' JSON-RPC (core/ui/src/strict/calls.ts): `globalThis.host.post` and
+//! `ui.message`. Its page's module
 //! and what that imports are read by `Files`, and each runs as QuickJS's bytecode, compiled once and kept (`cache`), as
 //! QuickJS's own `qjsc` compiles a program ahead of time. What the Web APIs answer with a promise runs on rquickjs's
 //! async runtime, which nothing here waits on: each call into the sandbox runs its jobs until none is left.
@@ -16,9 +18,13 @@ use anyhow::anyhow;
 use futures_lite::future::block_on;
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::{Declared, WriteOptions};
-use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Function, Module, Persistent, Value};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Exception, Function, Module, Object, Persistent, Type, Value};
+use serde::Deserialize as _;
+use serde::de::IntoDeserializer as _;
 use sha2::{Digest, Sha256};
 use url::Url;
+
+use crate::tree::{Id, Kind, Mutation};
 
 /// The sandbox's own globals (`prelude.js`), with the DOM's events (`event-target-shim.js`).
 const PRELUDE: &str = include_str!("prelude.js");
@@ -117,8 +123,8 @@ pub type Files = Box<dyn FnMut(&Url) -> anyhow::Result<String>>;
 
 /// What the app's JS gave its host.
 pub enum Posted {
-    /// A batch of ops (`host.update`), as JSON.
-    Update(String),
+    /// A mutation of its tree (`mutations`).
+    Mutation(Mutation),
     /// A JSON-RPC message for its client (`host.post`), as JSON.
     Message(String),
 }
@@ -164,8 +170,7 @@ impl Sandbox {
         let app = page.to_string();
         let (host, started) = block_on(context.with(|ctx| -> anyhow::Result<_> {
             let globals = ctx.globals();
-            let to = posted.clone();
-            globals.set("__update", Function::new(ctx.clone(), move |json: String| to.borrow_mut().push(Posted::Update(json)))?)?;
+            globals.set("mutations", mutations(&ctx, &posted)?)?;
             let to = posted.clone();
             globals.set("__post", Function::new(ctx.clone(), move |json: String| to.borrow_mut().push(Posted::Message(json)))?)?;
             let now = clock.clone();
@@ -194,13 +199,13 @@ impl Sandbox {
         Ok(sandbox)
     }
 
-    /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), and runs
-    /// it until it waits again.
+    /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), as a
+    /// plain object made directly, and runs it until it waits again.
     pub fn send(&self, to: &str, message: &serde_json::Value) -> anyhow::Result<()> {
         let called = block_on(self.context.with(|ctx| {
             let ui: rquickjs::Object = run(&ctx, ctx.globals().get("ui"))?;
             let function: Function = run(&ctx, ui.get(to))?;
-            let message: Value = run(&ctx, ctx.json_parse(message.to_string()))?;
+            let message = run(&ctx, js(&ctx, message))?;
             run(&ctx, function.call::<_, ()>((rquickjs::function::This(ui), message)))
         }));
         // What it threw is its error, as a browser reports an event handler's, once what it queued has run.
@@ -279,6 +284,81 @@ impl Sandbox {
     pub fn clock(&self) -> &Clock {
         &self.clock
     }
+}
+
+/// The host's functions the renderer calls with each mutation (`Mutations` in core/ui/src/strict/renderer.ts), each
+/// kept to be applied once the sandbox's turn has run.
+fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs::Result<Object<'js>> {
+    let mutations = Object::new(ctx.clone())?;
+    let to = posted.clone();
+    let create = move |ctx: Ctx<'js>, id: Id, kind: String, value: Option<String>| -> rquickjs::Result<()> {
+        let kind = Kind::deserialize(kind.as_str().into_deserializer())
+            .map_err(|error: serde::de::value::Error| Exception::throw_type(&ctx, &error.to_string()))?;
+        to.borrow_mut().push(Posted::Mutation(Mutation::Create { id, kind, value }));
+        Ok(())
+    };
+    mutations.set("create", Function::new(ctx.clone(), create)?)?;
+    let to = posted.clone();
+    let set = move |id: Id, name: String, value: Value<'js>| to.borrow_mut().push(Posted::Mutation(Mutation::Set { id, name, value: data(&value) }));
+    mutations.set("set", Function::new(ctx.clone(), set)?)?;
+    let to = posted.clone();
+    let insert = move |parent: Id, id: Id, before: Option<Id>| to.borrow_mut().push(Posted::Mutation(Mutation::Insert { parent, id, before }));
+    mutations.set("insert", Function::new(ctx.clone(), insert)?)?;
+    let to = posted.clone();
+    mutations.set("remove", Function::new(ctx.clone(), move |parent: Id, id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Remove { parent, id })))?)?;
+    let to = posted.clone();
+    mutations.set("drop", Function::new(ctx.clone(), move |id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Drop { id })))?)?;
+    let to = posted.clone();
+    mutations.set("unsupported", Function::new(ctx.clone(), move |what: String| to.borrow_mut().push(Posted::Mutation(Mutation::Unsupported { what })))?)?;
+    Ok(mutations)
+}
+
+/// A JS value as JSON's data model, read from it directly: a function, a symbol or `undefined` is `null`, and a number
+/// that's whole is an integer, as JSON's text would have it.
+fn data(value: &Value) -> serde_json::Value {
+    use serde_json::Value as Data;
+    match value.type_of() {
+        Type::Bool => Data::Bool(value.as_bool().unwrap_or_default()),
+        Type::Int => Data::from(value.as_int().unwrap_or_default()),
+        Type::Float => {
+            let number = value.as_float().unwrap_or_default();
+            if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 { Data::from(number as i64) } else { serde_json::Number::from_f64(number).map_or(Data::Null, Data::Number) }
+        }
+        Type::String => value.as_string().and_then(|text| text.to_string().ok()).map_or(Data::Null, Data::String),
+        Type::Array => value.as_array().map_or(Data::Null, |array| Data::Array(array.iter::<Value>().map(|item| item.map_or(Data::Null, |item| data(&item))).collect())),
+        Type::Object => value.as_object().map_or(Data::Null, |object| {
+            Data::Object(object.props::<String, Value>().filter_map(Result::ok).filter(|(_, value)| !value.is_undefined() && !value.is_function()).map(|(name, value)| (name, data(&value))).collect())
+        }),
+        _ => Data::Null,
+    }
+}
+
+/// JSON's data as a JS value, made directly.
+fn js<'js>(ctx: &Ctx<'js>, data: &serde_json::Value) -> rquickjs::Result<Value<'js>> {
+    use serde_json::Value as Data;
+    Ok(match data {
+        Data::Null => Value::new_null(ctx.clone()),
+        Data::Bool(bool) => Value::new_bool(ctx.clone(), *bool),
+        Data::Number(number) => match number.as_i64().and_then(|int| i32::try_from(int).ok()) {
+            Some(int) => Value::new_int(ctx.clone(), int),
+            None => Value::new_float(ctx.clone(), number.as_f64().unwrap_or_default()),
+        },
+        Data::String(text) => rquickjs::String::from_str(ctx.clone(), text)?.into_value(),
+        Data::Array(items) => {
+            let array = rquickjs::Array::new(ctx.clone())?;
+            for (at, item) in items.iter().enumerate() {
+                array.set(at, js(ctx, item)?)?;
+            }
+            array.into_value()
+        }
+        Data::Object(fields) => {
+            let object = Object::new(ctx.clone())?;
+            for (name, field) in fields {
+                object.set(name.as_str(), js(ctx, field)?)?;
+            }
+            object.into_value()
+        }
+    })
 }
 
 /// What JS threw, as an error with its message and stack.

@@ -1,6 +1,6 @@
 // The text editing model from Rune (github.com/anomalyco/rune, crates/rune/src/edit.rs, edit/input.rs,
 // edit/caret_motion.rs, edit/history.rs, edit/ime.rs and runtime/selection/{click,selectable}.rs) at commit
-// 78efd4a7876b5478dd72033ce6fd2b2f13ab9f9a, cut down to plain text for the strict protocol's `input`: a caret and a
+// 78efd4a7876b5478dd72033ce6fd2b2f13ab9f9a, cut down to plain text for the renderer's `input`: a caret and a
 // selection, grapheme and word steps, undo and redo grouped as Chromium's editor groups them, an input method's
 // composition, a password's mask, and pointer selection by character, word and line. Not its rich text (marks,
 // blocks, pills), its visual (bidi) arrow motion, or its parley layouts: a field's layout is ours (`Layout`).
@@ -23,7 +23,7 @@
 // This file is changed from the original.
 
 //! A text input's editing: what's typed, selected and composed, as every platform's keyboard bridge says it
-//! (`Value`, Flutter's `TextEditingValue`, the strict protocol's `Editing`), and what keys, an input method, a paste
+//! (`Value`, Flutter's `TextEditingValue`, the renderer's `Editing`), and what keys, an input method, a paste
 //! and a pointer do to it (`Field`). Offsets in a `Field` are bytes of its text, on character boundaries; a `Value`'s
 //! are UTF-16 code units, as JS, Android and AppKit count them.
 //!
@@ -47,7 +47,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::inspect::Key;
 
-/// An input's editing state, as Flutter's `TextEditingValue` and the strict protocol's `Editing` have it: its text,
+/// An input's editing state, as Flutter's `TextEditingValue` and the renderer's `Editing` have it: its text,
 /// what's selected, and what an input method is composing, which is in the text. Offsets in UTF-16 code units.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Value {
@@ -233,7 +233,7 @@ impl Field {
         Field { text: text.to_owned(), anchor: text.len(), focus: text.len(), ..Field::default() }
     }
 
-    /// Its editing state, in the protocol's shape: what it composes is in its text, from the caret.
+    /// Its editing state, in the renderer's shape: what it composes is in its text, from the caret.
     pub fn value(&self) -> Value {
         let (a, _) = self.range();
         match &self.preedit {

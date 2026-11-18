@@ -16,8 +16,8 @@
 // Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, and on a native host by
 // its headless harness (clients/app/strict's `screenshot` example), each as a picture and its semantic tree as text
 // (src/strict/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
-// differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older protocol)
-// gives nothing, which it says.
+// differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
+// version) gives nothing, which it says.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { chromium } from "playwright-core"
@@ -38,11 +38,11 @@ const against = option("--against") && resolve(option("--against"))
 const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size"].includes(args[at - 1])).map((folder) => resolve(folder))
 const targets = folders.length ? folders : [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")))]
 const harness = join(root, "target/debug/examples/screenshot")
-// The strict protocol the UI library speaks, and the native host: a host that speaks an older one draws nothing of a
+// The runtime version the UI library needs, and the native host's: a host whose version is older draws nothing of a
 // page written for this one, so there's nothing yet to compare.
 const speaks = (file, pattern) => Number(readFileSync(join(root, file), "utf8").match(pattern)?.[1])
-const protocol = speaks("core/ui/src/strict/protocol.ts", /export const VERSION = (\d+)/)
-const hosted = speaks("clients/app/strict/src/lib.rs", /pub const VERSION: u32 = (\d+)/)
+const needed = speaks("core/ui/src/strict/renderer.ts", /export const RUNTIME_VERSION = (\d+)/)
+const hosted = speaks("clients/app/strict/src/lib.rs", /pub const RUNTIME_VERSION: u32 = (\d+)/)
 
 if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
 
@@ -152,7 +152,7 @@ async function dom(browser, serve, key, scene, folder) {
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
 function native(built, scene, folder) {
   if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p strict --example screenshot`)" }
-  if (hosted < protocol) return { missing: `the native host speaks protocol ${hosted}, the UI library ${protocol}: nothing to compare until it speaks ${protocol}` }
+  if (hosted < needed) return { missing: `the native host's runtime version is ${hosted}, the UI library needs ${needed}: nothing to compare until it's ${needed}` }
   // The harness loads the module the folder's `index.html` names, from beside it: the page's, with what it loads.
   const at = join(folder, "page")
   rmSync(at, { recursive: true, force: true })

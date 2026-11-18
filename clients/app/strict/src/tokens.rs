@@ -1,6 +1,6 @@
 //! The design tokens, which aren't the host's: they come with the UI library, over the air, as the app's page does,
 //! and are read as it opens (`load`). The host knows only kinds of token (a colour, light and dark, a length, a
-//! number), never their names or values. Until the strict protocol defines the token table (core/ui/src/strict/),
+//! number), never their names or values. For a page written for version 1, which has no token table,
 //! it's read from the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's (the
 //! touch and iPhone rules after it are a phone's), and `:root.dark`'s `--lighter`. This module is the only one that
 //! knows that, so the table replaces it here alone.
@@ -199,7 +199,7 @@ pub fn type_style(font: &str, dark: bool) -> TypeStyle {
     TypeStyle { size, weight, tracking, line_height, tabular }
 }
 
-// Version 2's token table (`Tokens` in core/ui/src/strict/protocol.ts), which comes with the UI library as
+// The token table (`Tokens` in core/ui/src/strict/renderer.ts), which comes with the UI library as
 // /ui/client/tokens.json. A host knows each kind of token and the conditions a value varies by, never a token's name.
 
 /// What a token's value may depend on, as the window is now, in the order they win.
@@ -264,7 +264,7 @@ pub struct Table {
 
 static TABLE: std::sync::RwLock<Option<std::sync::Arc<Table>>> = std::sync::RwLock::new(None);
 
-/// Takes the token table the UI library came with (`tokens.json`). → the version of the protocol it needs.
+/// Takes the token table the UI library came with (`tokens.json`). → the runtime version it needs.
 pub fn load_table(json: &str) -> anyhow::Result<u32> {
     let parsed: serde_json::Value = serde_json::from_str(json)?;
     let v = parsed["v"].as_u64().unwrap_or(0) as u32;

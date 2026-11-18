@@ -12,7 +12,7 @@ import { dirname, extname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
 import { build, parseAst } from "vite"
-import { VERSION } from "./src/strict/protocol.ts"
+import { RUNTIME_VERSION } from "./src/strict/renderer.ts"
 import { stylesCss, stylesPlugin } from "./tables.ts"
 
 const [source, out] = process.argv.slice(2)
@@ -88,11 +88,11 @@ try {
   process.exit(1)
 }
 
-// Its styles, beside each page: as CSS for the web, and as the strict protocol's style table for a native host.
+// Its styles, beside each page: as CSS for the web, and as the style table a native host's renderer draws with.
 for (const page of pages) {
   const folder = join(out, dirname(page))
   writeFileSync(join(folder, "styles.css"), stylesCss(made))
-  writeFileSync(join(folder, "styles.json"), JSON.stringify({ v: VERSION, styles: made.table }))
+  writeFileSync(join(folder, "styles.json"), JSON.stringify({ v: RUNTIME_VERSION, styles: made.table }))
 }
 
 /// A problem as the compiler says it, with where: the file as the app's source names it, its line and column, and

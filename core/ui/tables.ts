@@ -1,9 +1,9 @@
 // What the UI library's build makes of its tokens (src/tokens.ts) for each target: the web's CSS variables
-// (src/tokens.css, written here, never by hand) and a native host's token table (strict/protocol.ts's `Tokens`).
+// (src/tokens.css, written here, never by hand) and a native host's token table (strict/renderer.ts's `Tokens`).
 import { createHash } from "node:crypto"
 import { converter, parse } from "culori"
 import { parseAst, type Plugin } from "vite"
-import { conditions, VERSION, type Condition, type Rgba, type State, type Style as Entry2, type Styles as Table, type Token as Entry, type Tokens } from "./src/strict/protocol.ts"
+import { conditions, RUNTIME_VERSION, type Condition, type Rgba, type State, type Style as Entry2, type Styles as Table, type Token as Entry, type Tokens } from "./src/strict/renderer.ts"
 import { negative } from "./src/styles.ts"
 import { legacy, tokens, type Token } from "./src/tokens.ts"
 
@@ -113,7 +113,7 @@ export function tokensTable(): Tokens {
         return { kind: token.kind, value } as Entry
     }
   }
-  return { v: VERSION, tokens: Object.fromEntries(all.map((token) => [token.id, entry(token)])) }
+  return { v: RUNTIME_VERSION, tokens: Object.fromEntries(all.map((token) => [token.id, entry(token)])) }
 }
 
 if (import.meta.main) process.stdout.write(tokensCss())

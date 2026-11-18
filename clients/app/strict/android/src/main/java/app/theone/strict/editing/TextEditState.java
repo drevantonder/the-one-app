@@ -1,7 +1,7 @@
 // After Flutter's Android embedder (BSD-3-Clause, LICENSE-FLUTTER beside this file): TextInputChannel.TextEditState,
 // engine/src/flutter/shell/platform/android/io/flutter/embedding/engine/systemchannels/TextInputChannel.java at
 // flutter/flutter 4d19bda07ae859c5d3a205e3a61619ff485a1182, its fields and checks, written again here (that file
-// wasn't copied); read from the strict protocol's `Editing` (JSON) rather than Flutter's method channel.
+// wasn't copied); read from the renderer's `Editing` (JSON) rather than Flutter's method channel.
 
 // Copyright 2013 The Flutter Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be

@@ -144,7 +144,7 @@ pub fn open_window(entrypoint: String, subject: Option<String>, link: String) ->
 }
 
 /// Opens an app's window again in a web view, as `open_window` does one that isn't strict, in place of its strict
-/// window: one whose app sent a version of the strict protocol this program doesn't speak.
+/// window: one whose page uses what this program doesn't draw yet.
 #[cfg(desktop)]
 pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()));

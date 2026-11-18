@@ -1,10 +1,10 @@
-// Solid's universal renderer for a native host: what a strict page draws, as the strict protocol's ops
-// (../protocol.ts), sent to the host (`globalThis.host`) once a turn of the event loop, and what the person does,
-// from the host, to the handler it's for. A native host loads it as `/ui/client/web.js`, in place of Solid's DOM
-// renderer: a strict page's bundle, built for the DOM, imports only what both have (`createComponent`, `memo`).
+// Solid's universal renderer for a native host: what a strict page draws, as mutations of its tree, each a direct call
+// of the host's (`globalThis.mutations`, ../renderer.ts), and what the person does, from the host, to the handler it's
+// for. A native host loads it as `/ui/client/web.js`, in place of Solid's DOM renderer: a strict page's bundle, built
+// for the DOM, imports only what both have (`createComponent`, `memo`).
 import { createRenderer } from "@solidjs/universal"
 import { dynamicComponent, omit, type Component } from "solid-js"
-import { VERSION, type Event, type Host, type Op, type Type } from "../protocol.ts"
+import type { Event, Mutations, Type } from "../renderer.ts"
 import { flat, type Styles } from "../../styles.ts"
 
 /** A node as the sandbox keeps it: where it is in the tree, and the handlers the host's events go to, by the event's
@@ -17,41 +17,29 @@ export interface Node {
   handlers: Record<string, (event: object) => void>
 }
 
-const host = (globalThis as { host?: Host }).host
-let ops: Op[] = []
+const mutations = (globalThis as unknown as { mutations: Mutations }).mutations
 let next = 1
 /** Every node JS still holds, by its id, for the events the host sends to it. */
 const nodes = new Map<number, WeakRef<Node>>()
 /** A node JS no longer holds is dropped by the host too. */
 const held = new FinalizationRegistry<number>((id) => {
   nodes.delete(id)
-  queue({ op: "drop", id })
+  mutations.drop(id)
 })
 
 /** The root the host gives: the app's window, or its frame. */
 export const root: Node = { id: 0, type: "box", children: [], handlers: {} }
 
-/** What's to send, sent once what's running now has run, as one batch. */
-function queue(op: Op) {
-  if (!ops.length) queueMicrotask(send)
-  ops.push(op)
-}
-function send() {
-  const batch = ops
-  ops = []
-  host?.update({ v: VERSION, ops: batch })
-}
-
 /** Tells the host the page uses `what`, which it doesn't draw yet, so it opens the page another way. */
 export function unsupported(what: string) {
-  queue({ op: "unsupported", what })
+  mutations.unsupported(what)
 }
 
 function node(type: Type, value?: string): Node {
   const made: Node = { id: next++, type, children: [], handlers: {} }
   nodes.set(made.id, new WeakRef(made))
   held.register(made, made.id)
-  queue(value === undefined ? { op: "create", id: made.id, type } : { op: "create", id: made.id, type, value })
+  mutations.create(made.id, type, value)
   return made
 }
 
@@ -65,7 +53,7 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
   // Solid hands over what the page wrote, a number too (`{count()}`), which the DOM makes text of itself.
   createTextNode: (value) => node("raw-text", String(value)),
   replaceText(text, value) {
-    queue({ op: "set", id: text.id, name: "value", value: String(value) })
+    mutations.set(text.id, "value", String(value))
   },
   isTextNode: (node) => node.type === "raw-text",
   setProperty(node, name, value) {
@@ -73,23 +61,23 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
       const event = name.slice(2).toLowerCase()
       if (typeof value === "function") node.handlers[event] = value as (event: object) => void
       else delete node.handlers[event]
-      queue({ op: "set", id: node.id, name: name as "onClick", value: typeof value === "function" ? true : null })
+      mutations.set(node.id, name as "onClick", typeof value === "function" ? true : null)
     } else if (name === "style" && value && (Array.isArray(value) || "$id" in (value as object))) {
-      // Styles go by their ids, from the tables the host has (../protocol.ts's `Styles`), the last winning.
-      queue({ op: "set", id: node.id, name: "style", value: flat(value as Styles).map((style) => ("$id" in style ? style.$id : style)) })
-    } else queue({ op: "set", id: node.id, name: name as "role", value: value ?? null })
+      // Styles go by their ids, from the tables the host has (../renderer.ts's `Styles`), the last winning.
+      mutations.set(node.id, "style", flat(value as Styles).map((style) => ("$id" in style ? style.$id : style)))
+    } else mutations.set(node.id, name as "role", (value ?? null) as never)
   },
   insertNode(parent, node, anchor) {
     if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1)
     node.parent = parent
     const at = anchor ? parent.children.indexOf(anchor) : -1
     parent.children.splice(at < 0 ? parent.children.length : at, 0, node)
-    queue(anchor ? { op: "insert", parent: parent.id, id: node.id, before: anchor.id } : { op: "insert", parent: parent.id, id: node.id })
+    mutations.insert(parent.id, node.id, anchor?.id)
   },
   removeNode(parent, node) {
     parent.children.splice(parent.children.indexOf(node), 1)
     node.parent = undefined
-    queue({ op: "remove", parent: parent.id, id: node.id })
+    mutations.remove(parent.id, node.id)
   },
   getParentNode: (node) => node.parent,
   getFirstChild: (node) => node.children[0],
@@ -114,7 +102,7 @@ export function detach(node: Node) {
   const parent = node.parent
   parent.children.splice(parent.children.indexOf(node), 1)
   node.parent = undefined
-  queue({ op: "remove", parent: parent.id, id: node.id })
+  mutations.remove(parent.id, node.id)
 }
 
 /** Draws a page at the root. */

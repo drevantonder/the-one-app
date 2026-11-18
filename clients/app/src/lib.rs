@@ -490,10 +490,11 @@ async fn start() -> Result<Value, String> {
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
-    // Android draws a strict app's window natively, over the page, of a version this program speaks (`strict`).
+    // Android draws a strict app's window natively, over the page, where it needs this program's runtime version or
+    // an older one (`strict`).
     #[cfg(target_os = "android")]
     {
-        told["strict"] = json!(::strict::VERSION);
+        told["runtimeVersion"] = json!(::strict::RUNTIME_VERSION);
     }
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);

@@ -42,6 +42,11 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   - **Flutter's Android embedder** (BSD-3): its windowing, keyboard bridge (`InputConnection`) and autofill. Every
     keyboard bridge speaks Flutter's editing state (text, selection, composing range, actions).
   - **AccessKit**: accessibility, from one semantic tree, wired as GPUI wires it.
+  - **React Native's JSI and Fabric**: how a page's JS tells the host what to draw. Each mutation is a direct call of a
+    host function with its values as they are, applied once a turn of the sandbox has run, as Fabric's mounting layer
+    applies its mutations, in place of a batch of JSON, as React Native's old bridge had it. In QuickJS, for 11,000
+    mutations (1,000 rows), JSON took 8.4 ms, a typed-array command buffer 1.5 ms and direct calls 1.05 ms (measured
+    19 November 2026), so direct calls.
   - Not used: wgpu, and Zed's `editor` crate, which is GPL-3.0.
 - **Lynx** (ByteDance): native views on Android from JS. A spike on 19 November 2026 drew a strict screen in it with a
   cold start 35% faster than the web view and a fifth of its memory. Not chosen: Android uses our own renderer, and the

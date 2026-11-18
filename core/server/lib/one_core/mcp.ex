@@ -445,15 +445,22 @@ defmodule OneCore.Mcp do
             %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
 
           # Whether its app is trusted goes too: the client lets only a trusted app's page change the device
-          # or ask for someone else (`clients/app/page/client.js`). So does the strict protocol's version its page is
-          # written for (`host`), which a native host draws itself if it speaks it, and opens in a web view if not.
+          # or ask for someone else (`clients/app/page/client.js`). So does the runtime version its strict page needs
+          # (`runtimeVersion`), which a native host that has it draws itself, and one that hasn't opens in a web view.
+          # A client before runtime version 3 reads it as `host`, and gets it so until none is in use, so it opens
+          # in a web view what it can't draw.
           entrypoint ->
             Map.merge(resource, %{
               name: entrypoint.name,
               icons: [%{src: entrypoint.icon}],
               _meta:
                 Map.reject(
-                  %{category: entrypoint.category, trusted: version.trusted, host: entrypoint[:host]},
+                  %{
+                    category: entrypoint.category,
+                    trusted: version.trusted,
+                    runtimeVersion: entrypoint[:runtime_version],
+                    host: entrypoint[:runtime_version]
+                  },
                   &match?({_, nil}, &1)
                 )
             })

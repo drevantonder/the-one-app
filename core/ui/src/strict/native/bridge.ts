@@ -3,19 +3,20 @@
 // `#bridge`, which is this in the native build and the DOM's in the DOM's.
 import { createSignal } from "solid-js"
 import { event } from "./renderer.ts"
-import type { Event } from "../protocol.ts"
+import type { Host, Sandbox } from "../calls.ts"
+import type { Event, Events } from "../renderer.ts"
 import type * as Strict from "../types/ui.d.ts"
 import { readable } from "../../words.ts"
 // The bridge, as the DOM's (../../bridge.ts): the JSON-RPC a page and its client say to each other, through the host.
 
-const host = (globalThis as { host?: { post(message: object): void } }).host
+const host = (globalThis as { host?: Host }).host
 const waiting = new Map<number, (response: { result?: unknown; error?: { message: string } }) => void>()
 const listeners = new Set<() => void>()
 let requests = 0
 /** What listens for each key pressed (`keydown`). */
 const keys = new Set<(event: Strict.Keyed) => void>()
 
-;(globalThis as { ui?: object }).ui = {
+;(globalThis as { ui?: Sandbox & Events }).ui = {
   // A key pressed where the keyboard is goes to what has it, then to what listens for every key (`keydown`).
   event(told: Event) {
     event(told)

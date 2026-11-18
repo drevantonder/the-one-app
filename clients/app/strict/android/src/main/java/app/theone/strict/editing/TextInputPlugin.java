@@ -2,7 +2,7 @@
 // engine/src/flutter/shell/platform/android/io/flutter/plugin/editing/TextInputPlugin.java at flutter/flutter
 // 4d19bda07ae859c5d3a205e3a61619ff485a1182.
 // Changed: its framework is the renderer (`Framework`), not Flutter's TextInputChannel; a field's configuration is
-// the strict protocol's input props (type, inputmode, autocomplete, action, autocapitalize, spellcheck, multiline) as
+// the renderer's input props (type, inputmode, autocomplete, action, autocapitalize, spellcheck, multiline) as
 // Chrome reads them, not Flutter's TextInputConfiguration, with its place in CSS pixels; every field on the screen is in the autofill structure (as a browser's
 // form is), not only those in the focused field's AutofillGroup; no platform views or Scribe.
 
@@ -63,7 +63,7 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     afm = view.getContext().getSystemService(AutofillManager.class);
   }
 
-  // The strict protocol's input props as Android's input type, as Chrome reads an <input>'s, in the shape of Flutter's
+  // The renderer's input props as Android's input type, as Chrome reads an <input>'s, in the shape of Flutter's
   // inputTypeFromTextInputType.
   private static int inputTypeFrom(JSONObject config) {
     String type = config.optString("type", "text");

@@ -1,6 +1,6 @@
 [package]
 name = "strict"
-description = "A strict app drawn natively on a computer: its JS run in QuickJS, the ops it sends laid out by Taffy and drawn by our own renderer, copied from GPUI."
+description = "A strict app drawn natively on a computer: its JS run in QuickJS, the mutations it makes laid out by Taffy and drawn by our own renderer, copied from GPUI."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 // The key names from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/windows/events.rs,
 // `parse_normal_key` and `current_modifiers`) at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on
-// crates.io), named here as the DOM's `KeyboardEvent.key` names them, which the strict protocol's `keydown` and the
+// crates.io), named here as the DOM's `KeyboardEvent.key` names them, which the renderer's `keydown` and the
 // inspector speak. What a key types is WM_CHAR's (`window`); this names the keys that type nothing, and a letter or
 // digit held with Ctrl or Alt, which types nothing either.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0

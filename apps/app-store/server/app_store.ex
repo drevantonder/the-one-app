@@ -18,7 +18,7 @@ defmodule AppStore do
   def requires, do: %{"core" => ">= 0.25.13"}
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", category: "app-store", subject: "user", host: 2}]
+  def entrypoints, do: [%{page: "client/index.html", category: "app-store", subject: "user", runtime_version: 3}]
 
   @impl true
   def tools do

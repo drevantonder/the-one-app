@@ -1,6 +1,6 @@
 //! What a phone's platform asks of a screen beyond a computer's pointer and keys: its keyboard bridge (Android's
 //! `InputConnection`, through Flutter's `TextInputPlugin`), which keeps the input's whole editing state itself and
-//! says it back as the protocol's `Editing` (`editing::Value`); its autofill, which fills any field; its screen
+//! says it back as the renderer's `Editing` (`editing::Value`); its autofill, which fills any field; its screen
 //! reader, which presses, focuses and scrolls by node; and a finger, which pans what scrolls and may be lifted off what
 //! it pressed.
 
@@ -65,7 +65,7 @@ impl Screen {
     /// `action`; if not, `next` and `previous` move the keyboard, as a browser's form does.
     pub fn action(&mut self, id: Id, action: &str) {
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
-            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "action", "action": action});
+            let event = json!({"id": id, "name": "action", "action": action});
             if let Err(error) = self.sandbox.send("event", &event) {
                 self.threw(error);
             }

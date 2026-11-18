@@ -1,5 +1,5 @@
 // The UI library on a native host, which loads it as `/ui/client/ui.js` in place of the DOM's: the strict UI library
-// (../types/ui.d.ts), drawn from the four primitives with the strict protocol's ops (renderer.ts). Its components are
+// (../types/ui.d.ts), drawn from the four primitives told to the host as mutations (renderer.ts). Its components are
 // written in strict themselves. The UI library's typecheck proves each takes what a strict page gives it
 // (../check.ts).
 

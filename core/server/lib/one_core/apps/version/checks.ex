@@ -220,7 +220,7 @@ defmodule OneCore.Apps.Version.Checks do
             category: entrypoint[:category],
             subject: entrypoint[:subject],
             badge: entrypoint[:badge],
-            host: entrypoint[:host]
+            runtime_version: entrypoint[:runtime_version]
           }
 
     widgets =

@@ -3,7 +3,7 @@
 // atomic CSS classes on the web and to a style table for a native host, each style an id. Nothing about a style is
 // worked out as a page runs but which apply: a node's `style` is a list of them, and the last to say a property is
 // all it is, with no cascade and no specificity.
-import type { Inline, Properties, State } from "./strict/protocol.ts"
+import type { Inline, Properties, State } from "./strict/renderer.ts"
 import type { Token } from "./tokens.ts"
 
 /** A token of one kind, or its negative (`negative(tokens.space.lg)`, a margin pulling outward). */
