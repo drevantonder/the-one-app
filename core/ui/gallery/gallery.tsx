@@ -21,7 +21,7 @@ const named = () => {
 const families = [...new Set(Object.keys(scenes).map((name) => name.split("/")[0]))]
 
 /** Every scene by name, with what's pressed first, which the scenes' runner reads (`#scenes`). */
-const listed = () => JSON.stringify(Object.entries(scenes).map(([name, scene]) => ({ name, taps: typeof scene === "function" ? [] : (scene.taps ?? []) })))
+const listed = () => JSON.stringify(Object.entries(scenes).map(([name, scene]) => (typeof scene === "function" ? { name, taps: [] } : { name, taps: scene.taps ?? [], size: scene.size, touch: scene.touch })))
 
 render(() => (
   <Show when={named() !== "scenes"} fallback={<Text>{listed()}</Text>}>

@@ -8,7 +8,7 @@
 // scenes are what each screen shows, by name, and what it's given to show it, as the tools' answers a client would
 // give (record.js's answers): `{ "Inbox": { "answers": { "notifications_inbox": { … } } } }`, with any of `page` (its
 // page, `client/index.html` unless said, and a link after `#`), `taps` (what's pressed first, by what each is named or
-// says), `size` (`[390, 844]`, a phone's, unless said), and `like` (another scene's name, as Storybook's args are a
+// says), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
@@ -53,18 +53,18 @@ async function scenesOf(target, built, serve) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { page: at = "client/index.html", answers = {}, taps = [], size = [390, 844] } = whole(scene)
+      const { page: at = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false } = whole(scene)
       const [page, link] = at.split("#")
-      return { name, page, link, answers, taps, size }
+      return { name, page, link, answers, taps, size, touch }
     })
   }
   // The gallery lists its own, drawn at `#scenes`.
   const listed = await serve.text("index.html", "scenes")
-  return JSON.parse(listed).map(({ name, taps }) => ({ name, page: "index.html", link: name, answers: {}, taps, size: [390, 844] }))
+  return JSON.parse(listed).map(({ name, taps, size = [390, 844], touch = false }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch }))
 }
 
 /// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would.
-const host = (page, link, answers, [width, height]) => `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}iframe{border:0;width:${width}px;height:${height}px;display:block}</style>
+const host = (page, link, answers, [width, height], touch) => `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}iframe{border:0;width:${width}px;height:${height}px;display:block}</style>
 <iframe id="page" src="/${page}${link ? `#${encodeURIComponent(link)}` : ""}"></iframe>
 <script>
 const answers = ${JSON.stringify(answers)}
@@ -73,7 +73,7 @@ addEventListener("message", ({ data, source }) => {
   if (!data || data.id === undefined) return
   const reply = (body) => source.postMessage({ jsonrpc: "2.0", id: data.id, ...body }, "*")
   const own = (method) => (method in answers ? answers[method] : undefined)
-  if (data.method === "ui/initialize") return reply({ result: own("ui/initialize") ?? { hostContext: { containerDimensions: { width: ${width}, height: ${height} }, deviceCapabilities: { touch: false, hover: true }, theme: ${JSON.stringify(dark ? "dark" : "light")} } } })
+  if (data.method === "ui/initialize") return reply({ result: own("ui/initialize") ?? { hostContext: { containerDimensions: { width: ${width}, height: ${height} }, deviceCapabilities: { touch: ${touch}, hover: ${!touch} }, theme: ${JSON.stringify(dark ? "dark" : "light")} } } })
   if (data.method === "tools/call") {
     const answer = own(data.params.name)
     if (answer === undefined || answer?.$error) return reply({ result: { isError: true, content: [{ type: "text", text: answer?.$error ?? "No answer for " + data.params.name }] } })
@@ -100,7 +100,7 @@ function server(built, target) {
   })
   return {
     url: (key) => `http://localhost:${listener.port}/host.html?scene=${encodeURIComponent(key)}`,
-    host: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size)),
+    host: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch)),
     stop: () => listener.stop(true),
   }
 }
@@ -128,7 +128,7 @@ async function tap(frame, name) {
 
 /// A scene drawn on the DOM: its picture and its tree.
 async function dom(browser, serve, key, scene, folder) {
-  const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, colorScheme: dark ? "dark" : "light" })
+  const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, isMobile: scene.touch, colorScheme: dark ? "dark" : "light" })
   const problems = []
   page.on("pageerror", (error) => problems.push(String(error)))
   // The clock a native host's harness has (clients/app/strict/src/js.rs's `Clock::fixed`): 1 January 2026, UTC.
@@ -158,7 +158,7 @@ function native(built, scene, folder) {
   writeFileSync(join(at, "index.html"), readFileSync(join(built, scene.page), "utf8").replace(/(src|href)="(\.\.\/)+/g, '$1="').replace(/(src|href)="\.\//g, '$1="'))
   symlinkSync(join(built, "assets"), join(at, "assets"))
   if (existsSync(join(built, dirname(scene.page), "styles.json"))) cpSync(join(built, dirname(scene.page), "styles.json"), join(at, "styles.json"))
-  const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] } } } }
+  const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   // The harness's clock stands still, so what moves after each tap is moved on to where it settles, as the DOM's is.
   const requests = scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]).map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")

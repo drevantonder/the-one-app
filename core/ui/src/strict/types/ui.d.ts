@@ -298,9 +298,10 @@ export declare function Widget(props: {
 
 // Scenes: a component's or a screen's states, named, each drawn as it is with what it shows, for the gallery
 // (core/ui/gallery) and for comparing what the DOM and a native host draw (core/ui/scenes.js). A scene is what to
-// draw, or that with what to press first (`taps`, by what each is named or says) and whether it's drawn only by itself
-// (`alone`: something over the page). Its name is its family's and its own: "Buttons/Variants".
-export type Scene = (() => Element) | { render: () => Element; taps?: Tap[]; alone?: boolean }
+// draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
+// (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
+// finger points at it (`touch`). Its name is its family's and its own: "Buttons/Variants".
+export type Scene = (() => Element) | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean }
 /** What's pressed: what it's named or says, or that and its role where a name alone is two things (a field's label
  * and its select). */
 export type Tap = string | { role: string; name: string }
