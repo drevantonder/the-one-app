@@ -48,11 +48,10 @@ try {
         transformIndexHtml: () => [
           { tag: "script", attrs: { src: "/ui/client/colour-mode.js" }, injectTo: "head-prepend" },
           { tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" },
+          // Right after the UI library's, in the same place: a page has no <head> of its own, where "head" would put it
+          // before everything prepended, and the UI library's look would win over the page's own.
+          { tag: "link", attrs: { rel: "stylesheet", href: "styles.css" }, injectTo: "head-prepend" },
         ],
-      },
-      {
-        name: "styles",
-        transformIndexHtml: { order: "post", handler: () => [{ tag: "link", attrs: { rel: "stylesheet", href: "styles.css" }, injectTo: "head" }] },
       },
       // A module another page imports brings its own look: the stylesheets it imports, which a page links in its
       // HTML, it links in the page that imports it as it runs.
