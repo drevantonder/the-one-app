@@ -130,9 +130,15 @@ impl<P: Page> Discarding<P> {
     }
 }
 
-/// A page's web context, which WebDriver drives as it does Tauri's windows, as tauri-driver says by its variable.
+/// Where a page keeps its data: on Windows the app's WebView2 data folder, the launcher's, so every window is a client
+/// of one browser process, with its GPU and network processes, rather than starting its own. WebDriver drives
+/// it as it does Tauri's windows, which tauri-driver says by its variable.
 fn web_context() -> wry::WebContext {
-    let mut context = wry::WebContext::default();
+    #[cfg(windows)]
+    let folder = crate::shortcuts::local_data_dir().ok();
+    #[cfg(not(windows))]
+    let folder = None;
+    let mut context = wry::WebContext::new(folder);
     context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
     context
 }
