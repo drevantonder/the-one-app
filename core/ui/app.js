@@ -9,6 +9,7 @@
 // exits with 1.
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { dirname, extname, join, relative } from "node:path"
+import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
 import { build, parseAst } from "vite"
 
@@ -28,7 +29,7 @@ try {
     root: source,
     // Its TypeScript is read as the UI library's is, whatever the app's own tsconfig.json says for its editor: a strict
     // app's extends one of the UI library's (tsconfig.strict.json), which isn't beside it where a server builds it.
-    tsconfig: new URL("tsconfig.json", import.meta.url).pathname,
+    tsconfig: fileURLToPath(new URL("tsconfig.json", import.meta.url)),
     // Its files find each other wherever the client serves the app.
     base: "./",
     logLevel: "silent",
