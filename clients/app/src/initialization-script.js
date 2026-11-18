@@ -14,6 +14,18 @@ addEventListener("keydown", (event) => {
   history.go(step)
 })
 
+// Escape leaves an app at its first screen, as its Back does. The window says whether it's there, with nothing of
+// the app's open over it (`home` in page/client.js), so it's told before the app hears the key and shuts what's open.
+// Not while typing, where Escape is the field's.
+addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "Escape" || event.repeat || (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]"))) return
+    if (!document.querySelector("dialog[open], :popover-open")) top?.postMessage({ method: "notifications/one/escape" }, "*")
+  },
+  true,
+)
+
 // A mouse's back and forward buttons.
 addEventListener("mouseup", (event) => {
   const step = { 3: -1, 4: 1 }[event.button]

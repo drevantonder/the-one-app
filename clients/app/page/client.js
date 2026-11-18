@@ -1057,6 +1057,8 @@ function lift() {
 }
 addEventListener("message", ({ data }) => {
   if (data?.method === "notifications/one/wheel") wheel(data.params)
+  // Escape on a computer, at an app's first screen with nothing open over it, takes it home as its Back does.
+  if (data?.method === "notifications/one/escape" && home()) history.back()
 })
 
 /// The app that's open as `at`, or with none there, the one under every other: the launcher, or while there's none,
