@@ -156,6 +156,7 @@ interface Presence {
 interface Joined {
   relay: WebSocket;
   until?: number;
+  key: string;
 }
 
 /** What a connection to the Durable Object is: an endpoint's, a server's for outsiders' calls, or one call's. */
@@ -214,10 +215,14 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     let joined: Promise<Joined | undefined> | undefined;
     let received = Date.now();
     const quiet = setInterval(async () => {
-      if (Date.now() - received < SILENT) return;
-      clearInterval(quiet);
-      ours.close(1001, "It went quiet");
-      (await joined)?.relay.close(1001, "It went quiet");
+      if (Date.now() - received >= SILENT) {
+        clearInterval(quiet);
+        ours.close(1001, "It went quiet");
+        return void (await joined)?.relay.close(1001, "It went quiet");
+      }
+      // A server taken off its list, or whose device's token no longer admits it, is cut: what's open isn't the network's.
+      const { key } = (await joined) ?? {};
+      if (key && !(await this.env.NETWORK.admits(key, token))) ours.close(1008, "Not one of this network's");
     }, SILENT / 3);
     ours.addEventListener("close", () => clearInterval(quiet));
     ours.addEventListener("message", async ({ data }) => {
@@ -259,9 +264,11 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       ours.send(Uint8Array.of(SERVER_DENIES_AUTH, why.length, ...why));
       return void ours.close(1008, "Not one of this network's");
     }
-    // A run of a client is on for the device it runs for, which its token names, and a server for itself.
-    const [, device = key] = (token ?? "").split(".");
-    const on = new URLSearchParams({ key, device, ...(admitted.until === undefined && { server: "yes" }) });
+    // A run of a client is on for the device it runs for, which its token names (the presigner checked it), and a server
+    // for itself: whatever else its token says, it's not a device.
+    const server = admitted.until === undefined;
+    const device = server ? key : ((token ?? "").split(".")[1] ?? key);
+    const on = new URLSearchParams({ key, device, ...(server && { server: "yes" }) });
     const relay = (await this.relay((relay) => relay.fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } }))).webSocket!;
     relay.accept();
     relay.binaryType = "arraybuffer";
@@ -269,7 +276,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     relay.addEventListener("close", () => ours.close(1000, "It connected again"));
     ours.addEventListener("close", () => relay.close(1000, "It left"));
     ours.send(Uint8Array.of(SERVER_CONFIRMS_AUTH));
-    return { relay, until: admitted.until };
+    return { relay, until: admitted.until, key };
   }
 
   /**
