@@ -42,10 +42,19 @@ at in the folder it names (`dom.png`, `native.png`, `diff.png`, `changed.png`). 
 UI library's protocol yet draws nothing, which it says. A difference that's meant is said in the commit; one that
 isn't is fixed.
 
-### Desktop (Linux), by WebDriver
+### Which to use
+
+A strict app's page the renderer supports opens as a native window, with no WebKit inspector; any other opens in a web
+view. Native → the inspector (Strict windows, below). Web view, or the DOM for comparison → `tooling/window.py`
+(Desktop, next), which has the launcher open every app in a web view (`ONE_WEB_VIEW=1`, which the launcher honours,
+for any window you start yourself). A screen's states with no network → `bun scenes.js` (above): DOM against native.
+Either picture of a local network's screen takes seconds; neither hangs: `window.py` fails in `timeout` seconds
+saying what the app said.
+
+### Desktop (Linux), a web view, by WebDriver
 
 `tooling/window.py` gives a Selenium session on the window a `one:` link opens, the Home Screen's or an app's own,
-drawn and still. Start a network (`local-network`), then write a throwaway script:
+in a web view, drawn and still. Start a network (`local-network`), then write a throwaway script:
 
     import sys; sys.path.insert(0, "tooling")
     from window import opened, settled, frame
@@ -99,10 +108,12 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   network's edge is on this machine's localhost: `ssh -N -R <port>:localhost:<port> surface` puts it at the same
   address there. Its screen is often locked: `computer-use screenshot` with the window's `pid` and `window_id`
   still pictures it. Delete the folder, the tasks and the debug build's `%LOCALAPPDATA%\app.theone.client.dev` after.
-- In the app on a local network: open the window (`one:<app>`) as in Desktop above, with `ONE_HOME` and `ONE_AS` set
-  and the app's launcher running, then call the Inspector app's tools as that user, `one inspector windows`, `one
-  inspector tap --text …`, `one inspector snap`: they reach the window through the launcher, as an agent on another
-  device does: the launcher draws every strict window itself.
+- In the app on a local network (about 9 s to a picture): install the Inspector once (`one install --app
+  network/apps/inspector`), start `openbox` and `one one:<app>` in a desktop of your own (as Desktop above does, with
+  `ONE_HOME` and `ONE_AS` set), then call its tools as that user: `one inspector windows`, `one inspector tap --text
+  …`, `one inspector settle`, `one inspector snap > <scratch>/<name>.png` (stdout is the PNG, the window's own size,
+  1024×720 at first). They reach the window through the launcher, as an agent on another device does: it draws every
+  strict window itself.
 
 ### Android
 

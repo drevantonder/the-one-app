@@ -1,4 +1,8 @@
-"""WebDriver on the app's own window on Linux, the one a `one:` link opens: the Home Screen's, or an app's.
+"""WebDriver on the app's own window on Linux, the one a `one:` link opens: the Home Screen's, or an app's, in a web view.
+
+A strict app's window is drawn natively, and has no web view for WebDriver to reach: `opened` has the launcher open
+every app in a web view (`ONE_WEB_VIEW`, which the launcher honours), so a picture here is the DOM's, to compare with
+the native window's, which the inspector takes (the qa skill's Screens).
 
     import sys; sys.path.insert(0, "tooling")
     from window import opened, settled, frame
@@ -24,6 +28,7 @@ import threading
 
 from selenium import webdriver
 from selenium.webdriver.common.options import ArgOptions
+from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.support.ui import WebDriverWait
 
 PROGRAM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "debug", "one")
@@ -45,34 +50,43 @@ def opened(link, size=(390, 844), log=os.devnull, timeout=60):
     port = held.getsockname()[1]
     if app == "home-screen":
         held.close()
-    env = {**os.environ, "TAURI_WEBVIEW_AUTOMATION": "true", "WEBKIT_INSPECTOR_SERVER": f"127.0.0.1:{port}"}
+    env = {**os.environ, "TAURI_WEBVIEW_AUTOMATION": "true", "WEBKIT_INSPECTOR_SERVER": f"127.0.0.1:{port}", "ONE_WEB_VIEW": "1"}
     args = [PROGRAM, link] if app == "home-screen" else [PROGRAM]
     manager = subprocess.Popen(["openbox"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     started = subprocess.Popen(args, env=env, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     drawn = {name: threading.Event() for name in ("home-screen", app)}
+    seen = []
 
     def follow():
         with open(log, "a") as out:
             for line in started.stderr:
                 out.write(line)
                 out.flush()
+                seen.append(line.rstrip())
                 for name, event in drawn.items():
                     if line.startswith(f"{name} opened in "):
                         event.set()
+        # The app ended: whoever waits on a window stops waiting, and says what the app said.
+        for event in drawn.values():
+            event.set()
+
+    def wait(name, what):
+        if not drawn[name].wait(timeout) or started.poll() is not None:
+            raise TimeoutError(f"{what} {'ended' if started.poll() is not None else f'did not draw in {timeout} s'}; it said:\n"
+                               + "\n".join(seen[-10:]))
 
     threading.Thread(target=follow, daemon=True).start()
     service = None
     try:
-        if not drawn["home-screen"].wait(timeout):
-            raise TimeoutError(f"the Home Screen didn't draw in {timeout} s: see {log}")
+        wait("home-screen", "the Home Screen")
         if app != "home-screen":
             held.close()
-            subprocess.run([PROGRAM, link], env=env, check=True)
-            if not drawn[app].wait(timeout):
-                raise TimeoutError(f"{app} didn't draw in {timeout} s: see {log}")
+            subprocess.run([PROGRAM, link], env=env, check=True, timeout=timeout)
+            wait(app, app)
         service = webdriver.WebKitGTKService(service_args=[f"--target=127.0.0.1:{port}"])
         service.start()
-        driver = webdriver.Remote(service.service_url, options=ArgOptions())
+        driver = webdriver.Remote(service.service_url, options=ArgOptions(), client_config=ClientConfig(
+            remote_server_addr=service.service_url, timeout=timeout))
         try:
             driver.set_window_size(*size)
             settled(driver, timeout)

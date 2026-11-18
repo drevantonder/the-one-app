@@ -130,7 +130,8 @@ pub fn open_now() -> Vec<(String, Option<String>)> {
 
 /// Opens an app in its own window, at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link says it), or brings its
 /// window forward there if it's open: drawn here if its page is strict and of a version this program speaks
-/// (`strict`), otherwise in a web view in a process of its own.
+/// (`strict`), otherwise in a web view in a process of its own. With `ONE_WEB_VIEW` set in this program's environment,
+/// every app is a web view, as an agent wants one to compare its DOM with the native window (`tooling/window.py`).
 pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     open(entrypoint, subject, link, true)
 }
@@ -173,7 +174,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool)
     open.insert(key.clone(), Host { to: None, link: None });
     drop(open);
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    if strict {
+    if strict && std::env::var_os("ONE_WEB_VIEW").is_none() {
         crate::spawn(async move {
             if !crate::strict::open(&entrypoint, subject.as_deref(), &link).await
                 && let Err(error) = process(&key, &entrypoint, subject.as_deref(), &link)
