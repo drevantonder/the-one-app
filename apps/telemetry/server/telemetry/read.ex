@@ -107,7 +107,7 @@ defmodule Telemetry.Read do
             ) do
         Map.merge(quantiles(added(points)), %{
           view: view,
-          called: Map.get(names, view, if(view == "home-screen", do: "Home Screen", else: view)),
+          called: Map.get(names, view, view),
           failed: 0,
           over_time: over_time(points, from, to, step)
         })
