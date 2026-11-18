@@ -4,7 +4,7 @@
 // long it took over time. What's fine is silent: with nothing failing, there's no Failing.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, Empty, Icon, leave, List, Problem, Row, Screen, Section, Skeleton, Split, Tabs } from "ui"
+import { call, changed, Empty, Icon, List, Problem, Row, Screen, Section, Skeleton, Split, Tabs } from "ui"
 import "./app.css"
 
 /** A slow tool, or an app slow to open, as `telemetry_overview` answers it. */
@@ -267,7 +267,7 @@ function Telemetry(props: { all: Overview }) {
         </Show>
       }
     >
-      <Screen heading="Telemetry" back onBack={leave}>
+      <Screen heading="Telemetry">
         <Tabs.Root value={hours()} onValueChange={({ value }) => (setOpen(), setHours(value!))}>
           <Tabs.List>
             <For each={RANGES}>{(range) => <Tabs.Trigger value={range[0]}>{range[1]}</Tabs.Trigger>}</For>
@@ -321,8 +321,8 @@ function Telemetry(props: { all: Overview }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Telemetry" back onBack={leave}><Problem heading="Can't show Telemetry" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Telemetry" back onBack={leave}><Skeleton rows={6} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Telemetry"><Problem heading="Can't show Telemetry" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen heading="Telemetry"><Skeleton rows={6} /></Screen>}>
         <Telemetry all={overview()} />
       </Loading>
     </Errored>

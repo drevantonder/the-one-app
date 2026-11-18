@@ -1,7 +1,7 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, Empty, leave, List, LiveScreen, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
+import { Button, call, changed, Empty, List, LiveScreen, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
 interface AgentScreen {
@@ -62,7 +62,7 @@ function App() {
     <Errored fallback={(error, reset) => <Problem heading="Couldn't list your screens" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={screens().length}><Empty>Pick a screen to watch it.</Empty></Show>}><Detail screen={opened()!} /></Show>}>
-          <Screen heading="Computer Use" back onBack={leave}>
+          <Screen heading="Computer Use">
             <Show when={screens().length} fallback={<Empty>No screens. Your agents' desktops show here once they make one.</Empty>}>
               <List>
                 <For each={screens()} keyed={address}>

@@ -3,7 +3,7 @@
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, leave, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, toast } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, toast } from "ui"
 import "./app.css"
 
 /** A backup made to a destination. */
@@ -302,7 +302,7 @@ function Backups(props: { all: All }) {
   return (
     <>
       <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
-        <Screen heading="Backups" back onBack={leave} action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onClick={now}>Back Up Now</Button></Show>}>
+        <Screen heading="Backups" action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onClick={now}>Back Up Now</Button></Show>}>
           <Show when={destinations().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
               <For each={destinations()} keyed={(destination) => destination.name}>
@@ -326,8 +326,8 @@ function Backups(props: { all: All }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Backups" back onBack={leave}><Problem heading="Can't show backups" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Backups" back onBack={leave}><Skeleton rows={3} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Backups"><Problem heading="Can't show backups" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen heading="Backups"><Skeleton rows={3} /></Screen>}>
         <Backups all={backups()} />
       </Loading>
     </Errored>

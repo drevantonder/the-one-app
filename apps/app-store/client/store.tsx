@@ -77,7 +77,7 @@ type Market = Awaited<ReturnType<typeof market>>
 
 /// Where the app is: every app, a category's every app, an app's page and its See All. Each step in is a step in the
 /// history, so the device's back goes back out. An app's page a link opened (`linked`) is where the App Store starts,
-/// so its Back closes it.
+/// so it has no Back, as the Marketplace hasn't: the window's rail and the device's back leave it.
 interface View {
   category?: string
   app?: string
@@ -476,7 +476,7 @@ function Details(props: { listed: Listed }) {
   )
 }
 
-function AppStore(props: { market: Market; all: Owners; onBack: () => void }) {
+function AppStore(props: { market: Market; all: Owners }) {
   // An app the Marketplace doesn't list, as an installed one may not be, still has its page, as a link opens it.
   const opened = () => props.market.apps.find((listed) => key(listed) === view().app) ?? (view().app ? installed(props.market, props.all, view().app!) : undefined)
   const covered = () => !!(view().app && opened())
@@ -485,12 +485,12 @@ function AppStore(props: { market: Market; all: Owners; onBack: () => void }) {
   return (
     <>
       <div class="under" hidden={covered()}>
-        <Screen back onBack={() => (view().category ? history.back() : props.onBack())} class="apps">
+        <Screen back={!!view().category} class="apps">
           <Marketplace market={props.market} />
         </Screen>
       </div>
       <Show when={covered()}>
-        <Show when={view().details} fallback={<Screen back onBack={view().linked ? props.onBack : undefined} heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
+        <Show when={view().details} fallback={<Screen back={!view().linked} heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
           <Details listed={opened()!} />
         </Show>
       </Show>
@@ -504,13 +504,13 @@ const installed = (market: Market, all: Owners, app: string) => {
   return install && listed(market, install)
 }
 
-/// The App Store. `onBack` is its Back on its first screen, which closes it.
-export default function Store(props: { onBack: () => void }) {
+/// The App Store.
+export default function Store() {
   return (
     <div class="app-store">
-      <Errored fallback={(error) => <Screen back onBack={props.onBack}><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen back onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
-          <AppStore market={market()} all={owners()} onBack={props.onBack} />
+      <Errored fallback={(error) => <Screen><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
+        <Loading fallback={<Screen><Skeleton rows={4} /></Screen>}>
+          <AppStore market={market()} all={owners()} />
         </Loading>
       </Errored>
     </div>

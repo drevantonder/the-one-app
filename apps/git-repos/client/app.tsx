@@ -6,7 +6,7 @@ import { render } from "@solidjs/web"
 import { marked } from "marked"
 import DOMPurify from "dompurify"
 import "./app.css"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Input, leave, List, Menu, Problem, Row, Screen, Section, Select, share, Sheet, Skeleton, Split, Tabs, toast } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Input, List, Menu, Problem, Row, Screen, Section, Select, share, Sheet, Skeleton, Split, Tabs, toast } from "ui"
 
 /** A commit, as the tools answer it. */
 interface Commit {
@@ -129,7 +129,7 @@ const mine = async () => (await json<{ people: { who: string }[] }>("sign-in_peo
 
 function GitRepos() {
   return (
-    <Screen heading="Git Repos" back onBack={leave} action={<Button onClick={() => setAdding(true)}>New</Button>}>
+    <Screen heading="Git Repos" action={<Button onClick={() => setAdding(true)}>New</Button>}>
       <Show when={repos().length} fallback={<Empty>No repos yet.</Empty>}>
         <List>
           <For each={repos()}>

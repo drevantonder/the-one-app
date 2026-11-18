@@ -1,7 +1,7 @@
 // Colour Mode: light, dark, or as the device is, for every app on this device.
 import { createSignal, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { client, Field, leave, RadioGroup, Screen } from "ui"
+import { client, Field, RadioGroup, Screen } from "ui"
 
 const [mode, setMode] = createSignal<string>()
 client().then(({ theme }) => setMode(theme ?? "device"))
@@ -9,7 +9,7 @@ const choose = (mode: string) => client({ theme: mode === "device" ? null : (mod
 
 render(
   () => (
-    <Screen heading="Colour Mode" back onBack={leave}>
+    <Screen heading="Colour Mode">
       <Show when={mode()}>
         <Field hint="For every app on this device.">
           <RadioGroup

@@ -2,7 +2,7 @@
 // good. Restore or Delete Now from a row's menu, and Delete All for everything.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, leave, List, Menu, Problem, Row, Screen, Skeleton, Spinner, toast } from "ui"
+import { Button, call, changed, confirm, Empty, List, Menu, Problem, Row, Screen, Skeleton, Spinner, toast } from "ui"
 import "./app.css"
 
 /** A deleted item, as `soft-delete_list` answers it. */
@@ -97,7 +97,7 @@ async function purgeAll() {
 function Deleted(props: { items: Item[] }) {
   const deleted = () => props.items.filter((item) => item.state === "deleted")
   return (
-    <Screen heading="Recently Deleted" back onBack={leave} action={<Show when={deleted().length}><Button variant="destructive" onClick={purgeAll}>Delete All</Button></Show>}>
+    <Screen heading="Recently Deleted" action={<Show when={deleted().length}><Button variant="destructive" onClick={purgeAll}>Delete All</Button></Show>}>
       <Show when={props.items.length} fallback={<Empty>Nothing was deleted in the last 30 days.</Empty>}>
         <p class="hint">Deleted for good after 30 days.</p>
         <List>
@@ -131,8 +131,8 @@ function Deleted(props: { items: Item[] }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Recently Deleted" back onBack={leave}><Problem heading="Can't show what's deleted" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Recently Deleted" back onBack={leave}><Skeleton rows={3} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Recently Deleted"><Problem heading="Can't show what's deleted" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen heading="Recently Deleted"><Skeleton rows={3} /></Screen>}>
         <Deleted items={items()} />
       </Loading>
     </Errored>

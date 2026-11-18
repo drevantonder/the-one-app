@@ -8,7 +8,7 @@
 // each stage.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, leave, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
+import { Button, call, changed, client, confirm, Empty, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
 import { on } from "./mine.tsx"
 import "./app.css"
 
@@ -316,7 +316,7 @@ function Devices(props: { all: All }) {
   const said = () => props.all.update && softwareUpdate(props.all.update)
   return (
     <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} /></Show>}>
-      <Screen heading="Devices" back onBack={leave}>
+      <Screen heading="Devices">
         <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
           <List>
             <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
@@ -349,8 +349,8 @@ function Devices(props: { all: All }) {
 
 render(
   () => (
-    <Errored fallback={(error) => <Screen heading="Devices" back onBack={leave}><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Devices" back onBack={leave}><Skeleton rows={3} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="Devices"><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen heading="Devices"><Skeleton rows={3} /></Screen>}>
         <Devices all={mine()} />
       </Loading>
     </Errored>

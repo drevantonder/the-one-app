@@ -5,7 +5,7 @@
 // out. Groups are each person's own, so they're asked for as the person, wherever the app was opened.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, Field, Icon, Input, leave, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, toast } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, toast } from "ui"
 
 /** Someone in the network, or invited to it, as `sign-in_everyone` answers it. */
 interface Person {
@@ -250,7 +250,7 @@ function UsersAndGroups(props: { all: All }) {
   return (
     <>
       <Split open={!!group()} onClose={() => setOpened()} detail={<Show when={group()}><GroupScreen group={group()!} all={props.all} /></Show>}>
-        <Screen heading="Users & Groups" back onBack={leave} action={props.all.invites ? <Button onClick={() => setInviting(true)}>Invite</Button> : undefined}>
+        <Screen heading="Users & Groups" action={props.all.invites ? <Button onClick={() => setInviting(true)}>Invite</Button> : undefined}>
           <Section heading="Users">
             <List>
               <For each={props.all.joined} keyed={(person) => person.who}>
@@ -290,8 +290,8 @@ render(
   () => (
     <>
       <style>{".groups { display: flex; align-items: center; gap: 0.75rem; max-width: var(--readable); } .groups > span { flex: 1; min-width: 0; }"}</style>
-      <Errored fallback={(error) => <Screen heading="Users & Groups" back onBack={leave}><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen heading="Users & Groups" back onBack={leave}><Skeleton rows={3} /></Screen>}>
+      <Errored fallback={(error) => <Screen heading="Users & Groups"><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
+        <Loading fallback={<Screen heading="Users & Groups"><Skeleton rows={3} /></Screen>}>
           <UsersAndGroups all={all()} />
         </Loading>
       </Errored>

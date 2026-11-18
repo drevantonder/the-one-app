@@ -8,7 +8,7 @@
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { Dynamic, render } from "@solidjs/web"
 import "./app.css"
-import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, leave, List, open as opening, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
+import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, List, open as opening, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
 
 /// Whose Vault this is: a person's, a group's or the network's. Left unchosen, it's whoever the app was opened for.
 /** A field of an item: a secret one has no value here. */
@@ -620,8 +620,6 @@ function Vault() {
       <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={contents().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Detail item={item()} />}</Show>}>
         <Screen
         heading="Vault"
-        back
-        onBack={leave}
         action={
           <Show when={opened().servers.length}>
             <Button onClick={() => setSheet({ kind: "field" })}>Add</Button>

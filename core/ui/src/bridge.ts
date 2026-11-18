@@ -197,8 +197,9 @@ export function changed(listener: () => void): () => void {
 }
 
 
-/// `<Screen heading="Notes" back onBack={leave}>`: tells the client the user went back out of the app, from its
-/// first screen.
+/// `leave()`: tells the client the user is done with the app, as MCP Apps' `request-teardown`: the window goes back to
+/// the Home Screen, as the device's back does from the app's first screen. An app's first screen has no Back for it:
+/// the window's rail and the device's back leave every app.
 export const leave = () => greet().then(() => notify("ui/notifications/request-teardown"))
 
 /// `open("claims")`: shows another app over this one, by its app's name, as tapping its icon or a notification

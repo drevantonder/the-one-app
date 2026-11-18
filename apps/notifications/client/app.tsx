@@ -3,7 +3,7 @@
 // isn't woken by them says so first, and why.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, leave, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Spinner, Switch, toast } from "ui"
+import { Button, call, changed, client, confirm, Empty, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Spinner, Switch, toast } from "ui"
 import "./app.css"
 
 /** A notification, as `notifications_inbox` answers it. */
@@ -112,7 +112,7 @@ const More = () => (
 
 render(
   () => (
-    <Screen heading="Notifications" back onBack={leave} action={<Show when={inbox()?.notifications.length}><More /></Show>}>
+    <Screen heading="Notifications" action={<Show when={inbox()?.notifications.length}><More /></Show>}>
       <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
           <Show when={inbox().push}>{(push) => <PushState push={push()} />}</Show>

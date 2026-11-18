@@ -3,7 +3,7 @@
 // by a link that works once.
 import { createMemo, Errored, For, Loading, refresh } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, leave, List, open, Problem, Row, Screen, Skeleton, toast } from "ui"
+import { Button, call, changed, confirm, List, open, Problem, Row, Screen, Skeleton, toast } from "ui"
 import { on, Remove } from "./mine.tsx"
 
 /** A passkey, as `sign-in_devices` answers it. */
@@ -32,7 +32,7 @@ async function add() {
 
 render(
   () => (
-    <Screen heading="Sign-In & Security" back onBack={leave} action={<Button onClick={add}>Add Passkey</Button>}>
+    <Screen heading="Sign-In & Security" action={<Button onClick={add}>Add Passkey</Button>}>
       <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={2} />}>
           <List>
