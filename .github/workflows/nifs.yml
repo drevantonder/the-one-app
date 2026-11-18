@@ -1,6 +1,7 @@
-# Builds this repo's NIFs and programs for a Mac on GitHub's macOS runner, as `tooling/nifs macos-aarch64` builds them
-# on the Mac, and uploads the apps' to a Release: what `tooling/publish-nifs` asks for when that Mac is busy or
-# asleep. Each input is as `tooling/publish-nifs` gives it.
+# Builds this repo's NIFs and programs for a Mac on GitHub's macOS runner, as `tooling/nifs macos-aarch64` asks for
+# them from Linux, with that machine's Rust and the names it worked out for each NIF. The files asked for are kept as
+# the run's artifact `nifs`, a tar of them by their paths, which `tooling/nifs` downloads. Each input is as
+# `tooling/nifs` gives it.
 name: Mac NIFs
 
 on:
@@ -9,21 +10,18 @@ on:
       commit:
         description: The commit to build
         required: true
-      release:
-        description: The Release to upload them to
-        required: true
       rust:
-        description: The Rust to build with, as `rustc -V` names it on the machine publishing
+        description: The Rust to build with, as `rustc -V` names it on the machine asking
         required: true
       builds:
-        description: Each NIF's build, NIF_BUILD_<CRATE>=<input hash>, as the machine publishing worked them out
+        description: Each NIF's build, NIF_BUILD_<CRATE>=<input hash>, as the machine asking worked them out
         required: true
       files:
-        description: Each file to upload, <path>=<its name in the Release>
+        description: The files to keep, by their paths
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -34,17 +32,25 @@ jobs:
           ref: ${{ inputs.commit }}
       # tooling/nifs is bash 4's, which macOS doesn't have.
       - run: brew install bash
-      - run: rustup toolchain install "$RUST" --profile minimal --target aarch64-apple-darwin && rustup default "$RUST"
-        env:
-          RUST: ${{ inputs.rust }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust }}
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      # tooling/nifs keeps each build by what it's built from, so a crate that didn't change isn't built again.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/the-one-app/nifs
+          key: nifs-${{ github.run_id }}
+          restore-keys: nifs-
       - run: env $BUILDS tooling/nifs macos-aarch64
         env:
           BUILDS: ${{ inputs.builds }}
-      - run: |
-          mkdir "$RUNNER_TEMP/release"
-          for file in $FILES; do cp "${file%%=*}" "$RUNNER_TEMP/release/${file#*=}"; done
-          gh release upload "$RELEASE" "$RUNNER_TEMP"/release/* --clobber
+      - run: tar -cf nifs.tar $FILES
         env:
           FILES: ${{ inputs.files }}
-          RELEASE: ${{ inputs.release }}
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nifs
+          path: nifs.tar
+          retention-days: 7

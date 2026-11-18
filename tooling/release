@@ -14,11 +14,11 @@
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
 # the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
-# the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac builds a Mac's
-# `one`, which needs its system's frameworks: from Linux, it's built on the Mac `ssh mac` reaches, in its checkout
-# ~/scratch/one-release, at the same commit. A server release and a client release run at once, each in a checkout of its own, but a second of
-# the same kind is refused while the first builds. One published while the network's update of the one before is under
-# way takes its place there. A commit older than one
+# the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac's `one` needs
+# its system's frameworks: from Linux, it's built on GitHub's macOS runner (`.github/workflows/mac-client.yml`), from
+# the same commit with the same Rust, and published with the rest. A server release and a client release run at once,
+# each in a checkout of its own, but a second of the same kind is refused while the first builds. One published while
+# the network's update of the one before is under way takes its place there. A commit older than one
 # the network has published is refused, so a release that finishes late doesn't undo a newer one. A build already
 # published is left as it is, and published again, so a network that didn't hear of it does. So is a client built from
 # the same as the network's latest, in the same series (`OneCore.Builds.talk?/2`): it keeps its build, which `one
@@ -78,8 +78,7 @@ fi
 part=server
 ((${#want_servers[@]})) || part=client
 
-# Each line says how many seconds into the release it is, so where a release's time goes is in what it printed. The
-# Mac's lines come through Linux's.
+# Each line says how many seconds into the release it is, so where a release's time goes is in what it printed.
 [[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
 
 # A build is named by its commit's version (`tooling/version`), so what's built is all committed.
@@ -149,8 +148,8 @@ behind=$(jq -r --arg build "$build" '
 [[ -z $behind ]] || { echo "$build is a breaking release, and $behind isn't on the network's $(jq -r .network.build <<<"$builds") yet: release it once they are." >&2 && exit 1; }
 
 
-# Which are built here, which on the Mac, and which are published already.
-mine=() mac=()
+# Which are built here, and which are published already.
+mine=()
 for name in "${names[@]}"; do
   kind=${name#*/}
   # A server is published as its code, which is the same for every kind, and its kind's runtime, which a kind of
@@ -160,30 +159,28 @@ for name in "${names[@]}"; do
     echo "$name  $build is published already"
   elif [[ $name == server/* && $here != linux-* ]]; then
     echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
-  elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && $kind == windows-*) ]]; then
-    # A client's inputs name the Rust that builds it, so the machine that builds it decides: a Mac's, the Mac.
+  elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && ($kind == windows-* || $name == one/macos-*)) ]]; then
+    # A client's inputs name the Rust that builds it, which is this machine's, and GitHub's for a Mac's.
     if [[ $name != server/* ]] && was=$(unchanged "$name"); then
       echo "$name  built from the same as $was, which stays the latest"
     else
       mine+=("$name")
     fi
-  elif [[ $here == linux-* && $kind == macos-* ]]; then
-    mac+=("$name")
   else
     echo "$name isn't built on $here: build it on such a machine with tooling/release $name" >&2 && exit 1
   fi
 done
-for name in "${mine[@]}"; do echo "$name  $build, built here"; done
-for name in "${mac[@]}"; do echo "$name  $build, built on the Mac"; done
+for name in "${mine[@]}"; do
+  if [[ $name == one/macos-* && $here != macos-* ]]; then echo "$name  $build, built on GitHub"; else echo "$name  $build, built here"; fi
+done
 [[ -z $dry ]] || exit 0
 # Published already: published again, which sends nothing, so a network that didn't hear of it does.
-((${#mine[@]} + ${#mac[@]})) || { one publish --builds '[]' >/dev/null && exit; }
+((${#mine[@]})) || { one publish --builds '[]' >/dev/null && exit; }
 
 # One server release and one client release on a machine at a time, each kept as a pid file rather than flock: a daemon
 # a build starts (epmd, a compiler cache) inherits a flock's descriptor and outlives the release, which then refused
 # the next one with nothing publishing. Each holds its own checkout (below), which is what a second of its kind can't
-# share; a server's and a client's don't touch, so they build at once. What a Mac builds is asked for by Linux's
-# release, so the client's lock covers it.
+# share; a server's and a client's don't touch, so they build at once.
 if [[ $(uname) == Linux ]]; then
   lock=${XDG_RUNTIME_DIR:-/tmp}/one-release-$part.pid
   if ! (set -o noclobber && echo "$$ $build" >"$lock") 2>/dev/null; then
@@ -207,22 +204,24 @@ fi
 
 servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 
-# The Mac builds its part from the same commit meanwhile, once it's built its NIFs in the same checkout.
-if ((${#mac[@]})); then
-  ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && CARGO_BUILD_JOBS=\$((\$(sysctl -n hw.ncpu) / 2)) nice -n 19 taskpolicy -d throttle tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
-  on_mac=$!
-fi
-
 # `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
 # which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
 # that machine's system libraries, so each kind builds its own. Each builds at once, beside the servers, in a target
-# folder of its own: cargo holds one folder for one build at a time.
+# folder of its own: cargo holds one folder for one build at a time. A Mac's is built on GitHub's macOS runner, with
+# this machine's Rust, so it's what `client_inputs` says it's built from.
 target=${CARGO_TARGET_DIR:-$root/target}
 out=$target/builds/$build
 rm -rf "$out" && mkdir -p "$out"
 clients=()
 for name in "${mine[@]}"; do
   file=$(tr / - <<<"$name")
+  if [[ $name == one/macos-* && $here != macos-* ]]; then
+    (run=$(gh workflow run mac-client.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') &&
+      echo "Building $name on GitHub's macOS runner: $run" && gh run watch "${run##*/}" --exit-status >/dev/null &&
+      gh run download "${run##*/}" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
+      { echo "$name wasn't built on GitHub: gh run view ${run##*/} --log-failed" >&2 && exit 1; }) &
+    clients+=($!) && continue
+  fi
   case $name in
     one-cli/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc --no-default-features) program=x86_64-pc-windows-msvc/release/one.exe ;;
     one-cli/*) cargo=(build --no-default-features) program=release/one ;;
@@ -427,5 +426,4 @@ if ((${#mine[@]})); then
     for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
   '
 fi
-[[ -z ${on_mac-} ]] || wait "$on_mac" || { echo "The Mac's part wasn't released." >&2 && exit 1; }
 echo "The network's servers take $build by themselves (\`one builds\` says how far), and a device with \`one update\`."

@@ -13,14 +13,14 @@
 # `windows-x86_64.so`; a Mac's on a Mac, with its own toolchain and SDK. A build is kept by what it's built from
 # (`tooling/input-hash`), in this machine's cache, outside any worktree, so one whose inputs haven't changed is
 # the one built before, by any worktree, and only a crate that changed is built. A Mac's too: from Linux, it's built
-# on the Mac `ssh mac` reaches, in its checkout ~/scratch/one-release, at the same commit, which is on GitHub, so
-# what's built is committed. The Mac sleeps, so before that, One Core's is looked for in the latest server published
-# for a Mac, whose `nifs` lists what each NIF was built from, as `$target/nifs/<kind>` does for the ones here,
+# on GitHub's macOS runner (`.github/workflows/nifs.yml`), from the same commit, which must be on GitHub, so what's
+# built is committed, with the same Rust. That takes minutes, so before that, One Core's is looked for in the latest
+# server published for a Mac, whose `nifs` lists what each NIF was built from, as `$target/nifs/<kind>` does for the ones here,
 # which `tooling/release` puts in a server, and an app's where its `server/checksums.json` says it's published
 # (`tooling/publish-nifs`).
 #
 # Each NIF is named for its build, what it's built from (`tooling/input-hash`), so a server loads a changed one beside
-# the one before (`OneCore.Nif`). The Mac is given the names this machine worked out, in NIF_BUILD_<CRATE>, so a
+# the one before (`OneCore.Nif`). The runner is given the names this machine worked out, in NIF_BUILD_<CRATE>, so a
 # Mac's NIF is named for what it's kept by here.
 set -euo pipefail
 
@@ -92,10 +92,15 @@ for kind in "${kinds[@]}"; do
 
     mac=($(changed))
     ((${#mac[@]})) || continue
-    [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: the Mac builds the commit." >&2 && exit 1; }
-    commit=$(git rev-parse HEAD)
-    (ssh -o ConnectTimeout=15 mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && env ${builds[*]} CARGO_BUILD_JOBS=\$((\$(sysctl -n hw.ncpu) / 2)) nice -n 19 taskpolicy -d throttle tooling/nifs $kind >&2 && tar -c --no-mac-metadata --no-xattrs ${mac[*]}'" 2> >(sed 's/^/mac: /' >&2) | tar -x) &
-    on_mac=$!
+    [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: GitHub builds the commit." >&2 && exit 1; }
+    run=$(gh workflow run nifs.yml --ref main -f commit="$(git rev-parse HEAD)" -f rust="$(rustc -V | cut -d' ' -f2)" \
+      -f builds="${builds[*]}" -f files="${mac[*]}" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') ||
+      { echo "GitHub's macOS runner wasn't asked to build ${mac[*]}." >&2 && exit 1; }
+    echo "Building ${mac[*]} on GitHub's macOS runner: $run" >&2
+    downloaded=$(mktemp -d -p "$target")
+    (gh run watch "${run##*/}" --exit-status >/dev/null && gh run download "${run##*/}" -n nifs -D "$downloaded" &&
+      tar -xf "$downloaded/nifs.tar" && rm -r "$downloaded") &
+    on_github=$!
     continue
   elif [[ $kind != macos-* && $here != Linux ]]; then
     echo "$kind's are built on Linux" >&2 && exit 1
@@ -117,7 +122,7 @@ for kind in "${kinds[@]}"; do
     keep "$file"
   done
 done
-if [[ -n ${on_mac-} ]]; then
-  wait "$on_mac" || { echo "${mac[*]} changed since the last build of it, so the Mac builds it, and it didn't: wake the Mac and run this again." >&2 && exit 1; }
+if [[ -n ${on_github-} ]]; then
+  wait "$on_github" || { echo "${mac[*]} changed since the last build of it, and GitHub's macOS runner didn't build it: gh run view ${run##*/} --log-failed" >&2 && exit 1; }
   for file in "${mac[@]}"; do keep "$file"; done
 fi

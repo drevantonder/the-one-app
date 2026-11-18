@@ -8,8 +8,7 @@
 #
 #     tooling/publish-nifs
 #
-# A Mac's are built on the Mac, as `tooling/nifs` builds them, unless it's busy (a load above 20) or doesn't answer:
-# then on GitHub's macOS runner (`.github/workflows/nifs.yml`), which uploads them to the same Release.
+# A Mac's are built on GitHub's macOS runner, as `tooling/nifs` builds them.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -25,7 +24,7 @@ repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 release=nifs-${commit:0:12}
 
 # Each build of each app's crates, by its path, with its name in a Release, and those not published yet.
-declare -A named=() kinds=() uploaded=()
+declare -A named=() kinds=()
 files=() apps=() unpublished=()
 for crate in $(dirname apps/*/server/nif/*/Cargo.toml apps/*/server/bin/*/Cargo.toml); do
   app=${crate#apps/} && app=${app%%/*}
@@ -51,37 +50,13 @@ gh release view "$release" >/dev/null 2>&1 ||
   gh release create "$release" --target "$commit" --prerelease --title "NIFs at ${commit:0:12}" \
     --notes "Builds of apps' NIFs and programs at $commit, which each app's server/checksums.json names."
 
-linux=() && for kind in linux-x86_64 linux-aarch64 windows-x86_64; do [[ -z ${kinds[$kind]-} ]] || linux+=("$kind"); done
-((${#linux[@]} == 0)) || tooling/nifs "${linux[@]}"
-
-if [[ -n ${kinds[macos-aarch64]-} ]]; then
-  load=$(ssh -o ConnectTimeout=15 mac uptime 2>/dev/null | sed -E 's/.*load averages?: *([0-9]+).*/\1/' || true)
-  if [[ -n $load ]] && ((load < 20)); then
-    tooling/nifs macos-aarch64
-  else
-    echo "The Mac is busy or doesn't answer (load ${load:-unknown}), so GitHub's macOS runner builds its NIFs." >&2
-    builds=() mac=()
-    for file in "${unpublished[@]}"; do
-      [[ $file == */macos-* ]] || continue
-      mac+=("$file=${named[$file]}")
-      [[ $file != */nif/* ]] || {
-        crate=$(basename "$(dirname "$file")") && hash=${named[$file]#"$crate"-} && builds+=("NIF_BUILD_${crate^^}=${hash%%-*}")
-      }
-    done
-    run=$(gh workflow run nifs.yml -f commit="$commit" -f release="$release" -f rust="$(rustc -V | cut -d' ' -f2)" \
-      -f builds="${builds[*]}" -f files="${mac[*]}" 2>&1 | grep -o 'actions/runs/[0-9]*' | cut -d/ -f3)
-    gh run watch "$run" --exit-status >/dev/null || { echo "GitHub's macOS build failed: gh run view $run --log-failed" >&2 && exit 1; }
-    for pair in "${mac[@]}"; do
-      gh release download "$release" -p "${pair#*=}" -O "${pair%%=*}" --clobber && uploaded[${pair%%=*}]=1
-    done
-  fi
-fi
+tooling/nifs "${!kinds[@]}"
 
 # Each is uploaded under its name in the Release, from a folder of its own.
 upload=$(mktemp -d)
 trap 'rm -r "$upload"' EXIT
-for file in "${unpublished[@]}"; do [[ -n ${uploaded[$file]-} ]] || cp "$file" "$upload/${named[$file]}"; done
-[[ -z $(ls "$upload") ]] || gh release upload "$release" --clobber "$upload"/*
+for file in "${unpublished[@]}"; do cp "$file" "$upload/${named[$file]}"; done
+gh release upload "$release" --clobber "$upload"/*
 
 # Each app's checksums: its builds just published, and the rest as they were.
 for app in "${apps[@]}"; do
