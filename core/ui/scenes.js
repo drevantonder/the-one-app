@@ -1,6 +1,6 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
-// [--against <dir>] [--dark] [--size <width>x<height>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p strict
-// --example screenshot`). `--against` compares each scene's DOM drawing with an earlier run's too, kept in that
+// [--against <dir>] [--dark] [--size <width>x<height>] [--release]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p strict
+// --example screenshot`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene's DOM drawing with an earlier run's too, kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
 // A folder is the gallery (core/ui/gallery, its scenes the components': `*.scenes.tsx`) or an app's (apps/<app>,
@@ -17,7 +17,9 @@
 // its headless harness (clients/app/strict's `screenshot` example), each as a picture and its semantic tree as text
 // (src/strict/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
-// version) gives nothing, which it says.
+// version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
+// `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
+// scrolls, and the memory drawing took, to compare a change's before and after.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { chromium } from "playwright-core"
@@ -37,7 +39,7 @@ const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
 const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size"].includes(args[at - 1])).map((folder) => resolve(folder))
 const targets = folders.length ? folders : [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")))]
-const harness = join(root, "target/debug/examples/screenshot")
+const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 // The runtime version the UI library needs, and the native host's: a host whose version is older draws nothing of a
 // page written for this one, so there's nothing yet to compare.
 const speaks = (file, pattern) => Number(readFileSync(join(root, file), "utf8").match(pattern)?.[1])
@@ -166,7 +168,7 @@ function native(built, scene, folder) {
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
-    [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(requests ? ["--requests", "-"] : [])],
+    [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(requests ? ["--requests", "-"] : [])],
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env: { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" } },
   )
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing" }
@@ -176,8 +178,13 @@ function native(built, scene, folder) {
     role === "text" ? { text: name ?? "", states: {}, children: [] } : { role: role ?? undefined, name: name ?? undefined, states: Object.fromEntries(Object.entries({ ...more, ...states }).map(([state, value]) => [state, String(value)])), children: children.map(semantic) }
   const tree = outline({ states: {}, children: (Array.isArray(nodes) ? nodes : [nodes]).map(semantic) })
   writeFileSync(join(folder, "native.txt"), tree)
-  return { tree }
+  const measured = run.stderr.toString().match(/^measured (.*)$/m)
+  return { tree, measured: measured && JSON.parse(measured[1]) }
 }
+
+/// How quickly the native host drew a scene, as a line.
+const timings = ({ first_frame_ms, idle_ms, typing_ms, scrolling_ms, memory_mb }) =>
+  [`first frame ${first_frame_ms} ms`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`].filter(Boolean).join(", ")
 
 /// How much of two pictures differs, from 0 to 1, where they're the same size, with where in `diff`.
 function differs(one, other, diff) {
@@ -236,6 +243,7 @@ for (const target of targets) {
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
+    if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)
     const before = against && join(against, name, folder.split("/").at(-1))
     if (shown.tree === undefined) {
     } else if (before && existsSync(join(before, "dom.png"))) compared(said, "before and now", readFileSync(join(before, "dom.txt"), "utf8"), shown.tree, join(before, "dom.png"), join(folder, "dom.png"), join(folder, "changed.png"))

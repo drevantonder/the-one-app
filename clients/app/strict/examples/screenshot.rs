@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p strict --example screenshot -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
-//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch]
+//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--measure]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -13,6 +13,11 @@
 //! (`strict::inspect`), as a strict window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
 //! `step` moves it. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`).
+//! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
+//! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
+//! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
+//! (`scrolling_ms`), each where it has one, and the memory drawing took (`memory_mb`: the GPU, its atlas and the
+//! renderer, as the process's resident set grew).
 
 use std::path::PathBuf;
 
@@ -111,20 +116,30 @@ fn main() -> anyhow::Result<()> {
     if let Some(why) = screen.didnt_start() {
         anyhow::bail!("its page didn't start: {why}");
     }
+    let gpu = std::time::Instant::now();
+    let resident = || memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
+    let before = resident();
     let context = Context::new(false)?;
     let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };
     let atlas = std::sync::Arc::new(Atlas::new(&context));
     let mut renderer = Renderer::offscreen(&context, atlas, device);
     let mut scene = Scene::default();
     let size = Size { width: Pixels(width), height: Pixels(height) };
-    let mut draw = |screen: &mut Screen| -> anyhow::Result<(u32, u32, Vec<u8>)> {
+    let first_frame = std::cell::Cell::new(None);
+    // A frame drawn, and with `read`, waited for and read back.
+    let mut frame = |screen: &mut Screen, read: bool| -> anyhow::Result<(u32, u32, Vec<u8>)> {
         screen.idle();
         screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
         renderer.draw(&scene);
-        renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))
+        if !read {
+            return Ok((0, 0, Vec::new()));
+        }
+        let read = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
+        first_frame.set(first_frame.get().or(Some(gpu.elapsed())));
+        Ok(read)
     };
     for line in requests.lines().filter(|line| !line.trim().is_empty()) {
-        let (w, h, rgba) = draw(&mut screen)?;
+        let (w, h, rgba) = frame(&mut screen, true)?;
         let request = match strict::inspect::Request::parse(line) {
             Ok(request) => request,
             Err(refused) => {
@@ -152,11 +167,10 @@ fn main() -> anyhow::Result<()> {
         let answer = answered.borrow_mut().take();
         println!("{}", answer.unwrap_or_else(|| json!({"error": "it didn't answer"})));
     }
-    let (w, h, rgba) = draw(&mut screen)?;
+    let (w, h, rgba) = frame(&mut screen, true)?;
     let drawn = started.elapsed();
     // What it told the page as it drew (where each node is, what's in sight) has run, for its tree.
     screen.idle();
-    renderer.destroy();
     image::RgbaImage::from_raw(w, h, rgba).ok_or_else(|| anyhow::anyhow!("the frame is the wrong size"))?.save(png)?;
     std::fs::write(tree, serde_json::to_string_pretty(&screen.semantics())?)?;
     if let Some(failed) = &screen.failed {
@@ -167,5 +181,55 @@ fn main() -> anyhow::Result<()> {
         eprintln!("it opens in a web view: {why}");
     }
     eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {w}x{h} px");
+    if args.iter().any(|arg| arg == "--measure") {
+        // How long a frame takes, on average over FRAMES each after `act`, which says false where there's nothing
+        // to do it to: drawn one after another, as a window draws them, and the last waited for.
+        const FRAMES: u32 = 30;
+        let mut frames = |screen: &mut Screen, act: &mut dyn FnMut(&mut Screen, u32) -> bool| -> anyhow::Result<Option<f64>> {
+            let started = std::time::Instant::now();
+            for at in 0..FRAMES {
+                if !act(screen, at) {
+                    return Ok(None);
+                }
+                frame(screen, at + 1 == FRAMES)?;
+            }
+            Ok(Some(started.elapsed().as_secs_f64() * 1000.0 / f64::from(FRAMES)))
+        };
+        let idle = frames(&mut screen, &mut |_, _| true)?;
+        let found = |screen: &mut Screen, role: &str| ask(screen, json!({"op": "query", "role": role}))?["result"]["nodes"][0]["node"].as_u64();
+        let field = ["searchbox", "textbox"].into_iter().find_map(|role| found(&mut screen, role));
+        let typing = match field {
+            Some(node) => frames(&mut screen, &mut |screen, _| ask(screen, json!({"op": "type", "node": node, "text": "a"})).is_some_and(|answer| answer.get("result").is_some()))?,
+            None => None,
+        };
+        let list = found(&mut screen, "list");
+        let scrolling = match list {
+            Some(node) => frames(&mut screen, &mut |screen, at| {
+                let dy = if at < FRAMES / 2 { 40 } else { -40 };
+                ask(screen, json!({"op": "scroll", "node": node, "dy": dy})).is_some_and(|answer| answer.get("result").is_some())
+            })?,
+            None => None,
+        };
+        let ms = |ms: Option<f64>| ms.map(|ms| (ms * 100.0).round() / 100.0);
+        let first_frame_ms = first_frame.get().map(|first| first.as_secs_f64() * 1000.0);
+        let memory_mb = (resident().saturating_sub(before) as f64 / 1e5).round() / 10.0;
+        eprintln!(
+            "measured {}",
+            json!({"first_frame_ms": ms(first_frame_ms), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb})
+        );
+    }
+    renderer.destroy();
     Ok(())
+}
+
+/// What the screen answers `request`, an inspector's, once what it set off has run.
+fn ask(screen: &mut Screen, mut request: Value) -> Option<Value> {
+    request["v"] = json!(strict::inspect::VERSION);
+    request["id"] = json!(0);
+    let request = strict::inspect::Request::parse(&request.to_string()).ok()?;
+    let answered = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let to = answered.clone();
+    screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)));
+    screen.idle();
+    answered.borrow_mut().take()
 }

@@ -58,6 +58,10 @@ url = "2"
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text systems read as TTF.
 wuff = "0.2"
 
+[dev-dependencies]
+# The memory the headless harness's `--measure` says drawing took.
+memory-stats = "1"
+
 # The GPU, as GPUI drew with it before it moved to wgpu: Vulkan on Linux and Android, Metal on a Mac (Windows draws with
 # Direct3D 11, as GPUI does there). From its repo at a commit: crates.io's 0.9 refuses a GPU without
 # VK_EXT_inline_uniform_block (many phones' and some laptops'), where this falls back to uniform buffers.
