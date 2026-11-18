@@ -3,13 +3,13 @@ name: iphone
 description: Use to build the app for iPhone or the iPhone simulator, publish it to TestFlight, or put a development build on the owner's phone, from Linux over ssh to the Mac, without the owner doing anything.
 ---
 
-Everything iPhone happens on the Mac: `ssh mac 'zsh -lc "taskpolicy -b <command>"'` (a login shell, so Homebrew, Rust
+Everything iPhone happens on the Mac: `ssh mac 'zsh -lc "nice -n 19 taskpolicy -d throttle <command>"'` (a login shell, so Homebrew, Rust
 and Xcode's tools are on its PATH). The Mac is the owner's own laptop, in use, and shared by every agent, so what you
-run there runs at macOS's background priority, `taskpolicy -b` (low CPU and disk priority, on its efficiency cores),
+run there runs under `nice -n 19 taskpolicy -d throttle` (lowest CPU priority, throttled disk),
 which its children inherit, and with `CARGO_BUILD_JOBS=4`, half its cores. That is how the owner's own apps come
 first: on 18 Nov, with six busy programs of his standing in, a cargo build at normal priority took 62% of their work,
-one under `nice -n 19` and a throttled disk 52%, and one under `taskpolicy -b` 37%, which is slower for you (an
-incremental `one` build took 12 minutes instead of 1 or 2). Its load average isn't a reason to wait: the owner's
+one under `nice -n 19` and a throttled disk 52%, and one under `taskpolicy -b` 37%, which is far slower for you (an
+incremental `one` build took 12 minutes instead of 1 or 2), so don't use `taskpolicy -b`. Its load average isn't a reason to wait: the owner's
 simulators and Chrome had it above 200 with CPU to spare, so don't add to what uses its memory: shut down and delete a
 simulator you booted, and remove your `~/scratch/` checkout, when you're done.
 

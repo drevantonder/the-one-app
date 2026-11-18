@@ -76,7 +76,7 @@ BUILD
 
 build=$source/macos-aarch64
 tar -c -C "$work" helper AppIcon.iconset build |
-  ssh -o ConnectTimeout=15 mac 'd=$(mktemp -d) && trap "rm -r \"$d\"" EXIT && tar -x -C "$d" && taskpolicy -b bash "$d/build" "$d"' >"$build"
+  ssh -o ConnectTimeout=15 mac 'd=$(mktemp -d) && trap "rm -r \"$d\"" EXIT && tar -x -C "$d" && nice -n 19 taskpolicy -d throttle bash "$d/build" "$d"' >"$build"
 tar -tzf "$build" >/dev/null
 
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)

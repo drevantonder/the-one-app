@@ -209,7 +209,7 @@ servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 
 # The Mac builds its part from the same commit meanwhile, once it's built its NIFs in the same checkout.
 if ((${#mac[@]})); then
-  ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && CARGO_BUILD_JOBS=\$((\$(sysctl -n hw.ncpu) / 2)) taskpolicy -b tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
+  ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && CARGO_BUILD_JOBS=\$((\$(sysctl -n hw.ncpu) / 2)) nice -n 19 taskpolicy -d throttle tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
   on_mac=$!
 fi
 
@@ -346,7 +346,7 @@ keychain=$HOME/Library/Keychains/ptc-build.keychain-db
 d=$(mktemp -d) && trap 'rm -r "$d"; security lock-keychain "$keychain"' EXIT && cat >"$d/beam.smp"
 # The password goes to security on its standard input, never in a command line, where ps and logs see it.
 printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
-taskpolicy -b codesign --force --timestamp --keychain "$keychain" --sign "Developer ID Application" "$d/beam.smp" >&2
+nice -n 19 taskpolicy -d throttle codesign --force --timestamp --keychain "$keychain" --sign "Developer ID Application" "$d/beam.smp" >&2
 codesign --verify --strict "$d/beam.smp" >&2 && cat "$d/beam.smp"
 SIGN
 )")" <"$beam" >"$beam.signed"
