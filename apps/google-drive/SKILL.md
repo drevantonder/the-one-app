@@ -17,4 +17,4 @@ Google Drive is the person's Drive, through Drive's own API (v3) by its own name
   or `data` in base64 for a small one), and `files_update` renames, moves (addParents, removeParents) or trashes
   one. `generate_ids` gives ids to make files with, so a retry never makes two.
 - A Google Doc or Sheet's contents are read with `google-docs` and `google-sheets`.
-- With several accounts, each tool takes `account`. `accounts` lists them.
+- With several accounts, each tool takes `account`. `google-account_accounts` lists them.

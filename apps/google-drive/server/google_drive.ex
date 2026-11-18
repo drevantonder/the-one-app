@@ -20,13 +20,6 @@ defmodule GoogleDrive do
   @impl true
   def icon, do: "icon.png"
 
-  @doc "What Google Drive asks of Google, for the `google-account` app."
-  def google do
-    %{
-      scopes: ["https://www.googleapis.com/auth/drive"]
-    }
-  end
-
   @impl true
   def requires, do: %{"core" => ">= 0.22.18", "google-account" => "to reach your files"}
 
@@ -35,14 +28,14 @@ defmodule GoogleDrive do
   def hooks, do: ["google-account.scopes"]
 
   @impl true
-  def hook("google-account.scopes", _about, _call), do: google().scopes
+  def hook("google-account.scopes", _about, _call), do: ["https://www.googleapis.com/auth/drive"]
 
   @impl true
   def tools do
     string = &%{type: "string", description: &1}
 
     account =
-      string.("Which account: its address, or a part of it only it has, as google-drive_accounts lists them. The first if left out")
+      string.("Which account: its address, or a part of it only it has, as google-account_accounts lists them. The first if left out")
 
     with_account = fn properties, required ->
       Map.merge(%{type: "object", properties: Map.put(properties, :account, account)}, if(required, do: %{required: required}, else: %{}))
@@ -78,43 +71,6 @@ defmodule GoogleDrive do
     end
 
     [
-      %{
-        name: "accounts",
-        read_only: true,
-        description:
-          "The Google accounts Google Drive can use, the default first, each with ok, and why when it's false (google-drive_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}},
-        outputs: %{
-          type: "object",
-          properties: %{
-            accounts: %{
-              type: "array",
-              description: "The default first",
-              items: %{
-                type: "object",
-                properties: %{
-                  account: string.("Its address"),
-                  ok: %{type: "boolean", description: "Whether it can be used now"},
-                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
-                },
-                required: ["account", "ok"]
-              }
-            }
-          },
-          required: ["accounts"]
-        }
-      },
-      %{
-        name: "sign_in",
-        description:
-          "Starts signing a Google account in to Google Drive, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-drive_accounts lists it")}},
-        outputs: %{
-          type: "object",
-          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
-          required: ["url", "then"]
-        }
-      },
       %{
         name: "files_get",
         read_only: true,
@@ -218,26 +174,21 @@ defmodule GoogleDrive do
   end
 
   @impl true
-  def call(tool, inputs, call) when tool in ~w(accounts sign_in),
-    do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
-
   def call(tool, inputs, call) do
     run(tool, inputs, %{call: call, account: inputs["account"]})
   end
 
   defp run("files_get", %{"fileId" => id} = inputs, at) do
     api(at, "GET", "files/#{path(at, id)}",
-      query: [fields: inputs["fields"] || @one_file, supportsAllDrives: true],
+      query: %{fields: inputs["fields"] || @one_file, supportsAllDrives: true},
       missing: no_file(id),
       hint: @fields_hint
     )
   end
 
   defp run("files_list", inputs, at) do
-    query = for key <- ~w(q orderBy pageSize pageToken), do: {key, inputs[key]}
-
     api(at, "GET", "files",
-      query: query ++ [{"fields", inputs["fields"] || @list}],
+      query: inputs |> Map.take(~w(q orderBy pageSize pageToken)) |> Map.put("fields", inputs["fields"] || @list),
       hint: "q is Drive's search syntax, like name contains 'budget' and trashed = false, with values in single quotes; orderBy is like modifiedTime desc; " <> @fields_hint
     )
   end
@@ -245,7 +196,7 @@ defmodule GoogleDrive do
   defp run("files_create", %{"body" => body} = inputs, at) do
     api(at, "POST", "files",
       json: body,
-      query: [fields: inputs["fields"] || @file_fields, supportsAllDrives: true],
+      query: %{fields: inputs["fields"] || @file_fields, supportsAllDrives: true},
       missing: @no_folder,
       hint: @fields_hint
     )
@@ -277,7 +228,7 @@ defmodule GoogleDrive do
     started =
       request(at, "POST", @upload,
         json: Map.put_new(metadata, "mimeType", type),
-        query: [uploadType: "resumable", fields: inputs["fields"] || @file_fields, supportsAllDrives: true],
+        query: %{uploadType: "resumable", fields: inputs["fields"] || @file_fields, supportsAllDrives: true},
         headers: %{"x-upload-content-type" => type},
         missing: @no_folder,
         hint: @fields_hint
@@ -294,19 +245,19 @@ defmodule GoogleDrive do
   defp run("files_update", %{"fileId" => id} = inputs, at) do
     api(at, "PATCH", "files/#{path(at, id)}",
       json: inputs["body"] || %{},
-      query: [
+      query: %{
         addParents: inputs["addParents"],
         removeParents: inputs["removeParents"],
         fields: inputs["fields"] || @file_fields,
         supportsAllDrives: true
-      ],
+      },
       missing: no_file(id),
       hint: @fields_hint
     )
   end
 
   defp run("generate_ids", %{"count" => count}, at) do
-    %{ids: api(at, "GET", "files/generateIds", query: [count: count, space: "drive", type: "files"])["ids"]}
+    %{ids: api(at, "GET", "files/generateIds", query: %{count: count, space: "drive", type: "files"})["ids"]}
   end
 
   defp api(at, method, path, options), do: request(at, method, @api <> path, options)["body"]
@@ -316,20 +267,8 @@ defmodule GoogleDrive do
 
   # Google's API as the account `at` names, through google-account, which gives the answer's status, headers and
   # body, or raises with what went wrong.
-  defp request(at, method, url, options) do
-    given = for {option, value} <- options, value != nil, into: %{}, do: {to_string(option), value}
-    inputs = Map.merge(given, %{"method" => method, "url" => url})
-    google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
-  end
-
-  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
-  defp google(call, tool, inputs) do
-    inputs = Map.new(inputs, &query/1)
-    OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
-  end
-
-  defp query({"query", query}), do: {"query", Map.new(query)}
-  defp query(input), do: input
+  defp request(at, method, url, options),
+    do: OneCore.Call.tool(at.call, "google-account", "request", JSON.decode!(JSON.encode!(Map.new([account: at.account, method: method, url: url] ++ options))))
 
   defp no_file(id),
     do: "No file #{id}, or not one this account can see: file ids come from google-drive_files_list (root is My Drive)."
