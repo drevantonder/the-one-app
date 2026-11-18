@@ -4,7 +4,9 @@
 // for and keeps both in this app's name, with its icon, through Cua Driver's updates and this app's, as it's signed
 // by a developer. See Cua Driver's guide to embedding it (Skills/cua-driver/EMBEDDING.md).
 //
-//     helper run <program> [<argument>...]   runs the program as this app's child until it ends, and ends as it did
+//     helper run <program> [<argument>...]   runs the program as this app's child until it ends, and ends as it did;
+//                                            a socket it's given (--socket <path>) that nothing answers on is
+//                                            removed first, as Cua Driver's embedded mode leaves to its host
 //     helper ask <permission>                asks macOS for Accessibility or Screen Recording, which it does on the
 //                                            Mac's screen; started with open(1), so this app is responsible for it
 //     helper secure-input                    whether a password field has the focus: true or false
@@ -14,9 +16,25 @@ import Foundation
 
 let arguments = CommandLine.arguments.dropFirst()
 
+/// Removes the socket at `path` if nothing answers on it: one a daemon that stopped left behind.
+func removeIfStale(_ path: String) {
+    let connection = socket(AF_UNIX, SOCK_STREAM, 0)
+    defer { close(connection) }
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    withUnsafeMutableBytes(of: &address.sun_path) { room in
+        _ = path.withCString { strncpy(room.baseAddress!.assumingMemoryBound(to: CChar.self), $0, room.count - 1) }
+    }
+    let answered = withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(connection, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    }
+    if answered != 0 { unlink(path) }
+}
+
 switch arguments.first {
 case "run" where arguments.count > 1:
     let program = Array(arguments.dropFirst())
+    if let at = program.firstIndex(of: "--socket"), at + 1 < program.count { removeIfStale(program[at + 1]) }
     var child = pid_t()
     let argv = program.map { strdup($0) } + [nil]
     let started = posix_spawn(&child, program[0], nil, nil, argv, environ)
