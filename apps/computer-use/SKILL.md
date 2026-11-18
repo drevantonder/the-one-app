@@ -66,8 +66,8 @@ app that records the screen.
 
 ## A person's own phone
 
-Each Android phone whose The One App is running is a screen, called what the phone is called: its whole screen, as
-its person sees it. A phone runs no server, so its app does each action, through Android's accessibility service,
+Each Android phone whose The One App has answered is a screen, called what its person called it as they signed it in:
+its whole screen, as its person sees it. A phone runs no server, so its app does each action, through Android's accessibility service,
 which only its person turns on: Settings → Accessibility → The One App. Until they have, `screens` says so in the
 phone's description, and an action fails saying so while the phone tells its person how to turn it on. On Android 13
 and later, an app that didn't come from a store is a restricted setting there: its person allows it first, under ⋮ in
@@ -81,8 +81,9 @@ The One App's App Info. Computer Use on a phone needs Android 11 or later.
   password field: ask the person to type it.
 - `key` has only what Android gives: `Back` (or `Escape`), `Home`, `Recents`, `Notifications`, and `Return` in the
   field that has the focus. Anything else refuses.
-- The phone answers only while The One App runs on it, in front or not: one whose app isn't running isn't listed.
-  Only the phone's person and the network's owner use it, and you act as them, with their apps and accounts.
+- A phone whose app isn't running is still listed, saying so, and is woken by a push as it's used, which takes a few
+  seconds; one that doesn't wake (off, offline, or notifications not allowed for The One App) says so. Only the
+  phone's person and the network's owner use it, and you act as them, with their apps and accounts.
 
 ## Other apps' screens
 

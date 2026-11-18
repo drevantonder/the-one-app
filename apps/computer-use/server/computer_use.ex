@@ -50,7 +50,7 @@ defmodule ComputerUse do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.23.8"}
+  def requires, do: %{"core" => ">= 0.23.32", "sign-in" => "to name a phone as its person knows it"}
 
   @impl true
   def offers do
