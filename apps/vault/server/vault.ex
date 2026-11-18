@@ -74,7 +74,12 @@ defmodule Vault do
   def jobs, do: [%{tool: "expire", every: 3600}]
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", subject: "user", runtime_version: 4}]
+  def hooks, do: ["settings.sections"]
+
+  # The Vault is Settings' Accounts: your accounts, passwords and keys, and what apps keep here.
+  @impl true
+  def hook("settings.sections", _about, _call),
+    do: [%{in: "settings", name: "Accounts", component: "accounts", icon: "client/icon.svg", group: "network", order: 3}]
 
   @impl true
   def tools do
@@ -168,8 +173,12 @@ defmodule Vault do
             },
             apps: %{
               type: "array",
-              description: "The apps that use the Vault: `name`, which its tools start with, and `title`, as a person reads it",
-              items: %{type: "object", properties: %{name: %{type: "string"}, title: %{type: "string"}}, required: ["name", "title"]}
+              description: "The apps that use the Vault: `name`, which its tools start with, `title`, as a person reads it, and `icon`",
+              items: %{
+                type: "object",
+                properties: %{name: %{type: "string"}, title: %{type: "string"}, icon: %{type: ["string", "null"], description: "ui://icons/<sha256>/icon.<ext>"}},
+                required: ["name", "title"]
+              }
             },
             types: %{
               type: "array",
@@ -855,7 +864,7 @@ defmodule Vault do
     types = Items.types(call)
 
     use_it =
-      for({name, version} <- OneCore.Apps.running(call.subject), is_map_key(version.requires, "vault"), do: %{name: name, title: version.title || name})
+      for({name, version} <- OneCore.Apps.running(call.subject), is_map_key(version.requires, "vault"), do: %{name: name, title: version.title || name, icon: OneCore.Apps.Icons.address(version.icon)})
       |> Enum.sort_by(&String.downcase(&1.title))
 
     items = for item <- Enum.sort_by(Items.all(call, db), &String.downcase(&1["name"])), do: Items.listed(item, db, names, types)

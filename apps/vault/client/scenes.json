@@ -1,5 +1,5 @@
 {
-  "Sidebar": {
+  "Accounts": {
     "answers": {
       "vault_security": {
         "readiness": "ready",
@@ -111,13 +111,7 @@
     }
   },
   "All items": {
-    "like": "Sidebar",
-    "taps": [
-      {
-        "role": "button",
-        "name": "All 3"
-      }
-    ],
+    "like": "Accounts",
     "answers": {
       "vault_list": {
         "items": [
@@ -196,13 +190,7 @@
     }
   },
   "Empty": {
-    "like": "Sidebar",
-    "taps": [
-      {
-        "role": "button",
-        "name": "All 0"
-      }
-    ],
+    "like": "Accounts",
     "answers": {
       "vault_list": {
         "items": [],
@@ -215,14 +203,7 @@
   "Item": {
     "like": "Empty",
     "taps": [
-      {
-        "role": "button",
-        "name": "All 1"
-      },
-      {
-        "role": "button",
-        "name": "GitHub api.github.com and github.com"
-      }
+      "GitHub"
     ],
     "answers": {
       "vault_list": {
@@ -272,24 +253,13 @@
   "Add item": {
     "like": "Empty",
     "taps": [
-      {
-        "role": "button",
-        "name": "All 0"
-      },
-      "Add"
+      "Add Password or Key"
     ]
   },
   "Request": {
     "like": "Item",
     "taps": [
-      {
-        "role": "button",
-        "name": "Requests 1 waiting"
-      },
-      {
-        "role": "button",
-        "name": "Claude on Alex's Laptop wants Example API To read the build status"
-      }
+      "Choose…"
     ],
     "answers": {
       "vault_list": {
@@ -381,12 +351,6 @@
     }
   },
   "Not set up": {
-    "taps": [
-      {
-        "role": "button",
-        "name": "All 0"
-      }
-    ],
     "answers": {
       "vault_security": {
         "readiness": "not_set_up",
@@ -420,14 +384,5 @@
         "$error": "Couldn't reach the server"
       }
     }
-  },
-  "Requests": {
-    "like": "Request",
-    "taps": [
-      {
-        "role": "button",
-        "name": "Requests 1 waiting"
-      }
-    ]
   }
 }
