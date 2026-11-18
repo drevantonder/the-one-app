@@ -22,7 +22,6 @@ import { offset, reflow } from "./reflow.ts"
 import { type At, type Drop, type Editing, fitted, type Held, type Kind, machine, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
-const HOME = "home-screen/client/index.html"
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
 const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
 
@@ -48,11 +47,6 @@ const home = createActor(machine)
 const [state, setState] = createSignal(home.getSnapshot())
 home.subscribe(setState)
 home.start()
-
-/// The window says what it shows (`notifications/one/showing`): an app over the Home Screen, or the Home Screen.
-addEventListener("message", ({ source, data }) => {
-  if (source === parent && data?.method === "notifications/one/showing") home.send({ type: data.params?.entrypoint === HOME ? "home" : "launch" })
-})
 
 /// The owner and screenful nearest where the pages are as they move, which the dots follow during a swipe, as a
 /// phone's do, rather than once it ends.

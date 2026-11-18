@@ -10,10 +10,14 @@
 //   editing.dragging: over · flip(page ±1) · flip(owner ±1) · drop ─► still | asking | refused
 //   asking ─install─► installing ─installed─► still (placed) · ─failed─► still (back, saying why) · ─cancel─► still (back)
 //   refused ─dismiss─► still (back)
+//   asking · refused ─link─► still (back), then the link · installing: a link waits, unfollowed, for the install
+//
+// An app the window shows over it leaves it as it is, a phone's Home Screen under an app: what's open is open, editing
+// goes on, and an install finishes where it was dropped, or goes back, as it would have in front.
 //
 // Only Home is an owner's: you, everyone and each of your groups have Home pages, one owner above another. The App
 // Library and the App Store come after Home's screenfuls, and are one each for everyone you can reach.
-import { assign, emit, setup } from "xstate"
+import { assign, emit, raise, setup } from "xstate"
 import type { Item, Listed } from "./types.ts"
 
 /// The sections, in order: Home, fixed grids of apps and widgets, as a phone's Home Screen pages, a screenful or more,
@@ -158,9 +162,6 @@ export type Event =
   | { type: "close" }
   /** An opened category has grown out of its place, or shrunk back into it: its animations have finished. */
   | { type: "zoomed" }
-  /** The window shows an app over the Home Screen, or the Home Screen again. */
-  | { type: "launch" }
-  | { type: "home" }
   /** A finger stayed on an item or on empty space, or a mouse right-clicked it, for its menu, by whoever arranges it. */
   | { type: "hold"; held: Held }
   /** Edit Home Screen, from that menu, or a hold on a page's empty space: the owner's pages, as they are, to edit. */
@@ -371,8 +372,6 @@ export const machine = setup({
     // Where it is follows the pages, whatever's open.
     laid: { actions: ["lay", "jump"] },
     settled: { actions: "be" },
-    // An app shown over the Home Screen, as by a notification, closes what was open, and keeps what was edited.
-    launch: ".app",
     link: { target: ".nothing", actions: ["go", "jump"] },
   },
   states: {
@@ -451,6 +450,8 @@ export const machine = setup({
             install: "installing",
             cancel: { target: "still", actions: "back" },
             done: {},
+            // A link leaves editing, and what was edited is kept, so what was dropped goes back first.
+            link: { target: "still", actions: ["back", raise(({ event }) => event)] },
           },
         },
         // It's installing for them, where it was dropped, until that's done, or it's back in the App Library.
@@ -459,6 +460,8 @@ export const machine = setup({
             installed: "still",
             failed: { target: "still", actions: "back" },
             done: {},
+            // Followed now, it would keep what's installing on the page before it's installed, or after it failed.
+            link: {},
           },
         },
         // Dropped on an owner whose pages are someone else's to change: it goes back once that's been said.
@@ -466,6 +469,7 @@ export const machine = setup({
           on: {
             dismiss: { target: "still", actions: "back" },
             done: {},
+            link: { target: "still", actions: ["back", raise(({ event }) => event)] },
           },
         },
         // The widget gallery: a widget, in a size, to place.
@@ -486,7 +490,5 @@ export const machine = setup({
         },
       },
     },
-    // An app the window shows over the Home Screen, until its person goes back.
-    app: { on: { home: "nothing" } },
   },
 })
