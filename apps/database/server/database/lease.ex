@@ -33,8 +33,9 @@ defmodule Database.Lease do
   It's a `:gen_statem`, in one of these states:
 
   - `{:following, server}`: `server` holds the lease. A transaction is answered with who holds it, to be passed on
-    to them, and one they didn't run has this server read the log again and take the lease if it still names them.
-    `nil` is nobody: the log is empty, and this server isn't up to take it.
+    to them. One they didn't run has this server read what was logged after the last entry it read, and take the
+    lease if that's nothing; one that another server took meanwhile is followed there. `nil` is nobody: the log is
+    empty, and this server isn't up to take it.
   - `:settling`: this server has just opened the database. It answers from its copy, and writes nothing until
     `@writes_after` has passed.
   - `{:settling, written}`: a transaction wrote while settling. What it wrote is committed to the copy, and is
@@ -120,24 +121,34 @@ defmodule Database.Lease do
 
   def handle_event(:state_timeout, :settled, :settling, data), do: {:next_state, :holding, data}
 
-  # The server this one took to hold the lease didn't run a call passed on to it. If the log still names it, this
-  # server takes the lease, and otherwise it has learnt who holds it now. One that isn't up takes nothing, and says so.
-  def handle_event({:call, from}, {:take_over, server}, {:following, _server}, data) do
-    case look(data) do
-      {{:following, ^server}, data} ->
+  # The server this one follows didn't run a call passed on to it. If the log names nobody after it, this server takes
+  # the lease, and otherwise it has learnt who holds it now. Only what was logged after the last entry it read is
+  # read, which is one request: every call passed to a holder that's gone asks this, one after another, and each
+  # waits for the ones before. One that isn't up takes nothing, and says so.
+  def handle_event({:call, from}, {:take_over, server}, {:following, server}, data) do
+    entries = Log.since(data.artifact, data.number)
+    data = %{data | number: data.number + length(entries)}
+
+    case List.last(entries) do
+      nil ->
         if OneCore.Server.up?() do
           Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
           moved(take(data), [{:reply, from, :ok}])
         else
-          {:next_state, {:following, server}, data, {:reply, from, :not_up}}
+          {:keep_state_and_data, {:reply, from, :not_up}}
         end
 
-      looked ->
-        moved(looked, [{:reply, from, :ok}])
+      %{server: holder} when holder != data.server ->
+        Logger.info("#{data.artifact.prefix}: its lease is held by #{holder}")
+        {:next_state, {:following, holder}, data, {:reply, from, :ok}}
+
+      _this ->
+        moved(look(data), [{:reply, from, :ok}])
     end
   end
 
-  def handle_event({:call, from}, {:take_over, _server}, _holding, _data),
+  # Another holds it now, or this server does: the call is asked again, and goes there.
+  def handle_event({:call, from}, {:take_over, _server}, _state, _data),
     do: {:keep_state_and_data, {:reply, from, :ok}}
 
   # Anything else is asked with what wraps the artifact of the call that asks.
