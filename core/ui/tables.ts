@@ -35,7 +35,7 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
   switch (token.kind) {
     case "colour": {
       if (condition !== "default") return []
-      if (value.of) return [[token.id, `color-mix(in oklab, var(--${value.of.id}) ${value.alpha * 100}%, transparent)`]]
+      if (value.of) return [[token.id, `color-mix(in oklab, var(--${value.of.id}) ${+(value.alpha * 100).toFixed(2)}%, transparent)`]]
       const by = varying(value)
       return [[token.id, by.dark ? `light-dark(${by.default}, ${by.dark})` : String(by.default)]]
     }

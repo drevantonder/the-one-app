@@ -199,6 +199,14 @@ const roles = {
   selection: alpha(label, 10),
   /** What dims the page under a sheet or an alert. */
   overlay: colours.overlay,
+  /** Liquid Glass's fill: the page's background, a third see-through, over what's blurred behind it. */
+  glass: alpha(colours.background, 66),
+  /** What veils a page behind something opened over it, over what's blurred. */
+  veil: alpha(colours.background, 55),
+  /** A tile's tint, as an App Library category's square is. */
+  tile: alpha(label, 14),
+  /** What's chosen among apps and widgets by the keyboard: a tint. */
+  highlight: alpha(label, 6),
   /** Words and icons on an accent. */
   onAccent: colour("oklch(1 0 0)"),
   loader: alpha(label, 40),
@@ -249,9 +257,14 @@ export const tokens = {
     grabber: length({ default: px(0), touch: rem(0.25) }), grabberGap: length({ default: px(0), touch: rem(0.5) }) }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
-  shadow: named({ focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), /** A window's, a sheet's or a menu's: its shadow, and its 1px edge inside. */
+  shadow: named({
+    /** Liquid Glass's: a hairline rim, a line of light along its top, and a soft shadow under it. */
+    glass: shadow({ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0.5 0 0 / 12%)", inset: true }, { x: 0, y: 1, blur: 0, spread: 0, colour: "oklch(1 0 0 / 30%)", inset: true }, { x: 0, y: 8, blur: 24, spread: -10, colour: "oklch(0 0 0 / 30%)" }),
+    /** What's carried by a finger: a soft drop shadow. */
+    lifted: shadow({ x: 0, y: 12, blur: 28, spread: -6, colour: "oklch(0 0 0 / 30%)" }),
+    focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), /** A window's, a sheet's or a menu's: its shadow, and its 1px edge inside. */
     window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }, { x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
-  material: named({ glass: material(20, 1.8), thin: material(14, 1.2) }, (key) => `material-${key}`),
+  material: named({ glass: material(20, 1.8), thin: material(18, 1.2) }, (key) => `material-${key}`),
   font: named(fonts, (key) => `font-${key}`),
   weight: named(weightRoles, (key) => `weight-${key}`),
   type: named({
@@ -260,7 +273,7 @@ export const tokens = {
     medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),
   }, (key) => `type-${key}`),
-  motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]) }, (key) => `move-${key}`),
+  motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]), hold: motion(500, out) }, (key) => `move-${key}`),
 }
 
 
