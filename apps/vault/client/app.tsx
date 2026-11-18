@@ -318,7 +318,7 @@ function Sidebar() {
       </List>
       <List>
         <Row heading="Security" end={security().readiness !== "ready" ? <Box role="img" aria-label="Needs you" style={dot} /> : undefined} current={at("security")} onClick={() => enter("security")} />
-        <Row heading="Recently Deleted" onClick={() => opening("soft-delete", { subject: whose() })} />
+        <Row heading="Recently Deleted" onClick={() => opening("soft-delete/client/index.html", { subject: whose() })} />
       </List>
     </Screen>
   )

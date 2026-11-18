@@ -66,17 +66,7 @@ defmodule SoftDelete do
   def requires, do: %{"core" => ">= 0.25.4", "database" => "to keep what you deleted for 30 days"}
 
   @impl true
-  def hooks, do: ["uninstalled", "superseded"]
-
-  @impl true
-  def entrypoints,
-    do: [
-      %{
-        page: "client/index.html",
-        subject: "user",
-        runtime_version: 4
-      }
-    ]
+  def hooks, do: ["uninstalled", "superseded", "settings.sections"]
 
   @impl true
   def offers do
@@ -251,7 +241,11 @@ defmodule SoftDelete do
   def move(%{"state" => "purged"}, _event), do: {:error, "It was deleted for good already."}
   def move(%{"state" => state}, event), do: {:error, "An item that's #{state} can't be moved by #{inspect(event)}."}
 
+  # Recently Deleted is a section of Settings.
   @impl true
+  def hook("settings.sections", _about, _call),
+    do: [%{in: "settings", name: "Recently Deleted", component: "deleted", icon: "client/icon.svg", group: "system", order: 2}]
+
   # The apps that required it went with it (`with`), and are one item with it: Restore brings them all back. What they
   # kept and made that goes with them, One Core says (`artifacts`).
   def hook("uninstalled", %{"for" => owner, "name" => name, "app" => app} = about, call) do

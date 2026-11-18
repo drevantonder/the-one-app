@@ -58,7 +58,15 @@ defmodule Backups do
   end
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", runtime_version: 4}]
+  def hooks, do: ["settings.sections"]
+
+  # Backups is a section of Settings, for the network's owners, who alone see and change them.
+  @impl true
+  def hook("settings.sections", _about, call) do
+    if Call.owns?(%{call | subject: "network"}),
+      do: [%{in: "settings", name: "Backups", component: "backups", icon: "client/icon.svg", group: "system", order: 1}],
+      else: []
+  end
 
   @impl true
   def jobs, do: [%{tool: "due", every: 3600}]
