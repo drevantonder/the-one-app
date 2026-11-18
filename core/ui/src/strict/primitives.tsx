@@ -412,13 +412,17 @@ const scrolls = (target: EventTarget | null, box: HTMLElement) => {
 /** A text's props. */
 export interface TextProps extends Semantics {
   style?: Style
+  /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabindex`. */
+  tabindex?: 0 | -1
+  onClick?: (event: Located) => void
   children?: JSX.Element
 }
 
 /// `<Text style={{ font: "title" }}>Recently Deleted</Text>`: words, in one of the type styles (`font`: `body`,
 /// `label`, `title`, `figure`, `subheadline`, `footnote`, `caption-1`, `caption-2`) and a token's `color`, or as
 /// what it's in has them. It runs on in a text it's in, and is a block in a box. `role="heading"` with `aria-level`
-/// makes it a heading. A strict app's words are always in a `Text` or in a UI library component that takes them.
+/// makes it a heading; one inside another with `role="link"` and `onClick` is a link in its words. A strict app's words
+/// are always in a `Text` or in a UI library component that takes them.
 export function Text(props: TextProps) {
   const own = omit(props, "style", "children")
   const tag = () => (props.role === "heading" ? `h${props["aria-level"] ?? 2}` : "span")

@@ -109,6 +109,9 @@ export declare function Scroll(props: ScrollProps): Element
 
 export type TextProps = Semantics & {
   style?: Style
+  /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabindex`. */
+  tabindex?: 0 | -1
+  onClick?: (event: Located) => void
   children?: Element
 }
 export declare function Text(props: TextProps): Element
