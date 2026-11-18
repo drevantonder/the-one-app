@@ -144,9 +144,11 @@ defmodule OneCore.Mcp do
             JSON.encode!(%{jsonrpc: "2.0", id: id, error: %{code: -32603, message: message}})
         end
 
-      # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is.
-      {:ok, %{"method" => "notifications/one/watch"} = notification} when from != nil ->
-        Server.watch(from, notification["params"]["address"])
+      # A client saying an app of its is on screen, and where a server reaches it, or with no address, that none is,
+      # with the device it runs for, where it proves one as a request does.
+      {:ok, %{"method" => "notifications/one/watch", "params" => params} = notification} when from != nil ->
+        device = User.device(from, meta(params))
+        Server.watch(from, notification["params"]["address"], if(device != from, do: device))
         ""
 
       # A client saying what it measured of itself, as from the device and person its request proves it is, which

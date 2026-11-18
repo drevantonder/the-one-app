@@ -752,7 +752,7 @@ async fn opens(app: AppHandle) {
         )?;
         #[cfg(desktop)]
         let home = ::client::home()?;
-        Client::open(home, cli::resolvers()).await
+        Client::open(home, cli::resolvers(), Vec::new()).await
     };
     let client = match opened.await {
         Ok(client) => client,

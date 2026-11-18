@@ -34,10 +34,21 @@ defmodule OneCore.Iroh do
 
   @doc """
   Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes:
-  `address`, the JSON a client is told one in. With `nil`, forgets it. It's kept in the file `watching` beside the
-  server's key, which the endpoint starts with.
+  `address`, the JSON a client is told one in, and `device`, the device it proved it runs for, if it did. With `nil`,
+  forgets it. It's kept in the file `watching` beside the server's key, which the endpoint starts with. A device
+  watches from its latest run, so a run of the same device from before is forgotten.
   """
-  def watch(_endpoint, _client, _address), do: :erlang.nif_error(:nif_not_loaded)
+  def watch(_endpoint, _client, _address, _device), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "The devices watching, by their keys."
+  def devices(_endpoint), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc """
+  Asks the device whose key is `device` one message, the run of its client that's watching, and sends `to` the
+  message `{reference, outcome}`: `{:ok, answer}`; `:unreachable` if no run of it is watching or it doesn't answer, so
+  it was asked nothing; or `:stopped` if it stopped answering after it was asked.
+  """
+  def ask_client(_endpoint, _device, _message, _to, _reference), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Sends `message` to every client that's watching, each on a stream of its own: over the connection it has open

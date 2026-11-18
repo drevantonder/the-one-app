@@ -49,7 +49,7 @@ pub fn main() -> ExitCode {
     // Run by git as its remote helper, it's that, under the name git found it by, with `.exe` after it on Windows.
     let named = env::args().next().map(|program| Path::new(&program).file_stem().map(|name| name.to_owned()));
     let result = if named.flatten().is_some_and(|name| name == git_repos_client::HELPER) {
-        runtime.block_on(async { git_repos_client::helper(Client::open(client::home()?, resolvers()).await?, &args).await })
+        runtime.block_on(async { git_repos_client::helper(Client::open(client::home()?, resolvers(), Vec::new()).await?, &args).await })
     } else {
         git_repos_client::beside();
         runtime.block_on(run(args))
@@ -82,7 +82,7 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     if args.first().is_some_and(|word| word == "restore") {
         return Ok(printed(backups_client::restore(&args[1..]).await?));
     }
-    let client = Client::open(client::home()?, resolvers()).await?;
+    let client = Client::open(client::home()?, resolvers(), Vec::new()).await?;
     signed_in(&client).await?;
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
     let code = match words.as_slice() {

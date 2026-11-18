@@ -2,7 +2,7 @@
 //! server's Elixir with the key of whoever asked, and sends its answers back. A client asks one message a stream
 //! (`client`), and is told something the same way: one message on a stream the server opens, over the connection
 //! the client has open if it has one, and otherwise over one the server makes to it. A server asks another as a
-//! client does.
+//! client does, and asks a device that's watching the same way, over a connection it makes to the run watching.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -48,10 +48,16 @@ struct Reached {
 type Asks = Arc<RwLock<()>>;
 
 impl Reached {
-    /// Keeps where the clients that are watching are, as `watchers` has them now.
+    /// Keeps where the clients that are watching are, and the device each runs for, as `watchers` has them now.
     fn keep(&self, watchers: &HashMap<String, Watcher>) {
-        let stored: HashMap<&String, &EndpointAddr> =
-            watchers.iter().map(|(key, watcher)| (key, &watcher.address)).collect();
+        let stored: HashMap<&String, serde_json::Value> = watchers
+            .iter()
+            .map(|(key, watcher)| {
+                let mut stored = serde_json::to_value(&watcher.address).unwrap_or_default();
+                stored["device"] = watcher.device.clone().into();
+                (key, stored)
+            })
+            .collect();
         if let Ok(stored) = serde_json::to_vec(&stored) {
             let _ = std::fs::write(&*self.watching, stored);
         }
@@ -64,13 +70,25 @@ type Clients = Arc<Mutex<HashMap<String, Connection>>>;
 /// This server's connection to each other server, by its key, with the address it was made to.
 type Servers = Mutex<HashMap<String, (String, Option<Arc<client::Reached>>)>>;
 
-/// A client that wants to hear what changes: where it said a server reaches it, and the connection this server made
-/// to it there to tell it something, while that's open. One thing at a time is said over it, so that many things to say
-/// at once make one connection.
+/// A client that wants to hear what changes: where it said a server reaches it, the device it runs for, if it proved
+/// one, and the connection this server made to it there to tell it something or ask it, while that's open. One thing
+/// at a time is said over it, so that many things to say at once make one connection.
 #[derive(Clone)]
 struct Watcher {
     address: EndpointAddr,
-    open: Arc<tokio::sync::Mutex<Option<client::Reached>>>,
+    device: Option<String>,
+    open: Arc<tokio::sync::Mutex<Option<Arc<client::Reached>>>>,
+}
+
+impl Watcher {
+    /// The connection to this client, made again if it isn't open.
+    async fn reached(&self, endpoint: &Endpoint) -> Option<Arc<client::Reached>> {
+        let mut open = self.open.lock().await;
+        if !open.as_ref().is_some_and(|open| open.open()) {
+            *open = client::Reached::connect(endpoint, self.address.clone(), client::CONNECT).await.map(Arc::new);
+        }
+        open.clone()
+    }
 }
 
 #[rustler::resource_impl]
@@ -166,10 +184,16 @@ fn start(
         tokio::spawn(accept(endpoint.clone(), handler, clients.clone(), asks.clone()));
         let watching = Path::new(&key_file).with_file_name("watching");
         let stored = std::fs::read(&watching).ok();
-        let stored: HashMap<String, EndpointAddr> =
+        let stored: HashMap<String, serde_json::Value> =
             stored.and_then(|stored| serde_json::from_slice(&stored).ok()).unwrap_or_default();
-        let watchers =
-            stored.into_iter().map(|(key, address)| (key, Watcher { address, open: Arc::default() })).collect();
+        let watchers = stored
+            .into_iter()
+            .filter_map(|(key, stored)| {
+                let device = stored["device"].as_str().map(str::to_owned);
+                let address = serde_json::from_value(stored).ok()?;
+                Some((key, Watcher { address, device, open: Arc::default() }))
+            })
+            .collect();
         let reached = Reached {
             endpoint: AssertUnwindSafe(endpoint),
             clients: AssertUnwindSafe(clients),
@@ -286,16 +310,25 @@ fn gone(message: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Keeps where the client whose key is `client` says a server reaches it while it wants to hear what changes, the
-/// JSON a client is told an address in, or with none, forgets it. A client says only where it is itself.
+/// JSON a client is told an address in, and the device it proved it runs for, or with no address, forgets it. A client
+/// says only where it is itself. A device watches from its latest run, as its app runs once, so a run of the same
+/// device from before is forgotten.
 #[rustler::nif(schedule = "DirtyIo")]
-fn watch(reached: ResourceArc<Reached>, client: String, address: Option<String>) -> Atom {
+fn watch(reached: ResourceArc<Reached>, client: String, address: Option<String>, device: Option<String>) -> Atom {
     let address = address.and_then(|address| serde_json::from_str::<EndpointAddr>(&address).ok());
     let mut watchers = reached.watchers.lock().expect("no connection panics");
     let changed = match address.filter(|address| address.id.to_string() == client) {
         // A client says it each time it connects, which changes nothing once it's said.
-        Some(address) if watchers.get(&client).is_some_and(|watcher| watcher.address == address) => false,
+        Some(address)
+            if watchers.get(&client).is_some_and(|watcher| watcher.address == address && watcher.device == device) =>
+        {
+            false
+        }
         Some(address) => {
-            watchers.insert(client, Watcher { address, open: Arc::default() });
+            if device.is_some() {
+                watchers.retain(|_, watcher| watcher.device != device);
+            }
+            watchers.insert(client, Watcher { address, device, open: Arc::default() });
             true
         }
         None => watchers.remove(&client).is_some(),
@@ -327,7 +360,7 @@ fn notify(reached: ResourceArc<Reached>, message: Binary) -> Atom {
             {
                 return;
             }
-            *open = client::Reached::connect(&reached.endpoint, watcher.address.clone(), client::CONNECT).await;
+            *open = client::Reached::connect(&reached.endpoint, watcher.address.clone(), client::CONNECT).await.map(Arc::new);
             match open.as_ref() {
                 Some(open) => drop(client::notify(open.connection(), &message).await),
                 None => {
@@ -341,6 +374,53 @@ fn notify(reached: ResourceArc<Reached>, message: Binary) -> Atom {
             }
         });
     }
+    atoms::ok()
+}
+
+/// The devices that are watching, by their keys: each a device a run of its client proved it runs for.
+#[rustler::nif]
+fn devices(reached: ResourceArc<Reached>) -> Vec<String> {
+    let watchers = reached.watchers.lock().expect("no connection panics");
+    watchers.values().filter_map(|watcher| watcher.device.clone()).collect()
+}
+
+/// Asks the device whose key is `device` one message, the run of its client that's watching, over the connection this
+/// server has made to it, or one it makes now, and sends `to` the message `{reference, outcome}`: `{:ok, answer}`;
+/// `:unreachable` if no run of it is watching, or the one that is can't be reached, so it was asked nothing, and has
+/// gone, as `notify` finds; or `:stopped` if it stopped answering after it was asked, so it may have done it.
+#[rustler::nif]
+fn ask_client(reached: ResourceArc<Reached>, device: String, message: Binary, to: LocalPid, reference: Term) -> Atom {
+    let watching = reached.watchers.lock().expect("no connection panics").clone();
+    let watcher = watching.into_iter().find(|(_, watcher)| watcher.device.as_ref() == Some(&device));
+    let message = message.as_slice().to_vec();
+    let reference = Reference::keep(reference);
+    RUNTIME.spawn(async move {
+        let open = match &watcher {
+            Some((_, watcher)) => watcher.reached(&reached.endpoint).await,
+            None => None,
+        };
+        if let (None, Some((key, watcher))) = (&open, &watcher) {
+            let mut watchers = reached.watchers.lock().expect("no connection panics");
+            // It may have said where it is again since.
+            if watchers.get(key).is_some_and(|now| Arc::ptr_eq(&now.open, &watcher.open)) {
+                watchers.remove(key);
+                reached.keep(&watchers);
+            }
+        }
+        let response = match open {
+            Some(open) => open.ask(&message, |_| {}).await,
+            None => Err(RequestError::Unreachable),
+        };
+        reference.send(&to, |env| match response {
+            Ok(response) => {
+                let mut binary = NewBinary::new(env, response.len());
+                binary.as_mut_slice().copy_from_slice(&response);
+                (atoms::ok(), Binary::from(binary)).encode(env)
+            }
+            Err(RequestError::Stopped) => atoms::stopped().encode(env),
+            Err(RequestError::Unreachable) => atoms::unreachable().encode(env),
+        });
+    });
     atoms::ok()
 }
 

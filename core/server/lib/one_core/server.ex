@@ -40,12 +40,35 @@ defmodule OneCore.Server do
   end
 
   @doc """
-  Keeps that the client whose key is `client` wants to hear what changes, and is reached at `address` to be told
-  it. With no address, it no longer does. A client that can't be reached there is forgotten.
+  Keeps that the client whose key is `client`, a run of `device`, wants to hear what changes, and is reached at
+  `address` to be told it. With no address, it no longer does. A client that can't be reached there is forgotten.
   """
-  def watch(client, address) do
+  def watch(client, address, device) do
     {_key, endpoint} = :persistent_term.get(__MODULE__)
-    Iroh.watch(endpoint, client, address && JSON.encode!(address))
+    Iroh.watch(endpoint, client, address && JSON.encode!(address), device)
+  end
+
+  @doc """
+  The devices whose app is watching this server, by their keys: each is reached by `ask_device/2` while it runs.
+  None with no server started.
+  """
+  def devices do
+    case :persistent_term.get(__MODULE__, nil) do
+      {_key, endpoint} -> Iroh.devices(endpoint)
+      nil -> []
+    end
+  end
+
+  @doc """
+  Asks the device whose key is `device` one JSON-RPC request, `message`, as its app runs: a device's app answers a
+  call of a tool that acts on the device itself (`client::DeviceTools`), as MCP's `tools/call`. Gives `{:ok, answer}`,
+  `:unreachable` where its app isn't watching this server or didn't answer, so it was asked nothing, or `:stopped`
+  where it stopped answering after it was asked, so it may have done it. Who may ask it what is the asking app's to
+  decide: the device answers any server acting for its person.
+  """
+  def ask_device(device, message) do
+    {_key, endpoint} = :persistent_term.get(__MODULE__)
+    await(&Iroh.ask_client(endpoint, device, message, self(), &1))
   end
 
   @doc "The folder this server keeps what's its own on this machine in."

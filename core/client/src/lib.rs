@@ -7,7 +7,8 @@
 //! A client asks a server in MCP's JSON-RPC: one message on a stream of its own, and the answer back on that stream.
 //! A server tells a client something the same way, on a stream the server opens. No connection is kept open for
 //! that: a client that wants to hear, as the app does while it runs, says it's watching, and a server connects to it
-//! when there's something to say.
+//! when there's something to say. A server acting for its person asks a watching client to call a tool of the device's
+//! own the same way too, as MCP has a server send requests to its client (`DeviceTools`).
 
 mod resolve;
 mod cache;
@@ -24,7 +25,7 @@ use std::{env, fs};
 use anyhow::{Context, Result, anyhow, bail};
 use data_encoding::BASE64URL_NOPAD;
 use futures_util::StreamExt;
-use futures_util::future::join_all;
+use futures_util::future::{BoxFuture, join_all};
 use futures_util::stream::FuturesUnordered;
 use iroh::endpoint::{QuicTransportConfig, ReadError, RecvStream, RelayMode, VarInt, presets};
 use iroh::{Endpoint, EndpointAddr, EndpointId, NetReportConfig, RelayConfig, RelayUrl, SecretKey, TransportAddr};
@@ -83,6 +84,19 @@ const IDLE: Duration = Duration::from_secs(2);
 /// has for that server only where that connection was, so a server that starts again listens on the port it did
 /// (`one_core_iroh`'s `start`).
 const SILENT: Duration = Duration::from_secs(4);
+
+/// What an app's native code does on the device itself, when a server acting for the device's person asks: a call of
+/// one of the app's tools that act on the device, as Computer Use's on a phone's own screen. A server asks it as MCP's
+/// `tools/call`, the tool named as the network names its tools (`computer-use_screenshot`), and it's answered as a
+/// tool's call is. Only a client that's watching is asked, as the app is while it runs.
+pub trait DeviceTools: Send + Sync {
+    /// The app whose tools these are.
+    fn app(&self) -> &'static str;
+
+    /// Calls the tool named `tool`, without its app's name, with `arguments`, and gives its result, as MCP's
+    /// `CallToolResult`. An error is its result too, with `isError`.
+    fn call<'a>(&'a self, tool: &'a str, arguments: Value) -> BoxFuture<'a, Result<Value>>;
+}
 
 /// A network's address, and the token this machine shows there: what says it's one of the network's own.
 #[derive(Clone, Deserialize)]
@@ -945,6 +959,8 @@ pub struct Client {
     behind: watch::Sender<Option<String>>,
     /// What the native code of the apps the program ships with fills in of a tool's inputs (`resolve`).
     resolvers: Vec<Arc<dyn InputResolver>>,
+    /// The tools of the device's own that the native code of the apps the program ships with answers a server.
+    tools: Vec<Arc<dyn DeviceTools>>,
     /// What this client knows of each tool, as a server last listed them (`resolve`).
     listed: std::sync::Mutex<Option<Arc<resolve::Listed>>>,
     /// What this client says of itself in each record it reports (`report`), as OpenTelemetry's resource attributes
@@ -992,10 +1008,15 @@ impl Link {
 }
 
 impl Client {
-    /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do.
-    /// It opens whether or not its device is in its network: where that is, is its `session`, which it moves on by
-    /// itself from here (`sessions`). Only a home it can't read is an error.
-    pub async fn open(home: impl Into<PathBuf>, resolvers: Vec<Arc<dyn InputResolver>>) -> Result<Arc<Self>> {
+    /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do,
+    /// and answers a server's call of `tools`, the device's own. It opens whether or not its device is in its network:
+    /// where that is, is its `session`, which it moves on by itself from here (`sessions`). Only a home it can't read
+    /// is an error.
+    pub async fn open(
+        home: impl Into<PathBuf>,
+        resolvers: Vec<Arc<dyn InputResolver>>,
+        tools: Vec<Arc<dyn DeviceTools>>,
+    ) -> Result<Arc<Self>> {
         let home = home.into();
         let config = match fs::read(home.join("network")) {
             Ok(network) => {
@@ -1027,7 +1048,7 @@ impl Client {
         let says = [("as", "ONE_AS"), ("link", "ONE_LINK"), ("subject", "ONE_SUBJECT")];
         let says = says.into_iter().filter_map(|(says, variable)| Some((says, env::var(variable).ok()?))).collect();
         let notifications = broadcast::channel(16).0;
-        accept(link.endpoint.clone(), notifications.clone());
+        let endpoint = link.endpoint.clone();
         let link = std::sync::RwLock::new(link);
         let (watching, connection) = (AtomicBool::new(false), watch::Sender::new(Connection::Connecting));
         let listed = std::sync::Mutex::default();
@@ -1037,10 +1058,11 @@ impl Client {
         let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
             home, key, address, session: watch::Sender::new(session), admitting: Mutex::default(),
-            again: Arc::default(), link, reach, notifications, says, watching, connection, behind: watch::Sender::new(None), resolvers,
+            again: Arc::default(), link, reach, notifications, says, watching, connection, behind: watch::Sender::new(None), resolvers, tools,
             listed, resource, reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
             me: me.clone(), runtime: tokio::runtime::Handle::current(),
         });
+        accept(endpoint, client.me.clone());
         client.panics();
         if let Some(was) = updated {
             client.report(json!({"name": "one.client.updated", "attributes": {"one.build.previous": was}}));
@@ -1179,7 +1201,7 @@ impl Client {
         let token = config.token.clone().context("this device was given no token")?;
         let network = Network { address: config.address.clone(), token };
         let new = Link::run(&self.key, Some(network), config.who.clone()).await?;
-        accept(new.endpoint.clone(), self.notifications.clone());
+        accept(new.endpoint.clone(), self.me.clone());
         let old = std::mem::replace(&mut *self.link.write().expect("no renewal panics"), new);
         self.reach.lock().await.open = None;
         tokio::spawn(async move {
@@ -1289,25 +1311,51 @@ impl Client {
             if let Some(open) = self.connect(server).await
                 && !watching
             {
-                let _ = open.ask(json!({"jsonrpc": "2.0", "method": WATCH, "params": {}}).to_string().as_bytes(), |_| {}).await;
+                let mut unwatch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {}});
+                self.say(&mut unwatch);
+                let _ = open.ask(unwatch.to_string().as_bytes(), |_| {}).await;
             }
         });
         join_all(watches).await;
     }
 
-    /// Connects to `server`, hears what it tells this client over the connection, and if this client is watching,
-    /// says so first, with where a server reaches it.
+    /// Connects to `server`, hears what it tells and asks this client over the connection, and if this client is
+    /// watching, says so first, with where a server reaches it and the device it runs for.
     async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
         let link = self.link();
         let open = Reached::connect(&link.endpoint, server, CONNECT).await?;
         tokio::spawn(receive_notifications(open.connection().clone(), self.notifications.clone()));
+        tokio::spawn(answer(self.me.clone(), open.connection().clone()));
         tokio::spawn(straight(self.me.clone(), open.connection().clone()));
         if self.watching.load(Ordering::Relaxed) {
             let here = address(&link.endpoint, link.network.as_ref()).ok()?;
-            let watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
+            let mut watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
+            self.say(&mut watch);
             open.ask(watch.to_string().as_bytes(), |_| {}).await.ok()?;
         }
         Some(open)
+    }
+
+    /// What this device answers a server that asked it `message`, `from` being the server's key: a call of a tool of
+    /// the device's own (`DeviceTools`), as MCP's `tools/call`, from a server acting for this device's person. Anyone
+    /// else of the network is refused, as is anything else.
+    async fn answer(&self, from: EndpointId, message: &[u8]) -> Value {
+        let request: Value = serde_json::from_slice(message).unwrap_or_default();
+        let error = |code: i64, message: String| json!({"jsonrpc": "2.0", "id": request["id"], "error": {"code": code, "message": message}});
+        let ours = matches!(self.servers(false).await, Ok(Some(servers)) if servers.iter().any(|server| server.id == from));
+        if !ours {
+            return error(NOBODY, "Only a server acting for this device's person asks it".into());
+        }
+        let name = request["params"]["name"].as_str().unwrap_or_default();
+        let found = self.tools.iter().find_map(|tools| Some((tools, name.strip_prefix(tools.app())?.strip_prefix('_')?)));
+        let Some((tools, tool)) = found.filter(|_| request["method"] == "tools/call") else {
+            return error(-32601, format!("This device has no {} {name}", request["method"].as_str().unwrap_or("method")));
+        };
+        let result = match tools.call(tool, request["params"]["arguments"].clone()).await {
+            Ok(result) => result,
+            Err(why) => json!({"content": [{"type": "text", "text": format!("{why:#}")}], "isError": true}),
+        };
+        json!({"jsonrpc": "2.0", "id": request["id"], "result": result})
     }
 
     /// What servers tell this client: each a JSON-RPC notification.
@@ -1837,19 +1885,38 @@ const WATCH: &str = "notifications/one/watch";
 /// What the servers the presigner listed are kept as.
 const SERVERS: &str = "presigner/servers";
 
-/// A server with something to say connects to this client to say it, at `endpoint`, until it closes. Only one of the
-/// network's own reaches a client, and all it can make one do is ask again.
-fn accept(endpoint: Endpoint, notifications: broadcast::Sender<Value>) {
+/// A server with something to say or ask connects to this client to say it, at `endpoint`, until it closes. Only one
+/// of the network's own reaches a client, and all it can make one do is ask again, or call a tool of the device's own,
+/// which only one acting for the device's person may (`Client::answer`).
+fn accept(endpoint: Endpoint, client: std::sync::Weak<Client>) {
     tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
-            let notifications = notifications.clone();
+            let client = client.clone();
             tokio::spawn(async move {
-                if let Ok(connection) = incoming.await {
-                    receive_notifications(connection, notifications).await
-                }
+                let Ok(connection) = incoming.await else { return };
+                let Some(notifications) = client.upgrade().map(|client| client.notifications.clone()) else { return };
+                tokio::spawn(answer(client, connection.clone()));
+                receive_notifications(connection, notifications).await
             });
         }
     });
+}
+
+/// Answers what a server asks this client over `connection`, each message on a stream of its own, as a server answers
+/// a client (`Client::answer`), until the connection ends. An empty message only asks whether it's there.
+async fn answer(client: std::sync::Weak<Client>, connection: iroh::endpoint::Connection) {
+    let from = connection.remote_id();
+    while let Ok((mut send, mut receive)) = connection.accept_bi().await {
+        let client = client.clone();
+        tokio::spawn(async move {
+            let Ok(message) = receive.read_to_end(LIMIT).await else { return };
+            let Some(client) = client.upgrade().filter(|_| !message.is_empty()) else { return drop(send.finish()) };
+            let response = client.answer(from, &message).await.to_string();
+            if send.write_all(response.as_bytes()).await.is_ok() {
+                let _ = send.finish();
+            }
+        });
+    }
 }
 
 /// Moves a device's session on (`Session`), for as long as its client is open: asks for its token while it's
