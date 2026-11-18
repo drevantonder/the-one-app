@@ -1,5 +1,6 @@
 # The app is named by its build's identifier, ONE_IDENTIFIER, which `generate` reads from its Tauri config: the
-# app, its notification extension and the App Group they share.
+# app, its notification extension and the App Group they share. Its name under the icon is its build's, ONE_NAME, from
+# the same config (`CFBundleDisplayName`, which iOS shows before the bundle's name).
 name: app
 options:
   bundleIdPrefix: ${ONE_IDENTIFIER}
@@ -12,7 +13,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: the One App
+      PRODUCT_NAME: ${ONE_NAME}
       PRODUCT_BUNDLE_IDENTIFIER: ${ONE_IDENTIFIER}
 targetTemplates:
   app:
@@ -49,6 +50,7 @@ targets:
     info:
       path: app_iOS/Info.plist
       properties:
+        CFBundleDisplayName: ${ONE_NAME}
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]

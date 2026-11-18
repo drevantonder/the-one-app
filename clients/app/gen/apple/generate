@@ -9,5 +9,6 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 named() { plutil -extract identifier raw -o - "$1" 2>/dev/null; }
 ONE_IDENTIFIER=$( { [ -n "${1-}" ] && named "$1"; } || named "$here/../../tauri.conf.json")
-export ONE_IDENTIFIER
+ONE_NAME=$( { [ -n "${1-}" ] && plutil -extract productName raw -o - "$1" 2>/dev/null; } || plutil -extract productName raw -o - "$here/../../tauri.conf.json")
+export ONE_IDENTIFIER ONE_NAME
 cd "$here" && xcodegen generate
