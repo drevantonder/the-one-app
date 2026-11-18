@@ -54,7 +54,7 @@ the commit the edge was deployed from (`core/edge/edge.js`). As the app opens, i
 runs on, and loads it from its next start, as Expo Updates do by default (`src/page.rs`); without one, or with no
 network, it loads its own. So a change to the page goes live with an edge deploy, on phones too, with no build of
 the app. It takes one only signed by the platform's key, whose public half is built in, checked again each start: the
-deploy signs it with `PAGE_SIGNING_KEY` (1Password's "The One App page signing key"), and a deploy without it ships a
-page no app takes. `page/update.json` says the lowest build of the app the page runs on (`native`): a change to the page that
+deploy signs it with `PAGE_SIGNING_KEY` (read from 1Password's "The One App page signing key" when unset), and refuses
+without a key. `page/update.json` says the lowest build of the app the page runs on (`native`): a change to the page that
 needs something new of the app's Rust half (a command, an event) raises it to the build that adds that, so an app
 older than that keeps its own page until it's updated.

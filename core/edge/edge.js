@@ -75,7 +75,8 @@ cpSync(`${root}/core/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true
 // Tauri's updater and Sparkle do, the app takes it only with `update.json.sig`, the platform's Ed25519 signature of
 // `update.json`, whose public half it has built in, so neither whoever runs the network's edge nor anything in front
 // of it can give the app a page of their own. PAGE_SIGNING_KEY is its private half, a PKCS#8 DER in base64 (in
-// 1Password, "The One App page signing key"); without it the page isn't signed, and apps keep the one they have.
+// 1Password, "The One App page signing key"), read from there when the variable isn't set; without a key the deploy
+// refuses, as an unsigned page is one apps refuse.
 const version = (await $`sh ${root}/tooling/version`.text()).trim();
 {
   const files = {};
@@ -86,10 +87,9 @@ const version = (await $`sh ${root}/tooling/version`.text()).trim();
   const update = { version, ...(await Bun.file(`${app}/page/update.json`).json()), files };
   const said = Buffer.from(JSON.stringify(update));
   await Bun.write(`${web}/dist/page/update.json`, said);
-  if (process.env.PAGE_SIGNING_KEY) {
-    const key = createPrivateKey({ key: Buffer.from(process.env.PAGE_SIGNING_KEY, "base64"), format: "der", type: "pkcs8" });
-    await Bun.write(`${web}/dist/page/update.json.sig`, sign(null, said, key).toString("base64"));
-  } else console.warn("PAGE_SIGNING_KEY isn't set, so the window's page isn't signed and apps keep the one they have");
+  const pageKey = process.env.PAGE_SIGNING_KEY || (await $`op read ${"op://van-tonder-nosudo/The One App page signing key/credential"}`.text()).trim();
+  const key = createPrivateKey({ key: Buffer.from(pageKey, "base64"), format: "der", type: "pkcs8" });
+  await Bun.write(`${web}/dist/page/update.json.sig`, sign(null, said, key).toString("base64"));
 }
 
 const built = `${root}/target/edge`;

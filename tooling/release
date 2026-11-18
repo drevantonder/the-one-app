@@ -68,6 +68,11 @@ done
 # a PKCS#8 DER in base64 (in 1Password, "The One App build signing key"), whose public half, `key`, is built into `one`,
 # which takes no build without it (`clients/cli/src/serving.rs`), as Tauri's updater and Sparkle take theirs.
 key=3fd5f3516020dafc3690044ac56dceef578b1f162b72ec4687af2d764192d2f2
+# Without BUILD_SIGNING_KEY in the environment (an override, for a machine without 1Password) it's read from 1Password,
+# into this process only.
+[[ -n $dry || -n ${BUILD_SIGNING_KEY:-} ]] ||
+  BUILD_SIGNING_KEY=$(op read "op://van-tonder-nosudo/The One App build signing key/credential") || exit 1
+export BUILD_SIGNING_KEY
 [[ -n $dry ]] || [[ $(base64 -d <<<"${BUILD_SIGNING_KEY:-}" 2>/dev/null | openssl pkey -inform DER -pubout -outform DER 2>/dev/null |
   tail -c 32 | xxd -p -c 64) == "$key" ]] || { echo "BUILD_SIGNING_KEY isn't the platform's build signing key." >&2 && exit 1; }
 
