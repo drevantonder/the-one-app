@@ -941,7 +941,9 @@ async fn go(
 /// as `OneCore.Release.compare/2`, run in a VM of the new build, says, told which messages this `one` speaks. A build
 /// downloaded now is compared as it's checked (`Here::take`); this is for one that was here already.
 fn method(here: &Here, record: &Record, current: &Pair, next: &Pair) -> Result<(), String> {
-    let compare = "OneCore.Release.compare(System.fetch_env!(\"ONE_FROM\"), System.fetch_env!(\"ONE_TO\"))";
+    // No `!` in it: on Windows the release's script runs it with cmd's delayed expansion on, which takes what's
+    // between two of them for a variable, and dropped `!(\"ONE_FROM\"), System.fetch_env!`.
+    let compare = "OneCore.Release.compare(System.get_env(\"ONE_FROM\"), System.get_env(\"ONE_TO\"))";
     let output = command(release(&here.build(&next.build)))
         .args(["eval", compare])
         .env("ONE_FROM", here.build(&current.build))
