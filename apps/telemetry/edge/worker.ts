@@ -91,8 +91,11 @@ function span(item: TraceItem) {
     const line: LogLine = JSON.parse(text).telemetry;
     Object.assign(record, line, { attributes: { ...record.attributes, ...line.attributes } });
   }
-  const thrown = item.exceptions[0];
   const upgraded = request?.headers.upgrade?.toLowerCase() === "websocket";
+  // Cloudflare ends a WebSocket a Worker holds when it sheds load from a machine (`loadShed`, thrown in the Worker as
+  // "internal error; reference = …"), as the relay's endpoints saw about six times an hour (18 Nov), and its endpoint
+  // connects again at once, as iroh's does: that's Cloudflare's, not a failure.
+  const thrown = upgraded && item.outcome === "loadShed" ? undefined : item.exceptions[0];
   const error =
     record.error ||
     (thrown && `${thrown.name}: ${thrown.message}`) ||
