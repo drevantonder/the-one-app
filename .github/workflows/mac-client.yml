@@ -1,0 +1,36 @@
+# Builds `one` for a Mac on GitHub's macOS runner, as `tooling/release` asks for it, with the Rust the machine releasing
+# has, so what it's built from (`tooling/input-hash`) is what that machine worked out. It's kept as the run's artifact
+# `one-macos-aarch64`, gzipped, which `tooling/release` downloads and publishes with the rest.
+name: Mac client
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: The commit to build
+        required: true
+      rust:
+        description: The Rust to build with, as `rustc -V` names it on the machine releasing
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p app
+      - run: gzip -9 -c target/release/one >one-macos-aarch64.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: one-macos-aarch64
+          path: one-macos-aarch64.gz
+          retention-days: 7
