@@ -28,4 +28,4 @@ Notifications reach a person on their devices and stay in their inbox until they
   change them when they ask.
 - `register`, `unregister` and `devices` are for the app on a phone or in a browser, which registers where its
   push service reaches it, and its notification key: what it's sent is encrypted to that key, so Apple, Google
-  and the network's edge carry it without reading it, and the phone opens it before it shows. A computer's app shows notifications while it runs, and needs nothing registered.
+  and the network's edge carry it without reading it, and the phone opens it before it shows. A device that's removed in Sign-In is forgotten here with it (`sign-in.device_removed`), and so is a token its push service says is gone. A computer's app shows notifications while it runs, and needs nothing registered.

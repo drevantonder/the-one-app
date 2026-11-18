@@ -42,7 +42,18 @@ defmodule Notifications do
       key text not null
     )
     """,
-    "create index devices_by_user on devices (user)"
+    "create index devices_by_user on devices (user)",
+    # A device registers with its own key too, which is what Sign-In says when it removes the device, so that what
+    # reaches it is forgotten with it. One that registered before registers again as its app starts.
+    "drop table devices",
+    """
+    create table devices (
+      token text primary key, user text not null, via text not null, name text not null, at text not null,
+      key text not null, device text not null
+    )
+    """,
+    "create index devices_by_user on devices (user)",
+    "create index devices_by_device on devices (device)"
   ]
 
   # The most of a person's notifications an inbox shows, newest first.
@@ -59,6 +70,16 @@ defmodule Notifications do
       "database" => "to keep your inbox",
       "encryption" => "to encrypt what's sent to your devices"
     }
+  end
+
+  @impl true
+  def hooks, do: ["sign-in.device_removed"]
+
+  # A removed device is nobody's, so nothing is sent where its push service reaches it.
+  @impl true
+  def hook("sign-in.device_removed", %{"device" => device, "who" => who}, call) do
+    transaction(call, &query(&1, "delete from devices where device = ? and user = ?", [device, who]))
+    :ok
   end
 
   @impl true
@@ -214,6 +235,7 @@ defmodule Notifications do
               description: "Where it reaches the device: an APNs or FCM token, or a browser's subscription as JSON"
             },
             name: %{type: "string", maxLength: 80, description: "What the device is called"},
+            device: %{type: "string", format: "device", description: "The device's key. This device's, if left out"},
             key: %{
               type: "string",
               pattern: "^[0-9a-f]{64}$",
@@ -221,7 +243,7 @@ defmodule Notifications do
                 "The device's notification key, which what it's sent is encrypted to, so nothing on the way reads it"
             }
           },
-          required: ["via", "token", "name", "key"]
+          required: ["via", "token", "name", "key", "device"]
         },
         outputs: %{type: "object", properties: %{device: %{type: "string", description: "What it's called"}}, required: ["device"]}
       },
@@ -360,18 +382,19 @@ defmodule Notifications do
     %{app: app, allowed: allow}
   end
 
-  def call("register", %{"via" => via, "token" => token, "name" => name, "key" => key}, call) do
+  def call("register", %{"via" => via, "token" => token, "name" => name, "key" => key, "device" => device}, call) do
     user = person(call)
     at = DateTime.to_iso8601(DateTime.utc_now(:second))
 
     transaction(call, fn db ->
-      query(db, "insert or replace into devices (token, user, via, name, at, key) values (?, ?, ?, ?, ?, ?)", [
+      query(db, "insert or replace into devices (token, user, via, name, at, key, device) values (?, ?, ?, ?, ?, ?, ?)", [
         token,
         user,
         via,
         name,
         at,
-        key
+        key,
+        device
       ])
     end)
 

@@ -534,12 +534,12 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, ...abo
           for (const model of ["oauthRefreshToken", "oauthAccessToken", "oauthConsent"]) await adapter.deleteMany({ model, where: theirs });
         }
       }
-      return { removed: device.name };
+      return { removed: device.name, device: device.id };
     }
     const signed_in = (await internalAdapter.listSessions(user.id)).find(({ id }) => id === about.device);
     if (!signed_in) return { error: "That isn't one of your devices." };
     await internalAdapter.deleteSession(signed_in.token);
-    return { removed: browser(signed_in.userAgent) };
+    return { removed: browser(signed_in.userAgent), device: await browserDevice(signed_in.id) };
   }
   if (ask === "approve") {
     // A person lets a device in by its code from one of their own devices or assistants, which a passkey let in.

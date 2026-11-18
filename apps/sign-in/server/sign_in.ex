@@ -227,6 +227,20 @@ defmodule SignIn do
   end
 
   @impl true
+  def offers do
+    [
+      %{
+        name: "device_removed",
+        kind: :observe,
+        description:
+          "One of a person's devices, assistants or browsers was removed with `remove_device`: its `device` key, " <>
+            "as the `device` hook knows it, and `who` it was, users/<name>. An app that keeps anything for the " <>
+            "device, as where its push service reaches it, forgets it: it's nobody's from then on."
+      }
+    ]
+  end
+
+  @impl true
   def hooks, do: ["device", "owner"]
 
   @impl true
@@ -309,7 +323,8 @@ defmodule SignIn do
   end
 
   def call("remove_device", %{"device" => device}, call) do
-    %{"removed" => name} = ask(%{ask: "remove_device", who: person(call), device: device})
+    %{"removed" => name, "device" => key} = ask(%{ask: "remove_device", who: person(call), device: device})
+    Call.run_hook(call, "device_removed", %{"device" => key, "who" => person(call)})
     %{removed: name}
   end
 
