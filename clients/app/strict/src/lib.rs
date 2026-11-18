@@ -7,6 +7,7 @@
 mod clone;
 pub mod geometry;
 pub mod inspect;
+mod intl;
 pub mod js;
 pub mod platform;
 pub mod render;

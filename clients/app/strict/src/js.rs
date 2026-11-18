@@ -1,6 +1,7 @@
 //! An app's JS, in a QuickJS sandbox of its own (rquickjs), with the Web APIs a Worker has, the WinterTC Minimum Common
 //! API's, but the network's (`fetch`): AWS LLRT's implementations of them, the sandbox's own clock, timers and
-//! `console` (`prelude.js`), and core/ui/src/strict/types/globals.d.ts says which. It talks with its host as `Host` and
+//! `console` (`prelude.js`), and `Intl` on ICU4X (`intl.js`, `intl.rs`); core/ui/src/strict/types/globals.d.ts says
+//! which. It talks with its host as `Host` and
 //! `Sandbox` in core/ui/src/strict/protocol.ts say: `globalThis.host` takes its ops and what it posts its client, and
 //! the UI library gives `globalThis.ui`, which takes what the person did and the client's messages. Its page's module
 //! and what that imports are read by `Files`, and each runs as QuickJS's bytecode, compiled once and kept (`cache`), as
@@ -22,6 +23,8 @@ use url::Url;
 /// The sandbox's own globals (`prelude.js`), with the DOM's events (`event-target-shim.js`).
 const PRELUDE: &str = include_str!("prelude.js");
 const EVENT_TARGET_SHIM: &str = include_str!("event-target-shim.js");
+/// Intl, as ECMA-402 says, on what intl.rs formats with.
+const INTL: &str = include_str!("intl.js");
 
 /// The Web APIs that are LLRT's, as its own runtime adds them to a context.
 fn web(ctx: &Ctx) -> rquickjs::Result<()> {
@@ -89,6 +92,14 @@ impl Clock {
         match self.0.epoch_ms {
             Some(_) => "en-US".into(),
             None => sys_locale::get_locale().unwrap_or_else(|| "en-US".into()),
+        }
+    }
+
+    /// The time zone the sandbox's JS shows times in, by its IANA name: the host's, or for a fixed clock, `UTC`.
+    pub fn time_zone(&self) -> String {
+        match self.0.epoch_ms {
+            Some(_) => "UTC".into(),
+            None => crate::intl::host_time_zone(),
         }
     }
 
@@ -165,6 +176,8 @@ impl Sandbox {
             let fixed = clock.0.epoch_ms.map_or_else(|| "null".into(), |epoch_ms| epoch_ms.to_string());
             let locale = serde_json::to_string(&clock.locale())?;
             let host: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed}, LOCALE = {locale}, shim = (() => {{\n{EVENT_TARGET_SHIM}\n}})();\n{PRELUDE}")))?;
+            run(&ctx, crate::intl::init(&ctx, &clock.time_zone()))?;
+            run(&ctx, ctx.eval::<(), _>(INTL))?;
             let started = run(&ctx, Module::import(&ctx, page.as_str()))?;
             Ok((Persistent::save(&ctx, host), Persistent::save(&ctx, started)))
         }))?;

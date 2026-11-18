@@ -34,8 +34,20 @@ llrt_url = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65f
 llrt_util = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
 llrt_utils = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076", default-features = false }
 futures-lite = "2"
-# The host's language, which the sandbox's JS formats in.
+# The host's language and time zone, which the sandbox's JS formats in.
 sys-locale = "0.3"
+iana-time-zone = "0.1"
+# Intl, as ECMA-402 says (intl.rs, intl.js), formatted by ICU4X with the data for every locale built in, as Boa formats
+# it: its experimental crate formats currencies, percentages and relative times, its `unstable` field bag mirrors
+# ECMA-402's date options, and each time zone's rules are jiff's.
+icu = { version = "2.4", features = ["compiled_data", "unstable"] }
+icu_datetime = { version = "2.4", features = ["unstable_jiff_0_2"] }
+icu_experimental = { version = "0.7", features = ["compiled_data"] }
+icu_provider = "2.4"
+fixed_decimal = { version = "0.7", features = ["ryu"] }
+tinystr = "0.8"
+writeable = "0.6"
+jiff = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11"

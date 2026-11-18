@@ -1,8 +1,10 @@
-// What a strict app's JS has beyond the language itself (ES2024, with Intl): what its sandbox, QuickJS on a native
-// host (clients/app/strict/src/js.rs), and a browser both have. That's the Web APIs a Worker has, the WinterTC Minimum
-// Common API's (web-apis.d.ts), but the network's: no `fetch`, `Request`, `Response`, `Headers` or `FormData`, as an
-// app reaches the network through `call()`, and no WebAssembly, which QuickJS hasn't. No `document`, `window` or other
-// DOM API: the UI library is how an app reaches its screen.
+// What a strict app's JS has beyond the language itself: what its sandbox, QuickJS on a native host
+// (clients/app/strict/src/js.rs), and a browser both have. That's ES2024 with ECMA-402's Intl, but DisplayNames,
+// DurationFormat, supportedValuesOf, formatRange and selectRange, which a native host's ICU4X doesn't make and
+// TypeScript's lib still declares; and the Web APIs a Worker has, the WinterTC Minimum Common API's (web-apis.d.ts),
+// but the network's: no `fetch`, `Request`, `Response`, `Headers` or `FormData`, as an app reaches the network through
+// `call()`, and no WebAssembly, which QuickJS hasn't. No `document`, `window` or other DOM API: the UI library is how an
+// app reaches its screen.
 /// <reference path="./web-apis.d.ts" />
 declare var console: {
   log(...data: unknown[]): void

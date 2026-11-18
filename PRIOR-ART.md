@@ -55,6 +55,18 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   in its shape until it does.
 - **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
   aside: it's compiled, so an app's entrypoint couldn't arrive from a server, and its widgets are each platform's own look.
+- **What a strict app's JS runs with on a native host** (18 November 2026, measured): the WinterTC Minimum Common API.
+  - **AWS LLRT's modules** (Apache-2.0, on rquickjs): chosen for URL, encoding, crypto, Blob, streams, DOMException
+    and structuredClone. Its v0.10 is only on GitHub; crates.io's is on an older rquickjs. Its Event, EventTarget and
+    AbortSignal give a listener no event's target, no `preventDefault` and no `handleEvent`, so those are
+    event-target-shim's (MIT) and ours. Its `Intl` is a time zone helper for dayjs, in en-US only.
+  - **FormatJS's Intl polyfills**: set aside. In QuickJS they took 45 ms to load as bytecode and 89 ms to add one
+    locale's data, every time a sandbox starts, and their data for CLDR's 421 modern locales is 130 MB (2.7 MB
+    compressed together).
+  - **ICU4X 2.4**: chosen for Intl, with every locale's data built in (about 11 MB), each formatter made in under
+    0.1 ms. Its `unstable` `DateTimeFieldBag` mirrors ECMA-402's date options. icu_experimental 0.7 formats only
+    lengths, areas, masses, volumes and durations as units, not bytes, temperatures or percentages, so units come from
+    CLDR's JSON (`clients/app/strict/units.js`). It has no DisplayNames for Intl, number ranges or plural ranges yet.
 
 ## App systems to learn from
 

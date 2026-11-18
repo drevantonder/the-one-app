@@ -28,8 +28,11 @@
 /// `<Box style={[look.row, open() && look.open]} />`, the last to say a property winning. The build makes each
 /// `styles()` ahead of time, so what it's given is written out: literals, `tokens.…` and `negative(…)`. A component
 /// lets a caller change only what it names: `style?: Styles<"marginTop" | "alignSelf">`. There's no element of the
-/// DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window` or other Web API;
-/// `render(() => <App />)` from `ui` draws the page. Words are in a `Text`, or in a component that takes them (a
+/// DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window` or other DOM API. Its JS has
+/// the language with `Intl`, and the Web APIs a Worker has (`URL`, `TextEncoder`, `crypto`, `structuredClone`,
+/// `AbortController`, events, streams, timers) but `fetch`, as `call()` reaches the network, so an npm package that runs
+/// in a Worker runs in it (core/ui/src/strict/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
+/// the page. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
 /// setText(event.currentTarget.value)}`, a key `onKeyDown={(event) => event.key === "Enter" && save()}`, a switch's
 /// `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
