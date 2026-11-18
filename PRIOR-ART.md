@@ -28,7 +28,25 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 ## What the clients could be built with
 
 - **Expo**: phone apps, and it can send them updates without a store release. No desktop apps. Not chosen.
-- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026.
+- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026. From 19 November 2026 it stays the iPhone's shell, and the web view a host falls back to for a page that isn't strict or needs a newer host.
+- **Our own renderer** (19 November 2026): strict screens on a computer and an Android phone are drawn by a renderer of
+  ours for our closed set of primitives and tokens, with code copied in rather than depended on, so the repo stays MIT.
+  Each copied file keeps its source's notice and says where it came from and at which upstream commit.
+  - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and renderers (Metal, DX11, Blade with Vulkan), its
+    text system (CoreText, DirectWrite, cosmic-text) and its desktop windows, input, IME and panel code. Not its App,
+    Entity and View layers, which Solid strict replaces, and not as a dependency.
+  - **Taffy**: layout.
+  - **Rune** (anomalyco/rune, MIT): its text editing model (cursor, selection, bidi, undo, IME composition), and the
+    design of its inspector. Rune itself as the renderer was set aside: weak IME on Windows and Linux, and it takes no
+    pull requests.
+  - **Flutter's Android embedder** (BSD-3): its windowing, keyboard bridge (`InputConnection`) and autofill. Every
+    keyboard bridge speaks Flutter's editing state (text, selection, composing range, actions).
+  - **AccessKit**: accessibility, from one semantic tree, wired as GPUI wires it.
+  - Not used: wgpu, and Zed's `editor` crate, which is GPL-3.0.
+- **Lynx** (ByteDance): native views on Android from JS. A spike on 19 November 2026 drew a strict screen in it with a
+  cold start 35% faster than the web view and a fifth of its memory. Not chosen: Android uses our own renderer, and the
+  web view until that works.
+- **Blitz**: an HTML and CSS renderer in Rust. Not chosen.
 - **Vercel's UI SDK** (`@ui-sdk`, Apache-2.0, 0.1.0 beta, 12 November 2026): behaviours with no look of their own
   (popups, selection, keyboard, focus) for React, Vue, Svelte, Solid and Web Components, made for agents to build
   with. Considered for the UI the clients share, and not chosen.
