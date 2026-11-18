@@ -28,10 +28,14 @@ Its words:
 - Who is a user (`users/alice`), a group, meaning its members (`groups/family`), `everyone` in the network, a
   app by its artifact's name, or a sharing link's holder (`users/alice/links/...`).
 - `owner`, `editor` and `viewer` are what someone may do: an owner is an editor, and an editor is a viewer.
-  Whoever a user's artifact's name starts with owns it, a group's members own what was made for the group
-  (`groups/family/made/...`), and every user what was made for the network (`network/made/...`). A group's or
-  the network's apps, and what those keep, are their owners', and the network's owner owns everything. Whoever has a relation to a user or a group
-  has it to everything that's theirs: a group's owner owns its apps and what they keep. `member` puts a user or
+  Whoever a user's artifact's name starts with owns it. What was made for a group (`groups/family/made/...`) or
+  the network (`network/made/...`) its members see and its owners own, as a GitHub organization's members read its
+  repositories: an owner lets others change it with `editor`, of all of it (`--artifact groups/family/made`) or of
+  one app's (`--artifact network/made/vault`), and `--who groups/family` (or `everyone`) lets every member. A
+  member asking for a group or the network calls an app's tool that only reads if they see what that app made for
+  it, and any other if they may change it. A group's or the network's apps, and what those keep, are their owners',
+  and the network's owner owns everything. Whoever has a relation to an artifact has it to everything in it by its
+  name, and to a user or a group to everything that's theirs: a group's owner owns its apps and what they keep. `member` puts a user or
   a group in a group. `parent` names another artifact as who, and gives whoever has a relation to that one the
   same relation to this.
 - `installer` of the network (or of a group) may install apps for it, as its owner does, and nothing more an owner

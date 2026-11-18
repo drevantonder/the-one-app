@@ -296,7 +296,7 @@ defmodule Permissions do
       if not (member?(db, asking(call), artifact) or may?(db, asking(call), "viewer", artifact)),
         do: raise("#{asking(call)} isn't in #{artifact}, nor sees it, so doesn't see who has it.")
 
-      up = followed(db, @parents, Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"]), [])
+      up = followed(db, @parents, up(artifact), [])
       tuples = "select who as next from tuples where artifact = ? and relation in (?, ?, ?)"
       named = for at <- up, %{"next" => who} <- query(db, tuples, [at | Map.fetch!(@enough, relation)]), do: who
       %{users: Enum.sort(Enum.filter(followed(db, @members, named, []), &(user?(&1) or &1 == "everyone")))}
@@ -396,7 +396,7 @@ defmodule Permissions do
 
   # Raises unless whoever asks may write or remove a tuple with this relation to the artifact: an owner or an
   # editor shares up to their own relation, and only an owner adds or removes an owner, a member or a parent, or
-  # says who installs apps: a group's members own what's made for it.
+  # says who installs apps: a group's members see what's made for it.
   defp shares!(db, call, artifact, relation) do
     owner = relation in ["owner", "member", "installer", "parent"]
     reaches!(db, asking(call), if(owner, do: "owner", else: "editor"), artifact)
@@ -410,19 +410,35 @@ defmodule Permissions do
   end
 
   # Whether `who` has the relation to the artifact. `whos` is everyone `who` counts as: themselves, everyone if
-  # they're a user, and each group they're a member of, however far that goes. `up` is the artifact, whose it is, and
-  # their parents, as far as those go, ending at the network. An artifact's name starts with whose it is, so a user
-  # owns what their name starts, and a group's members what was made for the group, with no tuple. Each step is one
-  # small question of the database, which is many times faster than asking it all of this at once.
+  # they're a user, and each group they're a member of, however far that goes. `up` is the artifact, what it's in, by
+  # its name, and their parents, as far as those go, ending at the network: a tuple on `network/made/vault` is one on
+  # each of the network's Vault items. Each step is one small question of the database, which is many times faster
+  # than asking it all of this at once.
   defp may?(db, who, relation, artifact) do
     whos = followed(db, @groups, if(user?(who), do: [who, "everyone"], else: [who]), [])
     enough = Map.fetch!(@enough, relation)
 
-    up = Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"])
-
-    Enum.any?(followed(db, @parents, up, []), fn artifact ->
-      Enum.any?(whos, &(String.starts_with?(artifact, theirs(&1)) or query(db, @tuple, [artifact, &1 | enough]) != []))
+    Enum.any?(followed(db, @parents, up(artifact), []), fn artifact ->
+      named?(who, whos, relation, artifact) or Enum.any?(whos, &(query(db, @tuple, [artifact, &1 | enough]) != []))
     end)
+  end
+
+  # The artifact and what it's in, by its name, then the network: `network/made/vault/x1`, `network/made/vault`,
+  # `network/made`, `network`.
+  defp up(artifact) do
+    parts = String.split(artifact, "/")
+    Enum.uniq(for(n <- length(parts)..2//-1, do: Enum.join(Enum.take(parts, n), "/")) ++ ["network"])
+  end
+
+  # What an artifact's name says with no tuple: a user owns all that's theirs, and a group or the network what was
+  # made for it, which their members see, as a GitHub organization's members read its repositories by default. Who
+  # changes it is its owners, and whoever they share it with: `editor` of `network/made`, or of one app's,
+  # `network/made/vault`.
+  defp named?(who, whos, relation, artifact) do
+    member_of = (whos -- [who]) ++ if(user?(who), do: ["network"], else: [])
+
+    String.starts_with?(artifact, theirs(who)) or
+      (relation == "viewer" and Enum.any?(member_of, &String.starts_with?(artifact, theirs(&1))))
   end
 
   # How the names start of what's a who's own with no tuple saying so: all of a user's, and what was made for a
