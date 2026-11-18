@@ -3,7 +3,8 @@
 // hung at the edge, and one that never reached a server, is in Telemetry too. A span has the request's route, status,
 // duration and outcome, and what the Worker said of it in a line of its own, `{"telemetry": …}`: its `traceparent`,
 // which a server it reached carried on, the `parent` it came in with, `attributes` such as `one.server`, an
-// `error`, and the `start` and `end` of what it did, where that's less than the Worker's whole run. Nothing else of a
+// `error`, and the `start` and `end` of what it did, where that's less than the Worker's whole run. A line with a
+// `name` is a span of that name, kept whatever ran it, as the network's updater says each step of an update. Nothing else of a
 // request is kept: no query, header, cookie, body or other log line, so never a token or a code.
 //
 // Spans are gathered a minute at a time in a Durable Object and kept as one blob of Telemetry's own artifact for
@@ -43,6 +44,8 @@ interface LogLine {
   /** When what the span is of began and ended, in milliseconds since 1970, where the Worker ran on past it. */
   start?: number;
   end?: number;
+  /** What the span is called, where it's of something else than the request: such a span is never routine. */
+  name?: string;
 }
 
 /**
@@ -84,8 +87,9 @@ function span(item: TraceItem): Span | null {
     (status !== undefined && status >= 500 && `It answered ${status}`) ||
     undefined;
   // As OpenTelemetry names an HTTP server's span, and a call between Workers by the Worker and its method.
-  const name = request ? `${request.method} ${path}` : event?.rpcMethod ? [worker, event.rpcMethod].filter(Boolean).join(" ") : null;
-  const routine = item.executionModel === "durableObject" || (path ? ROUTINE.test(path) : event?.rpcMethod !== "forward");
+  const name =
+    record.name ?? (request ? `${request.method} ${path}` : event?.rpcMethod ? [worker, event.rpcMethod].filter(Boolean).join(" ") : null);
+  const routine = !record.name && (item.executionModel === "durableObject" || (path ? ROUTINE.test(path) : event?.rpcMethod !== "forward"));
   if (!name || (!error && routine)) return null;
 
   const [, trace = hex(16), id = hex(8)] = PARENT.exec(record.traceparent ?? "") ?? [];

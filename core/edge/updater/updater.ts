@@ -156,7 +156,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     await this.ctx.storage.setAlarm(state.until ?? Date.now() + 365 * 86_400_000);
     const status = this.status(state, reported);
     const changed = JSON.stringify([state, this.instructions(state, reported)]) !== before;
-    if (changed) console.log(JSON.stringify({ updater: status }));
+    if (changed) said(state, status);
     // Every server is told again what to do once anything changed, and as one that has something to do says what it
     // is, so one that missed being told, as one reconnecting does, hears it.
     return { status, ...((changed || concerned) && { broadcast: JSON.stringify({ jsonrpc: "2.0", method: MESSAGE, params: status }) }) };
@@ -172,7 +172,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     const why = preparing ? `didn't finish preparing within ${PREPARING / 60_000} min` : `didn't take it within ${RESTARTING / 60_000} min`;
     this.hold(state, late?.key ?? "", late && reported[late.key]?.name, why);
     await this.ctx.storage.put("state", state);
-    console.log(JSON.stringify({ updater: this.status(state, reported) }));
+    said(state, this.status(state, reported));
   }
 
   async reported(): Promise<Record<string, Reported>> {
@@ -334,6 +334,25 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       },
     };
   }
+}
+
+/**
+ * Says what the update is now, as it changes, in the line Telemetry's Tail Worker keeps as a span
+ * (`apps/telemetry/edge/worker.ts`): `network update`, from when its build was published to now, with its status,
+ * build and how far it is, and as an error, which server held it and why, so Telemetry tells the network's owner.
+ */
+function said(state: State, status: ReturnType<NetworkUpdater["status"]>) {
+  const held = status.held && `${status.held.name ?? status.held.server.slice(0, 8)}: ${status.held.why}`;
+  const attributes = {
+    "one.update.status": status.network_update_status,
+    ...(status.build && { "one.update.build": status.build }),
+    "one.update.done": status.done,
+    "one.update.of": status.of,
+    "one.update.skipped": status.skipped.length,
+    ...(status.waiting_for && { "one.update.waiting_for": status.waiting_for }),
+    ...(status.held && { "one.update.held.server": status.held.name ?? status.held.server }),
+  };
+  console.log(JSON.stringify({ telemetry: { name: "network update", start: state.published ?? Date.now(), end: Date.now(), attributes, ...(held && { error: held }) } }));
 }
 
 /**
