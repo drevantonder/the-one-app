@@ -932,7 +932,8 @@ body {
   }
 }
 
-/* The page overview: every Home page small, two or more across, each with its tick under it. */
+/* The page overview: every Home page small, two or more across, each with its tick under it. It fades in, and out
+   as it closes (home.tsx). */
 .overview {
   position: absolute;
   inset: 0;

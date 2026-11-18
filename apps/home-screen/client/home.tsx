@@ -107,6 +107,15 @@ const place = (from: Element) => {
 }
 /// The UI library's pace of that name, from its tokens.
 const paced = (name: "quick" | "settle" | "travel") => pace(document.documentElement, name)
+/// As something goes, a copy of it fades out from where it is, over what's under it, taking no taps, as iOS's do.
+const fadeOut = (element: HTMLElement) => {
+  const from = element.isConnected ? getComputedStyle(element).opacity : "1"
+  const ghost = element.cloneNode(true) as HTMLElement
+  ghost.inert = true
+  ghost.style.pointerEvents = "none"
+  document.querySelector(".home")?.append(ghost)
+  ghost.animate([{ opacity: from }, { opacity: 0 }], { ...paced("settle"), fill: "forwards" }).finished.finally(() => ghost.remove())
+}
 
 /// An owner's pages as they're kept: each with what's on it and whether it's hidden, to edit.
 const draft = (owner: Owner, index: number): Editing => ({ owner: index, pages: fitted(owner.pages.map((page) => ({ items: [...page.items], hidden: page.hidden }))) })
@@ -877,9 +886,13 @@ function Overview(props: { owner: Owner; index: number }) {
     from.addEventListener("pointerup", up)
     from.addEventListener("pointercancel", up)
   }
-  onSettled(() => covers(() => home.send({ type: "dismiss" })))
+  let overview!: HTMLDivElement
+  onSettled(() => {
+    const shut = covers(() => home.send({ type: "dismiss" }))
+    return () => (shut(), fadeOut(overview))
+  })
   return (
-    <div class="overview">
+    <div class="overview" ref={overview}>
       <div class="bar">
         <Button onClick={() => home.send({ type: "dismiss" })}>Done</Button>
       </div>
