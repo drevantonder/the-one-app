@@ -168,9 +168,12 @@ function watched(element: HTMLElement, props: BoxProps) {
     (focus) => void (focus && queueMicrotask(() => element.focus({ preventScroll: false }))),
   )
   if (!props.onLayout) return
-  const sized = new ResizeObserver(() => props.onLayout?.({ currentTarget: element }))
+  // A box moves as well as grows: as it's resized, and as the window is, which moves what's pinned to its foot.
+  const report = () => props.onLayout?.({ currentTarget: element })
+  const sized = new ResizeObserver(report)
   sized.observe(element)
-  onCleanup(() => sized.disconnect())
+  window.addEventListener("resize", report)
+  onCleanup(() => (sized.disconnect(), window.removeEventListener("resize", report)))
 }
 
 /** What a page moved by hand listens for (protocol.ts's `Moved`), which `movable` draws. */
