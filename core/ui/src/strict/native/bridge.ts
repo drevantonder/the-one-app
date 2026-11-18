@@ -123,9 +123,23 @@ export function back(): void {
   throw new Error("A native host has no history to go back through: a screen's Back says where it goes (`onBack`)")
 }
 
-/** Puts text on the clipboard. */
-export function copy(_text: string): Promise<void> {
-  return Promise.reject(new Error("A native host has no clipboard yet (core/ui/src/strict/native/bridge.ts)"))
-}
+/** Puts text on the clipboard, which its client does (`one/copy`): a page has none of its own. */
+export const copy = async (text: string): Promise<void> => (await greeted, void (await ask("one/copy", { text })))
+
+/** Hands text to the device's share sheet, or copies it where there's none, as its client does (`one/share`). */
+export const share: typeof Strict.share = async (text) => (await greeted, (await ask<{ done: "shared" | "copied" | null }>("one/share", { text })).done ?? undefined)
+
+/** Plays a haptic, as the DOM's does (`one/haptic`): a client without them says so, which is all there is to it. */
+export const haptic: typeof Strict.haptic = (kind) => void greeted.then(() => ask("one/haptic", { kind })).catch(() => {})
+
+/** Tells the client the person is done with the app, as the DOM's does: MCP Apps' `request-teardown`. */
+export const leave: typeof Strict.leave = async () => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/request-teardown", params: {} }))
+
+/** Has the client show its person their recovery key, or ask them for it, as the DOM's does (`one/recovery-key`). */
+export const showRecoveryKey: typeof Strict.showRecoveryKey = async ({ subject } = {}) => (await greeted, (await ask<{ done: boolean }>("one/recovery-key", { subject })).done)
+export const useRecoveryKey: typeof Strict.useRecoveryKey = async ({ subject } = {}) => (await greeted, (await ask<{ done: boolean }>("one/recovery-key", { typed: true, subject })).done)
+
+/** What another app's client exports, from where the DOM's finds it: beside this app's page, under the client's root. */
+export const component: typeof Strict.component = (app, name) => import(/* @vite-ignore */ `/${app}/client/${name}.js`)
 /** The link the page was opened to, as its host says (`hostContext.link`), as it comes. */
 export const link: typeof Strict.link = () => opened()

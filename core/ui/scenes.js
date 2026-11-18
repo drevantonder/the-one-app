@@ -79,7 +79,9 @@ addEventListener("message", ({ data, source }) => {
     if (answer === undefined || answer?.$error) return reply({ result: { isError: true, content: [{ type: "text", text: answer?.$error ?? "No answer for " + data.params.name }] } })
     return reply({ result: { content: [{ type: "text", text: JSON.stringify(answer) }] } })
   }
-  reply({ result: own(data.method) ?? {} })
+  // A method no answer names isn't answered, as record.js's and the native harness's aren't.
+  const answer = own(data.method)
+  reply(answer === undefined ? { error: { code: -32601, message: data.method + " isn't answered here" } } : { result: answer })
 })
 </script>`
 
@@ -158,7 +160,8 @@ function native(built, scene, folder) {
   if (existsSync(join(built, dirname(scene.page), "styles.json"))) cpSync(join(built, dirname(scene.page), "styles.json"), join(at, "styles.json"))
   const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
-  const requests = scene.taps.map((tap, at) => JSON.stringify({ v: 1, id: at + 1, op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) })).join("\n")
+  // The harness's clock stands still, so what moves after each tap is moved on to where it settles, as the DOM's is.
+  const requests = scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]).map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
     [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", ...(dark ? ["--dark"] : []), ...(requests ? ["--requests", "-"] : [])],
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env: { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" } },

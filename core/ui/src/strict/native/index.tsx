@@ -13,7 +13,7 @@ export { tokens } from "../../tokens.ts"
 export { Box, EditableText, Image, Layer, Path, render, Scroll, Text } from "./primitives.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "../../field.tsx"
 export { Select } from "../../select.tsx"
-export { call, changed, client, connection, covers, direction, link, go, keydown, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
+export { call, changed, client, component, connection, covers, direction, leave, link, go, keydown, open, pinShortcut, haptic, reducedMotion, safeArea, share, showRecoveryKey, sizeChanged, useRecoveryKey, viewport } from "./bridge.ts"
 
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
@@ -37,11 +37,5 @@ const later = (name: string) => () => {
   throw new Error(`${name} isn't drawn on a native host yet (core/ui/src/strict/native/index.tsx)`)
 }
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
-export const leave = later("leave") as typeof Strict.leave
-export const component = later("component") as typeof Strict.component
-export const showRecoveryKey = later("showRecoveryKey") as typeof Strict.showRecoveryKey
-export const useRecoveryKey = later("useRecoveryKey") as typeof Strict.useRecoveryKey
-export const share = later("share") as typeof Strict.share
-export const haptic: typeof Strict.haptic = () => {}
 export const Widget = later("Widget") as typeof Strict.Widget
 export const visible: typeof Strict.visible = () => true

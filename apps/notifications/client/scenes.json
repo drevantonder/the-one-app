@@ -49,6 +49,11 @@
             "allowed": false
           }
         ]
+      },
+      "one/client": {
+        "device": "Laptop",
+        "build": "0.26.0",
+        "theme": null
       }
     }
   },
@@ -59,6 +64,11 @@
       },
       "notifications_apps": {
         "apps": []
+      },
+      "one/client": {
+        "device": "Laptop",
+        "build": "0.26.0",
+        "theme": null
       }
     }
   },
