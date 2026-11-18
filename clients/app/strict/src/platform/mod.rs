@@ -302,10 +302,9 @@ impl Windows {
         if request.op != "snap" {
             return screen.inspect(request, reply);
         }
+        // The scene it last drew: painting one afresh would draw nothing where nothing changed since (`Screen::paint`).
         let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), window.native.device_size());
-        let mut scene = crate::render::scene::Scene::default();
-        screen.paint(window.native.size(), window.native.scale(), &mut self.text, &self.atlas, &mut scene);
-        renderer.draw(&scene);
+        renderer.draw(&window.scene);
         let snapped = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn")).and_then(|(width, height, rgba)| {
             let mut png = Vec::new();
             image::RgbaImage::from_raw(width, height, rgba)
