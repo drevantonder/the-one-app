@@ -1,0 +1,61 @@
+[package]
+name = "strict-android"
+description = "A strict screen drawn on Android by our own renderer: GPUI's scene and Blade renderer, taffy, cosmic-text, AccessKit."
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# A workspace of its own: a spike, built for Android only, beside the repo's workspace.
+[workspace]
+exclude = ["vendor"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+accesskit = "0.25"
+# Its Java delegate, prebuilt, loaded from memory: the app needs no Java of AccessKit's.
+accesskit_android = { version = "0.9.1", features = ["embedded-dex"] }
+android_logger = "0.15"
+anyhow = "1"
+# GPUI's renderer was written against Blade e3cf011 (Zed's Cargo.toml at 8249ef56); this is a newer Blade, whose Vulkan
+# backend works without VK_EXT_inline_uniform_block (2e7f478), which the emulator's SwiftShader and many phones lack.
+blade-graphics = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
+blade-macros = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
+blade-util = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
+bytemuck = { version = "1", features = ["derive"] }
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
+data-encoding = "2"
+etagere = "0.2"
+# The desktop host's tokens.rs names its colour `gpui::Rgba`; this is that type alone (`gpui/`).
+gpui = { path = "gpui" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+jni = "0.21"
+log = "0.4"
+ndk = { version = "0.9", features = ["rwh_06"] }
+ndk-sys = "0.6"
+raw-window-handle = "0.6"
+# Android has no prebuilt bindings in rquickjs-sys, so bindgen makes them (`env.sh`).
+rquickjs = { version = "0.14", features = ["loader", "bindgen"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+taffy = { version = "=0.15.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "block_layout", "content_size"] }
+unicode-segmentation = "1"
+url = "2"
+wuff = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Blade with one change (blade-android-rgba.patch, applied by ../run to a checkout in vendor/): an sRGB surface that
+# offers no BGRA format, as Android's don't, gets an RGBA swapchain rather than one the driver wasn't asked for.
+[patch."https://github.com/kvark/blade"]
+blade-graphics = { path = "vendor/blade/blade-graphics" }

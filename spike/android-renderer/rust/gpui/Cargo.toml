@@ -1,0 +1,6 @@
+[package]
+name = "gpui"
+description = "GPUI's Rgba alone, which the desktop host's tokens.rs names, so it builds here without GPUI."
+version = "0.1.0"
+edition = "2024"
+license = "MIT"

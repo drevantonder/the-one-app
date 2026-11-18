@@ -1,0 +1,10 @@
+{
+  "name": "android-renderer-spike-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@solidjs/universal": "2.0.0",
+    "esbuild": "0.25.12",
+    "solid-js": "2.0.0"
+  }
+}

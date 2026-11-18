@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Builds the screens' JS, the renderer for the emulator (x86_64) and the release APKs, and installs them on the running
+# emulator. `./run arm64-v8a` builds for a phone instead, without installing (to measure the APK).
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+abi=${1:-x86_64}
+target=$([ "$abi" = arm64-v8a ] && echo aarch64-linux-android || echo x86_64-linux-android)
+cd "$here/app" && bun build.js >/dev/null
+. "$here/env.sh"
+export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk}
+if [ ! -d "$here/rust/vendor/blade" ]; then
+  git clone -q https://github.com/kvark/blade "$here/rust/vendor/blade"
+  git -C "$here/rust/vendor/blade" checkout -q 3d86d537fe100a06a091850253f692e7ca8bceaf
+  git -C "$here/rust/vendor/blade" apply "$here/rust/blade-android-rgba.patch"
+fi
+cd "$here/rust" && nice -n 10 cargo build -j 3 --release --target "$target"
+mkdir -p "$here/android/app/src/main/jniLibs/$abi"
+cp "target/$target/release/libstrict_android.so" "$here/android/app/src/main/jniLibs/$abi/"
+cd "$here/android" && nice -n 10 ./gradlew -q assembleRelease -Pabi="$abi" --console=plain 2>&1 | grep -E "^e:|error:|FAIL|warning: \[" || true
+[ "$abi" = x86_64 ] || exit 0
+adb=$HOME/Android/Sdk/platform-tools/adb
+"$adb" install -r app/build/outputs/apk/release/app-release.apk >/dev/null
+"$adb" install -r autofill/build/outputs/apk/release/autofill-release.apk >/dev/null

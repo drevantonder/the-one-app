@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# memory <Web|Lynx>: total PSS (KB) of the app's process and, for a WebView, its renderer process, with the app's own
+# screen open, then 1 and 5 screens open on top of it.
+set -euo pipefail
+adb=$HOME/Android/Sdk/platform-tools/adb
+pkg=app.theone.lynxspike
+pss() {
+  local total=0 pid kb
+  for pid in $("$adb" shell pidof $pkg) $("$adb" shell ps -A -o PID,NAME | awk '/webview:sandboxed_process/ {print $1}'); do
+    kb=$("$adb" shell dumpsys meminfo "$pid" | awk '/TOTAL PSS:/ {print $3}')
+    total=$((total + ${kb:-0}))
+  done
+  echo "$total"
+}
+"$adb" shell am force-stop $pkg
+"$adb" logcat -c
+"$adb" shell am start -W -n $pkg/.MainActivity >/dev/null
+echo "$1 shell only: $(pss) KB"
+for i in 1 2 3 4 5; do
+  "$adb" logcat -c
+  "$adb" shell am start -n $pkg/.${1}Activity >/dev/null
+  timeout 20 "$adb" logcat -m 1 -e "Fully drawn" >/dev/null
+  if [ $i = 1 ] || [ $i = 5 ]; then echo "$1 $i open: $(pss) KB"; fi
+done
