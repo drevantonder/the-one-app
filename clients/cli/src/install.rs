@@ -135,11 +135,16 @@ struct Locked {
     commit: String,
     hash: String,
     of: String,
+    /// The apps it requires, as the server said when it was installed, which come before it.
+    requires: Vec<String>,
 }
 
 impl Locked {
     fn json(&self) -> Value {
-        json!({"source": self.source, "ref": self.reference, "commit": self.commit, "hash": self.hash, "for": self.of})
+        json!({
+            "source": self.source, "ref": self.reference, "commit": self.commit, "hash": self.hash, "for": self.of,
+            "requires": self.requires,
+        })
     }
 
     fn read(locked: &Value) -> Option<Self> {
@@ -149,6 +154,12 @@ impl Locked {
             commit: locked["commit"].as_str()?.to_owned(),
             hash: locked["hash"].as_str()?.to_owned(),
             of: locked["for"].as_str()?.to_owned(),
+            requires: locked["requires"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|name| name.as_str().map(str::to_owned))
+                .collect(),
         })
     }
 }
@@ -220,25 +231,6 @@ fn offered(folder: &Path) -> Vec<(String, String)> {
         .collect();
     offered.sort();
     offered
-}
-
-/// The apps an app requires, as its `requires/0` names them (`OneCore.App`): each `"name" =>` of its map.
-fn requires(app: &Path) -> Vec<String> {
-    let mut required = Vec::new();
-    for file in fs::read_dir(app.join("server")).into_iter().flatten().flatten() {
-        let code = fs::read_to_string(file.path()).unwrap_or_default();
-        let Some((_, after)) = code.split_once("def requires") else { continue };
-        let Some(map) = after.split_once("%{").and_then(|(_, map)| map.split_once('}')).map(|(map, _)| map) else {
-            continue;
-        };
-        let keys = map.split("=>").map(str::trim_end).collect::<Vec<_>>();
-        for key in &keys[..keys.len() - 1] {
-            if let Some(name) = key.strip_suffix('"').and_then(|key| key.rsplit_once('"')).map(|(_, name)| name) {
-                required.push(name.to_owned());
-            }
-        }
-    }
-    required
 }
 
 /// Stops with what to build, where an app brings a NIF that isn't built for every kind of machine the network's
@@ -315,6 +307,7 @@ async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> 
 /// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
 /// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
 /// else `of` is in, as `deploy`'s `new` says.
+#[expect(clippy::too_many_arguments, reason = "each says something of the one deploy")]
 async fn deploy(
     client: &Client,
     of: &str,
@@ -365,12 +358,15 @@ async fn deploy(
         .and_then(|app| app["from"]["hash"].as_str())
         .with_context(|| format!("{name} was deployed, but `apps` doesn't list it for {of}"))?;
     report(from, name, commit, listing).await;
+    // `deploy` answers with the apps it requires, by name, each with why.
+    let requires = deployed["requires"].as_object().into_iter().flatten().map(|(name, _)| name.clone()).collect();
     Ok(Locked {
         source: from.spec.clone(),
         reference: from.reference.clone(),
         commit: commit.to_owned(),
         hash: hash.to_owned(),
         of: of.to_owned(),
+        requires,
     })
 }
 
@@ -431,35 +427,15 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         }
         return Ok(ExitCode::SUCCESS);
     }
-    let (of, apps) = installed(client, None).await?;
-    let is = |name: &str, at: &str| apps.iter().find(|app| app["name"] == name && app["for"] == at);
-    // Each app after the ones it requires that aren't installed for them or the network yet and the repo has.
-    let mut order: Vec<String> = Vec::new();
-    let mut next: Vec<(String, bool)> = names.iter().rev().map(|name| (name.clone(), false)).collect();
-    while let Some((name, placed)) = next.pop() {
-        if order.contains(&name) {
-            continue;
-        }
-        let app = folder.join("apps").join(&name);
-        if !app.join("SKILL.md").exists() {
+    let (of, _) = installed(client, None).await?;
+    // An app whose requirements aren't installed is refused by the server, which says which to install first.
+    let mut order: Vec<&String> = Vec::new();
+    for name in &names {
+        if !folder.join("apps").join(name).join("SKILL.md").exists() {
             bail!("{} has no app {name}: `one install {} --list` lists the ones it has", source.spec, args[0]);
         }
-        if placed {
+        if !order.contains(&name) {
             order.push(name);
-            continue;
-        }
-        next.push((name.clone(), true));
-        for required in requires(&app) {
-            let there = is(&required, &of).or(is(&required, "network")).is_some();
-            let repo = folder.join("apps").join(&required).join("SKILL.md").exists();
-            if !there && repo && !order.contains(&required) {
-                println!(
-                    "{name} requires {required}, which isn't installed for {of} or the network, so it's installed \
-                     from {} too.",
-                    source.spec
-                );
-                next.push((required, false));
-            }
         }
     }
     let lock = lock_file();
@@ -467,7 +443,7 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         Some(file) => read_lock(file)?,
         None => BTreeMap::new(),
     };
-    for name in &order {
+    for name in order {
         let it = deploy(client, &of, name, &folder, &source, &commit, trusted, new).await?;
         if let Some(file) = &lock {
             locked.insert(name.clone(), it);
@@ -495,8 +471,7 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
         for (name, it) in &waiting {
             let source = Source { spec: it.source.clone(), reference: it.reference.clone() };
             let (folder, commit) = source.fetch(Some(&it.commit))?;
-            let required = requires(&folder.join("apps").join(name));
-            if required.iter().any(|required| required != name && waiting.contains_key(required)) {
+            if it.requires.iter().any(|required| required != name && waiting.contains_key(required)) {
                 continue;
             }
             let now = deploy(client, &it.of, name, &folder, &source, &commit, None, false).await?;
