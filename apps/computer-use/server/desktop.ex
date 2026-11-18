@@ -627,7 +627,14 @@ defmodule ComputerUse.Desktop do
     else
       File.mkdir_p!(Path.dirname(plist))
       File.write!(plist, xml)
-      if loaded?, do: launchctl(["bootout", "#{domain()}/#{label()}"])
+      # Cua Driver takes as long as launchd lets it (20 s) to stop on SIGTERM, and until it has, `bootout` returns
+      # with the job still there and `bootstrap` fails as for a job loaded (5: Input/output error). So it's killed
+      # first, with its process group, which leaves nothing for `bootout` to wait for.
+      if loaded? do
+        launchctl(["kill", "SIGKILL", "#{domain()}/#{label()}"])
+        launchctl(["bootout", "#{domain()}/#{label()}"])
+      end
+
       {output, status} = launchctl(["bootstrap", domain(), plist])
       if status != 0, do: raise("launchd didn't start Computer Use for The One App: #{output}")
       true
