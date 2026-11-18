@@ -1328,6 +1328,11 @@ impl Client {
         tokio::spawn(answer(self.me.clone(), open.connection().clone()));
         tokio::spawn(straight(self.me.clone(), open.connection().clone()));
         if self.watching.load(Ordering::Relaxed) {
+            // Where it says a server reaches it is its network's relay, so it says so once it's there, as a client
+            // that has only just opened, as one a push woke, isn't yet.
+            if link.network.is_some() {
+                let _ = tokio::time::timeout(CONNECT, link.endpoint.online()).await;
+            }
             let here = address(&link.endpoint, link.network.as_ref()).ok()?;
             let mut watch = json!({"jsonrpc": "2.0", "method": WATCH, "params": {"address": here}});
             self.say(&mut watch);
