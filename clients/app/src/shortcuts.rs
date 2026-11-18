@@ -50,8 +50,12 @@ pub fn listed(listed: &Value) -> Vec<Shortcut> {
 static KEPT: Mutex<Option<Vec<Shortcut>>> = Mutex::new(None);
 
 /// Has the device list `shortcuts`, and none else of this app's, unless they're what it has. Each icon is drawn
-/// first, so it's done off the thread that asks.
+/// first, so it's done off the thread that asks. A client kept somewhere of its own (`ONE_HOME`), as a network built or
+/// tested with sets it, lists nothing: the device's list is its own client's, which it would otherwise replace.
 pub fn keep(shortcuts: Vec<Shortcut>) {
+    if std::env::var_os("ONE_HOME").is_some() {
+        return;
+    }
     std::thread::spawn(move || {
         let mut kept = KEPT.lock().expect("no keep panics");
         if kept.as_ref() == Some(&shortcuts) {
