@@ -177,6 +177,8 @@ export interface Commands {
   open_window(args: { entrypoint: string; subject: string | undefined; link: string }): void
   /** Brings the Home Screen's window forward. */
   front(): void
+  /** Makes a computer's launcher panel as tall as `height`, in points, or its tallest without, its top where it is. */
+  resize(args: { height?: number }): void
   /** Moves the window with the pointer, held down where it has no title bar of its own to hold. */
   "plugin:window|start_dragging"(): void
   /** Does what a double-click on a Mac's title bar does, as the Mac is set: zoom, minimize or nothing. */

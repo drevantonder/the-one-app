@@ -720,6 +720,20 @@ function problemOf(now) {
   if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]
 }
 
+/// How tall the launcher's content last said it is (`ui/notifications/size-changed`), and how tall its panel was made.
+let asked = 0
+/** @type {number | undefined} */
+let made
+/// A computer's launcher panel is as tall as the launcher says while it shows it, as Raycast's and Spotlight's grow and
+/// shrink to what they show, and its tallest while it shows anything else: its steps, a problem, an update.
+function fit() {
+  if (!panel()) return
+  const height = shown.getSnapshot().matches("launcher") && asked ? asked : undefined
+  if (height === made) return
+  made = height
+  invoke("resize", { height })
+}
+
 /// Draws what the window shows of itself, in its middle, over the frames: its mark and steps while it opens, a
 /// spinner and a line while it updates, why there's no Home Screen, or a problem; and over the launcher, a banner
 /// while its network doesn't answer. The launcher is the frames alone.
@@ -782,6 +796,7 @@ function draw() {
   const said = behind ? "Update Required: This version of the One App no longer works with your network." : problem && `${problem[0]}: ${problem[1]}`
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
+  fit()
   notes()
   rail()
   // Over the launcher: its network not answering, and trying again once it has lost it. Answering, nothing.
@@ -1480,6 +1495,11 @@ addEventListener("message", async ({ source, data }) => {
     // The app's user went back out of it. The app stays open behind the launcher.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && depth) history.back()
     else if (method === "ui/notifications/request-teardown" && panel() && view.key === baseKey()) invoke("hide")
+    // The launcher's content says how tall it is, which its panel is made while it shows it.
+    if (method === "ui/notifications/size-changed" && panel() && view.key === baseKey() && typeof params.height === "number") {
+      asked = params.height
+      fit()
+    }
     // Something is open over its page, or nothing is any more, and whether it's on its first screen.
     if (method === "notifications/one/over") {
       view.over = params.over === true

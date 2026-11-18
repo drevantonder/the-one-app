@@ -24,9 +24,10 @@ use wry::{RequestAsyncResponder, WebView, WebViewBuilder, WebViewId};
 use crate::discard::Discarding;
 use crate::{hosts, notifications};
 
-/// The launcher's size, in points, as Raycast's panel is: its search bar, two of a phone's pages side by side, drawn
-/// smaller (`measure` in the Home Screen's home.tsx), and its footer bar.
-const SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 600.0);
+/// The launcher's width and tallest height, in points, as Raycast's panel is: its search bar, two of a phone's pages
+/// side by side with their six rows, drawn smaller (`measure` in the Home Screen's home.tsx), and its footer bar. It's
+/// as tall as what it shows, which its page says (`resize`).
+const SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 610.0);
 /// How round the launcher's corners are, in points, as Raycast's are.
 #[cfg(target_os = "macos")]
 const CORNER: f64 = 16.0;
@@ -41,6 +42,8 @@ pub(crate) enum Told {
     /// Puts it away, and with `true` gives the keyboard back to the app that had it (Escape, or its page done).
     Hide(bool),
     Theme(Option<crate::Theme>),
+    /// Makes it as tall as its page's content, or its tallest (`resize`).
+    Resize(Option<f64>),
     /// Loads its page again, as the device's session starts again.
     Reload,
     /// Opens a `one:` link.
@@ -75,6 +78,11 @@ pub(crate) fn summon() {
 /// Puts the launcher away, as an app opens from it, or with `give_back`, as it's dismissed.
 pub(crate) fn hide(give_back: bool) {
     tell(Told::Hide(give_back))
+}
+
+/// Makes the launcher as tall as `height`, in points, or its tallest, as its page asks.
+pub(crate) fn resize(height: Option<f64>) {
+    tell(Told::Resize(height))
 }
 
 /// The app was started again: its icon in the Dock or taskbar, which shows the launcher, or a `one:` link it opens.
@@ -181,7 +189,9 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     #[cfg(target_os = "linux")]
     let window = {
         use tao::platform::unix::WindowBuilderExtUnix;
-        window.with_skip_taskbar(true)
+        // GTK keeps a window that isn't resizable the size it was made, so here it's resizable, held to the size it's
+        // given (`Told::Resize`).
+        window.with_skip_taskbar(true).with_resizable(true).with_min_inner_size(SIZE).with_max_inner_size(SIZE)
     };
     #[cfg(windows)]
     let window = {
@@ -281,6 +291,20 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 crate::Theme::Light => Theme::Light,
                 crate::Theme::Dark => Theme::Dark,
             })),
+            // Its top stays where it is, as Raycast's and Spotlight's grow and shrink downwards.
+            Event::UserEvent(Told::Resize(height)) => {
+                let size = LogicalSize::new(SIZE.width, height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height));
+                let at = window.outer_position();
+                #[cfg(target_os = "linux")]
+                {
+                    window.set_min_inner_size(Some(size));
+                    window.set_max_inner_size(Some(size));
+                }
+                window.set_inner_size(size);
+                if let Ok(at) = at {
+                    window.set_outer_position(at);
+                }
+            }
             Event::UserEvent(Told::Reload) => {
                 page_started.store(false, Ordering::Relaxed);
                 if let Some(webview) = page.webview() {
