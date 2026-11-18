@@ -12,7 +12,7 @@ import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
-import { DEVICE_CODE_GRANT_TYPE, oauthDeviceAuthorization } from "@better-auth/oauth-provider";
+import { DEVICE_CODE_GRANT_TYPE, getIssuer, oauthDeviceAuthorization, verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import Bowser from "bowser";
 import type { BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
@@ -239,9 +239,22 @@ const devices = () => ({
   hooks: {
     before: [
       {
-        // No consent screen: the passkey question is the consent, so it has to have just been answered.
+        // Allow on the consent page goes on to the passkey question, so it has to have just been answered. Cancel
+        // needs no one signed in: Better Auth asks for a session to say no, so it's answered here, as Better Auth
+        // would, at the redirect its own authorization endpoint checked before it signed the query.
         matcher: (ctx) => ctx.path === "/oauth2/consent",
         handler: createAuthMiddleware(async (ctx) => {
+          if (ctx.body?.accept !== true) {
+            const signed = String(ctx.body?.oauth_query ?? "");
+            if (!(await verifyOAuthQueryParams(signed, ctx.context.secret))) throw new APIError("BAD_REQUEST", { error: "invalid_signature" });
+            const query = new URLSearchParams(signed);
+            const denied = new URLSearchParams({ error: "access_denied", error_description: "User denied access" });
+            if (query.get("state")) denied.set("state", query.get("state")!);
+            denied.set("iss", getIssuer(ctx, { loginPage: SIGN_IN, consentPage: SIGN_IN }));
+            const url = new URL(query.get("redirect_uri")!);
+            for (const [name, value] of denied) url.searchParams.set(name, value);
+            return ctx.json({ redirect: true, url: url.href });
+          }
           const session = await getSessionFromCtx(ctx);
           if (!session || Date.now() - new Date(session.session.createdAt).getTime() >= FRESH * 1000)
             throw new APIError("FORBIDDEN", { message: "Sign in again to approve this." });
@@ -356,8 +369,8 @@ async function createAuth(origin: string) {
           },
         },
       }),
-      // What lets an assistant somewhere else in at /mcp, as MCP's authorization says. Signing in and saying yes are
-      // one page and one question.
+      // What lets an assistant somewhere else in at /mcp, as MCP's authorization says. Its consent page is the sign-in
+      // page, whose Allow goes on to the passkey.
       mcp({
         loginPage: SIGN_IN,
         consentPage: SIGN_IN,

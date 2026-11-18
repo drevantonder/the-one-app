@@ -1,18 +1,20 @@
 // The sign-in page. It asks for the passkey, and what that lets happen depends on how the page was opened (`Flow`):
-// with an invitation, someone joins; from an assistant's request to be let in, the assistant is. Opened with a new
+// with an invitation, someone joins; from an assistant's request to be let in, the assistant is, once they Allow it
+// on a consent page as Google's and GitHub's are. Opened with a new
 // device's code, as that device's link has it, its person signs in if they aren't yet, and is shown the code to
 // compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign-In & Security, someone
 // makes another passkey. Whichever it was, this browser is signed in after, and is one of that person's devices,
 // whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, which has no
 // passkeys, the page shows the device's code and its button opens the page in the device's browser instead.
-import { createSignal } from "solid-js"
+import { createSignal, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
-import { Field, Input, SignIn } from "ui"
+import { Field, Icon, Input, SignIn } from "ui"
 import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
 import Bowser from "bowser"
+import "./page.css"
 
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
 const opened = new URLSearchParams(location.hash.slice(1))
@@ -48,8 +50,8 @@ const shown = "code" in flow ? flow.code.replace(/(.{4})(?=.)/g, "$1-") : undefi
 /// Where answering an assistant or a device is, one stage at a time, which only `setStage` moves. A device's: whether
 /// this person is signed in here, which they do first if not; its code claimed for them, which only they can then
 /// answer, as what it's for is learned; comparing codes, and saying it matches or stopping it, which the button
-/// pressed shows under way; and how that ended. An assistant's: learning who's asking, and then saying so beside
-/// the passkey question. Either may fail, and Try Again starts it again.
+/// pressed shows under way; and how that ended. An assistant's: learning who's asking, and then asking whether to
+/// Allow it. Either may fail, and Try Again starts it again.
 type Stage =
   | { stage: "checking" }
   | { stage: "needsPasskey" }
@@ -57,13 +59,39 @@ type Stage =
   | { stage: "comparing"; name: string }
   | { stage: "approved"; name: string }
   | { stage: "denied"; name: string }
-  | { stage: "ready"; name: string }
+  | { stage: "ready"; app: App }
   | { stage: "created" }
   | { stage: "failed"; why: string }
 
 const [stage, setStage] = createSignal<Stage>({ stage: "checking" })
 /// The name someone joining goes by, as they type it.
 const [called, setCalled] = createSignal("")
+
+/// An assistant asking to be let in, as its own metadata names it (its Client ID Metadata Document or its
+/// registration), with who'd let it in if they're signed in here already.
+interface App {
+  name: string
+  logo?: string
+  /// Where it says it's from, when that isn't where it sends you back.
+  from?: string
+  to?: string
+  /// What this person goes by.
+  person?: string
+}
+
+/// The site an app says it's from, if it sends you back to a different one on the web: its metadata doesn't add up.
+/// One sent back to `localhost` or an app's own link is a program on this device.
+function elsewhere(from: string | undefined, redirect: string | null) {
+  try {
+    const [said, back] = [new URL(from!).hostname, new URL(redirect!)]
+    if (back.protocol !== "https:") return {}
+    const to = back.hostname
+    const same = said === to || to.endsWith(`.${said}`) || said.endsWith(`.${to}`)
+    return same ? {} : { from: said, to }
+  } catch {
+    return {}
+  }
+}
 
 /// What this page asks Better Auth besides the passkey.
 async function ask<T = unknown>(path: string, body: object): Promise<T> {
@@ -79,8 +107,22 @@ async function begin() {
   setStage({ stage: "checking" })
   try {
     if (flow.flow === "assistant") {
-      const client = await ask<{ client_name: string }>("/oauth2/public-client-prelogin", { client_id: flow.client, oauth_query: flow.request })
-      return setStage({ stage: "ready", name: client.client_name })
+      const [client, { data }] = await Promise.all([
+        ask<{ client_name?: string; client_uri?: string; logo_uri?: string }>("/oauth2/public-client-prelogin", { client_id: flow.client, oauth_query: flow.request }),
+        auth.getSession(),
+      ])
+      // An app named by its metadata document's address is from that address's site, which Better Auth checked.
+      const site = client.client_uri ?? (flow.client.startsWith("https://") ? flow.client : undefined)
+      const user = data?.user as { name: string; called?: string | null } | undefined
+      return setStage({
+        stage: "ready",
+        app: {
+          name: client.client_name || (site ? new URL(site).hostname : "An app"),
+          logo: client.logo_uri?.startsWith("https://") ? client.logo_uri : undefined,
+          ...elsewhere(site, params.get("redirect_uri")),
+          person: user && (user.called || user.name),
+        },
+      })
     }
     if (flow.flow === "device") {
       const { data } = await auth.getSession()
@@ -130,13 +172,19 @@ async function signIn() {
   if (error) throw new Error(error.message ?? "That passkey didn't work. Try again.")
   if (flow.flow === "join") await ask("/update-user", { called: called().trim() })
   if (flow.flow === "assistant") {
-    // Signing in was saying yes, so the assistant is sent back with what it came for.
+    // They allowed it and signed in, so the assistant is sent back with what it came for.
     const { url } = await ask<{ url: string }>("/oauth2/consent", { accept: true, oauth_query: flow.request })
     return location.replace(url)
   }
   // Signed in, someone is shown their Home Screen: this browser has the app too, the web client.
   if (flow.flow !== "device") return location.replace("/")
   await claim()
+}
+
+/// Cancel on the consent page: the assistant is sent back told no (`access_denied`), whether or not anyone's signed in.
+async function cancel() {
+  const { url } = await ask<{ url: string }>("/oauth2/consent", { accept: false, oauth_query: (flow as { request: string }).request })
+  location.replace(url)
 }
 
 /// This person's answer to the device whose code they compared.
@@ -151,8 +199,8 @@ const link = new URL(location.href)
 link.searchParams.delete("app")
 link.searchParams.delete("why")
 
-/// What a stage shows, as `SignIn` takes it, and whether it asks for a name.
-type Shows = Parameters<typeof SignIn>[0] & { asksName?: boolean }
+/// What a stage shows, as `SignIn` takes it, whether it asks for a name, and the assistant it asks about.
+type Shows = Parameters<typeof SignIn>[0] & { asksName?: boolean; app?: App }
 
 /// What each stage shows: its heading, the spinner's line while something's under way, the code, the warning, the
 /// problem, the button and what it does, and the one line left once it's answered.
@@ -190,8 +238,18 @@ function shows(): Shows {
       }
     case "assistant":
       switch (now.stage) {
-        case "ready":
-          return { heading: "Sign in", warning: `${now.name} will act as you. Sign in only if you asked for this.`, button: "Sign in", onSignIn: signIn }
+        case "ready": {
+          const { app } = now
+          return {
+            mark: <Logos app={app} />,
+            heading: `${app.name} wants to use your network`,
+            app,
+            button: "Allow",
+            onSignIn: signIn,
+            stop: "Cancel",
+            onStop: cancel,
+          }
+        }
         case "failed":
           return { heading: "Sign in", problem: `Couldn't tell who's asking: ${failed}`, button: "Try Again", onSignIn: begin }
         default:
@@ -206,12 +264,53 @@ function shows(): Shows {
   }
 }
 
+/// The app's logo, or its initial on a plain tile when it has none or it doesn't load, joined to the network's mark.
+function Logos(props: { app: App }) {
+  const [failed, setFailed] = createSignal(false)
+  return (
+    <div class="logos">
+      <Show when={props.app.logo && !failed()} fallback={<span class="tile">{[...props.app.name][0].toUpperCase()}</span>}>
+        <img class="tile" src={props.app.logo} alt="" referrerpolicy="no-referrer" onError={() => setFailed(true)} />
+      </Show>
+      <span class="joins" aria-hidden="true">···</span>
+      <img src={mark} alt="" />
+    </div>
+  )
+}
+
+/// Who the app would act as, what it will be able to do, as its token allows, a warning only when its metadata
+/// doesn't add up, and where it's taken out again.
+/// It reaches `/mcp`, every app's tools, as this person, and with `offline_access` it's given a refresh token.
+function Consent(props: { app: App }) {
+  const stays = params.get("scope")?.split(" ").includes("offline_access")
+  return (
+    <>
+      <p class="account">{[props.app.person && `as ${props.app.person}`, location.host].filter(Boolean).join(" · ")}</p>
+      <section class="can">
+        <h2>{props.app.name} will be able to</h2>
+        <ul>
+          <li><Icon name="check" />Use your apps' tools as you, like email, calendar and files</li>
+          <li><Icon name="check" />Reach only what you can, nothing more</li>
+          {stays && <li><Icon name="check" />Stay connected until you remove it</li>}
+        </ul>
+      </section>
+      <Show when={props.app.to}>
+        <p class="warning">
+          <Icon name="warning-circle" />
+          <span>{props.app.name} says it's from {props.app.from} but sends you back to {props.app.to}. Allow only if you trust {props.app.to}.</span>
+        </p>
+      </Show>
+      <p class="note">Allow only apps you trust. You can remove {props.app.name} anytime in Devices.</p>
+    </>
+  )
+}
+
 begin()
 
 render(
   () => (
     <SignIn
-      mark={<img src={mark} alt="" />}
+      mark={shows().mark ?? <img src={mark} alt="" />}
       heading={shows().heading}
       note={shows().note}
       code={shows().code}
@@ -225,6 +324,7 @@ render(
       onStop={shows().onStop}
       done={shows().done}
     >
+      {shows().app && <Consent app={shows().app!} />}
       {shows().asksName && !shows().done && (
         <Field label="Your name">
           <Input name="name" autocomplete="name" required value={called()} onInput={(event) => setCalled(event.target.value)} />

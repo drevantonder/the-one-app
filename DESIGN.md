@@ -88,12 +88,13 @@ What users see, as the project's owner decided it. Only their decisions are here
 
 ## Signing in and joining
 
-- No consent screen: signing in with the passkey is the only question.
+- An AI app connecting asks on a consent screen, as Google's and GitHub's do (18 Nov): its logo joined to ours, "<App> wants to use your network", who it acts as, a plain box of what it will be able to do, a grey note, then Cancel and Allow, which goes on to the passkey. It reads as guidance: warning colour only for what's really risky. Its name and logo are its own metadata's, never hard-coded.
+- Anyone else signing in has no consent screen: the passkey is the only question.
 - The one exception is a new device (15 Nov): it shows a short code, and where you sign in asks whether it matches, with nothing typed.
 - "It should be possible for you to let in new devices without my tap using the cli and/or MCP" (15 Nov, to the agents).
 - The sign-in screen and the pages the auth Worker serves are one component.
 - The logo is the mark alone, with no tile; the tile is for the OS's icons.
-- Words are bare: a title and a button. Warnings about who will act as you stay.
+- Words are bare: a title and a button. A new device's warning about who will act as you stays.
 - Try a Demo is in a ? menu in the start screen's corner.
 
 ## Opening, the connection and updates (17 Nov)
