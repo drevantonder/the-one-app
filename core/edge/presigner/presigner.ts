@@ -221,7 +221,7 @@ async function sign(env: PresignerEnv, by: string, token: string | null, body: s
   if (!ask) return refuse(400, "An ask is JSON that names one blob's key, to read, write, replace, list or remove");
   if (!(await allowed(env, by, token, ask))) return refuse(403, "You aren't on its list of servers");
   // Said before it's signed, so no list read from now on is believed until what's signed has had its time to land.
-  if (LIST.test(ask.key)) await changes(env).hold();
+  if (LIST.test(ask.key)) await changes(env).hold(ask.operation === "write" ? "absent" : "any");
   const { method, url, headers } = request(env, ask);
   url.searchParams.set("X-Amz-Expires", String(SIGNED_FOR));
   const signed = await bucket(env).sign(url, { method, headers, aws: { signQuery: true } });
@@ -323,21 +323,25 @@ type Lists = (prefix: string | undefined) => Promise<string[] | null>;
 const kept = new Map<string, { at: number; list: string[] | null }>();
 
 /**
- * Says when a list of servers was last changed, for every copy of the presigner, which each keep what they've read in
- * memory that no copy can reach into: a write to a list is signed for `SIGNED_FOR` seconds, so a list that was read
- * before that has passed may not be the one that's there then. Every list is held back from belief until then, and read
- * from the bucket again once it has, so a server taken off a list is refused on its next request, not when `KEPT`
- * ends. A Durable Object is one place that every copy asks, and answers in the order things happened.
+ * Says when a list of servers may have changed, for every copy of the presigner, which each keep what they've read in
+ * memory that no copy can reach into. A write to a list is signed for `SIGNED_FOR` seconds, so a list read before that
+ * has passed may not be the one that's there then. It's held back from belief until then, and read from the bucket
+ * again once it has, so a server taken off a list is refused on its next request, not when `KEPT` ends. A Durable
+ * Object is one place that every copy asks, and answers in the order things happened.
+ *
+ * A write that only lands if there's no list yet (`write`) can't change one that's there, and a server that starts
+ * signs one each time (`OneCore.Servers.joined?/2`), so that holds back only the lists that weren't there.
  */
 export class Changes extends DurableObject<PresignerEnv> {
-  /** Lists read at or before this time, in milliseconds, aren't believed. */
-  async until(): Promise<number> {
-    return (await this.ctx.storage.get<number>("until")) ?? 0;
+  /** When lists read at or before it aren't believed, in milliseconds: any, and the ones that weren't there. */
+  async until(): Promise<{ any: number; absent: number }> {
+    const held = await this.ctx.storage.get<number>(["any", "absent"]);
+    return { any: held.get("any") ?? 0, absent: held.get("absent") ?? 0 };
   }
 
   /** A write is signed now. The clocks of the copies and this one differ a little, so it's held a few seconds past that. */
-  async hold(): Promise<void> {
-    await this.ctx.storage.put("until", Date.now() + (SIGNED_FOR + 5) * 1000);
+  async hold(of: "any" | "absent"): Promise<void> {
+    await this.ctx.storage.put(of, Date.now() + (SIGNED_FOR + 5) * 1000);
   }
 }
 
@@ -345,16 +349,16 @@ const changes = (env: PresignerEnv) => env.CHANGES.getByName("lists");
 
 /**
  * Reads the lists of servers for one request: each from the bucket once, however often it's asked for, and from
- * what an earlier request read if that was read since the last change to any list and less than `KEPT` ago. What's
- * kept is the list, never a request for it: a promise made in one request can't be settled in another that has ended.
+ * what an earlier request read if that was read since any change to it and less than `KEPT` ago. What's kept is the
+ * list, never a request for it: a promise made in one request can't be settled in another that has ended.
  */
 function reader(env: PresignerEnv): Lists {
   const read = new Map<string | undefined, Promise<string[] | null>>();
-  let until: Promise<number> | undefined;
+  let until: ReturnType<Changes["until"]> | undefined;
   const get = async (prefix: string) => {
     const [at, held] = [Date.now(), await (until ??= changes(env).until())];
     const had = kept.get(prefix);
-    if (had && had.at > held && at - had.at < KEPT) return had.list;
+    if (had && had.at > (had.list ? held.any : Math.max(held.any, held.absent)) && at - had.at < KEPT) return had.list;
     const found = await list(env, prefix);
     for (const [old, { at: read }] of kept) if (at - read >= KEPT) kept.delete(old);
     kept.set(prefix, { at, list: found });
