@@ -9,7 +9,7 @@
 # the checkout, with the same inputs in its environment, named in capitals (`-f rust=1.99.1` is RUST). GitHub's
 # runner is free and leaves the Mac alone, but at times it has no macOS runner for hours, out of capacity (18 Nov), and
 # drops a job after 15 minutes: a job no runner has taken within 5 is cancelled, and the Mac builds it, slowly and in
-# the background there, as its person may be using it.
+# the background there, as its person may be using it, one build at a time, as they share its checkout.
 set -euo pipefail
 
 workflow=$1 file=$2 folder=$3 command=$4 && shift 4
@@ -23,18 +23,33 @@ done
 run=$(gh workflow run "$workflow" --ref main -f commit="$commit" "${inputs[@]}" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') ||
   { echo "GitHub wasn't asked to run $workflow." >&2 && exit 1; }
 id=${run##*/}
-watched=$(mktemp)
-trap 'rm -f "$watched"' EXIT
-if timeout 300 gh run watch "$id" >/dev/null 2>"$watched" || [[ $(gh run view "$id" --json jobs --jq '[.jobs[].steps | length] | add // 0') != 0 ]]; then
-  gh run watch "$id" --exit-status >/dev/null 2>&1 || { echo "$workflow failed on GitHub: gh run view $id --log-failed" >&2 && exit 1; }
+
+# Waits until the run is completed, or a runner has taken its job when `$1` is `taken`, or until `$2` seconds into
+# this, and leaves the run's state in `now`: `<status> <how many of its jobs a runner has taken>`. `gh run watch` ends
+# at the first of GitHub's API calls that fails, as some do while many releases watch at once (after 3 s, 18 Nov), so
+# a watch that ends early is started again, after the 30 s GitHub asks a client to wait.
+wait_for() {
+  local left
+  while true; do
+    now=$(gh run view "$id" --json status,jobs --jq '"\(.status) \([.jobs[] | select(.status != "queued" and .status != "waiting" and .status != "pending")] | length)"') || now=
+    left=$(($2 - SECONDS))
+    [[ $now == completed* || ($1 == taken && -n $now && $now != *" 0") ]] || ((left <= 0)) && return
+    timeout "$left" gh run watch "$id" --interval 30 >/dev/null 2>&1 || (($? == 124)) || sleep 30
+  done
+}
+wait_for taken 300
+if [[ -n $now && $now != *" 0" ]]; then
+  wait_for completed $((SECONDS + 6 * 3600))
+  [[ $(gh run view "$id" --json conclusion --jq .conclusion) == success ]] ||
+    { echo "$workflow failed on GitHub: gh run view $id --log-failed" >&2 && exit 1; }
   gh run download "$id" -n "${file%.*}" -D "$folder"
   echo "$file was built on GitHub's macOS runner: $run" >&2
   exit
 fi
-gh run cancel "$id" >/dev/null 2>&1 || true
-echo "GitHub's macOS runner didn't take $workflow ($run) in ${SECONDS}s, so the Mac builds $file. $(tail -1 "$watched")" >&2
+gh run cancel "$id" >/dev/null
+echo "GitHub's macOS runner didn't take $workflow ($run) in ${SECONDS}s, so the Mac builds $file." >&2
 ssh -o ConnectTimeout=15 mac "zsh -lc $(printf %q "set -e; export PATH=\$HOME/.local/bin:\$HOME/.cargo/bin:\$PATH CARGO_BUILD_JOBS=4 ${env[*]}
-cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit
-nice -n 19 taskpolicy -d throttle bash -c $(printf %q "$command") >&2 && cat $file && rm $file")" >"$folder/$file.part"
+lockf -k ~/scratch/one-release.lock bash -c $(printf %q "cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit &&
+nice -n 19 taskpolicy -d throttle bash -c $(printf %q "$command") >&2 && cat $file && rm $file")")" >"$folder/$file.part"
 mv "$folder/$file.part" "$folder/$file"
 echo "$file was built on the Mac" >&2

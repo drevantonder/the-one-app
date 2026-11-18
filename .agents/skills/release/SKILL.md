@@ -58,7 +58,7 @@ them, whatever they're on.
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, an app's `edge/`, `clients/web/`, and the app's window page `clients/app/page/`, which every app on a build it runs on loads from its next start, phones too) | `bun install && bun edge.js deploy <the network's address>` in `core/edge/`, with the Cloudflare token in `CLOUDFLARE_API_TOKEN` |
 | The server (`core/server/`, or Rust it builds with) | `tooling/release server`. A build that only changed One Core's code is loaded into each server while it runs (`update_method` `hot_load`, about a second); a changed NIF of One Core's is loaded beside the one before, and what calls it started again on it; one with a runtime built from anything else (`runtime-inputs`), messages `one` doesn't speak (`client::serve`), 0.minor, supervisor, struct, macro or `-on_load` module restarts each, as does any build after one that went back (`restart: <why>`, in `update_method_reason`). A new `one` alone restarts nothing: it's put in place as its build is loaded, and runs the server from its next start |
-| The desktop app or CLI (`core/client/`, `clients/`, an app's `client/native/`) | `tooling/release client`, then `one update` on each device. Servers take it by themselves, as the network's update takes a server build: the new `one` is put in place, restarting nothing, and runs each server from its next start. `client` includes the Mac's build, made on a Mac as a NIF is (about 2 to 3 minutes on GitHub, 8 with nothing cached, and up to 5 more before the owner's Mac builds it if GitHub has no runner: run `client` with your harness's longest timeout, and don't start it again, since a second release of the kind is refused while the first builds), and only when what it's built from changed since the network's latest `one/macos-aarch64` (so is every client: one that didn't keeps its build, and `one --version` says which that is); Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
+| The desktop app or CLI (`core/client/`, `clients/`, an app's `client/native/`) | `tooling/release client`, then `one update` on each device. Servers take it by themselves, as the network's update takes a server build: the new `one` is put in place, restarting nothing, and runs each server from its next start. `client` includes the Mac's build, made on a Mac as a NIF is (about 2 to 3 minutes on GitHub, 8 with nothing cached, and up to 5 more before the owner's Mac builds it if GitHub has no runner: run `client` with your harness's longest timeout; a second release of the kind waits for the first, then publishes what the network doesn't have, or says a newer build covers it), and only when what it's built from changed since the network's latest `one/macos-aarch64` (so is every client: one that didn't keeps its build, and `one --version` says which that is); Linux's alone is `tooling/release one/linux-x86_64 one-cli/linux-x86_64` (about 4 min) |
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, `tooling/`, `.agents/` | Nothing |
 
@@ -78,8 +78,8 @@ whoever makes it (`tooling/network`).
 On a device that is also a server, `one update` is the network's Update Now. What a server did is in the log of the
 program keeping it running (`one serve run`), `journalctl --user -u one-server-<key's first 12>` on Linux.
 
-Run an edge deploy only while no server release publishes on the machine, which `tooling/release` keeps as a pid file:
-`! { read -r pid _ <"${XDG_RUNTIME_DIR:-/tmp}/one-release-server.pid" && kill -0 "$pid"; } 2>/dev/null && bun edge.js deploy <address>`. The network's address and
+Run an edge deploy only while no server release publishes on the machine, by taking its lock, which waits for one that
+does: `flock ~/.cache/the-one-app/release-server.lock bun edge.js deploy <address>`. The network's address and
 where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 ## What is live
@@ -100,7 +100,7 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 - Releasing a server build onto storage whose stored names it had renamed. A rename of anything kept (a blob prefix,
   a database, a table) needs a one-time rename of what's stored first; say so in the commit and do it before
   `one update`.
-- Releasing from a worktree behind `origin/main`, which `tooling/release` refuses once a newer build is published.
+- Releasing from a worktree behind `origin/main`: a build the network has from a newer commit covers it, so `tooling/release` publishes none of it.
 - Releasing a server from a tree with changes not committed: the build is `.dirty`, and every server refuses it
   ("says it's ….dirty, not what was published").
 - Changing what servers ask each other (`hooks/call`, `apps/call`, what a call passed on says in `_meta`) so the

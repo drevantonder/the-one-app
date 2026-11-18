@@ -19,10 +19,11 @@
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac's `one` needs
 # its system's frameworks: from Linux, it's built on a Mac (`tooling/on-mac`: GitHub's runner, or the owner's), from
 # the same commit with the same Rust, and published with the rest. A server release and a client release run at once,
-# each in a checkout of its own, but a second of the same kind is refused while the first builds. One published while
-# the network's update of the one before is under way takes its place there. A commit older than one
-# the network has published is refused, so a release that finishes late doesn't undo a newer one. A build already
-# published is left as it is, and published again, so a network that didn't hear of it does. So is a client built from
+# each in a checkout of its own, and a second of the same kind waits for the first. One published while the network's
+# update of the one before is under way takes its place there. A build the network has published from this commit, or
+# from a newer one, which has this one's changes, covers it: it's left as it is, so a release that finishes late
+# doesn't undo a newer one, and one of this commit is published again, so a network that didn't hear of it does. So
+# is a client built from
 # the same as the network's latest, in the same series (`OneCore.Builds.talk?/2`): it keeps its build, which `one
 # --version` says, rather than being built again for a version it wouldn't differ in. A client's `inputs` are what
 # `client_inputs` says, kept with it as a runtime's are.
@@ -33,7 +34,7 @@
 # with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with, and on Windows Git, named by their SHA-256, which it downloads the first time (`OneCore.Programs`).
 # A Mac's VM is signed on the Mac, which must be awake. The builds are in
-# target/builds/<build> of the checkout it builds in, on Linux ~/.cache/the-one-app/release.
+# target/builds/<build> of the checkout it builds in, on Linux ~/.cache/the-one-app/release-<server or client>.
 #
 # A server for a kind of machine, `server/<kind>`, is published in two parts, which a machine puts together (`one
 # serve run`): `server-code`, One Core's own code, its release's `releases/` and the UI library, the same for every kind of
@@ -88,7 +89,24 @@ part=server
 build=$(tooling/version)
 commit=$(git rev-parse HEAD)
 here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
+
+# One release of each part on a machine at a time, as each builds in the checkout kept for its part (below): a second
+# waits for the first, and then finds what the network has published since. The lock is a flock every process the
+# release starts holds, so it's held until the last of them ends, even when the release is stopped and they aren't;
+# a pid file, released as the script ended, let a release start over the builds of one stopped before it, and two
+# releases take a lock released between their looks at it (18 Nov). A daemon a build starts would hold it too, as long
+# as it runs: the compiler cache's, sccache (`~/.cargo/config.toml`), is started before it's taken.
+if [[ -z $dry && $(uname) == Linux ]]; then
+  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$part
+  mkdir -p "$(dirname "$kept")"
+  ! command -v sccache >/dev/null || sccache --show-stats >/dev/null
+  exec 9>>"$kept.lock"
+  flock -n 9 || { echo "Waiting for the $part release of $(cat "$kept.lock") on this machine to finish" && flock 9; }
+  echo "$build, pid $$" >"$kept.lock"
+fi
+# What the network has, after the release before this one, and whether a build is from a newer commit than this.
 builds=$(one builds)
+git fetch -q origin main
 
 triple() {
   case $1 in
@@ -130,13 +148,6 @@ for want in "${wanted[@]}"; do
 done
 names=($(printf '%s\n' "${names[@]}" | sort -u))
 
-# Nothing older than what the network runs or has published: a release that finished late would undo it.
-for running in $(jq -r '[.servers[].build, .devices[].build, (.latest // {} | .[].build)] | unique[]' <<<"$builds"); do
-  sha=${running##*[-.]}
-  if [[ $commit != "$sha"* ]] && git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$commit" "$sha"; then
-    echo "The network has $running already, which is newer than $build: release from main as it is now." >&2 && exit 1
-  fi
-done
 # A breaking release only once every server and the edge are on the one before, since parts two apart don't talk
 # (`OneCore.Builds.talk?/2`). Devices aren't waited for: their people update them, which works whatever they're on.
 behind=$(jq -r --arg build "$build" '
@@ -150,15 +161,22 @@ behind=$(jq -r --arg build "$build" '
 [[ -z $behind ]] || { echo "$build is a breaking release, and $behind isn't on the network's $(jq -r .network.build <<<"$builds") yet: release it once they are." >&2 && exit 1; }
 
 
+# Whether a build is this commit's, or a newer one's on main, which has its changes.
+covers() {
+  local sha=${1##*[-.]}
+  [[ $commit == "$sha"* ]] || { git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$commit" "$sha"; }
+}
+
 # Which are built here, and which are published already.
 mine=()
 for name in "${names[@]}"; do
   kind=${name#*/}
   # A server is published as its code, which is the same for every kind, and its kind's runtime, which a kind of
   # machine new to the network has none of yet.
-  if [[ $(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds") == "$build" ]] &&
+  latest=$(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds")
+  if [[ -n $latest ]] && covers "$latest" &&
     { [[ $name != server/* ]] || jq -e --arg n "server-runtime/$kind" '.latest[$n]' <<<"$builds" >/dev/null; }; then
-    echo "$name  $build is published already"
+    if [[ $latest == "$build" ]]; then echo "$name  $build is published already"; else echo "$name  $latest is published, which has $build's changes"; fi
   elif [[ $name == server/* && $here != linux-* ]]; then
     echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
   elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && ($kind == windows-* || $name == one/macos-*)) ]]; then
@@ -182,26 +200,11 @@ done
 # Published already: published again, which sends nothing, so a network that didn't hear of it does.
 ((${#mine[@]})) || { one publish --builds '[]' >/dev/null && exit; }
 
-# One server release and one client release on a machine at a time, each kept as a pid file rather than flock: a daemon
-# a build starts (epmd, a compiler cache) inherits a flock's descriptor and outlives the release, which then refused
-# the next one with nothing publishing. Each holds its own checkout (below), which is what a second of its kind can't
-# share; a server's and a client's don't touch, so they build at once.
+# It builds in one checkout kept for releasing each part on this machine, put at the commit released, so each release
+# builds, downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does,
+# rather than all of it again in each new worktree (most of a server's build, 17 Nov). A server's and a client's don't
+# touch, so they build at once.
 if [[ $(uname) == Linux ]]; then
-  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release-$part.pid
-  if ! (set -o noclobber && echo "$$ $build" >"$lock") 2>/dev/null; then
-    read -r pid was <"$lock" || true
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "The $part release of $was is building on this machine (pid $pid): let it finish rather than build over it." >&2
-      exit 1
-    fi
-    echo "$$ $build" >"$lock"
-  fi
-  trap 'rm -f "$lock"' EXIT
-
-  # It builds in one checkout kept for releasing each kind on this machine, put at the commit released, so each release
-  # builds, downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does,
-  # rather than all of it again in each new worktree (most of a server's build, 17 Nov).
-  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$part
   [[ -d $kept ]] || { git worktree prune && git worktree add -q --detach "$kept" "$commit"; }
   git -C "$kept" checkout -q --detach -f "$commit"
   root=$kept && cd "$root"
@@ -225,6 +228,9 @@ signed() {
 }
 out=$target/builds/$build
 rm -rf "$out" && mkdir -p "$out"
+# cargo-xwin links its clang-cl again each time it starts, which two at once on a machine fail at, so it builds one
+# thing at a time there, as `tooling/nifs` does too.
+xwin=(flock -o "${XDG_CACHE_HOME:-$HOME/.cache}/cargo-xwin.lock" cargo xwin build --target x86_64-pc-windows-msvc)
 # Builds the client `$1`. Windows shows a program by its version resource and icon, as in Windows Firewall's prompt:
 # one's are the One App's. It's named there as its file is, one.exe. The app comes with its installer, made with NSIS,
 # the One App's by the same, and each is signed once it's what it ships as.
@@ -232,12 +238,12 @@ client() {
   local name=$1 file cargo program exe setup
   file=$(tr / - <<<"$name")
   case $name in
-    one-cli/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc --no-default-features) program=x86_64-pc-windows-msvc/release/one.exe ;;
-    one/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc) program=x86_64-pc-windows-msvc/release/one.exe ;;
-    one-cli/*) cargo=(build --no-default-features) program=release/one ;;
-    one/*) cargo=(build) program=release/one ;;
+    one-cli/windows-*) cargo=("${xwin[@]}" --no-default-features) program=x86_64-pc-windows-msvc/release/one.exe ;;
+    one/windows-*) cargo=("${xwin[@]}") program=x86_64-pc-windows-msvc/release/one.exe ;;
+    one-cli/*) cargo=(cargo build --no-default-features) program=release/one ;;
+    one/*) cargo=(cargo build) program=release/one ;;
   esac
-  echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
+  echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file "${cargo[@]}" --release -p app &&
     mkdir "$out/$file.d" && cp "$target/clients/$file/$program" "$out/$file.d/" && exe=$out/$file.d/$(basename "$program") &&
     { [[ $name != *windows-* ]] || { VERSION=${build%%+*} tooling/windows-name "$exe" && signed "$exe"; }; } &&
     { [[ $name != one/windows-* ]] || {
@@ -247,7 +253,7 @@ client() {
     }; } &&
     gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs"
 }
-clients=() windows=()
+clients=()
 for name in "${mine[@]}"; do
   file=$(tr / - <<<"$name")
   if [[ $name == one/macos-* && $here != macos-* ]]; then
@@ -257,15 +263,11 @@ for name in "${mine[@]}"; do
         -f rust="$(rustc -V | cut -d' ' -f2)" &&
       client_inputs "${name#*/}" >"$out/$file.inputs" || { echo "$name wasn't built." >&2 && exit 1; }) &
     clients+=($!)
-  elif [[ $name == one/windows-* || $name == one-cli/windows-* ]]; then
-    windows+=("$name")
   elif [[ $name == one/* || $name == one-cli/* ]]; then
     client "$name" &
     clients+=($!)
   fi
 done
-# Windows' one after the other: cargo-xwin links its clang-cl again each time it starts, which two at once fail at.
-((${#windows[@]})) && { (for name in "${windows[@]}"; do client "$name" || exit 1; done) & clients+=($!); }
 
 cache=$target/release-cache
 mkdir -p "$cache"

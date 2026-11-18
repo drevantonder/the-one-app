@@ -37,9 +37,12 @@ target=${CARGO_TARGET_DIR:-$root/target}
 
 declare -A sums=()
 for kind in "${kinds[@]}"; do
+  wrap=()
   case $kind in
     linux-x86_64 | linux-aarch64) triple=${kind#*-}-unknown-linux-gnu build="zigbuild --target $triple.2.35" library=lib%s.so ;;
-    windows-x86_64) triple=x86_64-pc-windows-msvc build="xwin build --target $triple" library=%s.dll ;;
+    # One cargo-xwin build on a machine at a time, as `tooling/release` says.
+    windows-x86_64) triple=x86_64-pc-windows-msvc build="xwin build --target $triple" library=%s.dll
+      wrap=(flock -o "${XDG_CACHE_HOME:-$HOME/.cache}/cargo-xwin.lock") ;;
     macos-aarch64) triple=aarch64-apple-darwin build="build --target $triple" library=lib%s.dylib ;;
     *) echo "No server runs on $kind" >&2 && exit 1 ;;
   esac
@@ -109,7 +112,7 @@ for kind in "${kinds[@]}"; do
   ((${#built[@]})) || continue
   # Each kind of machine needs Rust's standard library for it, which a new machine may not have yet.
   rustup target add "$triple" >/dev/null
-  env "${builds[@]}" cargo $build --release $(printf -- '-p %s ' $(basename -a $(dirname "${built[@]}")))
+  env "${builds[@]}" "${wrap[@]}" cargo $build --release $(printf -- '-p %s ' $(basename -a $(dirname "${built[@]}")))
   for file in "${built[@]}"; do
     crate=$(dirname "$file")
     if [[ $crate == */bin/* ]]; then
