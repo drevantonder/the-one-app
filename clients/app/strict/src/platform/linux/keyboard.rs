@@ -1,5 +1,6 @@
 // The key names from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_linux/src/linux/platform.rs,
-// `keystroke_from_xkb`, and x11/client.rs, `xkb_state_for_key_event`) at commit
+// `keystroke_from_xkb`, `get_xkb_compose_state` and `keystroke_underlying_dead_key`, and x11/client.rs,
+// `xkb_state_for_key_event`) at commit
 // 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, named here as the DOM's `KeyboardEvent.key` names them, which the strict
 // protocol's `keydown` and the inspector speak.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
@@ -33,6 +34,8 @@ pub fn key(state: &State, keycode: Keycode) -> Key {
         Keysym::Control_L | Keysym::Control_R => "Control",
         Keysym::Alt_L | Keysym::Alt_R => "Alt",
         Keysym::Super_L | Keysym::Super_R => "Meta",
+        Keysym::Multi_key => "Compose",
+        sym if (0xfe50..=0xfe93).contains(&sym.raw()) => "Dead",
         _ => "",
     };
     let key = if !named.is_empty() {
@@ -80,4 +83,71 @@ pub fn state_of(xkb: &State, event_state: xproto::KeyButMask) -> State {
         xkb.serialize_layout(xkb::STATE_LAYOUT_LOCKED),
     );
     key_event_state
+}
+
+/// The compose table for the locale, as libxkbcommon finds it (`LC_ALL`, `LC_CTYPE`, `LANG`, then `C`'s), which dead
+/// keys and the Compose key type accented letters and symbols by, as GTK's and GPUI's do without an input method.
+pub fn compose(context: &xkb::Context) -> Option<xkb::compose::State> {
+    let locales = ["LC_ALL", "LC_CTYPE", "LANG"].into_iter().filter_map(|name| std::env::var_os(name).filter(|locale| !locale.is_empty()));
+    locales.chain([std::ffi::OsString::from("C")]).find_map(|locale| {
+        let table = xkb::compose::Table::new_from_locale(context, &locale, xkb::compose::COMPILE_NO_FLAGS).ok()?;
+        Some(xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS))
+    })
+}
+
+/// What a dead key shows while it waits for the letter it accents, as the DOM's dead keys are drawn
+/// (developer.mozilla.org/en-US/docs/Web/API/UI_Events/Keyboard_event_key_values#dead_keycodes_for_linux).
+pub fn dead_key(keysym: Keysym) -> Option<String> {
+    match keysym {
+        Keysym::dead_grave => Some("`".to_owned()),
+        Keysym::dead_acute => Some("´".to_owned()),
+        Keysym::dead_circumflex => Some("^".to_owned()),
+        Keysym::dead_tilde => Some("~".to_owned()),
+        Keysym::dead_macron => Some("¯".to_owned()),
+        Keysym::dead_breve => Some("˘".to_owned()),
+        Keysym::dead_abovedot => Some("˙".to_owned()),
+        Keysym::dead_diaeresis => Some("¨".to_owned()),
+        Keysym::dead_abovering => Some("˚".to_owned()),
+        Keysym::dead_doubleacute => Some("˝".to_owned()),
+        Keysym::dead_caron => Some("ˇ".to_owned()),
+        Keysym::dead_cedilla => Some("¸".to_owned()),
+        Keysym::dead_ogonek => Some("˛".to_owned()),
+        Keysym::dead_iota => Some("ͅ".to_owned()),
+        Keysym::dead_voiced_sound => Some("゙".to_owned()),
+        Keysym::dead_semivoiced_sound => Some("゚".to_owned()),
+        Keysym::dead_belowdot => Some("̣̣".to_owned()),
+        Keysym::dead_hook => Some("̡".to_owned()),
+        Keysym::dead_horn => Some("̛".to_owned()),
+        Keysym::dead_stroke => Some("̶̶".to_owned()),
+        Keysym::dead_abovecomma => Some("̓̓".to_owned()),
+        Keysym::dead_abovereversedcomma => Some("ʽ".to_owned()),
+        Keysym::dead_doublegrave => Some("̏".to_owned()),
+        Keysym::dead_belowring => Some("˳".to_owned()),
+        Keysym::dead_belowmacron => Some("̱".to_owned()),
+        Keysym::dead_belowcircumflex => Some("ꞈ".to_owned()),
+        Keysym::dead_belowtilde => Some("̰".to_owned()),
+        Keysym::dead_belowbreve => Some("̮".to_owned()),
+        Keysym::dead_belowdiaeresis => Some("̤".to_owned()),
+        Keysym::dead_invertedbreve => Some("̯".to_owned()),
+        Keysym::dead_belowcomma => Some("̦".to_owned()),
+        Keysym::dead_currency => None,
+        Keysym::dead_lowline => None,
+        Keysym::dead_aboveverticalline => None,
+        Keysym::dead_belowverticalline => None,
+        Keysym::dead_longsolidusoverlay => None,
+        Keysym::dead_a => None,
+        Keysym::dead_A => None,
+        Keysym::dead_e => None,
+        Keysym::dead_E => None,
+        Keysym::dead_i => None,
+        Keysym::dead_I => None,
+        Keysym::dead_o => None,
+        Keysym::dead_O => None,
+        Keysym::dead_u => None,
+        Keysym::dead_U => None,
+        Keysym::dead_small_schwa => Some("ə".to_owned()),
+        Keysym::dead_capital_schwa => Some("Ə".to_owned()),
+        Keysym::dead_greek => None,
+        _ => None,
+    }
 }

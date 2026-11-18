@@ -401,9 +401,10 @@ impl Field {
         self.replace(self.range(), &s, EditKind::Other);
     }
 
-    /// What the input method says. A password takes none.
+    /// What the input method says. A password shows nothing being composed, but takes what's committed, as a dead
+    /// key's é.
     pub fn ime(&mut self, ime: Ime) {
-        if self.secure || self.readonly {
+        if self.readonly || (self.secure && matches!(ime, Ime::Preedit(..))) {
             self.preedit = None;
             return;
         }

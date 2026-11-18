@@ -52,6 +52,10 @@ pub struct Display {
     atoms: XcbAtoms,
     xkb: RefCell<xkbc::State>,
     xkb_context: xkbc::Context,
+    /// Dead keys' and the Compose key's sequences, and what one so far shows, as GPUI's X11 platform types them
+    /// without an input method.
+    compose: RefCell<Option<xkbc::compose::State>>,
+    composed: RefCell<String>,
     xkb_device: i32,
     cursors: cursor::Handle,
     loaded: RefCell<HashMap<Cursor, xproto::Cursor>>,
@@ -172,6 +176,8 @@ impl Display {
             screen,
             atoms,
             xkb: RefCell::new(xkb_state),
+            compose: RefCell::new(keyboard::compose(&xkb_context)),
+            composed: RefCell::default(),
             xkb_context,
             xkb_device,
             cursors,
@@ -328,6 +334,57 @@ impl Display {
         }
     }
 
+    /// Steps the dead keys' and Compose key's sequence with `keysym`, as GPUI's X11 key press does: while it's on
+    /// its way, what it has so far shows in the input as what's being composed, and once it's done its letter is
+    /// committed there; a sequence the key doesn't fit writes what it showed and starts again from the key. → whether
+    /// the sequence took the key, so it's typed no other way.
+    fn compose(&self, id: WindowId, keysym: xkbc::Keysym, typed: String, out: &mut Vec<(WindowId, Input)>) -> bool {
+        use xkbc::compose::{FeedResult, Status};
+        let mut compose = self.compose.borrow_mut();
+        let Some(compose) = compose.as_mut() else { return false };
+        if compose.feed(keysym) == FeedResult::Ignored {
+            return false;
+        }
+        // A dead key shows its accent, the Compose key a dot, as GTK draws them, and any other key what it types.
+        let shown = keyboard::dead_key(keysym).or_else(|| (keysym == xkbc::Keysym::Multi_key).then(|| "·".to_owned())).unwrap_or(typed);
+        let mut composed = self.composed.borrow_mut();
+        match compose.status() {
+            Status::Composing => {
+                composed.push_str(&shown);
+                out.push((id, Input::Ime(Ime::Preedit(composed.clone(), None))));
+                true
+            }
+            Status::Composed => {
+                composed.clear();
+                out.push((id, Input::Ime(Ime::Commit(compose.utf8().unwrap_or_default()))));
+                compose.reset();
+                true
+            }
+            Status::Cancelled => {
+                compose.reset();
+                if !composed.is_empty() {
+                    out.push((id, Input::Ime(Ime::Commit(std::mem::take(&mut *composed)))));
+                }
+                drop(composed);
+                // The key may start a sequence of its own, or be typed.
+                compose.feed(keysym) != FeedResult::Ignored && compose.status() == Status::Composing && {
+                    *self.composed.borrow_mut() = shown.clone();
+                    out.push((id, Input::Ime(Ime::Preedit(shown, None))));
+                    true
+                }
+            }
+            Status::Nothing => false,
+        }
+    }
+
+    /// Ends a dead key's sequence where it is, as a press or the window losing the keyboard does.
+    fn end_compose(&self) {
+        if let Some(compose) = self.compose.borrow_mut().as_mut() {
+            compose.reset();
+        }
+        self.composed.borrow_mut().clear();
+    }
+
     /// Gives the input method a key, as GPUI's `xim_handle_event` does.
     fn forward(&self, key: xproto::KeyPressEvent) {
         let mut xim = self.xim.borrow_mut();
@@ -424,6 +481,8 @@ impl Display {
             }
             Event::ButtonPress(event) => {
                 let Some(id) = self.window(event.event) else { return };
+                // A press ends a dead key's sequence: the input writes what it showed, as GPUI's does.
+                self.end_compose();
                 let at = self.at(event.event_x, event.event_y);
                 // Buttons 1 to 3 are the main, middle and secondary; 4 and 5 the wheel's turns, up and down, 6 and 7
                 // sideways; a notch is 3 lines of 16 px.
@@ -455,6 +514,7 @@ impl Display {
                     if let Some((ximc, handler)) = self.xim.borrow_mut().as_mut() {
                         reset_ic(ximc, handler);
                     }
+                    self.end_compose();
                     out.push((id, Input::Focus(false)));
                 }
             }
@@ -465,8 +525,11 @@ impl Display {
             }
             Event::KeyPress(event) => {
                 let Some(id) = self.window(event.event) else { return };
-                let key = keyboard::key(&keyboard::state_of(&self.xkb.borrow(), event.state), event.detail.into());
-                out.push((id, Input::Key(key)));
+                let state = keyboard::state_of(&self.xkb.borrow(), event.state);
+                let keysym = state.key_get_one_sym(event.detail.into());
+                if !self.compose(id, keysym, state.key_get_utf8(event.detail.into()), out) {
+                    out.push((id, Input::Key(keyboard::key(&state, event.detail.into()))));
+                }
             }
             Event::XkbStateNotify(event) => {
                 self.xkb.borrow_mut().update_mask(
