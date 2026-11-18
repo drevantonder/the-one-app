@@ -301,10 +301,12 @@ impl Screen {
                     Posted::Message(message) => {
                         let (Ok(message), Some(asked)) = (serde_json::from_str::<Value>(&message), self.asked.as_mut()) else { continue };
                         let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
-                        // What it copies, or shares, which a computer with no share sheet copies, goes on the clipboard.
-                        if let (Some(id), Some("one/copy" | "one/share"), Some(text)) = (message.get("id"), method.as_deref(), message["params"]["text"].as_str()) {
+                        // What it copies, or shares, which a computer with no share sheet copies (`done`: "copied"), goes on
+                        // the clipboard.
+                        if let (Some(id), Some(asked @ ("one/copy" | "one/share")), Some(text)) = (message.get("id"), method.as_deref(), message["params"]["text"].as_str()) {
                             self.clipboard.write(false, text);
-                            answers.push(json!({"jsonrpc": "2.0", "id": id, "result": {}}));
+                            let result = if asked == "one/share" { json!({"done": "copied"}) } else { json!({}) };
+                            answers.push(json!({"jsonrpc": "2.0", "id": id, "result": result}));
                             continue;
                         }
                         match asked(message, appearance) {
