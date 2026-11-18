@@ -82,14 +82,14 @@ type Protocol = { oldest: number; newest: number };
 /**
  * The protocols a part speaks, as it `said`, or where it said none, as its build, `version`, says: none known for
  * one that says neither. Parts built before they said theirs, as phones whose people haven't updated them are, speak
- * 1 from 0.24, whose wire it is unchanged, as `OneCore.Protocol.of/2` says; this goes once no part seen in 90 days
+ * 1 from 0.23, whose wire it is unchanged, as `OneCore.Protocol.of/2` says; this goes once no part seen in 90 days
  * says none.
  */
 function spoken(said: unknown, version: string | undefined): Protocol | undefined {
   const { oldest, newest } = (said ?? {}) as Partial<Protocol>;
   if (Number.isInteger(oldest) && Number.isInteger(newest) && oldest! <= newest!) return { oldest: oldest!, newest: newest! };
   const [major, minor] = (version ?? "").split(".").map(Number);
-  return major > 0 || minor >= 24 ? { oldest: 1, newest: 1 } : undefined;
+  return major > 0 || minor >= 23 ? { oldest: 1, newest: 1 } : undefined;
 }
 /** Whether a part that speaks `theirs` talks with the edge: their ranges overlap. */
 const talk = (theirs: Protocol | undefined) => !!theirs && theirs.oldest <= SPEAKS.newest && SPEAKS.oldest <= theirs.newest;

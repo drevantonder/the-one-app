@@ -27,11 +27,11 @@ defmodule OneCore.Protocol do
       when is_integer(oldest) and is_integer(newest) and oldest <= newest,
       do: %{"oldest" => oldest, "newest" => newest}
 
-  # Parts built before they said their protocol, as phones whose people haven't updated them are, speak 1 from 0.24,
+  # Parts built before they said their protocol, as phones whose people haven't updated them are, speak 1 from 0.23,
   # whose wire it is unchanged, and none known before it. This goes once no part seen in 90 days says none.
   def of(_said, build) do
     version = Builds.version(build)
-    if version && Version.compare(version, "0.24.0") != :lt, do: %{"oldest" => 1, "newest" => 1}
+    if version && Version.compare(version, "0.23.0") != :lt, do: %{"oldest" => 1, "newest" => 1}
   end
 
   @doc "Whether a part that speaks `theirs` (`of/2`) talks with this one (`overlap?/2`)."

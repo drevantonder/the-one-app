@@ -170,7 +170,7 @@ survey() {
   # use speaks only that. A part that says none speaks what its build does, as `OneCore.Protocol.of/2` has it.
   behind=$(jq -r --argjson mine "$(cat core/protocol.json)" --argjson since "$((($(date +%s) - 90 * 86400) * 1000))" '
     def spoken($said; $build):
-      $said // ($build // "" | split(".") | map(tonumber? // 0) | if .[0] > 0 or .[1] >= 24 then {oldest: 1, newest: 1} else null end);
+      $said // ($build // "" | split(".") | map(tonumber? // 0) | if .[0] > 0 or .[1] >= 23 then {oldest: 1, newest: 1} else null end);
     def overlaps($b): . != null and $b != null and .oldest <= $b.newest and $b.oldest <= .newest;
     def talks: overlaps($mine);
     def named: if . == null then "none" elif .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end;
