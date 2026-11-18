@@ -533,6 +533,9 @@ defmodule OneCore.Apps.Lifecycle do
         not Enum.any?(records, fn {holder, name} -> stranded?(owner, holder, name, version) end),
         moved = for({holder, name} <- records, do: superseded(owner, at, version, holder, name)),
         not Enum.any?(moved, &match?({:error, _why}, &1)) do
+      # What says it's installed for someone with no record of it any more, as a move from before moves unmarked
+      # left, goes, so it's installed for nobody.
+      for holder <- holders, do: Installed.unmarked(copy, holder)
       Hooks.observe("superseded", %{"app" => copy, "by" => artifact}, {nil, Store.whose(copy)})
       copy
     end
