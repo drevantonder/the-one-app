@@ -51,8 +51,11 @@ pub fn target() -> String {
 
 /// The protocols this build speaks with the network's other parts, from `oldest` to `newest` (`core/protocol.json`),
 /// which it says in each request: a server refuses one only where they speak none in common (`OneCore.Protocol`).
-pub static PROTOCOL: std::sync::LazyLock<Value> =
-    std::sync::LazyLock::new(|| serde_json::from_str(include_str!("../../protocol.json")).expect("core/protocol.json is JSON"));
+pub static PROTOCOL: std::sync::LazyLock<Value> = std::sync::LazyLock::new(|| {
+    let protocol: Value =
+        serde_json::from_str(include_str!("../../protocol.json")).expect("core/protocol.json is JSON");
+    json!({"oldest": protocol["oldest"], "newest": protocol["newest"]})
+});
 
 /// What a device says of itself as it asks for its token, which the network keeps so a list of its devices says
 /// which build each is: its build, the protocols it speaks, its kind of machine and its name.

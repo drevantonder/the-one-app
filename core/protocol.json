@@ -1,1 +1,1 @@
-{ "oldest": 1, "newest": 1 }
+{ "oldest": 1, "newest": 1, "legacy": { "from": "0.23.0", "protocol": 1 } }

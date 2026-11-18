@@ -29,8 +29,8 @@
 // speaks, and its build, as it says what it is. A call from outside goes only to a server that talks with the edge,
 // and says the edge's protocol and build: a rule apart from being ready.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
-/** The protocols the edge speaks, from `oldest` to `newest`. */
-import SPEAKS from "../../protocol.json";
+/** The protocols the edge speaks, and the cutoff for parts too old to say theirs (`core/protocol.json`). */
+import PROTOCOL_CONFIG from "../../protocol.json";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
 import type { Input, Reported } from "../updater/updater.ts";
@@ -79,17 +79,29 @@ const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
 const SWITCH = 12_000;
 /** The protocols a part speaks, from `oldest` to `newest` (`core/protocol.json`). */
 type Protocol = { oldest: number; newest: number };
+type Legacy = { from: string; protocol: number };
+/** The protocols the edge speaks, from `oldest` to `newest`. */
+const SPEAKS: Protocol = { oldest: PROTOCOL_CONFIG.oldest, newest: PROTOCOL_CONFIG.newest };
+const LEGACY: Legacy | undefined = (PROTOCOL_CONFIG as { legacy?: Legacy }).legacy;
+/** Semantic version `[major, minor, patch, release]` of a build string, or `undefined` if it isn't one. */
+const semver = (version: string | undefined): [number, number, number, number] | undefined => {
+  const match = /^(\d+)\.(\d+)\.(\d+)(-[^+]+)?(?:\+.*)?$/.exec(version ?? "");
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ? 0 : 1] : undefined;
+};
+const LEGACY_FROM = LEGACY ? semver(LEGACY.from) : undefined;
+const atLeast = (a: [number, number, number, number], b: [number, number, number, number]) =>
+  (a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]) >= 0;
 /**
  * The protocols a part speaks, as it `said`, or where it said none, as its build, `version`, says: none known for
  * one that says neither. Parts built before they said theirs, as phones whose people haven't updated them are, speak
- * 1 from 0.23, whose wire it is unchanged, as `OneCore.Protocol.of/2` says; this goes once no part seen in 90 days
- * says none.
+ * what `core/protocol.json`'s `legacy` says from its cutoff build, as `OneCore.Protocol.of/2` says; this goes once no
+ * part seen in 90 days says none.
  */
 function spoken(said: unknown, version: string | undefined): Protocol | undefined {
   const { oldest, newest } = (said ?? {}) as Partial<Protocol>;
   if (Number.isInteger(oldest) && Number.isInteger(newest) && oldest! <= newest!) return { oldest: oldest!, newest: newest! };
-  const [major, minor] = (version ?? "").split(".").map(Number);
-  return major > 0 || minor >= 23 ? { oldest: 1, newest: 1 } : undefined;
+  const parsed = LEGACY_FROM && semver(version);
+  return parsed && atLeast(parsed, LEGACY_FROM) ? { oldest: LEGACY!.protocol, newest: LEGACY!.protocol } : undefined;
 }
 /** Whether a part that speaks `theirs` talks with the edge: their ranges overlap. */
 const talk = (theirs: Protocol | undefined) => !!theirs && theirs.oldest <= SPEAKS.newest && SPEAKS.oldest <= theirs.newest;
