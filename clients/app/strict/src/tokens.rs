@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use gpui::Rgba;
+use crate::geometry::Rgba;
 
 /// What CSS has as 1rem, in pixels.
 const REM: f32 = 16.0;

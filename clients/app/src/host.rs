@@ -95,12 +95,39 @@ pub fn run(entrypoint: String, subject: Option<String>, link: String) -> ExitCod
     }
 }
 
+/// Asks the One App, started if it isn't running, to open `opened`'s window, and waits for its answer.
+#[cfg(target_os = "linux")]
+fn hand_over(home: &std::path::Path, opened: &Opened) -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build()?;
+    runtime.block_on(async {
+        let stream = connect(&crate::hosts::address(home)).await?;
+        let (read, mut write) = tokio::io::split(stream);
+        let ask = json!({"id": "open", "command": "open_window", "args": {"entrypoint": opened.entrypoint, "subject": opened.subject, "link": opened.link}});
+        write.write_all(format!("{ask}\n").as_bytes()).await?;
+        let mut lines = BufReader::new(read).lines();
+        while let Some(line) = lines.next_line().await? {
+            let answer: Value = serde_json::from_str(&line).unwrap_or_default();
+            if answer["id"] == "open" {
+                return match answer.get("error") {
+                    Some(error) => Err(anyhow::anyhow!("{error}")),
+                    None => Ok(()),
+                };
+            }
+        }
+        anyhow::bail!("the One App ended")
+    })
+}
+
 fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     let home = ::client::home()?;
-    // An app whose page is strict is drawn natively, where this program can (`strict`).
+    // Started by the system, from the app's own shortcut, it asks the One App to open it, which draws a strict app's
+    // window itself (`strict`) and starts a web view's, as this, for any other. Where that can't be, it's a web view.
     #[cfg(target_os = "linux")]
-    if let Some(exit) = crate::strict::run(started(), &home, &opened.entrypoint, opened.subject.as_deref(), &opened.link, class) {
-        return Ok(exit);
+    if std::env::var_os("ONE_WEB_VIEW").is_none() {
+        match hand_over(&home, &opened) {
+            Ok(()) => return Ok(ExitCode::SUCCESS),
+            Err(error) => eprintln!("{} opens here: {error:#}", opened.entrypoint),
+        }
     }
     crate::page::load(&home);
     let event_loop = EventLoopBuilder::<Told>::with_user_event().build();

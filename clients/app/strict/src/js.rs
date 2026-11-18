@@ -184,13 +184,15 @@ impl Sandbox {
     /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), and runs
     /// it until it waits again.
     pub fn send(&self, to: &str, message: &serde_json::Value) -> anyhow::Result<()> {
-        block_on(self.context.with(|ctx| {
+        let called = block_on(self.context.with(|ctx| {
             let ui: rquickjs::Object = run(&ctx, ctx.globals().get("ui"))?;
             let function: Function = run(&ctx, ui.get(to))?;
             let message: Value = run(&ctx, ctx.json_parse(message.to_string()))?;
             run(&ctx, function.call::<_, ()>((rquickjs::function::This(ui), message)))
-        }))?;
-        self.settle()
+        }));
+        // What it threw is its error, as a browser reports an event handler's, once what it queued has run.
+        self.settle()?;
+        called
     }
 
     /// When its next timer is due, in ms from now on its clock, if it has one.
@@ -216,11 +218,12 @@ impl Sandbox {
 
     /// Runs the timers that are due.
     pub fn fire(&self) -> anyhow::Result<()> {
-        block_on(self.context.with(|ctx| {
+        let fired = block_on(self.context.with(|ctx| {
             let host = run(&ctx, self.host.clone().restore(&ctx))?;
             run(&ctx, host.get::<_, Function>("fire").and_then(|fire| fire.call::<_, ()>(())))
-        }))?;
-        self.settle()
+        }));
+        self.settle()?;
+        fired
     }
 
     /// Runs its jobs, and what the Web APIs answer with a promise, until none is left, then tells it of each promise

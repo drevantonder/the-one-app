@@ -968,7 +968,7 @@ async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
         let mut tools = computer_use_client::tools();
         // A strict window's inspector, which is this program's own.
         #[cfg(all(desktop, target_os = "linux"))]
-        tools.push(Arc::new(strict::Inspector(home.clone())));
+        tools.push(Arc::new(strict::Inspector));
         let client = Client::open(home, cli::resolvers(), tools).await?;
         client.service("app");
         anyhow::Ok(client)

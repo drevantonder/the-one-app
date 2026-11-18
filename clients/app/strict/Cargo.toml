@@ -1,21 +1,26 @@
 [package]
 name = "strict"
-description = "A strict app drawn natively on a computer: its JS run in QuickJS, the ops it sends drawn with GPUI."
+description = "A strict app drawn natively on a computer: its JS run in QuickJS, the ops it sends laid out by Taffy and drawn by our own renderer, copied from GPUI."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# Zed's GPUI, from Zed's repo at a commit, as every app built on GPUI takes it: the release on crates.io is a year
-# behind and has no headless rendering. `headless` draws a window offscreen to a PNG (`examples/screenshot.rs`), with
-# GPUI's own headless context, which is test support.
-[features]
-headless = ["gpui/test-support", "gpui_platform/test-support", "dep:gpui_wgpu"]
-
 [dependencies]
 anyhow.workspace = true
-gpui = { git = "https://github.com/zed-industries/zed", rev = "1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a" }
-# A Linux window is X11's or Wayland's, whichever the desktop is: GPUI builds neither unless asked.
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a", features = ["x11", "wayland"] }
+# The GPU, as GPUI drew with it before it moved to wgpu: Vulkan on Linux and Windows, Metal on a Mac.
+blade-graphics = "0.9"
+blade-macros = "0.3"
+blade-util = "0.5"
+bytemuck = { version = "1", features = ["derive"] }
+data-encoding = "2"
+# Where glyphs and images are packed into the atlas's textures.
+etagere = "0.2"
+# Images a page shows, and the inspector's `snap`, a PNG.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+log = "0.4"
+parking_lot = "0.12"
+raw-window-handle = "0.6"
+resvg = { version = "0.47", default-features = false }
 # QuickJS, with its module loader: a page's module imports the UI library's. Its async runtime runs what the Web APIs
 # below answer with a promise.
 rquickjs = { version = "0.14", features = ["loader", "futures"] }
@@ -34,19 +39,18 @@ sys-locale = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11"
+taffy = "0.15"
+unicode-linebreak = "0.1"
 url = "2"
-# The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which GPUI's text systems read as TTF.
+# The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text systems read as TTF.
 wuff = "0.2"
-data-encoding = "2"
-# The inspector's `snap`, a PNG.
-image = { version = "0.25", default-features = false, features = ["png"] }
-raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-# The inspector's `snap` of a window on X11, read back from the X server: GPUI reads back only a headless window.
-x11rb = "0.13"
-gpui_wgpu = { git = "https://github.com/zed-industries/zed", rev = "1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a", optional = true }
-
-[[example]]
-name = "screenshot"
-required-features = ["headless"]
+# The windows' thread's event loop, as GPUI's Linux platform has it.
+calloop = "0.14"
+cosmic-text = "0.19"
+# The desktop's light or dark, from its portal, through libdbus, as tao reads the desktop.
+dbus = "0.9"
+swash = "0.2"
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "xkb", "cursor", "resource_manager"] }
+xkbcommon = { version = "0.8", default-features = false, features = ["x11"] }

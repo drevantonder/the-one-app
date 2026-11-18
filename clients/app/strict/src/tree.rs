@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context as _, bail};
+use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -151,6 +151,18 @@ impl Node {
     }
 }
 
+/// A batch of a version of the strict protocol this host doesn't speak, which a window opens in a web view instead.
+#[derive(Debug)]
+pub struct Mismatch(pub u32);
+
+impl std::fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "this host speaks version {} of the strict protocol, not {}", crate::VERSION, self.0)
+    }
+}
+
+impl std::error::Error for Mismatch {}
+
 pub struct Tree {
     pub nodes: HashMap<Id, Node>,
 }
@@ -169,7 +181,7 @@ impl Tree {
     /// Applies one batch, in order. A batch of a version this host doesn't speak is refused whole.
     pub fn apply(&mut self, update: Update) -> anyhow::Result<()> {
         if update.v != crate::VERSION {
-            bail!("this host speaks version {} of the strict protocol, not {}", crate::VERSION, update.v);
+            return Err(Mismatch(update.v).into());
         }
         for op in update.ops {
             match op {

@@ -18,11 +18,6 @@ iroh = { version = "1.4", default-features = false, features = ["tls-ring"] }
 serde_json = "1"
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 
-# What Zed's GPUI needs that crates.io doesn't have yet, as Zed's own workspace patches it (`strict`).
-[patch.crates-io]
-async-task = { git = "https://github.com/smol-rs/async-task", rev = "41fd3359c75e221bd8b187a8ee361aa309c1714c" }
-calloop = { git = "https://github.com/zed-industries/calloop", rev = "3759371fee14c40066d64777e2a36b6ffcc22590" }
-
 [profile.release]
 strip = true
 

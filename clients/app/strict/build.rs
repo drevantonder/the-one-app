@@ -1,4 +1,4 @@
-//! GPUI's X11 window links xkbcommon's X11 half by its unversioned name (`libxkbcommon-x11.so`), which a Linux
+//! The X11 window (`platform/linux/x11.rs`) links xkbcommon's X11 half by its unversioned name (`libxkbcommon-x11.so`), which a Linux
 //! distribution ships only in its development package (Debian's and Ubuntu's `libxkbcommon-x11-dev`), while the library
 //! itself (`libxkbcommon-x11.so.0`) is wherever X11 apps run. Where only that is, it's linked by a name of its own here,
 //! so building needs nothing installed that running doesn't.

@@ -1,5 +1,6 @@
-//! A computer's app windows: each app opens in a window of its own, in a process of its own (`host`), as an app
-//! the system lists by its own name and icon, and the launcher (`computer`) starts them. They have no client of
+//! A computer's app windows: a strict app's is drawn by this process (`strict`), and any other app's is a web view in
+//! a process of its own (`host`), as an app the system lists by its own name and icon; the launcher (`computer`)
+//! starts them. They have no client of
 //! their own: each asks through this one, over a local channel that only this user on this machine reaches, a Unix
 //! socket (`address`), or on Windows a named pipe, so there's one connection to the network, one sign-in
 //! and one set of what's kept. What one asks is what the launcher's page asks (`invoke`), by the same commands
@@ -128,8 +129,21 @@ pub fn open_now() -> Vec<(String, Option<String>)> {
 }
 
 /// Opens an app in its own window, at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link says it), or brings its
-/// window forward there if it's open.
+/// window forward there if it's open: drawn here if its page is strict and of a version this program speaks
+/// (`strict`), otherwise in a web view in a process of its own.
 pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
+    open(entrypoint, subject, link, true)
+}
+
+/// Opens an app's window again in a web view, as `open_window` does one that isn't strict, in place of its strict
+/// window: one whose app sent a version of the strict protocol this program doesn't speak.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
+    HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()));
+    open(entrypoint, subject, link, false)
+}
+
+fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     #[cfg(target_os = "macos")]
     {
@@ -144,18 +158,39 @@ pub fn open_window(entrypoint: String, subject: Option<String>, link: String) ->
         }
         return Ok(());
     }
-    let mut command = std::process::Command::new(crate::shortcuts::program(&entrypoint).map_err(|error| error.to_string())?);
-    command.env("ONE_APP", &entrypoint).env("ONE_OPEN", &link).stdin(std::process::Stdio::null());
+    open.insert(key.clone(), Host { to: None, link: None });
+    drop(open);
+    #[cfg(target_os = "linux")]
+    if strict {
+        crate::spawn(async move {
+            if !crate::strict::open(&entrypoint, subject.as_deref(), &link).await
+                && let Err(error) = process(&key, &entrypoint, subject.as_deref(), &link)
+            {
+                eprintln!("{error}");
+                HOSTS.open.lock().expect("no host panics").remove(&key);
+            }
+        });
+        return Ok(());
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = strict;
+    process(&key, &entrypoint, subject.as_deref(), &link).inspect_err(|_| drop(HOSTS.open.lock().expect("no host panics").remove(&key)))
+}
+
+/// Starts app `entrypoint`'s window in a web view, in a process of its own.
+fn process(key: &str, entrypoint: &str, subject: Option<&str>, link: &str) -> Result<(), String> {
+    let mut command = std::process::Command::new(crate::shortcuts::program(entrypoint).map_err(|error| error.to_string())?);
+    // Started here, it's a web view; started by the system, it asks this program to open it (`host`).
+    command.env("ONE_APP", entrypoint).env("ONE_OPEN", link).env("ONE_WEB_VIEW", "1").stdin(std::process::Stdio::null());
     // A window of its own, and no console's.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
-    match &subject {
+    match subject {
         Some(subject) => command.env("ONE_SUBJECT", subject),
         None => command.env_remove("ONE_SUBJECT"),
     };
     let mut child = command.spawn().map_err(|error| format!("{entrypoint} didn't open: {error}"))?;
-    open.insert(key.clone(), Host { to: None, link: None });
-    drop(open);
+    let key = key.to_owned();
     // It's waited for, so it's gone once it ends; one that never said hello is forgotten then.
     std::thread::spawn(move || {
         let _ = child.wait();
@@ -213,7 +248,7 @@ fn ns_string(text: &str) -> Option<*mut objc2::runtime::AnyObject> {
 }
 
 /// Talks with one app's window until it ends, or with a second start of the app (`again`).
-async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
+pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
     let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
     let (to, mut out) = unbounded_channel::<Value>();
@@ -272,8 +307,12 @@ async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
             });
         });
     }
+    // It's forgotten, unless another window has taken its place (`open_web_view`).
     if let Some(key) = key {
-        HOSTS.open.lock().expect("no host panics").remove(&key);
+        let mut open = HOSTS.open.lock().expect("no host panics");
+        if open.get(&key).is_some_and(|host| host.to.as_ref().is_some_and(|ours| ours.same_channel(&to))) {
+            open.remove(&key);
+        }
     }
     if let Some(views) = crate::app().views.get() {
         views.shown(&label, false);
@@ -281,7 +320,7 @@ async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
 }
 
 /// One file of an app's, for an app's window, as the launcher's page loads one (`Views::file`).
-async fn file(address: &str) -> Result<Value, String> {
+pub(crate) async fn file(address: &str) -> Result<Value, String> {
     let (kind, file) = crate::views()?.file(address).await.map_err(|error| format!("{error:#}"))?;
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))
 }

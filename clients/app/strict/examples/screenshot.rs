@@ -1,25 +1,26 @@
 //! A strict page drawn offscreen, the same on every run: a PNG of it and its semantic tree as JSON.
 //!
-//!     cargo run -p strict --features headless --example screenshot -- <page's built folder> <out.png> <out.json> \
+//!     cargo run -p strict --example screenshot -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
-//! core/ui's `record.js` does: `{ "<tool>": <its answer>, "<method>": <its result> }`. It draws with GPUI's own headless
-//! context: its test platform, Allo alone as the typeface, the sandbox's fixed clock and randomness, and wgpu's
-//! offscreen renderer on whatever adapter wgpu finds (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json` picks
-//! Mesa's software Vulkan, lavapipe, where there's no GPU). `--requests` gives it the inspector's requests first, one a
-//! line (`strict::inspect`), as a strict window takes them on its socket, from a file or stdin (`-`), each answered on
+//! core/ui's `record.js` does: `{ "<tool>": <its answer>, "<method>": <its result> }`. It draws as a window does, with
+//! Allo alone as the typeface, the sandbox's fixed clock and randomness, and our renderer drawing offscreen on
+//! whatever GPU Vulkan finds (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json` picks Mesa's software Vulkan,
+//! lavapipe, where there's no GPU). `--requests` gives it the inspector's requests first, one a line
+//! (`strict::inspect`), as a strict window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
 //! `step` moves it.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use gpui::{AppContext as _, HeadlessAppContext, WindowAppearance, px, size};
 use serde_json::{Value, json};
-use strict::Screen;
+use strict::geometry::{DevicePixels, Pixels, Size};
 use strict::js::{Clock, Files, Sandbox};
+use strict::render::{context::BladeContext, renderer::BladeRenderer, scene::Scene};
+use strict::text::{PlatformTextSystem, TextSystem};
+use strict::{Appearance, Screen};
 use url::Url;
 
 fn main() -> anyhow::Result<()> {
@@ -65,13 +66,11 @@ fn main() -> anyhow::Result<()> {
     strict::tokens::load(&files(&Url::parse("file:///ui/client/ui.css")?)?);
 
     let started = std::time::Instant::now();
-    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(strict::FONT));
-    let mut cx = HeadlessAppContext::with_platform(text_system, Arc::new(()), gpui_platform::current_headless_renderer);
-    strict::add_fonts(cx.text_system())?;
+    let mut text = TextSystem::new(PlatformTextSystem::new(strict::FONT, strict::fonts()?, false));
     let sandbox = Sandbox::start(&page, files, None, Clock::fixed())?;
     let ran = started.elapsed();
     // What the page asks its client, answered from `answers`, as record.js answers it.
-    let asked: strict::Asked = Box::new(move |message, _, _| {
+    let asked: strict::Asked = Box::new(move |message, _| {
         let id = message.get("id")?.clone();
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
         Some(match (method, params["name"].as_str()) {
@@ -85,17 +84,21 @@ fn main() -> anyhow::Result<()> {
             },
         })
     });
-    let window = cx.open_window(size(px(width), px(height)), |window, cx| {
-        cx.new(|cx| {
-            let mut screen = Screen::new(sandbox, Some(asked), window, cx);
-            screen.theme = Some(if dark { WindowAppearance::Dark } else { WindowAppearance::Light });
-            screen
-        })
-    })?;
-    cx.simulate_window_scale_factor_change(window.into(), scale);
-    cx.run_until_parked();
+    let mut screen = Screen::new(sandbox, Some(asked));
+    screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
+    let context = BladeContext::new(false)?;
+    let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };
+    let atlas = std::sync::Arc::new(strict::render::atlas::BladeAtlas::new(&context));
+    let mut renderer = BladeRenderer::offscreen(&context, atlas, device);
+    let mut scene = Scene::default();
+    let size = Size { width: Pixels(width), height: Pixels(height) };
+    let mut draw = |screen: &mut Screen| -> anyhow::Result<(u32, u32, Vec<u8>)> {
+        screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
+        renderer.draw(&scene);
+        renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))
+    };
     for line in requests.lines().filter(|line| !line.trim().is_empty()) {
-        cx.update_window(window.into(), |_, window, cx| drop(window.draw(cx)))?;
+        let (w, h, rgba) = draw(&mut screen)?;
         let request = match strict::inspect::Request::parse(line) {
             Ok(request) => request,
             Err(refused) => {
@@ -104,42 +107,32 @@ fn main() -> anyhow::Result<()> {
             }
         };
         if request.op == "snap" {
-            let image = cx.capture_screenshot(window.into())?;
             let mut png = Vec::new();
-            image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
-            let snapped = json!({"png": data_encoding::BASE64.encode(&png), "width": image.width(), "height": image.height()});
+            image::RgbaImage::from_raw(w, h, rgba).expect("the frame's size").write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+            let snapped = json!({"png": data_encoding::BASE64.encode(&png), "width": w, "height": h});
             println!("{}", strict::inspect::answer(&request.id, Ok(snapped)));
             continue;
         }
         let answered = std::rc::Rc::new(std::cell::RefCell::new(None));
         let to = answered.clone();
         let deadline = request.f64("deadline").unwrap_or(5000.0);
-        cx.update_window(window.into(), |_, window, cx| {
-            if let Some(Some(screen)) = window.root::<Screen>() {
-                screen.update(cx, |screen, cx| screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)), window, cx));
-            }
-        })?;
-        cx.run_until_parked();
-        // A `settle` not settled at once is told so at its deadline, on GPUI's test clock here.
+        screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)));
+        // A `settle` not settled at once is told so at its deadline.
         if answered.borrow().is_none() {
-            cx.advance_clock(std::time::Duration::from_secs_f64(deadline / 1000.0));
-            cx.run_until_parked();
+            std::thread::sleep(std::time::Duration::from_secs_f64(deadline / 1000.0));
+            screen.fire();
         }
         let answer = answered.borrow_mut().take();
         println!("{}", answer.unwrap_or_else(|| json!({"error": "it didn't answer"})));
     }
-    cx.update_window(window.into(), |_, window, cx| drop(window.draw(cx)))?;
+    let (w, h, rgba) = draw(&mut screen)?;
     let drawn = started.elapsed();
-    let image = cx.capture_screenshot(window.into())?;
-    image.save(png)?;
-    let (semantics, failed) = cx.update_window(window.into(), |_, window, cx| {
-        let screen = window.root::<Screen>().flatten().map(|screen| screen.read(cx));
-        (screen.map(Screen::semantics), screen.and_then(|screen| screen.failed.clone()))
-    })?;
-    std::fs::write(tree, serde_json::to_string_pretty(&semantics)?)?;
-    if let Some(failed) = failed {
+    renderer.destroy();
+    image::RgbaImage::from_raw(w, h, rgba).ok_or_else(|| anyhow::anyhow!("the frame is the wrong size"))?.save(png)?;
+    std::fs::write(tree, serde_json::to_string_pretty(&screen.semantics())?)?;
+    if let Some(failed) = &screen.failed {
         eprintln!("the page failed: {failed}");
     }
-    eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {}x{} px", image.width(), image.height());
+    eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {w}x{h} px");
     Ok(())
 }

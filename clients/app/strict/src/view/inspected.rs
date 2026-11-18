@@ -1,10 +1,8 @@
-//! What the inspector (`crate::inspect`) asks of a drawn screen: what the window draws and how it takes input, which a
-//! renderer of the host's own answers in its place. What's read from the tree alone is `inspect`'s.
+//! What the inspector (`crate::inspect`) asks of a drawn screen: where it drew each node and how it takes input. What's read from the tree alone is `inspect`'s.
 
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, bail};
-use gpui::{Context, Window, point, px};
 use serde_json::{Value, json};
 
 use super::{Edit, Screen};
@@ -18,7 +16,7 @@ impl Screen {
     /// Answers an inspector request, but `snap`, which is the window's to answer, as it has its pixels. It reads where
     /// each node was drawn as the last frame laid it out, so it's asked once a frame has been drawn after what changed
     /// last. `reply` is told once, at once but for `settle`.
-    pub fn inspect(&mut self, request: Request, reply: Reply, window: &mut Window, cx: &mut Context<Screen>) {
+    pub fn inspect(&mut self, request: Request, reply: Reply) {
         if request.op == "settle" {
             let deadline = Duration::from_secs_f64(request.f64("deadline").unwrap_or(5000.0).max(0.0) / 1000.0);
             let started = Instant::now();
@@ -28,41 +26,37 @@ impl Screen {
                 result["ms"] = json!(started.elapsed().as_millis() as u64);
                 reply(inspect::answer(&id, Ok(result)))
             })));
-            cx.spawn_in(window, async move |this, cx| {
-                cx.background_executor().timer(deadline).await;
-                let _ = this.update(cx, |this, _| this.tell_settled());
-            })
-            .detach();
+            // The window calls `fire` at the deadline, as `due` says.
             return self.tell_settled();
         }
-        let result = self.act(&request, window, cx);
+        let result = self.act(&request);
         reply(inspect::answer(&request.id, result))
     }
 
-    fn act(&mut self, request: &Request, window: &mut Window, cx: &mut Context<Screen>) -> anyhow::Result<Value> {
-        let dark = self.dark(window);
+    fn act(&mut self, request: &Request) -> anyhow::Result<Value> {
+        let dark = self.dark();
         Ok(match request.op.as_str() {
             "window" => {
-                let size = window.viewport_size();
+                let (size, scale) = self.painted;
                 json!({
-                    "width": f32::from(size.width),
-                    "height": f32::from(size.height),
-                    "scale": window.scale_factor(),
+                    "width": size.width,
+                    "height": size.height,
+                    "scale": scale,
                     "time": self.sandbox.clock().now(),
                     "paused": self.sandbox.clock().paused(),
                     "failed": self.failed,
                 })
             }
-            "tree" => inspect::tree(&self.tree, &self.rects.borrow()),
-            "query" => inspect::query(&self.tree, &self.rects.borrow(), dark, request),
+            "tree" => inspect::tree(&self.tree, &self.rects),
+            "query" => inspect::query(&self.tree, &self.rects, dark, request),
             "tap" => {
                 let target = if request.selects() {
                     inspect::one(&self.tree, request)?
                 } else {
                     let (x, y) = request.point().context("say what to tap: a node, by a selector, or a point, x and y")?;
-                    inspect::at(&self.tree, &self.rects.borrow(), x, y).with_context(|| format!("nothing is drawn at {x}, {y}"))?
+                    inspect::at(&self.tree, &self.rects, x, y).with_context(|| format!("nothing is drawn at {x}, {y}"))?
                 };
-                let tapped = self.press(target, window, cx)?;
+                let tapped = self.press(target)?;
                 json!({"tapped": tapped})
             }
             "type" => {
@@ -70,44 +64,39 @@ impl Screen {
                 let input = match request.selects() {
                     true => {
                         let id = inspect::one(&self.tree, request)?;
-                        self.press(id, window, cx)?
+                        self.press(id)?
                     }
-                    false => self.focused(window).context("nothing has the keyboard: say which input, by a selector")?,
+                    false => self.focused.context("nothing has the keyboard: say which input, by a selector")?,
                 };
                 if self.tree.nodes.get(&input).is_none_or(|node| node.kind != Kind::Input) {
                     bail!("node {input} isn't an input, so it takes no text");
                 }
                 let mut buffer = [0; 4];
                 for typed in text.chars() {
-                    self.edit(input, Edit::Type(typed.encode_utf8(&mut buffer)), window, cx);
+                    self.edit(input, Edit::Type(typed.encode_utf8(&mut buffer)));
                 }
                 json!({"typed": input, "value": self.typed.get(&input)})
             }
             "key" => {
                 let key = Key::of(request)?;
-                let node = self.key(&key, window, cx);
+                let node = self.key(&key);
                 json!({"node": node})
             }
             "scroll" => {
-                let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
-                let (offset, most) = (self.scroll.offset(), self.scroll.max_offset());
-                // GPUI's offset is how far the content has moved: up and left are negative.
-                let x = (f32::from(offset.x) - dx).clamp(-f32::from(most.x), 0.0);
-                let y = (f32::from(offset.y) - dy).clamp(-f32::from(most.y), 0.0);
-                self.scroll.set_offset(point(px(x), px(y)));
-                cx.notify();
-                json!({"scrolled": {"x": -x, "y": -y}})
+                let dy = request.f32("dy").unwrap_or(0.0);
+                // What scrolls around the node selected, or the window.
+                let at = if request.selects() { self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()) } else { None };
+                let (x, y) = at.unwrap_or((0.0, 0.0));
+                let id = self.scroll(crate::geometry::point(x, y), dy);
+                json!({"scrolled": {"x": 0.0, "y": id.map_or(0.0, |id| self.scrolled.get(&id).copied().unwrap_or(0.0))}})
             }
             "clock" => {
                 let clock = self.sandbox.clock().clone();
                 match request.inputs.get("pause").and_then(Value::as_bool) {
-                    Some(true) => {
-                        clock.pause();
-                        self.timer = None;
-                    }
+                    Some(true) => clock.pause(),
                     Some(false) => {
                         clock.resume();
-                        self.pump(window, cx);
+                        self.pump();
                     }
                     None => {}
                 }
@@ -116,10 +105,10 @@ impl Screen {
                     if ms < 0.0 {
                         bail!("the clock goes forward only: it's at {} ms", clock.now());
                     }
-                    self.step(ms, window, cx);
+                    self.step(ms);
                 }
                 if let Some(ms) = request.f64("step") {
-                    self.step(ms.max(0.0), window, cx);
+                    self.step(ms.max(0.0));
                 }
                 json!({"time": clock.now(), "paused": clock.paused()})
             }
@@ -129,65 +118,32 @@ impl Screen {
 
     /// Presses node `id`, as a finger or a pointer would: what takes the press is it or what it's in, an input
     /// taking the keyboard, and what listens for `click` getting one. → what took it.
-    fn press(&mut self, id: Id, window: &mut Window, cx: &mut Context<Screen>) -> anyhow::Result<Id> {
+    fn press(&mut self, id: Id) -> anyhow::Result<Id> {
         let mut at = Some(id);
         while let Some(node) = at.filter(|node| !inspect::pressable(&self.tree, *node)) {
             at = inspect::parent(&self.tree, node).filter(|parent| *parent != 0);
         }
         let pressed = at.with_context(|| format!("node {id} takes no press, and neither does what it's in"))?;
-        if let Some((handle, _)) = self.focus.get(&pressed) {
-            window.focus(&handle.clone(), cx);
-        }
+        self.focus(Some(pressed));
         if self.tree.nodes[&pressed].kind != Kind::Input {
-            self.event(pressed, "click", None, window, cx);
+            self.event(pressed, "click", None);
         }
         Ok(pressed)
     }
 
-    /// What has the keyboard.
-    fn focused(&self, window: &Window) -> Option<Id> {
-        self.focus.iter().find(|(_, (handle, _))| handle.is_focused(window)).map(|(id, _)| *id)
-    }
-
-    /// Presses a key where the keyboard is, as the window's own keys do. → what had the keyboard.
-    fn key(&mut self, key: &Key, window: &mut Window, cx: &mut Context<Screen>) -> Option<Id> {
-        let focused = self.focused(window);
-        if key.key == "Tab" {
-            if key.shift { window.focus_prev(cx) } else { window.focus_next(cx) }
-            return focused;
-        }
-        let id = focused?;
-        if self.tree.nodes.get(&id).is_some_and(|node| node.listens("keydown")) {
-            if let Err(error) = self.sandbox.send("event", &key.event(id)) {
-                self.failed = Some(format!("{error:#}"));
-            }
-            self.pump(window, cx);
-        }
-        let input = self.tree.nodes.get(&id).is_some_and(|node| node.kind == Kind::Input);
-        match key.key.as_str() {
-            "Enter" if input => drop(self.edit(id, Edit::Enter, window, cx)),
-            "Backspace" if input => drop(self.edit(id, Edit::Backspace, window, cx)),
-            "Enter" | " " if !input => self.event(id, "click", None, window, cx),
-            typed if input && typed.chars().count() == 1 && !key.ctrl && !key.meta => drop(self.edit(id, Edit::Type(typed), window, cx)),
-            _ => {}
-        }
-        Some(id)
-    }
-
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order.
-    fn step(&mut self, ms: f64, window: &mut Window, cx: &mut Context<Screen>) {
+    fn step(&mut self, ms: f64) {
         let clock = self.sandbox.clock().clone();
         clock.pause();
-        self.timer = None;
         let mut left = ms;
         while let Some(due) = self.sandbox.due().filter(|due| *due <= left) {
             let due = due.max(0.0);
             clock.advance(due);
             left -= due;
-            self.fire(window, cx);
+            self.fire();
         }
         clock.advance(left);
-        self.pump(window, cx);
+        self.pump();
     }
 
     /// Tells each `settle` waiting that it's settled, if it is, or what's pending once its deadline has come.
@@ -204,42 +160,4 @@ impl Screen {
             tell(json!({"settled": settled, "pending": pending}));
         }
     }
-}
-
-/// The window as drawn, for the inspector's `snap`, read back from the X server, as GPUI reads back only a headless
-/// window's (its own renderer's offscreen frame will take its place). A Wayland window can't be read back by its app.
-pub fn snap(window: &Window) -> anyhow::Result<Value> {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let drawable = match HasWindowHandle::window_handle(window).map_err(|error| anyhow::anyhow!("{error}"))?.as_raw() {
-        RawWindowHandle::Xcb(handle) => handle.window.get(),
-        RawWindowHandle::Xlib(handle) => handle.window as u32,
-        _ => bail!("only a window on X11 is snapped yet: this one isn't (run it with WAYLAND_DISPLAY unset)"),
-    };
-    snap_x11(drawable)
-}
-
-#[cfg(target_os = "linux")]
-fn snap_x11(drawable: u32) -> anyhow::Result<Value> {
-    use x11rb::connection::Connection as _;
-    use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat};
-    let (connection, _) = x11rb::connect(None)?;
-    let geometry = connection.get_geometry(drawable)?.reply()?;
-    let (width, height) = (u32::from(geometry.width), u32::from(geometry.height));
-    let image = connection.get_image(ImageFormat::Z_PIXMAP, drawable, 0, 0, geometry.width, geometry.height, !0)?.reply()?;
-    let bytes = (width * height * 4) as usize;
-    if image.data.len() < bytes {
-        bail!("the X server gave {} bytes of a {width}x{height} window, not 32 bits a pixel", image.data.len());
-    }
-    // BGRX, as a 24-bit depth window's pixels are little-endian on every machine this runs on.
-    let rgba: Vec<u8> = image.data[..bytes].chunks_exact(4).flat_map(|pixel| [pixel[2], pixel[1], pixel[0], 255]).collect();
-    let picture = image::RgbaImage::from_raw(width, height, rgba).context("its pixels don't fill it")?;
-    let mut png = Vec::new();
-    picture.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
-    let _ = connection.flush();
-    Ok(json!({"png": data_encoding::BASE64.encode(&png), "width": width, "height": height}))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn snap_x11(_: u32) -> anyhow::Result<Value> {
-    bail!("only a window on X11 is snapped yet")
 }
