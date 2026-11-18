@@ -45,11 +45,12 @@ export const Video: typeof Strict.Video = (props) => {
 
 export const render: typeof Strict.render = (code) => draw(code as never)
 
-/** A layer: a box over the whole window, at the root, after the page, so it's drawn over it. A modal one's dialog says
- * so (`aria-modal`), and the host holds the keyboard and the screen reader in it. */
+/** A layer: a box over the whole window, at the root, after the page, so it's drawn over it. A modal one says so
+ * (`aria-modal`): the host holds the keyboard and the screen reader in it, and what's behind it is inert, as the DOM's
+ * is. */
 export const Layer: typeof Strict.Layer = (props) => {
   const box = createElement("box")
-  spread(box, { style: layer })
+  spread(box, { style: layer, get "aria-modal"() { return props.modal ? "true" : undefined } })
   insertNode(root, box)
   insert(box, () => props.children)
   onCleanup(() => detach(box))

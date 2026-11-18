@@ -18,7 +18,8 @@ const fromContent = new Set(["button", "link", "heading", "menuitem", "tab", "op
 const states = ["level", "expanded", "checked", "disabled", "selected", "busy", "current"]
 const whenSo = new Set(["disabled", "selected", "busy", "current"])
 
-const words = (node: Semantic): string => node.text ?? node.children.map(words).filter(Boolean).join(" ")
+/** What's in a node, as ARIA names something from its content: words, and what's in it by its own name. */
+const words = (node: Semantic): string => node.text ?? node.name ?? node.children.map(words).filter(Boolean).join(" ")
 const tidy = (text: string) => text.replace(/\s+/g, " ").trim()
 
 /** The tree as lines, `- role "name" [state=value]`, what's in each indented under it. */

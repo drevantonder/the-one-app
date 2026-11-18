@@ -84,7 +84,8 @@
     "like": "Recently Deleted",
     "taps": [
       "More for groceries"
-    ]
+    ],
+    "touch": true
   },
   "Nothing Deleted": {
     "answers": {

@@ -1,7 +1,7 @@
 // A whole view of an app, a part of one, and a list beside what it opens: written once in strict, on the primitives
 // (#primitives), the same on the DOM and on a native host, which each say what's theirs (#bridge): their history,
 // their device's back and how they move between screens.
-import { createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
+import { children, createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Scroll, Text } from "#primitives"
 import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport } from "#bridge"
@@ -112,9 +112,9 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
               <Icon name="caret-left" along />
             </Button>
           </Show>
-          <Text role="heading" aria-level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, !named() && look.unnamed]}>
+          <Heading level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, !named() && look.unnamed]}>
             {props.heading}
-          </Text>
+          </Heading>
           <Show when={props.action}>
             <BarEnd value={true}>
               <Collect value={computer ? collect : null}>
@@ -140,14 +140,28 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   )
 }
 
+/** A heading: its words a `Text`, or, where it's more than words (a button at its end, an icon before it), a box
+ * that's the heading, as a `Text` holds only words. */
+function Heading(props: { level: number; "aria-hidden"?: "true"; style: Parameters<typeof Text>[0]["style"]; children?: JSX.Element }) {
+  const inside = children(() => props.children)
+  const words = () => inside.toArray().every((part) => typeof part === "string" || typeof part === "number")
+  return (
+    <Show when={words()} fallback={<Box role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>{inside()}</Box>}>
+      <Text role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>
+        {inside()}
+      </Text>
+    </Show>
+  )
+}
+
 /// `<Section heading="This week">...</Section>`: a part of a screen under a small grey heading.
 export function Section(props: { heading?: JSX.Element; children?: JSX.Element }) {
   return (
     <Box style={look.section}>
       <Show when={props.heading}>
-        <Text role="heading" aria-level={2} style={[look.heading, touch() && look.touchHeading]}>
+        <Heading level={2} style={[look.heading, touch() && look.touchHeading]}>
           {props.heading}
-        </Text>
+        </Heading>
       </Show>
       {props.children}
     </Box>

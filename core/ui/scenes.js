@@ -233,9 +233,10 @@ for (const target of targets) {
     const said = [`${name} · ${scene.name}`]
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
-    else compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
+    else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     const before = against && join(against, name, folder.split("/").at(-1))
-    if (before && existsSync(join(before, "dom.png"))) compared(said, "before and now", readFileSync(join(before, "dom.txt"), "utf8"), shown.tree, join(before, "dom.png"), join(folder, "dom.png"), join(folder, "changed.png"))
+    if (shown.tree === undefined) {
+    } else if (before && existsSync(join(before, "dom.png"))) compared(said, "before and now", readFileSync(join(before, "dom.txt"), "utf8"), shown.tree, join(before, "dom.png"), join(folder, "dom.png"), join(folder, "changed.png"))
     else if (before) said.push("  before and now: no scene of this name before")
     said.push(`  ${folder}`)
     report.push(said.join("\n"))
