@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Computer Use on this phone (ComputerUse.kt): it sees the screen, takes screenshots, touches it and reads the field
-     that has the focus, to type there. It listens to nothing that happens on the screen. -->
+<!-- Computer Use on this phone or TV (ComputerUse.kt): it sees the screen, takes screenshots, touches it, reads the
+     field that has the focus, to type there, and moves the focus as a D-pad does. It does nothing with what happens on
+     the screen, and hears of what changes and where the focus goes only so Android keeps what it reads of the
+     screen up to date, as it does from the events a service hears. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/computer_use_description"
     android:summary="@string/computer_use_summary"
-    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged|typeViewFocused|typeViewAccessibilityFocused"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
     android:canTakeScreenshot="true"
     android:isAccessibilityTool="false"
-    android:notificationTimeout="1000" />
+    android:notificationTimeout="0" />

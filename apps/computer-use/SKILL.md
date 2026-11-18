@@ -90,7 +90,7 @@ app that records the screen.
 
 ## A person's own phone
 
-Each Android phone whose The One App has answered is a screen, called what its person called it as they signed it in:
+Each Android phone or TV whose The One App has answered is a screen, called what its person called it as they signed it in:
 its whole screen, as its person sees it. A phone runs no server, so its app does each action, through Android's accessibility service,
 which only its person turns on: Settings → Accessibility → The One App. Until they have, `screens` says so in the
 phone's description, and an action fails saying so while the phone tells its person how to turn it on. On Android 13
@@ -103,8 +103,11 @@ The One App's App Info. Computer Use on a phone needs Android 11 or later.
   way from where it scrolls, and stops where it ends.
 - `type` puts text into the field that has the focus, where its selection is: tap the field first. It refuses a
   password field: ask the person to type it.
-- `key` has only what Android gives: `Back` (or `Escape`), `Home`, `Recents`, `Notifications`, and `Return` in the
-  field that has the focus. Anything else refuses.
+- `key` has only what Android gives: `Back` (or `Escape`), `Home`, `Recents`, `Notifications`; `Up`, `Down`, `Left`
+  and `Right`, which move the focus as a D-pad does and say where it went; and `Return`, which is Return in a field and
+  presses what has the focus anywhere else. Anything else refuses.
+- An Android TV is the same, driven as its remote drives it: move with `key` Up, Down, Left and Right, and press with
+  Return. `click` taps there too, though its apps are made for a D-pad.
 - A phone whose app isn't running is still listed, saying so, and is woken by a push as it's used, which takes a few
   seconds; one that doesn't wake (off, offline, or notifications not allowed for The One App) says so. Only the
   phone's person and the network's owner use it, and you act as them, with their apps and accounts.

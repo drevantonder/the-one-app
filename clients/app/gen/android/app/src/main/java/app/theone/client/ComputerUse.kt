@@ -7,15 +7,18 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Point
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
+import android.view.View
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.RequiresApi
@@ -23,6 +26,7 @@ import androidx.core.app.NotificationCompat
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -54,8 +58,6 @@ class ComputerUse : AccessibilityService() {
   companion object {
     @Volatile private var running: ComputerUse? = null
 
-    /** What's said wherever it's off, as the switch is in Android's Settings. */
-    private const val OFF = "Computer Use isn't on for this phone: its person turns on The One App in Settings → Accessibility, as Computer Use in the app shows them."
     private const val CHANNEL = "computer-use"
     private const val ASKED = 7700
 
@@ -64,8 +66,14 @@ class ComputerUse : AccessibilityService() {
     fun screen(context: Context): String {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) throw IllegalStateException("Computer Use needs Android 11 or later.")
       val (width, height) = picture(real(context))
-      return """{"width":$width,"height":$height,"on":${running != null}}"""
+      return """{"width":$width,"height":$height,"on":${running != null},"tv":${tv(context)}}"""
     }
+
+    /** Whether this is a TV, which its remote's D-pad drives: Android TV's home is leanback, which no phone has. */
+    private fun tv(context: Context) = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
+    /** What this device is, as its person would say it. */
+    private fun kind(context: Context) = if (tv(context)) "TV" else "phone"
 
     /** A PNG of the screen as it is now. */
     @JvmStatic
@@ -153,28 +161,31 @@ class ComputerUse : AccessibilityService() {
     }
 
     /**
-     * Presses `keys`, space between, one after another: a phone has only Back (or Escape), Home, Recents and
-     * Notifications, which Android gives an accessibility service, and Return in the field that has the focus.
+     * Presses `keys`, space between, one after another. An accessibility service can't press a key, so each is what
+     * Android gives it to do in its place: Back (or Escape), Home, Recents and Notifications as the system's; Up,
+     * Down, Left and Right as a D-pad moves the focus, to what's next that way; and Return as typing's Return in a
+     * field, or anywhere else as a D-pad's centre, clicking what has the focus.
      */
     @JvmStatic
     fun key(context: Context, keys: String): String {
       val service = service(context)
       val pressed = keys.split(" ").filter { it.isNotEmpty() }
-      val actions = pressed.map {
+      val actions: List<() -> String?> = pressed.map {
         when (it.lowercase()) {
-          "back", "escape" -> GLOBAL_ACTION_BACK
-          "home" -> GLOBAL_ACTION_HOME
-          "recents" -> GLOBAL_ACTION_RECENTS
-          "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
-          "return", "enter" -> null
-          else -> throw IllegalStateException("A phone has no $it key: it has Back, Home, Recents, Notifications and Return. Type text with `type`.")
+          "back", "escape" -> { -> service.global(GLOBAL_ACTION_BACK, it) }
+          "home" -> { -> service.global(GLOBAL_ACTION_HOME, it) }
+          "recents" -> { -> service.global(GLOBAL_ACTION_RECENTS, it) }
+          "notifications" -> { -> service.global(GLOBAL_ACTION_NOTIFICATIONS, it) }
+          "up" -> { -> service.move(View.FOCUS_UP) }
+          "down" -> { -> service.move(View.FOCUS_DOWN) }
+          "left" -> { -> service.move(View.FOCUS_LEFT) }
+          "right" -> { -> service.move(View.FOCUS_RIGHT) }
+          "return", "enter" -> service::enter
+          else -> throw IllegalStateException("A ${kind(service)} has no $it key: it has Back, Home, Recents, Notifications, Up, Down, Left, Right and Return. Type text with `type`.")
         }
       }
-      for (action in actions) {
-        val done = if (action != null) service.performGlobalAction(action) else service.enter()
-        if (!done) throw IllegalStateException("Android didn't press ${pressed[actions.indexOf(action)]}.")
-      }
-      return "Pressed $keys"
+      val now = actions.map { it() }.lastOrNull()
+      return if (now != null) "Pressed $keys: the focus is on $now" else "Pressed $keys"
     }
 
     /**
@@ -185,7 +196,7 @@ class ComputerUse : AccessibilityService() {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) throw IllegalStateException("Computer Use needs Android 11 or later.")
       return running ?: run {
         asked(context)
-        throw IllegalStateException(OFF)
+        throw IllegalStateException("Computer Use isn't on for this ${kind(context)}: its person turns on The One App in Settings → Accessibility, as Computer Use in the app shows them.")
       }
     }
 
@@ -201,7 +212,7 @@ class ComputerUse : AccessibilityService() {
       val tap = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("app", "computer-use")
       val shown = NotificationCompat.Builder(context, CHANNEL)
         .setSmallIcon(R.mipmap.ic_launcher)
-        .setContentTitle("Your AI asked to use this phone")
+        .setContentTitle("Your AI asked to use this ${kind(context)}")
         .setContentText("To let it, turn on The One App in Accessibility settings.")
         .setAutoCancel(true)
         .setContentIntent(PendingIntent.getActivity(context, ASKED, tap, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
@@ -285,10 +296,91 @@ class ComputerUse : AccessibilityService() {
   /** The field that has the focus to type into, in any window on the screen. */
   private fun focused(): AccessibilityNodeInfo? = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
 
-  /** Return in the field that has the focus, as its keyboard's action key: Android 11 or later. */
-  private fun enter(): Boolean {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) throw IllegalStateException("Return needs Android 11 or later.")
-    val field = focused() ?: throw IllegalStateException("Nothing on the screen has the focus to press Return in: tap a text field first.")
-    return field.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+  private fun global(action: Int, key: String): String? {
+    if (!performGlobalAction(action)) throw IllegalStateException("Android didn't press $key.")
+    return null
+  }
+
+  /** Where this last moved the focus. */
+  private var moved: AccessibilityNodeInfo? = null
+
+  /**
+   * What has the focus: where this last moved it, while it's still there; or the input focus a D-pad moves and a
+   * keyboard types into, or else what TalkBack reads, or else the active window. A web view says the input focus is
+   * on itself, its frame or the element at different times, of the same focus, so it's the innermost focused element.
+   */
+  private fun current(): AccessibilityNodeInfo {
+    moved?.takeIf { it.refresh() && it.isFocused }?.let { return it }
+    val focus = focused() ?: findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY) ?: rootInActiveWindow
+      ?: throw IllegalStateException("Nothing is on the screen.")
+    return innermost(focus) ?: focus
+  }
+
+  private fun innermost(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+    for (i in 0 until node.childCount) node.getChild(i)?.let(::innermost)?.let { return it }
+    return node.takeIf { it.isFocused }
+  }
+
+  /** Moves the focus to what's next in `direction` from what has it, as a D-pad does, and says what that is. */
+  private fun move(direction: Int): String {
+    val from = current()
+    val at = Rect().also(from::getBoundsInScreen)
+    // From an element of a web page, Android's own search gives the web view, which holds it, or itself.
+    val searched = from.focusSearch(direction)?.takeUnless { Rect().also(it::getBoundsInScreen).contains(at) }
+    val next = searched ?: nearest(from, direction) ?: throw IllegalStateException("Nothing is there to move the focus to.")
+    if (!next.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) throw IllegalStateException("Android didn't move the focus.")
+    moved = next
+    return named(next)
+  }
+
+  /** What a node is, as its person would read it: its text, or what it's labelled, or else what kind of thing it is. */
+  private fun named(node: AccessibilityNodeInfo): String {
+    val at = Rect().also(node::getBoundsInScreen)
+    val name = (node.text ?: node.contentDescription)?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { "“${it.take(60)}”" }
+      ?: node.className?.toString()?.substringAfterLast('.') ?: "something"
+    val size = real(this)
+    val (width, height) = picture(size)
+    return "$name at ${at.centerX() * width / size.x}, ${at.centerY() * height / size.y}"
+  }
+
+  /**
+   * What a D-pad moves to from `from` in `direction` where Android's `focusSearch` can't say: in a web page, whose
+   * elements its web view draws itself, as the app's pages are. Of what can take the focus in its window, the
+   * nearest that way, weighed as Android's own FocusFinder does; or, from what holds them, as the web view does, the
+   * first.
+   */
+  private fun nearest(from: AccessibilityNodeInfo, direction: Int): AccessibilityNodeInfo? {
+    val root = from.window?.root ?: return null
+    val at = Rect().also(from::getBoundsInScreen)
+    val all = mutableListOf<Pair<AccessibilityNodeInfo, Rect>>()
+    fun walk(node: AccessibilityNodeInfo) {
+      if (!node.isVisibleToUser) return
+      if (node.isFocusable && node != from) all += node to Rect().also(node::getBoundsInScreen)
+      for (i in 0 until node.childCount) node.getChild(i)?.let(::walk)
+    }
+    walk(root)
+    val inside = all.filter { at.contains(it.second) && it.second != at }
+    if (inside.isNotEmpty()) return inside.minWith(compareBy({ it.second.top }, { it.second.left })).first
+    return all.mapNotNull { (node, to) ->
+      val (major, minor) = when (direction) {
+        View.FOCUS_UP -> at.top - to.bottom to to.centerX() - at.centerX()
+        View.FOCUS_DOWN -> to.top - at.bottom to to.centerX() - at.centerX()
+        View.FOCUS_LEFT -> at.left - to.right to to.centerY() - at.centerY()
+        else -> to.left - at.right to to.centerY() - at.centerY()
+      }
+      if (major < 0) null else node to 13L * major * major + abs(minor).toLong() * abs(minor)
+    }.minByOrNull { it.second }?.first
+  }
+
+  /** Return: in a field, its keyboard's action key; anywhere else, a click on what has the focus, as a D-pad's centre. */
+  private fun enter(): String? {
+    val at = current()
+    val done = if (at.isEditable) {
+      at.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+    } else {
+      at.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+    }
+    if (!done) throw IllegalStateException("Android didn't press Return on ${named(at)}.")
+    return null
   }
 }

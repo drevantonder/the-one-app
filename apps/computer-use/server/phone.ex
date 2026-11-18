@@ -29,7 +29,9 @@ defmodule ComputerUse.Phone do
       %{
         "name" => phone["name"],
         "description" =>
-          "#{phone["name"]}'s own screen, an Android phone, as its person sees it" <>
+          "#{phone["name"]}'s own screen, " <>
+            if(phone["tv"], do: "an Android TV, which its remote's D-pad drives: `key` Up, Down, Left and Right move the focus, and Return presses what has it", else: "an Android phone") <>
+            ", as its person sees it" <>
             cond do
               awake[device] == nil -> "; its app isn't running, and it's woken as it's used"
               not phone["on"] -> "; its person hasn't turned on The One App in Settings → Accessibility yet"
@@ -67,7 +69,7 @@ defmodule ComputerUse.Phone do
     Artifact.update(call.own, blob, fn stored ->
       was = if stored, do: JSON.decode!(stored), else: %{}
       named = was["named"] || sign_in_name(call, device)
-      now = %{"named" => named, "name" => named || screen["name"], "width" => screen["width"], "height" => screen["height"], "on" => screen["on"]}
+      now = %{"named" => named, "name" => named || screen["name"], "width" => screen["width"], "height" => screen["height"], "on" => screen["on"], "tv" => screen["tv"]}
       if now == was, do: stored, else: JSON.encode!(now)
     end)
     |> JSON.decode!()

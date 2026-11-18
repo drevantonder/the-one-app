@@ -61,7 +61,7 @@ mod android {
                     let said = env.call_static_method(class, "screen", "(Landroid/content/Context;)Ljava/lang/String;", &[context.into()])?;
                     string(env, said.l()?)
                 })?)?;
-                let screen = json!({"name": client::name(), "width": screen["width"], "height": screen["height"], "on": screen["on"]});
+                let screen = json!({"name": client::name(), "width": screen["width"], "height": screen["height"], "on": screen["on"], "tv": screen["tv"]});
                 json!({"content": [{"type": "text", "text": screen.to_string()}], "structuredContent": screen})
             }
             "screenshot" => {
