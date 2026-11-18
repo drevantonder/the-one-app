@@ -139,7 +139,7 @@ defmodule OneCore.Apps.Calls do
   # One Core's own answer with MCP content after it, as code mode's `call` gives what its calls showed (`OneCore.CodeMode`).
   def structured({:content, answer, _parts}), do: structured(answer)
   def structured({:file, kind, %Artifact{}, _name}), do: %{"mimeType" => kind}
-  def structured(answer), do: JSON.decode!(JSON.encode!(answer))
+  def structured(answer), do: OneCore.JSON.normalize(answer)
 
   # An app is installed for users and groups. A sharing link's holder is neither, and calls only a tool that says
   # they may, of the apps installed for whoever the link leads to: one that keeps to what the link reaches.

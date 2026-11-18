@@ -40,7 +40,14 @@ defmodule OneCore.Service do
     end
 
     meta = %{actor: call.actor, subject: call.subject, forwarded: true}
-    ask = %{app: app, service: service, function: "#{function}", arguments: json(arguments), _meta: meta}
+
+    ask = %{
+      app: app,
+      service: service,
+      function: "#{function}",
+      arguments: OneCore.JSON.normalize(arguments),
+      _meta: meta
+    }
 
     case ask(servers, call.server, ask) do
       {:ok, response} -> response
@@ -83,8 +90,8 @@ defmodule OneCore.Service do
       Apps.installed(who, app) || raise "#{app} isn't installed for #{who}, or for the network"
 
     response =
-      case Calls.function(installed, name, "#{function}", json(arguments), {nil, who}) do
-        {:ok, response} -> json(response)
+      case Calls.function(installed, name, "#{function}", OneCore.JSON.normalize(arguments), {nil, who}) do
+        {:ok, response} -> OneCore.JSON.normalize(response)
         {:forwarded, %{"answer" => response}} -> response
         {:error, why} -> raise why
       end
@@ -172,8 +179,6 @@ defmodule OneCore.Service do
   end
 
   # What arrives after going through JSON, which is how it reaches another server.
-  defp json(term), do: JSON.decode!(JSON.encode!(term))
-
   # Asks each server in turn until one is ready, and then the first that's back of those that were starting or
   # stopping. A server that couldn't be reached was asked nothing.
   defp ask(servers, here, ask, down \\ [])
@@ -190,7 +195,7 @@ defmodule OneCore.Service do
   end
 
   defp ask([here | _], here, %{app: app, service: service, function: function, arguments: arguments}, _down) do
-    with {:ok, response} <- Services.run(app, service, function, arguments), do: {:ok, json(response)}
+    with {:ok, response} <- Services.run(app, service, function, arguments), do: {:ok, OneCore.JSON.normalize(response)}
   end
 
   defp ask([server | servers], here, ask, down) do

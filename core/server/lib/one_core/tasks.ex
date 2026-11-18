@@ -424,5 +424,5 @@ defmodule OneCore.Tasks do
   def question(message) when is_binary(message),
     do: %{"mode" => "form", "message" => message, "requestedSchema" => %{"type" => "object", "properties" => %{}}}
 
-  def question(%{} = question), do: Map.merge(%{"mode" => "form"}, JSON.decode!(JSON.encode!(question)))
+  def question(%{} = question), do: Map.merge(%{"mode" => "form"}, OneCore.JSON.normalize(question))
 end

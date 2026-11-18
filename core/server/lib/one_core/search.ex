@@ -113,7 +113,7 @@ defmodule OneCore.Search do
           namespace: List.wrap(app),
           description: [tool.description],
           namespaceDescription: about,
-          parameters: Map.keys(stringed(tool.inputs)["properties"] || %{})
+          parameters: Map.keys(OneCore.JSON.normalize(tool.inputs || %{})["properties"] || %{})
         },
         length: length(split(name))
       }
@@ -373,7 +373,7 @@ defmodule OneCore.Search do
   end
 
   defp inputs(schema) do
-    schema = stringed(schema)
+    schema = OneCore.JSON.normalize(schema || %{})
     required = List.wrap(schema["required"])
     properties = Enum.sort(schema["properties"] || %{})
 
@@ -381,11 +381,9 @@ defmodule OneCore.Search do
      Enum.reject(properties, &(elem(&1, 0) in required))}
   end
 
-  defp stringed(schema), do: JSON.decode!(JSON.encode!(schema || %{}))
-
   @doc "A JSON Schema as a TypeScript type, as a code mode signature shows it."
   def ts(schema) do
-    schema = stringed(schema)
+    schema = OneCore.JSON.normalize(schema || %{})
 
     case {schema["enum"], schema["type"], schema["properties"]} do
       {[_ | _] = one_of, _, _} -> Enum.map_join(one_of, " | ", &JSON.encode!/1)

@@ -280,7 +280,7 @@ defmodule OneCore.CodeMode do
   defp answered(call, name, input) do
     case call.(name, input || %{}) do
       {:ok, result} ->
-        case JSON.decode!(JSON.encode!(result)) do
+        case OneCore.JSON.normalize(result) do
           %{"isError" => true, "content" => content} -> {:error, texts(content)}
           result -> {:ok, result}
         end

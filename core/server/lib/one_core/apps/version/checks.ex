@@ -188,13 +188,12 @@ defmodule OneCore.Apps.Version.Checks do
     with [] <- Shape.problems(:jobs, jobs, prefix),
          [] <-
            for({job, at} <- indexed(jobs), problem <- job_problems(job, tools), do: "#{prefix}jobs()[#{at}]#{problem}") do
-      {:ok, for(job <- jobs, do: %{tool: job.tool, every: job.every, inputs: json(job[:inputs])})}
+      {:ok,
+       for(job <- jobs, do: %{tool: job.tool, every: job.every, inputs: OneCore.JSON.normalize(job[:inputs] || %{})})}
     else
       problems -> {:error, Enum.join(problems, "\n")}
     end
   end
-
-  defp json(value), do: JSON.decode!(JSON.encode!(value || %{}))
 
   defp job_problems(%{tool: name} = job, tools) do
     case Enum.find(tools, &(&1.name == name)) do
@@ -202,7 +201,7 @@ defmodule OneCore.Apps.Version.Checks do
         [".tool: got #{Shape.given(name)}, expected one of this app's tools: #{Enum.map_join(tools, ", ", & &1.name)}"]
 
       %{takes: takes} ->
-        case ExJsonSchema.Validator.validate(takes, json(job[:inputs])) do
+        case ExJsonSchema.Validator.validate(takes, OneCore.JSON.normalize(job[:inputs] || %{})) do
           :ok -> []
           {:error, wrong} -> for {why, "#" <> at} <- wrong, do: ".inputs#{at}: #{why}, for the tool #{name}"
         end

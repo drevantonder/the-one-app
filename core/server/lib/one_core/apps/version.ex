@@ -238,7 +238,7 @@ defmodule OneCore.Apps.Version do
   against on every call: `takes` from its `inputs`, and `gives` from its `outputs`, where it says them.
   """
   def schemas(tool) do
-    resolve = &ExJsonSchema.Schema.resolve(JSON.decode!(JSON.encode!(&1)))
+    resolve = &ExJsonSchema.Schema.resolve(OneCore.JSON.normalize(&1))
     tool = Map.put(tool, :takes, resolve.(tool.inputs))
     if tool[:outputs], do: Map.put(tool, :gives, resolve.(tool.outputs)), else: tool
   end

@@ -115,7 +115,7 @@ defmodule OneCore.Apps.Version.Shape do
   end
 
   defp json(value) do
-    {:ok, JSON.decode!(JSON.encode!(value))}
+    {:ok, OneCore.JSON.normalize(value)}
   rescue
     _ -> :error
   end

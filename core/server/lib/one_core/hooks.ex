@@ -141,7 +141,7 @@ defmodule OneCore.Hooks do
         nil
 
       {:mutate, %{} = changes} ->
-        JSON.decode!(JSON.encode!(changes))
+        OneCore.JSON.normalize(changes)
 
       {:validate, :ok} ->
         "ok"
@@ -150,7 +150,7 @@ defmodule OneCore.Hooks do
         %{"refuse" => why}
 
       {:collect, part} ->
-        JSON.decode!(JSON.encode!(part))
+        OneCore.JSON.normalize(part)
 
       {:mutate, _} ->
         raise "It answered #{inspect(result)} to #{hook}, which is answered with what it changes, by name"

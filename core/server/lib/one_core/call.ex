@@ -117,7 +117,7 @@ defmodule OneCore.Call do
         file
 
       {:ok, result} ->
-        JSON.decode!(JSON.encode!(result))
+        OneCore.JSON.normalize(result)
 
       {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} ->
         raise why
