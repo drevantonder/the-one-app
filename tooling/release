@@ -20,7 +20,10 @@
 # the same kind is refused while the first builds. One published while the network's update of the one before is under
 # way takes its place there. A commit older than one
 # the network has published is refused, so a release that finishes late doesn't undo a newer one. A build already
-# published is left as it is, and published again, so a network that didn't hear of it does.
+# published is left as it is, and published again, so a network that didn't hear of it does. So is a client built from
+# the same as the network's latest, in the same series (`OneCore.Builds.talk?/2`): it keeps its build, which `one
+# --version` says, rather than being built again for a version it wouldn't differ in. A client's `inputs` are what
+# `client_inputs` says, kept with it as a runtime's are.
 #
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
 # and OTP as Hex builds them for each kind of machine (Ubuntu 22.04's, so glibc 2.35 and OpenSSL 3 or newer), or as
@@ -86,6 +89,32 @@ commit=$(git rev-parse HEAD)
 here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
 builds=$(one builds)
 
+triple() {
+  case $1 in
+    linux-x86_64) echo x86_64-unknown-linux-gnu ;;
+    linux-aarch64) echo aarch64-unknown-linux-gnu ;;
+    macos-aarch64) echo aarch64-apple-darwin ;;
+    windows-x86_64) echo x86_64-pc-windows-msvc ;;
+  esac
+}
+
+# What a client for a kind of machine is built from: its crate and what it's built with (`tooling/input-hash`), and the
+# files its window shows from outside the crate (Tauri's `frontendDist`). Its own build isn't in it: that's the version
+# `one --version` says, so a client built for an earlier build still says what it is.
+client_inputs() {
+  { tooling/input-hash clients/app "$(triple "$1")" && jq -r '.build.frontendDist[]' clients/app/tauri.conf.json | (cd clients/app && xargs sha256sum); } |
+    sha256sum | cut -d' ' -f1
+}
+
+# Whether a client is the network's latest already: built from what it would be now, and in the same series, so what
+# talks with the servers (`OneCore.Builds.talk?/2`) doesn't drift further from them with each release it skips.
+series() { local version=${1%%+*}; [[ $version == 0.* ]] && echo "${version%.*}" || echo "${version%%.*}"; }
+unchanged() {
+  local latest
+  latest=$(jq -r --arg n "$1" --arg i "$(client_inputs "${1#*/}")" '.latest[$n] | select(.inputs == $i) | .build' <<<"$builds")
+  [[ -n $latest && $(series "$latest") == "$(series "$build")" ]] && echo "$latest"
+}
+
 # What's asked for, by name. A desktop or the CLI is built for each kind of machine a device of the network's is,
 # but a phone, whose app the network's owner builds.
 names=()
@@ -132,7 +161,12 @@ for name in "${names[@]}"; do
   elif [[ $name == server/* && $here != linux-* ]]; then
     echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
   elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && $kind == windows-*) ]]; then
-    mine+=("$name")
+    # A client's inputs name the Rust that builds it, so the machine that builds it decides: a Mac's, the Mac.
+    if [[ $name != server/* ]] && was=$(unchanged "$name"); then
+      echo "$name  built from the same as $was, which stays the latest"
+    else
+      mine+=("$name")
+    fi
   elif [[ $here == linux-* && $kind == macos-* ]]; then
     mac+=("$name")
   else
@@ -200,7 +234,7 @@ for name in "${mine[@]}"; do
   (echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
     mkdir "$out/$file.d" && cp "$target/clients/$file/$program" "$out/$file.d/" &&
     { [[ $name != *windows-* ]] || VERSION=${build%%+*} tooling/windows-name "$out/$file.d/$(basename "$program")"; } &&
-    gzip -9 -c "$out/$file.d/$(basename "$program")" >"$out/$file.gz" && rm -r "$out/$file.d") &
+    gzip -9 -c "$out/$file.d/$(basename "$program")" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs") &
   clients+=($!)
 done
 
@@ -242,12 +276,13 @@ packing=() code=()
 for kind in "${servers[@]}"; do
   echo "Building the server for $kind"
   case $kind in
-    linux-x86_64) hex=amd64 bunzip=bun-linux-x64-baseline.zip triple=x86_64-unknown-linux-gnu ;;
-    linux-aarch64) hex=arm64 bunzip=bun-linux-aarch64.zip triple=aarch64-unknown-linux-gnu ;;
-    macos-aarch64) bunzip=bun-darwin-aarch64.zip triple=aarch64-apple-darwin ;;
-    windows-x86_64) bunzip=bun-windows-x64-baseline.zip triple=x86_64-pc-windows-msvc ;;
+    linux-x86_64) hex=amd64 bunzip=bun-linux-x64-baseline.zip ;;
+    linux-aarch64) hex=arm64 bunzip=bun-linux-aarch64.zip ;;
+    macos-aarch64) bunzip=bun-darwin-aarch64.zip ;;
+    windows-x86_64) bunzip=bun-windows-x64-baseline.zip ;;
     *) echo "There's no server for $kind" >&2 && exit 1 ;;
   esac
+  triple=$(triple "$kind")
 
   # The VM and OTP for that machine, from Hex's builds for Linux, Erlang/OTP's own for Windows and the Erlang
   # Ecosystem Foundation's for a Mac, fetched once.
@@ -369,8 +404,9 @@ if ((${#mine[@]})); then
     const builds = await Promise.all(readdirSync(OUT).filter((file) => file.endsWith(".gz")).map(async (file) => {
       const bytes = await Bun.file(`${OUT}/${file}`).bytes();
       const [, what, kind] = file.match(/^(server-runtime|server-code|server|one-cli|one)-?(.*?)(\.tar)?\.gz$/);
-      // A runtime is told by what it was built from, which the network keeps with it.
-      const inputs = what === "server-runtime" ? { inputs: (await Bun.file(`${OUT}/${file.replace(/\.tar\.gz$/, ".inputs")}`).text()).trim() } : {};
+      // A runtime and a client are told by what they were built from, which the network keeps with them.
+      const from = Bun.file(`${OUT}/${file.replace(/(\.tar)?\.gz$/, ".inputs")}`);
+      const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
       return { file, name: kind ? `${what}/${kind}` : what, build: BUILD, ...inputs, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
     }));
     const publish = () => {
