@@ -949,6 +949,11 @@ impl Screen {
         }
     }
 
+    /// Whether an input holds something its person typed that its app hasn't taken (`Field::typed`).
+    pub fn typed(&self) -> bool {
+        self.fields.values().any(Field::typed)
+    }
+
     /// The editing state of the input with the keyboard, for a platform's keyboard bridge (`editing`).
     pub fn editing(&self) -> Option<editing::Value> {
         self.focused.and_then(|id| self.fields.get(&id)).map(Field::value)

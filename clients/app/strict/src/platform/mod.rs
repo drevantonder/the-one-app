@@ -66,6 +66,8 @@ pub struct WindowOptions {
 #[derive(Clone)]
 pub struct Strict(Sender);
 
+static STARTED: OnceLock<Result<Strict, String>> = OnceLock::new();
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 type Sender = calloop::channel::Sender<Job>;
 #[cfg(target_os = "windows")]
@@ -76,8 +78,12 @@ type Sender = android::Sender;
 impl Strict {
     /// The windows' thread, started the first time it's asked for.
     pub fn get() -> anyhow::Result<Strict> {
-        static STARTED: OnceLock<Result<Strict, String>> = OnceLock::new();
         STARTED.get_or_init(|| start().map_err(|error| format!("{error:#}"))).clone().map_err(|error| anyhow::anyhow!(error))
+    }
+
+    /// The windows' thread, if it's been started.
+    pub fn started() -> Option<Strict> {
+        STARTED.get()?.clone().ok()
     }
 
     /// Runs `job` on the windows' thread, where every window and its screen are.
@@ -209,6 +215,12 @@ impl Windows {
             return Ok(None);
         }
         Renderer::new(&self.context, self.atlas.clone(), native, native.device_size(), native.transparent()).map(Some)
+    }
+
+    /// Whether a window holds something its person typed that its app hasn't taken (`Screen::typed`): any app's, and
+    /// a panel while it's showing.
+    pub fn typed(&self) -> bool {
+        self.windows.values().any(|window| (!window.panel || window.visible) && window.screen.as_ref().is_ok_and(Screen::typed))
     }
 
     /// Does `f` to window `id`'s screen, if it's open, and draws what it changed.

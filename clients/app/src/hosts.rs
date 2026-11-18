@@ -310,6 +310,18 @@ pub(crate) fn double_clicked(window: *mut std::ffi::c_void) {
     }
 }
 
+/// Has `window` keep its frame by `name` in the user's defaults, as AppKit does a named window's, and opens it there
+/// if it was kept. AppKit's, on the main thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn remember_frame(window: *mut std::ffi::c_void, name: &str) {
+    let Some(name) = ns_string(name) else { return };
+    let window = window.cast::<objc2::runtime::AnyObject>();
+    unsafe {
+        let _: bool = objc2::msg_send![window, setFrameUsingName: name];
+        let _: bool = objc2::msg_send![window, setFrameAutosaveName: name];
+    }
+}
+
 /// `text` as an `NSString`.
 #[cfg(target_os = "macos")]
 fn ns_string(text: &str) -> Option<*mut objc2::runtime::AnyObject> {
@@ -388,6 +400,7 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
     if let Some(views) = crate::app().views.get() {
         views.shown(&label, false);
     }
+    crate::updater::gone(&label);
 }
 
 /// One file of an app's, for an app's window, as the launcher's page loads one (`Views::file`).
@@ -454,6 +467,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         "visible" => {
             let views = views()?;
             views.shown(label, args["onScreen"].as_bool() == Some(true));
+            crate::spawn(crate::updater::ready());
             if args["onScreen"].as_bool() == Some(true) {
                 views.caught_up().await
             }
@@ -466,6 +480,8 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         "recovery_key" => recovery_key(text("subject")).await.map(Value::from),
         "recover" => recover(text("key").unwrap_or_default(), text("subject")).await.map(done),
         "close" => close(text("view").unwrap_or_default()).map(done),
+        // Whether the window holds something its person typed and hasn't sent, which a new build waits for (`updater`).
+        "editing" => Ok(done(crate::updater::editing(label, args["editing"].as_bool() == Some(true)))),
         "reconnect" => reconnect().map(done),
         "sign_out" => sign_out().await.map(done),
         "push" => push().await,

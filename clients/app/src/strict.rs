@@ -737,3 +737,13 @@ impl ::client::DeviceTools for Inspector {
 fn refused(why: &str) -> Value {
     json!({"isError": true, "content": [{"type": "text", "text": why}]})
 }
+
+/// Whether a strict window holds something its person typed that its app hasn't taken (`Windows::typed`).
+pub async fn typed() -> bool {
+    let Some(strict) = Strict::started() else { return false };
+    let (told, answer) = tokio::sync::oneshot::channel();
+    strict.run(move |windows| {
+        let _ = told.send(windows.typed());
+    });
+    answer.await.unwrap_or(false)
+}

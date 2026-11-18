@@ -157,7 +157,7 @@ impl Record {
             update_method: self.update_method,
             update_method_reason: self.update_method_reason.clone(),
             next_build: self.next.as_ref().map(|next| next.build.clone()),
-            program_name: Some(format!("{PROGRAM}/{}", target())),
+            program_name: Some(name()),
             program: self.pair().map(|pair| pair.program),
             next_program: self.next.as_ref().map(|next| next.program.clone()),
             went_back: self.went_back.clone(),
@@ -500,6 +500,16 @@ pub async fn update(client: &Client) -> Result<String> {
     }
     take_program(one, &env::current_exe()?).await?;
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
+}
+
+/// This program's name among the network's builds: `one/macos-aarch64`, `one-cli/linux-x86_64`.
+pub fn name() -> String {
+    format!("{PROGRAM}/{}", target())
+}
+
+/// The network's latest build of this program, if it has one.
+pub async fn latest_program(client: &Client) -> Result<Option<String>> {
+    Ok(download(client).await?.get(PROGRAM).and_then(|one| one["build"].as_str()).map(str::to_owned))
 }
 
 /// Whether this program's file is another build than the one running: an update of this device's server takes the
@@ -1075,7 +1085,7 @@ async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     let build = one["build"].as_str().context("a build says which it is")?;
     ensure!(count(build) >= count(BUILD), "The network's build of one, {build}, is older than this one, {BUILD}.");
     let packed = program.canonicalize()?.with_extension("new.gz");
-    fetch(&format!("{PROGRAM}/{}", target()), one, &packed).await?;
+    fetch(&name(), one, &packed).await?;
     let new = packed.with_extension("");
     let unpacked =
         std::io::copy(&mut flate2::read::GzDecoder::new(fs::File::open(&packed)?), &mut fs::File::create(&new)?);
@@ -1083,15 +1093,17 @@ async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     unpacked.with_context(|| format!("The build {build} of one didn't unpack."))?;
     #[cfg(unix)]
     fs::set_permissions(&new, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
-    let output = command(&new).arg("--version").output();
-    if !output
-        .as_ref()
-        .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).split_whitespace().nth(1) == Some(build))
-    {
+    if build_of(&new).as_deref() != Some(build) {
         fs::remove_file(&new)?;
         bail!("The build {build} of one doesn't start here.")
     }
     Ok(new)
+}
+
+/// The build the program `program` says it is (`one --version`), if it starts.
+pub fn build_of(program: &Path) -> Option<String> {
+    let output = command(program).arg("--version").output().ok()?;
+    String::from_utf8_lossy(&output.stdout).split_whitespace().nth(1).map(str::to_owned)
 }
 
 /// Puts the program `new` in place of `program`, in one step. Windows replaces no program that's running, but lets
@@ -1174,7 +1186,7 @@ fn signed(name: &str, build: &Value) -> Result<()> {
 
 /// The count of commits in a build's metadata (`tooling/version`), which only grows on main: `0.25.13+3670.9046435e40b3`
 /// is 3670, as `OneCore.Builds.count/1` reads it.
-fn count(build: &str) -> u64 {
+pub fn count(build: &str) -> u64 {
     build.split_once('+').and_then(|(_, metadata)| metadata.split('.').next()?.parse().ok()).unwrap_or(0)
 }
 

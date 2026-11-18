@@ -701,6 +701,15 @@ fn shortcut(home: &std::path::Path) -> Option<global_hotkey::GlobalHotKeyManager
     Some(keeper)
 }
 
+/// This program's file, which an update replaces: Linux names a program whose file was replaced while it ran `<its
+/// path> (deleted)`, and it's the new file that's meant.
+pub(crate) fn program() -> std::io::Result<std::path::PathBuf> {
+    std::env::var_os("ONE_PROGRAM").map(std::path::PathBuf::from).map_or_else(std::env::current_exe, Ok).map(|program| {
+        let named = program.to_string_lossy();
+        named.strip_suffix(" (deleted)").map(std::path::PathBuf::from).unwrap_or(program)
+    })
+}
+
 /// Starts the app again on the build it was just updated to: the app windows that are open open again in it, and the
 /// launcher shows again if it was showing. Each app's window ends with this program's channel.
 fn restart(#[cfg_attr(not(unix), expect(unused_variables))] home: &std::path::Path, shown: bool) {
@@ -708,13 +717,7 @@ fn restart(#[cfg_attr(not(unix), expect(unused_variables))] home: &std::path::Pa
     // The new program serves the channel at the same address.
     #[cfg(unix)]
     let _ = std::fs::remove_file(hosts::address(home));
-    // Linux names a program whose file was replaced while it ran `<its path> (deleted)`, and it's the new file that's
-    // started.
-    let program = std::env::var_os("ONE_PROGRAM").map(std::path::PathBuf::from).map_or_else(std::env::current_exe, Ok).map(|program| {
-        let named = program.to_string_lossy();
-        named.strip_suffix(" (deleted)").map(std::path::PathBuf::from).unwrap_or(program)
-    });
-    let mut command = match program {
+    let mut command = match program() {
         Ok(program) => std::process::Command::new(program),
         Err(error) => return eprintln!("couldn't start again: {error}"),
     };

@@ -46,6 +46,7 @@ mod title_bar;
 mod strict;
 
 pub(crate) mod page;
+mod updater;
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
 /// the apps it uses, which are all at its own address, and nothing from anywhere else.
@@ -398,8 +399,16 @@ async fn update() -> Result<String, String> {
 async fn visible(on_screen: bool) -> Result<(), String> {
     let views = views()?;
     views.shown("main", on_screen);
+    spawn(updater::ready());
     views.caught_up().await;
     Ok(())
+}
+
+/// Says whether the Home Screen's window holds something its person typed and hasn't sent (`updater`).
+#[cfg(mobile)]
+#[tauri::command]
+fn editing(editing: bool) {
+    updater::editing("main", editing)
 }
 
 /// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
@@ -880,16 +889,6 @@ async fn opens() {
         }
     };
     eprintln!("the client opened {} ms after the app started", app.started.elapsed().as_millis());
-    // The network's page, if it has a newer one, for the next start.
-    spawn({
-        let client = client.clone();
-        async move {
-            let updated = async { page::update(&client, &app.shell.home()?).await }.await;
-            if let Err(error) = updated {
-                eprintln!("couldn't ask the network for its page: {error:#}")
-            }
-        }
-    });
     // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
     // not the system still has the server to start (`cli::serving::settle`).
     #[cfg(desktop)]
@@ -924,6 +923,8 @@ async fn opens() {
             eprintln!("this client's connection: {now:?}");
             app.shell.emit("connection", json!(now));
             if now == Connection::Online {
+                // What it missed: what every view was answered, and a newer build or page (`updater`).
+                spawn(updater::caught_up());
                 views.refresh(None).await
             }
         }
@@ -959,6 +960,10 @@ async fn opens() {
     let mut notifications = client.notifications();
     spawn(async move {
         while let Ok(message) = notifications.recv().await {
+            if message["method"] == "notifications/one/update" {
+                spawn(updater::heard(message["params"].clone()));
+                continue;
+            }
             if message["method"] != "notifications/one/changed" {
                 continue;
             }
@@ -1246,6 +1251,7 @@ pub fn run() {
             serve,
             update,
             visible,
+            editing,
             close,
             retry,
             reconnect,

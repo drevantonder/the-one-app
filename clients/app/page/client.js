@@ -1194,6 +1194,16 @@ function lift() {
   swipe.taken = false
   swipe.lifted = true
 }
+/// The frames that hold something their person typed and haven't sent (`initialization-script.js`): the window says
+/// whether any does, which a new build of the app waits for (`clients/app/src/updater.rs`).
+const typedIn = new Set()
+addEventListener("message", ({ data, source }) => {
+  if (data?.method !== "notifications/one/editing") return
+  const before = typedIn.size > 0
+  if (data.params?.editing) typedIn.add(source)
+  else typedIn.delete(source)
+  if (typedIn.size > 0 !== before) invoke("editing", { editing: typedIn.size > 0 }).catch(() => {})
+})
 addEventListener("message", ({ data }) => {
   if (data?.method === "notifications/one/wheel") wheel(data.params)
   // Escape on a computer, at an app's first screen with nothing open over it, takes it home as its Back does, and on

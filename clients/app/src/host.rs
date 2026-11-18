@@ -158,6 +158,13 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
         window.with_title_hidden(true).with_titlebar_transparent(true).with_fullsize_content_view(true)
     };
     let window = window.build(&event_loop)?;
+    // It opens where it was last, as a strict app's window does (`strict::platform`), so one opened again as the app
+    // starts again on a new build is where it was (`updater`).
+    #[cfg(target_os = "macos")]
+    {
+        use tao::platform::macos::WindowExtMacOS;
+        crate::hosts::remember_frame(window.ns_window(), &format!("one {}", json!({"entrypoint": opened.entrypoint, "subject": opened.subject})));
+    }
 
     #[cfg(target_os = "macos")]
     let home_screen = ::client::NAME;

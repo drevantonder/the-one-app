@@ -177,6 +177,13 @@ impl Display {
             view.measure(&window);
 
             window.center();
+            // An app's window opens where it was last, as AppKit keeps a named window's frame in the user's defaults,
+            // so one opened again as the app starts again on a new build is where it was (`updater`).
+            if options.panel.is_none() {
+                let name = NSString::from_str(&format!("one {}", options.tag));
+                window.setFrameUsingName(&name);
+                window.setFrameAutosaveName(&name);
+            }
             Ok(NativeWindow {
                 view: Retained::as_ptr(&view) as usize,
                 panel: options.panel.is_some(),

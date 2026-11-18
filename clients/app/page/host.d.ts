@@ -164,6 +164,8 @@ export interface Commands {
   recovery_key(args: { subject: string | undefined }): string
   recover(args: { key: string; subject: string | undefined }): void
   visible(args: { onScreen: boolean }): void
+  /** Whether the window holds something its person typed and hasn't sent, which a new build waits for. */
+  editing(args: { editing: boolean }): void
   opened(args: { view: string; ms: number }): void
   /** Reports to Telemetry, as Telemetry's tool `record` takes a record, what went wrong here. */
   report(args: { record: Record<string, unknown> }): void

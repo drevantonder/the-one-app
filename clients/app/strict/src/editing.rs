@@ -233,6 +233,12 @@ impl Field {
         Field { text: text.to_owned(), anchor: text.len(), focus: text.len(), ..Field::default() }
     }
 
+    /// Whether it holds something its person typed that its app hasn't taken: text, with typing to undo (an app that
+    /// sets other text, as one that sends what's typed and empties it, clears that, `set`), or a password's.
+    pub fn typed(&self) -> bool {
+        !self.text.trim().is_empty() && (self.secure || !self.history.undo.is_empty())
+    }
+
     /// Its editing state, in the renderer's shape: what it composes is in its text, from the caret.
     pub fn value(&self) -> Value {
         let (a, _) = self.range();

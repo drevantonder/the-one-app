@@ -66,3 +66,34 @@ addEventListener(
   },
   { passive: true },
 )
+
+// Whether this frame holds something its person typed and hasn't sent: a field typed in that still holds text. A new
+// build of the app, which it starts again on by itself, waits for no window on screen to (`clients/app/src/updater.rs`),
+// as the window adds up what its frames say (`editing` in page/client.js). It's looked at again as what's typed may
+// have been sent, which an app does by emptying the field.
+const typed = new Set()
+let editing = false
+const kinds = ["checkbox", "radio", "range", "color", "button", "submit", "reset", "file", "hidden", "image"]
+const field = (/** @type {EventTarget} */ at) =>
+  at instanceof HTMLTextAreaElement || (at instanceof HTMLInputElement && !kinds.includes(at.type)) || (at instanceof HTMLElement && at.isContentEditable)
+const holds = (/** @type {any} */ at) => at.isConnected && (at.isContentEditable ? at.textContent : at.value).trim() !== ""
+const said = () => {
+  for (const at of typed) if (!holds(at)) typed.delete(at)
+  if (typed.size > 0 === editing) return
+  editing = typed.size > 0
+  top?.postMessage({ method: "notifications/one/editing", params: { editing } }, "*")
+}
+addEventListener(
+  "input",
+  (event) => {
+    const at = event.composedPath()[0]
+    if (event.isTrusted && field(at)) typed.add(at)
+    said()
+  },
+  true,
+)
+for (const type of ["focusout", "submit", "keyup", "click"]) addEventListener(type, () => setTimeout(said), true)
+addEventListener("pagehide", () => {
+  typed.clear()
+  said()
+})
