@@ -1,8 +1,7 @@
 // The push services a notification wakes a device through: Apple's (APNs), Google's (FCM) and a browser's (Web
-// Push). Each makes the one request its service documents, with `fetch` given, so a test sees each request as it
-// would go out. The keys are the Worker's secrets (README.md); a service whose keys aren't there fails, saying so.
+// Push). Each makes the one request its service documents. The keys are the Worker's secrets (README.md); a service whose keys aren't there fails, saying so.
 //
-// What a device shows is encrypted to it by the server that sent it (`apps/encryption/client/native/src/cipher.rs`, `seal_notification`),
+// What a device shows is encrypted to it by the server that sent it (`apps/encryption/client/native/src/cipher.rs`, `seal`),
 // as `sealed`, and that's all that goes: the push service carries it and reads nothing. On an iPhone, the app's
 // notification extension opens it before it shows (`mutable-content`), so Apple has only a fixed line; on Android
 // it's a data message, which the app opens and shows itself. A device sent nothing to show is woken for its app to
@@ -36,20 +35,32 @@ export interface Device {
 
 /** What a service did: nothing to say, the token's gone, or why it failed. */
 type Outcome = { gone?: boolean; failed?: string };
-type Fetch = typeof fetch;
+
+/**
+ * What a push service answered, as the text it said, cut short, and as JSON if it was one: a gateway's error page
+ * isn't, and what it said is still why a request failed.
+ */
+async function said<Body>(response: Response): Promise<{ text: string; body: Partial<Body> }> {
+  const text = (await response.text()).slice(0, 300);
+  try {
+    return { text, body: JSON.parse(text) };
+  } catch {
+    return { text, body: {} };
+  }
+}
 
 /**
  * Wakes each of `devices` (`{ via, token, sealed }`, the notification encrypted to that device, as base64).
  * Gives the tokens whose service says they're gone, which the app forgets, and why each failure failed.
  */
-export async function send(fetch: Fetch, env: Keys, devices: Device[]) {
+export async function send(env: Keys, devices: Device[]) {
   const gone: string[] = [];
   const failed: { token: string; why: string }[] = [];
   await Promise.all(
     devices.map(async ({ via, token, sealed }) => {
       let outcome: Outcome;
       try {
-        outcome = await SENDERS[via](fetch, env, token, sealed);
+        outcome = await SENDERS[via](env, token, sealed);
       } catch (error) {
         outcome = { failed: (error as Error).message };
       }
@@ -74,7 +85,7 @@ async function token(whose: string, make: () => Promise<{ token: string; lasts: 
  * APNs, with a token from the team's .p8 key: an ES256 JWT, which Apple takes for up to an hour and refuses to
  * have made more often than every 20 minutes, so it's kept 50.
  */
-async function apns(fetch: Fetch, env: Keys, device: string, sealed?: string): Promise<Outcome> {
+async function apns(env: Keys, device: string, sealed?: string): Promise<Outcome> {
   if (!sealed) return { failed: "an iPhone's app isn't woken to answer a server" };
   if (!env.APNS_KEY) return { failed: "APNs isn't set up for this network" };
   const bearer = await token("apns", async () => ({
@@ -96,17 +107,18 @@ async function apns(fetch: Fetch, env: Keys, device: string, sealed?: string): P
     body: JSON.stringify({ aps: { alert: { body: FIXED }, "mutable-content": 1, sound: "default" }, n: sealed }),
   });
   if (response.ok) return {};
-  const { reason = "" } = await response.json<{ reason?: string }>().catch(() => ({}) as { reason?: string });
+  const { text, body } = await said<{ reason: string }>(response);
+  const reason = body.reason ?? "";
   if (response.status === 410 || ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"].includes(reason)) return { gone: true };
   if (["ExpiredProviderToken", "InvalidProviderToken"].includes(reason)) cache.delete("apns");
-  return { failed: `APNs answered ${response.status} ${reason}`.trim() };
+  return { failed: `APNs answered ${response.status} ${text}`.trim() };
 }
 
 /**
  * FCM's HTTP v1 API, with an OAuth token for the Firebase service account, from its RS256 JWT. A wake with nothing to
  * show is `wake` and lasts 30 seconds, after which the server that asked has given up.
  */
-async function fcm(fetch: Fetch, env: Keys, device: string, sealed?: string): Promise<Outcome> {
+async function fcm(env: Keys, device: string, sealed?: string): Promise<Outcome> {
   if (!env.FCM_ACCOUNT) return { failed: "FCM isn't set up for this network" };
   const account = JSON.parse(env.FCM_ACCOUNT);
   const bearer = await token("fcm", async () => {
@@ -120,9 +132,9 @@ async function fcm(fetch: Fetch, env: Keys, device: string, sealed?: string): Pr
       .sign(await importPKCS8(account.private_key, "RS256"));
     const grant = { grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion };
     const response = await fetch(at, { method: "POST", body: new URLSearchParams(grant) });
-    const given = await response.json<{ access_token?: string; expires_in: number; error_description?: string }>().catch(() => ({}) as { access_token?: undefined; expires_in: number; error_description?: string });
-    if (!given.access_token) throw new Error(`Google gave FCM no token: ${given.error_description ?? response.status}`);
-    return { token: given.access_token, lasts: (given.expires_in - 300) * 1000 };
+    const { text, body: given } = await said<{ access_token: string; expires_in: number }>(response);
+    if (!given.access_token) throw new Error(`Google gave FCM no token: ${response.status} ${text}`);
+    return { token: given.access_token, lasts: (given.expires_in! - 300) * 1000 };
   });
   const message = sealed
     ? { token: device, data: { n: sealed }, android: { priority: "HIGH", ttl: "86400s" } }
@@ -134,15 +146,15 @@ async function fcm(fetch: Fetch, env: Keys, device: string, sealed?: string): Pr
   });
   if (response.ok) return {};
   type ErrorBody = { error?: { status?: string; details?: { errorCode?: string }[] } };
-  const { error = {} } = await response.json<ErrorBody>().catch(() => ({}) as ErrorBody);
+  const { text, body: { error = {} } } = await said<ErrorBody>(response);
   const code = error.details?.find((detail) => detail.errorCode)?.errorCode ?? error.status ?? "";
   if (response.status === 404 || code === "UNREGISTERED") return { gone: true };
   if (response.status === 401) cache.delete("fcm");
-  return { failed: `FCM answered ${response.status} ${code}`.trim() };
+  return { failed: `FCM answered ${response.status} ${text}`.trim() };
 }
 
 /** Web Push: RFC 8291's encryption to the browser's subscription, which is the token, and RFC 8292's VAPID. */
-async function webpush(fetch: Fetch, env: Keys, device: string, sealed?: string): Promise<Outcome> {
+async function webpush(env: Keys, device: string, sealed?: string): Promise<Outcome> {
   if (!sealed) return { failed: "a browser isn't woken to answer a server" };
   if (!env.VAPID_PRIVATE_KEY) return { failed: "Web Push isn't set up for this network" };
   const subscription = JSON.parse(device);
@@ -151,7 +163,7 @@ async function webpush(fetch: Fetch, env: Keys, device: string, sealed?: string)
   const response = await fetch(subscription.endpoint, await buildPushPayload(message, subscription, vapid));
   if (response.ok) return {};
   if (response.status === 404 || response.status === 410) return { gone: true };
-  return { failed: `the browser's push service answered ${response.status}` };
+  return { failed: `the browser's push service answered ${response.status} ${(await response.text()).slice(0, 300)}`.trim() };
 }
 
 const SENDERS = { apns, fcm, webpush };
