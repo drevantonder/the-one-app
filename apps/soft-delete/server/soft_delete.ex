@@ -731,12 +731,14 @@ defmodule SoftDelete do
     end
   end
 
-  # Whether whoever the call runs for owns the artifact, as the apps that validate `reach` say.
+  # Whether whoever asked owns the artifact, as the apps that validate `reach` say: a member running a call for a
+  # group or the network owns only what they do themselves. A scheduled job is asked by nobody, so it's whoever it
+  # runs for.
   defp owner(call, name),
     do:
       Hooks.validate(
         "reach",
-        %{"who" => call.subject, "relation" => "owner", "artifact" => name},
+        %{"who" => call.actor || call.subject, "relation" => "owner", "artifact" => name},
         {call.actor, call.subject}
       )
 
