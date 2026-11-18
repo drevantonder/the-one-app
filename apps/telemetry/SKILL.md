@@ -39,6 +39,20 @@ client sent a `traceparent`.
   `name` it lists every metric there is, with its attributes.
 - `spending` gives the tokens AI models took in and gave out, as apps record them, per model per day, and what they cost where the endpoint says
   (OpenRouter does). It has no prices of its own.
+- Each server's machine reports its server's life, through `one serve run`, even while the server can't start, and
+  keeps it until a server is told: `one.server.start` (how long it took, `one.server.restart.reason` why the run
+  before ended, an error where it didn't start, with its last lines), `one.server.stop` (an error where nobody
+  asked), `one.server.crash_loop` and `one.server.update` (`one.update.method`, `one.update.outcome`: `took`,
+  `went_back` or `stayed`, with why). Each says `one.server`, the server's key. The network's update is
+  `network update` on the edge, an error while it's held. A database's lease moving to a server is
+  `one.database.lease.moves` (`one.reason`), a call kept waiting by its holder `one.database.lease.wait`
+  (`one.outcome` `not_answered`, warned of, or `gone`), and an app not answering a hook in time
+  `one.hook.timeouts`, each by `one.app`.
+- Telemetry tells the network's first owner, through Notifications, what needs them, as alerts: a server not
+  running or restarting over and over, the update held, a kind of error not seen in 14 days, an app's tools failing,
+  an app not answering. `alerts` lists them, the open ones and those resolved in the last day, and each kind with
+  what fires it; `mute` stops a kind being told, or has it told again, as the switches on Telemetry's screen do. A
+  problem is one notification however long it lasts, and it's told again once it's resolved, but for a new error.
 - Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
   doing is open, and who did what isn't.
 

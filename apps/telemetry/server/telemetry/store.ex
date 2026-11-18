@@ -43,6 +43,26 @@ defmodule Telemetry.Store do
     for {:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data)
   end
 
+  @doc """
+  Every server's and the edge's batch that ended after `from`, in nanoseconds since 1970, that isn't among `read`, by
+  its name: the names, and the batches, as each was kept, read from the hours they're in before those are put
+  together (`prune/1`). One put together meanwhile is named, and not given.
+  """
+  def since(own, from, read) do
+    to = System.os_time(:nanosecond)
+    hours = Enum.uniq(for(at <- from..to//3_600_000_000_000, do: hour(at)) ++ [hour(to)])
+
+    names =
+      for hour <- hours,
+          name <- Artifact.list(own, hour <> "/"),
+          not hour?(name),
+          to_of(name) > from,
+          name not in read,
+          do: name
+
+    {names, for({:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data))}
+  end
+
   @doc "How much is kept: since when, in milliseconds since 1970, how many bytes, for how many days, and the most."
   def retention(own) do
     names = Artifact.list(own, "batches/")
@@ -64,8 +84,10 @@ defmodule Telemetry.Store do
     hours = Enum.group_by(Artifact.list(own, "batches/"), &Path.dirname/1)
     oldest = hour(now - @days * 86_400_000_000_000)
 
+    # An hour is put together 10 minutes after it ends, once alerts have read its last batches one by one
+    # (`since/3`, `Telemetry.Alerts`).
     put_together =
-      for {hour, names} <- hours, hour >= oldest, hour < hour(now), Enum.any?(names, &(not hour?(&1))) do
+      for {hour, names} <- hours, hour >= oldest, hour < hour(now - 600_000_000_000), Enum.any?(names, &(not hour?(&1))) do
         together(own, hour, names)
         hour
       end
@@ -113,6 +135,7 @@ defmodule Telemetry.Store do
 
   defp id(batch), do: "#{batch["server"]}/#{batch["to"]}"
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")
+  defp to_of(name), do: name |> Path.basename() |> String.split("-") |> hd() |> String.to_integer()
   defp bytes(name), do: name |> String.split("-") |> List.last() |> String.to_integer()
 
   # When the oldest kept is from, in milliseconds since 1970: the start of its hour.

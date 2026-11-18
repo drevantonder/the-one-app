@@ -14,6 +14,9 @@ defmodule Telemetry.Recorded do
   - Log lines: what an app records, and every warning and error said to `Logger` on the server, which Telemetry
     installed for the network hears. A crash is kept as its exception's banner and never as the state or message it
     crashed on.
+  - What One Core and the apps measure as `:telemetry` events, Elixir's own way a library says what it measured,
+    each a number named by its event: `[:one, :hook, :timeouts]` is `one.hook.timeouts`, its metadata its attributes
+    (`one.app`). Which events those are is `@events`.
   - What a client reported of itself (the hook `measured`), as records: its requests that failed or were slow, each
     a span its server's span of it is under, how long no server answered it, how long its views took to open, and
     its pages' errors and its own crashes.
@@ -31,6 +34,23 @@ defmodule Telemetry.Recorded do
   @scale 3
   # How long a text that's recorded may be, in characters: an error's message, an attribute.
   @longest 1000
+
+  # The `:telemetry` events kept, each a number: its `:duration` in milliseconds, or else its `:count`.
+  @events [
+    # An app that didn't answer a hook in time (`OneCore.Hooks.within/3`).
+    [:one, :hook, :timeouts],
+    # How long a call waited on the server holding an app's database before this one took it over, and why
+    # (`Database.transaction/3`).
+    [:one, :database, :lease, :wait],
+    # A database's lease that moved to this server, and why (`Database.Lease`).
+    [:one, :database, :lease, :moves]
+  ]
+
+  @doc """
+  This server started, as the hook `started` says: the Telemetry installed for the network hears its warnings and
+  errors from now, before anything else would have it start.
+  """
+  def started(call), do: received(call, [])
 
   @doc "A tool call, as the hook `called` told it."
   def called(call, %{"trace" => trace, "took" => took} = about) do
@@ -195,11 +215,22 @@ defmodule Telemetry.Recorded do
   # A report is a term, which may hold anything: only a crash's reason is kept of one, above.
   defp message({:report, _report}), do: nil
 
-  # A server's own warnings and errors are the network's, so the Telemetry installed for the network hears them. The
-  # handler is this module as it is now, so it's added again each time the app moves to newer code.
+  @doc false
+  # A `:telemetry` handler, run where the event was: the number it measured.
+  def measure(event, measurements, metadata, %{to: to}) do
+    value = Map.get(measurements, :duration, Map.get(measurements, :count, 1))
+    attributes = Map.new(metadata, fn {name, value} -> {"one.#{name}", value(value)} end)
+    GenServer.cast(to, {:received, numbers: [{Enum.join(event, "."), attributes, value}]})
+  end
+
+  # A server's own warnings and errors, and what it measures, are the network's, so the Telemetry installed for the
+  # network hears them. The handlers are this module as it is now, so they're added again each time the app moves to
+  # newer code.
   defp listen(%{installed: "network"}) do
     :logger.remove_handler(__MODULE__)
     :ok = :logger.add_handler(__MODULE__, __MODULE__, %{level: :warning, config: %{to: self()}})
+    :telemetry.detach(__MODULE__)
+    :ok = :telemetry.attach_many(__MODULE__, @events, &__MODULE__.measure/4, %{to: self()})
   end
 
   defp listen(_state), do: :ok
@@ -222,7 +253,10 @@ defmodule Telemetry.Recorded do
   end
 
   @impl true
-  def terminate(_why, %{installed: "network"}), do: :logger.remove_handler(__MODULE__)
+  def terminate(_why, %{installed: "network"}) do
+    :logger.remove_handler(__MODULE__)
+    :telemetry.detach(__MODULE__)
+  end
   def terminate(_why, _state), do: :ok
 
   @impl true

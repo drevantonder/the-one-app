@@ -9,9 +9,12 @@ defmodule Telemetry do
   writes nothing at all. It isn't kept in a database,
   whose log is kept whole forever and whose snapshot is the whole file: what's recorded is kept for a while and then
   let go, which blobs by the hour are (`Telemetry.Store`). It may be lost, and holds no one's data.
+
+  What needs a person is told to the network's first owner, as alerts (`Telemetry.Alerts`), whose state is the one
+  thing it keeps in its database.
   """
   @behaviour OneCore.App
-  alias Telemetry.{Store, Read, Recorded}
+  alias Telemetry.{Alerts, Store, Read, Recorded}
   alias OneCore.Call
 
   @impl true
@@ -22,13 +25,18 @@ defmodule Telemetry do
   def own, do: :installed
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.18", "database" => "to keep its schedule"}
+  def requires,
+    do: %{
+      "core" => ">= 0.23.17",
+      "database" => "to keep its schedule and its alerts",
+      "notifications" => "to tell the network's owner what needs them"
+    }
 
   @impl true
-  def hooks, do: ["called", "measured"]
+  def hooks, do: ["called", "measured", "started"]
 
   @impl true
-  def jobs, do: [%{tool: "prune", every: 3600}]
+  def jobs, do: [%{tool: "prune", every: 3600}, %{tool: "evaluate", every: 60}]
 
   @impl true
   def entrypoints, do: [%{page: "client/index.html"}]
@@ -302,6 +310,82 @@ defmodule Telemetry do
         outputs: %{type: "object", properties: %{recorded: %{type: "integer", description: "How many"}}, required: ["recorded"]}
       },
       %{
+        name: "alerts",
+        read_only: true,
+        description:
+          "The alerts telling the network's owner what needs them, open and resolved in the last day, newest first, and each kind of alert with what fires it and whether it's muted",
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{
+            alerts: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  id: %{type: "integer"},
+                  kind: %{type: "string", enum: Map.keys(Alerts.kinds())},
+                  key: %{type: "string", description: "What of its kind it's about: a server's key, a build, an app"},
+                  state: %{
+                    type: "string",
+                    enum: ~w(firing notified resolving resolved),
+                    description: "firing until its owner's told, notified, resolving until they're told it cleared, resolved"
+                  },
+                  title: %{type: "string"},
+                  text: %{type: ["string", "null"]},
+                  began: ms.("When it fired"),
+                  last: ms.("When its symptom was last seen"),
+                  ended: %{type: ["integer", "null"], description: "When it cleared, in milliseconds since 1970"}
+                },
+                required: ~w(id kind key state title text began last ended)
+              }
+            },
+            kinds: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  kind: %{type: "string"},
+                  about: %{type: "string", description: "What fires it"},
+                  muted: %{type: "boolean"}
+                },
+                required: ["kind", "about", "muted"]
+              }
+            }
+          },
+          required: ["alerts", "kinds"]
+        }
+      },
+      %{
+        name: "mute",
+        description:
+          "Mutes a kind of alert, so the network's owner isn't told of it, or has it told again. Only the network's owners may",
+        inputs: %{
+          type: "object",
+          properties: %{
+            kind: %{type: "string", enum: Map.keys(Alerts.kinds())},
+            muted: %{type: "boolean", description: "false has it told again"}
+          },
+          required: ["kind", "muted"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{kind: %{type: "string"}, muted: %{type: "boolean"}},
+          required: ["kind", "muted"]
+        }
+      },
+      %{
+        name: "evaluate",
+        description:
+          "Reads what was recorded since it last did, moves each alert on and tells the network's owner what fired and what cleared. The clock calls it every minute",
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          properties: %{told: %{type: "integer", description: "How many notifications it sent"}},
+          required: ["told"]
+        }
+      },
+      %{
         name: "prune",
         description:
           "Puts each hour that's over into one blob, and lets go of what's older than #{Store.days()} days or past #{div(Store.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
@@ -323,6 +407,7 @@ defmodule Telemetry do
   def hook("called", %{"app" => app, "tool" => "record"}, %Call{app: app}), do: :ok
   def hook("called", about, call), do: Recorded.called(call, about)
   def hook("measured", record, call), do: Recorded.measured(call, record)
+  def hook("started", _about, call), do: Recorded.started(call)
 
   @doc "Keeps a batch that a server recorded (`Telemetry.Recorded`), on a server acting for whoever Telemetry is installed for."
   def keep(call, batch), do: Store.keep(call.own, batch)
@@ -383,6 +468,9 @@ defmodule Telemetry do
   end
 
   def call("prune", _inputs, call), do: Store.prune(call.own)
+  def call("alerts", _inputs, call), do: Alerts.list(call)
+  def call("mute", %{"kind" => kind, "muted" => muted}, call), do: Alerts.mute(call, kind, muted)
+  def call("evaluate", _inputs, call), do: Alerts.evaluate(call)
 
   # What was kept over the last `hours`, and when that is, in nanoseconds since 1970.
   defp read(call, hours) do

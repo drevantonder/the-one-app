@@ -1,10 +1,10 @@
 // Telemetry: what a person acts on of what the network recorded, laid out as a trace and
-// metrics viewer is, cut down. Calls over time first, then what's failing, what's slowest and what AI cost, over
-// the range picked above them. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
+// metrics viewer is, cut down. What it alerted the network's owner of first, then calls over time, what's failing,
+// what's slowest and what AI cost, over the range picked above them, and last which alerts its owner is told. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
 // long it took over time. What's fine is silent: with nothing failing, there's no Failing.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { call, changed, Empty, Icon, List, Problem, Row, Screen, Section, Skeleton, Split, Tabs } from "ui"
+import { call, changed, Empty, Icon, List, Problem, Row, Screen, Section, Skeleton, Split, Switch, Tabs, toast } from "ui"
 import "./app.css"
 
 /** A slow tool, or an app slow to open, as `telemetry_overview` answers it. */
@@ -64,6 +64,23 @@ interface Span {
   message?: string
 }
 
+/** An alert, as `telemetry_alerts` answers it. */
+interface Alert {
+  id: number
+  kind: string
+  state: "firing" | "notified" | "resolving" | "resolved"
+  title: string
+  text?: string | null
+  began: number
+  ended?: number | null
+}
+
+/** What `telemetry_alerts` answers: the alerts open or resolved in the last day, and each kind, muted or not. */
+interface Alerts {
+  alerts: Alert[]
+  kinds: { kind: string; about: string; muted: boolean }[]
+}
+
 const RANGES = [
   ["1", "Hour"],
   ["24", "Day"],
@@ -72,7 +89,17 @@ const RANGES = [
 ]
 const [hours, setHours] = createSignal("24")
 const overview = createMemo(() => call("telemetry_overview", { hours: Number(hours()) }).then((text): Overview => JSON.parse(text)))
-changed(() => refresh(overview))
+const alerts = createMemo(() => call("telemetry_alerts", {}).then((text): Alerts => JSON.parse(text)))
+changed(() => (refresh(overview), refresh(alerts)))
+
+async function mute(kind: string, muted: boolean) {
+  try {
+    await call("telemetry_mute", { kind, muted })
+  } catch (error) {
+    toast(error as Error)
+  }
+  refresh(alerts)
+}
 
 /// What's open beside the list: a failure's trace, `{ trace }`, or a slow tool or app, `{ slow }`.
 const [open, setOpen] = createSignal<{ trace?: string; where?: string; slow?: Slowest & { key: string } }>()
@@ -274,6 +301,22 @@ function Telemetry(props: { all: Overview }) {
             <Tabs.Indicator />
           </Tabs.List>
         </Tabs.Root>
+        <Show when={alerts().alerts.length}>
+          <Section heading="Alerts">
+            <List>
+              <For each={alerts().alerts} keyed={(alert) => alert.id}>
+                {(alert) => (
+                  <Row
+                    start={<span class={{ bad: alert().state !== "resolved" }}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></span>}
+                    heading={alert().title}
+                    text={alert().text ?? undefined}
+                    end={alert().ended ? `Resolved ${since(alert().ended!)}` : since(alert().began)}
+                  />
+                )}
+              </For>
+            </List>
+          </Section>
+        </Show>
         <Calls steps={all().calls} />
         <Show when={failing().length}>
           <Section heading="Failing">
@@ -311,6 +354,18 @@ function Telemetry(props: { all: Overview }) {
           </Section>
         </Show>
         <Spending days={all().spending} />
+        <Section heading="Notify the Owner When">
+          <List>
+            <For each={alerts().kinds} keyed={(kind) => kind.kind}>
+              {(kind) => (
+                <Row
+                  heading={kind().about}
+                  end={<Switch aria-label={kind().about} checked={!kind().muted} onChange={(event) => mute(kind().kind, !event.currentTarget.checked)} />}
+                />
+              )}
+            </For>
+          </List>
+        </Section>
         <p class="hint">
           Kept for {all().retention.days} days, up to {size(all().retention.most_bytes)}. {size(all().retention.bytes)} now.
         </p>
