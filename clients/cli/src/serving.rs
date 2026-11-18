@@ -1419,9 +1419,13 @@ mod system {
     }
 
     /// Registers the task. A task has no environment of its own, so the server's is in its arguments, which
-    /// `one serve run` takes.
+    /// `one serve run` takes. It's its person's by their SID, as `whoami` gives it: their account's name needs
+    /// `USERDOMAIN`, which OpenSSH sets to `WORKGROUP`, and Task Scheduler finds no account by that.
     pub fn install(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
-        let user = format!("{}\\{}", env::var("USERDOMAIN")?, env::var("USERNAME")?);
+        let whoami = command("whoami").args(["/user", "/fo", "csv", "/nh"]).output()?;
+        let user = String::from_utf8(whoami.stdout)?;
+        let user = user.trim().rsplit(',').next().map(|sid| sid.trim_matches('"').to_owned());
+        let user = user.filter(|sid| sid.starts_with("S-")).context("whoami gave no SID")?;
         let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
         let arguments: String = env.iter().map(|(name, value)| format!(" \"{name}={value}\"")).collect();
         let task = format!(
