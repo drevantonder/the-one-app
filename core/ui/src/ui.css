@@ -1766,8 +1766,12 @@ button.ui-box {
   inset-inline-end: 0;
   color: var(--muted-foreground);
 }
+/* Its actions, the one that fixes it first, in a row that wraps where there's no room. */
 .ui-state .problem .action {
   justify-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   margin-top: 0.5rem;
   color: var(--foreground);
 }
