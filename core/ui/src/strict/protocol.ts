@@ -47,6 +47,26 @@ export interface Event {
   value?: string
 }
 
+/** What a native host gives an app's sandbox, as `globalThis.host`, before it loads the app's page: the module its
+ * entrypoint's page names, whose imports of the UI library (`/ui/client/web.js`, `/ui/client/ui.js`) the host loads
+ * from `/ui/client/native/`, the same names, built for it. */
+export interface Host {
+  /** Takes a batch of ops, to draw. */
+  update(update: Update): void
+  /** Takes a JSON-RPC message for the app's client, as a page on the DOM posts one to its frame's parent (MCP Apps):
+   * `ui/initialize`, `tools/call` and the rest, which the client answers as it answers a page. */
+  post(message: object): void
+}
+
+/** What the UI library gives the host, as `globalThis.ui`, once it's loaded. */
+export interface Sandbox {
+  /** Something the person did. */
+  event(event: Event): void
+  /** A JSON-RPC message from the client, as a page on the DOM gets one in its `message` event: an answer to what it
+   * posted, or a notification (`notifications/one/changed`, `ui/notifications/host-context-changed`). */
+  message(message: object): void
+}
+
 /** What a node can listen for, as its `on…` prop: `click` is `onClick`, as the DOM names them. A host offers each as
  * an accessibility action too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
  * and `Blur`. */
