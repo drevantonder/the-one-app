@@ -1,0 +1,11 @@
+{
+  "name": "lynx-spike-app",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@lynx-js/tasm": "0.0.53",
+    "@solidjs/universal": "2.0.0",
+    "esbuild": "0.25.12",
+    "solid-js": "2.0.0"
+  }
+}

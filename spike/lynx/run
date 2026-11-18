@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Builds the spike's assets and its x86_64 release APK, installs it on the running emulator.
+set -euo pipefail
+cd "$(dirname "$0")/app" && bun build.js
+cd ../android && ./gradlew -q assembleRelease -Pabi=x86_64 --console=plain 2>&1 | grep -E "^e:|error:|FAIL" || true
+"$HOME/Android/Sdk/platform-tools/adb" install -r app/build/outputs/apk/release/app-release.apk

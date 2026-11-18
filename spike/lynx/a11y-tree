@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# a11y-tree <Web|Lynx> <out.xml>: what an accessibility service sees of the screen (uiautomator's dump), as a list.
+set -euo pipefail
+adb=$HOME/Android/Sdk/platform-tools/adb
+"$adb" shell am force-stop app.theone.lynxspike
+"$adb" logcat -c
+"$adb" shell am start -n app.theone.lynxspike/.${1}Activity >/dev/null
+timeout 20 "$adb" logcat -m 1 -e "Fully drawn" >/dev/null
+"$adb" shell uiautomator dump /sdcard/tree.xml >/dev/null
+"$adb" pull -q /sdcard/tree.xml "$2"
+python3 -I -c '
+import sys, xml.etree.ElementTree as E
+def walk(n, d):
+    a = n.attrib
+    if n.tag == "node":
+        flags = [k for k in ("clickable", "focusable", "checkable", "scrollable", "heading") if a.get(k) == "true"]
+        print("  " * d + a.get("class", "").split(".")[-1], repr(a.get("text", "")), repr(a.get("content-desc", "")), " ".join(flags))
+    for c in n: walk(c, d + 1)
+walk(E.parse(sys.argv[1]).getroot(), 0)' "$2"
