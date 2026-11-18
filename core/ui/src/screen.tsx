@@ -62,7 +62,8 @@ const Room = createContext<() => number>(() => viewport().width)
 const Opened = createContext<() => (() => void) | undefined>(() => undefined)
 /** What a screen's Back does when it says nothing of its own: back through the history, or closing a split's detail. */
 const Leave = createContext<() => void>(goBack)
-/** Whether it's in a split's detail beside its list, where a screen has nowhere to go back to. */
+/** Whether it's in a split's detail beside its list, where a screen has nowhere to go back to. A split in that detail
+ * whose own detail is pushed over its list has a Back again, to that list. */
 const InDetail = createContext<() => boolean>(() => false)
 /** Whether a state is all there is of a split's detail beside its list, which it fills, in its middle. */
 export const Middle = createContext<() => boolean>(() => false)
@@ -178,7 +179,6 @@ const open: (() => void)[] = []
 /// calls `onClose`, and the app sets `open` false.
 export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
-  const inDetail = useContext(InDetail)
   const beside = () => room() >= wide
   const listWidth = () => Math.min(column, Math.max(columnMin, room() * 0.38))
   // What's drawn as open, which follows `open` as a move.
@@ -216,7 +216,7 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
       <Box aria-hidden={!beside() && !shown() ? "true" : undefined} style={[look.pane, beside() ? look.detail : look.over, !beside() && !shown() && look.hidden]}>
         <Room value={() => (beside() ? room() - listWidth() - 1 : room())}>
           <Leave value={close}>
-            <InDetail value={() => inDetail() || beside()}>
+            <InDetail value={beside}>
               <Middle value={beside}>{props.detail}</Middle>
             </InDetail>
           </Leave>
