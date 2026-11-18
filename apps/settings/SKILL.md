@@ -32,7 +32,7 @@ An app adds to Settings by hooking into `settings.sections`, answering with its 
     def hook("settings.sections", _about, _call),
       do: [
         %{in: "settings", name: "Devices", component: "devices", icon: "client/icon.svg", group: "network", order: 1, badge: "waiting"},
-        %{in: "device", component: "awake"}
+        %{in: "device", component: "awake", service: true}
       ]
 
 - `component` is what draws it: a Solid component the app's client exports (`client/package.json`: `{"exports":
@@ -46,8 +46,10 @@ An app adds to Settings by hooking into `settings.sections`, answering with its 
   draws a whole `Screen`, with `back`, and is given `groups`, a component that draws what other apps add to a place
   it offers: `<props.groups in="device" device={id} />`.
 - Any other `in` is a group in a page a section offers, headed by the adding app's icon and name, so it's clear which
-  app brings what: `"device"`, a device's page in Devices, whose component is given `device`, the device's id; or
-  `"app"`, the app's own page in Settings' Apps. A group's component draws only its rows (a `List`), never a
-  `Screen`, and nothing for a device it has nothing for.
+  app brings what: `"device"`, a device's page in Devices, whose component is given `device`, the device's id, and
+  `server`, the server it is or runs on, if any; or `"app"`, the app's own page in Settings' Apps. A device's group
+  says where it applies, so no heading shows over nothing: `kinds`, the kinds of device it's for (`app`, `browser`,
+  `assistant`, `server`), and `service: true` for only a server where the app's service runs (Stay Awake, on a Mac).
+  A group's component draws only its rows (a `List`), never a `Screen`.
 
 An app that can't answer is left out, as one whose answer doesn't say what it must is.

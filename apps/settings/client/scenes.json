@@ -15,7 +15,9 @@
             "name": "Sign In & Security",
             "group": "you",
             "order": 0,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "sign-in/devices",
@@ -29,7 +31,9 @@
             "name": "Devices",
             "group": "network",
             "order": 1,
-            "count": 1
+            "count": 1,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "sign-in/users",
@@ -43,7 +47,9 @@
             "name": "People & Groups",
             "group": "network",
             "order": 2,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "vault/accounts",
@@ -57,7 +63,9 @@
             "name": "Accounts",
             "group": "network",
             "order": 3,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "notifications/notifications",
@@ -71,7 +79,9 @@
             "name": "Notifications",
             "group": "general",
             "order": 1,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "home-screen/appearance",
@@ -85,7 +95,9 @@
             "name": "Appearance",
             "group": "general",
             "order": 2,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "sign-in/connect",
@@ -99,7 +111,9 @@
             "name": "AI",
             "group": "general",
             "order": 3,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "backups/backups",
@@ -113,7 +127,9 @@
             "name": "Backups",
             "group": "system",
             "order": 1,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           },
           {
             "id": "soft-delete/deleted",
@@ -127,7 +143,9 @@
             "name": "Recently Deleted",
             "group": "system",
             "order": 2,
-            "count": null
+            "count": null,
+            "kinds": null,
+            "service": false
           }
         ]
       },

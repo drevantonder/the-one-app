@@ -82,7 +82,7 @@ interface Waiting {
 }
 
 /** What Settings draws of what other apps add to a place a section offers: a device's page (`settings.sections`). */
-type Groups = (props: { in: "device"; device: string }) => Element
+type Groups = (props: { in: "device"; device: string; kind: string; server?: string; services?: string[] }) => Element
 
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
@@ -324,7 +324,17 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
           </List>
         </Section>
       </Show>
-      <Show when={props.groups} keyed>{(Groups) => <Groups in="device" device={thing().id} />}</Show>
+      <Show when={props.groups} keyed>
+        {(Groups) => (
+          <Groups
+            in="device"
+            device={thing().id}
+            kind={thing().kind ?? "server"}
+            server={server()?.id}
+            services={server()?.services?.filter((service) => service.on).map((service) => service.app)}
+          />
+        )}
+      </Show>
       <Section heading="About">
         <List>
           <Row heading="Kind" end={<Text style={look.muted}>{kinds[thing().kind ?? "server"]}</Text>} />

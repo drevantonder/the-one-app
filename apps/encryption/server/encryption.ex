@@ -26,6 +26,13 @@ defmodule Encryption do
   @impl true
   def sensitive, do: true
 
+  # Whether a device of the app holds your key is a group on its page in Settings.
+  @impl true
+  def hooks, do: ["settings.sections"]
+
+  @impl true
+  def hook("settings.sections", _about, _call), do: [%{in: "device", component: "device", kinds: ["app"]}]
+
   alias Encryption.Keys
   alias OneCore.{Artifact, Call, Hooks, Server, User}
   alias OneCore.Apps.Calls

@@ -32,7 +32,9 @@ defmodule Settings do
             "file of the app's client/), its `group` (\"you\", \"network\", \"general\", \"system\") and `order` in it, and a " <>
             "`badge`, a tool of the app's that only reads, whose answer's `count` is the red count on its row and on " <>
             "Settings' icon; or a place a section offers, as a group headed by the app's icon and name: \"device\", " <>
-            "a device's page, given `device`; or \"app\", the app's own page in Settings. SKILL.md says more."
+            "a device's page, given `device`, with the `kinds` of device it's for (app, browser, assistant, server) and " <>
+            "`service: true` where it's only for a server running the app's service; or \"app\", the app's own page " <>
+            "in Settings. SKILL.md says more."
       }
     ]
   end
@@ -69,6 +71,8 @@ defmodule Settings do
                   name: %{type: ["string", "null"]},
                   group: %{type: ["string", "null"]},
                   order: %{type: "integer"},
+                  kinds: %{type: ["array", "null"], items: %{type: "string"}, description: "The kinds of device a device's group is for"},
+                  service: %{type: "boolean", description: "Whether a device's group is only where the app's service runs"},
                   count: %{type: ["integer", "null"], description: "Its red count, where it has a badge"}
                 },
                 required: ["id", "app", "title", "trusted", "component", "in", "order"]
@@ -164,6 +168,8 @@ defmodule Settings do
         name: section["name"],
         group: section["group"],
         order: section["order"] || 0,
+        kinds: section["kinds"],
+        service: section["service"] == true,
         count: count(call, app, section["badge"])
       }
     end

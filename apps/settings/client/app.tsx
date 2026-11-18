@@ -20,6 +20,8 @@ interface Added {
   group: "you" | "network" | "general" | "system" | null
   order: number
   count: number | null
+  kinds: string[] | null
+  service: boolean
 }
 
 /** Where an app's update is, as `apps` answers it. */
@@ -213,8 +215,10 @@ function Drawn(props: { section: Added }) {
 /// What other apps add to a place a section offers (`in`): each a group headed by its app's icon and name, drawn by
 /// its app's component, given what the place is about (`device`), or a row opening its page where its app is
 /// untrusted. An app's own page has only that app's.
-function Groups(props: { in: Added["in"]; device?: string; app?: string }) {
-  const here = () => added().filter((one) => one.in === props.in && (props.in !== "app" || one.app === props.app))
+function Groups(props: { in: Added["in"]; device?: string; kind?: string; server?: string; services?: string[]; app?: string }) {
+  const fits = (one: Added) =>
+    props.in === "app" ? one.app === props.app : (!one.kinds || one.kinds.includes(props.kind!)) && (!one.service || !!props.services?.includes(one.app))
+  const here = () => added().filter((one) => one.in === props.in && fits(one))
   return (
     <For each={here()} keyed={(one) => one.id}>
       {(one) => (
@@ -230,7 +234,7 @@ function Groups(props: { in: Added["in"]; device?: string; app?: string }) {
             when={one().trusted}
             fallback={<List><Row heading={`Open ${one().title}`} onClick={() => opening(`${one().app}/client/${one().component}.html${props.device ? `#${props.device}` : ""}`)} /></List>}
           >
-            <Group added={one()} device={props.device} />
+            <Group added={one()} device={props.device} server={props.server} />
           </Show>
         </Section>
       )}
@@ -238,13 +242,13 @@ function Groups(props: { in: Added["in"]; device?: string; app?: string }) {
   )
 }
 
-function Group(props: { added: Added; device?: string }) {
+function Group(props: { added: Added; device?: string; server?: string }) {
   const drawn = createMemo(() => component(props.added.app, props.added.component).then((module) => module.default))
   return (
     <Errored fallback={(error) => <Problem heading={`Can't show ${props.added.title}`} text={error() as Error} />}>
       <Loading fallback={<Skeleton rows={1} />}>
         <Show when={drawn()} keyed>
-          {(Drawn) => <Drawn device={props.device} />}
+          {(Drawn) => <Drawn device={props.device} server={props.server} />}
         </Show>
       </Loading>
     </Errored>
