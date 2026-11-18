@@ -40,7 +40,7 @@ fn main() -> anyhow::Result<()> {
     let folder = std::fs::canonicalize(folder)?;
     let ui = flag("--ui").map(PathBuf::from);
     let root = folder.clone();
-    let files: Files = Box::new(move |url: &Url| {
+    let mut files: Files = Box::new(move |url: &Url| {
         let path = url.path();
         let file = match (path.strip_prefix("/ui/client/"), &ui) {
             (Some(file), Some(ui)) => ui.join(file),
@@ -54,6 +54,8 @@ fn main() -> anyhow::Result<()> {
         .find_map(|tag| tag.contains("type=\"module\"").then(|| tag.split("src=\"").nth(1)?.split('"').next()).flatten())
         .ok_or_else(|| anyhow::anyhow!("index.html loads no module"))?;
     let page = Url::parse("file:///index.html")?.join(module)?;
+    // The design tokens, which come with the UI library.
+    strict::tokens::load(&files(&Url::parse("file:///ui/client/ui.css")?)?);
 
     let started = std::time::Instant::now();
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(strict::FONT));

@@ -14,7 +14,7 @@ use gpui::{
 use serde_json::{Value, json};
 
 use crate::js::{Posted, Sandbox};
-use crate::tokens::{TOKENS, type_style};
+use crate::tokens::{tokens, type_style};
 use crate::tree::{Id, Kind, Length, Node, Style, Tree};
 
 actions!(strict, [FocusNext, FocusPrevious]);
@@ -317,7 +317,7 @@ pub fn add_fonts(text_system: &gpui::TextSystem) -> anyhow::Result<()> {
 
 /// A colour token, in light or dark.
 pub fn colour(name: &str, dark: bool) -> Hsla {
-    TOKENS.colour(name, dark).map(Hsla::from).unwrap_or_default()
+    tokens().colour(name, dark).map(Hsla::from).unwrap_or_default()
 }
 
 /// A node's semantics as AccessKit has them, on its element.
@@ -438,7 +438,7 @@ fn data_url(src: &str) -> Option<Arc<gpui::Image>> {
 fn pixels(length: &Length) -> Option<f32> {
     match length {
         Length::Px(px) => Some(*px),
-        Length::Word(word) => TOKENS.length(word),
+        Length::Word(word) => tokens().length(word),
     }
 }
 
@@ -459,7 +459,7 @@ fn definite(length: &Length) -> DefiniteLength {
     }
 }
 
-/// How a node is laid out and its box looks: flex, by default a column, as React Native's and Lynx's views are.
+/// How a node is laid out and its box looks: flex, by default a column, as React Native's views are.
 fn layout<E: Styled>(mut element: E, style: &Style) -> E {
     element = match style.display.as_deref() {
         Some("grid") => element.grid(),
@@ -601,7 +601,7 @@ fn text_style<E: Styled>(mut element: E, style: &Style, dark: bool, text: bool) 
     if let Some(radius) = &style.border_radius {
         let radius = match radius {
             Length::Word(full) if full == "full" => 9999.0,
-            Length::Word(token) => TOKENS.length(&format!("radius-{token}")).unwrap_or(0.0),
+            Length::Word(token) => tokens().length(&format!("radius-{token}")).unwrap_or(0.0),
             Length::Px(px) => *px,
         };
         element = element.rounded(px(radius));

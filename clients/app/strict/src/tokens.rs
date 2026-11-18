@@ -1,14 +1,14 @@
-//! The design tokens, read from the UI library's own stylesheet (`core/ui/src/tokens.css`) as it's built in, so a
-//! native screen draws with exactly what a web one does: its colours, light and dark, its sizes and its type styles.
-//! Only `:root`'s first rule is read, which is a computer's (the touch and iPhone rules after it are a phone's), and
-//! `:root.dark`'s `--lighter`.
+//! The design tokens, which aren't the host's: they come with the UI library, over the air, as the app's page does,
+//! and are read as it opens (`load`). The host knows only kinds of token (a colour, light and dark, a length, a
+//! number), never their names or values. Until the strict protocol defines the token table (core/ui/src/strict/),
+//! it's read from the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's (the
+//! touch and iPhone rules after it are a phone's), and `:root.dark`'s `--lighter`. This module is the only one that
+//! knows that, so the table replaces it here alone.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use gpui::Rgba;
-
-const CSS: &str = include_str!("../../../../core/ui/src/tokens.css");
 
 /// What CSS has as 1rem, in pixels.
 const REM: f32 = 16.0;
@@ -19,14 +19,27 @@ pub struct Tokens {
     lighter: f32,
 }
 
-pub static TOKENS: LazyLock<Tokens> = LazyLock::new(|| Tokens::parse(CSS));
+static LOADED: OnceLock<Tokens> = OnceLock::new();
+
+/// Takes the tokens the UI library came with, as the window opens, before anything is drawn.
+pub fn load(css: &str) {
+    let _ = LOADED.set(Tokens::parse(css));
+}
+
+/// The tokens loaded, or none (`load`), where every lookup is `None`.
+pub fn tokens() -> &'static Tokens {
+    LOADED.get_or_init(|| Tokens::parse(""))
+}
 
 impl Tokens {
     fn parse(css: &str) -> Tokens {
+        // A rule's declarations, by its selector exactly, as written or minified (`:root {` or `:root{`).
         let rule = |selector: &str| -> HashMap<String, String> {
-            let Some(start) = css.find(&format!("\n{selector} {{")) else { return HashMap::new() };
+            let Some(start) = [format!("{selector} {{"), format!("{selector}{{")].iter().filter_map(|open| {
+                css.match_indices(open.as_str()).find(|(at, _)| *at == 0 || matches!(css.as_bytes()[at - 1], b'\n' | b'}'))
+            }).map(|(at, _)| at).min() else { return HashMap::new() };
             let body = &css[start..];
-            let body = &body[body.find('{').unwrap_or(0) + 1..body.find("\n}").unwrap_or(body.len())];
+            let body = &body[body.find('{').unwrap_or(0) + 1..body.find('}').unwrap_or(body.len())];
             uncommented(body)
                 .split(';')
                 .filter_map(|declaration| {
@@ -136,7 +149,10 @@ fn oklch(value: &str) -> Option<Rgba> {
         Some(percent) => percent.parse::<f32>().ok()? / 100.0,
         None => alpha.parse().ok()?,
     };
-    let mut parts = lch.split_whitespace().map(|part| part.parse::<f32>());
+    let mut parts = lch.split_whitespace().map(|part| match part.strip_suffix('%') {
+        Some(percent) => percent.parse::<f32>().map(|percent| percent / 100.0),
+        None => part.parse::<f32>(),
+    });
     let (l, c, h) = (parts.next()?.ok()?, parts.next()?.ok()?, parts.next()?.ok()?);
     let (a, b) = (c * h.to_radians().cos(), c * h.to_radians().sin());
     let l_ = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
@@ -167,7 +183,7 @@ pub struct TypeStyle {
 
 /// `body`, `label`, `title`, `figure`, `subheadline`, `footnote`, `caption-1` or `caption-2`.
 pub fn type_style(font: &str, dark: bool) -> TypeStyle {
-    let tokens = &*TOKENS;
+    let tokens = tokens();
     let weight = |name: &str| tokens.number(name, dark).unwrap_or(450.0);
     let size = |name: &str| tokens.length(name).unwrap_or(14.0);
     let (size, weight, tracking, line_height, tabular) = match font {

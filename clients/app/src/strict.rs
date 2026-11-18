@@ -153,7 +153,7 @@ fn window(
     // The page's files, which the app's window has, each asked for as the sandbox imports it.
     let (files_to, next) = (to.clone(), std::sync::atomic::AtomicU64::new(0));
     let files_asked = asked.clone();
-    let files: Files = Box::new(move |url: &Url| {
+    let mut files: Files = Box::new(move |url: &Url| {
         let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let (answer_to, answer) = mpsc::channel();
         files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
@@ -161,6 +161,8 @@ fn window(
         let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
         Ok(String::from_utf8(file)?)
     });
+    // The design tokens, which come with the UI library, as its pages' do.
+    strict::tokens::load(&files(&page.module.join("/ui/client/ui.css")?)?);
     let cache = home.join("strict").join(::client::BUILD);
     let sandbox = Sandbox::start(&page.module, files, Some(cache), Clock::real())?;
 
