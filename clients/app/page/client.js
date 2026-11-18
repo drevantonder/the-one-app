@@ -64,6 +64,11 @@ let icons = new Map()
 /// for.
 /** @type {Set<string | undefined>} */
 const listed = new Set()
+/// The apps each of those lists says are trusted, by who it's for, as each was last listed. A page of any other app,
+/// one installed untrusted or not listed yet, asks only what its app's server code may, behind its sandbox, for
+/// whoever it was opened for, and changes nothing of this device (`respond`).
+/** @type {Map<string | undefined, Promise<Set<string>>>} */
+const trusted = new Map()
 
 /// What an app's address is named by: its app's name, then who it's for (its subject) if that isn't its user, last part first.
 /** @param {string} entrypoint @param {string} [subject] */
@@ -853,8 +858,12 @@ async function behind() {
 /** @param {string} [subject] */
 async function list(subject) {
   listed.add(subject)
+  const listing = invoke("apps", { subject })
+  const apps = (/** @type {import("./host.js").Resource[]} */ resources) => new Set(resources.filter(({ _meta }) => _meta?.trusted === true).map(({ uri }) => uri.slice("ui://".length).split("/")[0]))
+  const before = trusted.get(subject) ?? Promise.resolve(new Set())
+  trusted.set(subject, listing.then(({ resources }) => apps(resources), () => before))
   try {
-    let { resources, outdated } = await invoke("apps", { subject })
+    let { resources, outdated } = await listing
     // A screen runs its own app and the UI library, which every one of them runs.
     const library = outdated.some((host) => host.split(".")[0] === "ui")
     for (const view of open.values()) if (library || outdated.includes(view.host)) page(view, { type: "stale" })
@@ -1385,9 +1394,16 @@ const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc:
 /// The haptics an app may ask for, by iOS's names.
 /** @type {unknown[]} */
 const HAPTICS = ["light", "medium", "heavy", "rigid", "soft", "selection", "success", "warning", "error"]
-/// What this page answers an app itself. The rest is the client's to answer.
+/// What this page answers an app itself. The rest is the client's to answer, as from the app whose page it is,
+/// which this page says, whatever the page does: a server has an untrusted app's page call only what its server code
+/// may (`OneCore.Mcp`). An untrusted app's page asks for whoever it was opened for, and changes nothing of this
+/// device but its own status bar; a trusted one's may do anything its server code may, which is all its person may.
 /** @param {View} view @param {string} method @param {Record<string, any>} params */
 async function respond(view, method, params) {
+  const app = view.entrypoint.split("/")[0]
+  const trusts = async () => (await trusted.get(view.subject))?.has(app) === true
+  /** Who the page asks for: whoever it says, if its app is trusted. @param {string} [said] */
+  const whom = async (said) => (said && (await trusts()) ? said : view.subject)
   if (method === "ui/initialize") {
     return {
       protocolVersion: "2026-01-26",
@@ -1414,14 +1430,14 @@ async function respond(view, method, params) {
   if (method === "ping") return {}
   if (method === "ui/request-display-mode") return { mode: "fullscreen" }
   // A file too large to go in a call: the client sends it where the network keeps it, for a tool of that app.
-  if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { app: view.entrypoint.split("/")[0] } })
+  if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { app } })
   // A person's recovery key is shown and typed on this page, which is the client's own: no app's page is handed one.
-  if (method === "one/recovery-key") return recoveryKey(params.typed === true, params.subject ?? view.subject)
+  if (method === "one/recovery-key") return recoveryKey(params.typed === true, await whom(params.subject))
   // Another app, shown over this one, as tapping its icon or a notification from it does: by its app's name,
   // and its page if it isn't the app's first app, for whoever this one is for unless it says. `behind` starts
   // it as a finger lands on its icon, and it shows as the finger lifts, out of the icon at `from` in its page.
   if (method === "ui/open-link" && params.url?.startsWith("one:")) {
-    if (!go(params.url.slice("one:".length), params.subject ?? view.subject, params.behind, within(view.frame, params.from))) throw new Error("That app isn't on this device")
+    if (!go(params.url.slice("one:".length), await whom(params.subject), params.behind, within(view.frame, params.from))) throw new Error("That app isn't on this device")
     return {}
   }
   // A web address opens in the device's own browser, outside the app.
@@ -1446,6 +1462,8 @@ async function respond(view, method, params) {
   }
   // What an app is told of its client, and the few things one changes of it.
   if (method === "one/client") {
+    const changes = Object.keys(params).filter((change) => change !== "statusBar")
+    if (changes.length && !(await trusts())) throw new Error(`${names.get(view.entrypoint) || app} is installed untrusted, so it doesn't change this device (${changes.join(", ")}).`)
     if (params.leave) return invoke("sign_out")
     // The device's status bar, hidden while this app shows, as an iPhone's Home Screen hides it while it's edited.
     if ("statusBar" in params) {
@@ -1481,10 +1499,12 @@ async function respond(view, method, params) {
     return { ...client, theme: chosen(), pinsShortcuts: !!globalThis.androidPin, settings: !!globalThis.androidSettings || client.settings === true, launcher: panel() }
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
-  // An app opened from a group's page is answered for the group.
-  const subject = params._meta?.subject ?? view.subject
+  // An app opened from a group's page is answered for the group. What else an untrusted app's page says of its
+  // request, who it's from among it, isn't passed on.
+  const subject = await whom(params._meta?.subject)
   if (subject && !listed.has(subject)) list(subject)
-  return invoke("request", { view: view.key, method, params: subject ? { ...params, _meta: { ...params._meta, subject } } : params })
+  const meta = { ...((await trusts()) && params._meta), app, ...(subject && { subject }) }
+  return invoke("request", { view: view.key, method, params: { ...params, _meta: meta } })
 }
 
 addEventListener("message", async ({ source, data }) => {

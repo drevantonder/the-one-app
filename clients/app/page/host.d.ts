@@ -63,7 +63,8 @@ export interface Resource {
   mimeType?: string
   /** An app entrypoint's icon, as a `data:` address. */
   icons?: { src: string }[]
-  _meta?: { category?: string }
+  /** An app entrypoint's category, and whether its app is trusted. */
+  _meta?: { category?: string; trusted?: boolean }
 }
 
 /**
