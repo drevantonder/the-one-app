@@ -85,6 +85,13 @@ pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(vec![ttf])
 }
 
+/// How long after its shortcut summoned a panel, or after it was last pressed again, the shortcut's key is still its:
+/// longer than a key's repeat delay, so one held repeats into nothing.
+/// The roles of what the DOM draws as a button, which Tab reaches (core/ui's strict/primitives.tsx `pressed`).
+const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link", "combobox"];
+
+const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
+
 pub struct Screen {
     tree: Tree,
     sandbox: Sandbox,
@@ -165,6 +172,8 @@ pub struct Screen {
     /// What has taken the keyboard by its `autofocus`, while that's so, and where each node listening for `layout`
     /// was last told it is.
     autofocused: std::collections::HashSet<Id>,
+    /// The key of the shortcut that summoned it, and when it was last pressed (`summoned`).
+    shortcut: Option<(String, std::time::Instant)>,
     laid_out: HashMap<Id, Rect>,
     /// Whether each node listening for `intersection` was last told it's near the window.
     intersecting: HashMap<Id, bool>,
@@ -235,6 +244,7 @@ impl Screen {
             frame: 0,
             seen: None,
             autofocused: Default::default(),
+            shortcut: None,
             laid_out: HashMap::new(),
             intersecting: HashMap::new(),
             tab_order: Vec::new(),
@@ -610,9 +620,11 @@ impl Screen {
         let moving = self.transitions.finish(now);
         self.placed = placed;
         // A modal dialog holds the keyboard: Tab goes only to what's in it, and it has the keyboard as it appears.
+        // What's inert, or in what is, Tab passes over.
         if let Some(modal) = modal {
             tab_order.retain(|id| self.within(*id, modal));
         }
+        tab_order.retain(|id| !self.tree.inert(*id));
         self.tab_order = tab_order;
         self.rects = rects;
         self.animating = animating || moving;
@@ -946,7 +958,24 @@ impl Screen {
     /// the keyboard.
     pub fn key(&mut self, key: &Key) -> Option<Id> {
         let focused = self.focused;
+        // The key of the shortcut that just summoned it, still held or pressed again at once, is the shortcut's, not
+        // the page's: it types nothing and presses nothing (`summoned`).
+        if let Some((held, since)) = self.shortcut.take() {
+            if key.key == held && since.elapsed() < SHORTCUT_HELD {
+                self.shortcut = Some((held, std::time::Instant::now()));
+                return focused;
+            }
+        }
+        // Tab is told to what has the keyboard and what it's in, as any key is, then moves the keyboard, as a
+        // browser's does unless the page stops it, which a native host can't hear in time.
         if key.key == "Tab" && !key.ctrl && !key.meta && !key.alt {
+            if let Some(id) = focused {
+                for listener in self.chain_from(id) {
+                    if self.tree.nodes.get(&listener).is_some_and(|node| node.listens("keydown")) {
+                        self.tell(listener, "keydown", key.told());
+                    }
+                }
+            }
             self.states.focus_visible = true;
             let order = &self.tab_order;
             let next = match focused.and_then(|focused| order.iter().position(|id| *id == focused)) {
@@ -1031,7 +1060,20 @@ impl Screen {
             return;
         }
         self.visible = visible;
+        // Shown again, it has the keyboard where it says `autofocus`, as a page opened does, from its first key on;
+        // put away, nothing keeps it, so nothing left with it is pressed as it comes back.
+        self.autofocused.clear();
+        self.focus(if visible { self.tree.autofocused().max() } else { None });
+        if visible {
+            self.autofocused.extend(self.tree.autofocused());
+        }
         self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": {"visible": visible}}));
+    }
+
+    /// It was summoned by a shortcut that ends with `key` (as the DOM's `KeyboardEvent.key` names it): that key, still
+    /// held as it shows or pressed again right after, is the shortcut's (`key`).
+    pub fn summoned(&mut self, key: Option<&str>) {
+        self.shortcut = key.map(|key| (key.to_owned(), std::time::Instant::now()));
     }
 
     /// Its window got or lost the keyboard: the caret shows only while it has it, and an input losing it keeps what
@@ -1690,7 +1732,8 @@ impl Painter<'_> {
         });
         let shown = self.turned(bounds).intersect(&mask);
         let root = id == 0;
-        let pointer = look.pointer_events.unwrap_or(pointer);
+        // What's inert takes no pointer, nor does what's in it.
+        let pointer = !node.is("inert") && look.pointer_events.unwrap_or(pointer);
         if node.str("aria-modal") == Some("true") {
             self.modal = Some(id);
         }
@@ -1739,7 +1782,11 @@ impl Painter<'_> {
             }
         }
         let pressable = (node.listens("click") || node.kind == Kind::Input) && !node.is("disabled") && !node.is("aria-disabled");
-        if pressable && (node.kind == Kind::Input || node.str("tabindex") != Some("-1") && node.prop("tabindex").and_then(Value::as_i64) != Some(-1)) {
+        // Tab reaches what the DOM's does: an input, what's pressed as a button is (a role the DOM draws as a
+        // `<button>`, core/ui's strict/primitives.tsx `pressed`), and what says its `tabindex`.
+        let tabindex = node.prop("tabindex").and_then(|index| index.as_i64().or_else(|| index.as_str()?.parse().ok()));
+        let button = node.listens("click") && node.str("role").is_some_and(|role| BUTTON_ROLES.contains(&role));
+        if pressable && tabindex.is_none_or(|index| index >= 0) && (node.kind == Kind::Input || button || tabindex.is_some()) {
             self.tab_order.push(id);
         }
         let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, scroll: None };

@@ -229,6 +229,18 @@ impl Tree {
         self.nodes.get(&id)?.parent
     }
 
+    /// Whether `id` is inert, or in what is (`inert`, as the DOM's).
+    pub fn inert(&self, id: Id) -> bool {
+        let mut at = Some(id);
+        while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
+            if node.is("inert") {
+                return true;
+            }
+            at = node.parent;
+        }
+        false
+    }
+
     /// Whether nothing's changed since `take_changed` was last asked.
     pub fn unchanged(&self) -> bool {
         self.changed.is_empty()
@@ -350,7 +362,7 @@ impl Tree {
     /// Whether there's a modal shown in `id`, the last one there putting the way to it, from `id`, in `path`.
     fn modal(&self, id: Id, path: &mut Vec<Id>) -> bool {
         let Some(node) = self.nodes.get(&id) else { return false };
-        if node.hidden() || node.str("aria-hidden") == Some("true") {
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
             return false;
         }
         path.push(id);
@@ -364,7 +376,7 @@ impl Tree {
     /// The semantic tree from `id`, where `held` is the way to the modal shown, which only what's on it is read on.
     fn read(&self, id: Id, held: Option<&[Id]>) -> Vec<Value> {
         let Some(node) = self.nodes.get(&id) else { return Vec::new() };
-        if node.hidden() || node.str("aria-hidden") == Some("true") {
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
             return Vec::new();
         }
         let held = match held {
@@ -455,7 +467,7 @@ impl Tree {
     /// button's name where it has no `aria-label`.
     fn label(&self, id: Id) -> String {
         let Some(node) = self.nodes.get(&id) else { return String::new() };
-        if node.hidden() || node.str("aria-hidden") == Some("true") {
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
             return String::new();
         }
         if let Some(name) = node.str("aria-label") {

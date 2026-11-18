@@ -42,8 +42,8 @@ pub(crate) enum Told {
     /// Runs script in the launcher's page.
     Script(String),
     /// Shows the launcher, or puts it away if it's showing: its shortcut, or the ring in a Mac's menu bar, when it
-    /// was pressed.
-    Toggle(std::time::Instant),
+    /// was pressed, and the key the shortcut ends with, as the DOM names it.
+    Toggle(std::time::Instant, Option<String>),
     Summon,
     /// The launcher is drawn natively in this window (`strict::launcher`), or with none, it's the web launcher.
     Native(Option<strict::platform::WindowId>),
@@ -342,7 +342,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 page = None;
                 if std::mem::take(&mut wanted) {
                     let asked = std::time::Instant::now();
-                    on_strict(move |windows| windows.summon(id, asked));
+                    on_strict(move |windows| windows.summon(id, asked, None));
                 }
             }
             // It's the web launcher: its page loads, and it shows if it's wanted.
@@ -363,20 +363,20 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                     shown = true;
                 }
             }
-            Event::UserEvent(Told::Toggle(asked)) if native.is_some() => {
+            Event::UserEvent(Told::Toggle(asked, key)) if native.is_some() => {
                 let id = native.expect("it's native");
-                on_strict(move |windows| if windows.showing(id) { windows.put_away(id, true) } else { windows.summon(id, asked) });
+                on_strict(move |windows| if windows.showing(id) { windows.put_away(id, true) } else { windows.summon(id, asked, key.as_deref()) });
             }
             Event::UserEvent(Told::Summon) if native.is_some() => {
                 let (id, asked) = (native.expect("it's native"), std::time::Instant::now());
-                on_strict(move |windows| windows.summon(id, asked));
+                on_strict(move |windows| windows.summon(id, asked, None));
             }
-            Event::UserEvent(Told::Toggle(_) | Told::Summon) if !decided => wanted = true,
-            Event::UserEvent(Told::Toggle(_)) if shown => {
+            Event::UserEvent(Told::Toggle(..) | Told::Summon) if !decided => wanted = true,
+            Event::UserEvent(Told::Toggle(..)) if shown => {
                 shown = false;
                 put_away(&window, page.as_mut(), true);
             }
-            Event::UserEvent(Told::Toggle(_) | Told::Summon) => {
+            Event::UserEvent(Told::Toggle(..) | Told::Summon) => {
                 show(&window, page.as_mut());
                 shown = true;
                 focused = false;
@@ -697,9 +697,17 @@ fn shortcut(home: &std::path::Path) -> Option<global_hotkey::GlobalHotKeyManager
             return None;
         }
     };
+    // The key it ends with, as the DOM names it, which a page it summons doesn't take as its own.
+    let code = format!("{:?}", key.key);
+    let last = match code.as_str() {
+        "Space" => " ".to_owned(),
+        letter if letter.starts_with("Key") => letter[3..].to_lowercase(),
+        digit if digit.starts_with("Digit") => digit[5..].to_owned(),
+        other => other.to_owned(),
+    };
     GlobalHotKeyEvent::set_event_handler(Some(move |pressed: GlobalHotKeyEvent| {
         if pressed.id == key.id() && pressed.state == HotKeyState::Pressed {
-            tell(Told::Toggle(std::time::Instant::now()));
+            tell(Told::Toggle(std::time::Instant::now(), Some(last.clone())));
         }
     }));
     eprintln!("the launcher's shortcut is {chosen}");
@@ -851,7 +859,7 @@ fn ring() -> Option<tray_icon::TrayIcon> {
     }));
     TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
         if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-            tell(Told::Toggle(std::time::Instant::now()));
+            tell(Told::Toggle(std::time::Instant::now(), None));
         }
     }));
     let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(false).with_tooltip(crate::page::NAME).build();

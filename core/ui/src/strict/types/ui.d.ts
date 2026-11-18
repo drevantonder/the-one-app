@@ -95,6 +95,9 @@ export type BoxProps = Semantics & {
   onIntersection?: (event: Intersected) => void
   /** Has the keyboard as it's drawn, and again each time it's set. */
   autofocus?: boolean
+  /** Out of reach, with all that's in it, as the DOM's `inert` is: never pressed, never reached by Tab, never read,
+   * as what's faded out is. `undefined`, not `false`, for reachable. */
+  inert?: true
   children?: Element
 }
 export declare function Box(props: BoxProps): Element

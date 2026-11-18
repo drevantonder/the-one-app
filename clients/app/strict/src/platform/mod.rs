@@ -309,7 +309,8 @@ impl Windows {
     /// Shows panel `id`, centred near the top of the screen the pointer is on, with the keyboard, its frame drawn as
     /// it shows; the window that had the keyboard is kept, to give it back (`put_away`). `asked` is when it was asked
     /// to, which its `Shown` says how long after.
-    pub fn summon(&mut self, id: WindowId, asked: std::time::Instant) {
+    /// `key` is the key its shortcut ends with, where its shortcut summoned it (`Screen::summoned`).
+    pub fn summon(&mut self, id: WindowId, asked: std::time::Instant, key: Option<&str>) {
         let Some(window) = self.windows.get_mut(&id) else { return };
         if window.visible {
             return self.display.activate(&window.native);
@@ -319,6 +320,7 @@ impl Windows {
         window.summoned = Some(asked);
         if let Ok(screen) = &mut window.screen {
             screen.shown(true);
+            screen.summoned(key);
         }
         self.display.summon(&window.native);
         // Drawn now, not on the loop's next turn, so its first frame is the one it shows with.
