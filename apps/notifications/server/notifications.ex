@@ -71,7 +71,7 @@ defmodule Notifications do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.23.33",
+      "core" => ">= 0.25.4",
       "database" => "to keep your inbox",
       "encryption" => "to encrypt what's sent to your devices"
     }
@@ -104,7 +104,7 @@ defmodule Notifications do
   @impl true
   def entrypoints do
     [
-      %{page: "client/index.html", subject: "user"}
+      %{page: "client/index.html", subject: "user", host: 1}
     ]
   end
 

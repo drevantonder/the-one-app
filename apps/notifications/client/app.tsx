@@ -2,9 +2,7 @@
 // something, each of which you hear from or not. Tapping one marks it read and opens the app it's from. A phone or a
 // browser that isn't woken by them says so first, and why, and a browser turns them on here.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, List, Menu, open, Problem, Row, Screen, Section, Skeleton, Spinner, Switch, toast } from "ui"
-import "./app.css"
+import { Box, Button, call, changed, client, confirm, Empty, List, Menu, open, Problem, render, Row, Screen, Section, Skeleton, Spinner, Switch, Text, toast } from "ui"
 
 /** A notification, as `notifications_inbox` answers it. */
 interface Received {
@@ -86,10 +84,10 @@ function PushState(props: { push: Push; settings: boolean }) {
   return (
     <>
       <Show when={props.push.state === "registering"}>
-        <p class="push" role="status">
+        <Box role="status" style={{ flexDirection: "row", alignItems: "center", gap: 8, color: "muted-foreground" }}>
           <Spinner />
-          <span>Turning on notifications…</span>
-        </p>
+          <Text>Turning on notifications…</Text>
+        </Box>
       </Show>
       <Show when={props.push.state === "notAsked"}>
         <List>
@@ -147,11 +145,11 @@ render(
           <Show when={inbox().push}>{(push) => <PushState push={push()} settings={inbox().settings} />}</Show>
           <Section>
             <Show when={inbox().notifications.length} fallback={<Empty>No notifications.</Empty>}>
-              <List class="inbox">
+              <List>
                 <For each={inbox().notifications}>
                   {(notification) => (
                     <Row
-                      heading={<span class={{ unread: !notification.read }}>{notification.title}</span>}
+                      heading={<Text style={{ font: notification.read ? "body" : "label" }}>{notification.title}</Text>}
                       text={[notification.from, notification.text].filter(Boolean).join(" · ")}
                       end={ago(notification.at)}
                       onClick={() => tapped(notification)}
@@ -163,16 +161,15 @@ render(
           </Section>
           <Show when={inbox().apps.length}>
             <Section heading="Allow Notifications">
-              <form>
+              <Box style={{ gap: "gap" }}>
                 <For each={inbox().apps} keyed={(app) => app.app}>
                   {(app) => <Switch label={app().name} checked={app().allowed} onChange={(event) => change("notifications_allow", { app: app().app, allow: event.currentTarget.checked })} />}
                 </For>
-              </form>
+              </Box>
             </Section>
           </Show>
         </Loading>
       </Errored>
     </Screen>
   ),
-  document.body,
 )
