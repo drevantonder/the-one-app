@@ -27,13 +27,13 @@ defmodule OneCore.Builds do
   def build, do: Application.fetch_env!(:one_core, :build)
 
   @doc """
-  The version a build is, Semantic Versioning's. A build from before builds had versions, named `<count>-<commit>`,
-  is 0.15.0, whose servers, clients and edge it talked with as they were.
+  The version a build is, Semantic Versioning's, or `nil` for one that doesn't say it, as one from before builds had
+  versions (`<count>-<commit>`), which is too old to talk with any part of the platform.
   """
   def version(build) do
     case Version.parse(to_string(build)) do
       {:ok, version} -> version
-      :error -> Version.parse!("0.15.0")
+      :error -> nil
     end
   end
 
@@ -56,9 +56,16 @@ defmodule OneCore.Builds do
 
   defp series(%Version{major: 0, minor: minor}), do: {0, minor}
   defp series(%Version{major: major}), do: major
+  defp series(nil), do: nil
 
-  @doc "Whether the build `a` is a version before `b`'s."
-  def older?(a, b), do: Version.compare(version(a), version(b)) == :lt
+  @doc "Whether the build `a` is a version before `b`'s: one that doesn't say its version is before any."
+  def older?(a, b) do
+    case {version(a), version(b)} do
+      {nil, _b} -> true
+      {_a, nil} -> false
+      {a, b} -> Version.compare(a, b) == :lt
+    end
+  end
 
   @doc "The kind of machine this is, as builds are named, the same as a client names it: `linux-x86_64`, `macos-aarch64`."
   def target do
@@ -164,7 +171,7 @@ defmodule OneCore.Builds do
 
   @doc """
   The count of commits in a build's metadata (`tooling/version`), which only grows on main: `0.22.4+3100.abcdef` is
-  3100, and one from before builds had versions 0.
+  3100, and one that doesn't say its version 0.
   """
   def count(build) do
     with %Version{build: metadata} when is_binary(metadata) <- version(build),

@@ -63,7 +63,7 @@ export interface Presence {
 
 /** What it's told. */
 export type Input =
-  | { published: string; latest?: Record<string, string> }
+  | { published: string; latest: Record<string, string> }
   | { now: true }
   | { reported: { key: string } & Reported }
   | { seen: string }
@@ -135,10 +135,8 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     let concerned = false;
 
     if ("published" in input) {
-      // Only a newer build moves it: one published again, as a release run again publishes, changes nothing. A server
-      // from before it said the latest of each name says only its server build.
-      const latest = input.latest ?? { "server-code": input.published };
-      const moved = Object.entries(latest).filter(([name, build]) => !state.latest?.[name] || newer(build, state.latest[name]));
+      // Only a newer build moves it: one published again, as a release run again publishes, changes nothing.
+      const moved = Object.entries(input.latest).filter(([name, build]) => !state.latest?.[name] || newer(build, state.latest[name]));
       if (moved.length || !state.build) {
         state.latest = { ...state.latest, ...Object.fromEntries(moved) };
         this.begin(state, state.build && !newer(input.published, state.build) ? state.build : input.published, presence, reported);

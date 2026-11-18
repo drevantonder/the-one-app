@@ -252,8 +252,8 @@ defmodule OneCore.Mcp do
 
   # Parts of the platform talk across one breaking release and no more (`OneCore.Builds.talk?/2`): a server, a
   # client and the edge each say their build as `_meta.version`, and what one two or more away says is refused before
-  # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022). One that says none is from
-  # before builds had versions, 0.15's. What updates a part that's behind is answered whatever it's on, however far
+  # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022), and one that says none is
+  # refused as too old. What updates a part that's behind is answered whatever it's on, however far
   # behind, as an app store always lets an old app update, since it's how a part catches up: the builds it
   # downloads, an update, the task an update is followed by (`tasks/get`, as a client's Update follows it), the list
   # of tools a client reads before it calls one, and which builds run, by which the program keeping a server running,
@@ -263,19 +263,20 @@ defmodule OneCore.Mcp do
   defp talks("tools/call", %{"name" => name}) when name in ["builds", "download", "update"], do: :ok
 
   defp talks(_method, params) do
-    theirs = meta(params)["version"] || "0.15.0"
+    theirs = meta(params)["version"]
 
     if Builds.talk?(theirs, Builds.build()) do
       :ok
     else
       here = Servers.name(Server.key()) || "This server"
+      on = theirs || "a build that doesn't say its version"
 
       why =
         if Builds.older?(theirs, Builds.build()),
           do:
-            "#{here} is on #{Builds.build()}, and what asked on #{theirs}, more than one breaking release behind, which doesn't talk with it until it's updated (`one update`)",
+            "#{here} is on #{Builds.build()}, and what asked on #{on}, more than one breaking release behind, which doesn't talk with it until it's updated (`one update`)",
           else:
-            "#{here} is on #{Builds.build()}, more than one breaking release behind what asked on #{theirs}: it's asked once it's updated"
+            "#{here} is on #{Builds.build()}, more than one breaking release behind what asked on #{on}: it's asked once it's updated"
 
       {:error, -32022, why, %{version: Builds.build(), requested: theirs}}
     end

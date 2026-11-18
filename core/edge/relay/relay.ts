@@ -77,19 +77,25 @@ const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
 const SWITCH = 12_000;
 /**
  * A build's breaking release, as Semantic Versioning's 0.x reads at Cargo, npm and Hex: its 0.minor, or from 1.0 its
- * major. A server from before builds had versions says none, and is 0.15.0.
+ * major.
  */
-function series(version = "0.15.0"): [number, number] {
+function series(version: string): [number, number] {
   const [major, minor] = version.split(".").map(Number);
   return major === 0 ? [0, minor] : [major, 0];
 }
-/** Whether two builds talk: one breaking release apart at most, as `OneCore.Builds.talk?/2` says. */
-const talk = (a?: string, b?: string) => {
+/**
+ * Whether the build `a` talks with `b`, the edge's: one breaking release apart at most, as `OneCore.Builds.talk?/2`
+ * says. One that doesn't say its version is too old to talk with any.
+ */
+const talk = (a: string | undefined, b: string) => {
+  if (!a) return false;
   const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
   if (major === 0 && otherMajor === 0) return Math.abs(minor - otherMinor) <= 1;
   return major > 0 && otherMajor > 0 && Math.abs(major - otherMajor) <= 1;
 };
-const before = (a?: string, b?: string) => {
+/** Whether the build `a` is a breaking release before `b`, the edge's: one that doesn't say its version is. */
+const before = (a: string | undefined, b: string) => {
+  if (!a) return true;
   const [[major, minor], [otherMajor, otherMinor]] = [series(a), series(b)];
   return major < otherMajor || (major === otherMajor && minor < otherMinor);
 };
@@ -283,7 +289,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
 
     // Only a server that talks with the edge is asked, and only one that's ready, or isn't known not to be.
     const versions = await this.relay((relay) => relay.versions(servers));
-    const talking = servers.filter((server) => !versions[server] || talk(versions[server], this.env.VERSION));
+    const talking = servers.filter((server) => talk(versions[server], this.env.VERSION));
     if (!talking.length) {
       const error = `None of its ${servers.length} servers is on a version that talks with the edge's ${this.env.VERSION}: ${servers.map((server) => `${server.slice(0, 8)} ${versions[server]}`).join(", ")}`;
       console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length }, error } }));
@@ -328,8 +334,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   /**
    * A server or a device of the network's asks who's here, of the keys it names: `?keys=<key>,<key>`, and is told
    * `{"presence": {<key>: <Presence>}}` and the edge's build as `one-version`. A server says what it is with a POST of
-   * `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>}`, as that changes. One that
-   * says neither, a server from before they said them, is taken as before: active and running while it's connected.
+   * `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>}`, as that changes.
    */
   async handleSeen(request: Request, url: URL) {
     const admitted = await admit(this.env.NETWORK, request, request.method === "POST" ? await request.text() : "");
@@ -346,9 +351,10 @@ export default class extends WorkerEntrypoint<RelayEnv> {
         version,
         ...Object.fromEntries(Object.entries(said).filter(([name]) => UPDATE.includes(name as keyof Reported))),
       };
-      const now = await this.relay((relay) => relay.report(key, version, status, update));
       const behind = !talk(version, this.env.VERSION) && before(version, this.env.VERSION);
-      const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build from before versions"}, more than one breaking release before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
+      const error = behind ? `${key.slice(0, 8)} is on ${version ?? "a build that doesn't say its version"}, more than one breaking release before the edge's ${this.env.VERSION}, so the edge sends it nothing until it's updated` : undefined;
+      if (!version) return refuse(400, error!);
+      const now = await this.relay((relay) => relay.report(key, version, status, update));
       const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
       console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes, error } }));
       if (!status) return refuse(400, `A server says what it is with {"server_membership": ${MEMBERSHIPS.join("|")}, "server_daemon_status": ${SAID.join("|")}}`);
@@ -371,7 +377,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     if (request.method === "POST") {
       if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
       const { said } = admitted;
-      if (typeof said.published === "string") input = { published: said.published, ...(typeof said.latest === "object" && said.latest !== null && { latest: said.latest as Record<string, string> }) };
+      if (typeof said.published === "string" && said.latest && typeof said.latest === "object") input = { published: said.published, latest: said.latest as Record<string, string> };
       else if (said.now === true) input = { now: true };
       else return refuse(400, 'A server says {"published": <build>, "latest": {<name>: <build>}} or {"now": true}');
     }
@@ -435,8 +441,7 @@ export class Relay extends DurableObject<RelayEnv> {
   /**
    * An endpoint that proved its key is joined: what it sends another comes over this connection, and what another
    * sends it goes back over it. One that connects again has left its old connection behind. It's connected for its
-   * `device`, and a `server` that comes is told to the others. One that has never said what it is, from before
-   * servers said it, is active and running from now, as it was taken before.
+   * `device`, and a `server` that comes is told to the others.
    */
   async endpoint(params: URLSearchParams) {
     const [key, device, server] = [params.get("key"), params.get("device"), params.has("server")];
@@ -445,8 +450,6 @@ export class Relay extends DurableObject<RelayEnv> {
     this.ctx.acceptWebSocket(ours, [`endpoint ${key}`, `on ${device}`]);
     ours.serializeAttachment({ key, device, server });
     if (server) {
-      if (!(await this.ctx.storage.get(`presence ${key}`)))
-        await this.ctx.storage.put(`presence ${key}`, { server_membership: "active", server_daemon_status: "running", at: Date.now() } satisfies ServerStatus);
       this.notify(SEEN);
       await this.updated({ seen: key! });
     }
@@ -454,10 +457,9 @@ export class Relay extends DurableObject<RelayEnv> {
   }
 
   /**
-   * A server says what it is, `status`, and its build, `version`, or none from before builds had them. The other
-   * servers are told. Gives its presence now.
+   * A server says what it is, `status`, and its build, `version`. The other servers are told. Gives its presence now.
    */
-  async report(key: string, version = "0.15.0", status?: ServerStatus, update?: Reported) {
+  async report(key: string, version: string, status?: ServerStatus, update?: Reported) {
     await this.ctx.storage.put({ [`version ${key}`]: version, ...(status && { [`presence ${key}`]: status }) });
     if (status) this.notify(SEEN);
     if (update) await this.updated({ reported: { key, ...update } });
