@@ -43,38 +43,7 @@ mod hosts;
 #[cfg(desktop)]
 mod title_bar;
 
-/// A computer's window's page, which is this program's own files (`build.rs`), and the app's name.
-#[cfg(desktop)]
-pub(crate) mod page {
-    include!(concat!(env!("OUT_DIR"), "/page.rs"));
-
-    /// One of the page's files, by the path it's served at.
-    pub fn file(path: &str) -> Option<&'static [u8]> {
-        FILES.iter().find(|(served, _)| *served == path).map(|(_, file)| *file)
-    }
-
-    /// One of the page's files as the web view's answer for it, with what it may load.
-    pub fn respond(path: &str) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
-        use wry::http::{Response, StatusCode, header};
-        let response = match file(path) {
-            Some(file) => Response::builder().header(header::CONTENT_TYPE, kind(path)).header(header::CONTENT_SECURITY_POLICY, CSP).body(file.into()),
-            None => Response::builder().status(StatusCode::NOT_FOUND).body(Vec::new().into()),
-        };
-        response.expect("these headers are valid")
-    }
-
-    /// What kind of file one of the page's own is.
-    fn kind(path: &str) -> &'static str {
-        match path.rsplit('.').next() {
-            Some("html") => "text/html",
-            Some("js") => "text/javascript",
-            Some("css") => "text/css",
-            Some("png") => "image/png",
-            Some("woff2") => "font/woff2",
-            _ => "text/plain",
-        }
-    }
-}
+pub(crate) mod page;
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
 /// the apps it uses, which are all at its own address, and nothing from anywhere else.
@@ -870,6 +839,16 @@ async fn opens() {
         }
     };
     eprintln!("the client opened {} ms after the app started", app.started.elapsed().as_millis());
+    // The network's page, if it has a newer one, for the next start.
+    spawn({
+        let client = client.clone();
+        async move {
+            let updated = async { page::update(&client, &app.shell.home()?).await }.await;
+            if let Err(error) = updated {
+                eprintln!("couldn't ask the network for its page: {error:#}")
+            }
+        }
+    });
     // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
     // not the system still has the server to start (`cli::serving::settle`).
     #[cfg(desktop)]
@@ -1239,7 +1218,21 @@ pub fn run() {
 #[cfg(mobile)]
 fn window(app: &AppHandle) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error>> {
     let page = HOME.parse().expect("the home screen has an address");
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page)).on_navigation(|to| stays(to.as_str()));
+    // Tauri answers with the page built in, and the network's kept one goes in its place (`page`).
+    if let Ok(home) = self::app().shell.home() {
+        page::load(&home);
+    }
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page))
+        .on_navigation(|to| stays(to.as_str()))
+        .on_web_resource_request(|request, response| {
+            use tauri::http::{HeaderValue, StatusCode, header};
+            let path = request.uri().path();
+            if let Some(file) = page::kept(path) {
+                *response.status_mut() = StatusCode::OK;
+                response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(page::kind(path)));
+                *response.body_mut() = file.into();
+            }
+        });
     let window = window.build()?;
     #[cfg(target_os = "ios")]
     status_bar::watch(&window)?;

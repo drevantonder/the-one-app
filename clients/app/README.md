@@ -39,3 +39,13 @@ file>` first makes its Xcode project, so its notification extension and App Grou
 Android's project names the One App's identifier and name itself (`app/build.gradle.kts`, `strings.xml`, the folder
 of `MainActivity`), so a network's Android app with an identifier of its own is made from its own
 `cargo tauri android init --config <that file>` for now.
+
+## Its page from the network
+
+The window's page (`page/`) is built into the app, and its network's edge serves it too, at `<address>/page/`, from
+the commit the edge was deployed from (`core/edge/edge.js`). As the app opens, it asks for that, keeps a newer one it
+runs on, and loads it from its next start, as Expo Updates do by default (`src/page.rs`); without one, or with no
+network, it loads its own. So a change to the page goes live with an edge deploy, on phones too, with no build of
+the app. `page/update.json` says the lowest build of the app the page runs on (`native`): a change to the page that
+needs something new of the app's Rust half (a command, an event) raises it to the build that adds that, so an app
+older than that keeps its own page until it's updated.

@@ -166,6 +166,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
     *OPENED.lock().expect("nothing panics holding it") = link;
     crate::begin(Computer, started);
+    crate::page::load(&home);
 
     #[cfg(target_os = "macos")]
     let _menu = menu();

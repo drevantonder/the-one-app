@@ -90,6 +90,7 @@ pub fn run(entrypoint: String, subject: Option<String>, link: String) -> ExitCod
 
 fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     let home = ::client::home()?;
+    crate::page::load(&home);
     let event_loop = EventLoopBuilder::<Told>::with_user_event().build();
     // The window's class, which a Linux desktop matches to the app's entry (`StartupWMClass`), once GTK has started.
     #[cfg(target_os = "linux")]

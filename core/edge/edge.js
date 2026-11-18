@@ -66,6 +66,19 @@ for (const file of readdirSync(web).filter((file) => file !== "dist")) cpSync(`$
 // Built here, so a deploy never ships whatever build of the UI library was left on disk.
 await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).quiet();
 cpSync(`${root}/core/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true });
+// The app's own page, as its window has it, at `/page/`, which the app keeps and loads from its next start if it's
+// newer than its own and it runs on it (`clients/app/src/page.rs`), with what's said of it in `update.json`: its
+// version, the lowest build of the app it runs on (`clients/app/page/update.json`), and each file's SHA-256.
+const version = (await $`sh ${root}/tooling/version`.text()).trim();
+{
+  const files = {};
+  for (const file of (await Bun.file(`${app}/tauri.conf.json`).json()).build.frontendDist) {
+    cpSync(`${app}/${file}`, `${web}/dist/page/${basename(file)}`);
+    files[basename(file)] = new Bun.CryptoHasher("sha256").update(await Bun.file(`${app}/${file}`).bytes()).digest("hex");
+  }
+  const update = { version, ...(await Bun.file(`${app}/page/update.json`).json()), files };
+  await Bun.write(`${web}/dist/page/update.json`, JSON.stringify(update));
+}
 
 const built = `${root}/target/edge`;
 rmSync(built, { recursive: true, force: true });
@@ -136,7 +149,6 @@ const config = {
   config.updater = relative(here, `${built}/updater.jsonc`);
 }
 // The relay is told the edge's build, by which it knows which servers talk with it (`relay/relay.ts`).
-const version = (await $`sh ${root}/tooling/version`.text()).trim();
 for (const piece of ["relay", "mcp"]) {
   const worker = (await import(`${here}/${piece}/wrangler.jsonc`)).default;
   if (piece === "mcp" && who) worker.services = [...worker.services, { binding: who.binding, service: who.service, entrypoint: who.entrypoint }];

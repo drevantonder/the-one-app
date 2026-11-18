@@ -22,6 +22,8 @@ window = [
   "dep:tauri-build",
   "dep:anyhow",
   "dep:data-encoding",
+  "dep:semver",
+  "dep:sha2",
   "dep:serde_json",
   "dep:tokio",
   "dep:tauri",
@@ -67,6 +69,9 @@ anyhow = { workspace = true, optional = true }
 cli = { path = "../cli" }
 client = { path = "../../core/client" }
 data-encoding = { version = "2", optional = true }
+# The window's page the network has: its version, the lowest build it runs on, and its files' hashes (`page`).
+semver = { version = "1", features = ["serde"], optional = true }
+sha2 = { version = "0.11", optional = true }
 serde_json = { workspace = true, optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 url = { version = "2", optional = true }
