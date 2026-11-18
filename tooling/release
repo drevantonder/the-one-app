@@ -123,8 +123,10 @@ behind=$(jq -r --arg build "$build" '
 mine=() mac=()
 for name in "${names[@]}"; do
   kind=${name#*/}
-  # A server is published as its code, which is the same for every kind.
-  if [[ $(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds") == "$build" ]]; then
+  # A server is published as its code, which is the same for every kind, and its kind's runtime, which a kind of
+  # machine new to the network has none of yet.
+  if [[ $(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds") == "$build" ]] &&
+    { [[ $name != server/* ]] || jq -e --arg n "server-runtime/$kind" '.latest[$n]' <<<"$builds" >/dev/null; }; then
     echo "$name  $build is published already"
   elif [[ $name == server/* && $here != linux-* ]]; then
     echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
