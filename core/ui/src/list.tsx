@@ -3,6 +3,7 @@ import { children, createContext, createEffect, createMemo, createSignal, flush,
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
 import { direction, reducedMotion, touch, viewport } from "#bridge"
+import { Icon } from "./button.tsx"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { Choose } from "./collect.ts"
 import { messages } from "./words.ts"
@@ -26,8 +27,13 @@ const look = styles({
   // Every row draws the line above it, and the list hides the first's.
   rows: { marginTop: negative(tokens.length.hairline) },
   flatRows: { marginTop: 0 },
+  // In grouped cards on a computer, as Raycast's Settings: the card is inset, and its lines between rows run from its
+  // inset to its inset.
+  groupedList: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center", paddingInline: tokens.grid[3] },
   row: { position: "relative", flexDirection: "row", alignItems: "stretch", overflow: "hidden", borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
   flatRow: { borderTopWidth: 0, borderRadius: tokens.radius.medium },
+  groupedInside: { minHeight: tokens.length.groupedRow, paddingInline: 0, paddingBlock: tokens.grid[1.5], gap: tokens.grid[2.5], backgroundColor: tokens.colour.transparent },
+  sidebarInside: { minHeight: tokens.length.sidebarRow },
   wraps: { flexWrap: "wrap" },
   current: { backgroundColor: tokens.colour.selection },
   // A listbox's option, the one chosen highlighted as a row open beside its list is.
@@ -61,13 +67,17 @@ const look = styles({
   heading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 1 },
   flatHeading: { flexShrink: 0, maxWidth: "70%", fontWeight: tokens.weight.regular },
   text: { font: tokens.type.medium, color: tokens.colour.secondaryLabel, lineClamp: 2 },
+  // Under its heading in grouped cards and a sidebar, as Raycast's Settings draws a row's subtitle.
+  groupedHeading: { fontWeight: tokens.weight.regular },
+  groupedText: { font: tokens.type.caption },
+  destructive: { color: tokens.colour.red },
   flatText: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
   start: { flexShrink: 0 },
   end: { flexShrink: 0, maxWidth: "50%", color: tokens.colour.secondaryLabel, textAlign: "end" },
   control: { flexShrink: 0, minWidth: tokens.length.control, justifyContent: "center", alignItems: "center", paddingStart: tokens.grid[1] },
   action: { flexShrink: 0, flexDirection: "row", alignItems: "center", marginStart: "auto", paddingBottom: tokens.grid[2], paddingEnd: tokens.grid[3] },
   swipe: { position: "absolute", top: 0, bottom: 0, end: 0, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: tokens.colour.red, color: tokens.colour.onAccent, cursor: "pointer" },
-  chevron: { color: tokens.colour.secondaryLabel },
+  chevron: { flexShrink: 0, color: tokens.colour.tertiaryLabel },
   // A row coming or going: it opens up where it goes, or closes up, fading as it does.
   slot: { overflow: "hidden", transitionProperty: ["height", "opacity"], transition: tokens.motion.settle },
   entering: { opacity: { default: 1, entering: 0 } },
@@ -99,6 +109,14 @@ const slot = (node: JSX.Element, state: State, to?: number): Slot => {
   const [drawn, setDrawn] = createSignal(false)
   return { node, state: now, setState, to: held, setTo, drawn, setDrawn }
 }
+
+/// `<ListStyle value="insetGrouped">…</ListStyle>`: how the lists in it are drawn, as SwiftUI's `listStyle` is. `plain`,
+/// the usual, is Raycast's rows on a computer and a card of rows under a finger. `insetGrouped` is cards of rows on
+/// every device, each row its heading over its grey line, and one that opens with a chevron, as Raycast's Settings and
+/// iOS's Settings draw them. `sidebar` is a window's sidebar: rows on the window with their icons, the one open beside
+/// it filled, as macOS's and Raycast's Settings' sidebars; under a finger, as `insetGrouped`. A screen whose lists
+/// aren't plain has no action bar, as Raycast's Settings window has none.
+export const ListStyle = createContext<"plain" | "insetGrouped" | "sidebar">("plain")
 
 /** Whether a row is an option of a listbox, which its list's slot is for it. */
 const InListbox = createContext(false)
@@ -180,6 +198,10 @@ export function createListbox({ onOpen }: { onOpen?: (index: number) => void } =
 /// list draws only its rows near the window, as React Native's FlatList and UIKit's table views do: 16 at a time, as
 /// they come near it, the rest held at the height they were, or a row's, until they do.
 export function List(props: { listbox?: Listbox; label?: string; children?: JSX.Element }) {
+  const style = useContext(ListStyle)
+  // On a computer a plain list and a sidebar are rows on the window; grouped cards are cards there too.
+  const flat = () => !touch() && style !== "insetGrouped"
+  const grouped = () => !touch() && style === "insetGrouped"
   const drawing: Drawing = new Map()
   const rows = children(() => (
     <Drawing value={drawing}>
@@ -311,8 +333,8 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
   )
   return (
     <Show when={slots().length}>
-      <Box role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, !touch() && look.flat]}>
-        <Box style={[look.rows, !touch() && look.flatRows]}>
+      <Box role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, flat() && look.flat, grouped() && look.groupedList]}>
+        <Box style={[look.rows, flat() && look.flatRows]}>
           <For each={chunks()}>{(start) => <Chunk start={start} />}</For>
         </Box>
       </Box>
@@ -327,6 +349,8 @@ const HOLD = 500
 /// How far aside a row stays to show its destructive item.
 const SHOWN = 88
 
+/// `<Row heading="Remove Device…" destructive onClick={remove} />` is a row that does something destructive, its
+/// heading red, as iOS's Settings has one at the foot of a page.
 /// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, up to two grey lines
 /// of `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With
 /// `onClick` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
@@ -363,6 +387,7 @@ type RowProps = {
   current?: boolean
   control?: JSX.Element
   action?: JSX.Element
+  destructive?: boolean
 }
 
 /// A row, drawn.
@@ -447,19 +472,32 @@ function Drawn(props: RowProps) {
     onCleanup(() => choose.clear(actions))
   }
 
+  const style = useContext(ListStyle)
+  // A plain list's rows on a computer are Raycast's, the grey words beside the heading; elsewhere they're under it.
+  const flat = () => !touch() && style === "plain"
+  const grouped = () => !touch() && style === "insetGrouped"
+  const sidebar = () => !touch() && style === "sidebar"
+  // A row that opens something says so with a chevron, as iOS's Settings does, but not in a computer's sidebar, whose
+  // rows open beside it, or a plain list's.
+  const opens = () => !!props.onClick && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
   const inside = () => (
     <>
       <Show when={props.start}>
         <Box style={look.start}>{props.start}</Box>
       </Show>
-      <Box style={[look.words, !touch() && look.flatWords]}>
-        <Text style={[look.heading, !touch() && look.flatHeading]}>{props.heading}</Text>
+      <Box style={[look.words, flat() && look.flatWords]}>
+        <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, props.destructive && look.destructive]}>{props.heading}</Text>
         <Show when={props.text}>
-          <Text style={[look.text, !touch() && look.flatText]}>{props.text}</Text>
+          <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{props.text}</Text>
         </Show>
       </Box>
       <Show when={props.end}>
         <Box style={look.end}>{props.end}</Box>
+      </Show>
+      <Show when={opens()}>
+        <Box style={look.chevron}>
+          <Icon name="caret-right" />
+        </Box>
       </Show>
     </>
   )
@@ -474,16 +512,16 @@ function Drawn(props: RowProps) {
         onPointerCancel={cancel}
         onContextMenu={(event) => menu()?.open(at(event))}
         onPointerEnter={chosen}
-        style={[look.row, !touch() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
+        style={[look.row, !touch() && !grouped() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
       >
         <Show when={props.control}>
           <Box style={[look.control, moving()]}>{props.control}</Box>
         </Show>
         <Show
           when={props.onClick}
-          fallback={<Box style={[look.inside, !touch() && look.flatInside, !!props.control && look.after, moving()]}>{inside()}</Box>}
+          fallback={<Box style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</Box>}
         >
-          <Box role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, !touch() && look.flatInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
+          <Box role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
             {inside()}
           </Box>
         </Show>

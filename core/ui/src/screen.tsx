@@ -8,6 +8,7 @@ import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport 
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "./words.ts"
 import { ActionBar, type Action } from "./actions.tsx"
+import { ListStyle } from "./list.tsx"
 import { Choose, Collect } from "./collect.ts"
 import { negative, styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
@@ -27,6 +28,22 @@ const look = styles({
   bare: { minHeight: 0 },
   // The arrow, not the button's edge, lines up with what's under it.
   back: { marginStart: negative(tokens.length.iconInset) },
+  // On a computer, Back and Forward in one pill of glass before the title, as macOS's System Settings and Raycast's
+  // Settings have them; under a finger, Back alone, round.
+  pill: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
+    height: tokens.length.control,
+    paddingInline: tokens.grid[1],
+    borderRadius: tokens.radius.full,
+    backgroundColor: tokens.colour.glass,
+    boxShadow: tokens.shadow.pill,
+  },
+  pillButton: { width: tokens.length.control, height: tokens.length.control, alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.full, cursor: "pointer", color: tokens.colour.secondaryLabel },
+  pillOff: { color: tokens.colour.quaternaryLabel, cursor: "default" },
+  pillLine: { width: tokens.length.hairline, height: tokens.grid[4], backgroundColor: tokens.colour.quinaryLabel },
+  round: { paddingInline: 0 },
   action: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], flexShrink: 0 },
   main: { flexGrow: 1, minHeight: 0 },
   // What's in it keeps clear of what the device keeps for itself at its other edges.
@@ -38,6 +55,10 @@ const look = styles({
   // Raycast's on a computer, 11px; iOS's on a phone, its footnote inset to the rows' words.
   heading: { font: tokens.type.small, color: tokens.colour.secondaryLabel, userSelect: "none" },
   touchHeading: { paddingInline: tokens.grid[4] },
+  // Above a card in grouped cards: the group's name, as Raycast's Settings heads one, in line with the card's words.
+  groupedHeading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, color: tokens.colour.label, paddingInline: tokens.grid[3], paddingTop: tokens.grid[2] },
+  // Grouped cards keep a readable width in the middle of what they're in, as Raycast's Settings' do.
+  groupedSection: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
   split: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0, position: "relative" },
   beside: { flexDirection: "row" },
   pane: { minHeight: 0, minWidth: 0, overflow: "hidden", backgroundColor: tokens.colour.background },
@@ -47,6 +68,8 @@ const look = styles({
   hidden: { opacity: 0, pointerEvents: "none" },
   // Where there is, the list keeps a readable width and what it opens has the rest.
   list: { flexBasis: "38%", minWidth: tokens.length.columnMin, maxWidth: tokens.length.column, flexShrink: 0, borderEndWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  // A window's sidebar is narrower, as macOS's and Raycast's Settings' are.
+  sidebar: { flexBasis: tokens.length.sidebar, minWidth: tokens.length.sidebar, maxWidth: tokens.length.sidebar },
   detail: { flexGrow: 1, flexShrink: 1 },
 })
 
@@ -55,6 +78,7 @@ const look = styles({
 const columnMin = 18 * 16
 const column = 24 * 16
 const wide = 48 * 16
+const sidebarWidth = 15 * 16
 
 /** How wide what's being drawn has room for: the window, or a split's side. */
 const Room = createContext<() => number>(() => viewport().width)
@@ -65,6 +89,10 @@ const Leave = createContext<() => void>(goBack)
 /** Whether it's in a split's detail beside its list, where a screen has nowhere to go back to. A split in that detail
  * whose own detail is pushed over its list has a Back again, to that list. */
 const InDetail = createContext<() => boolean>(() => false)
+/// `<History value={{ back, forward }}>`: where a window's Back and Forward go, as macOS's System Settings keeps them:
+/// the screens in it draw them in their bar, each greyed where it goes nowhere. A split pushing a screen over its list
+/// starts again, its Back going back to the list.
+export const History = createContext<{ back?: () => void; forward?: () => void } | null>(null)
 /** Whether a state is all there is of a split's detail beside its list, which it fills, in its middle. */
 export const Middle = createContext<() => boolean>(() => false)
 
@@ -87,6 +115,8 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   // The device's own back calls a Back of the screen's own, as a tap on it does.
   createEffect(() => !!props.back && !!props.onBack, (now) => (now ? covers(back) : undefined))
   const backed = () => !!props.back && !inDetail()
+  const history = useContext(History)
+  const style = useContext(ListStyle)
   // Only an app's first screen, which has no Back, gives way to the breadcrumb.
   const named = () => !!props.back || !breadcrumb()
   // On a computer, as Raycast's: the bar's buttons and menus' items are the screen's actions, in the footer's pills and
@@ -103,15 +133,37 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
     clear: (row: object) => chosen()?.row === row && setChosen(undefined),
   }
   const actions = () => [...(chosen()?.actions() ?? []).map((action) => ({ ...action, section: action.section ?? "chosen" })), ...bar()]
-  const footed = () => computer && actions().length > 0
+  // Raycast's command windows, whose lists are plain, have the footer; its Settings window, a sidebar and grouped
+  // cards, has none.
+  const footed = () => computer && style === "plain" && actions().length > 0
   return (
     <Box style={look.screen}>
       <Box role="banner" style={look.bar}>
         <Box style={[look.row, !named() && (!props.action || computer) && look.bare]}>
-          <Show when={backed()}>
-            <Button variant="ghost" size="icon" aria-label={messages.back} onClick={back} style={look.back}>
-              <Icon name="caret-left" along />
-            </Button>
+          <Show when={backed() || (computer && history)}>
+            <Box role="group" style={[look.pill, !computer && look.round]}>
+              <Box
+                role="button"
+                aria-label={messages.back}
+                aria-disabled={backed() || history?.back ? undefined : "true"}
+                onClick={() => (backed() ? back() : history?.back?.())}
+                style={[look.pillButton, !(backed() || history?.back) && look.pillOff]}
+              >
+                <Icon name="caret-left" along />
+              </Box>
+              <Show when={computer}>
+                <Box style={look.pillLine} />
+                <Box
+                  role="button"
+                  aria-label={messages.forward}
+                  aria-disabled={!backed() && history?.forward ? undefined : "true"}
+                  onClick={() => !backed() && history?.forward?.()}
+                  style={[look.pillButton, (backed() || !history?.forward) && look.pillOff]}
+                >
+                  <Icon name="caret-right" along />
+                </Box>
+              </Show>
+            </Box>
           </Show>
           <Heading level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, !named() && look.unnamed]}>
             {props.heading}
@@ -157,10 +209,11 @@ function Heading(props: { level: number; "aria-hidden"?: "true"; style: Paramete
 
 /// `<Section heading="This week">...</Section>`: a part of a screen under a small grey heading.
 export function Section(props: { heading?: JSX.Element; children?: JSX.Element }) {
+  const grouped = useContext(ListStyle) === "insetGrouped"
   return (
-    <Box style={look.section}>
+    <Box style={[look.section, grouped && look.groupedSection]}>
       <Show when={props.heading}>
-        <Heading level={2} style={[look.heading, touch() && look.touchHeading]}>
+        <Heading level={2} style={[look.heading, touch() && look.touchHeading, grouped && look.groupedHeading]}>
           {props.heading}
         </Heading>
       </Show>
@@ -179,8 +232,11 @@ const open: (() => void)[] = []
 /// calls `onClose`, and the app sets `open` false.
 export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
+  const history = useContext(History)
   const beside = () => room() >= wide
-  const listWidth = () => Math.min(column, Math.max(columnMin, room() * 0.38))
+  // A sidebar's list is a sidebar's width (`ListStyle`), and the detail has the rest.
+  const sidebar = useContext(ListStyle) === "sidebar"
+  const listWidth = () => (sidebar ? sidebarWidth : Math.min(column, Math.max(columnMin, room() * 0.38)))
   // What's drawn as open, which follows `open` as a move.
   const [shown, setShown] = createSignal(false)
   const close = () => props.onClose?.()
@@ -206,7 +262,7 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
 
   return (
     <Box style={[look.split, beside() && look.beside]}>
-      <Box aria-hidden={!beside() && shown() ? "true" : undefined} style={[look.pane, beside() ? look.list : look.over, !beside() && shown() && look.hidden]}>
+      <Box aria-hidden={!beside() && shown() ? "true" : undefined} style={[look.pane, beside() ? look.list : look.over, beside() && sidebar && look.sidebar, !beside() && shown() && look.hidden]}>
         <Room value={() => (beside() ? listWidth() : room())}>
           <Opened value={() => (props.open ? close : undefined)}>
             <Middle value={() => false}>{props.children}</Middle>
@@ -216,9 +272,11 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
       <Box aria-hidden={!beside() && !shown() ? "true" : undefined} style={[look.pane, beside() ? look.detail : look.over, !beside() && !shown() && look.hidden]}>
         <Room value={() => (beside() ? room() - listWidth() - 1 : room())}>
           <Leave value={close}>
+            <History value={beside() ? history : null}>
             <InDetail value={beside}>
               <Middle value={beside}>{props.detail}</Middle>
             </InDetail>
+            </History>
           </Leave>
         </Room>
       </Box>

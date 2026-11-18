@@ -20,10 +20,10 @@ export { call, changed, client, component, connection, covers, direction, leave,
 export { Badge, Button, Icon, Spinner } from "../../button.tsx"
 export { seen } from "../../seen.ts"
 
-export { Screen, Section, Split } from "../../screen.tsx"
+export { History, Screen, Section, Split } from "../../screen.tsx"
 export { Empty, Problem, Skeleton, Status, Steps } from "../../states.tsx"
 
-export { createListbox, List, Row } from "../../list.tsx"
+export { createListbox, List, ListStyle, Row } from "../../list.tsx"
 export { Metadata } from "../../metadata.tsx"
 
 export { Menu } from "../../menu.tsx"

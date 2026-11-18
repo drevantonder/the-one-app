@@ -58,6 +58,7 @@
   --hairline: 1px;
   --column: 24rem;
   --column-min: 18rem;
+  --sidebar: 15rem;
   --excerpt: 12rem;
   --safe-top: 0px;
   --safe-bottom: 0px;
@@ -74,6 +75,8 @@
   --key: 1.125rem;
   --action-panel: 20rem;
   --row: 2.375rem;
+  --grouped-row: 2.875rem;
+  --sidebar-row: 2.0625rem;
   --size-large: 1.125rem;
   --size-medium: 0.8125rem;
   --size-small: 0.6875rem;
@@ -189,6 +192,8 @@
     --grabber: 0.25rem;
     --grabber-gap: 0.5rem;
     --row: 3.25rem;
+    --grouped-row: 3.25rem;
+    --sidebar-row: 3.25rem;
     --size-medium: 0.9375rem;
     --size-small: 0.8125rem;
     --size-caption: 0.8125rem;
@@ -205,6 +210,8 @@
     --bar: 3.3382rem;
     --gutter: 16px;
     --row: 3.0588rem;
+    --grouped-row: 3.0588rem;
+    --sidebar-row: 3.0588rem;
     --size-large: 1rem;
     --size-medium: 0.8824rem;
     --size-small: 0.7647rem;

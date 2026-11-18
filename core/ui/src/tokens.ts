@@ -281,6 +281,8 @@ export const tokens = {
     /** A split's list beside what it opens: its widest and its narrowest. */
     column: length(rem(24)),
     columnMin: length(rem(18)),
+    /** A window's sidebar, as macOS's and Raycast's Settings': 240px. */
+    sidebar: length(rem(15)),
     /** How tall a block of code grows before it scrolls. */
     excerpt: length(rem(12)),
     /** What the device keeps for itself at each edge of the window (a status bar, a notch, a home indicator), which
@@ -306,6 +308,10 @@ export const tokens = {
     actionPanel: length(rem(20)),
     /** How tall a row in a list is at least: what's pressed, and a little room. */
     row: length({ default: rem(2.375), touch: rem(3.25), phone: rem(52 / 17) }),
+    /** A row in grouped cards, as Raycast's Settings and iOS's Settings draw them: 46px on a computer. */
+    groupedRow: length({ default: rem(2.875), touch: rem(3.25), phone: rem(52 / 17) }),
+    /** A sidebar's row on a computer, as macOS's and Raycast's Settings' sidebars draw them. */
+    sidebarRow: length({ default: rem(2.0625), touch: rem(3.25), phone: rem(52 / 17) }),
   }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), window: radius(px(26)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),

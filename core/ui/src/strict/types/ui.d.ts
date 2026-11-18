@@ -199,6 +199,8 @@ export declare function render(code: () => Element): () => void
 export declare function Screen(props: { heading?: Element; action?: Element; back?: boolean; onBack?: () => void; children?: Element }): Element
 export declare function Section(props: { heading?: Element; children?: Element }): Element
 export declare function Split(props: { open?: boolean; onClose?: () => void; detail?: Element; children?: Element }): Element
+/** Where a window's Back and Forward go (`History`), which its screens draw in their bar. */
+export declare function History(props: { value: { back?: () => void; forward?: () => void } | null; children: Element }): Element
 /** A listbox: which of its rows is chosen, and what's typed in that drives it (`createListbox`). */
 export interface Listbox {
   readonly id: string
@@ -209,6 +211,8 @@ export interface Listbox {
 }
 export declare function createListbox(): Listbox
 export declare function List(props: { listbox?: Listbox; label?: string; children?: Element }): Element
+/** How the lists in it are drawn (`ListStyle`): plain, inset grouped cards, or a window's sidebar. */
+export declare function ListStyle(props: { value: "plain" | "insetGrouped" | "sidebar"; children: Element }): Element
 export declare function Row(props: {
   heading?: Element
   text?: Element
@@ -219,12 +223,14 @@ export declare function Row(props: {
   current?: boolean
   control?: Element
   action?: Element
+  /** Something destructive it does, its heading red. */
+  destructive?: boolean
 }): Element
 
 export type IconName =
   | "calendar-blank" | "caret-down" | "caret-left" | "caret-right" | "caret-up-down" | "check" | "copy" | "corners-in"
-  | "corners-out" | "device-mobile" | "dots-three" | "file" | "gear-six" | "magnifying-glass" | "minus" | "minus-circle"
-  | "paperclip" | "pencil-simple" | "plus" | "plus-circle" | "squares-four" | "trash" | "warning-circle" | "x"
+  | "corners-out" | "device-mobile" | "devices" | "dots-three" | "file" | "gear-six" | "globe" | "hard-drives" | "magnifying-glass" | "minus" | "minus-circle"
+  | "paperclip" | "pencil-simple" | "plus" | "plus-circle" | "robot" | "squares-four" | "trash" | "warning-circle" | "x"
 export declare function Icon(props: { name: IconName; along?: boolean }): Element
 export declare function Spinner(): Element
 

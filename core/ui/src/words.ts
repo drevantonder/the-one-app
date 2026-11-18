@@ -13,6 +13,7 @@ export const [messages, setMessages] = createStore({
   copy: "Copy",
   details: "Details",
   exitFullScreen: "Exit Full Screen",
+  forward: "Forward",
   fullScreen: "Full Screen",
   hideDetails: "Hide Details",
   loading: "Loading",

@@ -36,9 +36,12 @@ const look = styles({
   // action that fixes it at its end.
   problem: {
     flexDirection: "row",
+    // Its actions go under its words where they'd leave the words narrower than a menu.
+    flexWrap: "wrap",
     alignItems: "center",
     alignSelf: "stretch",
     columnGap: tokens.grid[3],
+    rowGap: tokens.grid[3],
     paddingBlock: tokens.grid[3],
     paddingInline: tokens.grid[3],
     borderRadius: tokens.radius.medium,
@@ -50,7 +53,7 @@ const look = styles({
   warn: { backgroundColor: tokens.colour.orangeTint },
   symbol: { alignSelf: "flex-start", paddingTop: tokens.grid[0.5], color: tokens.colour.red },
   warnSymbol: { color: tokens.colour.orange },
-  words: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: tokens.grid[0.5], alignItems: "flex-start" },
+  words: { flexGrow: 1, flexShrink: 1, flexBasis: tokens.length.menu, minWidth: 0, gap: tokens.grid[0.5], alignItems: "flex-start" },
   heading: { fontWeight: tokens.weight.medium },
   said: { color: tokens.colour.secondaryLabel },
   // Show Details: quiet, under the sentence.
@@ -67,7 +70,7 @@ const look = styles({
   },
   caret: { transitionProperty: ["rotate"], transition: tokens.motion.quick },
   turned: { rotate: 90 },
-  actions: { flexDirection: "row", flexShrink: 0, gap: tokens.grid[2], color: tokens.colour.label },
+  actions: { flexDirection: "row", flexWrap: "wrap", flexShrink: 0, maxWidth: "100%", gap: tokens.grid[2], color: tokens.colour.label },
   // The rest of a tool's error, as it was written, with Copy in its corner as a code block has.
   details: { position: "relative", alignSelf: "stretch", marginTop: tokens.grid[1] },
   code: {

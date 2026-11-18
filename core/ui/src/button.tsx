@@ -27,6 +27,10 @@ import trash from "@phosphor-icons/core/assets/regular/trash.svg?raw"
 import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.svg?raw"
 import caretDown from "@phosphor-icons/core/assets/regular/caret-down.svg?raw"
 import deviceMobile from "@phosphor-icons/core/assets/regular/device-mobile.svg?raw"
+import devices from "@phosphor-icons/core/assets/regular/devices.svg?raw"
+import globe from "@phosphor-icons/core/assets/regular/globe.svg?raw"
+import hardDrives from "@phosphor-icons/core/assets/regular/hard-drives.svg?raw"
+import robot from "@phosphor-icons/core/assets/regular/robot.svg?raw"
 import minus from "@phosphor-icons/core/assets/regular/minus.svg?raw"
 import minusCircle from "@phosphor-icons/core/assets/regular/minus-circle.svg?raw"
 import plusCircle from "@phosphor-icons/core/assets/regular/plus-circle.svg?raw"
@@ -45,6 +49,10 @@ const svgs = {
   "corners-in": cornersIn,
   "corners-out": cornersOut,
   "device-mobile": deviceMobile,
+  devices,
+  globe,
+  "hard-drives": hardDrives,
+  robot,
   "dots-three": dotsThree,
   file,
   "gear-six": gearSix,
