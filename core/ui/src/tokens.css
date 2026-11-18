@@ -82,6 +82,13 @@
   --text-base: 0.875rem;
   --text-lg: 1.0625rem;
   --text-title: 1.75rem;
+  /* Apple's smaller text styles, the same under a finger and a mouse, as an iPhone's labels are: subheadline, for a
+     section's toggle; footnote, for a count or code; caption 1, for an icon's name; caption 2, the smallest, for a
+     key or a small heading. In rem, so an iPhone's Text Size grows them with the rest. */
+  --text-subheadline: 0.9375rem;
+  --text-footnote: 0.8125rem;
+  --text-caption-1: 0.75rem;
+  --text-caption-2: 0.6875rem;
   /* What's typed in a field: body, but never under 16px under a finger, below. */
   --text-field: var(--text-base);
 
