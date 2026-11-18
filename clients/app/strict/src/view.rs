@@ -808,9 +808,9 @@ impl Screen {
         let id = self.focused?;
         let field = self.fields.get(&id).filter(|field| !field.secure && !field.readonly)?;
         let drawn = self.drawn.get(&id)?;
-        let (line, x) = editing::Layout::caret(drawn, field.caret());
+        let (line, x) = field.placed().unwrap_or_else(|| editing::Layout::caret(drawn, field.caret()));
         let height = drawn.paragraph.line_height * drawn.grown;
-        Some(Bounds { origin: point(drawn.origin.x + x * drawn.grown, drawn.origin.y + line as f32 * height), size: Size { width: drawn.grown, height } })
+        Some(Bounds { origin: point(drawn.origin.x + (x - drawn.scroll.x) * drawn.grown, drawn.origin.y + line as f32 * height), size: Size { width: drawn.grown, height } })
     }
 
     /// Does `change` to input `id`'s editing, and tells its app what changed.
@@ -1354,34 +1354,45 @@ impl Painter<'_> {
         let line_height = text.style.line_height;
         // A one-line input's text in the middle of its box, as it's drawn in a row centred on its items.
         let top = if multiline { content.origin.y } else { content.origin.y + (content.size.height - paragraph.size().height * grown) / 2.0 };
+        // Its text starts where its first strong character's direction says, as an input with `dir="auto"`: at the
+        // right where it's Hebrew or Arabic.
+        let rtl = !empty && paragraph.lines.first().is_some_and(|line| line.rtl);
+        let text = if rtl { Text { align: 1.0 - text.align, ..text } } else { text };
         let aligned = |line: &crate::text::Line| (width - line.width).max(0.0) * text.align;
-        let caret = field.map_or(0, Field::caret);
+        let offsets: Vec<f32> = paragraph.lines.iter().map(aligned).collect();
+        let offset = |line: usize| offsets.get(line).copied().unwrap_or(0.0);
+        // Where the caret is drawn: where an arrow across text running both ways left it, or before its byte.
+        let (caret_line, caret_x) = match field.and_then(Field::placed) {
+            Some(placed) if !empty => placed,
+            _ => {
+                let (line, x) = paragraph.caret(field.map_or(0, Field::caret));
+                (line, x + offset(line))
+            }
+        };
         // One line scrolls along as the caret goes past its ends, as an `<input>` does, and back to its start once
         // it hasn't the keyboard; several scroll down and up to keep the caret's line in its box, as a `<textarea>`.
         let mut scroll = self.drawn.get(&id).map_or(point(0.0, 0.0), |drawn| drawn.scroll);
-        let (line, x) = paragraph.caret(caret);
         if !multiline {
-            let x = x + paragraph.lines.first().map_or(0.0, aligned);
-            scroll.x = if focused && !empty { scroll.x.max(x - width + 1.0).min(x) } else { 0.0 };
+            scroll.x = if focused && !empty { scroll.x.max(caret_x - width + 1.0).min(caret_x) } else { 0.0 };
             scroll.x = scroll.x.clamp(0.0, (paragraph.size().width + 1.0 - width).max(0.0));
         } else {
             let height = content.size.height / grown;
-            let top = line as f32 * line_height;
+            let top = caret_line as f32 * line_height;
             if focused {
                 scroll.y = scroll.y.max(top + line_height - height).min(top);
             }
             scroll.y = scroll.y.clamp(0.0, (paragraph.size().height - height).max(0.0));
         }
-        let offsets: Vec<f32> = paragraph.lines.iter().map(|line| aligned(line) - scroll.x).collect();
         let origin = point(content.origin.x, top - scroll.y * grown);
         let clip = content.intersect(&mask);
-        let at = |line: usize, x: f32| point(origin.x + (offsets.get(line).copied().unwrap_or(0.0) + x) * grown, origin.y + line as f32 * line_height * grown);
+        // A point along line `line`, `x` from where its paragraph starts, in the window.
+        let at = |line: usize, x: f32| point(origin.x + (x - scroll.x) * grown, origin.y + line as f32 * line_height * grown);
         if let (true, Some(field), false) = (focused, field, empty) {
             let (start, end) = field.selection();
             if start < end {
                 let tint = colour_token("blue", self.conditions).unwrap_or(text.color).opacity(0.3);
                 for (line, x0, x1) in paragraph.spans(start, end) {
-                    let bounds = Bounds { origin: at(line, x0), size: Size { width: (x1 - x0) * grown, height: line_height * grown } };
+                    let bounds = Bounds { origin: at(line, x0 + offset(line)), size: Size { width: (x1 - x0) * grown, height: line_height * grown } };
                     self.quad(bounds, clip, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
                 }
             }
@@ -1392,18 +1403,13 @@ impl Painter<'_> {
             // What an input method is composing is underlined, as every platform's own fields draw it.
             if let Some((start, end)) = field.composed() {
                 for (line, x0, x1) in paragraph.spans(start, end) {
-                    let below = at(line, x0);
+                    let below = at(line, x0 + offset(line));
                     let bounds = Bounds { origin: point(below.x, below.y + (line_height - 2.0) * grown), size: Size { width: (x1 - x0) * grown, height: grown } };
                     self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
                 }
             }
             if self.caret && !field.readonly {
-                let place = if empty {
-                    point(origin.x + width * text.align * grown, origin.y)
-                } else {
-                    let (line, x) = paragraph.caret(caret);
-                    at(line, x)
-                };
+                let place = if empty { point(origin.x + width * text.align * grown, origin.y) } else { at(caret_line, caret_x) };
                 let bounds = Bounds { origin: place, size: Size { width: grown, height: line_height * grown } };
                 self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
             }
@@ -1574,8 +1580,8 @@ const BLINK: f64 = 1200.0;
 const BLINK_STOPS: f64 = 10_000.0;
 
 /// Where an input's text was drawn: its paragraph (of its display text, or its placeholder while it's `empty`), its
-/// first line's top left in the window, where each line starts along it, how much it's grown, and how far it has
-/// scrolled, along one line or down several.
+/// first line's top left in the window, where each line starts along the paragraph, how much it's grown, and how far
+/// it has scrolled, along one line or down several. Its `Layout` is the paragraph's, unscrolled.
 pub(crate) struct Drawn {
     paragraph: Paragraph,
     words: String,
@@ -1594,7 +1600,7 @@ impl Drawn {
         }
         let y = (at.y - self.origin.y) / self.grown;
         let line = ((y / self.paragraph.line_height).floor().max(0.0) as usize).min(self.paragraph.lines.len().saturating_sub(1));
-        let x = (at.x - self.origin.x) / self.grown;
+        let x = (at.x - self.origin.x) / self.grown + self.scroll.x;
         editing::Layout::index_on(self, line, x).unwrap_or(0)
     }
 }
@@ -1630,6 +1636,28 @@ impl editing::Layout for Drawn {
             Some(last) if wraps && last.is_whitespace() => line.end - last.len_utf8(),
             _ => line.end,
         }
+    }
+
+    fn bidi(&self) -> bool {
+        !self.empty && self.paragraph.lines.iter().any(|line| line.rtl || line.glyphs.iter().any(|(_, glyph)| glyph.rtl))
+    }
+
+    fn rtl(&self, line: usize) -> bool {
+        self.paragraph.lines.get(line).is_some_and(|line| line.rtl)
+    }
+
+    fn stops(&self, line: usize) -> Vec<editing::Stop> {
+        let (Some(drawn), false) = (self.paragraph.lines.get(line), self.empty) else { return Vec::new() };
+        let offset = self.offsets.get(line).copied().unwrap_or(0.0);
+        drawn
+            .glyphs
+            .iter()
+            .flat_map(|(_, glyph)| {
+                let (left, right) = if glyph.rtl { (glyph.end, glyph.index) } else { (glyph.index, glyph.end) };
+                let x = offset + glyph.position.x.0;
+                [editing::Stop { x, index: left, right: false }, editing::Stop { x: x + glyph.advance, index: right, right: true }]
+            })
+            .collect()
     }
 }
 

@@ -246,7 +246,20 @@ impl TextSystem {
         let mut offset = 0;
         for hard in text.split('\n') {
             let layout = self.layout_line(hard, style);
-            wrap(&layout, hard, offset, width, &mut lines);
+            if layout.runs.iter().flat_map(|run| &run.glyphs).any(|glyph| glyph.rtl) {
+                // Text that runs right to left in it is broken by cosmic-text, which reorders each line once it's
+                // broken, as Unicode's bidi algorithm says; ours breaks it as it's drawn, which is only right where
+                // it runs one way.
+                let mut start = 0;
+                for line in self.platform.layout_lines(hard, style, width) {
+                    let mut end = Vec::new();
+                    wrap(&line, hard, offset, None, &mut end);
+                    lines.extend(end.into_iter().map(|drawn| Line { start: start + offset, end: line.len + offset, ..drawn }));
+                    start = line.len;
+                }
+            } else {
+                wrap(&layout, hard, offset, width, &mut lines);
+            }
             offset += hard.len() + 1;
         }
         if let Some(max) = max_lines.filter(|max| *max > 0 && lines.len() > *max) {

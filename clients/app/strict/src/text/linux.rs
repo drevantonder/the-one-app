@@ -1,8 +1,9 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_wgpu/src/cosmic_text_system.rs) at commit
 // 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, and cut down for the strict host: cosmic-text's shaping and swash's
 // rasterizing, on Linux. Changed: a face is loaded at the weight asked for, which a variable font draws by its `wght`
-// axis in shaping and rasterizing alike, letter spacing is cosmic-text's, there are no user fallback chains, and a glyph
-// says where its characters end, how wide it is and which way it runs, for a caret in right-to-left text.
+// axis in shaping and rasterizing alike, letter spacing is cosmic-text's, there are no user fallback chains, a glyph
+// says where its characters end, how wide it is and which way it runs, for a caret in right-to-left text, and a line's
+// glyphs are placed left to right from its own left edge, which cosmic-text breaks text into where it asks.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -60,6 +61,17 @@ impl CosmicTextSystem {
     }
 
     pub fn layout_line(&mut self, text: &str, style: &TextStyle) -> LineLayout {
+        let mut lines = self.layout_lines(text, style, None);
+        if lines.is_empty() {
+            return LineLayout { font_size: px(style.size), len: text.len(), ..Default::default() };
+        }
+        lines.swap_remove(0)
+    }
+
+    /// `text` broken into lines no wider than `width` by cosmic-text, each line's glyphs placed from its own left
+    /// edge, left to right, as Unicode's bidi algorithm reorders a line once it's broken (UAX #9, L1 and L2); with no
+    /// width, one line however long. Each line's `len` is where it ends in `text`.
+    pub fn layout_lines(&mut self, text: &str, style: &TextStyle, width: Option<f32>) -> Vec<LineLayout> {
         let mut features = FontFeatures::new();
         if style.tabular {
             features.enable(cosmic_text::FeatureTag::new(b"tnum"));
@@ -75,55 +87,63 @@ impl CosmicTextSystem {
         line.layout_to_buffer(
             &mut self.scratch,
             style.size,
-            None, // We do our own wrapping
-            cosmic_text::Wrap::None,
+            width,
+            if width.is_some() { cosmic_text::Wrap::WordOrGlyph } else { cosmic_text::Wrap::None },
             Ellipsize::None,
-            None,
+            // From the left, whichever way it runs: where a line goes along its box is the paragraph's to say.
+            Some(cosmic_text::Align::Left),
             &mut layout_lines,
             None,
             cosmic_text::Hinting::Disabled,
         );
 
-        let Some(layout) = layout_lines.first() else {
-            return LineLayout { font_size: px(style.size), len: text.len(), rtl: line.rtl, ..Default::default() };
-        };
-
-        let mut runs: Vec<ShapedRun> = Vec::new();
-        for glyph in &layout.glyphs {
-            let font_id = self.font_id(glyph.font_id, glyph.font_weight);
-            let is_emoji = self.faces[font_id.0].2;
-            // HACK: Prevent crash caused by variation selectors.
-            if glyph.glyph_id == 3 && is_emoji {
-                continue;
+        let mut out = Vec::with_capacity(layout_lines.len());
+        for layout in &layout_lines {
+            let left = layout.glyphs.iter().map(|glyph| glyph.x).fold(f32::INFINITY, f32::min);
+            let left = if left.is_finite() { left } else { 0.0 };
+            let mut glyphs: Vec<&cosmic_text::LayoutGlyph> = layout.glyphs.iter().collect();
+            glyphs.sort_by(|a, b| a.x.total_cmp(&b.x));
+            let mut runs: Vec<ShapedRun> = Vec::new();
+            for glyph in glyphs {
+                let font_id = self.font_id(glyph.font_id, glyph.font_weight);
+                let is_emoji = self.faces[font_id.0].2;
+                // HACK: Prevent crash caused by variation selectors.
+                if glyph.glyph_id == 3 && is_emoji {
+                    continue;
+                }
+                let shaped_glyph = ShapedGlyph {
+                    id: GlyphId(glyph.glyph_id as u32),
+                    position: point(
+                        (glyph.x - left + glyph.x_offset * style.size).into(),
+                        (glyph.y - glyph.y_offset * style.size).into(),
+                    ),
+                    index: glyph.start,
+                    end: glyph.end,
+                    advance: glyph.w,
+                    rtl: glyph.level.is_rtl(),
+                    is_emoji,
+                };
+                if let Some(last_run) = runs.last_mut().filter(|last_run| last_run.font_id == font_id) {
+                    last_run.glyphs.push(shaped_glyph);
+                } else {
+                    runs.push(ShapedRun { font_id, glyphs: vec![shaped_glyph] });
+                }
             }
-            let shaped_glyph = ShapedGlyph {
-                id: GlyphId(glyph.glyph_id as u32),
-                position: point(
-                    (glyph.x + glyph.x_offset * style.size).into(),
-                    (glyph.y - glyph.y_offset * style.size).into(),
-                ),
-                index: glyph.start,
-                end: glyph.end,
-                advance: glyph.w,
-                rtl: glyph.level.is_rtl(),
-                is_emoji,
-            };
-            if let Some(last_run) = runs.last_mut().filter(|last_run| last_run.font_id == font_id) {
-                last_run.glyphs.push(shaped_glyph);
-            } else {
-                runs.push(ShapedRun { font_id, glyphs: vec![shaped_glyph] });
-            }
+            let len = layout.glyphs.iter().map(|glyph| glyph.end).max().unwrap_or(0);
+            out.push(LineLayout {
+                font_size: px(style.size),
+                width: layout.w.into(),
+                ascent: layout.max_ascent.into(),
+                descent: layout.max_descent.into(),
+                runs,
+                len,
+                rtl: line.rtl,
+            });
         }
-
-        LineLayout {
-            font_size: px(style.size),
-            width: layout.w.into(),
-            ascent: layout.max_ascent.into(),
-            descent: layout.max_descent.into(),
-            runs,
-            len: text.len(),
-            rtl: line.rtl,
+        if let Some(last) = out.last_mut() {
+            last.len = text.len();
         }
+        out
     }
 
     pub fn raster_bounds(&mut self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {

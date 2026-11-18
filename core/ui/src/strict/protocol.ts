@@ -33,7 +33,8 @@ export type Id = number
  * - `path`: a vector shape (`d`, in its `viewBox`), as SVG's `<path>`: filled with its `fill`, the text's colour
  *   unless its style says otherwise, and stroked with its `stroke`; its `viewBox` is stretched to its box, its stroke
  *   as wide however it's stretched. An icon, a chart's line or area.
- * - `input`: a text field, one line, or several with `multiline`, whose text is its editing state (`Editing`).
+ * - `input`: a text field, one line, or several with `multiline`, whose text is its editing state (`Editing`), and
+ *   runs the way its first strong character does, as the DOM's `dir="auto"`.
  * - `picker`: the device's own way of choosing one of a few (`options`), as a phone's wheel or sheet is: see-through
  *   over its box, so what's drawn under it shows, and pressed, it opens the device's picker, which sends `input` with
  *   the `value` chosen. A page uses it where a finger points; a host with no picker of its own may draw none.

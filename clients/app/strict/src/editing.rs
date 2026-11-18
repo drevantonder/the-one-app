@@ -88,7 +88,8 @@ impl Clipboard for Memory {
 }
 
 /// Where a field's text is drawn, in its display text's bytes (`Field::display`), for the moves that depend on how
-/// it wraps: up and down, and a line's ends.
+/// it's drawn: up and down, a line's ends, and the arrows across text that runs both ways. Along a line is from where
+/// its paragraph starts, in its own pixels.
 pub trait Layout {
     /// The line byte `index` is on, and how far along it the caret before it is drawn.
     fn caret(&self, index: usize) -> (usize, f32);
@@ -96,6 +97,21 @@ pub trait Layout {
     fn index_on(&self, line: usize, x: f32) -> Option<usize>;
     /// Where the line byte `index` is on begins or ends.
     fn line_edge(&self, index: usize, end: bool) -> usize;
+    /// Text runs right to left somewhere in it, so the arrows move across it as it's drawn.
+    fn bidi(&self) -> bool;
+    /// Line `line`'s paragraph runs right to left.
+    fn rtl(&self, line: usize) -> bool;
+    /// Where a caret can be on line `line`: each glyph's left and right edge.
+    fn stops(&self, line: usize) -> Vec<Stop>;
+}
+
+/// A place a caret can be: `x` along its line, before byte `index`, at a glyph's right edge or its left. Where runs
+/// of either direction meet, two bytes have a place at one `x`, as Rune's carets have an affinity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stop {
+    pub x: f32,
+    pub index: usize,
+    pub right: bool,
 }
 
 /// What a key asks of whoever holds the field.
@@ -130,6 +146,9 @@ pub struct Field {
     /// The x a run of Up and Down keeps, in its layout's pixels, so a caret passing a shorter line comes back to
     /// its column, as a browser's does. Any other key lets it go.
     column: Option<f32>,
+    /// Where an arrow across text that runs both ways left the caret, `(focus, line, x)`, which is where it's drawn
+    /// while the focus is still there: one of the byte's two places where runs meet.
+    place: Option<(usize, usize, f32)>,
     /// What the press that started a pointer's selection selects by, and the range it began on, which a drag keeps
     /// whole.
     unit: Unit,
@@ -230,6 +249,7 @@ impl Field {
         self.preedit = None;
         self.history = History::default();
         self.column = None;
+        self.place = None;
     }
 
     /// The selection as ordered byte offsets.
@@ -290,6 +310,12 @@ impl Field {
             }
             None => j.min(self.text.len()),
         }
+    }
+
+    /// Where the caret was put by an arrow across text that runs both ways: its line and how far along it, in its
+    /// `Layout`'s pixels. Otherwise it's drawn before its byte (`caret`).
+    pub fn placed(&self) -> Option<(usize, f32)> {
+        self.place.filter(|place| place.0 == self.focus && self.preedit.is_none()).map(|(_, line, x)| (line, x))
     }
 
     /// Where the caret is drawn, in its display text: in what's being composed, at its cursor.
@@ -356,6 +382,7 @@ impl Field {
             return;
         }
         self.column = None;
+        self.place = None;
         if &self.text[a..b] == s {
             (self.anchor, self.focus) = (a + s.len(), a + s.len());
             return;
@@ -376,6 +403,7 @@ impl Field {
 
     fn restore(&mut self, to: &Snapshot) {
         self.text = to.text.clone();
+        self.place = None;
         (self.anchor, self.focus) = (to.anchor, to.focus);
     }
 
@@ -432,6 +460,7 @@ impl Field {
         self.finish_composition();
         self.history.run = Run::Closed;
         self.column = None;
+        self.place = None;
         let at = self.to_model(at);
         if shift {
             self.unit = Unit::Char;
@@ -589,6 +618,46 @@ impl Field {
         }
     }
 
+    /// Left or Right across text that runs both ways, as Rune's caret moves (`caret_motion.rs`, `visual_in`): across
+    /// the line as it's drawn, from where the caret was put, to the nearest place that way, the edge of the glyph it
+    /// crosses; at the line's edge it goes on to the next line the way its paragraph runs, so Left leaves a
+    /// right-to-left line forward. A word goes by the text's order, forward where the arrow points the way the
+    /// paragraph runs. A selection collapses to the end drawn further that way, as Notepad's and Word's do.
+    fn move_visually(&mut self, layout: &dyn Layout, place: Option<(usize, usize, f32)>, right: bool, word: bool, extend: bool) {
+        let (line, x) = place.filter(|place| place.0 == self.focus).map_or_else(|| layout.caret(self.to_display(self.focus)), |(_, line, x)| (line, x));
+        let forward = right != layout.rtl(line);
+        let (a, b) = self.range();
+        if !extend && a != b {
+            let (to_a, to_b) = (layout.caret(self.to_display(a)), layout.caret(self.to_display(b)));
+            let to = if to_a.0 == to_b.0 { if (to_a.1 <= to_b.1) == right { b } else { a } } else if forward { b } else { a };
+            (self.anchor, self.focus) = (to, to);
+            return;
+        }
+        if word {
+            let to = if forward { self.next_word(self.focus) } else { self.prev_word(self.focus) };
+            return self.set_focus(to, extend);
+        }
+        let stops = layout.stops(line);
+        let ahead = stops.iter().map(|stop| stop.x).filter(|at| if right { *at > x + 0.5 } else { *at < x - 0.5 });
+        let nearest = if right { ahead.fold(f32::INFINITY, f32::min) } else { ahead.fold(f32::NEG_INFINITY, f32::max) };
+        // Of the places there, the edge of the glyph just crossed: its right edge going right.
+        match stops.iter().filter(|stop| (stop.x - nearest).abs() < 0.5).max_by_key(|stop| stop.right == right) {
+            Some(stop) => {
+                self.set_focus(self.to_model(stop.index), extend);
+                self.place = Some((self.focus, line, stop.x));
+            }
+            // At the line's edge it goes on to the next line or the one before, the way its paragraph runs, and
+            // stays on the first's or the last's.
+            None => {
+                let edge = self.to_model(layout.line_edge(self.to_display(self.focus), forward));
+                let to = if forward { next_char(&self.text, edge) } else { prev_char(&self.text, edge) };
+                if to != edge && layout.caret(self.to_display(to)).0 != line {
+                    self.set_focus(to, extend);
+                }
+            }
+        }
+    }
+
     /// Applies one key, as the DOM's `KeyboardEvent.key` names it, with its modifiers, laid out as `layout` draws
     /// it. While an input method composes, its keys are its own.
     pub fn key(&mut self, key: &Key, layout: Option<&dyn Layout>) -> Outcome {
@@ -603,8 +672,9 @@ impl Field {
         let word = if mac { key.alt } else { key.ctrl };
         let line = mac && key.meta;
         let shift = key.shift;
-        // Any key but Up and Down lets the column go.
+        // Any key but Up and Down lets the column go, and any key the caret's place.
         let column = self.column.take();
+        let place = self.place.take();
         // Typing, deleting and line breaks join the open undo step; any other key closes it.
         let typed = key.key.chars().count() == 1 && !command && !key.ctrl && !key.meta;
         if !typed && !matches!(key.key.as_str(), "Backspace" | "Delete" | "Enter") {
@@ -654,25 +724,21 @@ impl Field {
             }
             "Insert" if shift && !key.ctrl => out.paste = !self.readonly,
             "Insert" if key.ctrl && !self.secure => out.copy = Some(self.selected().to_owned()),
-            "ArrowLeft" => {
-                let i = if line {
-                    self.line_edge(layout, false)
-                } else if word {
-                    self.prev_word(self.focus)
-                } else {
-                    prev_char(&self.text, self.focus)
-                };
-                self.move_h(i, shift, false);
-            }
-            "ArrowRight" => {
-                let i = if line {
-                    self.line_edge(layout, true)
-                } else if word {
-                    self.next_word(self.focus)
-                } else {
-                    next_char(&self.text, self.focus)
-                };
-                self.move_h(i, shift, true);
+            "ArrowLeft" | "ArrowRight" => {
+                let right = key.key == "ArrowRight";
+                match layout.filter(|layout| !line && !self.secure && layout.bidi()) {
+                    Some(layout) => self.move_visually(layout, place, right, word, shift),
+                    None => {
+                        let i = match (line, word, right) {
+                            (true, _, _) => self.line_edge(layout, right),
+                            (false, true, true) => self.next_word(self.focus),
+                            (false, true, false) => self.prev_word(self.focus),
+                            (false, false, true) => next_char(&self.text, self.focus),
+                            (false, false, false) => prev_char(&self.text, self.focus),
+                        };
+                        self.move_h(i, shift, right);
+                    }
+                }
             }
             // Home and End go to the text's ends on macOS. Elsewhere they go to the line's edge, and with Ctrl to
             // the text's ends.

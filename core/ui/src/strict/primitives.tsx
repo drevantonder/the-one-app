@@ -331,7 +331,8 @@ const hints: Record<Action, "enter" | "done" | "go" | "next" | "previous" | "sea
 /// composing, paste and autofill are the device's own. `action` names its action key (a phone's Done, Go, Search,
 /// Send), and `onAction` is told it was pressed: Return in one line, as an input method that's composing doesn't. In
 /// several lines Return is a new line unless `action` says otherwise. What a page drawn on the DOM gives it besides
-/// (`pattern`, a form's `name`) reaches the element. A `readonly` one is all selected as it's focused, to copy.
+/// (`pattern`, a form's `name`) reaches the element. A `readonly` one is all selected as it's focused, to copy. Its
+/// text runs the way its first strong character does (`dir="auto"`), so Hebrew or Arabic starts at the right.
 export function EditableText(props: EditableTextProps) {
   const own = omit(props as EditableTextProps & { class?: string }, "style", "class", "multiline", "action", "autocorrect", "autofocus", "onAction", "onKeyDown", "onFocus", "onInput")
   const action = (): Action => props.action ?? (props.multiline ? "newline" : "done")
@@ -359,6 +360,7 @@ export function EditableText(props: EditableTextProps) {
     <Dynamic
       component={props.multiline ? "textarea" : "input"}
       type={props.multiline ? undefined : (props.type ?? "text")}
+      dir="auto"
       enterkeyhint={props.action || !props.multiline ? hints[action()] : undefined}
       autocorrect={props.autocorrect === undefined ? undefined : props.autocorrect ? "on" : "off"}
       autofocus={props.autofocus}
