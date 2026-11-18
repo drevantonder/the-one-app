@@ -9,6 +9,9 @@ defmodule Notifications do
   and this app's edge function (`edge/`) sends there, since only it holds the push services'
   keys. What it's handed for each device is the notification encrypted to that key (`Cipher.seal/3`), so
   neither it nor the push service reads it: the device opens it before it shows.
+
+  A phone is woken the same way with nothing to show when a server asks its app something while it isn't running
+  (the hook `wake`), as Computer Use does of an Android phone's screen.
   """
   @behaviour OneCore.App
 
@@ -66,20 +69,34 @@ defmodule Notifications do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.22.18",
+      "core" => ">= 0.23.32",
       "database" => "to keep your inbox",
       "encryption" => "to encrypt what's sent to your devices"
     }
   end
 
   @impl true
-  def hooks, do: ["sign-in.device_removed"]
+  def hooks, do: ["sign-in.device_removed", "wake"]
 
   # A removed device is nobody's, so nothing is sent where its push service reaches it.
   @impl true
   def hook("sign-in.device_removed", %{"device" => device, "who" => who}, call) do
     transaction(call, &query(&1, "delete from devices where device = ? and user = ?", [device, who]))
     :ok
+  end
+
+  # Wakes a device whose app a server is about to ask something, through each push token it registered as its
+  # person's: one registered under its key by anyone else is never woken.
+  def hook("wake", %{"device" => device}, call) do
+    with "users/" <> _ = user <- OneCore.Hooks.whose(device),
+         [_ | _] = devices <- transaction(call, &query(&1, "select token, via from devices where device = ? and user = ?", [device, user])),
+         address when is_binary(address) <- Application.get_env(:one_core, :address),
+         {:ok, %{"gone" => gone, "failed" => failed}} <- ask(address, %{devices: devices}) do
+      forget(call, gone)
+      %{"woken" => length(failed) + length(gone) < length(devices)}
+    else
+      _ -> nil
+    end
   end
 
   @impl true
@@ -460,10 +477,7 @@ defmodule Notifications do
          json = JSON.encode!(notification),
          sent = Enum.map(devices, &%{token: &1["token"], via: &1["via"], sealed: sealed(&1["key"], json)}),
          {:ok, %{"gone" => gone, "failed" => failed}} <- ask(address, %{devices: sent}) do
-      if gone != [] do
-        forget = "delete from devices where token in (select value from json_each(?))"
-        transaction(call, &query(&1, forget, [JSON.encode!(gone)]))
-      end
+      forget(call, gone)
 
       names = Map.new(devices, &{&1["token"], &1["name"]})
       for %{"token" => token, "why" => why} <- failed, do: %{device: names[token], why: why}
@@ -471,6 +485,14 @@ defmodule Notifications do
       nil -> for device <- devices, do: %{device: device["name"], why: "this network has no address"}
       {:error, why} -> for device <- devices, do: %{device: device["name"], why: why}
     end
+  end
+
+  # Forgets the devices whose push service says their tokens are gone.
+  defp forget(_call, []), do: :ok
+
+  defp forget(call, gone) do
+    forget = "delete from devices where token in (select value from json_each(?))"
+    transaction(call, &query(&1, forget, [JSON.encode!(gone)]))
   end
 
   defp sealed(key, json) do

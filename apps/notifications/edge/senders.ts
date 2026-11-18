@@ -5,7 +5,9 @@
 // What a device shows is encrypted to it by the server that sent it (`apps/encryption/client/native/src/cipher.rs`, `seal_notification`),
 // as `sealed`, and that's all that goes: the push service carries it and reads nothing. On an iPhone, the app's
 // notification extension opens it before it shows (`mutable-content`), so Apple has only a fixed line; on Android
-// it's a data message, which the app opens and shows itself.
+// it's a data message, which the app opens and shows itself. A device sent nothing to show is woken for its app to
+// answer a server, which only an Android phone is: a high-priority data message, which starts its app in the
+// background (`Notifications.kt`).
 import { buildPushPayload } from "@block65/webcrypto-web-push";
 import { importPKCS8, SignJWT } from "jose";
 
@@ -25,11 +27,11 @@ export interface Keys {
   VAPID_SUBJECT?: string;
 }
 
-/** A device to wake: which service, its token there, and the notification encrypted to it, as base64. */
+/** A device to wake: which service, its token there, and the notification encrypted to it, as base64, if it's to show one. */
 export interface Device {
   via: keyof typeof SENDERS;
   token: string;
-  sealed: string;
+  sealed?: string;
 }
 
 /** What a service did: nothing to say, the token's gone, or why it failed. */
@@ -72,7 +74,8 @@ async function token(whose: string, make: () => Promise<{ token: string; lasts: 
  * APNs, with a token from the team's .p8 key: an ES256 JWT, which Apple takes for up to an hour and refuses to
  * have made more often than every 20 minutes, so it's kept 50.
  */
-async function apns(fetch: Fetch, env: Keys, device: string, sealed: string): Promise<Outcome> {
+async function apns(fetch: Fetch, env: Keys, device: string, sealed?: string): Promise<Outcome> {
+  if (!sealed) return { failed: "an iPhone's app isn't woken to answer a server" };
   if (!env.APNS_KEY) return { failed: "APNs isn't set up for this network" };
   const bearer = await token("apns", async () => ({
     token: await new SignJWT({ iss: env.APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) })
@@ -99,8 +102,11 @@ async function apns(fetch: Fetch, env: Keys, device: string, sealed: string): Pr
   return { failed: `APNs answered ${response.status} ${reason}`.trim() };
 }
 
-/** FCM's HTTP v1 API, with an OAuth token for the Firebase service account, from its RS256 JWT. */
-async function fcm(fetch: Fetch, env: Keys, device: string, sealed: string): Promise<Outcome> {
+/**
+ * FCM's HTTP v1 API, with an OAuth token for the Firebase service account, from its RS256 JWT. A wake with nothing to
+ * show is `wake` and lasts 30 seconds, after which the server that asked has given up.
+ */
+async function fcm(fetch: Fetch, env: Keys, device: string, sealed?: string): Promise<Outcome> {
   if (!env.FCM_ACCOUNT) return { failed: "FCM isn't set up for this network" };
   const account = JSON.parse(env.FCM_ACCOUNT);
   const bearer = await token("fcm", async () => {
@@ -118,7 +124,9 @@ async function fcm(fetch: Fetch, env: Keys, device: string, sealed: string): Pro
     if (!given.access_token) throw new Error(`Google gave FCM no token: ${given.error_description ?? response.status}`);
     return { token: given.access_token, lasts: (given.expires_in - 300) * 1000 };
   });
-  const message = { token: device, data: { n: sealed }, android: { priority: "HIGH", ttl: "86400s" } };
+  const message = sealed
+    ? { token: device, data: { n: sealed }, android: { priority: "HIGH", ttl: "86400s" } }
+    : { token: device, data: { wake: "1" }, android: { priority: "HIGH", ttl: "30s" } };
   const response = await fetch(`https://fcm.googleapis.com/v1/projects/${account.project_id}/messages:send`, {
     method: "POST",
     headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
@@ -134,7 +142,8 @@ async function fcm(fetch: Fetch, env: Keys, device: string, sealed: string): Pro
 }
 
 /** Web Push: RFC 8291's encryption to the browser's subscription, which is the token, and RFC 8292's VAPID. */
-async function webpush(fetch: Fetch, env: Keys, device: string, sealed: string): Promise<Outcome> {
+async function webpush(fetch: Fetch, env: Keys, device: string, sealed?: string): Promise<Outcome> {
+  if (!sealed) return { failed: "a browser isn't woken to answer a server" };
   if (!env.VAPID_PRIVATE_KEY) return { failed: "Web Push isn't set up for this network" };
   const subscription = JSON.parse(device);
   const vapid = { subject: env.VAPID_SUBJECT ?? "", publicKey: env.VAPID_PUBLIC_KEY ?? "", privateKey: env.VAPID_PRIVATE_KEY };
