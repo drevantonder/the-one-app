@@ -27,7 +27,9 @@ defmodule OneCore.Apps.Lifecycle do
   each time the network's edge says a server came or went, and Try Again.
 
   It's a GenServer only for the clock and for that: once a day it looks for newer versions, for whoever this server
-  acts for; and it settles what lost its task as it starts and as servers come and go.
+  acts for; and it settles what lost its task as it starts and as servers come and go, one settle at a time: a server
+  coming or going while one runs has it run once more after, however many did, as each reads what's there anew.
+  During a release servers say they changed every few seconds, and each settle reads every app's updates.
   """
   use GenServer
   require Logger
@@ -47,25 +49,33 @@ defmodule OneCore.Apps.Lifecycle do
   def init(nil) do
     Process.send_after(self(), :daily, :timer.minutes(5))
     Registry.register(OneCore.Waiting, :seen, nil)
-    {:ok, nil, {:continue, :settle}}
+    {:ok, %{settling: nil, again: false}, {:continue, :settle}}
   end
 
   # Starting, what this server ran before is lost, and a server that came or went may have lost what it ran.
   @impl true
-  def handle_continue(:settle, state) do
-    Task.start(&settle/0)
-    {:noreply, state}
+  def handle_continue(:settle, state), do: {:noreply, settling(state)}
+
+  defp settling(state) do
+    {settling, _ref} = spawn_monitor(&settle/0)
+    %{state | settling: settling}
   end
 
   @impl true
-  def handle_info(:seen, state), do: handle_continue(:settle, state)
+  def handle_info(:seen, %{settling: nil} = state), do: {:noreply, settling(state)}
+  def handle_info(:seen, state), do: {:noreply, %{state | again: true}}
+
+  def handle_info({:DOWN, _ref, :process, settling, _why}, %{settling: settling, again: again} = state) do
+    state = %{state | settling: nil, again: false}
+    {:noreply, if(again, do: settling(state), else: state)}
+  end
 
   def handle_info(:daily, state) do
     Process.send_after(self(), :daily, @day)
 
     Task.start(fn ->
       for owner <- Servers.acts_for(Server.key()), do: reconcile(owner)
-      for %{app: artifact} <- Deploy.deployed(), takes?(artifact), installed?(artifact), do: check(artifact)
+      for %{app: artifact} = app <- Deploy.deployed(), takes?(app), installed?(artifact), do: check(artifact)
     end)
 
     {:noreply, state}
@@ -319,7 +329,7 @@ defmodule OneCore.Apps.Lifecycle do
   """
   def settle do
     for owner <- Servers.acts_for(Server.key()), {name, record} <- Installed.read(owner), do: settled(owner, name, record)
-    for %{app: artifact} <- Deploy.deployed(), takes?(artifact), do: settled(artifact)
+    for %{app: artifact} = app <- Deploy.deployed(), takes?(app), do: settled(artifact)
     :ok
   end
 
@@ -765,11 +775,11 @@ defmodule OneCore.Apps.Lifecycle do
 
   @doc """
   Whether this server takes the app `artifact`'s updates: it acts for whoever it is, and runs their apps where
-  it's trusted.
+  it's trusted. An app as everyone's deployed apps list it (`OneCore.Apps.Deploy.deployed/0`) says whether it's
+  trusted, which isn't read again.
   """
-  def takes?(artifact) do
-    Servers.runs?(Store.whose(artifact), Store.trusted?(artifact))
-  end
+  def takes?(%{app: artifact, trusted: trusted}), do: Servers.runs?(Store.whose(artifact), trusted)
+  def takes?(artifact), do: takes?(%{app: artifact, trusted: Store.trusted?(artifact)})
 
   defp installed?(artifact),
     do: Installed.installed_for(artifact) != [] or Apps.app(Store.whose(artifact), Path.basename(artifact)) == artifact
