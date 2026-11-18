@@ -134,6 +134,11 @@ impl Views {
         }
         let none = || anyhow::anyhow!("no app here has {file}");
         let (name, path) = file.split_once('/').ok_or_else(none)?;
+        // `<app>@<version>` is that version's file, as the edge has it for a browser: an icon a page shows, by what's
+        // in it (`ui://icons/<sha256>/…`), which never changes.
+        if let Some((name, code)) = name.split_once('@') {
+            return self.read(&format!("ui://{name}/{code}/{path}")).await;
+        }
         let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
         // Android's and Windows' web views name the app after the scheme, in a host's name.
         let app = app.strip_prefix("oneapp.").unwrap_or(app);
