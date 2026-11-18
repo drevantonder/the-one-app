@@ -191,7 +191,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 let respond_asked = asked.clone();
                 let asked_by_app: strict::Asked =
                     Box::new(move |message, appearance| respond(message, appearance, &respond_state, &respond_to, &respond_asked));
-                let mut screen = Screen::new(sandbox, Some(asked_by_app));
+                let mut screen = Screen::new(sandbox, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 });
                 screen.theme = theme(chosen.as_deref());
                 windows.open(options, screen, on_event)
             }

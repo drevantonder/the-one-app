@@ -15,7 +15,7 @@ use crate::Screen;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux::{Display, NativeWindow, appearance};
+use linux::{Display, NativeWindow, appearance, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -130,6 +130,7 @@ impl Windows {
         self.next += 1;
         let native = self.display.open(id, &options)?;
         screen.appearance = appearance();
+        screen.reduced_motion = reduced_motion();
         let renderer = crate::render::renderer::BladeRenderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
         self.windows.insert(id, Window { native, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
         Ok(id)

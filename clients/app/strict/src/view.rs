@@ -13,13 +13,14 @@ use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, Pix
 use crate::inspect::{self, Key, Rect, Rects};
 use crate::js::{Posted, Sandbox};
 use crate::render::atlas::{AtlasKey, BladeAtlas};
-use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow};
+use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
 use crate::style::{self, Look, Paint, State, Text, colour};
 use crate::text::{Paragraph, TextSystem};
 use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
 
 pub(crate) mod inspected;
+mod transition;
 
 /// Light or dark: as the device is, or as Colour Mode says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -60,6 +61,12 @@ pub struct Screen {
     pub theme: Option<Appearance>,
     /// As the device is, which the window says.
     pub appearance: Appearance,
+    /// The person asked for less motion, as the device says.
+    pub reduced_motion: bool,
+    /// The room its page has, and whether it asked for less motion, as the page was last told them (its host
+    /// context's `containerDimensions` and `reducedMotion`, as a frame's host tells an MCP App).
+    room: Size<f32>,
+    told: Option<(Size<f32>, bool)>,
     asked: Option<Asked>,
     /// What has the keyboard.
     focused: Option<Id>,
@@ -74,10 +81,11 @@ pub struct Screen {
     captured: Option<Id>,
     /// What takes the pointer, as it was last painted, in the order painted, the topmost last.
     placed: Vec<(Id, Placed)>,
-    /// When it started, for what moves by itself, and whether anything did in the last frame.
-    started: Instant,
+    /// Whether anything moved by itself in the last frame.
     animating: bool,
     again: bool,
+    /// What's on its way from one value to another as a style changed.
+    transitions: transition::Transitions,
     /// What has taken the keyboard by its `autofocus`, while that's so, and where each node listening for `layout`
     /// was last told it is.
     autofocused: std::collections::HashSet<Id>,
@@ -99,13 +107,16 @@ pub struct Screen {
 }
 
 impl Screen {
-    /// The screen of an app whose JS has started, from what it's posted so far.
-    pub fn new(sandbox: Sandbox, asked: Option<Asked>) -> Screen {
+    /// The screen of an app whose JS has started, from what it's posted so far, with `room` logical pixels to draw in.
+    pub fn new(sandbox: Sandbox, asked: Option<Asked>, room: Size<f32>) -> Screen {
         let mut screen = Screen {
             tree: Tree::default(),
             sandbox,
             theme: None,
             appearance: Appearance::Light,
+            reduced_motion: false,
+            room,
+            told: None,
             asked,
             focused: None,
             typed: HashMap::new(),
@@ -114,9 +125,9 @@ impl Screen {
             pointer: None,
             captured: None,
             placed: Vec::new(),
-            started: Instant::now(),
             animating: false,
             again: false,
+            transitions: Default::default(),
             autofocused: Default::default(),
             laid_out: HashMap::new(),
             tab_order: Vec::new(),
@@ -216,6 +227,13 @@ impl Screen {
                         let (Ok(message), Some(asked)) = (serde_json::from_str::<Value>(&message), self.asked.as_mut()) else { continue };
                         let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
                         match asked(message, appearance) {
+                            // What only the window knows of where the page is, which it adds to its client's answer.
+                            Some(mut answer) if method.as_deref() == Some("ui/initialize") && answer["result"].is_object() => {
+                                answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
+                                answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
+                                self.told = Some((self.room, self.reduced_motion));
+                                answers.push(answer);
+                            }
                             Some(answer) => answers.push(answer),
                             None => {
                                 if let (Some(id), Some(method)) = (id, method) {
@@ -255,15 +273,23 @@ impl Screen {
 
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
-        Conditions { dark: self.dark(), ..Conditions::default() }
+        Conditions { dark: self.dark(), reduced_motion: self.reduced_motion, ..Conditions::default() }
     }
 
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &BladeAtlas, scene: &mut Scene) {
         scene.clear();
+        // The page is told when its room or its motion changes, as a frame's host tells an MCP App.
+        self.room = Size { width: size.width.0, height: size.height.0 };
+        if self.told.is_some_and(|told| told != (self.room, self.reduced_motion)) {
+            self.told = Some((self.room, self.reduced_motion));
+            let context = json!({"containerDimensions": {"width": self.room.width, "height": self.room.height}, "reducedMotion": self.reduced_motion});
+            self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": context}));
+        }
         let conditions = self.conditions();
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.states.focused = self.focused;
+        let now = self.sandbox.clock().now();
         let mut painter = Painter {
             tree: &self.tree,
             taffy: TaffyTree::new(),
@@ -280,11 +306,13 @@ impl Screen {
             typed: &self.typed,
             images: &mut self.images,
             rects: Rects::new(),
-            time: self.started.elapsed().as_secs_f32() * 1000.0,
+            time: now,
+            transitions: &mut self.transitions,
             animating: false,
             fixed: Vec::new(),
             window,
             modal: None,
+            turn: TransformationMatrix::unit(),
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.nodes.values().any(|node| node.styles.is_some());
@@ -326,6 +354,7 @@ impl Screen {
             Ok(()) => painter.paint(root, point(0.0, 0.0), Transform::NONE, window, 1.0, None, true),
         }
         let (placed, mut tab_order, rects, animating, modal) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal);
+        let moving = self.transitions.finish(now);
         self.placed = placed;
         // A modal dialog holds the keyboard: Tab goes only to what's in it, and it has the keyboard as it appears.
         if let Some(modal) = modal {
@@ -333,8 +362,9 @@ impl Screen {
         }
         self.tab_order = tab_order;
         self.rects = rects;
-        self.animating = animating;
+        self.animating = animating || moving;
         self.painted = (window.size, scale);
+        self.tell_settled();
         scene.finish();
         if let Some(modal) = modal
             && !self.focused.is_some_and(|focused| self.chain_from(focused).contains(&modal))
@@ -626,12 +656,13 @@ pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixe
         border_color: Hsla::default(),
         corner_radii: Corners::default(),
         border_widths: Edges::default(),
+        transformation: TransformationMatrix::unit(),
     });
     let body = Text::body(dark);
     let width = (window.size.width - 32.0).max(1.0);
     let paragraph = text.paragraph(words, &body.style, Some(width), None);
     let top = (window.size.height - paragraph.size().height) / 2.0;
-    let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, colour("muted-foreground", dark), scale, mask, atlas, scene);
+    let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, colour("muted-foreground", dark), scale, mask, TransformationMatrix::unit(), atlas, scene);
     scene.finish();
 }
 
@@ -724,14 +755,18 @@ struct Painter<'a> {
     typed: &'a HashMap<Id, String>,
     images: &'a mut HashMap<String, Option<Arc<Picture>>>,
     rects: Rects,
-    /// How long it's been drawn, in milliseconds, for what moves by itself (`animationName`), and whether anything did.
-    time: f32,
+    /// The time on the screen's clock, in milliseconds, for what moves by itself (`animationName`) and what's on its
+    /// way somewhere (`transitions`), and whether anything did.
+    time: f64,
+    transitions: &'a mut transition::Transitions,
     animating: bool,
     /// What's placed in the window, laid out as the root's children, and the window.
     fixed: Vec<NodeId>,
     window: Bounds<f32>,
     /// The topmost `aria-modal` dialog drawn, which holds the keyboard.
     modal: Option<Id>,
+    /// How what's painted now is turned, in the window: the `rotate`s of what it's in.
+    turn: TransformationMatrix,
 }
 
 /// What a node's state is, for its styles: where the pointer is, what's pressed and what has the keyboard.
@@ -783,7 +818,10 @@ impl Painter<'_> {
         let tree = self.tree;
         let node = &tree.nodes[&id];
         let state = self.states.of(id, node.kind == Kind::Input);
-        let computed = style::of(node, state, self.conditions);
+        let mut computed = style::of(node, state, self.conditions);
+        // What's just been added starts from its `entering` state, to move from.
+        let entering = (computed.transition.is_some() && self.transitions.entering(id)).then(|| style::of(node, State { entering: true, ..state }, self.conditions));
+        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.conditions.reduced_motion);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();
         let text = match &node.styles {
@@ -855,13 +893,67 @@ impl Painter<'_> {
                 bottom: ScaledPixels(borders.bottom * scale),
                 left: ScaledPixels(borders.left * scale),
             },
+            transformation: self.turn.scaled(scale),
         });
     }
 
-    /// Paints `node` with its parent's top left at `offset` in its layout, drawn through `transform`, clipped to
-    /// `mask` (in the window), `opacity` as opaque as it shows, taking the pointer if `pointer`.
+    /// A box's shadow, as CSS's `box-shadow` draws it: its box moved by its offset and grown by its spread, blurred,
+    /// under the box; or an inset one inside it, where the box moved and shrunk by its spread doesn't cover it.
+    fn shadow(&mut self, shadow: &crate::tokens::Shadow, bounds: Bounds<f32>, radii: Corners<f32>, grown: f32, mask: Bounds<f32>, opacity: f32) {
+        let spread = if shadow.inset { -shadow.spread } else { shadow.spread } * grown;
+        let shadow_bounds = Bounds {
+            origin: point(bounds.origin.x + shadow.x * grown - spread, bounds.origin.y + shadow.y * grown - spread),
+            size: Size { width: (bounds.size.width + 2.0 * spread).max(0.0), height: (bounds.size.height + 2.0 * spread).max(0.0) },
+        };
+        let scale = self.scale;
+        let corners = |radii: Corners<f32>, by: f32| Corners {
+            top_left: ScaledPixels((radii.top_left + by).max(0.0) * scale),
+            top_right: ScaledPixels((radii.top_right + by).max(0.0) * scale),
+            bottom_right: ScaledPixels((radii.bottom_right + by).max(0.0) * scale),
+            bottom_left: ScaledPixels((radii.bottom_left + by).max(0.0) * scale),
+        };
+        self.scene.insert_primitive(Shadow {
+            order: 0,
+            blur_radius: ScaledPixels(shadow.blur * grown * scale / 2.0),
+            bounds: shadow_bounds.scale_to(scale),
+            corner_radii: corners(radii, spread),
+            content_mask: ContentMask { bounds: mask.scale_to(scale) },
+            color: Hsla::from(shadow.colour).opacity(opacity),
+            transformation: self.turn.scaled(scale),
+            inset: u32::from(shadow.inset),
+            pad: 0,
+            outer: bounds.scale_to(scale),
+            outer_radii: corners(radii, 0.0),
+        });
+    }
+
+    /// The box `bounds` covers in the window once it's turned as what's painted now is: itself, where nothing's turned.
+    fn turned(&self, bounds: Bounds<f32>) -> Bounds<f32> {
+        if self.turn == TransformationMatrix::unit() {
+            return bounds;
+        }
+        let (left, top, right, bottom) = (bounds.origin.x, bounds.origin.y, bounds.origin.x + bounds.size.width, bounds.origin.y + bounds.size.height);
+        let corners = [[left, top], [right, top], [left, bottom], [right, bottom]].map(|corner| self.turn.apply(corner));
+        let (mut low, mut high) = (corners[0], corners[0]);
+        for [x, y] in corners {
+            low = [low[0].min(x), low[1].min(y)];
+            high = [high[0].max(x), high[1].max(y)];
+        }
+        Bounds { origin: point(low[0], low[1]), size: Size { width: high[0] - low[0], height: high[1] - low[1] } }
+    }
+
+    /// Paints `node` with its parent's top left at `offset` in its layout, drawn through `transform` and turned as
+    /// what it's in is, clipped to `mask` (in the window), `opacity` as opaque as it shows, taking the pointer if
+    /// `pointer`.
     #[allow(clippy::too_many_arguments)]
     fn paint(&mut self, taffy_node: NodeId, offset: Point<f32>, transform: Transform, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
+        let turn = self.turn;
+        self.paint_node(taffy_node, offset, transform, mask, opacity, parent, pointer);
+        self.turn = turn;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_node(&mut self, taffy_node: NodeId, offset: Point<f32>, transform: Transform, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
         let Ok(laid) = self.taffy.layout(taffy_node).copied() else { return };
         // What isn't displayed isn't drawn, and nothing in it is.
         if self.taffy.style(taffy_node).is_ok_and(|style| style.display == taffy::style::Display::None) {
@@ -881,23 +973,30 @@ impl Painter<'_> {
         let mut rotate = look.rotate;
         if let Some((name, duration)) = &look.animation {
             self.animating = true;
-            let turn = (self.time % duration.max(1.0)) / duration.max(1.0);
+            let duration = f64::from(duration.max(1.0));
+            let turn = ((self.time % duration) / duration) as f32;
             match name.as_str() {
                 "spin" => rotate += turn * 360.0,
                 _ => opacity *= 1.0 - 0.25 * (1.0 - (turn * std::f32::consts::TAU).cos()),
             }
         }
+        // Turned around its middle, with what's in it.
+        if rotate.rem_euclid(360.0) != 0.0 {
+            let middle = transform.point(centre);
+            self.turn = TransformationMatrix::rotation(rotate, [middle.x, middle.y]).then(&self.turn);
+        }
         let content = transform.bounds(Bounds {
             origin: point(laid_out.origin.x + laid.border.left + laid.padding.left, laid_out.origin.y + laid.border.top + laid.padding.top),
             size: Size { width: laid.content_box_width(), height: laid.content_box_height() },
         });
-        let shown = bounds.intersect(&mask);
+        let shown = self.turned(bounds).intersect(&mask);
         let root = id == 0;
         let pointer = pointer && look.pointer_events;
         if node.str("aria-modal") == Some("true") {
             self.modal = Some(id);
         }
-        self.rects.insert(id, Rect { x: bounds.origin.x, y: bounds.origin.y, width: bounds.size.width, height: bounds.size.height });
+        let drawn = self.turned(bounds);
+        self.rects.insert(id, Rect { x: drawn.origin.x, y: drawn.origin.y, width: drawn.size.width, height: drawn.size.height });
         let radii = Corners {
             top_left: corner(look.radii.top_left, bounds.size),
             top_right: corner(look.radii.top_right, bounds.size),
@@ -908,25 +1007,7 @@ impl Painter<'_> {
         // Shadows under it, the first nearest, then what shows through it, its fill and border, then shadows inside.
         if !root {
             for shadow in look.shadows.iter().rev().filter(|shadow| !shadow.inset) {
-                let spread = shadow.spread * transform.scale;
-                let shadow_bounds = Bounds {
-                    origin: point(bounds.origin.x + shadow.x * transform.scale - spread, bounds.origin.y + shadow.y * transform.scale - spread),
-                    size: Size { width: bounds.size.width + 2.0 * spread, height: bounds.size.height + 2.0 * spread },
-                };
-                let scale = self.scale;
-                self.scene.insert_primitive(Shadow {
-                    order: 0,
-                    blur_radius: ScaledPixels(shadow.blur * transform.scale * scale / 2.0),
-                    bounds: shadow_bounds.scale_to(scale),
-                    corner_radii: Corners {
-                        top_left: ScaledPixels((radii.top_left + spread) * scale),
-                        top_right: ScaledPixels((radii.top_right + spread) * scale),
-                        bottom_right: ScaledPixels((radii.bottom_right + spread) * scale),
-                        bottom_left: ScaledPixels((radii.bottom_left + spread) * scale),
-                    },
-                    content_mask: ContentMask { bounds: mask.scale_to(scale) },
-                    color: Hsla::from(shadow.colour).opacity(opacity),
-                });
+                self.shadow(shadow, bounds, radii, transform.scale, mask, opacity);
             }
             if let Some((blur, saturate)) = look.material {
                 self.scene.insert_primitive(Backdrop {
@@ -947,11 +1028,8 @@ impl Painter<'_> {
             if look.background.is_some() || look.borders != Edges::default() {
                 self.quad(bounds, mask, look.background.unwrap_or_default(), scaled(look.borders), look.border_color, radii, look.dashed, opacity);
             }
-            // An inset shadow, as a hairline inside its edge: a border of its spread, its blur softening nothing yet.
-            for shadow in look.shadows.iter().filter(|shadow| shadow.inset) {
-                let width = (shadow.spread + shadow.blur / 2.0).max(0.0) * transform.scale;
-                let edges = Edges { top: width, right: width, bottom: width, left: width };
-                self.quad(bounds, mask, Hsla::default(), edges, Hsla::from(shadow.colour), radii, false, opacity);
+            for shadow in look.shadows.iter().rev().filter(|shadow| shadow.inset) {
+                self.shadow(shadow, bounds, radii, transform.scale, mask, opacity);
             }
         }
         let pressable = (node.listens("click") || node.kind == Kind::Input) && !node.is("disabled") && !node.is("aria-disabled");
@@ -988,7 +1066,7 @@ impl Painter<'_> {
                 }
             }
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
-            Kind::Path => self.paint_path(node, content, &look, text.color, rotate, opacity, mask),
+            Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
             Kind::Picker => {}
             Kind::Box | Kind::Scroll => {
                 let mut child_mask = mask;
@@ -998,7 +1076,7 @@ impl Painter<'_> {
                         origin: point(laid_out.origin.x + laid.border.left, laid_out.origin.y + laid.border.top),
                         size: Size { width: laid.size.width - laid.border.left - laid.border.right, height: laid.size.height - laid.border.top - laid.border.bottom },
                     });
-                    child_mask = padding_box.intersect(&mask);
+                    child_mask = self.turned(padding_box).intersect(&mask);
                     if look.scrolls {
                         let inner = Size { width: laid.size.width - laid.border.left - laid.border.right, height: laid.size.height - laid.border.top - laid.border.bottom };
                         let most = point((laid.scrollable_overflow_rect.right - inner.width).max(0.0), (laid.scrollable_overflow_rect.bottom - inner.height).max(0.0));
@@ -1047,7 +1125,7 @@ impl Painter<'_> {
         let mask = ContentMask { bounds: mask.scale_to(self.scale) };
         // Glyphs grown with their box are rasterized at that size, so they stay sharp.
         let origin = point(px(content.origin.x / grown), px(content.origin.y / grown));
-        if let Err(error) = self.text.paint(paragraph, origin, width, text.align, text.color.opacity(opacity), self.scale * grown, mask, self.atlas, self.scene) {
+        if let Err(error) = self.text.paint(paragraph, origin, width, text.align, text.color.opacity(opacity), self.scale * grown, mask, self.turn.scaled(self.scale), self.atlas, self.scene) {
             log::warn!("text didn't draw: {error:#}");
         }
         if text.underline {
@@ -1082,6 +1160,7 @@ impl Painter<'_> {
                 bottom_left: ScaledPixels(radii.bottom_left * scale),
             },
             tile,
+            transformation: self.turn.scaled(scale),
         });
     }
 
@@ -1105,10 +1184,9 @@ impl Painter<'_> {
         self.sprite(&picture, bounds, radii, opacity, mask);
     }
 
-    /// A path, SVG's: its `d` in its `viewBox`, stretched to its box, filled and stroked as its style says, turned
-    /// `rotate` degrees around its middle, drawn by resvg at the window's scale.
-    #[allow(clippy::too_many_arguments)]
-    fn paint_path(&mut self, node: &Node, content: Bounds<f32>, look: &Look, current: Hsla, rotate: f32, opacity: f32, mask: Bounds<f32>) {
+    /// A path, SVG's: its `d` in its `viewBox`, stretched to its box, filled and stroked as its style says, drawn by
+    /// resvg at the window's scale.
+    fn paint_path(&mut self, node: &Node, content: Bounds<f32>, look: &Look, current: Hsla, opacity: f32, mask: Bounds<f32>) {
         let Some(d) = node.str("d") else { return };
         let view_box = node.str("viewBox").unwrap_or("0 0 24 24");
         let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
@@ -1124,19 +1202,10 @@ impl Painter<'_> {
             let rgba = crate::geometry::Rgba::from(colour);
             format!("rgba({},{},{},{})", (rgba.r * 255.0).round(), (rgba.g * 255.0).round(), (rgba.b * 255.0).round(), rgba.a)
         });
-        // Turned in steps of a degree, so a spinner's frames are kept, not drawn again each frame.
-        let rotate = rotate.rem_euclid(360.0).round();
-        let parts: Vec<f32> = view_box.split_whitespace().filter_map(|part| part.parse().ok()).collect();
-        let (vx, vy, vw, vh) = match parts[..] {
-            [x, y, w, h] => (x, y, w, h),
-            _ => (0.0, 0.0, 24.0, 24.0),
-        };
         let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="{view_box}" preserveAspectRatio="none"><g transform="rotate({rotate} {cx} {cy})"><path d="{d}" fill="{fill}" stroke="{stroke}" stroke-width="{width}" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></g></svg>"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="{view_box}" preserveAspectRatio="none"><path d="{d}" fill="{fill}" stroke="{stroke}" stroke-width="{width}" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>"#,
             w = device.width,
             h = device.height,
-            cx = vx + vw / 2.0,
-            cy = vy + vh / 2.0,
             d = d.replace('"', ""),
             fill = css(paint(look.fill)),
             stroke = css(paint(look.stroke)),

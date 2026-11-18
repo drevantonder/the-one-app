@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
             },
         })
     });
-    let mut screen = Screen::new(sandbox, Some(asked));
+    let mut screen = Screen::new(sandbox, Some(asked), Size { width, height });
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     let context = BladeContext::new(false)?;
     let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };

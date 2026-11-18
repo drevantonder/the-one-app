@@ -1,7 +1,7 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/scene.rs) at commit
 // 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the strict host: the scene a
 // frame draws, of quads, shadows, underlines and sprites, without paths, surfaces or layers, and with backdrops, what's
-// behind a node blurred, which are ours.
+// behind a node blurred, inset shadows, and a transformation on quads, shadows and images as on text, which are ours.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -263,6 +263,7 @@ pub(crate) struct Quad {
     pub border_color: Hsla,
     pub corner_radii: Corners<ScaledPixels>,
     pub border_widths: Edges<ScaledPixels>,
+    pub transformation: TransformationMatrix,
 }
 
 impl From<Quad> for Primitive {
@@ -298,6 +299,12 @@ pub(crate) struct Shadow {
     pub corner_radii: Corners<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub color: Hsla,
+    pub transformation: TransformationMatrix,
+    /// Ours: 1 for a shadow inside the box it's of (`outer`, with `outer_radii`), where its own box doesn't cover.
+    pub inset: u32,
+    pub pad: u32,
+    pub outer: Bounds<ScaledPixels>,
+    pub outer_radii: Corners<ScaledPixels>,
 }
 
 impl From<Shadow> for Primitive {
@@ -315,7 +322,8 @@ pub enum BorderStyle {
     Dashed = 1,
 }
 
-/// A 2D transformation, which the sprite shaders apply: here always none.
+/// A 2D transformation, in device pixels, which the shaders apply to what they draw: a node turned (`rotate`), and
+/// what's in it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct TransformationMatrix {
@@ -324,9 +332,44 @@ pub struct TransformationMatrix {
     pub translation: [f32; 2],
 }
 
+impl Default for TransformationMatrix {
+    fn default() -> Self {
+        Self::unit()
+    }
+}
+
 impl TransformationMatrix {
     pub fn unit() -> Self {
         Self { rotation_scale: [[1.0, 0.0], [0.0, 1.0]], translation: [0.0, 0.0] }
+    }
+
+    /// Turned `degrees` clockwise, as CSS's `rotate`, around `centre`.
+    pub fn rotation(degrees: f32, centre: [f32; 2]) -> Self {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let [x, y] = centre;
+        Self { rotation_scale: [[cos, -sin], [sin, cos]], translation: [x - (cos * x - sin * y), y - (sin * x + cos * y)] }
+    }
+
+    /// `then` after this one.
+    pub fn then(&self, then: &Self) -> Self {
+        let [[a, b], [c, d]] = then.rotation_scale;
+        let [[e, f], [g, h]] = self.rotation_scale;
+        let [x, y] = self.translation;
+        Self {
+            rotation_scale: [[a * e + b * g, a * f + b * h], [c * e + d * g, c * f + d * h]],
+            translation: [a * x + b * y + then.translation[0], c * x + d * y + then.translation[1]],
+        }
+    }
+
+    /// Where it takes `point`.
+    pub fn apply(&self, [x, y]: [f32; 2]) -> [f32; 2] {
+        let [[a, b], [c, d]] = self.rotation_scale;
+        [a * x + b * y + self.translation[0], c * x + d * y + self.translation[1]]
+    }
+
+    /// The same, for coordinates `factor` times as large: logical pixels to device pixels.
+    pub fn scaled(&self, factor: f32) -> Self {
+        Self { rotation_scale: self.rotation_scale, translation: [self.translation[0] * factor, self.translation[1] * factor] }
     }
 }
 
@@ -359,6 +402,7 @@ pub(crate) struct PolychromeSprite {
     pub content_mask: ContentMask<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
     pub tile: AtlasTile,
+    pub transformation: TransformationMatrix,
 }
 
 impl From<PolychromeSprite> for Primitive {

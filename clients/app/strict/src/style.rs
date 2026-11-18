@@ -446,17 +446,28 @@ pub struct Computed {
     pub layout: taffy::Style,
     pub look: Look,
     /// Its own text properties, which change what it inherits (`Text::with`).
-    text: TextChange,
+    pub(crate) text: TextChange,
     pub line_clamp: Option<usize>,
     /// Placed in the window, over everything, not in its parent (`position: fixed`).
     pub fixed: bool,
+    /// What changes of it move rather than jump, and how (`transitionProperty` and `transition`).
+    pub transition: Option<Transition>,
+}
+
+/// Which properties of a node move to a new value rather than jump, over how long, in milliseconds, with which easing
+/// (a cubic Bézier's two points), as CSS's `transition`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Transition {
+    pub properties: Vec<String>,
+    pub duration: f32,
+    pub easing: [f32; 4],
 }
 
 #[derive(Default)]
-struct TextChange {
+pub(crate) struct TextChange {
     style: Option<TextStyle>,
     weight: Option<u16>,
-    color: Option<Hsla>,
+    pub(crate) color: Option<Hsla>,
     align: Option<f32>,
     wrap: Option<bool>,
     underline: Option<bool>,
@@ -778,13 +789,26 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         wrap: word("whiteSpace").map(|white_space| white_space != "nowrap"),
         underline: word("textDecorationLine").map(|line| line == "underline"),
     };
-    Computed { layout, look, text, line_clamp: number("lineClamp").map(|lines| lines as usize), fixed }
+    let properties: Vec<String> = get("transitionProperty").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
+    let motion = get("transition").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions));
+    let transition = match motion {
+        Some((duration, easing)) if !properties.is_empty() && duration > 0.0 => Some(Transition { properties, duration, easing }),
+        _ => None,
+    };
+    Computed { layout, look, text, line_clamp: number("lineClamp").map(|lines| lines as usize), fixed, transition }
 }
 
 /// How node `node` is styled in `state`: its version 2 styles by id, or its version 1 style object.
 pub fn of(node: &Node, state: State, conditions: Conditions) -> Computed {
     match &node.styles {
         Some(ids) => compute(ids, state, conditions),
-        None => Computed { layout: layout(&node.style), look: look(&node.style, conditions.dark), text: TextChange::default(), line_clamp: node.style.line_clamp, fixed: false },
+        None => Computed {
+            layout: layout(&node.style),
+            look: look(&node.style, conditions.dark),
+            text: TextChange::default(),
+            line_clamp: node.style.line_clamp,
+            fixed: false,
+            transition: None,
+        },
     }
 }

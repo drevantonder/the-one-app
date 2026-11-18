@@ -212,7 +212,7 @@ impl TextSystem {
 
     /// Paints `paragraph` with its top left at `origin`, each line placed along `width` by `align` (0 start, 0.5
     /// centre, 1 end), as the shaders draw glyphs: from the atlas, each at the nearest of a few positions between
-    /// device pixels, rasterized at the window's scale.
+    /// device pixels, rasterized at the window's scale, then turned as `transformation` says.
     #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
@@ -223,6 +223,7 @@ impl TextSystem {
         color: Hsla,
         scale_factor: f32,
         content_mask: ContentMask<ScaledPixels>,
+        transformation: TransformationMatrix,
         atlas: &BladeAtlas,
         scene: &mut Scene,
     ) -> Result<()> {
@@ -233,7 +234,7 @@ impl TextSystem {
             let left = origin.x.0 + (width - line.width).max(0.0) * align;
             for (font_id, glyph) in &line.glyphs {
                 let point = Point { x: Pixels(left + glyph.position.x.0), y: Pixels(baseline + glyph.position.y.0) };
-                self.paint_glyph(point, *font_id, line.font_size, glyph, color, scale_factor, content_mask, atlas, scene)?;
+                self.paint_glyph(point, *font_id, line.font_size, glyph, color, scale_factor, content_mask, transformation, atlas, scene)?;
             }
         }
         Ok(())
@@ -250,6 +251,7 @@ impl TextSystem {
         color: Hsla,
         scale_factor: f32,
         content_mask: ContentMask<ScaledPixels>,
+        transformation: TransformationMatrix,
         atlas: &BladeAtlas,
         scene: &mut Scene,
     ) -> Result<()> {
@@ -298,6 +300,7 @@ impl TextSystem {
                 corner_radii: Default::default(),
                 content_mask,
                 tile,
+                transformation,
             });
         } else {
             scene.insert_primitive(MonochromeSprite {
@@ -307,7 +310,7 @@ impl TextSystem {
                 content_mask,
                 color,
                 tile,
-                transformation: TransformationMatrix::unit(),
+                transformation,
             });
         }
         Ok(())

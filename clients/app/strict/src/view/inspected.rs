@@ -151,7 +151,7 @@ impl Screen {
         if self.settling.is_empty() {
             return;
         }
-        let pending = inspect::pending(&self.unanswered, &self.sandbox.timers());
+        let pending = inspect::pending(&self.unanswered, &self.sandbox.timers(), self.transitions.len());
         let settled = inspect::settled(&pending, self.sandbox.clock().paused());
         let now = Instant::now();
         let (told, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling).into_iter().partition(|(until, _)| settled || *until <= now);

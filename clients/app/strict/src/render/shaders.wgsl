@@ -1,6 +1,7 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/blade/shaders.wgsl) at commit
 // 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), without its paths and video surfaces, which the
-// strict host doesn't draw. Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
+// strict host doesn't draw, and with backdrops, inset shadows and transformed quads, shadows and images, which are
+// ours. Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
 /* Functions useful for debugging:
@@ -489,6 +490,7 @@ struct Quad {
     border_color: Hsla,
     corner_radii: Corners,
     border_widths: Edges,
+    transformation: TransformationMatrix,
 }
 var<storage, read> b_quads: array<Quad>;
 
@@ -501,6 +503,8 @@ struct QuadVarying {
     @location(3) @interpolate(flat) background_solid: vec4<f32>,
     @location(4) @interpolate(flat) background_color0: vec4<f32>,
     @location(5) @interpolate(flat) background_color1: vec4<f32>,
+    // Where it is in the quad's own space, before its transformation, which its edges are measured in.
+    @location(6) local: vec2<f32>,
 }
 
 @vertex
@@ -509,7 +513,8 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     let quad = b_quads[instance_id];
 
     var out = QuadVarying();
-    out.position = to_device_position(unit_vertex, quad.bounds);
+    out.position = to_device_position_transformed(unit_vertex, quad.bounds, quad.transformation);
+    out.local = unit_vertex * vec2<f32>(quad.bounds.size) + quad.bounds.origin;
 
     let gradient = prepare_gradient_color(
         quad.background.tag,
@@ -522,7 +527,7 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
     out.background_color1 = gradient.color1;
     out.border_color = hsla_to_rgba(quad.border_color);
     out.quad_id = instance_id;
-    out.clip_distances = distance_from_clip_rect(unit_vertex, quad.bounds, quad.content_mask);
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, quad.bounds, quad.content_mask, quad.transformation);
     return out;
 }
 
@@ -535,7 +540,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
 
     let quad = b_quads[input.quad_id];
 
-    let background_color = gradient_color(quad.background, input.position.xy, quad.bounds,
+    let background_color = gradient_color(quad.background, input.local, quad.bounds,
         input.background_solid, input.background_color0, input.background_color1);
 
     let unrounded = quad.corner_radii.top_left == 0.0 &&
@@ -554,7 +559,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
 
     let size = quad.bounds.size;
     let half_size = size / 2.0;
-    let point = input.position.xy - quad.bounds.origin;
+    let point = input.local - quad.bounds.origin;
     let center_to_point = point - half_size;
 
     // Signed distance field threshold for inclusion of pixels. 0.5 is the
@@ -919,6 +924,13 @@ struct Shadow {
     corner_radii: Corners,
     content_mask: Bounds,
     color: Hsla,
+    transformation: TransformationMatrix,
+    // Ours: an inset shadow (`inset` 1) is drawn inside the box it's of (`outer`, with `outer_radii`), where the
+    // shadow's own box (`bounds`, moved and shrunk) doesn't cover it.
+    inset: u32,
+    pad: u32,
+    outer: Bounds,
+    outer_radii: Corners,
 }
 var<storage, read> b_shadows: array<Shadow>;
 
@@ -928,6 +940,7 @@ struct ShadowVarying {
     @location(1) @interpolate(flat) shadow_id: u32,
     //TODO: use `clip_distance` once Naga supports it
     @location(3) clip_distances: vec4<f32>,
+    @location(4) local: vec2<f32>,
 }
 
 @vertex
@@ -940,12 +953,17 @@ fn vs_shadow(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) ins
     // spread radius to achieve the spreading effect
     shadow.bounds.origin -= vec2<f32>(margin);
     shadow.bounds.size += 2.0 * vec2<f32>(margin);
+    // An inset shadow is drawn only inside its box.
+    if (shadow.inset != 0u) {
+        shadow.bounds = shadow.outer;
+    }
 
     var out = ShadowVarying();
-    out.position = to_device_position(unit_vertex, shadow.bounds);
+    out.position = to_device_position_transformed(unit_vertex, shadow.bounds, shadow.transformation);
+    out.local = unit_vertex * vec2<f32>(shadow.bounds.size) + shadow.bounds.origin;
     out.color = hsla_to_rgba(shadow.color);
     out.shadow_id = instance_id;
-    out.clip_distances = distance_from_clip_rect(unit_vertex, shadow.bounds, shadow.content_mask);
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, shadow.bounds, shadow.content_mask, shadow.transformation);
     return out;
 }
 
@@ -957,9 +975,23 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
     }
 
     let shadow = b_shadows[input.shadow_id];
+    var alpha = shadow_coverage(input.local, shadow);
+    if (shadow.inset != 0u) {
+        // Inside its box, where its own box isn't.
+        alpha = saturate(0.5 - quad_sdf(input.local, shadow.outer, shadow.outer_radii)) * (1.0 - alpha);
+    }
+    return blend_color(input.color, alpha);
+}
+
+// How much of `point` a shadow's box covers, blurred.
+fn shadow_coverage(point: vec2<f32>, shadow: Shadow) -> f32 {
+    // Not blurred, it's its box, its edge smoothed as a quad's.
+    if (shadow.blur_radius <= 0.0) {
+        return saturate(0.5 - quad_sdf(point, shadow.bounds, shadow.corner_radii));
+    }
     let half_size = shadow.bounds.size / 2.0;
     let center = shadow.bounds.origin + half_size;
-    let center_to_point = input.position.xy - center;
+    let center_to_point = point - center;
 
     let corner_radius = pick_corner_radius(center_to_point, shadow.corner_radii);
 
@@ -979,8 +1011,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
         alpha +=  blur * gaussian(y, shadow.blur_radius) * step;
         y += step;
     }
-
-    return blend_color(input.color, alpha);
+    return alpha;
 }
 
 // --- underlines --- //
@@ -1108,6 +1139,7 @@ struct PolychromeSprite {
     content_mask: Bounds,
     corner_radii: Corners,
     tile: AtlasTile,
+    transformation: TransformationMatrix,
 }
 var<storage, read> b_poly_sprites: array<PolychromeSprite>;
 
@@ -1116,6 +1148,7 @@ struct PolySpriteVarying {
     @location(0) tile_position: vec2<f32>,
     @location(1) @interpolate(flat) sprite_id: u32,
     @location(3) clip_distances: vec4<f32>,
+    @location(4) local: vec2<f32>,
 }
 
 @vertex
@@ -1124,10 +1157,11 @@ fn vs_poly_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     let sprite = b_poly_sprites[instance_id];
 
     var out = PolySpriteVarying();
-    out.position = to_device_position(unit_vertex, sprite.bounds);
+    out.position = to_device_position_transformed(unit_vertex, sprite.bounds, sprite.transformation);
+    out.local = unit_vertex * vec2<f32>(sprite.bounds.size) + sprite.bounds.origin;
     out.tile_position = to_tile_position(unit_vertex, sprite.tile);
     out.sprite_id = instance_id;
-    out.clip_distances = distance_from_clip_rect(unit_vertex, sprite.bounds, sprite.content_mask);
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, sprite.bounds, sprite.content_mask, sprite.transformation);
     return out;
 }
 
@@ -1140,7 +1174,7 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     }
 
     let sprite = b_poly_sprites[input.sprite_id];
-    let distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
+    let distance = quad_sdf(input.local, sprite.bounds, sprite.corner_radii);
 
     var color = sample;
     if ((sprite.grayscale & 0xFFu) != 0u) {
@@ -1188,9 +1222,13 @@ fn vs_blur(@builtin(vertex_index) vertex_id: u32) -> BlurVarying {
     return out;
 }
 
-// One way of a separable Gaussian: two taps a sample, between texels, for linear filtering to weigh.
+// One way of a separable Gaussian: two taps a sample, between texels, for linear filtering to weigh. With no
+// `sigma`, it's what's under each texel, as linear filtering averages it: the source halved, four texels to one.
 @fragment
 fn fs_blur(input: BlurVarying) -> @location(0) vec4<f32> {
+    if (blur.sigma <= 0.0) {
+        return textureSample(t_sprite, s_sprite, input.uv);
+    }
     let sigma = max(blur.sigma, 0.5);
     let reach = min(i32(ceil(sigma * 3.0)), 48);
     var sum = textureSample(t_sprite, s_sprite, input.uv);

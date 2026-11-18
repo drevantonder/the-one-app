@@ -35,7 +35,8 @@
 //! - `settle` (`deadline`, ms, 5000 unless given) → `{settled, ms, pending}`: waits until nothing's pending that ends
 //!   by itself, or the deadline, and says what still is: `request`s the app asked its client that aren't answered
 //!   (`method`, `tool`, `ms`), `timer`s (`in`, ms, and `every` for an interval, which never ends by itself so is
-//!   listed but not waited for), and `animation`s. While the clock's paused only requests are waited for.
+//!   listed but not waited for), and `transition`s on their way (`properties`, how many). While the clock's paused
+//!   only requests are waited for.
 
 use std::collections::HashMap;
 
@@ -323,9 +324,9 @@ pub struct Asked {
     pub since: std::time::Instant,
 }
 
-/// What's still pending, as `settle` lists it, from what the app asked and hasn't heard back, and its timers
-/// (`Sandbox::timers`, each `{in, every?}`).
-pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value]) -> Vec<Value> {
+/// What's still pending, as `settle` lists it, from what the app asked and hasn't heard back, its timers
+/// (`Sandbox::timers`, each `{in, every?}`), and how many properties are on their way (`moving`).
+pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize) -> Vec<Value> {
     let mut pending: Vec<Value> = asked
         .values()
         .map(|asked| json!({"kind": "request", "method": asked.method, "tool": asked.tool, "ms": asked.since.elapsed().as_millis() as u64}))
@@ -335,14 +336,18 @@ pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value]) -> Vec<Value> {
         timer["kind"] = json!("timer");
         timer
     }));
+    if moving > 0 {
+        pending.push(json!({"kind": "transition", "properties": moving}));
+    }
     pending
 }
 
 /// Whether nothing's pending that ends by itself: no request unanswered, and, while the clock runs, no timer but
-/// intervals.
+/// intervals and nothing on its way.
 pub fn settled(pending: &[Value], paused: bool) -> bool {
     pending.iter().all(|pending| match pending["kind"].as_str() {
         Some("timer") => paused || pending.get("every").is_some_and(|every| !every.is_null()),
+        Some("transition") => paused,
         _ => false,
     })
 }

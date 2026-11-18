@@ -25,6 +25,13 @@ globalThis.setInterval = (callback, delay = 0, ...args) => {
   return id
 }
 globalThis.clearInterval = globalThis.clearTimeout
+// The next frame's, as a 60 Hz display's, told the time it's drawn at, as a browser's.
+globalThis.requestAnimationFrame = (callback) => {
+  const id = nextTimer++
+  timers.set(id, { due: __now() + 16, run: () => callback(__now()) })
+  return id
+}
+globalThis.cancelAnimationFrame = globalThis.clearTimeout
 const say = (level) => (...parts) => __log(level, parts.map((part) => typeof part === "string" ? part : part instanceof Error ? `${part}\n${part.stack}` : JSON.stringify(part) ?? String(part)).join(" "))
 globalThis.console = { log: say("log"), info: say("info"), debug: say("debug"), warn: say("warn"), error: say("error") }
 
