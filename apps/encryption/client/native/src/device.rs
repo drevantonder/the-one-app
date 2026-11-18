@@ -25,7 +25,10 @@ impl InputResolver for Encrypts {
             let Input { app, format, says, typed, inputs, subject } = input;
             let filled = match (format, typed) {
                 ("secret", Some(text)) => secret(client, app, says, text, subject).await?,
-                ("owner-key", typed) => owner_key_for(client, inputs, typed, subject).await?,
+                ("owner-key", typed) => match owner_key_for(client, inputs, typed, subject).await? {
+                    Some(key) => key,
+                    None => return Ok(None),
+                },
                 ("artifact-keys", None) => artifact_keys(client, app, says, inputs, subject).await?,
                 ("passkey-keys", None) => passkey_keys(client, app, says, subject).await?,
                 _ => return Ok(None),
@@ -90,13 +93,13 @@ async fn owner_key_of(client: &Client, subject: Option<&str>) -> Result<(Key, St
 
 /// The key of `subject`, or of whoever this client asks for, encrypted to the device the input `device` names: the
 /// one typed as a recovery key, this device's copy, or for someone who has none yet, a new one, for this device
-/// itself.
+/// itself. Nothing where this device holds no copy to give, so the tool says what it does without one.
 async fn owner_key_for(
     client: &Client,
     inputs: &Map<String, Value>,
     typed: Option<&str>,
     subject: Option<&str>,
-) -> Result<String> {
+) -> Result<Option<String>> {
     let holds = tool_for(client, HOLDS, json!({}), subject).await?;
     let (owner, me) = (holds["owner"].as_str().unwrap_or_default(), client.device_key().public().to_string());
     let device = inputs.get("device").and_then(Value::as_str).unwrap_or(&me);
@@ -109,13 +112,14 @@ async fn owner_key_for(
             key
         }
         (Some(_), None) => bail!("There's no key to recover: nothing of yours is encrypted yet."),
+        (None, Some(_)) if holds["slot"].is_null() => return Ok(None),
         (None, Some(_)) => owner_key_of(client, subject).await?.0,
         (None, None) if device == me => cipher::owner(),
-        (None, None) => bail!("You have no key yet. It's made on the first device you set up, for itself."),
+        (None, None) => return Ok(None),
     };
     let to: PublicKey = device.parse().context("that isn't a device's key")?;
     let slot = cipher::seal(&to, &cipher::for_device(owner, device), key.as_slice())?;
-    Ok(json!({"check": cipher::check(&key), "slot": BASE64.encode(&slot)}).to_string())
+    Ok(Some(json!({"check": cipher::check(&key), "slot": BASE64.encode(&slot)}).to_string()))
 }
 
 /// The keys of the artifact an app's tool names, encrypted to each server in the input `servers`. Taking a

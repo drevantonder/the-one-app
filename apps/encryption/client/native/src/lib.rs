@@ -11,7 +11,8 @@
 //! - `artifact-keys`: the keys of the artifact that tool names, for each server in the input `servers`, from this
 //!   device's copy of its owner's key. A server that was listed and no longer is starts a new epoch.
 //! - `owner-key`: the owner's key for the device in the input `device`: a new one if they have none, and otherwise
-//!   this device's copy, or the recovery key given.
+//!   this device's copy, or the recovery key given. Nothing if this device holds no copy, or another device would
+//!   need one made: a tool that takes it does what it can without.
 //! - `passkey-keys`: the owner's key, encrypted to each of their passkeys that the app's tool named by `passkeys` lists
 //!   with a key from its PRF output and that can't unlock it yet.
 //!

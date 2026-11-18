@@ -321,6 +321,12 @@ defmodule Encryption do
     end
   end
 
+  def call("approve", %{"device" => _}, _call),
+    do:
+      raise(
+        "Only a device that holds your key lets another hold it. Approve this one from there, or with your recovery key."
+      )
+
   def call("approve", _inputs, _call), do: raise(@on_a_device)
 
   def call("ask", %{"device" => device} = inputs, call) do
