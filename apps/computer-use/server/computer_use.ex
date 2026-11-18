@@ -32,7 +32,15 @@ defmodule ComputerUse do
     properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}},
     required: ["mimeType"]
   }
-  @done %{type: "object", properties: %{done: %{type: "string", description: "What it did, in a few words"}}, required: ["done"]}
+  @done %{
+    type: "object",
+    properties: %{
+      done: %{type: "string", description: "What it did, in a few words"},
+      effect: %{type: "string", description: "On a computer's own screen, what Cua Driver saw of it: confirmed, unverifiable or suspected_noop"},
+      escalation: %{type: "object", description: "On a computer's own screen, what Cua Driver recommends when it didn't land"}
+    },
+    required: ["done"]
+  }
   @stream %{
     type: "object",
     properties: %{

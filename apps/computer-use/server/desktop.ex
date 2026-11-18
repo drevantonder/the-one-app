@@ -87,8 +87,7 @@ defmodule ComputerUse.Desktop do
 
       _ ->
         done = did(action, inputs)
-        OneCore.Service.call(call, __MODULE__, :act, [action, inputs], desktop)
-        %{done: done}
+        Map.put(OneCore.Service.call(call, __MODULE__, :act, [action, inputs], desktop), "done", done)
     end
   end
 
@@ -179,7 +178,11 @@ defmodule ComputerUse.Desktop do
     window(service, "get_window_state", Map.put(inputs, "include_screenshot", false))["structuredContent"]
   end
 
-  @doc "Does a Computer Use action other than a screenshot: `inputs` as Computer Use gives them."
+  @doc """
+  Does a Computer Use action other than a screenshot: `inputs` as Computer Use gives them. Answers with what Cua
+  Driver says of its effect, where it does: `effect` (confirmed, unverifiable or suspected_noop) and the `escalation`
+  it recommends.
+  """
   def act(service, action, inputs) do
     allowed!(service, action)
     desktop? = not Enum.any?(~w(pid window_id element_token), &Map.has_key?(inputs, &1))
@@ -196,54 +199,58 @@ defmodule ComputerUse.Desktop do
         {&window(service, &1, &2), Map.take(inputs, ~w(pid window_id element_token)), &Map.take(&1, ~w(x y))}
       end
 
-    case action do
-      "click" ->
-        send.("click", Map.merge(target, %{"button" => inputs["button"] || "left"}) |> Map.merge(at.(inputs)))
+    result =
+      case action do
+        "click" ->
+          send.("click", Map.merge(target, %{"button" => inputs["button"] || "left"}) |> Map.merge(at.(inputs)))
 
-      # Cua Driver's own double-click is aimed at a window or an element; on the display it's a click of two.
-      "double_click" when desktop? ->
-        send.("click", Map.merge(target, %{"count" => 2}) |> Map.merge(at.(inputs)))
+        # Cua Driver's own double-click is aimed at a window or an element; on the display it's a click of two.
+        "double_click" when desktop? ->
+          send.("click", Map.merge(target, %{"count" => 2}) |> Map.merge(at.(inputs)))
 
-      "double_click" ->
-        send.("double_click", Map.merge(target, at.(inputs)))
+        "double_click" ->
+          send.("double_click", Map.merge(target, at.(inputs)))
 
-      "move" ->
-        if not desktop?, do: raise("`move` moves the person's own pointer, which actions aimed at a window leave alone: it takes no window")
-        send.("move_cursor", Map.merge(target, at.(inputs)))
+        "move" ->
+          if not desktop?, do: raise("`move` moves the person's own pointer, which actions aimed at a window leave alone: it takes no window")
+          send.("move_cursor", Map.merge(target, at.(inputs)))
 
-      "drag" ->
-        # Cua Driver drags in a straight line, from a point to a point.
-        case Enum.map(inputs["path"] || [], at) do
-          [from, to] ->
-            send.("drag", Map.merge(target, %{"from_x" => from["x"], "from_y" => from["y"], "to_x" => to["x"], "to_y" => to["y"]}))
+        "drag" ->
+          # Cua Driver drags in a straight line, from a point to a point.
+          case Enum.map(inputs["path"] || [], at) do
+            [from, to] ->
+              send.("drag", Map.merge(target, %{"from_x" => from["x"], "from_y" => from["y"], "to_x" => to["x"], "to_y" => to["y"]}))
 
-          _ ->
-            raise "On a computer's own screen a drag is a straight line: give its path as two points, where it starts and where it ends"
-        end
-
-      "scroll" ->
-        send.("scroll", Map.merge(target, %{"direction" => inputs["direction"], "amount" => inputs["amount"] || 5}) |> Map.merge(at.(inputs)))
-
-      "type" ->
-        send.("type_text", Map.put(target, "text", inputs["text"] || ""))
-
-      "key" ->
-        for combo <- String.split(inputs["keys"] || "", " ", trim: true) do
-          case keys(combo) do
-            [key] -> send.("press_key", Map.put(target, "key", key))
-            keys -> send.("hotkey", Map.put(target, "keys", keys))
+            _ ->
+              raise "On a computer's own screen a drag is a straight line: give its path as two points, where it starts and where it ends"
           end
-        end
 
-      "set_value" ->
-        if not Map.has_key?(target, "element_token"), do: raise("set_value sets an element's value: give its element_token, from `elements`")
-        send.("set_value", Map.put(target, "value", inputs["value"] || ""))
+        "scroll" ->
+          send.("scroll", Map.merge(target, %{"direction" => inputs["direction"], "amount" => inputs["amount"] || 5}) |> Map.merge(at.(inputs)))
 
-      _ ->
-        raise "There's no action #{action}"
-    end
+        "type" ->
+          send.("type_text", Map.put(target, "text", inputs["text"] || ""))
 
-    :ok
+        "key" ->
+          presses =
+            for combo <- String.split(inputs["keys"] || "", " ", trim: true) do
+              case keys(combo) do
+                [key] -> send.("press_key", Map.put(target, "key", key))
+                keys -> send.("hotkey", Map.put(target, "keys", keys))
+              end
+            end
+
+          List.last(presses, %{})
+
+        "set_value" ->
+          if not Map.has_key?(target, "element_token"), do: raise("set_value sets an element's value: give its element_token, from `elements`")
+          send.("set_value", Map.put(target, "value", inputs["value"] || ""))
+
+        _ ->
+          raise "There's no action #{action}"
+      end
+
+    Map.take(result["structuredContent"] || %{}, ~w(effect escalation))
   end
 
   # The display's whole size in pixels, as Cua Driver's desktop actions count them. It gives a Mac's in points, with

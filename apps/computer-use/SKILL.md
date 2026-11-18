@@ -50,8 +50,11 @@ own pointer and keyboard) only when a task truly needs it or they're away. These
   then in that window's own screenshot), act in the background: the window stays behind, and the person's pointer
   doesn't move. `set_value` sets a field, slider or pop-up menu's value by its `element_token`. Prefer an element to a
   point; a point is for what has no element (a canvas, a video).
-- What an action did shows on the next `elements` or window `screenshot`: check it there. Some surfaces (Chromium and
-  Electron web content) don't take every background input, which the action says; only then use the whole display.
+- An action answers with Cua Driver's `effect` where it has one: `confirmed`, `unverifiable` or `suspected_noop`, and
+  an `escalation` when it recommends another way. Check what it did on the next `elements` or window `screenshot`.
+  Not every background input lands (a key press or a click in a text, in some apps; Chromium and Electron web
+  content): prefer `type` and `set_value` with an `element_token`, and use the whole display only when nothing else
+  does it.
 
 Never act on a window the person didn't ask you to use. On Linux, background work needs X11 (or XWayland): on Wayland
 itself one window can't be aimed at.
