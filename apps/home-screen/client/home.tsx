@@ -1256,8 +1256,11 @@ function HomeScreen(props: { owners: Owner[] }) {
   }
 
   /// A finger on the pages swipes them: across between an owner's pages, and up and down between owners, unless the
-  /// page scrolls itself, as the App Library does, or they're being edited. Until it has moved 10 points it may be a
-  /// tap or a hold; then it's a swipe, along the way it moved most, and the pages follow it from there. Across, on
+  /// page scrolls itself, as the App Library does, or they're being edited. A finger that lands while they move
+  /// catches them, both ways, as it can't yet say which way it's going. Until it has moved 10 points it may be a
+  /// tap or a hold; then it's a swipe, along the way it moved most, and the pages follow it from there. Whatever way
+  /// it doesn't swipe them, they go on to where they rest, the machine's `at`, as a phone's pages always end on one:
+  /// left where they were caught, the dots pill's rows, which roll with them, would stay half rolled. Across, on
   /// anything on them that scrolls sideways itself, it's that row's, unless it's at its end that way, as iOS's scroll
   /// views hand a swipe on. While something's carried, a second finger swipes as one does without it,
   /// along Home's pages and between owners, and the first stays with what it carries; its tap on an app stacks it.
@@ -1287,8 +1290,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     // every finger but the one carrying it has them, one at a time.
     const second = carrying() && event.pointerId !== carrier && !swipe
     if (!second && !state().matches("nothing") && !state().matches({ category: "closing" }) && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
-    const owner = shownOwner()
-    // A finger that lands while they move catches them.
+    const { owner } = home.getSnapshot().context.at
     stop(down)
     stop(sideways(owner))
     swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, on, row: row(on), owner, from: 0, base: 0, moves: [] }
@@ -1303,8 +1305,10 @@ function HomeScreen(props: { owners: Owner[] }) {
       // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
       const free = state().matches("nothing") || state().matches({ category: "closing" }) || state().matches({ editing: "still" }) || (carrying() && swipe.id !== carrier)
       const vertical = carrying() ? !state().context.held?.item?.widget : !state().matches("editing")
-      if (!free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home"))) return void (swipe = undefined)
-      if (axis === "x" && swipe.row && scrolls(swipe.row, dx)) return void (swipe = undefined)
+      const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home")) || (axis === "x" && swipe.row && scrolls(swipe.row, dx))
+      // Either way the pages go on: all of them, or the way the finger doesn't swipe, which it takes at once below.
+      slide(home.getSnapshot().context.at, true)
+      if (refused) return void (swipe = undefined)
       const moving = axis === "x" ? sideways(swipe.owner) : down
       const size = axis === "x" ? pitch() : height()
       Object.assign(swipe, { axis, x: event.clientX, y: event.clientY, base: moving.value, from: Math.round(moving.value / size) })
@@ -1325,11 +1329,11 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (event.type === "pointerup" && swipe.axis) drag(event)
     const done = swipe
     swipe = undefined
-    // A second finger's tap on an app stacks it on what's carried, and the pages it caught go on where they were going.
+    // A finger that didn't swipe lets go of the pages it caught, and a second finger's tap on an app stacks it on
+    // what's carried.
     if (!done.axis) {
-      if (!carrying() || done.id === carrier) return
       slide(home.getSnapshot().context.at, true)
-      if (event.type === "pointerup") stack(done.on)
+      if (carrying() && done.id !== carrier && event.type === "pointerup") stack(done.on)
       return
     }
     swiped = performance.now()
