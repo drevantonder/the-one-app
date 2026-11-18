@@ -1,18 +1,18 @@
 {
   "server/bin/wall/linux-aarch64": {
     "sha256": "c52516fdc2649b1c9b5b410bedc101e3fd4e08e4b0dcb51449116ac930e28f8a",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/wall-439c98e94e5522224ac425f99da735b5e4bff5573b72a262bd74536130c0696e-linux-aarch64"
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-5f67fba37c8e/wall-3e69e1202ca1ea26d37db15eab7060a188b63782c32e34d8c4704c73a6e3a899-linux-aarch64"
   },
   "server/bin/wall/linux-x86_64": {
     "sha256": "dab75eea997af7faec920d10198bddd14a7c947a39449b47e3e9f8a5418cdb2d",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/wall-75fedee2f088363276a40d825058ef1a61b6b0a92fde0a693f7912220b251b85-linux-x86_64"
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-5f67fba37c8e/wall-7de693ab2bdee420d1345da6a388907111a2567edfe3c8a97ca692deb09b9c28-linux-x86_64"
   },
   "server/bin/wall/macos-aarch64": {
-    "sha256": "3f1c80cf1b3d6ab090550c6c48e8b2ed7a46f8a086eb0cf446c3043a74b47552",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/wall-55bf45422885e17f70b3749d733e77f1c189fd9a7af26c6c3cbbd79e8c7df744-macos-aarch64"
+    "sha256": "71dd0d1c13195083236434663d13ac1fda1bfe7df57f77d9aff3b75bfcb0be92",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-5f67fba37c8e/wall-77424481c7e23ce90fd287ac3e8239c3cc2c59b93f94ceb1f41e12f144a70592-macos-aarch64"
   },
   "server/bin/wall/windows-x86_64": {
-    "sha256": "62dbde7cfa04ede9d2f78bd50fca0bf63cf68476670d23f085ba7a2262fd0fa1",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/wall-bed2699317da9e7fdacf0ef7a2290265b15c58dd1b5832d6450fd28ff53c8fd5-windows-x86_64"
+    "sha256": "2a5619e9bd17f7a5924d72018cea84471fd18e09bec3d4f3bee98c48e95f4210",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-5f67fba37c8e/wall-91a5aebcf1170d21367e6a7220815d26b1aa71984ee597b84b7160ec112ba64a-windows-x86_64"
   }
 }
