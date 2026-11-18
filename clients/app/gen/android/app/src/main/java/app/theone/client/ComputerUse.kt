@@ -42,8 +42,13 @@ import kotlin.math.sqrt
  * computer's is (`ComputerUse.Desktop`). Each action says what it did, or throws why it couldn't.
  */
 class ComputerUse : AccessibilityService() {
+  /**
+   * Android keeps the app's process running while the service is on, from as the phone starts, so the app's client
+   * starts with it, as a push would start it: the phone can then be asked without a push to wake it.
+   */
   override fun onServiceConnected() {
     running = this
+    Thread { Notifications.wake(this, dataDir.absolutePath) }.start()
   }
 
   override fun onUnbind(intent: Intent?): Boolean {
@@ -79,10 +84,22 @@ class ComputerUse : AccessibilityService() {
     @JvmStatic
     fun screenshot(context: Context): ByteArray = service(context).shot()
 
-    /** A tap, or with `right` a long press, as a phone has for what a right-click is on a computer. */
+    /**
+     * A tap, or with `right` a long press, as a phone has for what a right-click is on a computer. A TV has no
+     * touchscreen, and Android cancels a gesture made on one, so there it's what its remote does: the focus moves to
+     * what's there, and it's pressed, or held.
+     */
     @JvmStatic
     fun click(context: Context, x: Int, y: Int, button: String): String {
       val service = service(context)
+      if (tv(service)) {
+        val held = when (button) {
+          "left" -> false
+          "right" -> true
+          else -> throw IllegalStateException("A TV's remote has no $button button: click presses what's there, and right holds it.")
+        }
+        return "${if (held) "Held" else "Pressed"} ${service.press(x, y, held)}"
+      }
       val held = when (button) {
         "left" -> 50L
         "right" -> 800L
@@ -96,6 +113,7 @@ class ComputerUse : AccessibilityService() {
     @JvmStatic
     fun doubleClick(context: Context, x: Int, y: Int): String {
       val service = service(context)
+      if (tv(service)) return "Pressed ${service.press(x, y, false).also { service.press(x, y, false) }} twice"
       val at = service.at(x, y)
       service.gesture(GestureDescription.StrokeDescription(dot(at), 0, 50), GestureDescription.StrokeDescription(dot(at), 150, 50))
       return "Double-tapped at $x, $y"
@@ -105,6 +123,7 @@ class ComputerUse : AccessibilityService() {
     @JvmStatic
     fun drag(context: Context, path: IntArray): String {
       val service = service(context)
+      if (tv(service)) throw IllegalStateException("A TV has no touchscreen to drag on: move the focus with `key` Up, Down, Left and Right.")
       val through = Path()
       for (i in path.indices step 2) {
         val at = service.at(path[i], path[i + 1])
@@ -121,6 +140,7 @@ class ComputerUse : AccessibilityService() {
     @JvmStatic
     fun scroll(context: Context, x: Int, y: Int, direction: String, amount: Int): String {
       val service = service(context)
+      if (tv(service)) return service.scrollTv(x, y, direction, amount)
       val at = service.at(x, y)
       val size = real(service)
       val step = amount * 48 * service.resources.displayMetrics.density
@@ -372,8 +392,50 @@ class ComputerUse : AccessibilityService() {
     }.minByOrNull { it.second }?.first
   }
 
+  /**
+   * What the focus moves to at `x`, `y` of the screenshot, as a remote's press would be on it: the innermost thing
+   * there that's pressed or takes the focus, in the frontmost window that has one there. It's focused, then pressed,
+   * or held, and said.
+   */
+  private fun press(x: Int, y: Int, held: Boolean): String {
+    val point = at(x, y)
+    val node = windows.firstNotNullOfOrNull { it.root?.let { root -> under(root, point) } }
+      ?: throw IllegalStateException("Nothing at $x, $y is pressed or takes the focus.")
+    node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+    moved = node
+    val action = if (held) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
+    if (!node.performAction(action)) throw IllegalStateException("Android didn't press ${named(node)}.")
+    return named(node)
+  }
+
+  private fun under(node: AccessibilityNodeInfo, point: Point): AccessibilityNodeInfo? {
+    if (!node.isVisibleToUser || !Rect().also(node::getBoundsInScreen).contains(point.x, point.y)) return null
+    for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let { under(it, point) }?.let { return it }
+    return node.takeIf { it.isClickable || it.isFocusable }
+  }
+
+  /** Scrolls what scrolls at `x`, `y` a page at a time, `amount` times at most, as a remote's D-pad would. */
+  private fun scrollTv(x: Int, y: Int, direction: String, amount: Int): String {
+    val point = at(x, y)
+    val action = when (direction) {
+      "up" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP
+      "down" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
+      "left" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT
+      "right" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT
+      else -> throw IllegalStateException("Scroll up, down, left or right.")
+    }
+    fun scrolls(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+      if (!node.isVisibleToUser || !Rect().also(node::getBoundsInScreen).contains(point.x, point.y)) return null
+      for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let(::scrolls)?.let { return it }
+      return node.takeIf { action in it.actionList }
+    }
+    val node = windows.firstNotNullOfOrNull { it.root?.let(::scrolls) } ?: throw IllegalStateException("Nothing at $x, $y scrolls $direction.")
+    val scrolled = (1..amount).takeWhile { node.performAction(action.id) }.size
+    return "Scrolled ${named(node)} $direction $scrolled"
+  }
+
   /** Return: in a field, its keyboard's action key; anywhere else, a click on what has the focus, as a D-pad's centre. */
-  private fun enter(): String? {
+  private fun enter(): String {
     val at = current()
     val done = if (at.isEditable) {
       at.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
@@ -381,6 +443,6 @@ class ComputerUse : AccessibilityService() {
       at.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
     if (!done) throw IllegalStateException("Android didn't press Return on ${named(at)}.")
-    return null
+    return named(at)
   }
 }

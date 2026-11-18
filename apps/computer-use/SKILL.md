@@ -106,8 +106,10 @@ The One App's App Info. Computer Use on a phone needs Android 11 or later.
 - `key` has only what Android gives: `Back` (or `Escape`), `Home`, `Recents`, `Notifications`; `Up`, `Down`, `Left`
   and `Right`, which move the focus as a D-pad does and say where it went; and `Return`, which is Return in a field and
   presses what has the focus anywhere else. Anything else refuses.
-- An Android TV is the same, driven as its remote drives it: move with `key` Up, Down, Left and Right, and press with
-  Return. `click` taps there too, though its apps are made for a D-pad.
+- An Android TV is driven as its remote drives it: move with `key` Up, Down, Left and Right, and press with Return.
+  It has no touchscreen, so `click` moves the focus to what's there and presses it (`right` holds it), `scroll`
+  scrolls what's there a page at a time, and `drag` refuses. In a web view's page (The One App's own pages too), a TV's
+  WebView takes the focus but not the press: open what's focused there by asking its person to press OK.
 - A phone whose app isn't running is still listed, saying so, and is woken by a push as it's used, which takes a few
   seconds; one that doesn't wake (off, offline, or notifications not allowed for The One App) says so. Only the
   phone's person and the network's owner use it, and you act as them, with their apps and accounts.

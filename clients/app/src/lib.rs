@@ -910,7 +910,8 @@ async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
 }
 
 /// Starts the app's client without its window, for Android's messaging service (`Notifications.kt`), which a push that
-/// wakes the phone starts, as a server asks its app something while it isn't running (Notifications' hook `wake`):
+/// wakes the phone starts, as a server asks its app something while it isn't running (Notifications' hook `wake`), and
+/// for Computer Use's accessibility service, which Android keeps running while it's on (`ComputerUse.kt`):
 /// it opens the client kept in `home`, the app's folder, as the window would, and says it's watching to each server,
 /// which the one that woke it waits for before it asks. It returns once it has, or couldn't, within the time Android
 /// gives a high-priority message, and the client stays for as long as the app's process does, as it would once its
@@ -935,7 +936,7 @@ pub extern "system" fn Java_app_theone_client_Notifications_wake<'local>(
     };
     let home = match given() {
         Ok(home) => home,
-        Err(error) => return eprintln!("a push couldn't wake the app: {error:#}"),
+        Err(error) => return eprintln!("the app's client couldn't start without its window: {error:#}"),
     };
     // Android gives a high-priority message about 10 seconds before it may stop the process.
     let woken = tauri::async_runtime::block_on(async {
@@ -949,9 +950,9 @@ pub extern "system" fn Java_app_theone_client_Notifications_wake<'local>(
         tokio::time::timeout(std::time::Duration::from_secs(9), watching).await
     });
     match woken {
-        Ok(Ok(())) => eprintln!("a push woke the app in {} ms", started.elapsed().as_millis()),
-        Ok(Err(error)) => eprintln!("a push couldn't wake the app: {error:#}"),
-        Err(_) => eprintln!("a push didn't wake the app within 9 seconds"),
+        Ok(Ok(())) => eprintln!("the app's client started without its window in {} ms", started.elapsed().as_millis()),
+        Ok(Err(error)) => eprintln!("the app's client couldn't start without its window: {error:#}"),
+        Err(_) => eprintln!("the app's client didn't start without its window within 9 seconds"),
     }
 }
 
