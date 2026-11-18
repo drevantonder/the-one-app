@@ -202,20 +202,25 @@ defmodule GoogleAccount do
   # Signed in for a Google app, with what it asks of Google, or for its person, with what every Google app they
   # have asks: so adding an account in the Vault lets every one in at once.
   def call("sign_in", inputs, call) do
-    scopes =
+    {scopes, apps} =
       if call.caller do
-        inputs["scopes"] || raise("A Google app signs in with its scopes.")
+        {inputs["scopes"] || raise("A Google app signs in with its scopes."), [call.caller]}
       else
         {:ok, parts, _failed} = OneCore.Call.run_hook(call, "scopes", %{})
-        parts |> Map.values() |> List.flatten() |> Enum.uniq()
+        {parts |> Map.values() |> List.flatten() |> Enum.uniq(), Map.keys(parts)}
       end
+
+    # The apps it's for, as people know them, which the page Google sends them back to names.
+    running = OneCore.Apps.running(call.subject)
+    titles = Map.new(running, &{elem(&1, 0), elem(&1, 1).title}) |> Map.merge(Map.new(running, &{elem(&1, 1).artifact, elem(&1, 1).title}))
+    apps = apps |> Enum.map(&titles[&1]) |> Enum.reject(&is_nil/1) |> Enum.sort()
 
     params = %{"access_type" => "offline", "prompt" => "consent", "include_granted_scopes" => "true"}
     params = if hint = inputs["account"], do: Map.put(params, "login_hint", hint), else: params
     service = Map.merge(@service, %{"scopes" => Enum.uniq(["openid", "email" | scopes]), "params" => params})
 
     %{
-      url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}"})["url"],
+      url: vault(call, "sign_in", %{"service" => service, "item" => "Google {{email}}", "apps" => apps})["url"],
       then:
         "They open url in their browser and sign in, and Google sends them back to the network's address, which finishes it. The account is then in their Vault, under Accounts."
     }

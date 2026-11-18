@@ -71,8 +71,21 @@ defmodule Vault do
     # What was a plugin is an app.
     "alter table uses rename column plugin to app",
     "alter table requests rename column plugin to app",
-    "alter table sign_ins rename column plugin to app"
+    "alter table sign_ins rename column plugin to app",
+    # Where each sign-in began, the apps it's for, and how it ended, which its page says (`@sign_in_moves`).
+    "alter table sign_ins add column began text",
+    "alter table sign_ins add column apps text",
+    "alter table sign_ins add column ended text",
+    "alter table sign_ins add column ending text"
   ]
+
+  # Where a sign-in to an outside service is. It's `started` as the link is given, and kept by its `state` with where
+  # it began (`began/1`): an app's screen, an agent, or `one` in a terminal. Its service sends its person's browser
+  # back, which ends it, once: `ok`, its tokens kept; `cancelled`, they said no there; or `failed`, saying why. It
+  # stays ended, so its page shows the same ending however often it's opened, until it's gone with the rest that
+  # waited too long. What the page then shows is the ending for where it began (`apps/vault/edge/page/page.tsx`),
+  # and Try Again on one that didn't sign in starts another as it began.
+  @sign_in_moves %{"started" => ~w(ok cancelled failed), "ok" => [], "cancelled" => [], "failed" => []}
 
   # How long a request waits for its person, and a sign-in for its browser, in seconds.
   @request_waits 7 * 86_400
@@ -83,7 +96,7 @@ defmodule Vault do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.22.18",
+      "core" => ">= 0.23.10",
       "encryption" => "to keep your secrets from whoever runs the bucket",
       "database" => "to keep your items",
       "notifications" => "to tell you when an agent saves something to your Vault"
@@ -500,6 +513,11 @@ defmodule Vault do
               type: "string",
               description:
                 "The item its tokens become, the service's name if left out. {{<claim>}} is filled in from who signed in, as its OpenID Connect ID token says: Google {{email}}"
+            },
+            apps: %{
+              type: "array",
+              items: %{type: "string"},
+              description: "What it's for, as people know them, which the page they come back to names: Gmail, Google Calendar"
             }
           },
           required: ["service"]
@@ -637,16 +655,34 @@ defmodule Vault do
         name: "oauth_callback",
         by_link: true,
         description:
-          "Finishes a sign-in to an outside service. The network's edge calls this when the service sends its person back.",
+          "Finishes a sign-in to an outside service, or with `again`, starts it again. The network's edge calls this when the service sends its person back, and their page answers how it ended, and where it began.",
         inputs: %{
           type: "object",
-          properties: %{state: %{type: "string"}, code: %{type: "string"}, error: %{type: "string"}},
+          properties: %{
+            state: %{type: "string"},
+            code: %{type: "string"},
+            error: %{type: "string"},
+            again: %{type: "boolean", description: "Starts it again, once it ended without signing in"}
+          },
           required: ["state"]
         },
         outputs: %{
           type: "object",
-          properties: %{service: %{type: "string"}, item: %{type: "string", description: "What it's kept as in the Vault"}},
-          required: ["service", "item"]
+          properties: %{
+            service: %{type: "string"},
+            status: %{type: "string", enum: Map.keys(@sign_in_moves)},
+            began: %{
+              type: "object",
+              description: "Where: `{screen: <app>}`, `{agent: <its name>}` or `{cli: true}`",
+              properties: %{screen: %{type: "string"}, agent: %{type: "string"}, cli: %{type: "boolean"}}
+            },
+            apps: %{type: "array", items: %{type: "string"}, description: "What it's for"},
+            item: %{type: "string", description: "What it's kept as in the Vault, once it's ok"},
+            account: %{type: "string", description: "Who signed in, where the service says their email"},
+            problem: %{type: "string", description: "Why it failed"},
+            url: %{type: "string", description: "Where it's started again, with `again`"}
+          },
+          required: ["service", "status", "began", "apps"]
         }
       }
     ]
@@ -857,51 +893,10 @@ defmodule Vault do
   end
 
   def call("sign_in", %{"service" => given} = inputs, call) do
-    address = address()
     db = own(call)
-
-    service = %{
-      name: given["name"],
-      authorize: given["authorize"],
-      token: given["token"],
-      scopes: given["scopes"],
-      hosts: hosts!(given["hosts"]),
-      client: given["client"],
-      params: Map.get(given, "params", %{})
-    }
-
-    quietly("Starting the sign-in", fn ->
-      {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{random(24)}", random(48)}
-      item = find!(call, db, service.client)
-      client = fields(item)
-
-      client["client_id"] ||
-        raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
-
-      # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
-      if client["client_secret"] && not OAuth.to?(service.token, item["hosts"]),
-        do:
-          raise(
-            "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
-          )
-
-      stored = JSON.encode!(Map.take(service, [:name, :token, :hosts, :client]))
-
-      transaction(call, db, fn d ->
-        query(d, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
-
-        query(d, "insert into sign_ins (state, verifier, service, app, item, at) values (?, ?, ?, ?, ?, ?)", [
-          state,
-          verifier,
-          stored,
-          call.caller,
-          inputs["item"] || service.name,
-          now()
-        ])
-      end)
-
-      %{url: OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)}
-    end)
+    service = service(given)
+    apps = inputs["apps"] || [title(call, call.caller)]
+    %{url: started(call, db, service, call.caller, inputs["item"] || service.name, began(call), apps)}
   end
 
   # From the database, which keeps each item's name while soft delete has it aside.
@@ -1219,42 +1214,175 @@ defmodule Vault do
       call = %{call | subject: owner, actor: nil}
       db = own(call)
 
-      quietly("Finishing the sign-in", fn ->
-        sign_in =
-          transaction(call, db, fn d ->
-            case query(d, "select * from sign_ins where state = ? and at > ?", [state, now() - @sign_in_waits]) do
-              [sign_in] -> sign_in
-              [] -> raise "This sign-in isn't waiting any more. Start it again."
-            end
-          end)
+      sign_in =
+        transaction(call, db, fn d ->
+          case query(d, "select * from sign_ins where state = ? and at > ?", [state, now() - @sign_in_waits]) do
+            [sign_in] -> sign_in
+            [] -> raise "This sign-in isn't waiting any more. Start it again."
+          end
+        end)
 
-        service = JSON.decode!(sign_in["service"])
-        if why = inputs["error"], do: raise("#{service["name"]} didn't sign you in: #{why}.")
-        code = inputs["code"] || raise "#{service["name"]} sent no code back."
-        client = fields(find!(call, db, service["client"]))
-        tokens = OAuth.exchange(service, client, code, sign_in["verifier"], address() <> "/vault/callback")
-        name = signed_in(sign_in["item"], service, tokens)
-
-        if transaction(call, db, &query(&1, "delete from sign_ins where state = ? returning state", [state])) != [] do
-          found = find(call, db, name) || create(call, db, name, service["hosts"])
-
-          # Signed in, it's ready: whatever it needed of its person is done.
-          change!(db, found, fn record ->
-            record
-            |> kept_tokens(service, tokens)
-            |> Map.update!("uses", &Enum.uniq(&1 ++ [sign_in["app"]]))
-            |> Map.put("state", nil)
-          end)
-
-          Call.changed(call)
-        end
-
-        %{service: service["name"], item: name}
-      end)
+      cond do
+        inputs["again"] -> again(call, db, sign_in)
+        sign_in["ending"] -> ending(sign_in, JSON.decode!(sign_in["ending"]))
+        true -> returned(call, db, sign_in, inputs)
+      end
     else
       _ -> raise "This sign-in isn't one this network began."
     end
   end
+
+  # What a sign-in is to start with, from what an app gave, or what was kept of that.
+  defp service(given) do
+    %{
+      name: given["name"],
+      authorize: given["authorize"],
+      token: given["token"],
+      scopes: given["scopes"],
+      hosts: hosts!(given["hosts"]),
+      client: given["client"],
+      params: given["params"] || %{}
+    }
+  end
+
+  # Starts a sign-in for `app`, `started`, and gives the link its person opens.
+  defp started(call, db, service, app, item, began, apps) do
+    address = address()
+
+    quietly("Starting the sign-in", fn ->
+      {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{random(24)}", random(48)}
+      found = find!(call, db, service.client)
+      client = fields(found)
+
+      client["client_id"] ||
+        raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
+
+      # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
+      if client["client_secret"] && not OAuth.to?(service.token, found["hosts"]),
+        do:
+          raise(
+            "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
+          )
+
+      transaction(call, db, fn d ->
+        query(d, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
+
+        query(
+          d,
+          "insert into sign_ins (state, verifier, service, app, item, at, began, apps) values (?, ?, ?, ?, ?, ?, ?, ?)",
+          [state, verifier, JSON.encode!(service), app, item, now(), JSON.encode!(began), JSON.encode!(apps)]
+        )
+      end)
+
+      OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)
+    end)
+  end
+
+  # Where a sign-in began, which says how its page ends: on an agent, named as its person let it in (an assistant
+  # somewhere else, which comes in over the web, among their devices as `sign-in` lists them) or as it says it's
+  # called (an MCP client on a device of theirs, through `one mcp`); in a terminal, by `one`; or on an app's screen,
+  # the Vault's, where sign-ins are listed.
+  defp began(call) do
+    client = Call.client(call) || %{}
+    said = client["title"] || client["name"]
+
+    cond do
+      client["name"] == "one-cli" -> %{cli: true}
+      client["name"] in ["one-app", "one-web"] -> %{screen: "vault"}
+      name = client["web"] && assistant(call, client["device"]) -> %{agent: name}
+      said -> %{agent: said}
+      true -> %{screen: "vault"}
+    end
+  end
+
+  defp assistant(call, device) do
+    %{"devices" => devices} = Call.tool(call, "sign-in", "devices", %{})
+    Enum.find_value(devices, &(&1["kind"] == "assistant" and &1["id"] == device and &1["name"]))
+  end
+
+  # The service sent its person back: it ends, as only one return can end it.
+  defp returned(call, db, sign_in, inputs) do
+    service = JSON.decode!(sign_in["service"])
+
+    ending =
+      try do
+        quietly("Finishing the sign-in", fn ->
+          cond do
+            # RFC 6749 4.1.2.1: they said no.
+            inputs["error"] == "access_denied" -> %{"status" => "cancelled"}
+            why = inputs["error"] -> raise "#{service["name"]} didn't sign you in: #{why}."
+            true -> signed!(call, db, sign_in, service, inputs["code"])
+          end
+        end)
+      rescue
+        error in RuntimeError -> %{"status" => "failed", "problem" => error.message}
+      end
+
+    move!(call, db, sign_in, ending)
+  end
+
+  # Swaps the code for tokens and keeps them, once: a second return of the same browser finds it ended.
+  defp signed!(call, db, sign_in, service, code) do
+    code || raise "#{service["name"]} sent no code back."
+    client = fields(find!(call, db, service["client"]))
+    tokens = OAuth.exchange(service, client, code, sign_in["verifier"], address() <> "/vault/callback")
+    name = signed_in(sign_in["item"], service, tokens)
+    claimed = transaction(call, db, &query(&1, "update sign_ins set ended = 'ok' where state = ? and ended is null returning state", [sign_in["state"]]))
+
+    if claimed != [] do
+      found = find(call, db, name) || create(call, db, name, service["hosts"])
+
+      # Signed in, it's ready: whatever it needed of its person is done.
+      change!(db, found, fn record ->
+        record
+        |> kept_tokens(service, tokens)
+        |> Map.update!("uses", &Enum.uniq(&1 ++ [sign_in["app"]]))
+        |> Map.put("state", nil)
+      end)
+
+      Call.changed(call)
+    end
+
+    account = OAuth.claims(tokens["id_token"])["email"]
+    Map.merge(%{"status" => "ok", "item" => name}, if(is_binary(account), do: %{"account" => account}, else: %{}))
+  end
+
+  # Ends a sign-in as `ending` says, which only one that's started may (`@sign_in_moves`), and answers it.
+  defp move!(call, db, sign_in, %{"status" => to} = ending) do
+    if to not in @sign_in_moves["started"], do: raise("A sign-in doesn't end #{to}.")
+
+    transaction(call, db, fn d ->
+      query(d, "update sign_ins set ended = ?, ending = ? where state = ? and (ended is null or ended = ?)", [
+        to,
+        JSON.encode!(ending),
+        sign_in["state"],
+        to
+      ])
+    end)
+
+    ending(sign_in, ending)
+  end
+
+  # What its page shows: how it ended, and where it began.
+  defp ending(sign_in, ending) do
+    %{
+      service: JSON.decode!(sign_in["service"])["name"],
+      began: JSON.decode!(sign_in["began"]),
+      apps: JSON.decode!(sign_in["apps"])
+    }
+    |> Map.merge(Map.new(ending, fn {key, value} -> {String.to_existing_atom(key), value} end))
+  end
+
+  # Try Again: one that ended without signing in starts another, as it began, for the same app and item.
+  defp again(call, db, %{"ended" => ended} = sign_in) when ended in ["cancelled", "failed"] do
+    service = service(JSON.decode!(sign_in["service"]))
+    began = JSON.decode!(sign_in["began"])
+    apps = JSON.decode!(sign_in["apps"])
+    url = started(call, db, service, sign_in["app"], sign_in["item"], began, apps)
+    %{service: service.name, status: "started", began: began, apps: apps, url: url}
+  end
+
+  defp again(_call, _db, _sign_in), do: raise("Only a sign-in that didn't sign you in starts again.")
 
   # The item a sign-in's tokens become: its name, with any {{<claim>}} filled in from who the service says signed in.
   defp signed_in(name, service, tokens) do
@@ -1583,6 +1711,9 @@ defmodule Vault do
   defp names(call), do: Map.new(Apps.running(call.subject), fn {name, version} -> {version.artifact, name} end)
   defp named(names, app), do: Map.get(names, app, Path.basename(app))
   defp app_name(call, app), do: named(names(call), app)
+
+  defp title(call, app),
+    do: Enum.find_value(Apps.running(call.subject), Path.basename(app), fn {_name, version} -> version.artifact == app && version.title end)
 
   defp address do
     Application.get_env(:one_core, :address) ||

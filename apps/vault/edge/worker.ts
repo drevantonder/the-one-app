@@ -32,12 +32,20 @@ function whose(state: string) {
   }
 }
 
-/** Finishes a sign-in: has a server acting for whoever's it is take the code. Gives what the page then says. */
-async function callback(params: URLSearchParams) {
+/**
+ * Finishes a sign-in, or with `again` starts it again: has a server acting for whoever's it is take what the service
+ * sent back. Gives what the page then shows: how it ended and where it began, or only a `problem` where it can't say.
+ */
+async function callback(params: URLSearchParams, again: boolean) {
   const state = params.get("state") ?? "";
   const owner = whose(state);
   if (!owner) return { problem: "This sign-in isn't one this network began." };
-  const inputs = { state, ...(params.has("code") && { code: params.get("code") }), ...(params.has("error") && { error: params.get("error") }) };
+  const inputs = {
+    state,
+    ...(params.has("code") && { code: params.get("code") }),
+    ...(params.has("error") && { error: params.get("error") }),
+    ...(again && { again }),
+  };
   // Whoever comes back is nobody the network knows: what they hold is the state, as a sharing link's holder holds
   // a link, and the Vault's tool checks it's the one it gave.
   const call = { name: "vault_oauth_callback", arguments: inputs, _meta: { link: `${owner}/${state}` } };
@@ -45,10 +53,9 @@ async function callback(params: URLSearchParams) {
   const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers(NETWORK))]);
   const reached = await env.RELAY.forward([...servers], message);
   if (!reached) return { problem: "None of this network's servers answered. Start the sign-in again once one is on." };
-  type Result = { isError?: boolean; content?: { text?: string }[]; structuredContent?: { service: string; item: string } };
+  type Result = { isError?: boolean; content?: { text?: string }[]; structuredContent?: Record<string, unknown> };
   const { result, error }: { result?: Result; error?: { message?: string } } = JSON.parse(reached.answer);
-  const signed = result?.structuredContent;
-  if (result && !result.isError && signed) return { done: `Signed in to ${signed.service}. It's kept in your Vault as ${signed.item}.` };
+  if (result && !result.isError && result.structuredContent) return result.structuredContent;
   return { problem: result?.content?.[0]?.text ?? error?.message ?? "The server didn't say what happened." };
 }
 
@@ -56,7 +63,10 @@ export default {
   async fetch(request: Request) {
     const url = new URL(request.url);
     // The page asks for what it shows once it's open, so the answer is words in the page, never a page of its own.
-    if (url.pathname === "/vault/callback" && request.method === "POST") return Response.json(await callback(url.searchParams));
+    if (url.pathname === "/vault/callback" && request.method === "POST") {
+      const { again } = (await request.json().catch(() => ({}))) as { again?: unknown };
+      return Response.json(await callback(url.searchParams, again === true));
+    }
     if (url.pathname === "/vault/callback") return env.ASSETS.fetch(new URL("/vault/", url));
     if (url.pathname === "/vault/request") {
       const id = url.searchParams.get("id");
