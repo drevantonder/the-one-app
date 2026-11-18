@@ -2,8 +2,7 @@
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
 import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
-import "./profile.css"
-import { Button, call, changed, confirm, Empty, Field, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, toast } from "ui"
+import { Box, Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, Text, toast } from "ui"
 
 /** A profile, as `chrome-profiles_list` answers it. */
 interface Profile {
@@ -27,17 +26,22 @@ type State = "starting" | "opening" | "ready" | "saving" | "discarding" | "faile
 // What a profile's row says while it's being updated.
 const SAYS: Record<State, string> = { starting: "Starting", opening: "Starting", ready: "Updating", saving: "Saving", discarding: "Closing", failed: "Couldn't start" }
 
-const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
-/// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
+/// How long ago `at` was, in the largest unit that's whole: "2 hours ago". (Not Intl's: a strict page's JS has none on a
+/// native host.)
 function since(at: number) {
-  const minutes = Math.round((at - Date.now()) / 60_000)
-  if (minutes > -60) return ago.format(Math.min(minutes, -1), "minute")
-  if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
-  return ago.format(Math.round(minutes / (24 * 60)), "day")
+  const minutes = Math.max(1, Math.round((Date.now() - at) / 60_000))
+  const ago = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"} ago`
+  if (minutes < 60) return ago(minutes, "minute")
+  if (minutes < 48 * 60) return ago(Math.round(minutes / 60), "hour")
+  return ago(Math.round(minutes / (24 * 60)), "day")
 }
-const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
+/// A time of day, as "3:45 pm".
+const time = (at: number) => {
+  const date = new Date(at)
+  return `${date.getHours() % 12 || 12}:${String(date.getMinutes()).padStart(2, "0")} ${date.getHours() < 12 ? "am" : "pm"}`
+}
 /// A page's site, as its address bar shows it: "github.com".
-const site = (url: string) => URL.parse(url)?.hostname.replace(/^www\./, "") ?? url
+const site = (url: string) => url.match(/^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?(?:www\.)?([^/?#:]*)/i)?.[1] ?? url
 
 /// The profile, as `chrome-profiles_list` answers it now, asked again whenever something changed.
 function useProfile(props: Props) {
@@ -118,9 +122,9 @@ function Updating(props: { profile: Profile; subject?: string }) {
         />
       </Show>
       <Show when={u().state !== "failed" && !(u().state === "ready" && u().why)}>
-        <p class="chrome-profile-note">Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(u().until)}.</p>
+        <Text style={{ color: "muted-foreground" }}>Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time(u().until)}.</Text>
       </Show>
-      <div class="chrome-profile-actions">
+      <Box style={{ flexDirection: "row", gap: 8 }}>
         <Show when={u().state !== "failed" && !u().why}>
           <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onClick={() => finish("save")}>
             Save
@@ -129,7 +133,7 @@ function Updating(props: { profile: Profile; subject?: string }) {
         <Button variant="outline" loading={busy() === "discard" || u().state === "discarding"} disabled={!["ready", "failed"].includes(u().state) || !!busy()} onClick={() => finish("discard")}>
           Discard
         </Button>
-      </div>
+      </Box>
     </Section>
   )
 }
@@ -148,9 +152,10 @@ function Update(props: { profile: string; subject?: string }) {
 /// A new name for the profile.
 function Rename(props: Props & { asking: boolean; done: () => void }) {
   const [busy, setBusy] = createSignal(false)
-  const send = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
-    event.preventDefault()
-    const name = String(new FormData(event.currentTarget).get("value")).trim()
+  const [typed, setTyped] = createSignal(props.item)
+  const send = async () => {
+    const name = typed().trim()
+    if (!name) return
     setBusy(true)
     await call("chrome-profiles_rename", { profile: props.item, name }, { subject: props.subject })
       .then(() => (props.done(), props.open?.(name)))
@@ -159,12 +164,11 @@ function Rename(props: Props & { asking: boolean; done: () => void }) {
   }
   return (
     <Sheet heading="Rename Profile" open={props.asking} onClose={props.done}>
-      <form onSubmit={send}>
-        <Field label="Name">
-          <Input name="value" required autofocus value={props.item} />
-        </Field>
-        <Button type="submit" loading={busy()}>Rename</Button>
-      </form>
+      {/* TODO: Return renames too, once a strict input can say it was submitted (the strict contract). */}
+      <Field label="Name">
+        <Input name="value" required autofocus value={typed()} onInput={(event) => setTyped(event.currentTarget.value)} />
+      </Field>
+      <Button loading={busy()} onClick={send}>Rename</Button>
     </Sheet>
   )
 }
@@ -205,7 +209,7 @@ export default function ChromeProfile(props: Props) {
               <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
                 <List>
                   <For each={p().extensions} keyed={(e) => e.id}>
-                    {(e) => <Row start={<img src={e().icon ?? ""} alt="" class="chrome-profile-extension" />} heading={e().name} />}
+                    {(e) => <Row start={<Image src={e().icon ?? ""} alt="" style={{ width: 24, height: 24 }} />} heading={e().name} />}
                   </For>
                 </List>
               </Show>

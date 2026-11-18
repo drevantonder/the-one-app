@@ -111,7 +111,7 @@ defmodule ChromeProfiles do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.24.71",
+      "core" => ">= 0.25.4",
       "vault" => "to keep your profiles",
       "containers" => "to move a profile in and out of its browser",
       "chrome" => "to open a browser with a profile",
