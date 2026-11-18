@@ -980,7 +980,7 @@ function OwnerPill(props: { owners: Owner[] }) {
   let button!: HTMLButtonElement
   return (
     <div class="top-row">
-      <button type="button" class="owner-pill pill" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} aria-disabled={state().matches("editing") || undefined} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
+      <button type="button" class="owner-pill pill" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} aria-disabled={state().matches("editing") ? "true" : undefined} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
         <span class="roll" aria-hidden="true" ref={rolling}>
           <span class="names">
             <For each={props.owners}>{(owner) => <span ref={(name) => sized.observe(name)}>{owner.name}</span>}</For>
