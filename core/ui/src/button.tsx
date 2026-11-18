@@ -1,6 +1,6 @@
 // Something to press, a count or word beside something, an icon and a spinner: written once in strict, on the
 // primitives (#primitives), the same on the DOM and on a native host.
-import { omit, Show } from "solid-js"
+import { children, omit, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Path, Text } from "#primitives"
 import { messages } from "./words.ts"
@@ -156,6 +156,8 @@ export interface ButtonProps {
 /// can't be pressed again. `style` places it, and changes nothing else of its look.
 export function Button(props: ButtonProps) {
   const off = () => !!props.disabled || !!props.loading
+  // What it says, made once: words in a text, or what it's given (an icon) as it is.
+  const inside = children(() => props.children)
   return (
     <Box
       // What a page drawn on the DOM gives a `<button>` besides (a form's `type="submit"`) still reaches it.
@@ -169,7 +171,7 @@ export function Button(props: ButtonProps) {
       <Show when={props.loading}>
         <Spinner />
       </Show>
-      {typeof props.children === "string" ? <Text>{props.children}</Text> : props.children}
+      {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}
     </Box>
   )
 }
