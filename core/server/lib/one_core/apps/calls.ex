@@ -327,30 +327,31 @@ defmodule OneCore.Apps.Calls do
   Tells the app that `name` is for `at` what it observed, each a hook, what it's about and who asked, in turn and
   under one hold of its version, as `hook/6` would. It's told here, where it happened: an app that needs a server
   acting for whoever it was installed for passes it there itself (`OneCore.Call.forward/2`), and one that keeps what
-  it observed on this server for a while needn't. One that only runs elsewhere is told there. It has ten seconds for all
-  of it; what it answers or raises is ignored.
+  it observed on this server for a while needn't. One that only runs elsewhere is told there. It has ten seconds for
+  each, however many waited (`OneCore.Hooks.within/3`), so a server that comes back from sleep with minutes of them
+  waiting tells each; what it answers or raises is ignored.
   """
   def observe(at, name, observed) do
     Apps.run([at], name, fn at, versions ->
       version = versions[name]
 
-      Hooks.within(name, "what it observed", fn ->
-        for {hook, about, principal} <- observed, hook in version.hooks do
-          ask = {"hooks/call", %{installed: at, app: name, kind: :observe, hook: hook, about: about}}
+      for {hook, about, principal} <- observed, hook in version.hooks do
+        ask = {"hooks/call", %{installed: at, app: name, kind: :observe, hook: hook, about: about}}
 
-          call =
-            if Version.runs(version) == :here,
-              do: new_call(at, name, versions, ask, principal, false),
-              else: called(at, name, versions, ask, principal, false)
+        call =
+          if Version.runs(version) == :here,
+            do: new_call(at, name, versions, ask, principal, false),
+            else: called(at, name, versions, ask, principal, false)
 
-          try do
+        try do
+          Hooks.within(name, hook, fn ->
             if observes?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
-          catch
-            :throw, {Call, _forwarded} -> :ok
-            kind, reason -> Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
-          end
+          end)
+        catch
+          :throw, {Call, _forwarded} -> :ok
+          kind, reason -> Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
         end
-      end)
+      end
 
       {:ok, nil}
     end)
