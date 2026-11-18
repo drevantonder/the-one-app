@@ -20,8 +20,9 @@ use tauri::{AppHandle, Runtime};
 use tokio::sync::{Notify, watch};
 
 /// Where a phone is with being woken by its notifications, which Notifications says on it (`push`). It's the child of
-/// its client's session: it registers each time the device is signed in, and again whenever what it registered
-/// changes, its push token or whether its person allows notifications. It moves only as `moves_to` says, by
+/// its client's session: it registers each time the device is signed in, each time it connects to its network and
+/// is back in front, and again whenever what it registered changes, its push token or whether its person allows
+/// notifications. It moves only as `moves_to` says, by
 /// `listen`. A computer isn't woken: it shows them while the app runs, and has none of this.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
@@ -31,7 +32,8 @@ pub enum Push {
     /// Its person, or its system, said it may not show notifications. It registers once they allow them, as in the
     /// phone's Settings, which it looks at again each time the app is back in front.
     Denied,
-    /// Giving the network where its push service reaches it.
+    /// Giving the network where its push service reaches it, for the first time or after it failed: a phone that's
+    /// registered gives it again as it connects without leaving `Registered`.
     Registering,
     /// The network wakes it, until the device is signed in again, its push token changes or its person turns
     /// notifications off.
@@ -238,8 +240,10 @@ pub fn opens(tapped: &Value) -> Option<&str> {
 
 /// Asks its person whether this phone may show notifications, and gives the network the token its push service
 /// reaches it by: Apple's on an iPhone and Google's on Android (`Push`). It follows the device's session for as long
-/// as the app runs: each time the device is signed in, it registers again, and as its token changes, and once its
-/// person allows notifications after all. What fails, as on a first open with no server answering yet, is tried again
+/// as the app runs: each time the device is signed in, each time it connects to its network and each time the app is
+/// back in front, it registers again, and as its token changes, and once its person allows notifications after all.
+/// Push services rotate tokens, and a network that lost what it held of this phone gets it back the next time the
+/// phone reaches it: registering again is an upsert. What fails, as on a first open with no server answering yet, is tried again
 /// once a server answers again, or its person tries again. An app built without push (no Firebase config, or no Push
 /// Notifications capability) says why it isn't woken, and still shows the inbox.
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -257,7 +261,9 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
                 Err(why) => moved(Push::Failed { why }),
                 Ok(false) => moved(Push::Denied),
                 Ok(true) if again || *PUSH.borrow() != Push::Registered => {
-                    moved(Push::Registering);
+                    if *PUSH.borrow() != Push::Registered {
+                        moved(Push::Registering);
+                    }
                     match register(&notifications, &client).await {
                         Ok(token) => {
                             given = Some(token);
@@ -277,18 +283,19 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
                     let Ok(()) = changed else { return };
                     break *session.borrow() == Session::SignedIn;
                 }
-                // A server answers again, which may take what failed.
+                // A server answers, as it does again after the network was lost, which may take what failed, or may
+                // hold nothing of this phone.
                 changed = connection.changed() => {
                     let Ok(()) = changed else { return };
                     if *connection.borrow_and_update() == Connection::Online {
-                        break false;
+                        break true;
                     }
                 }
                 changed = heard.changed() => {
                     let Ok(()) = changed else { return };
                     break heard.borrow_and_update().as_ref() != given.as_ref();
                 }
-                _ = AGAIN.notified() => break false,
+                _ = AGAIN.notified() => break true,
             }
         };
     }
