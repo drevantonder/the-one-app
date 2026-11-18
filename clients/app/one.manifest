@@ -1,8 +1,33 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <application xmlns="urn:schemas-microsoft-com:asm.v3">
-    <windowsSettings>
+<!-- `one` on Windows, the app and the CLI: Common Controls 6 and each display's own scale for its window, and a console
+     program that asks for no console window of its own when nothing it's started from has one, as when the Start menu
+     opens the app or Task Scheduler starts its server (Windows 11 24H2 and later), while one started in a terminal
+     prints there. -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3" manifestVersion="1.0">
+  <assemblyIdentity name="one" type="win32" version="1.0.0.0"/>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+  <asmv3:application>
+    <asmv3:windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">permonitorv2</dpiAwareness>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
       <consoleAllocationPolicy xmlns="http://schemas.microsoft.com/SMI/2024/WindowsSettings">detached</consoleAllocationPolicy>
-    </windowsSettings>
-  </application>
+    </asmv3:windowsSettings>
+  </asmv3:application>
+  <asmv3:trustInfo>
+    <asmv3:security>
+      <asmv3:requestedPrivileges>
+        <asmv3:requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </asmv3:requestedPrivileges>
+    </asmv3:security>
+  </asmv3:trustInfo>
 </assembly>

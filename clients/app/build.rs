@@ -14,14 +14,7 @@ fn main() {
     #[cfg(feature = "window")]
     if !phone {
         page();
-        // A computer's window on Windows asks for Common Controls 6 and to be drawn at each display's own scale.
-        if target == "windows" {
-            embed_manifest::embed_manifest(embed_manifest::new_manifest("one")).expect("the manifest is embedded");
-        }
     }
-    // `one` without its window, on Windows, is a console program that asks for no console window of its own when
-    // nothing it's started from has one, as when Task Scheduler starts its server (Windows 11 24H2 and later).
-    #[cfg(not(feature = "window"))]
     if target == "windows" {
         embed_manifest::embed_manifest_file("one.manifest").expect("the manifest is embedded");
     }

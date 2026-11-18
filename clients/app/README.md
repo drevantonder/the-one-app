@@ -26,6 +26,13 @@ A Mac's app is its bundle, which `cargo tauri build --bundles app` makes in `tar
 `/Applications`, and `~/.local/bin/one` is a link to the program in it, so the CLI, a server and `one update` all run
 and replace that one program.
 
+## On Windows
+
+Windows' app is installed by its installer, `installer.nsi`, for its user alone, with no administrator: `one.exe` in
+`%LOCALAPPDATA%\Programs\the One App`, on the user's PATH, in the Start menu and in Settings > Apps. A person
+downloads it from their network (`one download --target windows-x86_64`'s `one-setup`), and the app updates itself
+from then on.
+
 ## A name, identifier and icon of its own
 
 Tauri merges a network's config over `tauri.conf.json` as it builds:

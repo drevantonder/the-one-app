@@ -62,7 +62,8 @@ them, whatever they're on.
 | A phone's app | Not from here: its network's owner builds it from the network's repo (`app/`) and puts it on the phone (`iphone`). Say one is needed |
 | Docs, `tooling/`, `.agents/` | Nothing |
 
-Windows' builds, `server/windows-x86_64` and `one-cli/windows-x86_64`, are made on Linux like the others, and are
+Windows' builds, `server/windows-x86_64`, `one/windows-x86_64`, `one-cli/windows-x86_64` and the app's installer,
+`one-setup/windows-x86_64` (NSIS's `makensis`, `apt install nsis`), are made on Linux like the others, and are
 built only for a network with a Windows server or device. The owner's Surface is one, a server of the live network
 since 18 Nov.
 

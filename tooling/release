@@ -9,8 +9,10 @@
 # `server` is a server for every kind of machine one of the network's servers runs on, and `client` is `one` for
 # every kind of desktop machine among the network's devices; neither says both. A name is one build, as
 # `one builds` names them: `server/linux-x86_64`, `one/macos-aarch64`, `one-cli/linux-x86_64`. A phone's app is
-# built by the network's owner from its repo (`iphone` skill), not here, and Windows has `one-cli` only, until the app
-# has a Windows build. --dry-run says what it would build, and builds nothing.
+# built by the network's owner from its repo (`iphone` skill), not here. Windows' app, `one/windows-x86_64`, comes
+# with its installer, `one-setup/windows-x86_64`, which a person installs it with the first time (`clients/app/
+# installer.nsi`); from then on it updates itself, as on Linux and a Mac. --dry-run says what it would build, and
+# builds nothing.
 #
 # The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
 # the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
@@ -122,7 +124,7 @@ for want in "${wanted[@]}"; do
     server) names+=($(jq -r '.servers[].target | "server/" + .' <<<"$builds")) ;;
     client) names+=($(jq -r '.devices[].target | select(startswith("linux-")) | "one/" + ., "one-cli/" + .' <<<"$builds")
       $(jq -r '.devices[].target | select(startswith("macos-")) | "one/" + .' <<<"$builds")
-      $(jq -r '.devices[].target | select(startswith("windows-")) | "one-cli/" + .' <<<"$builds")) ;;
+      $(jq -r '.devices[].target | select(startswith("windows-")) | "one/" + ., "one-cli/" + .' <<<"$builds")) ;;
     *) names+=("$want") ;;
   esac
 done
@@ -174,6 +176,9 @@ for name in "${mine[@]}"; do
   if [[ $name == one/macos-* && $here != macos-* ]]; then echo "$name  $build, built on GitHub"; else echo "$name  $build, built here"; fi
 done
 [[ -z $dry ]] || exit 0
+# Windows' installer is made with NSIS, as most Windows apps' are, and Linux has it as a package.
+[[ " ${mine[*]} " != *" one/windows-"* ]] || command -v makensis >/dev/null ||
+  { echo "Windows' installer is made with makensis: sudo apt install nsis" >&2 && exit 1; }
 # Published already: published again, which sends nothing, so a network that didn't hear of it does.
 ((${#mine[@]})) || { one publish --builds '[]' >/dev/null && exit; }
 
@@ -210,6 +215,14 @@ servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 # folder of its own: cargo holds one folder for one build at a time. A Mac's is built on GitHub's macOS runner, with
 # this machine's Rust, so it's what `client_inputs` says it's built from.
 target=${CARGO_TARGET_DIR:-$root/target}
+
+# Signs a Windows program, with jsign, once there's a certificate to sign with: WINDOWS_SIGNING is jsign's options
+# naming it, as `--storetype TRUSTEDSIGNING --keystore <region>.codesigning.azure.net --storepass <token> --alias
+# <account>/<profile>` for Microsoft's Artifact Signing, or `--keystore <file>.pfx --storepass <password>` for a
+# certificate of one's own. Without one, it ships unsigned, and SmartScreen asks its person before it runs.
+signed() {
+  [[ -z ${WINDOWS_SIGNING:-} ]] || jsign $WINDOWS_SIGNING --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 "$1"
+}
 out=$target/builds/$build
 rm -rf "$out" && mkdir -p "$out"
 clients=()
@@ -224,16 +237,23 @@ for name in "${mine[@]}"; do
   fi
   case $name in
     one-cli/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc --no-default-features) program=x86_64-pc-windows-msvc/release/one.exe ;;
+    one/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc) program=x86_64-pc-windows-msvc/release/one.exe ;;
     one-cli/*) cargo=(build --no-default-features) program=release/one ;;
     one/*) cargo=(build) program=release/one ;;
     *) continue ;;
   esac
   # Windows shows a program by its version resource and icon, as in Windows Firewall's prompt: one's are the One App's.
-  # It's named there as its file is, one.exe.
+  # It's named there as its file is, one.exe. The app comes with its installer, made with NSIS, the One App's by the
+  # same, and each is signed once it's what it ships as.
   (echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
-    mkdir "$out/$file.d" && cp "$target/clients/$file/$program" "$out/$file.d/" &&
-    { [[ $name != *windows-* ]] || VERSION=${build%%+*} tooling/windows-name "$out/$file.d/$(basename "$program")"; } &&
-    gzip -9 -c "$out/$file.d/$(basename "$program")" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs") &
+    mkdir "$out/$file.d" && cp "$target/clients/$file/$program" "$out/$file.d/" && exe=$out/$file.d/$(basename "$program") &&
+    { [[ $name != *windows-* ]] || { VERSION=${build%%+*} tooling/windows-name "$exe" && signed "$exe"; }; } &&
+    { [[ $name != one/windows-* ]] || {
+      setup=$out/one-setup-${name#*/}.exe &&
+        makensis -V2 -DVERSION="${build%%+*}" -DPROGRAM="$exe" -DOUTFILE="$setup" -DCOPYRIGHT="$(grep -m1 '^Copyright' LICENSE)" clients/app/installer.nsi &&
+        signed "$setup" && client_inputs "${name#*/}" >"${setup%.exe}.inputs"
+    }; } &&
+    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs") &
   clients+=($!)
 done
 
@@ -400,11 +420,11 @@ if ((${#mine[@]})); then
   ONE=$(command -v one) OUT=$out BUILD=$build bun -e '
     const { ONE, OUT, BUILD } = process.env;
     const { readdirSync } = require("node:fs");
-    const builds = await Promise.all(readdirSync(OUT).filter((file) => file.endsWith(".gz")).map(async (file) => {
+    const builds = await Promise.all(readdirSync(OUT).filter((file) => /\.(gz|exe)$/.test(file)).map(async (file) => {
       const bytes = await Bun.file(`${OUT}/${file}`).bytes();
-      const [, what, kind] = file.match(/^(server-runtime|server-code|server|one-cli|one)-?(.*?)(\.tar)?\.gz$/);
+      const [, what, kind] = file.match(/^(server-runtime|server-code|server|one-setup|one-cli|one)-?(.*?)(\.tar\.gz|\.gz|\.exe)$/);
       // A runtime and a client are told by what they were built from, which the network keeps with them.
-      const from = Bun.file(`${OUT}/${file.replace(/(\.tar)?\.gz$/, ".inputs")}`);
+      const from = Bun.file(`${OUT}/${file.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".inputs")}`);
       const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
       return { file, name: kind ? `${what}/${kind}` : what, build: BUILD, ...inputs, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
     }));
