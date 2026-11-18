@@ -31,7 +31,7 @@ defmodule OneCore.Apps.Version.Compile do
     with {:ok, skills} <- Skills.found(name, skills),
          {:ok, builds} <- nifs(under, nifs, rest),
          {:ok, modules, warnings} <- compiled(under, sources, builds),
-         {:ok, version} <- described(under, modules, rest) do
+         {:ok, version} <- described(under, modules, rest, skills) do
       kept = %{
         files: Enum.sort(for path <- Map.keys(rest), Version.loaded?(path), do: path),
         hashes: Map.new(rest, fn {path, text} -> {path, :crypto.hash(:sha256, text)} end),
@@ -225,10 +225,10 @@ defmodule OneCore.Apps.Version.Compile do
   end
 
   # `rest` is the files that aren't Elixir or skills. An app with no Elixir provides no tools and names no entrypoints.
-  defp described(under, modules, rest) do
+  defp described(under, modules, rest, skills) do
     case Enum.filter(modules, &(OneCore.App in Version.behaviours(&1))) do
       [] when modules == [] ->
-        Checks.checked(under, nil, Manifest.decode(%{}), [], rest)
+        Checks.checked(under, nil, Manifest.decode(%{}), [], rest, skills)
 
       [app] ->
         services = Enum.filter(modules, &(OneCore.Service in Version.behaviours(&1)))
@@ -242,7 +242,7 @@ defmodule OneCore.Apps.Version.Compile do
               for {module, called, needs} <- services,
                   do: %{name: Version.own_name(module), called: called, needs: needs}
 
-            Checks.checked(under, app, description, services, rest)
+            Checks.checked(under, app, description, services, rest, skills)
           else
             {:error,
              "A service says `use GenServer` or `@behaviour :gen_statem`, its needs/0 gives what it needs of a " <>

@@ -12,10 +12,11 @@ defmodule OneCore.Apps.Version.Checks do
 
   @doc """
   A version from what its app said of itself, `description`, if that's what an app says: `{:ok, version}` or
-  `{:error, why}`. `app` is its module, or nil for an untrusted one, whose module is in its sandbox's VM, and
-  `rest` its files that aren't Elixir or skills.
+  `{:error, why}`. `app` is its module, or nil for an untrusted one, whose module is in its sandbox's VM, `rest` its
+  files that aren't Elixir or skills, and `skills` its skills, whose metadata says its `title`
+  (`OneCore.Apps.Version.title/1`).
   """
-  def checked(under, app, description, services, rest) do
+  def checked(under, app, description, services, rest, skills) do
     %{
       tools: tools,
       entrypoints: entrypoints,
@@ -41,13 +42,18 @@ defmodule OneCore.Apps.Version.Checks do
 
       not (is_list(entrypoints) and Enum.all?(entrypoints, &entrypoint?(&1, rest))) ->
         {:error,
-         "entrypoints/0 gives a list of %{name: ..., page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-           "here, the app's icon/0 where an entrypoint has none, and category and subject, if it has them, are text"}
+         "entrypoints/0 gives a list of %{page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
+           "here, the app's icon/0 where an entrypoint has none, and name, category and subject, if it has them, are " <>
+           "text: an entrypoint's name is its app's title where it's that app, and its own only where it's something else"}
 
       not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
         {:error,
-         "widgets/0 gives a list of %{name: ..., tool: ..., sizes: [...]}: one of this app's tools that only " <>
-           "reads, and the sizes it comes in, of #{Enum.join(@sizes, ", ")}"}
+         "widgets/0 gives a list of %{tool: ..., sizes: [...]}: one of this app's tools that only reads, and the " <>
+           "sizes it comes in, of #{Enum.join(@sizes, ", ")}, and a name of its own only where it isn't its app's title"}
+
+      Version.title(skills) == nil and title == nil and Enum.any?(entrypoints ++ widgets, &(&1[:name] == nil)) ->
+        {:error,
+         "An entrypoint or widget with no name of its own is called its app's title, which its skill's metadata says"}
 
       not (is_list(exports) and Enum.all?(exports, &is_binary/1)) ->
         {:error, "Its module's functions are said as a list of names"}
@@ -78,8 +84,8 @@ defmodule OneCore.Apps.Version.Checks do
       true ->
         tools = Enum.map(tools, &Version.schemas/1)
 
-        version = version(under, app, tools, entrypoints, widgets, Enum.sort(services), rest, icon)
-        version = %{version | title: title || version.title}
+        title = Version.title(skills) || title || Enum.find_value(entrypoints, & &1[:name])
+        version = version(under, app, tools, entrypoints, widgets, Enum.sort(services), rest, icon, title)
 
         with {:ok, jobs} <- jobs(jobs, tools),
              do:
@@ -138,25 +144,26 @@ defmodule OneCore.Apps.Version.Checks do
 
   # An icon goes to clients as a `data:` address, so a home screen asks for nothing more. The app's is the file it
   # names, nil where that isn't one of its files (which deploying refuses), and an entrypoint's its own or else the app's.
-  defp version(under, app, tools, entrypoints, widgets, services, rest, icon) do
+  defp version(under, app, tools, entrypoints, widgets, services, rest, icon, title) do
     entrypoints =
-      for %{name: name, page: page} = entrypoint <- entrypoints,
+      for %{page: page} = entrypoint <- entrypoints,
           do: %{
-            name: name,
+            name: entrypoint[:name] || title,
             page: page,
             icon: if(is_map_key(rest, entrypoint[:icon] || icon), do: data(entrypoint[:icon] || icon, rest)),
             category: entrypoint[:category],
             subject: entrypoint[:subject]
           }
 
-    widgets = for %{name: name, tool: tool, sizes: sizes} <- widgets, do: %{name: name, tool: tool, sizes: sizes}
+    widgets =
+      for %{tool: tool, sizes: sizes} = widget <- widgets, do: %{name: widget[:name] || title, tool: tool, sizes: sizes}
 
     %Version{
       under: under,
       app: app,
       tools: tools,
       entrypoints: entrypoints,
-      title: List.first(for(entrypoint <- entrypoints, do: entrypoint.name)),
+      title: title,
       icon: if(is_map_key(rest, icon), do: data(icon, rest)),
       widgets: widgets,
       exports: [],
@@ -170,17 +177,20 @@ defmodule OneCore.Apps.Version.Checks do
 
   defp data(path, rest), do: "data:#{Version.kind(path)};base64,#{Base.encode64(rest[path])}"
 
-  defp entrypoint?(%{name: name, page: page} = entrypoint, rest) when is_binary(name),
+  defp entrypoint?(%{page: page} = entrypoint, rest),
     do:
-      page?(page, rest) and (entrypoint[:icon] == nil or is_map_key(rest, entrypoint[:icon])) and
+      page?(page, rest) and (entrypoint[:name] == nil or is_binary(entrypoint[:name])) and
+        (entrypoint[:icon] == nil or is_map_key(rest, entrypoint[:icon])) and
         (entrypoint[:category] == nil or is_binary(entrypoint[:category])) and
         (entrypoint[:subject] == nil or is_binary(entrypoint[:subject]))
 
   defp entrypoint?(_, _), do: false
 
   # A widget is drawn from what one of the app's tools answers, which a Home Screen page asks again and again.
-  defp widget?(%{name: name, tool: tool, sizes: [_ | _] = sizes}, tools) when is_binary(name),
-    do: Enum.any?(tools, &(&1.name == tool and &1[:read_only] == true)) and sizes -- @sizes == []
+  defp widget?(%{tool: tool, sizes: [_ | _] = sizes} = widget, tools),
+    do:
+      (widget[:name] == nil or is_binary(widget[:name])) and
+        Enum.any?(tools, &(&1.name == tool and &1[:read_only] == true)) and sizes -- @sizes == []
 
   defp widget?(_, _), do: false
 

@@ -66,7 +66,7 @@ defmodule OneCore.App.Manifest do
     quote do
       @callback tools() :: [%{name: String.t(), description: String.t(), inputs: map, outputs: map}]
       @callback call(tool :: String.t(), inputs :: map, OneCore.Call.t()) :: term
-      @callback entrypoints() :: [%{name: String.t(), page: String.t()}]
+      @callback entrypoints() :: [%{required(:page) => String.t(), optional(atom) => String.t()}]
       @callback widgets() :: [%{name: String.t(), tool: String.t(), sizes: [String.t()]}]
       @callback hooks() :: [String.t()]
       @callback hook(hook :: String.t(), about :: map, OneCore.Call.t()) :: term

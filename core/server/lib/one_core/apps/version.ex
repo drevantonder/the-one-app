@@ -18,7 +18,7 @@ defmodule OneCore.Apps.Version do
 
   `ui` is the code of the UI library its app was built against, or `nil` for an app with no entrypoint (`OneCore.Entrypoint`).
 
-  `title` is its name where a person reads it, its first app's unless it says, and `icon` its icon as a `data:`
+  `title` is its name where a person reads it, which its skill's metadata says (`title/1`), and `icon` its icon as a `data:`
   address, the file it names (`OneCore.App`). `entrypoints` lists its entrypoints: each one's `name`, its
   `page`, its `icon` as a `data:` address, its own or else the app's,
   its `category` and its `subject`, which are the app's to say and nil where it says none. `widgets` lists its widgets: each
@@ -109,12 +109,21 @@ defmodule OneCore.Apps.Version do
     end
   end
 
+  @doc """
+  An app's name where a person reads it, from its skills as `OneCore.Skills.found/2` gives them: its skill's
+  `metadata` `title` (`OneCore.App`), or nil where it has none.
+  """
+  def title(skills), do: text(metadata(skills)["title"])
+
+  defp metadata(skills) do
+    case Enum.find(skills, &(&1.at == "")) do
+      %{frontmatter: %{"metadata" => %{} = metadata}} -> metadata
+      _ -> %{}
+    end
+  end
+
   defp listing(version, skills) do
-    metadata =
-      case Enum.find(skills, &(&1.at == "")) do
-        %{frontmatter: %{"metadata" => %{} = metadata}} -> metadata
-        _ -> %{}
-      end
+    metadata = metadata(skills)
 
     text = for key <- ~w(subtitle about category), into: %{}, do: {String.to_atom(key), text(metadata[key])}
 

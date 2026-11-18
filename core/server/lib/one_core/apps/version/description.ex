@@ -90,7 +90,7 @@ defmodule OneCore.Apps.Version.Description do
     description = Manifest.decode(description)
 
     with {:ok, skills} <- Skills.found(name, skills),
-         {:ok, version} <- Checks.checked(under, nil, description, [], rest) do
+         {:ok, version} <- Checks.checked(under, nil, description, [], rest, skills) do
       version = %{
         version
         | code: code,

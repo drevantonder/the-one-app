@@ -23,7 +23,7 @@ defmodule OneCore.App do
   machine's sandbox, never in the server's.
   Any of the network's servers runs it for anyone, so it needs no server of yours, and whatever its code tries, it
   reaches only what's offered it, as whoever it runs for. What's offered is this interface, each function a message
-  to the server: `tools/0`, `call/3`, `entrypoints/0`, `icon/0`, `title/0`, `widgets/0`, `jobs/0` and
+  to the server: `tools/0`, `call/3`, `entrypoints/0`, `icon/0`, `widgets/0`, `jobs/0` and
   `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `apps`, `deployed`, `process`,
   `forward_to`, `changed`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The apps
@@ -110,9 +110,10 @@ defmodule OneCore.App do
     Skill (agentskills.io): it starts with the skill's `name`, which is the app's, and its `description`, one line
     saying when an agent should read it, as YAML between two lines of `---`, whose words `search` finds the app's
     tools by too. Its `metadata`, which Agent Skills leaves to whoever reads
-    it, is what a person reads where the app's listed (the App Store's Marketplace, the app directory): its `subtitle`, a
-    few words under its name, as an App Store app's is, and `about`, a few plain sentences on its page, as Google
-    Play's "About this app" is. Both say what it does for a person, with no word of an agent's. Its `category`
+    it, is what a person reads where the app's listed (the App Store's Marketplace, the app directory): its `title`, its
+    name wherever a person reads it (the App Library, the App Store, a notification it sends), as an App Store app's
+    name is, never its `name`; its `subtitle`, a few words under that; and `about`, a few plain sentences on its
+    page, as Google Play's "About this app" is. Both say what it does for a person, with no word of an agent's. Its `category`
     says what the app is for, and the App Store and the App Library group apps by it; it's one of these, and a
     deploy without one is refused:
 
@@ -134,6 +135,7 @@ defmodule OneCore.App do
         name: hello
         description: Read when someone arrives, to greet them.
         metadata:
+          title: Hello
           subtitle: Hello to whoever arrives
           about: Says hello to each person who arrives, by name, and counts how many it has greeted.
           category: Utilities
@@ -349,14 +351,15 @@ defmodule OneCore.App do
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
   and its edge function. An app's icon is its own, as an Android package's is, and deploying one without it is
   refused: `icon/0` names its file, an entrypoint's icon or one of its own, which goes wherever the app itself is shown (the App Store, the Vault). `entrypoints/0`, if the app has any, names its app entrypoints: each an icon
-  it puts in the launcher, with its name, category and page, a page of `client/`, and an icon of its own or else the
-  app's. People just see apps:
+  it puts in the launcher, with its page, a page of `client/`, and an icon of its own or else the app's. It's called
+  its app's `title`, and has a `name` of its own only where it's something else than its app, as Sign-In's Users &
+  Groups and Devices are, and so is a widget. People just see apps:
 
       @impl true
       def icon, do: "icon.png"
 
       @impl true
-      def entrypoints, do: [%{name: "Hello", page: "client/index.html"}]
+      def entrypoints, do: [%{page: "client/index.html"}]
 
   - An entrypoint may say its `category`, one of the app's categories above, where it's for something else than its
     app (`category: "Devices"`); One Core passes it to the launcher as it is, which otherwise places it by its app's. One
@@ -367,7 +370,6 @@ defmodule OneCore.App do
   - An entrypoint may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
     `subject: "user"` is an entrypoint about whoever opens it, as Vault and Devices are, which is opened for them wherever
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
-  - An app's name where a person reads it is `title/0`, and without one its first entrypoint's. One with no entrypoint gives `title/0`: `def title, do: "Gmail"`.
   - An app that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
     registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
     one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:
