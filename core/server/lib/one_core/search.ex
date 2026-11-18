@@ -12,7 +12,8 @@ defmodule OneCore.Search do
   The call is written as whoever asked calls tools (`_meta.mode`): a line of a code mode script
   (`tools.gmail.search({ query: string })`), or a command (`one gmail search --query <string>`).
   """
-  alias OneCore.Apps.{Store, Version}
+  alias OneCore.{Builds, Cache, Skills}
+  alias OneCore.Apps.Version
 
   # About how much of an answer the matches may take, in characters, before their descriptions are cut short, and
   # how much their apps' skills may, best match's first, before the rest are only named.
@@ -33,8 +34,7 @@ defmodule OneCore.Search do
   `mode`: `:code` or `:cli`.
   """
   def run(query, limit, tools, running, deployed, mode) do
-    found = entries(tools, running)
-    matches = query |> rank(found) |> Enum.take(max(limit, 1))
+    matches = query |> rank(index(tools, running)) |> Enum.take(max(limit, 1))
     installed = MapSet.new(running, fn {_name, version} -> version.artifact end)
     could = installable(deployed, installed, query, matches == [], mode)
 
@@ -57,6 +57,21 @@ defmodule OneCore.Search do
       shown = for(entry <- matches, entry.app != nil, do: {entry.app, running[entry.app]}) |> Enum.uniq()
       Enum.join(lines ++ skills(shown, mode) ++ could, "\n\n")
     end
+  end
+
+  @doc """
+  Makes the cache of each index `run/6` ranks by, one for each set of tools, the apps running they're from and the
+  build. Whatever calls this owns it.
+  """
+  def keep, do: Cache.new(__MODULE__)
+
+  @doc "Lets go of every index, as the apps running change."
+  def invalidate, do: Cache.invalidate(__MODULE__)
+
+  # The index of `tools`, built once for them, the versions of the apps they're from and this build of the server.
+  defp index(tools, running) do
+    versions = for {name, version} <- Enum.sort(running), do: {name, version.artifact, version.code}
+    Cache.fetch(__MODULE__, {Builds.build(), versions, tools}, fn -> {:commit, index(entries(tools, running))} end)
   end
 
   @doc "What an app says it's for: its skill's description, or nothing."
@@ -107,21 +122,19 @@ defmodule OneCore.Search do
   end
 
   # The entries for `query`, best first, as OpenCode ranks them: a query that's a tool's path is that tool alone.
-  defp rank(query, entries) do
+  defp rank(query, index) do
     trimmed = String.trim(query)
     path = String.replace_prefix(trimmed, "tools.", "")
 
-    case Enum.find(entries, &(path != "" and (&1.path == path or path(&1.path) == trimmed))) do
-      nil -> bm25(search_words(path), entries)
+    case Enum.find(index.entries, &(path != "" and (&1.path == path or path(&1.path) == trimmed))) do
+      nil -> bm25(search_words(path), index)
       exact -> [exact]
     end
   end
 
-  # Field-weighted BM25. Each word's weight in an entry is rounded as OpenCode keeps it, in a Float32Array, so
-  # scores, and so ties, are the same.
-  defp bm25([], _entries), do: []
-
-  defp bm25(terms, entries) do
+  # What field-weighted BM25 ranks `entries` by: each word's weight in each entry, rounded as OpenCode keeps it, in a
+  # Float32Array, so scores, and so ties, are the same.
+  defp index(entries) do
     fields =
       for entry <- entries,
           do: Map.new(entry.fields, fn {field, texts} -> {field, Enum.flat_map(texts, &search_words/1)} end)
@@ -152,8 +165,12 @@ defmodule OneCore.Search do
         end)
       end)
 
-    known = Map.keys(postings)
+    %{entries: entries, at: List.to_tuple(entries), count: count, postings: postings, known: Map.keys(postings)}
+  end
 
+  defp bm25([], _index), do: []
+
+  defp bm25(terms, %{at: entries, count: count, postings: postings, known: known}) do
     scores =
       Enum.reduce(terms, %{}, fn term, scores ->
         prefixed =
@@ -176,8 +193,6 @@ defmodule OneCore.Search do
 
         Enum.reduce(best, scores, fn {position, score}, scores -> Map.update(scores, position, score, &(&1 + score)) end)
       end)
-
-    entries = List.to_tuple(entries)
 
     scores
     |> Enum.map(fn {position, score} ->
@@ -251,7 +266,7 @@ defmodule OneCore.Search do
       Enum.any?(entry.fields.namespace, &Enum.any?(search_words(&1), fn word -> word in words end))
     end
 
-    case query |> rank(entries) |> Enum.filter(&(none or named.(&1))) |> Enum.take(5) do
+    case query |> rank(index(entries)) |> Enum.filter(&(none or named.(&1))) |> Enum.take(5) do
       [] ->
         []
 
@@ -289,7 +304,7 @@ defmodule OneCore.Search do
   # The skill of each app a match is in, read at once, as many as fit, and how to read the rest.
   defp skills(shown, mode) do
     with_skill = Enum.filter(shown, fn {_name, version} -> Enum.any?(Version.skills(version), &(&1.at == "")) end)
-    read = Store.read_all(for {_name, version} <- with_skill, do: {version.artifact, version.code, "SKILL.md"})
+    read = for {_name, version} <- with_skill, do: Skills.file(version.artifact, version.code, "SKILL.md")
 
     skills =
       for {{name, version}, {:ok, text}} <- Enum.zip(with_skill, read) do

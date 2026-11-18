@@ -20,7 +20,7 @@ defmodule OneCore.Apps do
   """
   use GenServer
   require Logger
-  alias OneCore.{Call, Hooks, Iroh, Jobs, Server, Servers, Services, User}
+  alias OneCore.{Call, Hooks, Iroh, Jobs, Search, Server, Servers, Services, Skills, User}
   alias OneCore.Apps.{Installed, LoadedVersion, Store, Version}
 
   @network "network"
@@ -31,7 +31,11 @@ defmodule OneCore.Apps do
   # What's loaded, then this, and after it what runs apps' processes, what tells the apps that observe a hook,
   # and the sandboxes untrusted apps run in, which hold versions here.
   def child_spec(_) do
-    children = [LoadedVersion, %{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}]
+    children = [
+      LoadedVersion,
+      %{id: __MODULE__, start: {GenServer, :start_link, [__MODULE__, nil, [name: __MODULE__]]}}
+    ]
+
     children = children ++ __MODULE__.Process.children() ++ Hooks.Observer.children() ++ OneCore.Sandbox.children()
     start = {Supervisor, :start_link, [children, [strategy: :rest_for_one]]}
     %{id: __MODULE__, type: :supervisor, start: start}
@@ -83,7 +87,10 @@ defmodule OneCore.Apps do
   defp said?(:error, %RuntimeError{}), do: true
   defp said?(:error, %Call.State.Cancelled{}), do: true
   defp said?(:exit, {%RuntimeError{}, raised}) when is_list(raised), do: true
-  defp said?(:exit, {reason, {module, function, arguments}}) when is_atom(module) and is_atom(function) and is_list(arguments), do: said?(:exit, reason)
+
+  defp said?(:exit, {reason, {module, function, arguments}})
+       when is_atom(module) and is_atom(function) and is_list(arguments), do: said?(:exit, reason)
+
   defp said?(_kind, _reason), do: false
 
   # What whoever called is told went wrong: what was raised, also where a process the call waited on raised it, and
@@ -226,6 +233,8 @@ defmodule OneCore.Apps do
 
     if any do
       Hooks.invalidate()
+      Search.invalidate()
+      Skills.invalidate()
       Jobs.reload()
     end
 
@@ -257,6 +266,8 @@ defmodule OneCore.Apps do
   def init(nil) do
     Hooks.keep()
     Installed.keep()
+    Search.keep()
+    Skills.keep()
     {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}, syncs: %{}}, {:continue, :start}}
   end
 
@@ -306,9 +317,14 @@ defmodule OneCore.Apps do
     LoadedVersion.hold(handed(loaded), self())
 
     case state.syncs do
-      %{^owner => %{next: {waiting, more}} = sync} -> {:noreply, put_in(state.syncs[owner], %{sync | next: {[from | waiting], more ++ loaded}})}
-      %{^owner => sync} -> {:noreply, put_in(state.syncs[owner], %{sync | next: {[from], loaded}})}
-      _ -> {:noreply, syncing(state, owner, [from], loaded)}
+      %{^owner => %{next: {waiting, more}} = sync} ->
+        {:noreply, put_in(state.syncs[owner], %{sync | next: {[from | waiting], more ++ loaded}})}
+
+      %{^owner => sync} ->
+        {:noreply, put_in(state.syncs[owner], %{sync | next: {[from], loaded}})}
+
+      _ ->
+        {:noreply, syncing(state, owner, [from], loaded)}
     end
   end
 
@@ -323,7 +339,10 @@ defmodule OneCore.Apps do
   # the owner is out of sync, and the next sync reads it.
   def handle_call({:looked, owner, installed, loaded, here}, _from, state) do
     {state, changed, any} = took_over(state, owner, installed, loaded)
-    gone = for artifact <- Map.values(installed), artifact in here, not is_map_key(state.running, artifact), do: artifact
+
+    gone =
+      for artifact <- Map.values(installed), artifact in here, not is_map_key(state.running, artifact), do: artifact
+
     state = if gone != [] and state.syncs[owner].next == nil, do: put_in(state.syncs[owner].next, {[], []}), else: state
     {:reply, {changed, any}, state}
   end
@@ -479,7 +498,10 @@ defmodule OneCore.Apps do
     any = changed != [] or state.installed[owner] != installed
     state = %{state | installed: Map.put(state.installed, owner, installed)}
     state = put_in(state.reloaded[owner], System.monotonic_time(:millisecond))
-    artifacts = for {_owner, installed} <- state.installed, {_name, artifact} <- installed, into: MapSet.new(), do: artifact
+
+    artifacts =
+      for {_owner, installed} <- state.installed, {_name, artifact} <- installed, into: MapSet.new(), do: artifact
+
     {running, dropped} = Map.split_with(state.running, fn {artifact, _version} -> artifact in artifacts end)
 
     state = %{

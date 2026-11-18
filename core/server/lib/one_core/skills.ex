@@ -23,7 +23,7 @@ defmodule OneCore.Skills do
   and those beneath the UI library's, `skill://ui/skills/<name>/SKILL.md`. No two apps are installed by one name, so no skill's address is
   another's.
   """
-  alias OneCore.{Entrypoint, App, Apps}
+  alias OneCore.{Entrypoint, App, Apps, Builds, Cache}
   alias OneCore.Apps.{Store, Version}
 
   @installing """
@@ -242,16 +242,42 @@ defmodule OneCore.Skills do
       [{_skill, :own, _at}] -> {:ok, App.skill(Apps.running(who))}
       [{_skill, {:own, text}, _at}] -> {:ok, text}
       [{skill, :ui, at}] -> {:ok, Entrypoint.library().files[skill.at <> at]}
-      [{skill, {artifact, code}, at}] -> Store.file(artifact, code, skill.at <> at)
+      [{skill, {artifact, code}, at}] -> file(artifact, code, skill.at <> at)
     end
   end
 
-  # Each skill by its path, with where its files are: One Core's own, then the apps' by the names they're installed by.
+  @doc """
+  Makes the cache of the skills each set of apps running has, and of their files, which never change, since a
+  version's files are named by their hash (`code`). Whatever calls this owns it.
+  """
+  def keep, do: Cache.new(__MODULE__)
+
+  @doc "Lets go of what's kept, as the apps running change."
+  def invalidate, do: Cache.invalidate(__MODULE__)
+
+  @doc "A file of the version `code` of the app `artifact`, as `OneCore.Apps.Store.file/3` gives it, read once."
+  def file(artifact, code, path) do
+    Cache.fetch(__MODULE__, {:file, artifact, code, path}, fn ->
+      case Store.file(artifact, code, path) do
+        {:ok, _text} = read -> {:commit, read}
+        absent -> {:ignore, absent}
+      end
+    end)
+  end
+
+  # Each skill by its path, with where its files are: One Core's own, then the apps' by the names they're installed
+  # by. They're found once for each set of versions running and this build of the server.
   defp found(who) do
-    own = App.skill(Apps.running(who))
+    running = Apps.running(who)
+    versions = for {name, version} <- Enum.sort(running), do: {name, version.artifact, version.code}
+    Cache.fetch(__MODULE__, {:found, Builds.build(), versions}, fn -> {:commit, found_in(running)} end)
+  end
+
+  defp found_in(running) do
+    own = App.skill(running)
 
     apps =
-      for {installed, version} <- Enum.sort(Apps.running(who)), skill <- Version.skills(version) do
+      for {installed, version} <- Enum.sort(running), skill <- Version.skills(version) do
         path = Enum.join([installed, Path.basename(version.artifact) | Path.split(skill.at)], "/")
         {path, skill, {version.artifact, version.code}}
       end
