@@ -54,7 +54,9 @@
 //! Every start is the one way: a build is started and has `START` to say it's running at the network's edge. What
 //! each machine is at is one small record, `state.json` in the client's home's `server/`, which every program changes
 //! in one step under one lock (`Here::change`), beside `builds/<build>`, each build kept, `runtimes/<build>`, each
-//! runtime kept, `programs/<build>`, each `one` a pair names, and `home`,
+//! runtime kept, `programs/<program>/<build>`, each `one` a pair names, kept by which it is (`one` or `one-cli`), so one
+//! of the other put in place by a person, as installing the app over `one-cli` does, runs the server from then on
+//! rather than being put back, and `home`,
 //! the server's own folder, its key among it. A build is put together from its runtime, as hard links, and its code
 //! (`Here::assemble`), so it's a whole Erlang release that any start starts. The server is told on its input what
 //! changes of it (`OneCore.Release`), and says it to the network, where it's ready once it's active and running. What
@@ -558,7 +560,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     // verified, or the one before for a pair gone back from, has that one put in place, and started instead. Where
     // that one isn't kept, as where a person put another `one` in place by hand, the one they put there runs it.
     if pair.program != BUILD {
-        if here.folder.join("programs").join(&pair.program).exists() {
+        if here.program(&pair.program).exists() {
             here.put_program(&pair.program, &program)?;
             return Err(again(&program));
         }
@@ -1023,10 +1025,9 @@ async fn take(
     }
     if next.program != current.program {
         // Both are kept beside the one in place, which they're put in place of only as the pair they're in is taken.
-        let programs = here.folder.join("programs");
-        fs::create_dir_all(&programs)?;
-        fs::copy(program.canonicalize()?, programs.join(&current.program))?;
-        fs::rename(fetched_program(&builds[PROGRAM], program).await?, programs.join(&next.program))?;
+        fs::create_dir_all(here.folder.join("programs").join(PROGRAM))?;
+        fs::copy(program.canonicalize()?, here.program(&current.program))?;
+        fs::rename(fetched_program(&builds[PROGRAM], program).await?, here.program(&next.program))?;
     }
     Ok(compared)
 }
@@ -1214,9 +1215,14 @@ impl Here {
     /// place of `program`.
     fn put_program(&self, build: &str, program: &Path) -> Result<()> {
         let new = program.canonicalize()?.with_extension("new");
-        fs::copy(self.folder.join("programs").join(build), &new)
+        fs::copy(self.program(build), &new)
             .with_context(|| format!("The build {build} of one, which the server's record pairs with its build, isn't kept here"))?;
         put(&new, program)
+    }
+
+    /// The kept `one` of the build `build`, of the kind this one is.
+    fn program(&self, build: &str) -> PathBuf {
+        self.folder.join("programs").join(PROGRAM).join(build)
     }
 
     /// The folder of the build `build`.
@@ -1252,7 +1258,14 @@ impl Here {
         let named = |name: &str| {
             pairs.iter().filter_map(|pair| pair.as_ref()).any(|pair| pair.build == name || pair.program == name)
         };
-        for folder in ["builds", "programs"] {
+        // Programs of the other kind are of a `one` no longer in place.
+        for kept in fs::read_dir(self.folder.join("programs")).into_iter().flatten() {
+            let kept = kept?;
+            if kept.file_name() != PROGRAM {
+                let _ = fs::remove_dir_all(kept.path()).or_else(|_| fs::remove_file(kept.path()));
+            }
+        }
+        for folder in ["builds", &format!("programs/{PROGRAM}")] {
             for kept in fs::read_dir(self.folder.join(folder)).into_iter().flatten() {
                 let kept = kept?;
                 if !named(&kept.file_name().to_string_lossy()) {
