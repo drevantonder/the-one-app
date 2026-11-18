@@ -24,7 +24,7 @@ that one question for it, and a new device when they also say the code it shows 
   Security makes it there.
 - A passkey with WebAuthn's PRF unlocks its person's key on a new device too (the encryption app's skill says how).
   `devices` says which do (`unlocks`). Whoever uses one has the key, so a device that holds it encrypts it to a
-  passkey only once its person allows that passkey there, by name and when it was added, in Sign-In & Security:
+  passkey only once its person allows that passkey there, by name and when it was added, in Sign In & Security:
   `encrypt_for_passkeys` with that `passkey`. Ask them first; never for a passkey they don't know they added. A
   passkey that hasn't said since it was made does once it's used: `unlock_with_passkey` with no device makes the
   link for that, and with a device that's asking for the key, lets that device in.

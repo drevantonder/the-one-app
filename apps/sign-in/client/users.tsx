@@ -1,4 +1,4 @@
-// People & Groups's own page, until Settings is where it's opened: the component Settings draws.
+// People & Groups, on a page of its own, for links that open it. Settings draws the same component.
 import { render } from "ui"
 import PeopleAndGroups from "./people.tsx"
 

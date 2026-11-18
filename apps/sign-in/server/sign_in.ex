@@ -31,36 +31,6 @@ defmodule SignIn do
   alias OneCore.{Artifact, Builds, Call, Edge}
 
   @impl true
-  def entrypoints do
-    [
-      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "Admin", runtime_version: 4},
-      %{
-        name: "Devices",
-        page: "client/index.html",
-        icon: "client/icon.svg",
-        category: "Devices",
-        subject: "user",
-        badge: "waiting",
-        runtime_version: 4
-      },
-      %{
-        name: "Sign-In & Security",
-        page: "client/security.html",
-        subject: "user",
-        runtime_version: 4
-      },
-      %{
-        name: "Connect Your AI",
-        page: "client/connect.html",
-        icon: "client/connect.svg",
-        category: "AI",
-        subject: "user",
-        runtime_version: 4
-      }
-    ]
-  end
-
-  @impl true
   def tools do
     none = %{type: "object", properties: %{}}
 
@@ -449,7 +419,7 @@ defmodule SignIn do
   end
 
   # The link makes a passkey of theirs for whoever opens it, so it's shown only on their own screen, which opens it.
-  # Anything else that asks, an assistant or `one`, has them notified, and Sign-In & Security makes it there.
+  # Anything else that asks, an assistant or `one`, has them notified, and Sign In & Security makes it there.
   def call("add_passkey", _inputs, call) do
     who = person(call)
 
@@ -458,13 +428,13 @@ defmodule SignIn do
     else
       Call.tool(call, "notifications", "send", %{
         "title" => "Add a passkey",
-        "text" => "Open Sign-In & Security and tap Add Passkey.",
+        "text" => "Open Sign In & Security and tap Add Passkey.",
         "to" => who,
         "app" => call.app,
         "page" => "client/security.html"
       })
 
-      %{message: "Your person was notified: Sign-In & Security, on a device of theirs, makes it. The link is shown only there."}
+      %{message: "Your person was notified: Sign In & Security, on a device of theirs, makes it. The link is shown only there."}
     end
   end
 
@@ -481,7 +451,7 @@ defmodule SignIn do
   end
 
   def call("encrypt_for_passkeys", _inputs, _call),
-    do: raise("A device that holds your key encrypts it to a passkey your person allowed: in Sign-In & Security there, or with `one` on it.")
+    do: raise("A device that holds your key encrypts it to a passkey your person allowed: in Sign In & Security there, or with `one` on it.")
 
   def call("unlock_with_passkey", inputs, _call) do
     device = inputs["device"] || ""

@@ -45,7 +45,7 @@ const all = createMemo(async () => {
 })
 changed(() => refresh(all))
 
-/** Everything Users & Groups shows. */
+/** Everything People & Groups shows. */
 type All = Awaited<ReturnType<typeof all>>
 
 /// What someone's grey line says: their name in the network, and that they own it, or that this is them.

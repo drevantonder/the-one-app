@@ -2,7 +2,7 @@
 // with an invitation, someone joins; from an assistant's request to be let in, the assistant is, once they Allow it
 // on a consent page as Google's and GitHub's are. Opened with a new
 // device's code, as that device's link has it, its person signs in if they aren't yet, and is shown the code to
-// compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign-In & Security, someone
+// compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign In & Security, someone
 // makes another passkey. Whichever it was, this browser is signed in after, and is one of that person's devices,
 // whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, the page first asks
 // who's signing in, then shows the number that person types on one of their devices to let this one in, as it waits
@@ -27,7 +27,7 @@ const opened = new URLSearchParams(location.hash.slice(1))
 const params = new URLSearchParams(location.search)
 
 /// How the page was opened, which picks what it does: someone joining with an invitation, someone who has joined
-/// making another passkey (the app's Sign-In & Security), an assistant's request to be let in, which Better Auth carries signed
+/// making another passkey (the app's Sign In & Security), an assistant's request to be let in, which Better Auth carries signed
 /// in the query and goes back as it came, a new device's code in a browser, or in the app's own window, a device of
 /// theirs asking for their key (the Vault's Unlock with Passkey), or a passkey made ready to unlock it, and otherwise
 /// signing in.
@@ -241,11 +241,11 @@ async function unlockAsked(device: string) {
   const { asking } = await tool<{ asking: { device: string; name: string }[] }>("encryption_key", {})
   const name = asking.find((asked) => asked.device === device)?.name
   if (!name) throw new Error("That device isn't asking for your key. Choose Unlock with Passkey on it again.")
-  if (!(await unlock(device, name))) throw new Error("This passkey can't unlock your key yet. Allow it in Sign-In & Security on a device that holds your key, then try again.")
+  if (!(await unlock(device, name))) throw new Error("This passkey can't unlock your key yet. Allow it in Sign In & Security on a device that holds your key, then try again.")
   setStage({ stage: "unlocked", name })
 }
 
-/// What a passkey made here is called, by where it was made, as its person's Sign-In & Security lists it, and asks
+/// What a passkey made here is called, by where it was made, as its person's Sign In & Security lists it, and asks
 /// whether it may unlock their key.
 const passkeyName = ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ")
 
@@ -388,7 +388,7 @@ function shows(): Shows {
     case "unlock":
       switch (now.stage) {
         case "unlocked":
-          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : "Your passkey is set up. Allow it in Sign-In & Security on a device that holds your key." }
+          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : "Your passkey is set up. Allow it in Sign In & Security on a device that holds your key." }
         case "failed":
           return { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
         default:

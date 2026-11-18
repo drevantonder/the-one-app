@@ -29,7 +29,7 @@ Its words:
   output, which only the device it's used on ever has, derives a key that a device that holds their key encrypts the
   key to, once its person allows that passkey on a device that holds the key, and the network's sign-in page opens it
   where the passkey's used and encrypts it to the new device, as `approve` does. Signing in with one on a new device lets it in at once. `sign-in`'s `encrypt_for_passkeys` and
-  `unlock_with_passkey` do it from a device. A passkey without PRF says so in Sign-In & Security, and the other ways
+  `unlock_with_passkey` do it from a device. A passkey without PRF says so in Sign In & Security, and the other ways
   stay.
 - What that trusts: whoever can use your passkey can open your key, the same as whoever can sign in as you. The PRF
   output and the key it opens stay on the device, in the sign-in page; what's kept, with the passkey, is the key it
