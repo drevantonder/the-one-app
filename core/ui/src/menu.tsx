@@ -1,6 +1,6 @@
 // A menu: a button that opens a few things to do, over the page under it. Written once in strict, on the primitives,
 // the same on the DOM and on a native host.
-import { children, createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
+import { children, createContext, createEffect, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Layer, Text } from "#primitives"
 import { direction, viewport } from "#bridge"
@@ -8,7 +8,13 @@ import { Button, Icon, type ButtonProps } from "./button.tsx"
 import { messages } from "./words.ts"
 import { styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
-import type { Located } from "./strict/types/ui.d.ts"
+import type { Laid, Located } from "./strict/types/ui.d.ts"
+
+/** Where something's drawn, as a menu opens under it. */
+const rectOf = (event: Laid): At => {
+  const { x, y, width, height } = event.currentTarget.getBoundingClientRect()
+  return { x, y, width, height }
+}
 
 /** Where a menu opens: under what opened it, or where a row was held. */
 type At = { x: number; y: number; width: number; height: number }
@@ -40,6 +46,8 @@ const Opened = createContext<{
   setActive: (value: string | undefined) => void
   /** Whether it was open and has closed, so its button takes the keyboard back. */
   closed: () => boolean
+  /** Where its button is, where it opens when something else opens it. */
+  place: (at: At) => void
   destructive: () => { value: string; label: JSX.Element } | undefined
   setDestructive: (item: { value: string; label: JSX.Element } | undefined) => void
 }>()
@@ -92,24 +100,35 @@ const look = styles({
 /// Escape and choosing an item close it. In a `Row`'s `end`, a long press or a right-click on the row opens it too,
 /// and a finger swipes the row to its `destructive` item.
 export const Menu = {
-  Root: (props: { onSelect?: (details: { value: string }) => void; children?: JSX.Element }) => {
-    const [at, setAt] = createSignal<At>()
+  Root: (props: { open?: boolean; onOpenChange?: (details: { open: boolean }) => void; onSelect?: (details: { value: string }) => void; children?: JSX.Element }) => {
+    const [where, setWhere] = createSignal<At>()
+    const [button, setButton] = createSignal<At>()
+    const [own, setOwn] = createSignal(false)
     const [destructive, setDestructive] = createSignal<{ value: string; label: JSX.Element }>()
     const [items, setItems] = createSignal<Entry[]>([])
     const [active, setActive] = createSignal<string>()
     const [closed, setClosed] = createSignal(false)
+    // Open as its `open` says, where that's said (as Ark's is), or as it was pressed; where it was opened, or under
+    // its button.
+    const shown = () => props.open ?? own()
+    const at = () => (shown() ? (where() ?? button()) : undefined)
     // Opened, the keyboard is on its first item; closed, back on its button.
-    const open = (where: At | undefined) => {
-      setClosed(!!at() && !where)
-      setActive(where ? items().find((item) => !item.disabled)?.value : undefined)
-      setAt(where)
+    createEffect(shown, (open) => {
+      setActive(open ? items().find((item) => !item.disabled)?.value : undefined)
+      if (!open) setWhere(undefined)
+    })
+    const open = (to: At | undefined) => {
+      setClosed(shown() && !to)
+      setWhere(to)
+      setOwn(!!to)
+      props.onOpenChange?.({ open: !!to })
     }
     const select = (value: string) => (open(undefined), props.onSelect?.({ value }))
     const add = (entry: Entry) => {
       setItems((now) => [...now, entry])
       return () => setItems((now) => now.filter((item) => item !== entry))
     }
-    return <Opened value={{ at, open, select, destructive, setDestructive, items, add, active, setActive, closed }}>{props.children}</Opened>
+    return <Opened value={{ at, open, select, destructive, setDestructive, items, add, active, setActive, closed, place: setButton }}>{props.children}</Opened>
   },
   Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: JSX.Element }) => {
     const menu = useContext(Opened)!
@@ -129,6 +148,7 @@ export const Menu = {
         aria-haspopup="menu"
         aria-expanded={menu.at() ? "true" : "false"}
         autofocus={menu.closed()}
+        {...({ onLayout: (event: Laid) => menu.place(rectOf(event)) } as {})}
         onClick={(event: Located) => {
           const rect = event?.currentTarget.getBoundingClientRect()
           menu.open(menu.at() || !rect ? undefined : { x: rect.x, y: rect.y, width: rect.width, height: rect.height })
