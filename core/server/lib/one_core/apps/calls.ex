@@ -30,9 +30,9 @@ defmodule OneCore.Apps.Calls do
         {:ran, ended} ->
           ended
 
-        # A tool that isn't there is observed as a call that failed, as one refused is.
+        # A tool that isn't there is observed as a call refused, as one whose inputs are wrong is.
         {:error, why} ->
-          observed(%{"app" => name, "tool" => tool, "inputs" => inputs}, principal, fn -> {:error, why} end)
+          observed(%{"app" => name, "tool" => tool, "inputs" => inputs}, principal, fn -> {:refused, why} end)
 
         forwarded ->
           forwarded
@@ -92,8 +92,7 @@ defmodule OneCore.Apps.Calls do
         Apps.held(List.wrap(version), fn -> answered(tool, about, fun.(about["inputs"])) end)
       end)
     else
-      # A call refused is observed as one that failed, with why: what it was given is wrong, or who may or a hook
-      # said no.
+      # A call refused is observed as refused, with why: what it was given is wrong, or who may or a hook said no.
       {:error, why, code} -> refuse(about, principal, code, why)
       {:error, why} -> refuse(about, principal, -32000, why)
     end
@@ -101,7 +100,7 @@ defmodule OneCore.Apps.Calls do
 
   defp refuse(about, principal, code, why) do
     State.refuse(State.id(), code, why)
-    observed(about, principal, fn -> {:error, why} end)
+    observed(about, principal, fn -> {:refused, why} end)
   end
 
   defp refused({:error, why}, code), do: {:error, why, code}
@@ -169,7 +168,9 @@ defmodule OneCore.Apps.Calls do
 
   # Runs a call as a span of its trace, OpenTelemetry's, which the SDK exports (`OneCore.Otlp`), with how long it took
   # as `one.tool.duration`, unless another server ran it, which measures it there. Its span says the app, the tool, whose call it was as an owner's
-  # prefix (`users/alice`), and how it ended: never what it was given or answered.
+  # prefix (`users/alice`), and how it ended: never what it was given or answered. One refused before it ran (`call`
+  # gives `{:refused, why}`) is the caller's mistake, not the tool's, as OpenTelemetry has a server's span for an RPC
+  # refused for its arguments or who asked: its outcome is `refused`, and its span isn't an error.
   defp observed(about, {_actor, subject}, call) do
     app = about["app"] || "one"
     attributes = %{"one.app" => app, "one.tool" => about["tool"]}
@@ -183,20 +184,29 @@ defmodule OneCore.Apps.Calls do
       {error, forwarded} =
         case ended do
           {:ok, _result} -> {nil, false}
+          {:refused, why} -> {{:refused, why}, false}
           {:error, why} -> {why, false}
           {:forwarded, result} -> {passed(result), true}
           # It would have been passed on again, so the server that passed it here observes it.
           :forwarding_loop -> {nil, nil}
         end
 
+      outcome =
+        case error do
+          nil -> "ok"
+          {:refused, _why} -> "refused"
+          why ->
+            Tracer.set_status(:error, String.slice(why, 0, 1000))
+            "error"
+        end
+
       if forwarded != nil do
         if forwarded, do: Tracer.set_attribute("one.forwarded", true)
-        if error, do: Tracer.set_status(:error, String.slice(error, 0, 1000))
-        outcome = if error, do: "error", else: "ok"
+        if outcome == "refused", do: Tracer.set_attribute("one.outcome", outcome)
         if not forwarded, do: Histogram.record(:"one.tool.duration", took / 1000, Map.put(attributes, "one.outcome", outcome))
       end
 
-      ended
+      with {:refused, why} <- ended, do: {:error, why}
     end
   end
 
