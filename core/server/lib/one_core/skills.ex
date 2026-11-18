@@ -125,18 +125,21 @@ defmodule OneCore.Skills do
       {:error, %{message: wrong}} ->
         {:error, "SKILL.md's first lines, between its two lines of `---`, aren't YAML: #{wrong}"}
 
+      {:ok, %{} = frontmatter} ->
+        missing = Enum.reject(~w(name description), &is_map_key(frontmatter, &1))
+
+        {:error,
+         "SKILL.md's first lines, between its two lines of `---`, lack #{Enum.join(missing, " and ")}.\n\n" <>
+           example(name)}
+
       _ ->
         {:error,
-         """
-         SKILL.md starts with its skill's name, which is the app's, and when an agent should read it:
-
-         ---
-         name: #{name}
-         description: Read before ...
-         ---
-         """}
+         "SKILL.md doesn't start with its skill's name and when an agent should read it, between two lines of `---`.\n\n" <>
+           example(name)}
     end
   end
+
+  defp example(name), do: "---\nname: #{name}\ndescription: Read before ...\n---"
 
   @doc """
   The skills among an app's `files`, the app being named `app`: each as `read/2` gives it, with `at`, the
@@ -189,7 +192,8 @@ defmodule OneCore.Skills do
     # What its schema says (`dependentRequired`), which the schema's validator doesn't know.
     case {inputs["name"], named} do
       {nil, _skills} when is_map_key(inputs, "file") ->
-        {:error, ~s(file is one of a skill's files, so it needs the skill's name: { name: "building-apps", file: "..." }.)}
+        {:error,
+         ~s(file is one of a skill's files, so it needs the skill's name: { name: "building-apps", file: "..." }.)}
 
       {nil, []} ->
         {:error, "#{inputs["app"]} has no skills here. skills {} lists every one."}
@@ -201,8 +205,7 @@ defmodule OneCore.Skills do
         {:ok, %{skills: listed}}
 
       {name, []} ->
-        {:error,
-         "There's no skill #{name}#{if inputs["app"], do: " in #{inputs["app"]}"}. skills {} lists every one."}
+        {:error, "There's no skill #{name}#{if inputs["app"], do: " in #{inputs["app"]}"}. skills {} lists every one."}
 
       {_name, [skill]} ->
         case text(who, "skill://#{skill.path}/#{inputs["file"] || "SKILL.md"}") do

@@ -69,10 +69,7 @@ defmodule OneCore.Apps.Deploy do
         install = install?.(version)
 
         with :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
-             :ok <- outputs(version),
-             :ok <- titled(version),
-             :ok <- categorized(version),
-             :ok <- icon(name, version),
+             :ok <- described(name, version),
              :ok <- if(install, do: fits(owner, name, version), else: :ok),
              {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
              _ = stage.("Keeping it in the bucket"),
@@ -205,6 +202,14 @@ defmodule OneCore.Apps.Deploy do
     elem(found, 0)
   end
 
+  # What every version deployed now says of itself, all that's missing at once, so one deploy puts it right.
+  defp described(name, version) do
+    refused =
+      for {:error, why} <- [outputs(version), titled(version), categorized(version), icon(name, version)], do: why
+
+    if refused == [], do: :ok, else: {:error, Enum.join(refused, "\n")}
+  end
+
   # Every tool of a version deployed now says what it answers, which every answer is checked against: a version
   # deployed before tools said it keeps running, and the next one deployed says it.
   defp outputs(version) do
@@ -224,7 +229,7 @@ defmodule OneCore.Apps.Deploy do
   defp titled(%{title: nil}),
     do:
       {:error,
-       "Its skill's metadata says no title, its name wherever a person reads it: `title: Hello`, beside its " <>
+       "SKILL.md's `metadata` has no `title`, its name wherever a person reads it: `title: Hello`, beside its " <>
          "subtitle and category (the skill building-apps)."}
 
   defp titled(_version), do: :ok
@@ -234,9 +239,14 @@ defmodule OneCore.Apps.Deploy do
       category when category in @categories ->
         :ok
 
+      nil ->
+        {:error,
+         "SKILL.md's `metadata` has no `category`, which is one of: " <>
+           Enum.join(@categories, ", ") <> " (the skill building-apps)."}
+
       category ->
         {:error,
-         "Its skill's metadata says its category is #{inspect(category)}. It says one of: " <>
+         "SKILL.md's `metadata.category` is #{inspect(category)}, which isn't one of: " <>
            Enum.join(@categories, ", ") <> " (the skill building-apps)."}
     end
   end

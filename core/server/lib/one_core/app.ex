@@ -444,14 +444,33 @@ defmodule OneCore.App do
     again and draws what it's answered.
 
   A widget is what the app shows on a Home Screen page at a glance: a tool call, drawn. `widgets/0`, if the app
-  has one, lists them:
+  has one, lists them. This is a whole app with one: a folder with `server/glance.ex`, its `icon.svg`, and a
+  `SKILL.md` as above, named `glance`, in the category `Utilities`:
 
-      @impl true
-      def widgets, do: [%{name: "Hello", tool: "glance", sizes: ["2x2", "4x2"]}]
+      defmodule Glance do
+        @behaviour OneCore.App
 
-      def call("glance", %{"size" => size}, call) do
-        greeted = length(OneCore.Artifact.list(call.own, "greeted/"))
-        %{part: "column", parts: [%{part: "stat", value: greeted, label: "greeted"}] ++ more(size)}
+        @impl true
+        def tools do
+          [
+            %{
+              name: "glance",
+              description: "One figure, to draw on a Home Screen page",
+              read_only: true,
+              inputs: %{type: "object", properties: %{size: %{type: "string"}}},
+              outputs: %{type: "object", properties: %{part: %{type: "string"}}, required: ["part"]}
+            }
+          ]
+        end
+
+        @impl true
+        def call("glance", %{"size" => _size}, _call), do: %{part: "stat", value: 42, label: "answers"}
+
+        @impl true
+        def icon, do: "icon.svg"
+
+        @impl true
+        def widgets, do: [%{name: "Glance", tool: "glance", sizes: ["2x2"]}]
       end
 
   - A widget names one of the app's `tool`s that only reads, its `name` on the card, and the `sizes` it comes

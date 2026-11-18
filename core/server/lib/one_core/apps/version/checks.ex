@@ -6,9 +6,7 @@ defmodule OneCore.Apps.Version.Checks do
   """
   alias OneCore.App.Manifest
   alias OneCore.Apps.Version
-
-  # The sizes a widget comes in, which are a phone's own: columns by rows of a Home Screen page's grid.
-  @sizes ~w(2x2 4x2 4x4)
+  alias OneCore.Apps.Version.Shape
 
   @doc """
   A version from what its app said of itself, `description`, if that's what an app says: `{:ok, version}` or
@@ -29,60 +27,23 @@ defmodule OneCore.Apps.Version.Checks do
 
     %{offers: offers, jobs: jobs, requires: requires, own: own} = description
 
-    cond do
-      not (is_list(tools) and Enum.all?(tools, &tool?(&1, rest))) ->
-        {:error,
-         "tools/0 gives a list of %{name: ..., description: ..., inputs: ..., outputs: ...}, where outputs is a JSON " <>
-           "Schema of an object, ui, if a tool has one, is a page of client/, and task_support, if it has one, is " <>
-           ":optional or :required"}
+    prefix = if app, do: Version.own_name(app) <> ".", else: ""
 
-      not (icon == nil or is_binary(icon)) ->
-        {:error, "icon/0 gives a file's path"}
+    problems =
+      Enum.flat_map([:tools, :entrypoints, :widgets, :offers], &Shape.problems(&1, description[&1], prefix)) ++
+        tool_problems(tools, rest, prefix) ++
+        entrypoint_problems(entrypoints, rest, prefix) ++
+        widget_problems(widgets, tools, prefix) ++
+        other_problems(description, app, prefix)
 
-      not (is_list(entrypoints) and Enum.all?(entrypoints, &entrypoint?(&1, rest))) ->
-        {:error,
-         "entrypoints/0 gives a list of %{page: ..., icon: ...}, where page is a page of client/ and icon a file " <>
-           "here, the app's icon/0 where an entrypoint has none, and name, category and subject, if it has them, are " <>
-           "text: an entrypoint's name is its app's title where it's that app, and its own only where it's something else"}
-
-      not (is_list(widgets) and Enum.all?(widgets, &widget?(&1, tools))) ->
-        {:error,
-         "widgets/0 gives a list of %{tool: ..., sizes: [...]}: one of this app's tools that only reads, and the " <>
-           "sizes it comes in, of #{Enum.join(@sizes, ", ")}, and a name of its own only where it isn't its app's title"}
-
-      not (is_list(exports) and Enum.all?(exports, &is_binary/1)) ->
-        {:error, "Its module's functions are said as a list of names"}
-
-      not (is_list(hooks) and Enum.all?(hooks, &Manifest.hook?/1) and
-               (hooks == [] or app == nil or function_exported?(app, :hook, 3))) ->
-        {:error,
-         "hooks/0 gives a list of hooks, and hook/3 is called at each. The hooks are One Core's, " <>
-           Enum.join(Enum.sort(Map.keys(Manifest.kinds())), ", ") <>
-           ", and the ones apps offer, each as <app>.<hook>: soft-delete.moved"}
-
-      not (is_list(offers) and Enum.all?(offers, &offer?/1)) ->
-        {:error,
-         "offers/0 gives a list of %{name: ..., kind: ..., description: ...}: a name of lowercase letters, " <>
-           "digits and _, and a kind of :observe, :mutate, :validate or :collect"}
-
-      not (is_map(requires) and Enum.all?(requires, &requirement?/1)) ->
-        {:error,
-         "requires/0 gives the other apps it needs, each by its name with why, as a person reads it after " <>
-           "\"Gmail uses Google Account\", and \"core\" the lowest version of the platform it runs on, as an Elixir " <>
-           "requirement: %{\"core\" => \">= 0.15.0\", \"google-account\" => \"to reach your mail\"}"}
-
-      own not in [:subject, :installed] ->
-        {:error,
-         "own/0 gives whose its own artifact is: :subject, whoever each call runs for (the default), or :installed, " <>
-           "whoever it was installed for, everyone's together"}
-
-      true ->
+    case problems do
+      [] ->
         tools = Enum.map(tools, &Version.schemas/1)
 
         title = Version.title(skills)
         version = version(under, app, tools, entrypoints, widgets, Enum.sort(services), rest, icon, title)
 
-        with {:ok, jobs} <- jobs(jobs, tools),
+        with {:ok, jobs} <- jobs(jobs, tools, prefix),
              do:
                {:ok,
                 %{
@@ -95,8 +56,113 @@ defmodule OneCore.Apps.Version.Checks do
                     requires: Map.delete(requires, "core"),
                     core: requires["core"]
                 }}
+
+      problems ->
+        {:error, Enum.join(Enum.take(problems, 20), "\n")}
     end
   end
+
+  # The items of a list an app gave that are maps, with where each is in it. What isn't one, `Shape` says.
+  defp indexed(list),
+    do: if(is_list(list), do: for({item, at} <- Enum.with_index(list), is_map(item), do: {item, at}), else: [])
+
+  # A tool may have a page of its own, its UI as MCP Apps has it, which a host shows for it.
+  defp tool_problems(tools, rest, prefix) do
+    for {%{ui: ui}, at} <- indexed(tools), is_binary(ui), why = page(ui, rest) do
+      "#{prefix}tools()[#{at}].ui: got #{Shape.given(ui)}, #{why}"
+    end
+  end
+
+  defp entrypoint_problems(entrypoints, rest, prefix) do
+    for {entrypoint, at} <- indexed(entrypoints),
+        {field, why} <- [
+          {:page, is_binary(entrypoint[:page]) && page(entrypoint[:page], rest)},
+          {:icon,
+           is_binary(entrypoint[:icon]) && not is_map_key(rest, entrypoint[:icon]) && "expected a file of the app"}
+        ],
+        why do
+      "#{prefix}entrypoints()[#{at}].#{field}: got #{Shape.given(entrypoint[field])}, #{why}"
+    end
+  end
+
+  # A widget is drawn from what one of the app's tools answers, which a Home Screen page asks again and again.
+  defp widget_problems(widgets, tools, prefix) do
+    tools = for {tool, _at} <- indexed(tools), do: tool
+
+    for {%{tool: name}, at} <- indexed(widgets), is_binary(name), why = widget_tool(name, tools) do
+      "#{prefix}widgets()[#{at}].tool: got #{Shape.given(name)}, #{why}"
+    end
+  end
+
+  defp widget_tool(name, tools) do
+    case Enum.find(tools, &(&1[:name] == name)) do
+      nil -> "expected one of this app's tools that only read: #{Enum.join(Enum.map(tools, & &1[:name]), ", ")}"
+      %{read_only: true} -> nil
+      _ -> "which doesn't say read_only: true in tools/0, as a tool that only reads does and a widget calls"
+    end
+  end
+
+  # Why `page` isn't a page of the app's client, or nil.
+  defp page(page, rest) do
+    cond do
+      not Version.client?(page) -> "expected an .html page of client/, such as \"client/index.html\""
+      Path.extname(page) != ".html" -> "expected an .html page of client/"
+      not is_map_key(rest, page) -> "expected a page the app has, and it has no #{page}"
+      true -> nil
+    end
+  end
+
+  defp other_problems(description, app, prefix) do
+    %{icon: icon, exports: exports, hooks: hooks, requires: requires, own: own} = description
+
+    List.flatten([
+      if(not (icon == nil or is_binary(icon)), do: "#{prefix}icon(): got #{Shape.given(icon)}, expected a file's path"),
+      if(not (is_list(exports) and Enum.all?(exports, &is_binary/1)),
+        do: "Its module's functions are said as a list of names"
+      ),
+      hook_problems(hooks, app, prefix),
+      requires_problems(requires, prefix),
+      if(own not in [:subject, :installed],
+        do:
+          "#{prefix}own(): got #{Shape.given(own)}, expected :subject, whoever each call runs for (the default), or " <>
+            ":installed, whoever it was installed for, everyone's together"
+      )
+    ])
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp hook_problems(hooks, app, prefix) do
+    if is_list(hooks) do
+      one_of = Enum.join(Enum.sort(Map.keys(Manifest.kinds())), ", ")
+
+      for {hook, at} <- Enum.with_index(hooks), not Manifest.hook?(hook) do
+        "#{prefix}hooks()[#{at}]: got #{Shape.given(hook)}, expected one of One Core's hooks (#{one_of}), or " <>
+          "another app's, as <app>.<hook>: soft-delete.moved"
+      end ++
+        if(hooks != [] and app != nil and not function_exported?(app, :hook, 3),
+          do: ["#{prefix}hooks(): hook/3 isn't defined, and it's called at each hook"],
+          else: []
+        )
+    else
+      "#{prefix}hooks(): got #{Shape.given(hooks)}, expected a list of hooks"
+    end
+  end
+
+  defp requires_problems(requires, prefix) when is_map(requires) do
+    for {name, why} <- requires, not requirement?({name, why}) do
+      "#{prefix}requires()[#{Shape.given(name)}]: got #{Shape.given(why)}, " <>
+        if(name == "core",
+          do: "expected the lowest version of the platform it runs on, as an Elixir requirement: \">= 0.15.0\"",
+          else:
+            "expected why it needs the app, as a person reads it after \"Gmail uses Google Account\": " <>
+              "\"to reach your mail\" (and the app's name is lowercase letters, digits and -)"
+        )
+    end
+  end
+
+  defp requires_problems(requires, prefix),
+    do:
+      "#{prefix}requires(): got #{Shape.given(requires)}, expected a map of the other apps it needs, each by its name with why"
 
   # The lowest version of the platform it runs on, as an Elixir requirement, or another app it requires, by its name,
   # and why, which isn't left out.
@@ -106,35 +172,31 @@ defmodule OneCore.Apps.Version.Checks do
   defp requirement?({name, why}),
     do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/ and is_binary(why) and String.trim(why) != ""
 
-  defp requirement?(_requirement), do: false
-
-  defp offer?(%{name: name, kind: kind, description: description}),
-    do:
-      is_binary(name) and name =~ ~r/^[a-z][a-z0-9_]*$/ and kind in [:observe, :mutate, :validate, :collect] and
-        is_binary(description)
-
-  defp offer?(_offer), do: false
-
   # A scheduled job calls one of the app's tools with inputs the tool takes, so one that could never run is
   # found out when it's deployed.
-  defp jobs(jobs, tools) do
-    checked =
-      for job <- List.wrap(jobs) do
-        with %{tool: name, every: every} when is_integer(every) and every > 0 <- job,
-             inputs = JSON.decode!(JSON.encode!(Map.get(job, :inputs, %{}))),
-             %{takes: takes} <- Enum.find(tools, &(&1.name == name)),
-             :ok <- ExJsonSchema.Validator.validate(takes, inputs) do
-          %{tool: name, every: every, inputs: inputs}
-        else
-          _ -> nil
-        end
-      end
+  defp jobs(jobs, tools, prefix) do
+    with [] <- Shape.problems(:jobs, jobs, prefix),
+         [] <-
+           for({job, at} <- indexed(jobs), problem <- job_problems(job, tools), do: "#{prefix}jobs()[#{at}]#{problem}") do
+      {:ok, for(job <- jobs, do: %{tool: job.tool, every: job.every, inputs: json(job[:inputs])})}
+    else
+      problems -> {:error, Enum.join(problems, "\n")}
+    end
+  end
 
-    if is_list(jobs) and nil not in checked,
-      do: {:ok, checked},
-      else:
-        {:error,
-         "jobs/0 gives a list of %{tool: ..., every: ...}: one of this app's tools, how many seconds apart, and the inputs it takes, if any"}
+  defp json(value), do: JSON.decode!(JSON.encode!(value || %{}))
+
+  defp job_problems(%{tool: name} = job, tools) do
+    case Enum.find(tools, &(&1.name == name)) do
+      nil ->
+        [".tool: got #{Shape.given(name)}, expected one of this app's tools: #{Enum.map_join(tools, ", ", & &1.name)}"]
+
+      %{takes: takes} ->
+        case ExJsonSchema.Validator.validate(takes, json(job[:inputs])) do
+          :ok -> []
+          {:error, wrong} -> for {why, "#" <> at} <- wrong, do: ".inputs#{at}: #{why}, for the tool #{name}"
+        end
+    end
   end
 
   # An icon goes to clients as a `data:` address, so a home screen asks for nothing more. The app's is the file it
@@ -171,39 +233,4 @@ defmodule OneCore.Apps.Version.Checks do
   end
 
   defp data(path, rest), do: "data:#{Version.kind(path)};base64,#{Base.encode64(rest[path])}"
-
-  defp entrypoint?(%{page: page} = entrypoint, rest),
-    do:
-      page?(page, rest) and (entrypoint[:name] == nil or is_binary(entrypoint[:name])) and
-        (entrypoint[:icon] == nil or is_map_key(rest, entrypoint[:icon])) and
-        (entrypoint[:category] == nil or is_binary(entrypoint[:category])) and
-        (entrypoint[:subject] == nil or is_binary(entrypoint[:subject]))
-
-  defp entrypoint?(_, _), do: false
-
-  # A widget is drawn from what one of the app's tools answers, which a Home Screen page asks again and again.
-  defp widget?(%{tool: tool, sizes: [_ | _] = sizes} = widget, tools),
-    do:
-      (widget[:name] == nil or is_binary(widget[:name])) and
-        Enum.any?(tools, &(&1.name == tool and &1[:read_only] == true)) and sizes -- @sizes == []
-
-  defp widget?(_, _), do: false
-
-  defp page?(page, rest),
-    do: is_binary(page) and Version.client?(page) and Path.extname(page) == ".html" and is_map_key(rest, page)
-
-  # A tool may have a page of its own, its UI as MCP Apps has it, which a host shows for it. What it answers is an
-  # object, which is what every version of MCP a client speaks takes as a tool's `outputSchema`. A version deployed
-  # before tools said what they answer says nothing of it, and still loads (`OneCore.Apps.Deploy` refuses a new one).
-  defp tool?(%{name: name, description: description, inputs: %{}} = tool, rest)
-       when is_binary(name) and is_binary(description),
-       do:
-         name =~ ~r/^[a-z][a-z0-9_]*$/ and (tool[:ui] == nil or page?(tool[:ui], rest)) and outputs?(tool[:outputs]) and
-           tool[:task_support] in [nil, :optional, :required]
-
-  defp tool?(_, _), do: false
-
-  defp outputs?(nil), do: true
-  defp outputs?(%{} = outputs), do: JSON.decode!(JSON.encode!(outputs))["type"] == "object"
-  defp outputs?(_outputs), do: false
 end
