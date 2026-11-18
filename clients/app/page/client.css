@@ -309,7 +309,8 @@ iframe[data-move] {
   body[data-rail] {
     --rail-width: calc(var(--rail) + var(--safe-left));
   }
-  #rail {
+  /* Only where the window has one: an app's own window on a computer has none. */
+  body[data-rail] #rail {
     z-index: 2;
     grid-area: 2 / 1;
     display: block;

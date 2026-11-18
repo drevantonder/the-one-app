@@ -32,12 +32,20 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Admin things (infrastructure apps, managing users) show only to the people who can act on them, the network's owners (17 Nov). Everyone else never sees them.
 - A section header's See All sits on the title's baseline, smaller than the title, ending at the content's edge (17 Nov), as iOS's App Store does.
 
+## App windows (18 Nov)
+
+- On a computer, every app opens as its own window, in its own light process, as Safari's "Add to Dock" web apps do: its own Dock or taskbar icon, its own Cmd-Tab or Alt-Tab entry, and on a Mac its own menu bar (the app's name, Edit, Window). Every app, no mix of the two ("that's just confusing"). The Home Screen stays in The One App's own window, and opening an app from it opens or brings forward that app's window. Phones and the web are unchanged.
+- Each app is one of the computer's apps too, kept in step with what's installed: on a Mac in `~/Applications/The One App/`, which Spotlight and Launchpad find, its icon the app's own on macOS's icon grid; in Windows' Start menu; and in a Linux desktop's applications. Opening it opens that app's window, or brings it forward.
+- An app's window has nothing of its own but the app: "Updated · Reload", "<App> didn't open", Update Required and the Reconnecting banner show over it as they do over an app on a phone.
+- Closing an app's window ends it. Quitting The One App closes every app's window. Closing the Home Screen's window while an app's window is open puts it away; the Dock icon brings it back.
+
 ## The rail (18 Nov)
 
 - One way on every platform from any app back to the Home Screen and over to another app, which adds nothing to the app, as iOS and Android stay out of an app's way. Its models are Samsung's Edge panels on phones and the app rail Teams, Slack and Discord keep on a computer.
 - Phones, and tablets held upright: a thin translucent handle on the right edge, always there, on the Home Screen too (18 Nov), and out of the way while something is open over what's showing (a sheet, a menu, Home pages being edited), as iOS hides its chrome while icons are rearranged. On the Home Screen the panel has Home marked as the one in front. It can be dragged up or down, and its place is kept, so it never sits on an app's own controls. A swipe in from it, or a tap, brings a small floating panel: Home first, then recent apps. Tapping one goes there as the window's moves do: Home closes the app as back does, and another app opens with its usual move. A swipe away or a tap beside it closes it; it follows the finger and springs. An iPhone's right edge is free; on Android only the handle's own stretch of the edge is kept from the system's back.
 - Computers, and tablets turned sideways: a thin sidebar on the left, always there, on the Home Screen too, as Teams', Slack's and Discord's are (18 Nov): Home at the top, then open and recent apps, whichever is in front outlined, Home on the Home Screen, each app's name as its tooltip. The Home Screen and every app take the rest of the width.
 - The web is the same, by size.
+- The computer's own app (Mac, Windows, Linux), where each app opens in a window of its own (18 Nov): the Home Screen's window keeps the sidebar, whose recent apps open or bring forward their own windows, and an app's own window has no rail: the Dock or taskbar and Cmd-Tab or Alt-Tab go between apps and to the Home Screen, as they do between any of the computer's apps.
 - An app's first screen has no Back to the Home Screen: the rail, and the device's own gestures (Android's back, the trackpad's swipe, the iPhone's swipe in from the left edge, Escape), leave it. An app's own Back stays for its own screens.
 - No pinning yet. Recent apps are a short list per device, the last 8, the open ones first.
 

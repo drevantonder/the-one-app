@@ -33,6 +33,15 @@ const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
 /// which installs one where there's none: the app in the category `app-store`, if there is one.
 let launcher = ""
 let appStore = ""
+/// On a computer, each app opens in a window of its own, as the computer's own app (`windows`, `hosts.rs`): the
+/// Home Screen's window shows the launcher alone, and an app's own window shows that app (`own`), each where the
+/// launcher is in a phone's. Either opens every other app in its own window.
+let windows = false
+/** @type {{ entrypoint: string, subject?: string, name?: string | null } | undefined} */
+let own
+/// The page under every other in this window: the launcher's, or in an app's own window, that app's.
+const base = () => own?.entrypoint ?? launcher
+const baseKey = () => key(base(), own?.subject)
 /// The apps that are open, by who each is for and what it is: `{ key, entrypoint, subject, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
 /// it as it was.
@@ -74,6 +83,16 @@ function dress() {
   for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { theme: theme() } })
 }
 scheme.addEventListener("change", dress)
+/// Colour Mode is the device's: on a computer each app's window has a page of its own, so each is told as it's chosen
+/// in any of them, and told what was chosen as it opens.
+/** @param {unknown} theme */
+function heardTheme(theme) {
+  if (theme === undefined || theme === chosen()) return
+  if (theme === "light" || theme === "dark") localStorage.setItem("theme", theme)
+  else localStorage.removeItem("theme")
+  dress()
+}
+listen("theme", ({ payload }) => heardTheme(payload))
 // Where the window goes from here, a sign-in page, isn't told Colour Mode: the bars follow the device there, as it does.
 addEventListener("pagehide", () => setTheme(null))
 
@@ -469,7 +488,7 @@ const machine = setup({
     // updates it.
     updates: () => !phone || testflight,
     appStore: () => Boolean(appStore),
-    launcher: ({ event }) => (event.type === "drawn" || event.type === "failed") && event.key === key(launcher),
+    launcher: ({ event }) => (event.type === "drawn" || event.type === "failed") && event.key === baseKey(),
   },
   actions: {
     told: assign({ told: ({ event, context }) => (event.type === "session" ? event.told : context.told) }),
@@ -486,7 +505,8 @@ const machine = setup({
     // Its apps are listed once it's told where its device is, unless it's to sign in.
     list: ({ context }) => void (context.told && context.told.session.state !== "signIn" && list()),
     start: () => start(),
-    signIn: ({ context }) => void (context.told?.link && location.replace(context.told.link)),
+    // An app's own window leaves signing in to the Home Screen's, which closes it once the device is in.
+    signIn: ({ context }) => void (own ? invoke("front") : context.told?.link && location.replace(context.told.link)),
     // The device hears its person's notifications once they see their home, and a phone looks again at whether it
     // may show them each time its home is back in front.
     listen: () => void invoke("listen"),
@@ -783,8 +803,9 @@ async function list(subject) {
         ;({ resources } = await invoke("apps", { subject }))
       }
       launcher = launcherIn(resources) || launcher
+      if (own) document.title = names.get(own.entrypoint) || document.title
       shortcuts()
-      if (launcher) on({ type: "listed" })
+      if (launcher || own) on({ type: "listed" })
       else if (shown.getSnapshot().context.connection === "online") on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "none", only: await only() })
       on({ type: "updateReady", ready: !phone && (await behind().catch(() => false)) })
     }
@@ -1082,7 +1103,7 @@ addEventListener("message", ({ data }) => {
 /// The app that's open as `at`, or with none there, the one under every other: the launcher, or while there's none,
 /// the App Store.
 /** @param {string | null} at */
-const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().matches("app_store") ? appStore : launcher))
+const showing = (at) => open.get(at ?? "") ?? open.get(shown.getSnapshot().matches("app_store") ? key(appStore) : baseKey())
 
 /// The rail: every app's way back to the Home Screen and over to another, above every app, as a phone's edge panel
 /// and a computer's app rail (Teams', Slack's) are. It's Home, then the apps used lately on this device (`recent`),
@@ -1110,7 +1131,12 @@ const fronted = new WeakSet()
 function used(view) {
   if (view.entrypoint === launcher || fronted.has(view)) return
   fronted.add(view)
-  recent = [view.key, ...recent.filter((at) => at !== view.key)].slice(0, RECENT)
+  usedKey(view.key)
+}
+/// An app by its key is the newest used, as one opened in a window of its own is.
+/** @param {string} at */
+function usedKey(at) {
+  recent = [at, ...recent.filter((was) => was !== at)].slice(0, RECENT)
   try {
     localStorage.setItem("recent", JSON.stringify(recent))
   } catch {}
@@ -1204,7 +1230,8 @@ function pick(entrypoint, subject) {
 let excluded
 function rail() {
   const now = shown.getSnapshot()
-  const homed = Boolean(launcher) && now.hasTag("pages") && !now.matches("app_store")
+  // An app's own window has none: the computer's own Dock or taskbar goes between its windows.
+  const homed = Boolean(launcher) && !own && now.hasTag("pages") && !now.matches("app_store")
   const handled = homed && !showing(here())?.over
   if (homed) document.body.dataset.rail = here() === null ? "home" : "app"
   else delete document.body.dataset.rail
@@ -1581,10 +1608,22 @@ function go(link, subject, behind, from) {
   const [entrypoint, fragment] = link.split("#", 2)
   const page = entrypoint.includes("/") ? entrypoint : first.get(entrypoint)
   if (!page) return false
+  // On a computer, an app opens in its own window, and the Home Screen comes forward in its own.
+  if (windows && key(page, subject) !== baseKey()) {
+    if (behind) return true
+    if (page === launcher) {
+      invoke("front")
+      return true
+    }
+    invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page })
+    usedKey(key(page, subject))
+    rail()
+    return true
+  }
   const tapped = performance.now()
   const next = load(page, subject, fragment)
   if (behind) return true
-  if (next.entrypoint === launcher) {
+  if (next.key === baseKey()) {
     // Each app's screens it went through on the way are steps back too.
     if (depth) history.go(Math.min(-depth, stack[0].at - stack[depth].at))
     return true
@@ -1682,7 +1721,7 @@ window.back = () => {
     sheet.requestClose()
     return true
   }
-  const view = open.get(here() ?? "") ?? open.get(key(launcher))
+  const view = open.get(here() ?? "") ?? open.get(baseKey())
   if (!view?.over || view.frame.inert) return false
   post(view, { method: "notifications/one/back" })
   return true
@@ -1729,7 +1768,7 @@ function returned() {
   // Put away, the window's pages are off screen (`away`), where its stale ones load their new versions.
   if (document.hidden) return
   for (const subject of listed) list(subject)
-  invoke("refresh", { view: key(launcher) })
+  invoke("refresh", { view: baseKey() })
   const view = here()
   if (view) invoke("refresh", { view })
 }
@@ -1738,9 +1777,9 @@ addEventListener("focus", returned)
 
 /// Shows the launcher, once this user's files have listed one: loaded, or loaded again where it was open.
 function start() {
-  const home = open.get(key(launcher))
+  const home = open.get(baseKey())
   if (home) page(home, { type: "retry" })
-  else load(launcher)
+  else load(base(), own?.subject)
   // The app that was showing when the page was loaded again is gone, so the launcher shows.
   restart()
   show(null, 0)
@@ -1771,9 +1810,13 @@ await listen("session", ({ payload }) => hear(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
-const { taps, testflight: fromTestflight, connection, open: link, ...told } = await invoke("start")
+const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, window: ownWindow, theme: kept, ...told } = await invoke("start")
 phone = Boolean(taps)
 testflight = Boolean(fromTestflight)
+windows = Boolean(inWindows)
+own = ownWindow ?? undefined
+if (own?.name) document.title = own.name
+heardTheme(kept)
 on({ type: "connection", connection })
 if (link) on({ type: "link", link })
 hear(told)

@@ -138,8 +138,8 @@ export type Moved =
 
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
-  /** Where the device is with its network as the window opens, whether its network answers, and whether a phone hears taps on notifications. */
-  start(): Told & { connection: Connection; taps?: boolean; open?: string | null }
+  /** Where the device is with its network as the window opens, whether its network answers, whether a phone hears taps on notifications, whether each app opens in a window of its own (a computer's), which app this window is if it's an app's own, and the Colour Mode chosen on the device, if one has been. */
+  start(): Told & { connection: Connection; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; theme?: "light" | "dark" | null }
   /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
@@ -168,6 +168,10 @@ export interface Commands {
   /** Light or dark for the window's own bars, or with `null`, as the device is. */
   theme(args: { theme: "light" | "dark" | null }): void
   listen(): void
+  /** Opens an app in a window of its own, at `link`, or brings it forward there if it's open. */
+  open_window(args: { entrypoint: string; subject: string | undefined; link: string }): void
+  /** Brings the Home Screen's window forward. */
+  front(): void
   tapped(args: { tapped: unknown }): void
   "plugin:notifications|set_click_listener_active"(args: { active: boolean }): void
   "plugin:haptics|impact_feedback"(args: { style: string }): void
@@ -192,6 +196,8 @@ export interface Events {
   session: Told
   /** Why a server refused this client for being on a version before its own, once one has. */
   behind: string
+  /** The Colour Mode chosen on this device, in any of its windows: `null` for as the device is. */
+  theme: "light" | "dark" | null
 }
 
 export type Listen = <Event extends keyof Events>(event: Event, handler: (event: { payload: Events[Event] }) => void) => unknown

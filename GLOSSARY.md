@@ -37,6 +37,10 @@ An app's own words are defined in that app's `SKILL.md`.
   On a wide window it's a thin sidebar on the left, always there, as Teams', Slack's and Discord's app rails are;
   elsewhere it's a handle on the right edge, always there too, that a finger brings it in from as a panel, as
   Samsung's Edge panels are.
+- **App window**: on a computer (Mac, Windows, Linux), an app open in a window of its own, in a process of its own,
+  which the system lists as that app: its own name and icon in the Dock or taskbar, in Cmd-Tab or Alt-Tab, and on a
+  Mac its own menu bar, as Safari's web apps are. It asks the network through the app's window, which keeps the Home
+  Screen, and each app's shortcut (`shortcuts`) opens it. In code, its process is the host (`host.rs`).
 - **App Store**: the app that installs and removes apps, in the category `app-store`, which a client opens itself
   where there's no launcher yet to open it from.
 - **Trusted**, **Untrusted**: the state of an installed app, apart from where it is in its lifecycle, and either

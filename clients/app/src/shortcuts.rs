@@ -1,8 +1,11 @@
 //! Each app with a screen of its own, where the device lists its own apps, so it's found and opened as they are: an
 //! iPhone's Spotlight and the app's one App Shortcut, Open [app] in The One App, which Siri, Shortcuts and the Action
-//! button have too (`gen/apple/Sources/app/Shortcuts.swift`), and Windows' Start menu. Each opens its app here by its
-//! `one:` link (`links`). They follow what's listed for this device's person (`apps`), so an app installed is added,
-//! one uninstalled goes, and a device that's signed out has none.
+//! button have too (`gen/apple/Sources/app/Shortcuts.swift`), Windows' Start menu, a Mac's Applications folder, which
+//! Spotlight and Launchpad find, and a Linux desktop's applications. Each opens its app as the device's own: on a phone
+//! here by its `one:` link (`links`), and on a computer in a window of its own (`host`). They follow what's listed for
+//! this device's person (`apps`), so an app installed is added, one uninstalled goes, and a device that's signed out
+//! has none. A Mac's and Linux's are kept only by an installed build, as only it takes the device's `one:` links: a
+//! developer's would leave behind ones to a build that's gone.
 
 use std::sync::Mutex;
 
@@ -61,7 +64,7 @@ pub fn keep(app: &AppHandle, shortcuts: Vec<Shortcut>) {
 
 /// An icon as a square PNG `side` pixels across, from its `data:` address: an SVG drawn at that size, or a PNG
 /// scaled to it.
-#[cfg(any(target_os = "ios", windows))]
+#[cfg(not(target_os = "android"))]
 fn png(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
     use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
     use resvg::usvg;
@@ -121,8 +124,8 @@ mod device {
 }
 
 /// Windows' are shortcuts in the Start menu, in a folder named for this app, each to this program with its `one:` link,
-/// and with its icon and an AppUserModelID of its own (`app_user_model_id`), so a window of its own groups under its own
-/// icon in the taskbar, apart from this app's.
+/// and with its icon and an AppUserModelID of its own (`app_id`), which the app's own window says too (`host`), so it
+/// groups under its own icon in the taskbar, apart from this app's.
 #[cfg(windows)]
 mod device {
     use std::path::Path;
@@ -143,7 +146,6 @@ mod device {
     use super::Shortcut;
 
     pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
-        let identifier = &app.config().identifier;
         let start = app.path().data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(&app.package_info().name);
         let icons = app.path().app_local_data_dir()?.join("shortcuts");
         std::fs::create_dir_all(&start)?;
@@ -169,7 +171,7 @@ mod device {
                 }
             };
             std::fs::write(&icon, ico(&drawn)?)?;
-            let id = super::app_user_model_id(identifier, &shortcut.entrypoint);
+            let id = super::app_id(&shortcut.entrypoint, None);
             link(&start.join(&file), &program, &format!("one:{}", shortcut.entrypoint), &icon, &shortcut.name, &id)?;
             made.push(file);
         }
@@ -239,17 +241,264 @@ mod device {
     }
 }
 
-/// Any other device lists nothing of the apps in this one.
-#[cfg(not(any(target_os = "ios", windows)))]
+/// A Mac's are app bundles in `~/Applications/<this app's name>/`, each with the app's name and icon, whose program is
+/// a copy of this one (a clone, which takes no room on APFS) told which app it is (`LSEnvironment`'s `ONE_APP`), as the
+/// program its window runs (`program`): macOS knows a process by its bundle, so it's the copy that gives an app its own
+/// Dock icon, Cmd-Tab entry and menu bar. A bundle already as it would be made is left as it is, and one whose program
+/// isn't this build's is made again, as this one is updated.
+#[cfg(target_os = "macos")]
+mod device {
+    use std::path::{Path, PathBuf};
+
+    use anyhow::Context;
+    use tauri::Manager;
+
+    use super::Shortcut;
+
+    pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+        if cfg!(debug_assertions) {
+            return Ok(());
+        }
+        let folder = folder(app)?;
+        std::fs::create_dir_all(&folder)?;
+        let program = std::env::current_exe()?;
+        let mut made = Vec::new();
+        for shortcut in shortcuts {
+            let bundle = bundle(&folder, &shortcut.name);
+            if made.contains(&bundle) {
+                continue;
+            }
+            match make(&bundle, shortcut, &program) {
+                Ok(()) => made.push(bundle),
+                Err(error) => eprintln!("{} isn't one of this Mac's apps: {error:#}", shortcut.entrypoint),
+            }
+        }
+        for kept in std::fs::read_dir(&folder)?.flatten() {
+            if !made.contains(&kept.path()) {
+                register(&kept.path(), "-u");
+                std::fs::remove_dir_all(kept.path())?;
+            }
+        }
+        if made.is_empty() {
+            std::fs::remove_dir(&folder)?;
+        }
+        Ok(())
+    }
+
+    /// Where an app's bundle is.
+    pub fn bundle(folder: &Path, name: &str) -> PathBuf {
+        let name: String = name.chars().map(|c| if matches!(c, '/' | ':') { '-' } else { c }).collect();
+        folder.join(format!("{}.app", name.trim_start_matches('.')))
+    }
+
+    /// The folder this app's apps are in.
+    pub fn folder(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
+        Ok(app.path().home_dir()?.join("Applications").join(&app.package_info().name))
+    }
+
+    fn make(bundle: &Path, shortcut: &Shortcut, program: &Path) -> anyhow::Result<()> {
+        let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        let plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>one</string>
+  <key>CFBundleIdentifier</key><string>{id}</string>
+  <key>CFBundleName</key><string>{name}</string>
+  <key>CFBundleDisplayName</key><string>{name}</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>{build}</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>LSEnvironment</key>
+  <dict>
+    <key>ONE_APP</key><string>{entrypoint}</string>
+    <key>ONE_PROGRAM</key><string>{program}</string>
+  </dict>
+</dict>
+</plist>
+"#,
+            id = text(&super::app_id(&shortcut.entrypoint, None)),
+            name = text(&shortcut.name),
+            build = text(::client::BUILD),
+            entrypoint = text(&shortcut.entrypoint),
+            program = text(&program.to_string_lossy()),
+        );
+        let icon = icns(&shortcut.icon)?;
+        let made = std::fs::read_to_string(bundle.join("Contents/Info.plist")).is_ok_and(|was| was == plist)
+            && std::fs::read(bundle.join("Contents/Resources/AppIcon.icns")).is_ok_and(|was| was == icon);
+        if made {
+            return Ok(());
+        }
+        let making = bundle.with_extension("making");
+        let _ = std::fs::remove_dir_all(&making);
+        std::fs::create_dir_all(making.join("Contents/MacOS"))?;
+        std::fs::create_dir_all(making.join("Contents/Resources"))?;
+        // A clone: APFS shares its blocks until either changes, and this program is replaced as it's updated, never
+        // changed, so its bundles are made again then (their `CFBundleVersion`).
+        std::fs::copy(program, making.join("Contents/MacOS/one"))?;
+        std::fs::write(making.join("Contents/Resources/AppIcon.icns"), icon)?;
+        std::fs::write(making.join("Contents/Info.plist"), plist)?;
+        let _ = std::fs::remove_dir_all(bundle);
+        std::fs::rename(&making, bundle)?;
+        // LaunchServices reads a bundle's LSEnvironment as it registers it, so it's told of the new one at once.
+        register(bundle, "-f");
+        Ok(())
+    }
+
+    /// Registers a bundle with LaunchServices (`-f`), or has it forgotten (`-u`).
+    fn register(bundle: &Path, how: &str) {
+        let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+        let _ = std::process::Command::new(lsregister).arg(how).arg(bundle).status();
+    }
+
+    /// An app's icon as a Mac app's: on macOS's icon grid, its body 824 of 1024 across in the middle, rounded by 185, as
+    /// `tooling/helper-icon` draws one, as an .icns of PNGs at the sizes macOS asks for.
+    fn icns(icon: &str) -> anyhow::Result<Vec<u8>> {
+        use resvg::tiny_skia::{FillRule, FilterQuality, Mask, PathBuilder, Pixmap, PixmapPaint, Transform};
+        let body = Pixmap::decode_png(&super::png(icon, 824)?)?;
+        let mut whole = Pixmap::new(1024, 1024).context("a pixmap")?;
+        whole.draw_pixmap(100, 100, body.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        // A rounded square, its corners quarter circles as near as cubic curves draw them.
+        let (near, far, radius) = (100.0, 924.0, 185.0);
+        let k = radius * 0.552_284_8;
+        let mut path = PathBuilder::new();
+        path.move_to(near + radius, near);
+        path.line_to(far - radius, near);
+        path.cubic_to(far - radius + k, near, far, near + radius - k, far, near + radius);
+        path.line_to(far, far - radius);
+        path.cubic_to(far, far - radius + k, far - radius + k, far, far - radius, far);
+        path.line_to(near + radius, far);
+        path.cubic_to(near + radius - k, far, near, far - radius + k, near, far - radius);
+        path.line_to(near, near + radius);
+        path.cubic_to(near, near + radius - k, near + radius - k, near, near + radius, near);
+        path.close();
+        let mut mask = Mask::new(1024, 1024).context("a mask")?;
+        mask.fill_path(&path.finish().context("a rounded square")?, FillRule::Winding, true, Transform::identity());
+        whole.apply_mask(&mask);
+        let mut entries = Vec::new();
+        for (kind, side) in [(b"ic10", 1024u32), (b"ic09", 512), (b"ic08", 256), (b"ic07", 128), (b"ic12", 64), (b"ic11", 32)] {
+            let mut sized = Pixmap::new(side, side).context("a pixmap")?;
+            let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
+            sized.draw_pixmap(0, 0, whole.as_ref(), &paint, Transform::from_scale(side as f32 / 1024.0, side as f32 / 1024.0), None);
+            let png = sized.encode_png()?;
+            entries.extend_from_slice(kind);
+            entries.extend_from_slice(&(png.len() as u32 + 8).to_be_bytes());
+            entries.extend_from_slice(&png);
+        }
+        let mut icns = b"icns".to_vec();
+        icns.extend_from_slice(&(entries.len() as u32 + 8).to_be_bytes());
+        icns.extend_from_slice(&entries);
+        Ok(icns)
+    }
+}
+
+/// Linux's are desktop entries in the user's applications (`~/.local/share/applications`), named after each app's id
+/// (`app_id`), which its window's class is too (`StartupWMClass`), each starting this program as that app's window, with
+/// its icon beside this app's data.
+#[cfg(target_os = "linux")]
+mod device {
+    use tauri::Manager;
+
+    use super::Shortcut;
+
+    pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+        if cfg!(debug_assertions) {
+            return Ok(());
+        }
+        let entries = app.path().data_dir()?.join("applications");
+        let icons = app.path().app_local_data_dir()?.join("shortcuts");
+        std::fs::create_dir_all(&entries)?;
+        std::fs::create_dir_all(&icons)?;
+        let program = std::env::current_exe()?;
+        // A desktop entry's Exec quotes each argument, and escapes what's special inside the quotes.
+        let quoted = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"").replace('`', "\\`").replace('$', "\\$"));
+        let mut made = Vec::new();
+        for shortcut in shortcuts {
+            let id = super::app_id(&shortcut.entrypoint, None);
+            let icon = icons.join(format!("{id}.png"));
+            match super::png(&shortcut.icon, 256) {
+                Ok(drawn) => std::fs::write(&icon, drawn)?,
+                Err(error) => {
+                    eprintln!("{}'s icon isn't one a device can show: {error:#}", shortcut.entrypoint);
+                    continue;
+                }
+            }
+            let entry = format!(
+                "[Desktop Entry]\nType=Application\nName={}\nExec=env {} {}\nIcon={}\nStartupWMClass={id}\nTerminal=false\n",
+                shortcut.name.replace('\n', " "),
+                quoted(&format!("ONE_APP={}", shortcut.entrypoint)),
+                quoted(&program.to_string_lossy()),
+                icon.display(),
+            );
+            let file = format!("{id}.desktop");
+            std::fs::write(entries.join(&file), entry)?;
+            made.push(id);
+        }
+        // What's no longer listed goes, its icon with it.
+        let ours = format!("{}.", ::client::NAME);
+        for kept in std::fs::read_dir(&entries)?.flatten() {
+            let name = kept.file_name().to_string_lossy().into_owned();
+            if let Some(id) = name.strip_suffix(".desktop").filter(|id| id.starts_with(&ours)) {
+                if !made.iter().any(|made| made == id) {
+                    std::fs::remove_file(kept.path())?;
+                    let _ = std::fs::remove_file(icons.join(format!("{id}.png")));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Android lists its apps itself (`shortcuts` in page/client.js).
+#[cfg(target_os = "android")]
 mod device {
     pub fn keep(_app: &tauri::AppHandle, _shortcuts: &[super::Shortcut]) -> anyhow::Result<()> {
         Ok(())
     }
 }
 
-/// The AppUserModelID of an app here, by its entrypoint's app, which Windows groups its windows under, in the taskbar,
-/// apart from this app's own (its identifier, `run`): `<identifier>.<app>`.
-#[cfg(windows)]
-pub fn app_user_model_id(identifier: &str, entrypoint: &str) -> String {
-    format!("{identifier}.{}", entrypoint.split('/').next().unwrap_or(entrypoint))
+/// An app's screen's id on a computer, as each system names an app: Windows' AppUserModelID, which it groups the app's
+/// windows by in the taskbar, a Mac bundle's identifier, and a Linux window's class. It's this app's identifier, then
+/// the app's name, its page's if it isn't the app's first, and who it's for, if not its user, last part first:
+/// `app.theone.client.notes`, `app.theone.client.sign-in.users`, `app.theone.client.notes.family.groups`.
+pub fn app_id(entrypoint: &str, subject: Option<&str>) -> String {
+    let mut parts = entrypoint.split('/');
+    let mut id = parts.next().unwrap_or_default().to_owned();
+    let page: Vec<&str> = parts.collect();
+    if page != ["client", "index.html"] {
+        let page = page.iter().filter(|part| **part != "client").copied().collect::<Vec<_>>().join("-");
+        id = format!("{id}.{}", page.trim_end_matches(".html"));
+    }
+    for part in subject.into_iter().flat_map(|subject| subject.split('/').rev()) {
+        id = format!("{id}.{part}");
+    }
+    let id: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' }).collect();
+    format!("{}.{id}", ::client::NAME)
+}
+
+/// An app's screen's name, as its shortcut has it, once this device has listed them.
+#[cfg(desktop)]
+pub fn name(entrypoint: &str) -> Option<String> {
+    let kept = KEPT.lock().expect("no keep panics");
+    kept.iter().flatten().find(|shortcut| shortcut.entrypoint == entrypoint).map(|shortcut| shortcut.name.clone())
+}
+
+/// The program an app's window runs (`hosts`): on a Mac its bundle's, so macOS knows it as that app, and otherwise
+/// this one.
+#[cfg(desktop)]
+pub fn program(app: &AppHandle, entrypoint: &str) -> anyhow::Result<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let kept = KEPT.lock().expect("no keep panics").clone().unwrap_or_default();
+        if let Some(shortcut) = kept.iter().find(|shortcut| shortcut.entrypoint == entrypoint) {
+            let program = device::bundle(&device::folder(app)?, &shortcut.name).join("Contents/MacOS/one");
+            if program.exists() {
+                return Ok(program);
+            }
+        }
+    }
+    let _ = (app, entrypoint);
+    Ok(std::env::current_exe()?)
 }
