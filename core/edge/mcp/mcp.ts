@@ -181,8 +181,8 @@ type Call = { id?: unknown; method?: unknown; params?: { _meta?: Record<string, 
 
 /**
  * Passes one JSON-RPC message to a server acting for one of `of`, as from `from`, a device or a sharing link's
- * holder, and answers what the server did. What's asked says who it's from, who it's for (a device's), the span
- * it's under and what MCP has it say, and nothing else of itself. `headers` are the HTTP request's, if it's one, and
+ * holder, and answers what the server did. What's asked says who it's from, who it's for and which app's page asked
+ * (a device's), the span it's under and what MCP has it say, and nothing else of itself. `headers` are the HTTP request's, if it's one, and
  * `client` its client's connection, whose going before its answer the servers are told.
  */
 async function forward(
@@ -206,9 +206,12 @@ async function forward(
   const mismatch = modern && mismatched(headers, call);
   if (mismatch) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32020, message: `Header mismatch: ${mismatch}` } }, { status: 400 });
   const subject = "device" in from ? meta.subject : undefined;
+  // Which app's page asked, as the window's page says of each (`clients/app/page/client.js`), which a server holds
+  // that page to (`OneCore.Mcp`).
+  const app = "device" in from ? meta.app : undefined;
   const traceparent = traced(meta.traceparent ?? headers?.get("traceparent") ?? undefined);
   const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP) || key === "progressToken"));
-  const forwardedMeta = { ...mcp, ...from, traceparent, ...(typeof subject === "string" && { subject }), ...(mode && { mode }) };
+  const forwardedMeta = { ...mcp, ...from, traceparent, ...(typeof subject === "string" && { subject }), ...(typeof app === "string" && { app }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: forwardedMeta } });
   const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
   const forwarded = env.RELAY.forward(servers, message);
