@@ -63,6 +63,22 @@ drops.
 - What the app says, and every page's console, Solid's dev warnings too, is in `log`, as `CONSOLE WARN …` (a debug
   build only), and when each window drew, as `<app> opened in … ms`. WebKitGTK here has no WebDriver BiDi.
 
+### Strict windows
+
+A strict app's window (its entrypoint's `host`) is drawn natively on Linux, not in a web view, so WebDriver doesn't
+reach it: drive it with the inspector, which every strict window serves (`clients/app/strict/src/inspect.rs` is its
+protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never a sleep:
+
+- Offscreen, the same on every run, with no network: `bun dist/build/app.js apps/<app>/client <out>` in `core/ui`
+  (after `bun build.js`), then `cargo run -p strict --features headless --example screenshot -- <out> <png> <json>
+  --ui core/ui/dist/client --answers <answers.json> --requests <requests.jsonl>`, its header says how. Its clock is
+  paused: `clock` `step` moves it.
+- In the app on a local network: open the window (`one:<app>`) as in Desktop above, with `ONE_HOME` and `ONE_AS` set
+  and the app's launcher running, then call the Inspector app's tools as that user, `one inspector windows`, `one
+  inspector tap --text …`, `one inspector snap`: they reach the window through the launcher, as an agent on another
+  device does. The window's own socket (`<XDG_RUNTIME_DIR>/<client>-<hash>-inspect-<pid>.sock`) takes the same
+  requests, one a line, from `socat`.
+
 ### Android
 
 An emulator with the AVD `one-phone` (Android 36, x86_64, KVM) is set up here:
