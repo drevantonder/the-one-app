@@ -194,8 +194,11 @@ for name in "${mine[@]}"; do
     one/*) cargo=(build) program=release/one ;;
     *) continue ;;
   esac
+  # Windows shows a program by the name its version resource says, as in Windows Firewall's prompt: one's is The One App.
   (echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
-    gzip -9 -c "$target/clients/$file/$program" >"$out/$file.gz") &
+    cp "$target/clients/$file/$program" "$out/$file" &&
+    { [[ $name != *windows-* ]] || VERSION=${build%%+*} tooling/windows-name "$out/$file"; } &&
+    gzip -9 -c "$out/$file" >"$out/$file.gz" && rm "$out/$file") &
   clients+=($!)
 done
 
@@ -285,8 +288,10 @@ for kind in "${servers[@]}"; do
     crate=$(basename "$(dirname "$nif")")
     if [[ $kind == windows-* ]]; then cp "$nif" "$priv/$crate.dll"; else cp "$nif" "$priv/$crate.so"; fi
   done
-  # Windows' VM keeps its debugging symbols apart already.
-  [[ $kind == windows-* ]] || "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"
+  # Windows' VM keeps its debugging symbols apart already. It's named The One App there, which Windows Firewall asks
+  # a person about as the server takes connections, rather than Erlang, which nobody there knows they have.
+  if [[ $kind == windows-* ]]; then tooling/windows-name "$(echo "$release"/erts-*/bin/erl.exe)"; else
+    "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
 
   # What it ships with: the UI library's build, which it builds apps against and serves, and the Bun it builds apps
   # with. What its NIFs were built from is beside them, for `tooling/nifs` to find a Mac's again.

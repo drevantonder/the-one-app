@@ -1,0 +1,24 @@
+#!/usr/bin/env bun
+// Names the Windows programs it's given The One App in their version resources, which Windows shows a program by:
+// in Windows Firewall's prompt and its list of allowed apps, among others. What else a resource says stays; a program
+// with none, as Rust builds one, has one made, of version VERSION. A signed program, as Erlang/OTP's are, is left
+// unsigned, as a changed one's signature no longer holds (resedit).
+import * as ResEdit from "resedit@3.1.1";
+import * as PE from "pe-library@1.0.1";
+import { readFileSync, writeFileSync } from "node:fs";
+for (const file of process.argv.slice(2)) {
+  const exe = PE.NtExecutable.from(readFileSync(file), { ignoreCert: true });
+  const resources = PE.NtExecutableResource.from(exe);
+  let [version] = ResEdit.Resource.VersionInfo.fromEntries(resources.entries);
+  if (!version) {
+    version = ResEdit.Resource.VersionInfo.create({ lang: 1033, fixedInfo: {}, strings: [] });
+    version.setFileVersion(process.env.VERSION, 1033);
+    version.setProductVersion(process.env.VERSION, 1033);
+  }
+  const languages = version.getAllLanguagesForStringValues();
+  for (const language of languages.length ? languages : [{ lang: 1033, codepage: 1200 }])
+    version.setStringValues(language, { FileDescription: "The One App", ProductName: "The One App" });
+  version.outputToResourceEntries(resources.entries);
+  resources.outputResource(exe);
+  writeFileSync(file, Buffer.from(exe.generate()));
+}
