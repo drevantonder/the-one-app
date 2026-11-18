@@ -156,7 +156,7 @@ impl Screen {
         let pressed = at.with_context(|| format!("node {id} takes no press, and neither does what it's in"))?;
         self.focus(Some(pressed));
         if self.tree.nodes[&pressed].kind != Kind::Input {
-            self.event(pressed, "click", None);
+            self.click(pressed, None);
         }
         Ok(pressed)
     }

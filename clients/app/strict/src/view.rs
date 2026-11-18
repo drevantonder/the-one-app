@@ -222,6 +222,19 @@ impl Screen {
         self.pump();
     }
 
+    /// Tells node `id` it was clicked, at `at` in the window, or in its middle by a key or an agent, with where it's
+    /// drawn (`rect`), which what it opens is placed by, as a menu is under its button.
+    pub(crate) fn click(&mut self, id: Id, at: Option<Point<f32>>) {
+        let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+        let at = at.unwrap_or(point(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0));
+        let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "click", "clientX": at.x, "clientY": at.y,
+            "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
+        if let Err(error) = self.sandbox.send("event", &event) {
+            self.threw(error);
+        }
+        self.pump();
+    }
+
     /// Tells the app a message from its client: an answer to what it asked (`Asked`), or a notification.
     pub fn message(&mut self, message: &Value) {
         if message.get("method").is_none() {
@@ -684,13 +697,7 @@ impl Screen {
         let Some(pressed) = self.states.pressed.take() else { return };
         let over = self.under(at).contains(&pressed);
         if over && self.placed(pressed).is_some_and(|placed| !placed.input) {
-            let rect = self.rects.get(&pressed).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
-            let event = json!({"v": crate::VERSION, "op": "event", "id": pressed, "name": "click", "clientX": at.x, "clientY": at.y,
-                "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            self.pump();
+            self.click(pressed, Some(at));
         }
     }
 
@@ -778,7 +785,7 @@ impl Screen {
         if self.fields.contains_key(&id) {
             self.type_key(id, key);
         } else if matches!(key.key.as_str(), "Enter" | " ") && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
-            self.event(id, "click", None)
+            self.click(id, None)
         }
         Some(id)
     }
@@ -1004,6 +1011,8 @@ pub(crate) struct Placed {
     pub parent: Option<Id>,
     /// Where it shows, clipped, in the window.
     pub shown: Bounds<f32>,
+    /// Whether it takes the pointer (`pointerEvents`): what doesn't is still in the chain of what's in it.
+    pub pointer: bool,
     pub cursor: Option<Cursor>,
     pub pressable: bool,
     pub input: bool,
@@ -1011,8 +1020,6 @@ pub(crate) struct Placed {
     pub scroll: Option<(f32, f32, bool)>,
 }
 
-    /// Whether it takes the pointer (`pointerEvents`): what doesn't is still in the chain of what's in it.
-    pub pointer: bool,
 struct Painter<'a> {
     tree: &'a Tree,
     taffy: TaffyTree<()>,
