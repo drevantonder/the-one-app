@@ -2,6 +2,7 @@ package app.theone.client
 
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
@@ -70,6 +71,14 @@ class MainActivity : TauriActivity() {
       WebViewCompat.addWebMessageListener(webView, "androidBack", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
         behind = message.data == "true"
         gate?.pass()
+      }
+      // Where the rail's handle is on the window's right edge (`rail` in client.js), in the page's pixels, which
+      // Android's back gesture leaves to it, so a finger there takes the handle; the rest of the edge is still back.
+      // Android leaves an app at most 200 dp of each edge, which the handle is shorter than.
+      WebViewCompat.addWebMessageListener(webView, "androidEdge", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
+        val scale = resources.displayMetrics.density
+        val at = message.data.orEmpty().split(",").mapNotNull { it.toFloatOrNull()?.times(scale)?.toInt() }
+        ViewCompat.setSystemGestureExclusionRects(webView, if (at.size == 4) listOf(Rect(at[0], at[1], at[2], at[3])) else emptyList())
       }
       // A haptic an app asked for, by iOS's name (`one/haptic` in client.js), played as Android's own, which follows
       // the system's Touch feedback. Flutter's choices for iOS's impacts and selection.

@@ -43,9 +43,11 @@ const key = (entrypoint, subject) => `${subject ?? ""}|${entrypoint}`
 /// Each app's first app, by the app's name, among this user's: what a notification from it, or a `one:` link to it, opens.
 /** @type {Map<string, string>} */
 let first = new Map()
-/// Each app's name, by its page, as this user's apps list them.
+/// Each app's name and icon, by its page, as this user's apps list them.
 /** @type {Map<string, string>} */
 let names = new Map()
+/** @type {Map<string, string>} */
+let icons = new Map()
 /// Who this client has listed files for: its user (`undefined`), and each group or the network an app was opened
 /// for.
 /** @type {Set<string | undefined>} */
@@ -251,6 +253,37 @@ function moves(leaving, coming, back, icon) {
   }
 }
 
+/// Takes `body.p` to `body.target` as a critically damped spring, as the Home Screen's pages have
+/// (apps/home-screen/client/pager.ts), from as fast as it's going (`velocity`), drawing each frame (`seek`) until it's
+/// still there (`settled`). Its `stiffness` is set so that from still it lands as the ease it replaces did, in the
+/// move's time: within 3 % of it all the way. → what stops it.
+/** @param {{ p: number, target: number, velocity: number, stiffness: number }} body @param {(p: number) => void} seek @param {() => void} settled */
+function spring(body, seek, settled) {
+  let last = performance.now()
+  /** @param {number} now */
+  const step = (now) => {
+    // A frame late, as when the window was hidden, is taken as one, so nothing jumps.
+    const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000))
+    last = now
+    let { p, velocity } = body
+    for (let at = 0; at < dt; at += 1 / 240) {
+      const slice = Math.min(1 / 240, dt - at)
+      velocity += (-body.stiffness * (p - body.target) - 2 * Math.sqrt(body.stiffness) * velocity) * slice
+      p += velocity * slice
+    }
+    const still = Math.abs(p - body.target) < 0.001 && Math.abs(velocity) < 0.05
+    body.velocity = still ? 0 : velocity
+    seek(still ? body.target : p)
+    if (still) settled()
+    else frame = requestAnimationFrame(step)
+  }
+  let frame = requestAnimationFrame(step)
+  return () => cancelAnimationFrame(frame)
+}
+/// How stiff a spring is that lands in `ms` from still.
+/** @param {number} ms */
+const stiffness = (ms) => (27 * 400 / ms) ** 2
+
 /// The window's moves between its launcher and its apps, and from app to app, one at a time: a child of the window's
 /// (`machine`), which tells it where to go only while it shows apps (tagged `pages`), and to stop where it was going
 /// (`freeze`) as it covers them all. The Home Screen is never told: it's a frame like any other here.
@@ -278,6 +311,9 @@ function moves(leaving, coming, back, icon) {
 ///     show, while tracking: as while playing, the finger keeping it unless it goes somewhere else.
 ///     popped(to), drawn already by the device: still at `to`, with nothing drawn; while playing toward it, nothing.
 ///
+/// The rail's Home and its apps (`rail`) are links (`go`): Home goes back through the history, as back does, and an
+/// app is `show`n, as one opened from another is.
+///
 /// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`), as do Android's back gesture
 /// (`backStarted`) and an iPhone's swipe in from the edge (`window.grab`).
 /** @typedef {{ from: View, to: View, upper: View, parts: Animation[], p: number, target: number, velocity: number, stiffness: number }} Move */
@@ -291,30 +327,7 @@ function seek(move, p) {
 const moveMachine = setup({
   types: /** @type {{ context: { move?: Move }, events: Shown }} */ ({}),
   actors: {
-    // A critically damped spring, as the Home Screen's pages have (apps/home-screen/client/pager.ts), stiff enough
-    // that from still it lands as the ease it replaces did, in the move's time: within 3 % of it all the way.
-    spring: fromCallback(/** @param {{ input: Move, sendBack: (event: Shown) => void }} spring */ ({ input: move, sendBack }) => {
-      let last = performance.now()
-      /** @param {number} now */
-      const step = (now) => {
-        // A frame late, as when the window was hidden, is taken as one, so nothing jumps.
-        const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000))
-        last = now
-        let { p, velocity } = move
-        for (let at = 0; at < dt; at += 1 / 240) {
-          const slice = Math.min(1 / 240, dt - at)
-          velocity += (-move.stiffness * (p - move.target) - 2 * Math.sqrt(move.stiffness) * velocity) * slice
-          p += velocity * slice
-        }
-        const still = Math.abs(p - move.target) < 0.001 && Math.abs(velocity) < 0.05
-        move.velocity = still ? 0 : velocity
-        seek(move, still ? move.target : p)
-        if (still) sendBack({ type: "settled" })
-        else frame = requestAnimationFrame(step)
-      }
-      let frame = requestAnimationFrame(step)
-      return () => cancelAnimationFrame(frame)
-    }),
+    spring: fromCallback(/** @param {{ input: Move, sendBack: (event: Shown) => void }} spring */ ({ input: move, sendBack }) => spring(move, (p) => seek(move, p), () => sendBack({ type: "settled" }))),
   },
   guards: {
     here: ({ event }) => "to" in event && event.to === front,
@@ -339,7 +352,7 @@ const moveMachine = setup({
       reveal(show.to, show.tapped)
       /** @type {Move} */
       // It goes where the window's history is: a finger that takes it from still hasn't gone anywhere yet.
-      const move = { from, to: show.to, upper, parts: animations, p: 0, target: event.type === "grab" ? 0 : 1, velocity: 0, stiffness: (27 * 400 / ms) ** 2 }
+      const move = { from, to: show.to, upper, parts: animations, p: 0, target: event.type === "grab" ? 0 : 1, velocity: 0, stiffness: stiffness(ms) }
       seek(move, 0)
       return { move }
     }),
@@ -708,6 +721,7 @@ function draw() {
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
   notes()
+  rail()
   // Over the launcher: its network not answering, and trying again once it has lost it. Answering, nothing.
   const banner = now.matches("launcher") && (context.connection === "offline" || context.connection === "reconnecting")
   if (byId("banner").hidden === banner) {
@@ -790,6 +804,7 @@ function launcherIn(resources) {
   // The last one set for an app is the one kept: its first.
   first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
   names = new Map(pages.map(({ uri, name }) => [named(uri), name ?? ""]))
+  icons = new Map(pages.flatMap(({ uri, icons }) => (icons?.[0] ? [[named(uri), icons[0].src]] : [])))
   const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
   appStore = found("app-store") ? named(/** @type {string} */ (found("app-store"))) : ""
   const home = found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
@@ -952,6 +967,7 @@ function reveal(view, tapped) {
 function layer(at) {
   const view = showing(at)
   front = view
+  if (view) used(view)
   bar()
   for (const other of open.values()) {
     other.frame.inert = other !== view
@@ -983,6 +999,7 @@ function gestures() {
   const back = !!view?.over || (!!view && view.entrypoint !== launcher)
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
+  rail()
 }
 /// The window's own sheet or alert open over every app (its recovery key, Update Required), if one is.
 const covering = () => /** @type {HTMLDialogElement | null} */ (document.querySelector("dialog[open]"))
@@ -1066,6 +1083,264 @@ addEventListener("message", ({ data }) => {
 /// the App Store.
 /** @param {string | null} at */
 const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().matches("app_store") ? appStore : launcher))
+
+/// The rail: every app's way back to the Home Screen and over to another, above every app, as a phone's edge panel
+/// and a computer's app rail (Teams', Slack's) are. It's Home, then the apps used lately on this device (`recent`),
+/// the open ones first, each newest opened first: going from one open app to another moves none, so what's under a
+/// finger or the pointer stays there. Where the window is wide, a computer's or a tablet's turned sideways, it's
+/// a thin sidebar on the window's left, the app in front outlined, and the apps beside it. Elsewhere it's a handle on
+/// the window's right edge, which a finger swipes the rail in from as a panel, or taps, and drags up or down out of
+/// the app's way, where it's kept. It's there only while an app is in front: the Home Screen is where it goes back to.
+/// Home goes back there as the device's back does, and an app opens as one does from another (`go`).
+const RECENT = 8
+/// The apps used lately on this device, by their keys, newest first.
+/** @type {string[]} */
+let recent = []
+try {
+  recent = JSON.parse(localStorage.getItem("recent") ?? "[]")
+} catch {}
+/// The apps shown since they were opened, which coming in front again doesn't move.
+/** @type {WeakSet<View>} */
+const fronted = new WeakSet()
+/// An app has come in front: opened, it's the newest used.
+/** @param {View} view */
+function used(view) {
+  if (view.entrypoint === launcher || fronted.has(view)) return
+  fronted.add(view)
+  recent = [view.key, ...recent.filter((at) => at !== view.key)].slice(0, RECENT)
+  try {
+    localStorage.setItem("recent", JSON.stringify(recent))
+  } catch {}
+}
+/// What the rail lists after Home: the apps used lately that are still this user's, the open ones first.
+function recents() {
+  const listed = recent
+    .map((at) => ({ key: at, subject: at.slice(0, at.indexOf("|")) || undefined, entrypoint: at.slice(at.indexOf("|") + 1) }))
+    .filter(({ entrypoint }) => names.has(entrypoint) && entrypoint !== launcher)
+  return [...listed.filter(({ key }) => open.has(key)), ...listed.filter(({ key }) => !open.has(key))]
+}
+
+const sidebar = byId("rail")
+const handle = byId("handle")
+const panel = /** @type {HTMLDialogElement} */ (byId("panel"))
+const sheet = byId("panel-sheet")
+/// Where the window is wide enough for the sidebar, as a computer's is, and a tablet's turned sideways.
+const wide = matchMedia("(min-width: 56rem) and (orientation: landscape)")
+
+const HOUSE = "M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z"
+/// Lists Home and the recent apps in `list`, each a button, which on the panel has its name under it and in the
+/// sidebar its name as its tooltip. → whether what's listed changed.
+/** @param {HTMLElement} list @param {boolean} named */
+function fill(list, named) {
+  const apps = recents()
+  const now = [here(), ...apps.map(({ key }) => key), names.size].join("\n")
+  if (list.dataset.listed === now) return
+  list.dataset.listed = now
+  const item = (/** @type {string} */ label, /** @type {boolean} */ current, /** @type {Element} */ picture, /** @type {() => void} */ pressed) => {
+    const button = Object.assign(document.createElement("button"), { className: "rail-item press ring", type: "button" })
+    if (current) button.setAttribute("aria-current", "page")
+    const tile = Object.assign(document.createElement("span"), { className: "tile" })
+    tile.append(picture)
+    button.append(tile)
+    if (named) button.append(Object.assign(document.createElement("span"), { className: "name", textContent: label }))
+    else button.ariaLabel = label
+    button.dataset.name = label
+    button.addEventListener("click", pressed)
+    const entry = document.createElement("li")
+    entry.append(button)
+    return entry
+  }
+  const house = icon(HOUSE)
+  house.classList.add("home")
+  list.replaceChildren(
+    item("Home", here() === null, house, () => pick(launcher)),
+    ...apps.map(({ key, entrypoint, subject }) => item(names.get(entrypoint) || entrypoint, key === here(), Object.assign(document.createElement("img"), { src: icons.get(entrypoint) ?? "", alt: "" }), () => pick(entrypoint, subject))),
+  )
+}
+/// Goes where the rail's button says, closing the panel as it does.
+/** @param {string} entrypoint @param {string} [subject] */
+function pick(entrypoint, subject) {
+  if (panel.open) settle(0)
+  go(entrypoint, subject)
+}
+
+/// Whether the rail shows, and as what: there's a Home Screen to go back to (`data-rail`), and an app in front of it
+/// (`shown`), while the window shows its apps. Android is told where the handle is, which its back gesture leaves to it.
+/** @type {string | undefined} */
+let excluded
+function rail() {
+  const now = shown.getSnapshot()
+  const showing = Boolean(launcher) && here() !== null && now.hasTag("pages") && !now.matches("app_store")
+  if (launcher) document.body.dataset.rail = showing ? "shown" : "hidden"
+  else delete document.body.dataset.rail
+  sidebar.inert = handle.inert = !showing
+  if (showing && wide.matches) fill(byId("rail-list"), false)
+  if (panel.open && (!showing || wide.matches)) panel.close()
+  placeHandle()
+  const at = showing && !wide.matches ? handle.getBoundingClientRect() : undefined
+  const edge = at ? [at.left, at.top, at.right, at.bottom].map(Math.round).join(",") : ""
+  if (edge !== excluded) globalThis.androidEdge?.postMessage(edge)
+  excluded = edge
+}
+wide.addEventListener("change", rail)
+addEventListener("resize", rail)
+
+/// Where the handle is up the window's right edge, as a share of its height, which a finger drags it along and this
+/// device keeps.
+let handleAt = 0.35
+try {
+  handleAt = Number(localStorage.getItem("handle") ?? handleAt) || handleAt
+} catch {}
+/// Puts the handle where it's kept, inside what the device keeps for itself at the top and bottom.
+/** @param {number} [at] @returns {number} where its top is, in the window */
+function placeHandle(at = handleAt) {
+  const safe = getComputedStyle(safeArea)
+  const height = handle.offsetHeight
+  const top = Math.min(Math.max(at * innerHeight - height / 2, parseFloat(safe.paddingTop) + 8), innerHeight - parseFloat(safe.paddingBottom) - height - 8)
+  handle.style.top = `${top}px`
+  return top
+}
+
+/// The panel comes in from the right edge, as far as `p`, 0 out of sight and 1 all the way in, which a finger or a
+/// spring sets: tapped, the handle springs it in, and a tap beside it, Escape or the device's back spring it out.
+const slide = { p: 0, target: 0, velocity: 0, stiffness: 0 }
+let sliding = () => {}
+/** @param {number} p */
+function seekPanel(p) {
+  slide.p = p
+  panel.style.setProperty("--p", String(p))
+}
+/// How far the panel goes, from all the way in to out of sight: from where it's laid out, wherever it is now.
+const travel = () => innerWidth - sheet.offsetLeft
+/** @param {0 | 1} target @param {number} [velocity] */
+function settle(target, velocity = 0) {
+  sliding()
+  if (target === 1 && !panel.open) openPanel()
+  Object.assign(slide, { target, velocity, stiffness: stiffness(parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--move-travel"))) })
+  sliding = spring(slide, seekPanel, () => {
+    sliding = () => {}
+    if (target === 0) panel.close()
+  })
+}
+/// The panel opens out of sight, by the handle, and over every app, so a tap beside it is the panel's.
+function openPanel() {
+  seekPanel(0)
+  fill(byId("panel-list"), true)
+  panel.showModal()
+  const top = Number.parseFloat(handle.style.top) + handle.offsetHeight / 2 - sheet.offsetHeight / 2
+  const safe = getComputedStyle(safeArea)
+  sheet.style.top = `${Math.max(parseFloat(safe.paddingTop) + 8, Math.min(top, innerHeight - parseFloat(safe.paddingBottom) - sheet.offsetHeight - 8))}px`
+  handle.ariaExpanded = "true"
+  gestures()
+}
+panel.addEventListener("close", () => {
+  sliding()
+  seekPanel(0)
+  handle.ariaExpanded = "false"
+  gestures()
+})
+panel.addEventListener("cancel", (event) => {
+  event.preventDefault()
+  settle(0)
+})
+panel.addEventListener("click", ({ target }) => target === panel && settle(0))
+
+/// A finger on the handle or the panel: where it went down, what it's doing once it's gone far enough to say (bringing
+/// the panel in or out, or moving the handle), and where it's been in the last tenth of a second.
+/** @type {{ id: number, on: HTMLElement, x: number, y: number, top: number, from: number, doing?: "panel" | "handle" | "none", recent: [number, number][] } | undefined} */
+let finger
+/// Whether what a finger just did was a drag, which isn't a tap as well.
+let dragged = false
+/** @param {PointerEvent} event @param {HTMLElement} on */
+function touched(event, on) {
+  if (event.button !== 0) return
+  dragged = false
+  finger = { id: event.pointerId, on, x: event.clientX, y: event.clientY, top: Number.parseFloat(handle.style.top), from: slide.p, recent: [] }
+}
+handle.addEventListener("pointerdown", (event) => touched(event, handle))
+sheet.addEventListener("pointerdown", (event) => touched(event, sheet))
+addEventListener("pointermove", (event) => {
+  if (!finger || event.pointerId !== finger.id) return
+  const dx = event.clientX - finger.x
+  const dy = event.clientY - finger.y
+  if (!finger.doing) {
+    if (Math.hypot(dx, dy) < 6) return
+    const across = Math.abs(dx) > Math.abs(dy)
+    // From the handle, in across the window brings the panel, and up or down moves the handle; on the panel, across
+    // takes it, and up or down scrolls it.
+    finger.doing = panel.open ? (across ? "panel" : "none") : across ? (dx < 0 ? "panel" : "none") : "handle"
+    dragged = finger.doing !== "none"
+    // Taken, it's the drag's wherever the finger goes; a tap on the panel is its button's.
+    if (dragged) finger.on.setPointerCapture(event.pointerId)
+    if (finger.doing === "panel") {
+      sliding()
+      if (!panel.open) openPanel()
+    }
+  }
+  if (finger.doing === "handle") placeHandle((finger.top + dy + handle.offsetHeight / 2) / innerHeight)
+  if (finger.doing !== "panel") return
+  const p = Math.min(1, Math.max(0, finger.from - dx / travel()))
+  finger.recent = [...finger.recent.filter(([then]) => event.timeStamp - then <= 100), [event.timeStamp, p]]
+  seekPanel(p)
+})
+/** @param {PointerEvent} event */
+function lifted(event) {
+  if (!finger || event.pointerId !== finger.id) return
+  const { doing, recent: moves } = finger
+  finger = undefined
+  if (doing === "handle") {
+    handleAt = (Number.parseFloat(handle.style.top) + handle.offsetHeight / 2) / innerHeight
+    try {
+      localStorage.setItem("handle", String(handleAt))
+    } catch {}
+    rail()
+  }
+  if (doing !== "panel") return
+  // Let go far enough or fast enough, it carries on, and otherwise goes back, as a move does; taken away, it goes.
+  const [[since, was] = [0, slide.p]] = moves
+  const velocity = event.timeStamp - since >= 20 ? ((slide.p - was) / (event.timeStamp - since)) * 1000 : 0
+  settle(event.type === "pointercancel" ? 0 : Math.abs(velocity) > 1 ? (velocity > 0 ? 1 : 0) : slide.p >= 0.5 ? 1 : 0, velocity)
+}
+addEventListener("pointerup", lifted)
+addEventListener("pointercancel", lifted)
+// Opened from the keyboard, its first button has the focus; from a finger, the panel, which shows no ring.
+handle.addEventListener("click", ({ detail }) => {
+  if (dragged) return
+  settle(1)
+  if (detail === 0) panel.querySelector("button")?.focus()
+})
+// A drag across the panel taps nothing in it.
+sheet.addEventListener("click", (event) => {
+  if (!dragged) return
+  event.stopPropagation()
+  event.preventDefault()
+}, true)
+
+/// The sidebar's tooltip: the name of the app under the pointer, or with the keyboard's focus, beside it. Pressed, it
+/// goes until the pointer leaves the rail.
+const tip = byId("rail-tip")
+let pressed = false
+/** @param {EventTarget | null} target */
+function tipFor(target) {
+  const item = target instanceof Element ? target.closest(".rail-item") : null
+  tip.hidden = !item
+  if (!(item instanceof HTMLElement)) return
+  tip.textContent = item.dataset.name ?? ""
+  const at = item.getBoundingClientRect()
+  tip.style.left = `${sidebar.getBoundingClientRect().right + 6}px`
+  tip.style.top = `${at.top + at.height / 2 - tip.offsetHeight / 2}px`
+}
+sidebar.addEventListener("pointerover", ({ target, pointerType }) => pointerType === "mouse" && !pressed && tipFor(target))
+sidebar.addEventListener("pointerleave", () => {
+  pressed = false
+  tipFor(null)
+})
+sidebar.addEventListener("focusin", ({ target }) => target instanceof Element && target.matches(":focus-visible") && tipFor(target))
+sidebar.addEventListener("focusout", () => tipFor(null))
+sidebar.addEventListener("click", () => {
+  pressed = true
+  tipFor(null)
+})
 
 /// When the window last came on screen.
 let onScreenSince = 0
@@ -1269,6 +1544,7 @@ function go(link, subject, behind, from) {
     history.pushState(depth, "")
     // It goes back into the icon it came out of, or slides out if it came from none.
     stack.splice(depth, Infinity, { key: next.key, at: history.length - 1, from })
+    rail()
   }
   on({ type: "show", to: next, back: false, icon: from, tapped })
   return true
@@ -1375,6 +1651,7 @@ addEventListener("popstate", (event) => {
   // comes out of it again.
   const icon = stack[back ? depth : to]?.from
   depth = to
+  rail()
   const view = /** @type {View} */ (showing(here()))
   // The device has drawn the move itself (an iPhone's swipe in from the edge): it isn't drawn a second time.
   on(event.hasUAVisualTransition ? { type: "popped", to: view, tapped } : { type: "show", to: view, back, icon, tapped })

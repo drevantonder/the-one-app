@@ -17,6 +17,8 @@ body {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  /* The rail's column, where the window is wide and has a Home Screen to go back to, and the apps' beside it. */
+  grid-template-columns: var(--rail-width, 0px) minmax(0, 1fr);
   margin: 0;
   background: var(--background);
   color: var(--foreground);
@@ -32,8 +34,8 @@ body {
 /* What the window shows of itself fills its middle, over the frames, with the background behind it: the UI library
    draws each state (`.ui-state.middle`). */
 #state {
-  z-index: 1;
-  grid-area: 2 / 1;
+  z-index: 3;
+  grid-area: 2 / 1 / 3 / -1;
   box-sizing: border-box;
   background: var(--background);
 }
@@ -68,7 +70,7 @@ body {
 /* An app's page that didn't open: its problem fills the app's place, over its frame. */
 #page-problem {
   z-index: 1;
-  grid-area: 2 / 1;
+  grid-area: 2 / 2;
   box-sizing: border-box;
   background: var(--background);
 }
@@ -79,7 +81,7 @@ body {
    and covers none of it, as a mail or chat app's does. A moment's gap says nothing: it comes in only once it has
    lasted a few seconds, behind what the device keeps for itself at the top, which it reaches into. */
 #banner {
-  grid-area: 1 / 1;
+  grid-area: 1 / 1 / 2 / -1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -110,7 +112,7 @@ body {
    covers little and moves nothing. */
 #passing {
   z-index: 2;
-  grid-area: 2 / 1;
+  grid-area: 2 / 2;
   justify-self: center;
   align-self: end;
   display: grid;
@@ -134,12 +136,16 @@ body {
 }
 /* The frames lie one over another, under what the window shows of itself. */
 iframe {
-  grid-area: 2 / 1;
+  grid-area: 2 / 2;
   box-sizing: border-box;
   width: 100%;
   height: 100%;
   border: 0;
   background: var(--background);
+}
+/* The launcher is under the rail too, which is there only over an app. */
+iframe.launcher {
+  grid-area: 2 / 1 / 3 / -1;
 }
 /* What the device keeps for itself, measured (client.js's `insets`). */
 #safe-area {
@@ -214,4 +220,221 @@ iframe[data-move] {
 #recovery[data-typed="true"] .shown,
 #recovery[data-typed="false"] .typed {
   display: none;
+}
+
+/* The rail (client.js's `rail`): Home, then the apps used lately, the one in front outlined. Each is its icon, Home a
+   house on a plain tile; under a pointer as small as a computer's own controls, under a finger a fingertip. */
+:root {
+  --rail: 3rem;
+  --rail-icon: 2rem;
+}
+@media (pointer: coarse) {
+  :root {
+    --rail: 3.5rem;
+    --rail-icon: 2.75rem;
+  }
+}
+#rail-list,
+#panel-list {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* Home stands apart from the apps, as Teams' and Discord's does. */
+#rail-list > li:first-child,
+#panel-list > li:first-child {
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.rail-item {
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.25rem 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+.rail-item .tile {
+  display: grid;
+  place-items: center;
+  width: var(--rail-icon);
+  height: var(--rail-icon);
+  border-radius: 22.5%;
+  overflow: hidden;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.rail-item img {
+  width: 100%;
+  height: 100%;
+}
+.rail-item .home {
+  width: 55%;
+  height: 55%;
+}
+.rail-item[aria-current] .tile {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+.rail-item .name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* It comes in with an app and goes with it: slid in from its side, or for whoever asked for less motion, faded. */
+#rail,
+#handle {
+  transition:
+    translate var(--move-travel) var(--ease-travel),
+    opacity var(--move-settle) var(--ease-settle),
+    visibility var(--move-travel) allow-discrete;
+}
+@media (prefers-reduced-motion: reduce) {
+  #rail,
+  #handle {
+    translate: none !important;
+  }
+}
+
+/* Where the window is wide, a thin sidebar on its left, beside the app. */
+#rail {
+  display: none;
+}
+@media (min-width: 56rem) and (orientation: landscape) {
+  body[data-rail] {
+    --rail-width: calc(var(--rail) + var(--safe-left));
+  }
+  #rail {
+    z-index: 2;
+    grid-area: 2 / 1;
+    display: block;
+    box-sizing: border-box;
+    padding: calc(0.5rem + var(--safe-top)) 0.25rem calc(0.5rem + var(--safe-bottom)) calc(0.25rem + var(--safe-left));
+    overflow-y: auto;
+    scrollbar-width: none;
+    border-right: 1px solid var(--sidebar-border);
+    background: var(--sidebar);
+    color: var(--sidebar-foreground);
+  }
+  body[data-rail="hidden"] #rail {
+    translate: -100% 0;
+    opacity: 0;
+    visibility: hidden;
+  }
+  #handle {
+    display: none;
+  }
+}
+/* Its tooltip, beside it, as shadcn's. */
+#rail-tip {
+  position: fixed;
+  z-index: 4;
+  margin: 0;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: var(--text-sm);
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Elsewhere, a thin translucent handle on the right edge, a fingertip wide and Android's most it lets an app keep
+   from its back gesture tall, where it's been dragged to. */
+#handle {
+  position: fixed;
+  z-index: 2;
+  top: 35%;
+  right: var(--safe-right);
+  width: 1.5rem;
+  height: 7rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px 0 0 999px;
+  background: none;
+  cursor: pointer;
+  touch-action: none;
+}
+#handle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 0.25rem;
+  width: 0.3125rem;
+  height: 4.5rem;
+  translate: 0 -50%;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 30%, transparent);
+  box-shadow: 0 0 0 0.5px color-mix(in oklab, var(--background) 60%, transparent);
+  transition: width var(--move-quick) var(--ease-quick);
+}
+#handle:is(:hover, :focus-visible, [aria-expanded="true"])::before {
+  width: 0.4375rem;
+}
+body:not([data-rail="shown"]) #handle {
+  translate: 100% 0;
+  opacity: 0;
+  visibility: hidden;
+}
+
+/* Its panel, swiped or tapped in from the handle, floating by it over the app, in the Home Screen's glass. A tap
+   beside it puts it away. */
+#panel {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  /* Clipped, not hidden: opening, it focuses Home while that's still out of sight, which would scroll it in. */
+  overflow: clip;
+  border: 0;
+  background: oklch(0 0 0 / calc(var(--p, 0) * 0.12));
+  color: var(--foreground);
+}
+#panel::backdrop {
+  background: none;
+}
+#panel-sheet {
+  position: absolute;
+  right: calc(0.5rem + var(--safe-right));
+  box-sizing: border-box;
+  width: 5.25rem;
+  max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 1rem);
+  padding: 0.5rem 0.375rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-radius: 1.5rem;
+  background: color-mix(in oklab, var(--popover) 66%, transparent);
+  box-shadow:
+    inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 30%, transparent),
+    0 8px 24px -10px oklch(0 0 0 / 0.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
+  translate: calc((1 - var(--p, 0)) * (100% + 0.5rem + var(--safe-right))) 0;
+  outline: none;
+  touch-action: pan-y;
+}
+#panel-sheet .rail-item {
+  --rail-icon: 3rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  #panel-sheet {
+    translate: none;
+    opacity: var(--p, 0);
+  }
 }

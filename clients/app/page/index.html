@@ -19,6 +19,15 @@
   <!-- While its network doesn't answer, a thin banner over the launcher, as a mail or chat app has one: it says so, and
        that it's reconnecting as it tries again. -->
   <p id="banner" role="status" hidden><span id="banner-spinner" class="ui-spinner" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span id="banner-text"></span><button id="banner-retry" class="ui-button press ring" data-variant="ghost">Try Again</button></p>
+  <!-- The rail: Home and the apps used lately, above every app (client.js's `rail`). Where the window is wide, a
+       sidebar on its left with each app's name as its tooltip; elsewhere a handle on its right edge, which brings
+       them in as a panel. -->
+  <nav id="rail" aria-label="Home and recent apps" inert><ul id="rail-list" role="list"></ul></nav>
+  <p id="rail-tip" aria-hidden="true" hidden></p>
+  <button id="handle" class="ring" type="button" aria-label="Home and recent apps" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel" inert></button>
+  <dialog id="panel" aria-label="Home and recent apps">
+    <nav id="panel-sheet" tabindex="-1" autofocus><ul id="panel-list" role="list"></ul></nav>
+  </dialog>
   <!-- What the window shows of itself, in its middle, over the frames, as the UI library's Steps, Status, Empty and
        Problem draw it (core/ui/src/states.tsx): its mark from its first paint and the steps it takes as it opens, until
        its person's home has drawn over them; an update under way; that there's no Home Screen; or a problem. -->

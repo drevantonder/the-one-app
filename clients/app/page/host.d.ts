@@ -61,6 +61,8 @@ export interface Resource {
   uri: string
   name?: string
   mimeType?: string
+  /** An app entrypoint's icon, as a `data:` address. */
+  icons?: { src: string }[]
   _meta?: { category?: string }
 }
 
@@ -223,4 +225,7 @@ declare global {
   var androidBack: { postMessage(message: string): void } | undefined
   /** Where Android's app plays a haptic, by its name (`MainActivity`). */
   var androidHaptic: { postMessage(message: string): void } | undefined
+  /** Where Android's app hears where the rail's handle is, `left,top,right,bottom` in the page's pixels, or "" while
+   * it's not there, which its back gesture leaves to it (`MainActivity`). */
+  var androidEdge: { postMessage(message: string): void } | undefined
 }

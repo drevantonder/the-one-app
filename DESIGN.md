@@ -32,6 +32,14 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Admin things (infrastructure apps, managing users) show only to the people who can act on them, the network's owners (17 Nov). Everyone else never sees them.
 - A section header's See All sits on the title's baseline, smaller than the title, ending at the content's edge (17 Nov), as iOS's App Store does.
 
+## The rail (18 Nov)
+
+- One way on every platform from any app back to the Home Screen and over to another app, which adds nothing to the app, as iOS and Android stay out of an app's way. Its models are Samsung's Edge panels on phones and the app rail Teams, Slack and Discord keep on a computer.
+- Phones, and tablets held upright: a thin translucent handle on the right edge, only while an app is open, never on the Home Screen. It can be dragged up or down, and its place is kept, so it never sits on an app's own controls. A swipe in from it, or a tap, brings a small floating panel: Home first, then recent apps. Tapping one goes there as the window's moves do: Home closes the app as back does, and another app opens with its usual move. A swipe away or a tap beside it closes it; it follows the finger and springs. An iPhone's right edge is free; on Android only the handle's own stretch of the edge is kept from the system's back.
+- Computers, and tablets turned sideways: a thin sidebar on the left, always there while an app is open: Home at the top, then open and recent apps, the app in front outlined, each app's name as its tooltip. The app takes the rest of the width.
+- The web is the same, by size.
+- No pinning yet. Recent apps are a short list per device, the last 8, the open ones first.
+
 ## Home Screen
 
 - Only Home is per owner (17 Nov): each owner (You first, then Everyone, then your groups) has several Home pages side by side. After them comes one App Library, for everyone you can reach. Home and the App Library are its two sections, each at least a whole screen (18 Nov): a swipe moves one screenful, through Home's and on past an owner's last Home page to the App Library, as on iOS.
