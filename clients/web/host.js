@@ -91,9 +91,21 @@ const reports = () => JSON.parse(localStorage.getItem(REPORTS) ?? "[]")
 function report(record) {
   const stored = reports()
   const browser = ["Edge", "Firefox", "Chrome", "Safari"].find((name) => navigator.userAgent.includes(name === "Edge" ? "Edg/" : `${name}/`))
-  const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser }
+  const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser, "os.type": os() }
   if (stored.length < 300) localStorage.setItem(REPORTS, JSON.stringify([...stored, { ...record, attributes, time: Date.now() }]))
   if (connection === "online") sendReports()
+}
+/// The device's operating system, by the names the app's client reports its own by (Rust's `env::consts::OS`). An
+/// iPad's Safari says it's a Mac, but has a touch screen.
+const os = () => {
+  const agent = navigator.userAgent
+  if (/iPhone|iPad|iPod/.test(agent) || (agent.includes("Macintosh") && navigator.maxTouchPoints > 1)) return "ios"
+  if (agent.includes("Android")) return "android"
+  if (agent.includes("Mac OS X")) return "macos"
+  if (agent.includes("Windows")) return "windows"
+  if (agent.includes("CrOS")) return "chromeos"
+  if (agent.includes("Linux")) return "linux"
+  return undefined
 }
 /// Reports are told a few seconds after the first of them, as one batch.
 /** @type {ReturnType<typeof setTimeout> | undefined} */
