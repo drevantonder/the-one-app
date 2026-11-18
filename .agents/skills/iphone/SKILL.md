@@ -39,9 +39,9 @@ An app is a network's: the commands that build it are in that repo's `app/README
   notifications.
 - That key can't make an App Store Connect app, an App Group, or put a group on an App ID: the API has nothing for
   them, and Xcode's own developer services, which `xcodebuild -allowProvisioningUpdates -authenticationKeyPath ...`
-  uses, refuse it (401). The owner does them on the website. Until the group (`group.` and the app's identifier) is
-  ticked on both App IDs and their profiles are made again, a profile's `com.apple.security.application-groups` is
-  empty, the app keeps its client in its own folder, and its notification extension can't read its key.
+  uses, refuse it (401). The owner does them on the website. The One App's group (`group.app.theone.client`) is on
+  both its App IDs and in all four of their profiles, so its client is kept in the group and its notification
+  extension reads its key there. A profile made before a group is ticked has none, and is made again once it is.
 - A development profile's `aps-environment` is `development` and an App Store one's `production`. The network's edge
   sends to one of APNs's two, the sandbox with `APNS_SANDBOX=1` (`apps/notifications/edge/README.md`), so a phone is
   woken only where its build matches it.
@@ -56,8 +56,8 @@ An app is a network's: the commands that build it are in that repo's `app/README
    `gen/apple/build/app_iOS.xcarchive/Products/Applications/<name>.app`. Or build for the simulator with
    `--target aarch64-sim --debug`, which needs no signing.
 2. Put each target's profile in it as `embedded.mobileprovision`, and sign it with that profile's own entitlements
-   less `keychain-access-groups` (a wildcard, which a signature can't hold) and an empty
-   `com.apple.security.application-groups`: `security cms -D -i <profile> > p.plist`,
+   less `keychain-access-groups` (a wildcard, which a signature can't hold), which keeps its
+   `com.apple.security.application-groups`, `group.app.theone.client`: `security cms -D -i <profile> > p.plist`,
    `plutil -extract Entitlements xml1 -o e.plist p.plist`, then `/usr/libexec/PlistBuddy -c "Delete :<key>" e.plist`
    (`plutil` reads the dots in `com.apple...` as a path). A profile's `com.apple.developer.associated-domains` is `*`,
    which a signature can't hold either: set it to the app's own, as `gen/apple/generate` and the build wrote them in
