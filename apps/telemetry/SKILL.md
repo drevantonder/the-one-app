@@ -26,8 +26,9 @@ client sent a `traceparent`.
   the servers it was logged on), its message, how often, when it was last, how long it lasted, and the trace of the
   newest. A kind is its message with numbers, ids and its stack left out, so one cause is one kind. A call refused
   for what it was given or who asked is the caller's mistake, not an error: its `one.tool.duration` outcome is
-  `refused`, not `error`, and it doesn't count as a failure. Start a bug there. What a
-  client reported says which (`from`: "App on Andre's iPhone", "claude-code (MCP) on linux"): its requests that
+  `refused`, not `error`, and it doesn't count as a failure; so is one a tool refused itself (`OneCore.Call.Refused`),
+  for what it was given or for a device that's off. Start a bug there. Each says where it's `from`: the server or the
+  edge it happened on, or what a client reported says which ("App on Andre's iPhone", "claude-code (MCP) on linux"): its requests that
   failed or were slow, as MCP names them (`tools/call gmail_search`), whose trace runs on into the server's span;
   how long no server answered it (`one.client.unanswered`); what its window showed went wrong
   (`one.client.problem`), an app that never opened (`one.client.open`), a sign-in that failed (`one.client.join`),

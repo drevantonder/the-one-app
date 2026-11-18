@@ -8,7 +8,7 @@ defmodule Telemetry.Read do
   @doc """
   The errors among `batches`, each kind once (`kind/1`), most recent first: failed spans by their name, and
   warnings and errors that were logged (`span: false`), whichever server logged them. A span another server ran is
-  that one's. A call refused for what it was given or who asked is the caller's mistake, not an error. `shown` says
+  that one's. Each is `from` the client that asked, or where none did, the server or the edge it happened on. A call refused for what it was given or who asked is the caller's mistake, not an error. `shown` says
   whether whose a call was may be shown.
   """
   def errors(batches, shown) do
@@ -30,7 +30,7 @@ defmodule Telemetry.Read do
           trace: span["traceId"],
           whose: whose(span, shown),
           server: span["server"],
-          from: from(span) || clients[span["traceId"]],
+          from: from(span) || clients[span["traceId"]] || span["server"],
           span: true
         }
       end
@@ -46,7 +46,7 @@ defmodule Telemetry.Read do
           trace: log["traceId"],
           whose: nil,
           server: log["server"],
-          from: from(log),
+          from: from(log) || log["server"],
           span: false
         }
       end

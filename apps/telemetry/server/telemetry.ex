@@ -73,7 +73,7 @@ defmodule Telemetry do
         took: maybe.("How long its span took, in milliseconds"),
         trace: %{type: ["string", "null"], description: "The newest one's trace, for `trace`"},
         server: %{type: ["string", "null"]},
-        from: %{type: ["string", "null"], description: "The client it's from"},
+        from: %{type: ["string", "null"], description: "The client it's from, or where no client asked, the server or the edge it happened on"},
         whose: %{type: ["string", "null"], description: "Whose call it was, where you may see that"},
         span: %{type: "boolean", description: "Whether it's a span, or a log line"}
       },
