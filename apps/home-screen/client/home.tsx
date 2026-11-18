@@ -1114,10 +1114,12 @@ function Refused(props: { owner: Owner; held: Held }) {
 }
 
 /// While pages are edited, + and Done float at the top, either side of the owner pill, over the pages, which stay
-/// where they are, as on a phone.
+/// where they are, as on a phone. They fade in and out.
 function EditBar() {
+  let top!: HTMLDivElement
+  onSettled(() => () => fadeOut(top))
   return (
-    <div class="top">
+    <div class="top" ref={top}>
       <div class="edit-bar">
         <Button variant="secondary" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />

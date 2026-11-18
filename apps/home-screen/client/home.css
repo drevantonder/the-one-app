@@ -695,18 +695,37 @@ body {
   position: relative;
   touch-action: none;
 }
-.cell.jiggles {
-  animation: jiggle 0.26s ease-in-out var(--wobble) infinite alternate;
+/* The jiggle eases in and out, as an iPhone's does, rather than starting and stopping in a frame: it swings from
+   side to side (`--swing`) as far as `--shake` says, which grows from nothing as editing begins and dies away as it
+   ends, the swing held where it was. */
+@property --swing {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
 }
-.cell.jiggles[data-size] {
+@property --shake {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+.cell {
+  rotate: calc(var(--swing) * var(--shake) * 1.4deg);
+  animation: jiggle 0.26s ease-in-out var(--wobble) infinite alternate paused;
+  transition: --shake var(--move-travel) var(--ease-travel);
+}
+.cell[data-size] {
   animation-duration: 0.34s;
+}
+.cell.jiggles {
+  --shake: 1;
+  animation-play-state: running;
 }
 @keyframes jiggle {
   from {
-    rotate: -1.4deg;
+    --swing: -1;
   }
   to {
-    rotate: 1.4deg;
+    --swing: 1;
   }
 }
 /* An app dropped where it isn't installed waits dimmed, and shows its progress over its icon as it installs. Only the
@@ -789,8 +808,8 @@ body {
   font-variant-numeric: tabular-nums;
 }
 /* + and Done, floating at the top over the pages, in the owner pill's row, + on the left and Done on the right, as
-   on a phone. They fade in as editing begins, and go at once. On a wide window they're over the corners of the pages
-   shown. */
+   on a phone. They fade in as editing begins, and out as it ends (home.tsx). On a wide window they're over the
+   corners of the pages shown. */
 .top {
   position: absolute;
   z-index: 7;
@@ -1081,7 +1100,7 @@ body {
   border-radius: 22.5%;
 }
 @media (prefers-reduced-motion: reduce) {
-  .cell.jiggles {
+  .cell {
     animation: none;
   }
   .overview {
