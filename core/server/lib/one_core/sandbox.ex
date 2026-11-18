@@ -34,7 +34,8 @@ defmodule OneCore.Sandbox do
   functions, no network, no website it reaches, no programs, and no files but a folder of its own that goes when it
   stops.
 
-  It calls the tools of only the apps it requires (`OneCore.App`): a call to any other's is refused.
+  It calls the tools of only the apps it requires (`OneCore.App`): a call to any other's is refused. So does its
+  page, which its client says is its (`OneCore.Mcp`), and which asks for whoever it was opened for.
   """
   @behaviour :gen_statem
   require Logger

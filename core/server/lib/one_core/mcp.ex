@@ -326,17 +326,21 @@ defmodule OneCore.Mcp do
     end)
   end
 
-  # Which app called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
-  # asks for (a request that says its `actor`). A client calls as nobody's app.
   defp result("tools/call", %{"name" => name} = params, from, {_actor, subject} = principal, forwarded) do
-    caller = if Map.has_key?(meta(params), "actor"), do: meta(params)["caller"]
-    request = %{mode: mode(params), tools: fn -> scripted(subject) end, call: called(from, principal, forwarded)}
+    case caller(name, meta(params), principal) do
+      {:ok, caller} ->
+        request = %{mode: mode(params), tools: fn -> scripted(subject) end, call: called(from, principal, forwarded)}
 
-    run = fn ->
-      rendered(name, call(name, Map.get(params, "arguments", %{}), principal, forwarded, caller, request), principal)
+        run = fn ->
+          inputs = Map.get(params, "arguments", %{})
+          rendered(name, call(name, inputs, principal, forwarded, caller, request), principal)
+        end
+
+        asked(tool(name, subject), name, run, params, principal, caller)
+
+      {:error, why} ->
+        rendered(name, {:error, why}, principal)
     end
-
-    asked(tool(name, subject), name, run, params, principal, caller)
   end
 
   defp result("tasks/" <> method, params, _from, principal, forwarded) when method in ["get", "update", "cancel"] do
@@ -439,14 +443,13 @@ defmodule OneCore.Mcp do
           nil ->
             %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
 
-          %{category: nil} = entrypoint ->
-            Map.merge(resource, %{name: entrypoint.name, icons: [%{src: entrypoint.icon}]})
-
+          # Whether its app is trusted goes too: the client lets only a trusted app's page change the device
+          # or ask for someone else (`clients/app/page/client.js`).
           entrypoint ->
             Map.merge(resource, %{
               name: entrypoint.name,
               icons: [%{src: entrypoint.icon}],
-              _meta: %{category: entrypoint.category}
+              _meta: Map.reject(%{category: entrypoint.category, trusted: version.trusted}, &match?({_, nil}, &1))
             })
         end
       end
@@ -587,6 +590,42 @@ defmodule OneCore.Mcp do
 
     own ++ apps
   end
+
+  # Which app called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
+  # asks for (a request that says its `actor`). A client calls as nobody's app, unless it says an app's page asked
+  # (`app`, which the app's window says of each page: `clients/app/page/client.js`). A trusted app's page then calls
+  # as its person does, since its server code may do anything they may. An untrusted app's calls as its server code
+  # does in its sandbox (`OneCore.Sandbox`): its own app's tools as its person, the tools of the apps it requires as
+  # itself, and nothing else. A client may say an app asked that didn't, which is its person's to do, and gives them
+  # nothing they couldn't do themselves.
+  defp caller(_name, %{"actor" => _} = meta, _principal), do: {:ok, meta["caller"]}
+
+  defp caller(name, %{"app" => app}, {actor, subject}) when is_binary(app) do
+    # The app is whoever the page was opened for's, or for a trusted app, the person's own, asking for someone else.
+    version = Apps.versions(Enum.uniq(Apps.chain(subject) ++ Apps.chain(actor)))[app]
+    tool = Enum.find(Tools.tools(), &(&1.name == name))
+    called = if tool == nil, do: hd(String.split(name, "_", parts: 2))
+
+    cond do
+      version == nil ->
+        {:error, "#{app} isn't installed for whoever its page asked for, so its page calls nothing"}
+
+      version.trusted or called == app ->
+        {:ok, nil}
+
+      is_map_key(version.requires, called) ->
+        {:ok, version.artifact}
+
+      true ->
+        why = if called, do: "its requires/0 doesn't name #{called}", else: "#{name} is One Core's own"
+
+        {:error,
+         "#{app}'s page may not call #{name}: #{app} is installed untrusted, and #{why}. An untrusted app's page " <>
+           "calls the tools of only its own app and the apps it requires."}
+    end
+  end
+
+  defp caller(_name, _meta, _principal), do: {:ok, nil}
 
   # Runs the call of `tool`, named `name`, by `run`. A tool made a task (`task_support`) is one for a person's client
   # that takes tasks, and refused to one that doesn't if it needs one. A script's calls are never tasks, since it
