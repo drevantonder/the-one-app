@@ -2,7 +2,7 @@
 //! does (a press, a key, a scroll) found on it and sent back to its JS as events. The window it's in (`platform`, or
 //! the headless harness) gives it the room, the scale and the input, and draws the scene it paints.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -153,6 +153,13 @@ pub struct Screen {
     again: bool,
     /// What's on its way from one value to another as a style changed.
     transitions: transition::Transitions,
+    /// The tree as Taffy lays it out, kept from frame to frame (`Retained`), the states its styles were last resolved
+    /// in, and the frame it's on.
+    layout: Retained,
+    styled: States,
+    frame: u64,
+    /// What the last frame showed, which a frame that would show the same doesn't paint again.
+    seen: Option<Seen>,
     /// What has taken the keyboard by its `autofocus`, while that's so, and where each node listening for `layout`
     /// was last told it is.
     autofocused: std::collections::HashSet<Id>,
@@ -218,6 +225,10 @@ impl Screen {
             animating: false,
             again: false,
             transitions: Default::default(),
+            layout: Retained::default(),
+            styled: States::default(),
+            frame: 0,
+            seen: None,
             autofocused: Default::default(),
             laid_out: HashMap::new(),
             tab_order: Vec::new(),
@@ -391,7 +402,7 @@ impl Screen {
             }
             if answers.is_empty() {
                 // What says `autofocus` takes the keyboard as it says so, as an active menu item does.
-                let wants: Vec<Id> = self.tree.nodes.iter().filter(|(_, node)| node.is("autofocus")).map(|(id, _)| *id).collect();
+                let wants: Vec<Id> = self.tree.autofocused().collect();
                 self.autofocused.retain(|id| wants.contains(id));
                 if let Some(id) = wants.into_iter().filter(|id| !self.autofocused.contains(id)).max() {
                     self.autofocused.insert(id);
@@ -436,7 +447,6 @@ impl Screen {
 
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
-        scene.clear();
         // The page is told when its room, its motion or its insets change, as a frame's host tells an MCP App.
         self.room = Size { width: size.width.0, height: size.height.0 };
         if self.told.is_some_and(|told| told != (self.room, self.reduced_motion, self.insets)) {
@@ -453,10 +463,53 @@ impl Screen {
         self.states.focused = self.focused;
         let now = self.sandbox.clock().now();
         let caret = self.caret_shows();
+        // A frame where nothing it shows has changed keeps the scene it drew, and costs nothing.
+        let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
+        let mut fields: Vec<_> = self.fields.iter().map(|(id, field)| (*id, field.display(), field.value(), field.placed())).collect();
+        fields.sort_by_key(|(id, ..)| *id);
+        let seen = Seen {
+            size: (window.size, scale),
+            conditions,
+            states: self.states.clone(),
+            scrolled: self.scrolled.clone(),
+            fields,
+            caret,
+            hovering: (self.home.as_ref().is_some_and(hovering), self.action.as_ref().is_some_and(hovering)),
+            notice: self.notice.as_ref().map(|notice| (notice.text.clone(), notice.action.as_ref().map(|(label, _)| label.clone()))),
+            breadcrumb: self.breadcrumb.as_ref().map(|crumb| (crumb.name.clone(), crumb.start)),
+            panel: self.panel.map(|panel| (panel.corner, panel.fill)),
+            fetched: self.fetched.values().filter(|fetched| fetched.is_some()).count(),
+        };
+        if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) {
+            return;
+        }
+        self.seen = Some(seen);
+        scene.clear();
+        // What's styled again: what changed, what's moving, each input (its words are its field's), and what's
+        // changed state, with what's around it, so the rest is kept as it was laid out.
+        let everything = self.layout.conditions != Some(conditions);
+        self.layout.conditions = Some(conditions);
+        let changed = self.tree.take_changed();
+        let moving = self.transitions.moving();
+        let mut below = HashSet::new();
+        let states = self.states.changed(&self.styled);
+        self.styled = self.states.clone();
+        for id in changed.iter().chain(&moving).chain(&states).copied().chain(self.tree.inputs()) {
+            let mut at = Some(id);
+            while let Some(id) = at.filter(|id| below.insert(*id)) {
+                at = self.tree.parent(id);
+            }
+        }
+        self.frame += 1;
         let mut painter = Painter {
             tree: &self.tree,
-            taffy: TaffyTree::new(),
-            nodes: HashMap::new(),
+            layout: &mut self.layout,
+            changed: &changed,
+            moving: &moving,
+            below: &below,
+            everything,
+            frame: self.frame,
+            gone: Vec::new(),
             text,
             atlas,
             scene,
@@ -477,13 +530,12 @@ impl Screen {
             since: self.changed.take().unwrap_or(now).min(now),
             transitions: &mut self.transitions,
             animating: false,
-            fixed: Vec::new(),
             window,
             modal: None,
             turn: TransformationMatrix::unit(),
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
-        let version2 = self.tree.nodes.values().any(|node| node.styles.is_some());
+        let version2 = self.tree.styled();
         let (body, background) = if version2 { Text::root(conditions) } else { (Text::body(conditions.dark), Some(colour("background", conditions.dark))) };
         match self.panel {
             // A panel's background is the host's: a popover's colour, or nothing over the system's glass, rounded.
@@ -494,14 +546,16 @@ impl Screen {
             None => painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
         }
         let root = painter.build(0, body, true);
-        for fixed in std::mem::take(&mut painter.fixed) {
-            let _ = painter.taffy.add_child(root, fixed);
+        // What's no longer in the tree goes, unless it moved elsewhere in it.
+        for id in std::mem::take(&mut painter.gone) {
+            painter.layout.forget(id, painter.frame, painter.transitions);
         }
+        painter.layout.place_fixed(painter.tree);
         let available = taffy::geometry::Size { width: AvailableSpace::Definite(window.size.width), height: AvailableSpace::Definite(window.size.height) };
-        let Painter { taffy, nodes, text, .. } = &mut painter;
-        let measured = taffy.compute_layout_with_measure(root, available, |input, node, _, _| {
+        let Painter { layout, text, .. } = &mut painter;
+        let measured = layout.taffy.compute_layout_with_measure(root, available, |input, _, leaf, _| {
             // What has nothing to measure is as big as its style says, or nothing.
-            let Some(Leaf { measure: Some(measure), .. }) = nodes.get(&node) else {
+            let Some(Leaf { measure: Some(measure), .. }) = leaf else {
                 return taffy::LayoutOutput::from_outer_size(taffy::geometry::Size {
                     width: input.known_dimensions.width.unwrap_or(0.0),
                     height: input.known_dimensions.height.unwrap_or(0.0),
@@ -570,10 +624,8 @@ impl Screen {
         // Where each node that listens for `layout` is, as its layout settles and whenever its size changes.
         let listening: Vec<(Id, Rect)> = self
             .tree
-            .nodes
-            .iter()
-            .filter(|(_, node)| node.listens("layout"))
-            .filter_map(|(id, _)| Some((*id, *self.rects.get(id)?)))
+            .laid_out()
+            .filter_map(|id| Some((id, *self.rects.get(&id)?)))
             .filter(|(id, rect)| self.laid_out.get(id).is_none_or(|was| (was.width, was.height) != (rect.width, rect.height)))
             .collect();
         for (id, rect) in listening {
@@ -707,7 +759,7 @@ impl Screen {
             if node == outer {
                 return true;
             }
-            at = crate::inspect::parent(&self.tree, node).filter(|parent| *parent != 0);
+            at = self.tree.parent(node).filter(|parent| *parent != 0);
         }
         false
     }
@@ -1034,8 +1086,9 @@ impl Screen {
         self.fields.retain(|id, _| input(id));
         self.set.retain(|id, _| input(id));
         self.drawn.retain(|id, _| input(id));
-        for (id, node) in tree.nodes.iter().filter(|(_, node)| node.kind == Kind::Input) {
-            let field = self.fields.entry(*id).or_default();
+        for id in tree.inputs() {
+            let node = &tree.nodes[&id];
+            let field = self.fields.entry(id).or_default();
             field.multiline = node.is("multiline");
             field.newline = field.multiline && node.str("action").is_none_or(|action| action == "newline");
             field.secure = node.str("type") == Some("password");
@@ -1049,9 +1102,9 @@ impl Screen {
                     editing::Value { text, selection: editing::Selection { base: end, extent: end }, composing: None }
                 }),
             };
-            if let Some(set) = set.filter(|set| self.set.get(id) != Some(set)) {
+            if let Some(set) = set.filter(|set| self.set.get(&id) != Some(set)) {
                 field.set(&set);
-                self.set.insert(*id, set);
+                self.set.insert(id, set);
             }
         }
     }
@@ -1091,12 +1144,15 @@ fn value_of(node: &Node) -> String {
 }
 
 /// What a leaf measures for layout.
+#[derive(PartialEq)]
 enum Measure {
     Text { words: String, text: Text, lines: Option<usize> },
     Input { words: String, text: Text, multiline: bool },
 }
 
-/// A tree node as laid out: which node, the text it inherits, how it looks, and what it measures.
+/// A tree node as laid out: which node, the text it inherits, how it looks, and what it measures; and a text's words
+/// as they were last wrapped, to the width they were wrapped to (`None`, as wide as they are), kept until it's styled
+/// again.
 struct Leaf {
     id: Id,
     text: Text,
@@ -1106,6 +1162,7 @@ struct Leaf {
     /// Placed in the window, not in its parent (`position: fixed`).
     fixed: bool,
     measure: Option<Measure>,
+    paragraph: Option<(Option<f32>, Arc<Paragraph>)>,
 }
 
 /// An image, decoded, in the atlas's byte order (BGRA).
@@ -1157,10 +1214,96 @@ pub(crate) struct Placed {
     pub scroll: Option<(f32, f32, bool)>,
 }
 
+/// The tree as Taffy lays it out, kept from frame to frame, as GPUI's and Flutter's are: a frame styles again only what
+/// changed (a mutation, a state, what it inherits, a transition), tells Taffy only what's different, and Taffy lays out
+/// again only what that touches, from its cache; a change of style that doesn't move anything lays out nothing again.
+struct Retained {
+    taffy: TaffyTree<Leaf>,
+    kept: HashMap<Id, Kept>,
+    /// What's placed in the window (`position: fixed`), laid out as the root's children after its own.
+    fixed: HashSet<Id>,
+    /// The conditions it was styled in: when they change, everything's styled again.
+    conditions: Option<Conditions>,
+}
+
+/// A node as it was last built: its Taffy node, what its style was resolved from, its children in the tree, those of
+/// them laid out in it (all but what's fixed), and the frame it was last seen in.
+struct Kept {
+    node: NodeId,
+    inherited: Text,
+    state: State,
+    children: Vec<Id>,
+    inside: Vec<NodeId>,
+    frame: u64,
+}
+
+impl Default for Retained {
+    fn default() -> Retained {
+        Retained { taffy: TaffyTree::new(), kept: HashMap::new(), fixed: HashSet::new(), conditions: None }
+    }
+}
+
+impl Retained {
+    fn leaf(&self, node: NodeId) -> &Leaf {
+        self.taffy.get_node_context(node).expect("every node has its leaf")
+    }
+
+    /// `id` was taken out of what it was in: unless it was built elsewhere in `frame`, it and what's in it go.
+    fn forget(&mut self, id: Id, frame: u64, transitions: &mut transition::Transitions) {
+        if self.kept.get(&id).is_none_or(|kept| kept.frame == frame) {
+            return;
+        }
+        let kept = self.kept.remove(&id).expect("it's kept");
+        let _ = self.taffy.remove(kept.node);
+        self.fixed.remove(&id);
+        transitions.forget(id);
+        for child in kept.children {
+            self.forget(child, frame, transitions);
+        }
+    }
+
+    /// Lays out what's fixed in the window, as the root's children after its own, each after what's in it and in the
+    /// tree's order, as they're found.
+    fn place_fixed(&mut self, tree: &Tree) {
+        let Some(root) = self.kept.get(&0) else { return };
+        let mut children = root.inside.clone();
+        if !self.fixed.is_empty() {
+            // Where each is in the tree, as the index of each node on the way to it.
+            let path = |id: Id| {
+                let mut path = Vec::new();
+                let mut at = id;
+                while let Some(parent) = tree.parent(at) {
+                    path.push(tree.nodes[&parent].children.iter().position(|child| *child == at).unwrap_or(0));
+                    at = parent;
+                }
+                path.reverse();
+                path
+            };
+            let mut fixed: Vec<(Vec<usize>, NodeId)> = self.fixed.iter().filter_map(|id| Some((path(*id), self.kept.get(id)?.node))).collect();
+            // What's in a node comes before it.
+            fixed.sort_by(|(a, _), (b, _)| match a.iter().zip(b).find(|(a, b)| a != b) {
+                Some((a, b)) => a.cmp(b),
+                None => b.len().cmp(&a.len()),
+            });
+            children.extend(fixed.into_iter().map(|(_, node)| node));
+        }
+        if self.taffy.children(root.node).is_ok_and(|now| now != children) {
+            self.taffy.set_children(root.node, &children).expect("its children are Taffy's");
+        }
+    }
+}
+
 struct Painter<'a> {
     tree: &'a Tree,
-    taffy: TaffyTree<()>,
-    nodes: HashMap<NodeId, Leaf>,
+    layout: &'a mut Retained,
+    /// What's styled again this frame (`Screen::paint`): what changed, what's moving, what's in or around either
+    /// (`below`), or all of it, where the conditions changed; the frame; and what was taken out of what it was in.
+    changed: &'a HashSet<Id>,
+    moving: &'a HashSet<Id>,
+    below: &'a HashSet<Id>,
+    everything: bool,
+    frame: u64,
+    gone: Vec<Id>,
     text: &'a mut TextSystem,
     atlas: &'a Atlas,
     scene: &'a mut Scene,
@@ -1186,8 +1329,7 @@ struct Painter<'a> {
     since: f64,
     transitions: &'a mut transition::Transitions,
     animating: bool,
-    /// What's placed in the window, laid out as the root's children, and the window.
-    fixed: Vec<NodeId>,
+    /// The window, where what's fixed is placed.
     window: Bounds<f32>,
     /// The topmost `aria-modal` dialog drawn, which holds the keyboard.
     modal: Option<Id>,
@@ -1195,8 +1337,26 @@ struct Painter<'a> {
     turn: TransformationMatrix,
 }
 
+/// Everything outside the tree that a frame shows: its size and scale, the conditions, each node's state, how far
+/// each scroll is scrolled, each input's text, caret and selection and whether the caret's on, what the window says
+/// over its page and where the pointer is on it, and how many pictures have come.
+#[derive(PartialEq)]
+struct Seen {
+    size: (Size<f32>, f32),
+    conditions: Conditions,
+    states: States,
+    scrolled: HashMap<Id, Point<f32>>,
+    fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>)>,
+    caret: bool,
+    hovering: (bool, bool),
+    notice: Option<(String, Option<String>)>,
+    breadcrumb: Option<(String, f32)>,
+    panel: Option<(f32, bool)>,
+    fetched: usize,
+}
+
 /// What a node's state is, for its styles: where the pointer is, what's pressed and what has the keyboard.
-#[derive(Default)]
+#[derive(Default, Clone, PartialEq)]
 pub(crate) struct States {
     /// What the pointer is over, from the root to the innermost.
     pub hovered: Vec<Id>,
@@ -1207,6 +1367,18 @@ pub(crate) struct States {
 }
 
 impl States {
+    /// What's in a different state from in `was`.
+    fn changed(&self, was: &States) -> Vec<Id> {
+        let mut changed: Vec<Id> = self.hovered.iter().filter(|id| !was.hovered.contains(id)).chain(was.hovered.iter().filter(|id| !self.hovered.contains(id))).copied().collect();
+        if self.pressed != was.pressed {
+            changed.extend(self.pressed.into_iter().chain(was.pressed));
+        }
+        if self.focused != was.focused || self.focus_visible != was.focus_visible {
+            changed.extend(self.focused.into_iter().chain(was.focused));
+        }
+        changed
+    }
+
     fn of(&self, id: Id, input: bool) -> State {
         State {
             hover: self.hovered.contains(&id),
@@ -1239,11 +1411,58 @@ fn corner(radius: Radius, size: Size<f32>) -> f32 {
 }
 
 impl Painter<'_> {
-    /// `id` and what's in it as Taffy's nodes. The root fills the window and scrolls, as a page's body.
+    /// `id` and what's in it as Taffy's nodes, styled again only where it or what it inherits changed, and gone into
+    /// only where something in it did. The root fills the window and scrolls, as a page's body.
     fn build(&mut self, id: Id, inherited: Text, root: bool) -> NodeId {
         let tree = self.tree;
         let node = &tree.nodes[&id];
         let state = self.states.of(id, node.kind == Kind::Input);
+        let restyle = match self.layout.kept.get_mut(&id) {
+            None => true,
+            Some(kept) => {
+                kept.frame = self.frame;
+                let restyle = self.everything
+                    || kept.inherited != inherited
+                    || kept.state != state
+                    || node.kind == Kind::Input
+                    || self.changed.contains(&id)
+                    || self.moving.contains(&id);
+                if !restyle && !self.below.contains(&id) {
+                    return kept.node;
+                }
+                restyle
+            }
+        };
+        let text = match restyle {
+            true => self.restyle(id, inherited, state, root),
+            false => self.layout.leaf(self.layout.kept[&id].node).text,
+        };
+        if matches!(node.kind, Kind::Box | Kind::Scroll) {
+            let children: Vec<Id> = node.children.iter().copied().filter(|child| tree.nodes.contains_key(child)).collect();
+            let built: Vec<NodeId> = children.iter().map(|child| self.build(*child, text, false)).collect();
+            // What's fixed is laid out in the window, as the root's (`Retained::place_fixed`).
+            let inside: Vec<NodeId> = built.into_iter().filter(|child| !self.layout.leaf(*child).fixed).collect();
+            let kept = self.layout.kept.get_mut(&id).expect("it's built");
+            if kept.children != children {
+                let now: HashSet<&Id> = children.iter().collect();
+                self.gone.extend(kept.children.iter().filter(|child| !now.contains(child)));
+                kept.children = children;
+            }
+            if kept.inside != inside {
+                if !root {
+                    self.layout.taffy.set_children(kept.node, &inside).expect("its children are Taffy's");
+                }
+                kept.inside = inside;
+            }
+        }
+        self.layout.kept[&id].node
+    }
+
+    /// Styles `id` again, in `state`, inheriting `inherited`, telling Taffy only what's different. → the text it
+    /// passes on.
+    fn restyle(&mut self, id: Id, inherited: Text, state: State, root: bool) -> Text {
+        let tree = self.tree;
+        let node = &tree.nodes[&id];
         let mut computed = style::of(node, state, self.conditions);
         // What's just been added starts from its `entering` state, to move from.
         let entering = (computed.transition.is_some() && self.transitions.entering(id)).then(|| style::of(node, State { entering: true, ..state }, self.conditions));
@@ -1273,29 +1492,44 @@ impl Painter<'_> {
         }
         layout.scrollbar_width = 0.0;
         let lines = computed.line_clamp.or(node.style.line_clamp);
-        let (measure, children) = match node.kind {
-            Kind::Text => (Some(Measure::Text { words: tree.text(id), text, lines }), Vec::new()),
-            Kind::RawText => (Some(Measure::Text { words: node.value.clone().unwrap_or_default(), text, lines: None }), Vec::new()),
+        let measure = match node.kind {
+            Kind::Text => Some(Measure::Text { words: tree.text(id), text, lines }),
+            Kind::RawText => Some(Measure::Text { words: node.value.clone().unwrap_or_default(), text, lines: None }),
             Kind::Input => {
                 let words = self.fields.get(&id).map(Field::display).unwrap_or_default();
                 let words = if words.is_empty() { node.str("placeholder").unwrap_or_default().to_owned() } else { words };
-                (Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") }), Vec::new())
+                Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") })
             }
-            Kind::Image | Kind::Path | Kind::Picker => (None, Vec::new()),
-            Kind::Box | Kind::Scroll => {
-                let children: Vec<Id> = node.children.iter().copied().filter(|child| tree.nodes.contains_key(child)).collect();
-                let built: Vec<NodeId> = children.into_iter().map(|child| self.build(child, text, false)).collect();
-                // What's fixed is laid out in the window, as the root's (`Screen::paint`).
-                let (fixed, inside): (Vec<NodeId>, Vec<NodeId>) = built.into_iter().partition(|child| self.nodes[child].fixed);
-                self.fixed.extend(fixed);
-                (None, inside)
-            }
+            Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll => None,
         };
         let positioned = layout.position == taffy::style::Position::Absolute;
-        let taffy_node = if children.is_empty() { self.taffy.new_leaf(layout) } else { self.taffy.new_with_children(layout, &children) }
-            .expect("taffy takes any style");
-        self.nodes.insert(taffy_node, Leaf { id, text, look, line_clamp: lines, positioned, fixed: computed.fixed, measure });
-        taffy_node
+        let leaf = Leaf { id, text, look, line_clamp: lines, positioned, fixed: computed.fixed, measure, paragraph: None };
+        let taffy = &mut self.layout.taffy;
+        match self.layout.kept.get_mut(&id) {
+            Some(kept) => {
+                if taffy.style(kept.node).is_ok_and(|was| *was != layout) {
+                    taffy.set_style(kept.node, layout).expect("taffy takes any style");
+                }
+                let was = taffy.get_node_context_mut(kept.node).expect("every node has its leaf");
+                let measured = was.measure != leaf.measure;
+                *was = leaf;
+                if measured {
+                    taffy.mark_dirty(kept.node).expect("it's Taffy's");
+                }
+                (kept.inherited, kept.state) = (inherited, state);
+            }
+            None => {
+                let node = taffy.new_leaf_with_context(layout, leaf).expect("taffy takes any style");
+                let kept = Kept { node, inherited, state, children: Vec::new(), inside: Vec::new(), frame: self.frame };
+                self.layout.kept.insert(id, kept);
+            }
+        }
+        if computed.fixed {
+            self.layout.fixed.insert(id);
+        } else {
+            self.layout.fixed.remove(&id);
+        }
+        text
     }
 
     /// A quad, its bounds and mask in the window.
@@ -1382,12 +1616,12 @@ impl Painter<'_> {
 
     #[allow(clippy::too_many_arguments)]
     fn paint_node(&mut self, taffy_node: NodeId, offset: Point<f32>, transform: Transform, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
-        let Ok(laid) = self.taffy.layout(taffy_node).copied() else { return };
+        let Ok(laid) = self.layout.taffy.layout(taffy_node).copied() else { return };
         // What isn't displayed isn't drawn, and nothing in it is.
-        if self.taffy.style(taffy_node).is_ok_and(|style| style.display == taffy::style::Display::None) {
+        if self.layout.taffy.style(taffy_node).is_ok_and(|style| style.display == taffy::style::Display::None) {
             return;
         }
-        let Some(leaf) = self.nodes.get(&taffy_node) else { return };
+        let Some(leaf) = self.layout.taffy.get_node_context(taffy_node) else { return };
         let (id, text, look, lines) = (leaf.id, leaf.text, leaf.look.clone(), leaf.line_clamp);
         let tree = self.tree;
         let node = &tree.nodes[&id];
@@ -1467,10 +1701,23 @@ impl Painter<'_> {
         let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, scroll: None };
         match node.kind {
             Kind::Text | Kind::RawText => {
-                let words = if node.kind == Kind::Text { tree.text(id) } else { node.value.clone().unwrap_or_default() };
                 let width = laid.content_box_width().max(1.0);
-                let paragraph = self.text.paragraph(&words, &text.style, text.wrap.then_some(width), lines);
-                self.paint_text(&paragraph, content, width, transform.scale, text, opacity, mask);
+                let wrap = text.wrap.then_some(width);
+                let kept = self.layout.leaf(taffy_node).paragraph.as_ref().filter(|(wrapped, _)| *wrapped == wrap).map(|(_, paragraph)| paragraph.clone());
+                let paragraph = kept.unwrap_or_else(|| {
+                    let words = if node.kind == Kind::Text { tree.text(id) } else { node.value.clone().unwrap_or_default() };
+                    let paragraph = Arc::new(self.text.paragraph(&words, &text.style, wrap, lines));
+                    if let Some(leaf) = self.layout.taffy.get_node_context_mut(taffy_node) {
+                        leaf.paragraph = Some((wrap, paragraph.clone()));
+                    }
+                    paragraph
+                });
+                // Words that don't show aren't drawn: their lines start at its content's left and run on to the right.
+                let size = paragraph.size();
+                let covers = Bounds { origin: content.origin, size: Size { width: size.width.max(width) * transform.scale, height: size.height * transform.scale } };
+                if self.turned(covers).intersects(&mask) {
+                    self.paint_text(&paragraph, content, width, transform.scale, text, opacity, mask);
+                }
             }
             Kind::Input => {
                 let padding = transform.bounds(Bounds {
@@ -1506,19 +1753,20 @@ impl Painter<'_> {
                 self.placed.push((id, placed));
                 // Its children in order, those with a higher `zIndex` later, and positioned ones after the rest of theirs.
                 let mut children: Vec<(usize, NodeId, i32, bool)> = self
+                    .layout
                     .taffy
                     .children(taffy_node)
                     .unwrap_or_default()
                     .into_iter()
                     .enumerate()
                     .map(|(at, child)| {
-                        let leaf = &self.nodes[&child];
+                        let leaf = self.layout.leaf(child);
                         (at, child, leaf.look.z_index, leaf.positioned)
                     })
                     .collect();
                 children.sort_by_key(|(at, _, z, positioned)| (*z, *positioned, *at));
                 for (_, child, _, _) in children {
-                    if self.nodes[&child].fixed {
+                    if self.layout.leaf(child).fixed {
                         let window = self.window;
                         self.paint(child, point(0.0, 0.0), Transform::NONE, window, 1.0, Some(id), pointer);
                     } else {

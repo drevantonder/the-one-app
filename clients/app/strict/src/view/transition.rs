@@ -156,9 +156,8 @@ pub(crate) struct Transitions {
     /// Where each property that moves was last going.
     values: HashMap<(Id, &'static str), Value>,
     moving: HashMap<(Id, &'static str), Moving>,
-    /// The nodes drawn last frame and this one: one that wasn't is entering.
+    /// The nodes in the tree as it's drawn: one that isn't yet is entering.
     drawn: HashSet<Id>,
-    drawing: HashSet<Id>,
 }
 
 impl Transitions {
@@ -171,7 +170,7 @@ impl Transitions {
     /// way from where it was, or from `entering`'s value for a node just added, to `computed`'s, setting off when it
     /// changed (`since`). `reduced`: the person asked for less motion.
     pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, since: f64, reduced: bool) {
-        self.drawing.insert(id);
+        self.drawn.insert(id);
         let Some(transition) = computed.transition.clone() else { return };
         for (property, moves) in PROPERTIES {
             let key = (id, property);
@@ -211,12 +210,24 @@ impl Transitions {
         }
     }
 
-    /// Ends a frame: forgets what's no longer drawn and what's arrived. → whether anything's still moving.
+    /// Node `id` is no longer in the tree as it's drawn: put back, it enters again.
+    pub fn forget(&mut self, id: Id) {
+        if self.drawn.remove(&id) {
+            for (property, _) in PROPERTIES {
+                self.values.remove(&(id, property));
+                self.moving.remove(&(id, property));
+            }
+        }
+    }
+
+    /// The nodes with something on its way, which are styled again each frame until it's arrived.
+    pub fn moving(&self) -> HashSet<Id> {
+        self.moving.keys().map(|(id, _)| *id).collect()
+    }
+
+    /// Ends a frame: forgets what's arrived. → whether anything's still moving.
     pub fn finish(&mut self, now: f64) -> bool {
-        self.drawn = std::mem::take(&mut self.drawing);
-        let drawn = &self.drawn;
-        self.values.retain(|(id, _), _| drawn.contains(id));
-        self.moving.retain(|(id, _), moving| drawn.contains(id) && !moving.done(now));
+        self.moving.retain(|_, moving| !moving.done(now));
         !self.moving.is_empty()
     }
 

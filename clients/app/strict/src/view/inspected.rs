@@ -168,7 +168,7 @@ impl Screen {
     pub(crate) fn press(&mut self, id: Id) -> anyhow::Result<Id> {
         let mut at = Some(id);
         while let Some(node) = at.filter(|node| !inspect::pressable(&self.tree, *node)) {
-            at = inspect::parent(&self.tree, node).filter(|parent| *parent != 0);
+            at = self.tree.parent(node).filter(|parent| *parent != 0);
         }
         let pressed = at.with_context(|| format!("node {id} takes no press, and neither does what it's in"))?;
         self.focus(Some(pressed));

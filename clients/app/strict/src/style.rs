@@ -331,7 +331,7 @@ pub fn look(style: &Style, dark: bool) -> Look {
 }
 
 /// How text is set where it is: what a node's children inherit, as CSS's text properties are inherited.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Text {
     pub style: TextStyle,
     pub color: Hsla,

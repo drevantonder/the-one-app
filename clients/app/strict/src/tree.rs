@@ -2,7 +2,7 @@
 //! layer applies Fabric's, which the window draws and which is its semantic tree: each node's role, name, value,
 //! states and actions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Context as _;
 use serde::{Deserialize, Serialize};
@@ -194,17 +194,75 @@ impl std::error::Error for Mismatch {}
 
 pub struct Tree {
     pub nodes: HashMap<Id, Node>,
+    /// What changed since the window last took it (`take_changed`): each node whose own props, style, text or
+    /// children did, and each `text` whose words did, so only that's laid out and painted again.
+    changed: HashSet<Id>,
+    /// The inputs, and what says `autofocus` or listens for `layout`, found without going through every node.
+    inputs: HashSet<Id>,
+    autofocus: HashSet<Id>,
+    layout: HashSet<Id>,
+    /// Whether the page names its styles (version 2) rather than sending style objects.
+    styled: bool,
 }
 
 impl Default for Tree {
     fn default() -> Self {
-        Tree { nodes: HashMap::from([(0, Node::new(Kind::Box, None))]) }
+        Tree {
+            nodes: HashMap::from([(0, Node::new(Kind::Box, None))]),
+            changed: HashSet::from([0]),
+            inputs: HashSet::new(),
+            autofocus: HashSet::new(),
+            layout: HashSet::new(),
+            styled: false,
+        }
     }
 }
 
 impl Tree {
     pub fn root(&self) -> &Node {
         &self.nodes[&0]
+    }
+
+    /// What `id` is in.
+    pub fn parent(&self, id: Id) -> Option<Id> {
+        self.nodes.get(&id)?.parent
+    }
+
+    /// Whether nothing's changed since `take_changed` was last asked.
+    pub fn unchanged(&self) -> bool {
+        self.changed.is_empty()
+    }
+
+    /// What's changed since this was last asked, and forgets it.
+    pub fn take_changed(&mut self) -> HashSet<Id> {
+        std::mem::take(&mut self.changed)
+    }
+
+    pub fn inputs(&self) -> impl Iterator<Item = Id> + '_ {
+        self.inputs.iter().copied()
+    }
+
+    /// What says `autofocus`.
+    pub fn autofocused(&self) -> impl Iterator<Item = Id> + '_ {
+        self.autofocus.iter().copied().filter(|id| self.nodes.get(id).is_some_and(|node| node.is("autofocus")))
+    }
+
+    /// What listens for `layout`.
+    pub fn laid_out(&self) -> impl Iterator<Item = Id> + '_ {
+        self.layout.iter().copied().filter(|id| self.nodes.get(id).is_some_and(|node| node.listens("layout")))
+    }
+
+    pub fn styled(&self) -> bool {
+        self.styled
+    }
+
+    /// `id` changed, and so did the words of each `text` it's in.
+    fn change(&mut self, id: Id) {
+        let mut at = Some(id);
+        while let Some(changed) = at {
+            self.changed.insert(changed);
+            at = self.nodes.get(&changed).and_then(|node| node.parent).filter(|parent| self.nodes.get(parent).is_some_and(|node| node.kind == Kind::Text));
+        }
     }
 
     /// Applies the app's mutations, in order. One that uses what this host doesn't draw yet is refused, and so is what
@@ -215,18 +273,28 @@ impl Tree {
                 Mutation::Unsupported { what } => return Err(Mismatch(format!("it uses {what}, which a native host doesn't draw yet")).into()),
                 Mutation::Create { id, kind, value } => {
                     self.nodes.insert(id, Node::new(kind, value));
+                    if kind == Kind::Input {
+                        self.inputs.insert(id);
+                    }
+                    self.changed.insert(id);
                 }
                 Mutation::Set { id, name, value } => {
                     let node = self.nodes.get_mut(&id).with_context(|| format!("there's no node {id}"))?;
                     match name.as_str() {
+                        "autofocus" => drop(self.autofocus.insert(id)),
+                        "onLayout" => drop(self.layout.insert(id)),
+                        _ => {}
+                    }
+                    match name.as_str() {
                         "style" => match value {
-                            Value::Array(styles) => node.styles = Some(styles),
+                            Value::Array(styles) => (node.styles, self.styled) = (Some(styles), true),
                             Value::Null => (node.style, node.styles) = (Style::default(), None),
                             value => node.style = serde_json::from_value(value)?,
                         },
                         "value" if node.kind == Kind::RawText => node.value = value.as_str().map(str::to_owned),
                         _ => drop(node.props.insert(name, value)),
                     }
+                    self.change(id);
                 }
                 Mutation::Insert { parent, id, before } => {
                     anyhow::ensure!(self.nodes.contains_key(&id), "there's no node {id}");
@@ -235,11 +303,15 @@ impl Tree {
                     let at = before.and_then(|before| into.children.iter().position(|child| *child == before));
                     into.children.insert(at.unwrap_or(into.children.len()), id);
                     self.nodes.get_mut(&id).expect("it's there").parent = Some(parent);
+                    self.change(parent);
                 }
                 Mutation::Remove { id, .. } => self.detach(id),
                 Mutation::Drop { id } => {
                     self.detach(id);
                     self.nodes.remove(&id);
+                    self.inputs.remove(&id);
+                    self.autofocus.remove(&id);
+                    self.layout.remove(&id);
                 }
             }
         }
@@ -249,8 +321,9 @@ impl Tree {
     /// Takes `id` out of what it's in, as a node inserted again moves.
     fn detach(&mut self, id: Id) {
         let Some(parent) = self.nodes.get_mut(&id).and_then(|node| node.parent.take()) else { return };
-        if let Some(parent) = self.nodes.get_mut(&parent) {
-            parent.children.retain(|child| *child != id);
+        if let Some(node) = self.nodes.get_mut(&parent) {
+            node.children.retain(|child| *child != id);
+            self.change(parent);
         }
     }
 

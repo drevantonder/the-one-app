@@ -191,11 +191,6 @@ pub fn order(tree: &Tree) -> Vec<Id> {
     order
 }
 
-/// The node's parent, if it's in the tree.
-pub fn parent(tree: &Tree, id: Id) -> Option<Id> {
-    tree.nodes.iter().find(|(_, node)| node.children.contains(&id)).map(|(parent, _)| *parent)
-}
-
 /// The nodes the request's selector matches, in the tree's order.
 pub fn select(tree: &Tree, request: &Request) -> Vec<Id> {
     let described = semantics(tree);
