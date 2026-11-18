@@ -197,19 +197,19 @@ pub struct BladeRenderer {
 /// How many times a backdrop's frame is halved at most: a sixteenth of it, for the widest blur.
 const LEVELS: usize = 4;
 
-/// The textures a backdrop's blur is drawn through, for frames of `size`: the frame, then for each level (half its
-/// size, a quarter, …) the frame shrunk to it and the two passes of its blur, and which level the last blur's in.
+/// The textures a backdrop's blur is drawn through, for frames of `size`: for each level (half its size, a quarter,
+/// …) the frame shrunk to it and the two passes of its blur, each made as a blur first needs it, as only the widest
+/// blur's last level has the two passes; and which level the last blur's in. The frame itself is read as it is.
 struct BackdropTextures {
     size: gpu::Extent,
     format: gpu::TextureFormat,
-    source: (gpu::Texture, gpu::TextureView),
-    levels: Vec<[(gpu::Texture, gpu::TextureView); 3]>,
+    levels: [[Option<(gpu::Texture, gpu::TextureView)>; 3]; LEVELS],
     blurred: usize,
 }
 
 impl BackdropTextures {
     fn all(&self) -> impl Iterator<Item = (gpu::Texture, gpu::TextureView)> + '_ {
-        std::iter::once(self.source).chain(self.levels.iter().flatten().copied())
+        self.levels.iter().flatten().flatten().copied()
     }
 }
 
@@ -224,8 +224,8 @@ impl BladeRenderer {
     ) -> anyhow::Result<Self> {
         let config = gpu::SurfaceConfig {
             size: extent(size),
-            // A backdrop copies what's drawn so far (`blur_behind`).
-            usage: gpu::TextureUsage::TARGET | gpu::TextureUsage::COPY,
+            // A backdrop blurs what's drawn so far, read from the frame (`blur_behind`).
+            usage: gpu::TextureUsage::TARGET | gpu::TextureUsage::RESOURCE,
             display_sync: gpu::DisplaySync::Recent,
             color_space: gpu::ColorSpace::Srgb,
             allow_exclusive_full_screen: false,
@@ -250,7 +250,7 @@ impl BladeRenderer {
             mip_level_count: 1,
             sample_count: 1,
             dimension: gpu::TextureDimension::D2,
-            usage: gpu::TextureUsage::COPY | gpu::TextureUsage::TARGET,
+            usage: gpu::TextureUsage::COPY | gpu::TextureUsage::TARGET | gpu::TextureUsage::RESOURCE,
             external: None,
         });
         let view = context.gpu.create_texture_view(
@@ -392,10 +392,6 @@ impl BladeRenderer {
 
         // The frame is drawn in runs of batches, one pass each, broken at each backdrop, which blurs what's drawn
         // before it.
-        let target = match &self.target {
-            Target::Surface { .. } => frame.as_ref().map(|frame| frame.texture()),
-            Target::Offscreen { texture, .. } => Some(*texture),
-        };
         let mut init = gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack);
         let mut run: Vec<PrimitiveBatch<'_>> = Vec::new();
         for batch in scene.batches() {
@@ -407,9 +403,7 @@ impl BladeRenderer {
             run.clear();
             init = gpu::InitOp::Load;
             for at in 0..backdrops.len() {
-                if let Some(target) = target {
-                    self.blur_behind(target, size, backdrops[at].blur.0);
-                }
+                self.blur_behind(view, size, backdrops[at].blur.0);
                 self.draw_run(view, gpu::InitOp::Load, globals, &[PrimitiveBatch::Backdrops(&backdrops[at..at + 1])]);
             }
         }
@@ -453,7 +447,7 @@ impl BladeRenderer {
                 PrimitiveBatch::Backdrops(backdrops) => self.instances(backdrops),
             })
             .collect();
-        let blurred = self.backdrop.as_ref().map(|backdrop| backdrop.levels[backdrop.blurred][2].1);
+        let blurred = self.backdrop.as_ref().and_then(|backdrop| backdrop.levels[backdrop.blurred][2]).map(|(_, view)| view);
         if let mut pass = self.command_encoder.render(
             "",
             gpu::RenderTargetSet { colors: &[gpu::RenderTarget { view, init_op: init, finish_op: gpu::FinishOp::Store }], depth_stencil: None },
@@ -511,9 +505,9 @@ impl BladeRenderer {
         }
     }
 
-    /// Blurs what's drawn into `target` so far, `sigma` device pixels, into the backdrop's textures: copied, then
-    /// blurred across into one at half its size and down into another, each a separable Gaussian's pass.
-    fn blur_behind(&mut self, target: gpu::Texture, size: gpu::Extent, sigma: f32) {
+    /// Blurs what's drawn into `frame` so far, `sigma` device pixels, into the backdrop's textures: shrunk, then
+    /// blurred across into one at that size and down into another, each a separable Gaussian's pass.
+    fn blur_behind(&mut self, frame: gpu::TextureView, size: gpu::Extent, sigma: f32) {
         let format = self.pipelines_format;
         let halved = |times: usize| gpu::Extent { width: (size.width >> times).max(1), height: (size.height >> times).max(1), depth: 1 };
         if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size || backdrop.format != format) {
@@ -523,51 +517,40 @@ impl BladeRenderer {
                     self.gpu.destroy_texture(texture);
                 }
             }
-            let make = |extent: gpu::Extent| {
-                let texture = self.gpu.create_texture(gpu::TextureDesc {
-                    name: "",
-                    format,
-                    size: extent,
-                    array_layer_count: 1,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: gpu::TextureDimension::D2,
-                    usage: gpu::TextureUsage::COPY | gpu::TextureUsage::RESOURCE | gpu::TextureUsage::TARGET,
-                    external: None,
-                });
-                let view = self.gpu.create_texture_view(texture, gpu::TextureViewDesc { name: "", format, dimension: gpu::ViewDimension::D2, subresources: &Default::default() });
-                (texture, view)
-            };
-            let levels = (1..=LEVELS).map(|level| [make(halved(level)), make(halved(level)), make(halved(level))]).collect();
-            self.backdrop = Some(BackdropTextures { size, format, source: make(size), levels, blurred: 0 });
-            let backdrop = self.backdrop.as_ref().expect("just made");
-            let textures: Vec<gpu::Texture> = backdrop.all().map(|(texture, _)| texture).collect();
-            for texture in textures {
-                self.command_encoder.init_texture(texture);
-            }
-        }
-        {
-            let source = self.backdrop.as_ref().expect("made above").source.0;
-            let mut transfer = self.command_encoder.transfer("");
-            transfer.copy_texture_to_texture(
-                gpu::TexturePiece { texture: target, mip_level: 0, array_layer: 0, origin: [0, 0, 0] },
-                gpu::TexturePiece { texture: source, mip_level: 0, array_layer: 0, origin: [0, 0, 0] },
-                size,
-            );
+            self.backdrop = Some(BackdropTextures { size, format, levels: Default::default(), blurred: 0 });
         }
         // Halved until the blur left is a few texels, each halving the average of four, so the Gaussian then takes
         // every texel it reaches: a wide blur taking texels further apart streaks what's sharp behind it.
         let level = (1..=LEVELS).find(|level| sigma / (1 << level) as f32 <= 6.0).unwrap_or(LEVELS);
+        let wanted = (0..level).map(|at| (at, 0)).chain([(level - 1, 1), (level - 1, 2)]);
         let backdrop = self.backdrop.as_mut().expect("made above");
-        backdrop.blurred = level - 1;
-        let (source, levels) = (backdrop.source.1, backdrop.levels.iter().map(|[shrunk, across, down]| [shrunk.1, across.1, down.1]).collect::<Vec<_>>());
-        let mut passes = Vec::new();
-        let mut from = source;
-        for shrunk in levels.iter().take(level) {
-            passes.push((from, shrunk[0], [0.0, 0.0], 0.0));
-            from = shrunk[0];
+        for (at, which) in wanted {
+            if backdrop.levels[at][which].is_none() {
+                let texture = self.gpu.create_texture(gpu::TextureDesc {
+                    name: "",
+                    format,
+                    size: halved(at + 1),
+                    array_layer_count: 1,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: gpu::TextureDimension::D2,
+                    usage: gpu::TextureUsage::RESOURCE | gpu::TextureUsage::TARGET,
+                    external: None,
+                });
+                let view = self.gpu.create_texture_view(texture, gpu::TextureViewDesc { name: "", format, dimension: gpu::ViewDimension::D2, subresources: &Default::default() });
+                self.command_encoder.init_texture(texture);
+                backdrop.levels[at][which] = Some((texture, view));
+            }
         }
-        let [_, across, down] = levels[level - 1];
+        backdrop.blurred = level - 1;
+        let view = |at: usize, which: usize| backdrop.levels[at][which].expect("made above").1;
+        let mut passes = Vec::new();
+        let mut from = frame;
+        for at in 0..level {
+            passes.push((from, view(at, 0), [0.0, 0.0], 0.0));
+            from = view(at, 0);
+        }
+        let (across, down) = (view(level - 1, 1), view(level - 1, 2));
         let extent = halved(level);
         let sigma = sigma / (1 << level) as f32;
         passes.push((from, across, [1.0 / extent.width as f32, 0.0], sigma));
