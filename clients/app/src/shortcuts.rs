@@ -130,15 +130,15 @@ mod device {
     use tauri::Manager;
     use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
     use windows::Win32::System::Com::StructuredStorage::{
-        PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
+        PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0, PropVariantClear,
     };
     use windows::Win32::System::Com::{
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile,
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-    use windows::core::{HSTRING, Interface, PWSTR};
+    use windows::Win32::UI::Shell::{IShellLinkW, SHStrDupW, ShellLink};
+    use windows::core::{HSTRING, Interface};
 
     use super::Shortcut;
 
@@ -185,6 +185,11 @@ mod device {
                 std::fs::remove_file(kept.path())?;
             }
         }
+        // With none, its folder goes too, so the Start menu has no empty one.
+        if made.is_empty() {
+            std::fs::remove_dir(&start)?;
+            std::fs::remove_dir(&icons)?;
+        }
         Ok(())
     }
 
@@ -212,19 +217,21 @@ mod device {
             link.SetArguments(&HSTRING::from(arguments))?;
             link.SetIconLocation(&HSTRING::from(icon), 0)?;
             link.SetDescription(&HSTRING::from(description))?;
-            let mut id: Vec<u16> = id.encode_utf16().chain([0]).collect();
-            let value = PROPVARIANT {
+            // As InitPropVariantFromString makes one, which the SDK has only inline: its string the COM allocator's,
+            // which the shell frees as that, and cleared once the store has its copy.
+            let mut value = PROPVARIANT {
                 Anonymous: PROPVARIANT_0 {
                     Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
                         vt: VT_LPWSTR,
-                        Anonymous: PROPVARIANT_0_0_0 { pwszVal: PWSTR(id.as_mut_ptr()) },
+                        Anonymous: PROPVARIANT_0_0_0 { pwszVal: SHStrDupW(&HSTRING::from(id))? },
                         ..Default::default()
                     }),
                 },
             };
-            // The store copies what it's given, and `id` is this function's own, so the value isn't cleared.
             let store: IPropertyStore = link.cast()?;
-            store.SetValue(&PKEY_AppUserModel_ID, &value)?;
+            let set = store.SetValue(&PKEY_AppUserModel_ID, &value);
+            PropVariantClear(&mut value)?;
+            set?;
             store.Commit()?;
             link.cast::<IPersistFile>()?.Save(&HSTRING::from(file), true)?;
         }
