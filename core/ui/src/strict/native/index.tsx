@@ -292,11 +292,17 @@ export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
 export const RadioGroup = later("RadioGroup") as typeof Strict.RadioGroup
 export const Select = { Root: later("Select") } as typeof Strict.Select
 export const Sheet = later("Sheet") as typeof Strict.Sheet
+export const Alert = later("Alert") as typeof Strict.Alert
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
 export const confirm = later("confirm") as typeof Strict.confirm
 export const open = later("open") as typeof Strict.open
 export const leave = later("leave") as typeof Strict.leave
+/** A native host doesn't open an app to a link yet. */
+export const link: typeof Strict.link = () => undefined
+export const component = later("component") as typeof Strict.component
+export const showRecoveryKey = later("showRecoveryKey") as typeof Strict.showRecoveryKey
+export const useRecoveryKey = later("useRecoveryKey") as typeof Strict.useRecoveryKey
 export const go: typeof Strict.go = (change) => change()
 export const share = later("share") as typeof Strict.share
 export const seen = later("seen") as typeof Strict.seen

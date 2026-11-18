@@ -37,6 +37,9 @@ addEventListener("pageswap", ({ activation, viewTransition }) => {
   if (activation?.navigationType === "traverse" && activation.from && activation.entry.index < activation.from.index) viewTransition?.skipTransition()
 })
 
+// The page was loaded again with a split's detail open: what was in it is gone, so each starts shut.
+if (history.state?.uiSplit) history.replaceState({ ...history.state, uiSplit: 0 }, "")
+
 /// What closes what a split has open beside its list, for the list's Back button, while something is.
 const Opened = createContext<() => (() => void) | undefined>(() => undefined)
 
@@ -96,22 +99,25 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
   // Whether the detail is beside the list, which the room it has says (ui.css).
   const [beside, setBeside] = createSignal(false)
   let byDevice = false
+  // How deep in the history its opening is, among the splits open in one another (a sidebar's, then a list's):
+  // each is one step, so the device's back closes the innermost first.
+  let depth = 0
+  const deep = () => Number(history.state?.uiSplit ?? 0)
   const close = () => props.onClose?.()
 
   // The device's back, or forward: what's open is what the history says.
   const travelled = (event: PopStateEvent) => {
     byDevice = event.hasUAVisualTransition
-    if (!history.state?.uiSplit && props.open) props.onClose?.()
+    if (props.open && deep() < depth) props.onClose?.()
   }
   onSettled(() => {
     addEventListener("popstate", travelled)
-    // The page was loaded again with the detail open: what was in it is gone, so it starts shut.
-    if (history.state?.uiSplit && !props.open) history.replaceState({ ...history.state, uiSplit: false }, "")
     const resized = new ResizeObserver(() => setBeside(!!getComputedStyle(panes).getPropertyValue("--beside")))
     resized.observe(split)
-    // Escape closes it, unless it's for a sheet or a menu over it, which closes that.
+    // Escape closes it, unless it's for a sheet or a menu over it, which closes that, or a split open in it, which
+    // closes first.
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented && props.open && !document.querySelector("dialog[open], :popover-open")) close()
+      if (event.key === "Escape" && !event.defaultPrevented && props.open && deep() <= depth && !document.querySelector("dialog[open], :popover-open")) close()
     }
     addEventListener("keydown", escape)
     return () => (removeEventListener("popstate", travelled), removeEventListener("keydown", escape), resized.disconnect())
@@ -128,8 +134,11 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
     if (still) setOpen(now)
     else go(() => setOpen(now), { back: !now, part: split })
     // Opening it is one step in the history, so that the device's back is what closes it.
-    if (now && !history.state?.uiSplit) history.pushState({ ...history.state, uiSplit: true }, "")
-    if (!now && history.state?.uiSplit) history.back()
+    if (now && !depth) history.pushState({ ...history.state, uiSplit: (depth = deep() + 1) }, "")
+    if (!now && depth) {
+      if (deep() >= depth) history.back()
+      depth = 0
+    }
   })
 
   return (

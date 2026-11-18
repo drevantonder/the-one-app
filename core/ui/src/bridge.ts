@@ -3,6 +3,7 @@
 // assistant.
 import { configureClientErrors, createSignal } from "solid-js"
 import { readable, reduced } from "./shared.ts"
+import type { JSX } from "@solidjs/web"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {
@@ -223,6 +224,33 @@ export const leave = () => greet().then(() => notify("ui/notifications/request-t
 /// in the device's own browser, outside the app, as an outside service's sign-in page is opened.
 export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number; radius?: number } } = {}): Promise<unknown> =>
   greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
+
+/// `createEffect(link, (to) => ...)`: the link the page was opened to last, `one:vault#request=4`'s `request=4`, as it
+/// changes: a link followed while the page is open is told too, the same one again as well. The page's address
+/// forgets it once it's read, so following it again is news. None until a link names more than the app.
+export function link(): string | undefined {
+  return (linked ??= follow())()
+}
+let linked: (() => string | undefined) | undefined
+function follow() {
+  const read = () => {
+    const to = location.hash.slice(1)
+    if (to) history.replaceState(history.state, "", location.pathname + location.search)
+    return to || undefined
+  }
+  const [to, setTo] = createSignal(read(), { equals: false })
+  addEventListener("hashchange", () => {
+    const now = read()
+    if (now) setTo(now)
+  })
+  return to
+}
+
+/// `const { Summary } = await component("chrome-profiles", "profile")`: what another app's client exports
+/// (its client/package.json names it), as a module the client serves beside this app's page: its components, drawn
+/// here with what they're given.
+export const component = (app: string, name: string): Promise<Record<string, (props: Record<string, unknown>) => JSX.Element>> =>
+  import(/* @vite-ignore */ new URL(`../../${app}/client/${name}.js`, document.baseURI).href)
 
 /// `sizeChanged({ height: 420 })`: tells the client how large the page's content is, in CSS pixels, as an MCP App tells
 /// its host (`ui/notifications/size-changed`). A window sized by what it shows, a computer's launcher, takes it; one

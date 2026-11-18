@@ -30,7 +30,7 @@
 /// repo's root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what
 /// isn't there (a component, a prop, a style) adds it there, with only what every host can draw (`protocol.ts`), and
 /// core/ui's `bun run typecheck` then says whether the DOM's component takes it.
-export { call, changed, client, connection, covers, haptic, leave, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, visible } from "./bridge.ts"
+export { call, changed, client, component, connection, covers, haptic, leave, link, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, visible } from "./bridge.ts"
 export { pace, seen, share } from "./shared.ts"
 export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
@@ -47,7 +47,7 @@ export { LiveScreen } from "./live-screen.tsx"
 export { Menu } from "./menu.tsx"
 export { Tabs } from "./tabs.tsx"
 export { Empty, Problem, Skeleton, Status, Steps } from "./states.tsx"
-export { confirm, Sheet } from "./sheet.tsx"
+export { Alert, confirm, Sheet } from "./sheet.tsx"
 export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"

@@ -148,6 +148,8 @@ export declare const Select: {
 export type ScreenInputs = { action: string } & Record<string, unknown>
 export declare function LiveScreen(props: { label: string; screen?: (inputs: ScreenInputs) => Promise<unknown>; watch?: boolean; children?: Element }): Element
 
+export declare function Alert(props: { heading: Element; text?: Element; open?: boolean; onClose?: () => void; action?: Element; children?: Element }): Element
+
 export declare function Sheet(props: { heading?: Element; open?: boolean; onClose?: () => void; children?: Element }): Element
 
 export declare const Menu: {
@@ -178,6 +180,10 @@ export declare function toast(text: string | Error, options?: { action?: { label
 export declare function confirm(question: { heading: string; text?: string; action?: string; destructive?: boolean }): Promise<boolean>
 export declare function open(app: string, options?: Subject): Promise<unknown>
 export declare function leave(): Promise<void>
+export declare function link(): string | undefined
+export declare function component(app: string, name: string): Promise<Record<string, (props: Record<string, unknown>) => Element>>
+export declare function showRecoveryKey(options?: Subject): Promise<boolean>
+export declare function useRecoveryKey(options?: Subject): Promise<boolean>
 export declare function go(change: () => void, options?: { back?: boolean }): void
 export declare function share(text: string): Promise<"shared" | "copied" | undefined>
 export declare function seen(at: string | number | Date): string

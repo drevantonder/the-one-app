@@ -166,28 +166,50 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
   )
 }
 
-/// A question that stops everything until it's answered: the one the page has, asked through `confirm`. It keeps
-/// showing the question as it fades out. Its two buttons sit side by side while both fit, and otherwise one over the
-/// other, the action above Cancel, as iOS lays them out (ui.css).
-function Alert(props: { question?: Question; open: boolean; onResult: (yes: boolean, reset: false) => void }) {
+/// `<Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={!!asking()} onClose={() => setAsking()} action={<><Button variant="outline" onClick={decline}>Don't Allow</Button><Button onClick={allow}>Allow</Button></>}>...</Alert>`:
+/// a question that stops everything until it's answered, as a system's permission prompt does, in the middle of the
+/// window while `open`: its `heading`, its grey `text`, what's chosen or typed for it, then its buttons (`action`),
+/// side by side while both fit, and otherwise one over the other, the first below, as iOS lays them out (ui.css).
+/// `confirm` asks a question with only Cancel and OK; this is for one that needs more. Escape and the device's back
+/// close it too, which calls `onClose`, and the app sets `open` false.
+export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: boolean; onClose?: () => void; action?: JSX.Element; children?: JSX.Element }) {
+  const id = `ui-alert-${Math.random().toString(36).slice(2)}`
+  return (
+    <Dialog class="ui-dialog alert" role="alertdialog" labelledby={id} describedby={props.text ? `${id}-text` : undefined} open={props.open} onClose={props.onClose}>
+      <div class="panel">
+        <h2 id={id}>{props.heading}</h2>
+        <Show when={props.text}>
+          <p id={`${id}-text`}>{props.text}</p>
+        </Show>
+        {props.children}
+        <Show when={props.action}>
+          <footer>{props.action}</footer>
+        </Show>
+      </div>
+    </Dialog>
+  )
+}
+
+/// The question `confirm` asks, which keeps showing as it fades out.
+function Asked(props: { question?: Question; open: boolean; onResult: (yes: boolean, reset: false) => void }) {
   let confirmed = false
   return (
-    <Dialog class="ui-dialog alert" role="alertdialog" labelledby="ui-alert-heading" describedby="ui-alert-text" open={props.open} onClose={() => props.onResult(confirmed, (confirmed = false))}>
-      <div class="panel">
-        <h2 id="ui-alert-heading">{props.question?.heading}</h2>
-        <Show when={props.question?.text}>
-          <p id="ui-alert-text">{props.question?.text}</p>
-        </Show>
-        <footer>
+    <Alert
+      heading={props.question?.heading}
+      text={props.question?.text}
+      open={props.open}
+      onClose={() => props.onResult(confirmed, (confirmed = false))}
+      action={
+        <>
           <Button variant="outline" autofocus onClick={(event) => ((confirmed = false), event.currentTarget.closest("dialog")!.close())}>
             {messages.cancel}
           </Button>
           <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((confirmed = true), event.currentTarget.closest("dialog")!.close())}>
             {props.question?.action || messages.ok}
           </Button>
-        </footer>
-      </div>
-    </Dialog>
+        </>
+      }
+    />
   )
 }
 
@@ -210,7 +232,7 @@ export function confirm(question: Question): Promise<boolean> {
     const [open, setOpen] = createSignal(false)
     let resolve: (yes: boolean) => void
     const host = document.body.appendChild(document.createElement("div"))
-    render(() => <Alert question={question()} open={open()} onResult={(yes) => (setOpen(false), resolve(yes))} />, host)
+    render(() => <Asked question={question()} open={open()} onResult={(yes) => (setOpen(false), resolve(yes))} />, host)
     ask = (question) => new Promise<boolean>((done) => ((resolve = done), setQuestion(question), setOpen(true)))
   }
   return ask(question)
