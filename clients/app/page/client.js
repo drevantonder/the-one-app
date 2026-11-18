@@ -726,19 +726,17 @@ function show(at, tapped) {
   opened(view)
 }
 
-/// Has the app that's open as `at` showing, or with none there, the launcher, and the launcher told which, so it
-/// knows whether it's showing. → the one showing.
+/// Has the app that's open as `at` showing, or with none there, the launcher, and every other off screen. → the one
+/// showing.
 /** @param {string | null} at */
 function layer(at) {
   const view = showing(at)
   front = view
   bar()
-  const home = open.get(key(launcher))
   for (const other of open.values()) {
     other.frame.inert = other !== view
     if (other !== view) page(other, { type: "away" })
   }
-  if (home && view) post(home, { method: "notifications/one/showing", params: { entrypoint: view.entrypoint, subject: view.subject } })
   gestures()
   return view
 }
@@ -922,8 +920,6 @@ addEventListener("message", async ({ source, data }) => {
       view.over = params.over === true
       gestures()
     }
-    // The launcher, loaded again, is told which app is showing.
-    if (method === "ui/notifications/initialized" && view.entrypoint === launcher) layer(history.state)
     // An app's page logs its errors as an MCP App logs to its host, and they're its app's, whatever it says.
     if (method === "notifications/message" && params.level === "error") {
       exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
