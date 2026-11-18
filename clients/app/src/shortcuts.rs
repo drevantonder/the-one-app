@@ -6,6 +6,10 @@
 //! this device's person (`apps`), so an app installed is added, one uninstalled goes, and a device that's signed out
 //! has none. A Mac's and Linux's are kept only by an installed build, as only it takes the device's `one:` links: a
 //! developer's would leave behind ones to a build that's gone.
+//!
+//! An app's icon outside The One App has The One App's ring small in its corner (`badged`), so a person who finds it in
+//! Spotlight, Raycast or the Start menu sees whose it is. Android badges its pinned shortcuts with this app's icon
+//! itself, and its dynamic ones are in this app's own icon's menu, so they're plain (`MainActivity`).
 
 use std::sync::Mutex;
 
@@ -88,6 +92,103 @@ fn png(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
     Ok(drawn.encode_png()?)
 }
 
+/// An app's icon where it leaves The One App (Spotlight, Raycast, the Dock, the Start menu, a launcher), as a square PNG
+/// `side` pixels across: on macOS's icon grid, its body 824 of 1024 across in the middle, rounded by 185, with a shadow
+/// below it, and The One App's ring small in the bottom right corner, so it reads as that app's, of The One App. It's
+/// drawn from the same numbers as `tooling/helper-icon`'s helpers. Inside The One App an icon stays plain.
+#[cfg(not(target_os = "android"))]
+fn badged(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
+    Ok(scaled(&badged_pixmap(icon)?, side)?.encode_png()?)
+}
+
+/// A 1024 picture at `side`.
+#[cfg(not(target_os = "android"))]
+fn scaled(whole: &resvg::tiny_skia::Pixmap, side: u32) -> anyhow::Result<resvg::tiny_skia::Pixmap> {
+    use resvg::tiny_skia::{FilterQuality, Pixmap, PixmapPaint, Transform};
+    let mut sized = Pixmap::new(side, side).ok_or_else(|| anyhow::anyhow!("an icon has a size"))?;
+    let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
+    let scale = Transform::from_scale(side as f32 / 1024.0, side as f32 / 1024.0);
+    sized.draw_pixmap(0, 0, whole.as_ref(), &paint, scale, None);
+    Ok(sized)
+}
+
+/// `badged` at 1024.
+#[cfg(not(target_os = "android"))]
+fn badged_pixmap(icon: &str) -> anyhow::Result<resvg::tiny_skia::Pixmap> {
+    use resvg::tiny_skia::{FillRule, FilterQuality, Mask, PathBuilder, Pixmap, PixmapPaint, Transform};
+    let ring = Pixmap::decode_png(include_bytes!("../../../icons/ring.png"))?;
+    let body = Pixmap::decode_png(&png(icon, 824)?)?;
+    let canvas = || Pixmap::new(1024, 1024).ok_or_else(|| anyhow::anyhow!("a pixmap"));
+    // The body, in a rounded square whose corners are quarter circles as near as cubic curves draw them.
+    let mut app = canvas()?;
+    app.draw_pixmap(100, 100, body.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    let (near, far, radius) = (100.0, 924.0, 185.0);
+    let k = radius * 0.552_284_8;
+    let mut path = PathBuilder::new();
+    path.move_to(near + radius, near);
+    path.line_to(far - radius, near);
+    path.cubic_to(far - radius + k, near, far, near + radius - k, far, near + radius);
+    path.line_to(far, far - radius);
+    path.cubic_to(far, far - radius + k, far - radius + k, far, far - radius, far);
+    path.line_to(near + radius, far);
+    path.cubic_to(near + radius - k, far, near, far - radius + k, near, far - radius);
+    path.line_to(near, near + radius);
+    path.cubic_to(near, near + radius - k, near + radius - k, near, near + radius, near);
+    path.close();
+    let mut mask = Mask::new(1024, 1024).ok_or_else(|| anyhow::anyhow!("a mask"))?;
+    mask.fill_path(&path.finish().ok_or_else(|| anyhow::anyhow!("a rounded square"))?, FillRule::Winding, true, Transform::identity());
+    app.apply_mask(&mask);
+    // The ring, 340 tall (about two fifths of the body), its right edge 66 and its bottom 66 in from the canvas's.
+    let mut corner = canvas()?;
+    let scale = 340.0 / ring.height() as f32;
+    let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
+    let at = Transform::from_scale(scale, scale).post_translate(958.0 - ring.width() as f32 * scale, 618.0);
+    corner.draw_pixmap(0, 0, ring.as_ref(), &paint, at, None);
+    // Each with a shadow below it, so it reads on any colour.
+    let mut whole = canvas()?;
+    for (layer, sigma, down, opacity) in [(&app, 10.0, 10, 0.30), (&corner, 14.0, 8, 0.45)] {
+        whole.draw_pixmap(0, down, shadow(layer, sigma, opacity).as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+        whole.draw_pixmap(0, 0, layer.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
+    }
+    Ok(whole)
+}
+
+/// What a picture's shape casts: black as opaque as the shape is, to `opacity`, blurred by a Gaussian of `sigma`, which
+/// three passes of a box blur make.
+#[cfg(not(target_os = "android"))]
+fn shadow(layer: &resvg::tiny_skia::Pixmap, sigma: f32, opacity: f32) -> resvg::tiny_skia::Pixmap {
+    // Moves `from` to `to` along `lines` lines of `length`, each point the mean of the `radius` either side of it.
+    fn blur(from: &[f32], to: &mut [f32], length: usize, lines: usize, along: usize, across: usize, radius: usize) {
+        for line in 0..lines {
+            let at = |point: usize| line * across + point * along;
+            let mut sum: f32 = (0..=radius.min(length - 1)).map(|point| from[at(point)]).sum();
+            for point in 0..length {
+                to[at(point)] = sum / (2 * radius + 1) as f32;
+                if point + radius + 1 < length {
+                    sum += from[at(point + radius + 1)];
+                }
+                if point >= radius {
+                    sum -= from[at(point - radius)];
+                }
+            }
+        }
+    }
+    let (width, height) = (layer.width() as usize, layer.height() as usize);
+    let mut alpha: Vec<f32> = layer.pixels().iter().map(|pixel| pixel.alpha() as f32 / 255.0).collect();
+    let mut between = vec![0.0; alpha.len()];
+    // Three boxes of width w have the variance of a Gaussian of 4σ² + 1 = w².
+    let radius = ((4.0 * sigma * sigma + 1.0).sqrt() as usize) / 2;
+    for _ in 0..3 {
+        blur(&alpha, &mut between, width, height, 1, width, radius);
+        blur(&between, &mut alpha, height, width, width, 1, radius);
+    }
+    let mut cast = resvg::tiny_skia::Pixmap::new(layer.width(), layer.height()).expect("the layer's own size");
+    for (pixel, alpha) in cast.data_mut().chunks_exact_mut(4).zip(alpha) {
+        pixel[3] = (alpha * opacity * 255.0).round() as u8;
+    }
+    cast
+}
+
 /// An iPhone's are what Spotlight indexes and its App Shortcut offers, which its Swift reads from `shortcuts.json` in
 /// the app's Application Support folder, as each one's entrypoint, name and icon (`InstalledApp`), and is told to read
 /// again (`OneShortcuts.changed`).
@@ -100,7 +201,7 @@ mod device {
         use objc2::runtime::AnyClass;
         let listed: Vec<_> = shortcuts
             .iter()
-            .filter_map(|shortcut| match super::png(&shortcut.icon, 180) {
+            .filter_map(|shortcut| match super::badged(&shortcut.icon, 180) {
                 Ok(icon) => Some(
                     serde_json::json!({"id": shortcut.entrypoint, "name": shortcut.name, "icon": BASE64.encode(&icon)}),
                 ),
@@ -140,7 +241,7 @@ mod device {
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-    use windows::Win32::UI::Shell::{IShellLinkW, SHStrDupW, ShellLink};
+    use windows::Win32::UI::Shell::{IShellLinkW, SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify, SHStrDupW, ShellLink};
     use windows::core::{HSTRING, Interface};
 
     use super::Shortcut;
@@ -154,6 +255,7 @@ mod device {
         // The shell's COM objects are its thread's, which is this one, made for this.
         unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok()?;
         let mut made = Vec::new();
+        let mut changed = false;
         for shortcut in shortcuts {
             // A file's name has none of what Windows keeps out of one.
             let name: String =
@@ -163,14 +265,20 @@ mod device {
                 continue;
             }
             let icon = icons.join(format!("{}.ico", shortcut.entrypoint.replace(['/', '.'], "-")));
-            let drawn = match super::png(&shortcut.icon, 256) {
+            let drawn = match super::badged(&shortcut.icon, 256) {
                 Ok(drawn) => drawn,
                 Err(error) => {
                     eprintln!("{}'s icon isn't one a device can show: {error:#}", shortcut.entrypoint);
                     continue;
                 }
             };
-            std::fs::write(&icon, ico(&drawn)?)?;
+            // The shell keeps an icon by its file's path, so it's told when one is drawn new (an app's own, or the badge
+            // an update adds), as it isn't by a file changing.
+            let drawn = ico(&drawn)?;
+            if std::fs::read(&icon).ok().as_deref() != Some(&drawn) {
+                std::fs::write(&icon, drawn)?;
+                changed = true;
+            }
             let id = super::app_id(&shortcut.entrypoint, None);
             link(&start.join(&file), &program, &format!("one:{}", shortcut.entrypoint), &icon, &shortcut.name, &id)?;
             made.push(file);
@@ -191,6 +299,9 @@ mod device {
         if made.is_empty() {
             std::fs::remove_dir(&start)?;
             std::fs::remove_dir(&icons)?;
+        }
+        if changed {
+            unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
         }
         Ok(())
     }
@@ -250,7 +361,6 @@ mod device {
 mod device {
     use std::path::{Path, PathBuf};
 
-    use anyhow::Context;
     use tauri::Manager;
 
     use super::Shortcut;
@@ -353,36 +463,12 @@ mod device {
         let _ = std::process::Command::new(lsregister).arg(how).arg(bundle).status();
     }
 
-    /// An app's icon as a Mac app's: on macOS's icon grid, its body 824 of 1024 across in the middle, rounded by 185, as
-    /// `tooling/helper-icon` draws one, as an .icns of PNGs at the sizes macOS asks for.
+    /// An app's icon as a Mac app's (`badged`), as an .icns of PNGs at the sizes macOS asks for.
     fn icns(icon: &str) -> anyhow::Result<Vec<u8>> {
-        use resvg::tiny_skia::{FillRule, FilterQuality, Mask, PathBuilder, Pixmap, PixmapPaint, Transform};
-        let body = Pixmap::decode_png(&super::png(icon, 824)?)?;
-        let mut whole = Pixmap::new(1024, 1024).context("a pixmap")?;
-        whole.draw_pixmap(100, 100, body.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
-        // A rounded square, its corners quarter circles as near as cubic curves draw them.
-        let (near, far, radius) = (100.0, 924.0, 185.0);
-        let k = radius * 0.552_284_8;
-        let mut path = PathBuilder::new();
-        path.move_to(near + radius, near);
-        path.line_to(far - radius, near);
-        path.cubic_to(far - radius + k, near, far, near + radius - k, far, near + radius);
-        path.line_to(far, far - radius);
-        path.cubic_to(far, far - radius + k, far - radius + k, far, far - radius, far);
-        path.line_to(near + radius, far);
-        path.cubic_to(near + radius - k, far, near, far - radius + k, near, far - radius);
-        path.line_to(near, near + radius);
-        path.cubic_to(near, near + radius - k, near + radius - k, near, near + radius, near);
-        path.close();
-        let mut mask = Mask::new(1024, 1024).context("a mask")?;
-        mask.fill_path(&path.finish().context("a rounded square")?, FillRule::Winding, true, Transform::identity());
-        whole.apply_mask(&mask);
+        let whole = super::badged_pixmap(icon)?;
         let mut entries = Vec::new();
         for (kind, side) in [(b"ic10", 1024u32), (b"ic09", 512), (b"ic08", 256), (b"ic07", 128), (b"ic12", 64), (b"ic11", 32)] {
-            let mut sized = Pixmap::new(side, side).context("a pixmap")?;
-            let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
-            sized.draw_pixmap(0, 0, whole.as_ref(), &paint, Transform::from_scale(side as f32 / 1024.0, side as f32 / 1024.0), None);
-            let png = sized.encode_png()?;
+            let png = super::scaled(&whole, side)?.encode_png()?;
             entries.extend_from_slice(kind);
             entries.extend_from_slice(&(png.len() as u32 + 8).to_be_bytes());
             entries.extend_from_slice(&png);
@@ -418,7 +504,7 @@ mod device {
         for shortcut in shortcuts {
             let id = super::app_id(&shortcut.entrypoint, None);
             let icon = icons.join(format!("{id}.png"));
-            match super::png(&shortcut.icon, 256) {
+            match super::badged(&shortcut.icon, 256) {
                 Ok(drawn) => std::fs::write(&icon, drawn)?,
                 Err(error) => {
                     eprintln!("{}'s icon isn't one a device can show: {error:#}", shortcut.entrypoint);
