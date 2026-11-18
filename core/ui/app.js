@@ -8,7 +8,7 @@
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
 // exits with 1.
 import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { extname, join, relative } from "node:path"
+import { dirname, extname, join, relative } from "node:path"
 import solid from "@solidjs/vite-plugin"
 import { build, parseAst } from "vite"
 
@@ -38,6 +38,20 @@ try {
           { tag: "script", attrs: { src: "/ui/client/colour-mode.js" }, injectTo: "head-prepend" },
           { tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" },
         ],
+      },
+      // A module another page imports brings its own look: the stylesheets it imports, which a page links in its
+      // HTML, it links in the page that imports it as it runs.
+      {
+        name: "exported-css",
+        generateBundle(_, bundle) {
+          for (const chunk of Object.values(bundle)) {
+            if (chunk.type !== "chunk" || !exported.some(([name]) => name === chunk.name) || !chunk.viteMetadata?.importedCss.size) continue
+            const here = dirname(chunk.fileName)
+            const links = [...chunk.viteMetadata.importedCss].map((css) => `\ndocument.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: new URL(${JSON.stringify(`./${relative(here, css)}`)}, import.meta.url).href }))`)
+            // After its code and before its sourcemap's comment, so the lines the sourcemap maps stay where they were.
+            chunk.code = chunk.code.replace(/(\n\/\/# sourceMappingURL=.*)?$/, (comment = "") => links.join("") + comment)
+          }
+        },
       },
     ],
     build: {
