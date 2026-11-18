@@ -531,13 +531,13 @@ defmodule ChromeProfiles do
   end
 
   # Which of the Vault's three states the profile is in, from its update's own: busy while its browser starts, is
-  # open for its person, saves or closes; action_required, with Try Again, where it couldn't start or couldn't save;
+  # open for its person, saves or closes; needs_action, with Try Again, where it couldn't start or couldn't save;
   # ready with no update. Its person isn't notified: they're in the update, which shows what went wrong.
   defp shown(call, %{"profile" => name, "update" => until} = note) when until != nil do
     {state, message, action} =
       case note do
-        %{"state" => "failed"} -> {:action_required, "Couldn't start its browser", %{label: "Try Again", tool: "update", inputs: %{profile: name}}}
-        %{"state" => "ready", "why" => why} when why != nil -> {:action_required, "Couldn't save", %{label: "Try Again", tool: "save", inputs: %{profile: name}}}
+        %{"state" => "failed"} -> {:needs_action, "Couldn't start its browser", %{label: "Try Again", tool: "update", inputs: %{profile: name}}}
+        %{"state" => "ready", "why" => why} when why != nil -> {:needs_action, "Couldn't save", %{label: "Try Again", tool: "save", inputs: %{profile: name}}}
         %{"state" => "ready"} -> {:busy, "Updating", nil}
         %{"state" => "saving"} -> {:busy, note["stage"] || "Saving…", nil}
         %{"state" => "discarding"} -> {:busy, "Closing…", nil}

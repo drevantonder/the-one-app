@@ -356,7 +356,7 @@ defmodule GoogleAccount do
   # call that found it says so to whoever made it, and the Vault shows the dot.
   defp again(call, email, response) do
     if response["status"] == 401 or (response["status"] == 403 and (message(response["body"]) || "") =~ ~r/insufficient|scope/i),
-      do: state(call, email, :action_required, "Sign in again", %{label: "Sign In", tool: "sign_in", inputs: %{account: email}})
+      do: state(call, email, :needs_action, "Sign in again", %{label: "Sign In", tool: "sign_in", inputs: %{account: email}})
   end
 
   defp state(call, email, state, message \\ nil, action \\ nil) do
