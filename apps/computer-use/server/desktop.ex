@@ -349,6 +349,38 @@ defmodule ComputerUse.Desktop do
   @impl GenServer
   def code_change(_version, state, _extra), do: {:ok, start(state)}
 
+  # Removed from this computer, or its app uninstalled: Cua Driver stops, and its agent, unit or task goes, with its
+  # socket and its lock on a Mac or Linux. What's in the service's folder goes with it. Stopped any other way, as
+  # with its server, it keeps running.
+  @impl GenServer
+  def terminate({:shutdown, :removed}, _state) do
+    case :os.type() do
+      {:unix, :darwin} ->
+        launchctl(["bootout", "#{domain()}/#{label()}"])
+        File.rm(Path.expand("~/Library/LaunchAgents/#{label()}.plist"))
+        for file <- [socket(), socket() <> ".lock"], do: File.rm(file)
+
+      {:unix, :linux} ->
+        name = "one-computer-use-#{key()}.service"
+        systemctl(["disable", "--now", name])
+        File.rm(Path.expand("~/.config/systemd/user/#{name}"))
+        systemctl(["daemon-reload"])
+        for file <- [socket(), socket() <> ".lock"], do: File.rm(file)
+
+      # Ending the task ends conhost, so Cua Driver is asked to stop first, as when its task is registered again.
+      {:win32, _} ->
+        name = "The One App Computer Use #{key()}"
+        driver = Path.join([OneCore.Service.folder(self()), "cua-driver-#{@cua}", "cua-driver.exe"])
+        if File.exists?(driver), do: System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
+        schtasks(["/end", "/tn", name])
+        schtasks(["/delete", "/tn", name, "/f"])
+    end
+
+    :ok
+  end
+
+  def terminate(_why, _state), do: :ok
+
   # Cua Driver, downloaded if it isn't here yet, run as a service of the person's session: started now, or started
   # again if what it runs changed.
   defp start(state) do
