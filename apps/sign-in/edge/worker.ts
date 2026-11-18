@@ -4,7 +4,7 @@
 // token a person let it have, or a browser signed in here, the web client.
 import { env, WorkerEntrypoint } from "cloudflare:workers";
 import { requireMcpAuth } from "@better-auth/mcp";
-import { asked, assistant, at, browserDevice, who, type Ask, type Auth } from "./auth.ts";
+import { asked, assistant, at, BELIEVED, browserDevice, who, type Ask, type Auth } from "./auth.ts";
 
 /** A server on this list acts for the network, and so for everyone in it. */
 const NETWORK = "network/";
@@ -74,20 +74,33 @@ export class Who extends WorkerEntrypoint {
 }
 
 /** The key a session is signed with into the address of its apps' files: this Worker's secret, as HMAC's. */
-const signing = (secret: string) => crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+let key: Promise<CryptoKey> | undefined;
+const signing = (secret: string) => (key ??= crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]));
 /** What's signed for a session. */
 const signs = (session: string) => new TextEncoder().encode(`apps/${session}`);
+
+/**
+ * The sessions of apps' pages this copy of the Worker found in the database, believed for `BELIEVED` seconds, or
+ * until they end if that's sooner, as a cookie's session is: an app's page asks for each of its files.
+ */
+const believed = new Map<string, { signed: Signed; until: number }>();
 
 /** Who an app's page's request is from, by the session signed into its address, `/apps/<session>.<signature>/…`. */
 async function appsSession(auth: Auth, url: URL): Promise<Signed | null> {
   const [session, hex = ""] = url.pathname.slice("/apps/".length).split("/")[0].split(".");
   const { adapter, internalAdapter, secret } = await auth.$context;
   const signature = Uint8Array.from(hex.match(/../g) ?? [], (byte) => parseInt(byte, 16));
-  const valid = await crypto.subtle.verify("HMAC", await signing(secret), signature, signs(session));
-  const stored = valid && (await adapter.findOne<{ userId: string; expiresAt: Date }>({ model: "session", where: [{ field: "id", value: session }] }));
-  if (!stored || stored.expiresAt < new Date()) return null;
+  if (!(await crypto.subtle.verify("HMAC", await signing(secret), signature, signs(session)))) return null;
+  const now = Date.now();
+  const known = believed.get(session);
+  if (known && known.until > now) return known.signed;
+  const stored = await adapter.findOne<{ userId: string; expiresAt: Date }>({ model: "session", where: [{ field: "id", value: session }] });
+  if (!stored || stored.expiresAt.getTime() < now) return null;
   const user = (await internalAdapter.findUserById(stored.userId))!;
-  return { device: await browserDevice(session), who: who(user) };
+  const signed = { device: await browserDevice(session), who: who(user) };
+  for (const [gone, { until }] of believed) if (until <= now) believed.delete(gone);
+  believed.set(session, { signed, until: Math.min(now + BELIEVED * 1000, stored.expiresAt.getTime()) });
+  return signed;
 }
 
 /** The key that signed what was asked, as the pieces of the edge check it, or null. */

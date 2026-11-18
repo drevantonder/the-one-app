@@ -5,6 +5,8 @@
   "workers_dev": false,
   // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them.
   "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in" }],
+  // Which version of it is deployed, by which it makes its tables once for each (`auth.ts`).
+  "version_metadata": { "binding": "VERSION" },
   // The sign-in page as it's built (`page/`, an app's page built against the UI library), which the Worker hands out
   // itself: every request comes to it first.
   "assets": { "directory": "files", "binding": "ASSETS", "run_worker_first": true }

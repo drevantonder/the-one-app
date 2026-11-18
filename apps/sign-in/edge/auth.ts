@@ -22,6 +22,8 @@ declare global {
     interface Env {
       DB: D1Database;
       ASSETS: Fetcher;
+      /** Which deployed version of this Worker this is (`version_metadata` in `wrangler.jsonc`). */
+      VERSION: WorkerVersionMetadata;
       OWN: {
         write(name: string, data: string): Promise<boolean>;
         update(name: string, change: (was: string | null) => string): Promise<string>;
@@ -75,6 +77,13 @@ interface Invite {
 
 /** How long ago someone may have answered the passkey question for it to count as them saying yes now, in seconds. */
 const FRESH = 5 * 60;
+/**
+ * How long a browser's session, once checked against the database, is believed without checking again, in seconds:
+ * Better Auth's cookie cache, and an app's page's session (`worker.ts`). A session signed out or removed is still
+ * let in here that long at most. The servers stop answering it at once, as its device is nobody's from then on
+ * (`browserOut`), so all it still reaches is `/apps`, and app files' code.
+ */
+export const BELIEVED = 60;
 /** How long an invitation lasts, in milliseconds. */
 const INVITED_FOR = 7 * 24 * 60 * 60 * 1000;
 /**
@@ -107,12 +116,20 @@ export const assistant = (client: string, user: string) => sha256(`${client}\n${
  */
 export const browserDevice = (session: string) => sha256(`browser\n${session}`);
 
-/** What signs this Worker's cookies and tokens, made on first use and kept beside what it protects. */
-async function secret() {
-  await env.DB.exec("create table if not exists secret (secret text not null)");
+/**
+ * What signs this Worker's cookies and tokens, made on first use and kept beside what it protects, and the version of
+ * this Worker that last made its tables (`createAuth`), in one round trip to the database.
+ */
+async function stored() {
   const generated = hex(crypto.getRandomValues(new Uint8Array(32)));
-  await env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(generated).run();
-  return (await env.DB.prepare("select secret from secret").first<{ secret: string }>())!.secret;
+  const [, , , secret, migrated] = await env.DB.batch<{ secret?: string; version?: string }>([
+    env.DB.prepare("create table if not exists secret (secret text not null)"),
+    env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(generated),
+    env.DB.prepare("create table if not exists migrated (version text not null)"),
+    env.DB.prepare("select secret from secret"),
+    env.DB.prepare("select version from migrated"),
+  ]);
+  return { secret: secret.results[0].secret!, migrated: migrated.results[0]?.version };
 }
 
 /** Tells every server that whose a device is has changed, so each asks again. */
@@ -282,15 +299,16 @@ const devices = () => ({
 
 /** Better Auth for the network at `origin`, with its tables made. */
 async function createAuth(origin: string) {
+  const { secret, migrated } = await stored();
   const auth = betterAuth({
     baseURL: origin,
     basePath: "/sign-in/auth",
-    secret: await secret(),
+    secret,
     database: env.DB,
     // The JWT plugin signs the tokens an assistant is given, and hands out none of its own. A device asks for its
     // answer at the token endpoint, which passes it on to `/device/token` once it's checked its signature.
     disabledPaths: ["/token", "/device/token"],
-    session: { freshAge: FRESH },
+    session: { freshAge: FRESH, cookieCache: { enabled: true, maxAge: BELIEVED } },
     // The name a person chose as they joined, which they can change: the one they're `users/<name>` by is chosen
     // for them, as they're invited, and never changes.
     user: { additionalFields: { called: { type: "string", required: false, input: true } } },
@@ -347,8 +365,13 @@ async function createAuth(origin: string) {
       devices(),
     ],
   });
-  const { runMigrations } = await getMigrations(auth.options);
-  await runMigrations();
+  // Working out what to make asks the database about every table, a round trip each, so it's done once for each
+  // version of this Worker deployed, as a deploy's migrations are, not as each copy of it starts.
+  if (migrated !== env.VERSION.id) {
+    const { runMigrations } = await getMigrations(auth.options);
+    await runMigrations();
+    await env.DB.batch([env.DB.prepare("delete from migrated"), env.DB.prepare("insert into migrated values (?)").bind(env.VERSION.id)]);
+  }
   return auth;
 }
 

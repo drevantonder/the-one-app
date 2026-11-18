@@ -151,7 +151,7 @@ async function mcp(request: Request, env: Env, ctx: ExecutionContext) {
   const who = await signedIn(request, env);
   if ("refused" in who) return who.refused;
   const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], request.headers, mode(new URL(request.url)), { signal: request.signal, ctx });
-  if (!(await nobodys(answer))) return answer;
+  if (!(await nobodys(answer))) return withCookies(answer, who.cookies);
   return who.challenge ? new Response(null, { status: 401, headers: { "www-authenticate": who.challenge } }) : refuse(401, "Sign in again");
 }
 
@@ -309,8 +309,12 @@ async function nobodys(answer: Response) {
 async function apps(request: Request, env: Env) {
   const who = await signedIn(request, env);
   if ("refused" in who || !who.apps) return Response.json({ error: "Sign in" }, { status: 401 });
-  const answer = Response.json({ apps: who.apps, device: who.session });
-  for (const cookie of who.cookies ?? []) answer.headers.append("set-cookie", cookie);
+  return withCookies(Response.json({ apps: who.apps, device: who.session }), who.cookies);
+}
+
+/** `answer`, with the cookies of a browser's session the app that signs people in renewed, if it did. */
+function withCookies(answer: Response, cookies: string[] = []) {
+  for (const cookie of cookies) answer.headers.append("set-cookie", cookie);
   return answer;
 }
 
