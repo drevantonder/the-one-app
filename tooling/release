@@ -71,8 +71,8 @@ if ((${#want_servers[@]} && ${#want_clients[@]})); then
   wait "$client" || status=1
   exit $status
 fi
-kind=server
-((${#want_servers[@]})) || kind=client
+part=server
+((${#want_servers[@]})) || part=client
 
 # Each line says how many seconds into the release it is, so where a release's time goes is in what it printed. The
 # Mac's lines come through Linux's.
@@ -150,11 +150,11 @@ for name in "${mac[@]}"; do echo "$name  $build, built on the Mac"; done
 # share; a server's and a client's don't touch, so they build at once. What a Mac builds is asked for by Linux's
 # release, so the client's lock covers it.
 if [[ $(uname) == Linux ]]; then
-  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release-$kind.pid
+  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release-$part.pid
   if ! (set -o noclobber && echo "$$ $build" >"$lock") 2>/dev/null; then
     read -r pid was <"$lock" || true
     if kill -0 "$pid" 2>/dev/null; then
-      echo "The $kind release of $was is building on this machine (pid $pid): let it finish rather than build over it." >&2
+      echo "The $part release of $was is building on this machine (pid $pid): let it finish rather than build over it." >&2
       exit 1
     fi
     echo "$$ $build" >"$lock"
@@ -164,7 +164,7 @@ if [[ $(uname) == Linux ]]; then
   # It builds in one checkout kept for releasing each kind on this machine, put at the commit released, so each release
   # builds, downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does,
   # rather than all of it again in each new worktree (most of a server's build, 17 Nov).
-  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$kind
+  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$part
   [[ -d $kept ]] || { git worktree prune && git worktree add -q --detach "$kept" "$commit"; }
   git -C "$kept" checkout -q --detach -f "$commit"
   root=$kept && cd "$root"
