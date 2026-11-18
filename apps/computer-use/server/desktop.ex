@@ -251,8 +251,8 @@ defmodule ComputerUse.Desktop do
     end
   end
 
-  # What a Mac's person must allow first for an action, said for them, asking macOS for it the first time it's missing
-  # while this runs, which adds the helper to its list in System Settings and asks on the Mac's screen. A permission
+  # What a Mac's person must allow first for an action, said for them, opening System Settings where it's turned on the
+  # first time it's missing while this runs (see handle_call({:ask, permission}, ...)). A permission
   # turned on after Cua Driver started is read by it once it starts again: a second action that finds it missing starts
   # it again, so the one after reads it afresh.
   defp allowed!(service, action) do
@@ -262,11 +262,13 @@ defmodule ComputerUse.Desktop do
       permission in missing(service) ->
         where = "System Settings → Privacy & Security → #{@panes[permission]} (#{@links[permission]})"
 
-        raise "macOS doesn't let Computer Use for The One App #{@uses[permission]} yet, and only the Mac's person can allow it. " <>
-                case GenServer.call(service, {:ask, permission}) do
-                  :opened -> "#{where} is open on the Mac: they turn on Computer Use for The One App there, then try again."
-                  :before -> "On the Mac, they open #{where} and turn on Computer Use for The One App, then try again."
-                end
+        how =
+          case GenServer.call(service, {:ask, permission}) do
+            :opened -> "#{where} is open on the Mac: they turn on Computer Use for The One App there, then try again."
+            :before -> "On the Mac, they open #{where} and turn on Computer Use for The One App, then try again."
+          end
+
+        raise "macOS doesn't let Computer Use for The One App #{@uses[permission]} yet, and only the Mac's person can allow it. " <> how
 
       action == "type" and :os.type() == {:unix, :darwin} and secure_input?(service) ->
         raise "A password field has the focus on the Mac. Its person types passwords and codes themselves."
