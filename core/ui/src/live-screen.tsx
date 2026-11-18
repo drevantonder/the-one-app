@@ -189,11 +189,13 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       .then(look)
   }
 
-  // Where the screen is drawn in the view: as big as fits, in the middle.
+  // Where the screen is drawn in the view: as big as fits, in the middle, in the video while it's shown (reconnecting
+  // too), or else in the picture. Before the first picture nothing is drawn, so there's nowhere to point.
   const at = (event: MouseEvent) => {
-    if (!size()) return
+    const drawn = showsVideo() ? video : picture() && img
+    if (!size() || !drawn) return
     const [width, height] = size()!
-    const box = (live() ? video : img).getBoundingClientRect()
+    const box = drawn.getBoundingClientRect()
     const scale = Math.min(box.width / width, box.height / height)
     const x = (event.clientX - box.left - (box.width - width * scale) / 2) / scale
     const y = (event.clientY - box.top - (box.height - height * scale) / 2) / scale
