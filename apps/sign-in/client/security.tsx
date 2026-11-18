@@ -3,7 +3,7 @@
 // by a link that works once. Each says whether it unlocks their key on a new device: one whose PRF output derives a
 // key, which it says the next time it's used, gets the key encrypted to it by a device that holds it, here, once its
 // person says it may. Whoever uses it has their key from then on, so a passkey nobody here allowed never does.
-import { createEffect, createMemo, Errored, For, Loading, refresh } from "solid-js"
+import { createEffect, createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, confirm, List, open, Problem, render, Row, Screen, Skeleton, toast, visible } from "ui"
 import { on, Remove } from "./mine.tsx"
 
@@ -67,14 +67,29 @@ const opens = (tool: string, inputs?: object) => async () => {
   }
 }
 
+const opening = <Button onClick={opens("sign-in_add_passkey")}>Add Passkey</Button>
+
+// The devices are read by `<Show>`, outside the `<Screen>`, which keeps what's thrown inside it to itself and draws nothing.
 render(() => (
-  <Screen heading="Sign-In & Security" action={<Button onClick={opens("sign-in_add_passkey")}>Add Passkey</Button>}>
-    <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={error() as Error} />}>
-      <Loading fallback={<Skeleton rows={2} />}>
-        <List>
-          <For each={mine().passkeys} keyed={(passkey) => passkey.id}>
+  <Errored
+    fallback={(error, retry) => (
+      <Screen heading="Sign-In & Security" action={opening}>
+        <Problem
+          heading="Can't show your passkeys"
+          text={error() as Error}
+          action={<Button onClick={() => (refresh(mine), retry())}>Try Again</Button>}
+        />
+      </Screen>
+    )}
+  >
+    <Loading fallback={<Screen heading="Sign-In & Security" action={opening}><Skeleton rows={2} /></Screen>}>
+      <Show when={mine()}>
+        {(all) => (
+          <Screen heading="Sign-In & Security" action={opening}>
+            <List>
+              <For each={all().passkeys} keyed={(passkey) => passkey.id}>
             {(passkey) => {
-              const only = () => mine().passkeys.length === 1
+              const only = () => all().passkeys.length === 1
               return (
                 <Row
                   heading={passkey().name}
@@ -91,8 +106,10 @@ render(() => (
               )
             }}
           </For>
-        </List>
-      </Loading>
-    </Errored>
-  </Screen>
+            </List>
+          </Screen>
+        )}
+      </Show>
+    </Loading>
+  </Errored>
 ))

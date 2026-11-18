@@ -239,6 +239,14 @@
     "like": "Server",
     "page": "client/security.html"
   },
+  "Passkeys error": {
+    "like": "Passkeys",
+    "answers": {
+      "sign-in_devices": {
+        "$error": "Couldn't reach it"
+      }
+    }
+  },
   "Users & Groups": {
     "page": "client/users.html",
     "answers": {
