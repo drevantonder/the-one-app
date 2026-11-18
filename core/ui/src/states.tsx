@@ -1,33 +1,126 @@
-import { createSignal, Show } from "solid-js"
+// An empty screen, what's coming, a problem, something under way and something starting: written once in strict, on
+// the primitives (#primitives), the same on the DOM and on a native host.
+import { createSignal, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
+import { Box, Scroll, Text } from "#primitives"
+import { copy } from "#bridge"
 import { Button, Icon, Spinner } from "./button.tsx"
-import { messages, readable, whole } from "./shared.ts"
+import { Middle } from "./screen.tsx"
+import { messages, readable, whole } from "./words.ts"
+import { styles } from "./styles.ts"
+import { tokens } from "./tokens.ts"
+
+const look = styles({
+  state: { gap: tokens.grid[4], maxWidth: tokens.length.readable, alignItems: "flex-start", font: tokens.type.medium },
+  // In the middle of its place: what's under way, or what fills a split's detail beside its list.
+  middle: { maxWidth: "none", alignItems: "center", justifyContent: "center", padding: tokens.length.gutter, textAlign: "center" },
+  fill: { flexGrow: 1 },
+  grey: { color: tokens.colour.secondaryLabel },
+  skeleton: {
+    alignSelf: "stretch",
+    borderWidth: tokens.length.hairline,
+    borderColor: tokens.colour.quinaryLabel,
+    borderRadius: tokens.radius.large,
+    backgroundColor: tokens.colour.background,
+    overflow: "hidden",
+    opacity: 0,
+    transitionProperty: ["opacity"],
+    transition: tokens.motion.settle,
+  },
+  late: { opacity: 1 },
+  line: { justifyContent: "center", gap: tokens.grid[2], padding: tokens.grid[3] },
+  next: { borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  bar: { width: "40%", height: tokens.grid[3], borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel, animationName: "pulse", animation: tokens.motion.pulse },
+  longer: { width: "70%" },
+  problem: {
+    flexDirection: "row",
+    alignSelf: "stretch",
+    columnGap: tokens.grid[2.5],
+    paddingBlock: tokens.grid[3],
+    paddingInline: tokens.grid[4],
+    borderWidth: tokens.length.hairline,
+    borderColor: tokens.colour.quinaryLabel,
+    borderRadius: tokens.radius.medium,
+    backgroundColor: tokens.colour.background,
+    color: tokens.colour.red,
+    textAlign: "start",
+  },
+  centred: { alignSelf: "center", maxWidth: tokens.length.readable },
+  warn: { color: tokens.colour.orange },
+  symbol: { paddingTop: tokens.grid[0.5] },
+  words: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: tokens.grid[0.5], alignItems: "flex-start" },
+  heading: { fontWeight: tokens.weight.medium },
+  said: { opacity: 0.9 },
+  // Show Details: quiet, under the sentence.
+  toggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.grid[1],
+    marginTop: tokens.grid[1],
+    borderRadius: tokens.radius.small,
+    color: { default: tokens.colour.secondaryLabel, hover: tokens.colour.label },
+    font: tokens.type.small,
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  caret: { transitionProperty: ["rotate"], transition: tokens.motion.quick },
+  turned: { rotate: 90 },
+  actions: { flexDirection: "row", flexWrap: "wrap", gap: tokens.grid[2], marginTop: tokens.grid[2], color: tokens.colour.label },
+  // The rest of a tool's error, as it was written, with Copy in its corner as a code block has.
+  details: { position: "relative", alignSelf: "stretch", marginTop: tokens.grid[1] },
+  code: {
+    minHeight: tokens.length.control,
+    maxHeight: tokens.length.excerpt,
+    paddingBlock: tokens.grid[2],
+    paddingStart: tokens.grid[3],
+    paddingEnd: tokens.length.control,
+    borderRadius: tokens.radius.medium,
+    backgroundColor: tokens.colour.quinaryLabel,
+    color: tokens.colour.label,
+  },
+  mono: { font: tokens.type.small, fontFamily: tokens.font.mono, whiteSpace: "pre-wrap", textAlign: "start" },
+  copy: { position: "absolute", top: 0, end: 0, color: tokens.colour.secondaryLabel },
+  status: { alignItems: "center", gap: tokens.grid[2], color: tokens.colour.secondaryLabel, font: tokens.type.small },
+  label: { font: tokens.type.medium, fontWeight: tokens.weight.medium, color: tokens.colour.label },
+  // On what's there now, which it dims, as a card.
+  over: { position: "absolute", inset: 0, backgroundColor: tokens.colour.veil },
+  card: { paddingBlock: tokens.grid[4], paddingInline: tokens.grid[6], borderWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.background },
+  steps: { gap: tokens.grid[3], alignItems: "flex-start", textAlign: "start" },
+  step: { flexDirection: "row", gap: tokens.grid[2.5], color: tokens.colour.secondaryLabel },
+  now: { color: tokens.colour.label },
+  mark: { width: tokens.length.icon, alignItems: "center", paddingTop: tokens.grid[0.5] },
+  dot: { width: tokens.grid[2.5], height: tokens.grid[2.5], marginTop: tokens.grid[1], borderWidth: tokens.length.hairline, borderColor: tokens.colour.quaternaryLabel, borderRadius: tokens.radius.full },
+  note: { color: tokens.colour.secondaryLabel, font: tokens.type.small },
+})
 
 /// `<Empty>No notes yet.</Empty>`: an empty screen or list: one grey line, and a button (`action`) only when
 /// there's an obvious first step.
 export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
+  const middle = useContext(Middle)
   return (
-    <div class="ui-state">
-      <p class="empty">{props.children}</p>
+    <Box style={[look.state, middle() && look.middle, middle() && look.fill]}>
+      <Text style={look.grey}>{props.children}</Text>
       {props.action}
-    </div>
+    </Box>
   )
 }
 
 /// `<Skeleton rows={3} />`: grey shapes the shape of the list that's coming, once it's taken longer than a blink,
 /// so a quick load shows nothing in between. It's what `<Loading fallback>` shows.
 export function Skeleton(props: { rows?: number }) {
+  const [late, setLate] = createSignal(false)
+  setTimeout(() => setLate(true), 100)
   return (
-    <div class="ui-state" role="status" aria-busy="true" aria-label={messages.loading}>
-      <div class="skeleton">
-        {Array.from({ length: props.rows ?? 3 }, () => (
-          <div>
-            <i />
-            <i />
-          </div>
+    <Box role="status" aria-busy="true" aria-label={messages.loading} style={look.state}>
+      <Box style={[look.skeleton, late() && look.late]}>
+        {Array.from({ length: props.rows ?? 3 }, (_, i) => (
+          <Box style={[look.line, i > 0 && look.next]}>
+            <Box style={look.bar} />
+            <Box style={[look.bar, look.longer]} />
+          </Box>
         ))}
-      </div>
-    </div>
+      </Box>
+    </Box>
   )
 }
 
@@ -38,30 +131,37 @@ export function Skeleton(props: { rows?: number }) {
 /// tool's error as text, shows what a person reads of it (`readable`), and the rest under Show Details, to copy for an
 /// agent or for support.
 export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Error; action?: JSX.Element; warn?: boolean }) {
+  const middle = useContext(Middle)
   const all = () => (typeof props.text === "string" || props.text instanceof Error ? whole(props.text) : undefined)
   const [open, setOpen] = createSignal(false)
   return (
-    <div class="ui-state" role="alert">
-      <div class={["problem", { warn: props.warn }]}>
-        <Icon name="warning-circle" />
-        <strong>{props.heading}</strong>
-        <Show when={props.text}>
-          <p>{all() === undefined ? (props.text as JSX.Element) : readable(all()!)}</p>
-        </Show>
-        <Show when={all() && all() !== readable(all()!)}>
-          <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-            <summary class="ring">
-              <Icon name="caret-right" along />
-              {open() ? messages.hideDetails : messages.showDetails}
-            </summary>
-            <Details text={all()!} />
-          </details>
-        </Show>
-        <Show when={props.action}>
-          <div class="action">{props.action}</div>
-        </Show>
-      </div>
-    </div>
+    <Box role="alert" style={[look.state, middle() && look.middle, middle() && look.fill]}>
+      <Box style={[look.problem, middle() && look.centred, props.warn && look.warn]}>
+        <Box style={look.symbol}>
+          <Icon name="warning-circle" />
+        </Box>
+        <Box style={look.words}>
+          <Text style={look.heading}>{props.heading}</Text>
+          <Show when={props.text}>
+            <Text style={look.said}>{all() === undefined ? (props.text as JSX.Element) : readable(all()!)}</Text>
+          </Show>
+          <Show when={all() && all() !== readable(all()!)}>
+            <Box role="button" aria-expanded={open() ? "true" : "false"} onClick={() => setOpen(!open())} style={look.toggle}>
+              <Box style={[look.caret, open() && look.turned]}>
+                <Icon name="caret-right" along />
+              </Box>
+              <Text>{open() ? messages.hideDetails : messages.showDetails}</Text>
+            </Box>
+            <Show when={open()}>
+              <Details text={all()!} />
+            </Show>
+          </Show>
+          <Show when={props.action}>
+            <Box style={look.actions}>{props.action}</Box>
+          </Show>
+        </Box>
+      </Box>
+    </Box>
   )
 }
 
@@ -70,30 +170,34 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Erro
 export function Details(props: { text: string }) {
   const [copied, setCopied] = createSignal(false)
   return (
-    <div class="ui-details">
-      <pre>{props.text.slice(readable(props.text).length).trim()}</pre>
-      <button type="button" class="ui-button press ring" data-variant="ghost" data-size="icon" aria-label={copied() ? messages.copied : messages.copy} title={messages.copy} onClick={() => navigator.clipboard.writeText(props.text).then(() => setCopied(true))}>
-        <Icon name={copied() ? "check" : "copy"} />
-      </button>
-    </div>
+    <Box style={look.details}>
+      <Scroll style={look.code}>
+        <Text style={look.mono}>{props.text.slice(readable(props.text).length).trim()}</Text>
+      </Scroll>
+      <Box style={look.copy}>
+        <Button variant="ghost" size="icon" aria-label={copied() ? messages.copied : messages.copy} onClick={() => void copy(props.text).then(() => setCopied(true))}>
+          <Icon name={copied() ? "check" : "copy"} />
+        </Button>
+      </Box>
+    </Box>
   )
 }
 
 /// `<Status heading="Connecting…" />`: something under way where what it's about will be: a spinner, a short
 /// `heading` and, only if it helps, one sentence of `text`, in the middle of its place. With `over`, it's a card on
-/// what's there now, which it dims: a live view reconnecting, something saving. Its place is laid out by the UI
-/// library, or `position: relative`.
+/// what's there now, which it dims: a live view reconnecting, something saving. Its place is `position: "relative"`.
 export function Status(props: { heading: JSX.Element; text?: JSX.Element; over?: boolean }) {
+  const middle = useContext(Middle)
   return (
-    <div class={["ui-state", "middle", { over: props.over }]} role="status">
-      <div class="status">
+    <Box role="status" style={[look.state, look.middle, middle() && look.fill, props.over && look.over]}>
+      <Box style={[look.status, props.over && look.card]}>
         <Spinner />
-        <strong>{props.heading}</strong>
+        <Text style={look.label}>{props.heading}</Text>
         <Show when={props.text}>
-          <p>{props.text}</p>
+          <Text>{props.text}</Text>
         </Show>
-      </div>
-    </div>
+      </Box>
+    </Box>
   )
 }
 
@@ -101,21 +205,22 @@ export function Status(props: { heading: JSX.Element; text?: JSX.Element; over?:
 /// something starting, as the steps it takes: those before `at` done, `at` under way with, only if it helps, one
 /// sentence of `text`, and the rest to come. In the middle of its place, as `Status` is.
 export function Steps(props: { steps: JSX.Element[]; at: number; text?: JSX.Element }) {
+  const middle = useContext(Middle)
   return (
-    <div class="ui-state middle" role="status">
-      <ol class="steps">
+    <Box role="status" style={[look.state, look.middle, middle() && look.fill]}>
+      <Box role="list" style={look.steps}>
         {props.steps.map((step, i) => (
-          <li class={{ done: i < props.at, now: i === props.at }}>
-            {i < props.at ? <Icon name="check" /> : i === props.at ? <Spinner /> : <span class="next" />}
-            <span>
-              {step}
+          <Box role="listitem" style={[look.step, i === props.at && look.now]}>
+            <Box style={look.mark}>{i < props.at ? <Icon name="check" /> : i === props.at ? <Spinner /> : <Box style={look.dot} />}</Box>
+            <Box>
+              <Text>{step}</Text>
               <Show when={i === props.at && props.text}>
-                <small>{props.text}</small>
+                <Text style={look.note}>{props.text}</Text>
               </Show>
-            </span>
-          </li>
+            </Box>
+          </Box>
         ))}
-      </ol>
-    </div>
+      </Box>
+    </Box>
   )
 }

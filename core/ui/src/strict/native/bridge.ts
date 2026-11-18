@@ -3,6 +3,7 @@
 // `#bridge`, which is this in the native build and the DOM's in the DOM's.
 import { createSignal } from "solid-js"
 import { event } from "./renderer.ts"
+import type { Event } from "../protocol.ts"
 import type * as Strict from "../types/ui.d.ts"
 import { readable } from "../../words.ts"
 // The bridge, as the DOM's (../../bridge.ts): the JSON-RPC a page and its client say to each other, through the host.
@@ -11,9 +12,15 @@ const host = (globalThis as { host?: { post(message: object): void } }).host
 const waiting = new Map<number, (response: { result?: unknown; error?: { message: string } }) => void>()
 const listeners = new Set<() => void>()
 let requests = 0
+/** What listens for each key pressed (`keydown`). */
+const keys = new Set<(event: Strict.Keyed) => void>()
 
 ;(globalThis as { ui?: object }).ui = {
-  event,
+  // A key pressed where the keyboard is goes to what has it, then to what listens for every key (`keydown`).
+  event(told: Event) {
+    event(told)
+    if (told.name === "keydown") for (const listener of keys) listener({ key: told.key ?? "", shiftKey: !!told.shiftKey, altKey: !!told.altKey, ctrlKey: !!told.ctrlKey, metaKey: !!told.metaKey, preventDefault() {} })
+  },
   message(message: { id?: number; method?: string; result?: unknown; error?: { message: string } }) {
     if (message.method === "notifications/one/changed") for (const listener of listeners) listener()
     else if (message.method === "ui/notifications/host-context-changed") dress((message as { params?: object }).params)
@@ -91,3 +98,22 @@ export const changed: typeof Strict.changed = (listener) => {
 }
 export const covers: typeof Strict.covers = () => () => {}
 export const connection: typeof Strict.connection = () => connected()
+/** Opening something is a step back closes, as the device's back closes what covers the page. */
+export const step = covers
+/** A native host draws no move between screens yet: the change is made at once. */
+export const go: typeof Strict.go = (change) => change()
+
+export const keydown: typeof Strict.keydown = (listener) => {
+  keys.add(listener)
+  return () => void keys.delete(listener)
+}
+
+/** Back, where there's no history to go back through. */
+export function back(): void {
+  throw new Error("A native host has no history to go back through: a screen's Back says where it goes (`onBack`)")
+}
+
+/** Puts text on the clipboard. */
+export function copy(_text: string): Promise<void> {
+  return Promise.reject(new Error("A native host has no clipboard yet (core/ui/src/strict/native/bridge.ts)"))
+}

@@ -349,21 +349,25 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
           <img ref={img} src={picture()} alt={props.label} draggable={false} onLoad={() => setSize([img.naturalWidth, img.naturalHeight])} />
         </Show>
         <Show when={state().matches("connecting") || (state().matches("pictures") && !size())}>
-          <Status heading="Connecting…" />
+          <div class="state">
+            <Status heading="Connecting…" />
+          </div>
         </Show>
         <Show when={state().matches("reconnecting")}>
           <Status over heading="Reconnecting…" />
         </Show>
         <Show when={state().matches("unreachable")}>
-          <Problem
-            heading="Can't reach this screen"
-            text={state().context.why}
-            action={
-              <button type="button" class="ui-button press ring" data-variant="outline" onClick={(event) => (event.stopPropagation(), connection.send({ type: "again" }))}>
-                Try Again
-              </button>
-            }
-          />
+          <div class="state">
+            <Problem
+              heading="Can't reach this screen"
+              text={state().context.why}
+              action={
+                <button type="button" class="ui-button press ring" data-variant="outline" onClick={(event) => (event.stopPropagation(), connection.send({ type: "again" }))}>
+                  Try Again
+                </button>
+              }
+            />
+          </div>
         </Show>
         <Show when={!watch}>
           <input

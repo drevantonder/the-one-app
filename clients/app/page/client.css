@@ -39,8 +39,8 @@ html[data-launcher="glass"] :is(#state, #page-problem) {
 html[data-launcher="solid"] body {
   background: var(--card);
 }
-/* What the window shows of itself fills its middle, over the frames, with the background behind it: the UI library
-   draws each state (`.ui-state.middle`). */
+/* What the window shows of itself fills its middle, over the frames, with the background behind it: each state
+   (`.ui-state.middle`, at this stylesheet's end) as the UI library's look. */
 #state {
   z-index: 3;
   grid-area: 2 / 1;
@@ -358,4 +358,172 @@ iframe[data-move] {
 #line[data-away] {
   opacity: 0;
   visibility: hidden;
+}
+
+/* What the window shows of itself (index.html's #state and #page-problem), as the UI library's Steps, Status, Empty
+   and Problem look. */
+.ui-state {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 1rem;
+  max-width: var(--readable);
+  font-size: var(--text-base);
+}
+.ui-state .empty {
+  color: var(--muted-foreground);
+}
+.ui-state .problem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  justify-self: stretch;
+  gap: 0.125rem 0.625rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--destructive);
+  line-height: 1.4;
+}
+/* A state in the middle of its place: what's under way, or a problem with what fills it. */
+.ui-state.middle {
+  place-content: center;
+  justify-items: center;
+  max-width: none;
+  min-height: 100%;
+  padding: var(--gutter);
+  text-align: center;
+}
+.ui-state.middle .problem {
+  justify-self: center;
+  max-width: var(--readable);
+  text-align: start;
+}
+.ui-state .status {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: var(--text-footnote);
+}
+.ui-state .status strong {
+  color: var(--foreground);
+  font-size: var(--text-base);
+}
+.ui-state .status p {
+  margin: 0;
+}
+.ui-state .steps {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: start;
+}
+.ui-state .steps li {
+  display: grid;
+  grid-template-columns: var(--icon) minmax(0, 1fr);
+  gap: 0.625rem;
+  color: var(--muted-foreground);
+}
+.ui-state .steps li.now {
+  color: var(--foreground);
+}
+.ui-state .steps li > :first-child {
+  margin-top: 0.15em;
+}
+.ui-state .steps small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: var(--text-footnote);
+}
+.ui-state .steps .next {
+  width: 0.625rem;
+  height: 0.625rem;
+  margin: 0.2em auto 0;
+  border: 1.5px solid var(--border);
+  border-radius: 50%;
+}
+.ui-state .problem.warn {
+  color: var(--warning);
+}
+.ui-state .problem > .ui-icon {
+  margin-top: 0.15em;
+}
+.ui-state .problem > :is(p, .action) {
+  grid-column: 2;
+}
+.ui-state .problem p {
+  opacity: 0.9;
+}
+/* Show Details: quiet, under the sentence, and what an agent reads of the problem once it's open. */
+.ui-state .problem > details {
+  grid-column: 2;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+}
+.ui-state .problem summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-footnote);
+  cursor: pointer;
+  list-style: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ui-state .problem summary::-webkit-details-marker {
+  display: none;
+}
+.ui-state .problem summary .ui-icon {
+  transition: rotate var(--move-quick) var(--ease-quick);
+}
+.ui-state .problem details[open] summary .ui-icon {
+  rotate: 90deg;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ui-state .problem summary:hover {
+    color: var(--foreground);
+  }
+}
+.ui-state .problem .ui-details {
+  margin-top: 0.5rem;
+}
+/* The rest of a tool's error, as it was written, with Copy in its corner as a code block has. */
+.ui-details {
+  position: relative;
+}
+.ui-details pre {
+  min-height: var(--control);
+  max-height: 12rem;
+  margin: 0;
+  padding: 0.5rem;
+  padding-inline: 0.75rem var(--control);
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  color: var(--foreground);
+  font: var(--text-footnote) / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ui-details .ui-button {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  color: var(--muted-foreground);
+}
+/* Its actions, the one that fixes it first, in a row that wraps where there's no room. */
+.ui-state .problem .action {
+  justify-self: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  color: var(--foreground);
+}
+@keyframes ui-late {
+  to { opacity: 1; }
 }

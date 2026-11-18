@@ -1,7 +1,7 @@
 // The bridge: how an app's page reaches its client, which is all it reaches. It speaks as an MCP App speaks to its
 // host, in JSON-RPC messages posted to the frame's parent, so one page is an app here and an MCP App in an
 // assistant.
-import { configureClientErrors, createSignal } from "solid-js"
+import { configureClientErrors, createSignal, flush, onSettled } from "solid-js"
 import { readable, reduced } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
 import type { Client, ClientChange } from "./strict/types/ui.d.ts"
@@ -95,8 +95,8 @@ export const updateReady = () => (greet(), updatable())
 
 /// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
 /// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css). And what the
-/// device keeps for itself at each edge, as `--safe-top` and the rest, whether the window names the app above it
-/// (`data-breadcrumb`, which a first screen's title gives way to), whether its network answers and whether an update
+/// device keeps for itself at each edge, as `--safe-top` and the rest (tokens.ts's `safeTop`), whether the window names
+/// the app above it (`breadcrumb`), whether its network answers and whether an update
 /// is ready.
 function dress(context: HostContext | undefined) {
   if (context?.connection) setConnected(context.connection)
@@ -104,7 +104,7 @@ function dress(context: HostContext | undefined) {
   const root = document.documentElement
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
-  if (context && "breadcrumb" in context) root.toggleAttribute("data-breadcrumb", context.breadcrumb === true)
+  if (context && "breadcrumb" in context) setNamed(context.breadcrumb === true)
   if (!context || !("theme" in context)) return
   root.style.colorScheme = context.theme ?? ""
   for (const name of ["light", "dark"]) root.classList.toggle(name, context.theme === name)
@@ -141,11 +141,69 @@ addEventListener("resize", () => {
   if (document.activeElement?.matches("input, textarea, select, [contenteditable]")) document.activeElement.scrollIntoView({ block: "nearest" })
 })
 
-/// Scrolls the page, and each side of a split, back to its top.
+/// Scrolls the page, and everything in it that scrolls (a screen, each side of a split), back to its top.
 function toTop() {
   const behavior = reduced.matches ? "instant" : "smooth"
-  for (const scrolled of [document.scrollingElement, ...document.querySelectorAll(".ui-split > .panes > *")]) scrolled?.scrollTo({ top: 0, behavior })
+  for (const scrolled of [document.scrollingElement, ...document.querySelectorAll("[data-scrolls]")]) scrolled?.scrollTo({ top: 0, behavior })
 }
+
+const [named, setNamed] = createSignal(false)
+/** Whether the window names the app above it, in its title bar's breadcrumb (an app's own window on a computer),
+ * which a first screen's title gives way to. */
+export const breadcrumb = () => named()
+
+/// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
+/// mustn't show it a second time.
+let travelled = false
+addEventListener("popstate", (event) => {
+  travelled = event.hasUAVisualTransition
+  setTimeout(() => (travelled = false))
+}, true)
+
+/// `go(() => setOpen(note))`: changes which screen shows, as a move. `change` puts the new screen in place, and the
+/// browser slides to it from what was there (its View Transitions): in over it, or with `back`, back out from over
+/// it. The browser takes its picture of the new screen once it's drawn, with what it was still loading, as the View
+/// Transitions guide has it: its picture of the old one stays on screen until then. For whoever asked for less motion
+/// one fades into the other, and where the browser can't, it's a plain swap. From one page to another the browser
+/// does this by itself (ui.css).
+export function go(change: () => void, { back = false }: { back?: boolean } = {}): void {
+  if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || travelled) return void change()
+  // What's still fading (a row let go of a moment ago) is finished first, so the move takes the screen as it settles.
+  // Chromium's page crashed taking it mid-fade. What never ends, a spinner, keeps going.
+  for (const fade of document.getAnimations()) if (fade.effect?.getComputedTiming().endTime !== Infinity) fade.finish()
+  const update = () => new Promise<void>((settled) => (change(), onSettled(settled), flush()))
+  document.startViewTransition({ update, types: reduced.matches ? [] : [back ? "ui-back" : "ui-forward", "ui-page"] })
+}
+
+// Back to a page left earlier is the device's to show. The browser would slide it in as if it were new.
+addEventListener("pageswap", ({ activation, viewTransition }) => {
+  if (activation?.navigationType === "traverse" && activation.from && activation.entry.index < activation.from.index) viewTransition?.skipTransition()
+})
+
+// The page was loaded again with something open as a step (`step`): what was open is gone, so it starts shut.
+if (history.state?.uiStep) history.replaceState({ ...history.state, uiStep: 0 }, "")
+const depth = () => Number(history.state?.uiStep ?? 0)
+
+/// `const done = step(close)`: something opened is a step in the browser's history, as a split's detail pushed over
+/// its list is, so the device's back (and the browser's) goes back from it, calling `close`. Steps open in one another
+/// are one each, so back closes the innermost first. → what to call once it's closed however it was, which takes its
+/// step out of the history if it's still there.
+export function step(close: () => void): () => void {
+  const mine = depth() + 1
+  history.pushState({ ...history.state, uiStep: mine }, "")
+  const left = () => depth() < mine && (removeEventListener("popstate", left), close())
+  addEventListener("popstate", left)
+  return () => {
+    removeEventListener("popstate", left)
+    if (depth() >= mine) history.back()
+  }
+}
+
+/** Back through the browser's history, as the device's own back gesture goes. */
+export const back = () => history.back()
+
+/** Puts text on the clipboard. */
+export const copy = (text: string) => navigator.clipboard.writeText(text)
 
 /// A client answers a page once the page has said what it is, which it does before the first thing it asks.
 let greeted: Promise<void> | undefined

@@ -11,13 +11,9 @@
    default, which a shell sets from Colour Mode, and any part of a page can set its own. How far in from each edge of
    the page what the device keeps for itself reaches (its status bar, home indicator, a notch): a screen's bar and its
    end keep clear of it, and what scrolls passes under it. A client says it (`hostContext.safeAreaInsets`, which the
-   bridge puts here). */
+   bridge puts here, over tokens.css's 0). */
 :root {
   color-scheme: light dark;
-  --safe-top: 0px;
-  --safe-right: 0px;
-  --safe-bottom: 0px;
-  --safe-left: 0px;
 }
 
 /* How every component of the UI library looks, from the tokens (tokens.css). The UI library's own parts are `ui-` classes; what
@@ -34,12 +30,6 @@ html {
   /* An app isn't a document: pulling past its top neither refreshes it nor drags the window. Sideways is the
      device's: a trackpad's two-finger swipe goes back, as it does in a browser. */
   overscroll-behavior-y: none;
-}
-/* What's scrolled to (a field the keyboard reached, a part a link names) stops below a screen's bar, not under it.
-   An app's screen bounces past its ends, as a phone's and a Mac's lists do, and takes the window nowhere. */
-html:has(.ui-screen) {
-  scroll-padding-top: calc(var(--control) + 1.25rem + var(--safe-top));
-  overscroll-behavior-y: contain;
 }
 body {
   margin: 0;
@@ -84,7 +74,7 @@ html:has(.ui-dialog[open]) {
 /* From one screen to the next, as the browser's View Transitions: the new one slides in over the old from the end
    of the line, and going back it slides out again; for whoever asked for less motion, one fades into the other.
    Between pages the browser starts it; inside one, `go` does
-   (screen.jsx), and says which way and whether the whole page moves or a part of it. */
+   (bridge.ts), and says which way. */
 @media (prefers-reduced-motion: no-preference) {
   @view-transition {
     navigation: auto;
@@ -116,15 +106,12 @@ html:has(.ui-dialog[open]) {
   --ui-new-from: -25%;
   --ui-old-over: 1;
 }
-::view-transition-group(ui-screen) {
-  overflow: clip;
-}
-:root:active-view-transition-type(ui-page)::view-transition-old(root), :root:active-view-transition-type(ui-part)::view-transition-old(ui-screen) {
+:root:active-view-transition-type(ui-page)::view-transition-old(root) {
   z-index: var(--ui-old-over);
   mix-blend-mode: normal;
   animation: ui-old var(--move-travel) var(--ease-travel) both;
 }
-:root:active-view-transition-type(ui-page)::view-transition-new(root), :root:active-view-transition-type(ui-part)::view-transition-new(ui-screen) {
+:root:active-view-transition-type(ui-page)::view-transition-new(root) {
   mix-blend-mode: normal;
   animation: ui-new var(--move-travel) var(--ease-travel) both;
 }
@@ -136,7 +123,7 @@ html:has(.ui-dialog[open]) {
 }
 
 /* What every control of the UI library starts from, under what any of them says of itself. */
-:where(.ui-screen, .ui-dialog, .ui-toast, [data-tabs-root]) button {
+:where(.ui-strict-box, .ui-dialog, .ui-toast, [data-tabs-root]) button {
   margin: 0;
   padding: 0;
   border: 0;
@@ -167,7 +154,7 @@ img {
 }
 /* What's the app's own, not what it shows: read and pressed, not selected, and a long press on it opens no link's
    preview. */
-:is(.ui-button, [role="tab"], [role="menuitem"], [role="option"], .ui-screen > header, .ui-section > h2) {
+:is(.ui-button, [role="tab"], [role="menuitem"], [role="option"]) {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -459,106 +446,6 @@ img {
   }
 }
 
-/* A whole view of an app: a bar that stays as it scrolls, then what's in it, which passes under the bar and under
-   what the device keeps for itself (`--safe-top`), as a phone's lists do. The bar and the end of what's in it keep
-   clear of that. */
-.ui-screen {
-  display: block;
-  /* As tall as the window, or as what it's in says (a split's side). */
-  min-height: var(--screen-height, 100dvh);
-}
-.ui-screen > header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: calc(var(--control) + 0.75rem + var(--safe-top));
-  padding: var(--safe-top) calc(var(--gutter) + var(--safe-right)) 0 calc(var(--gutter) + var(--safe-left));
-}
-/* What scrolls under the bar shows through it, blurred, as it does under a phone's. Behind the bar, not on it: a
-   blur on it would be where a menu in it is placed from. */
-.ui-screen > header::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background: color-mix(in oklab, var(--background) 80%, transparent);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-}
-.ui-screen > header > h1 {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--text-lg);
-  line-height: 1.3;
-  /* A long name, which may be all the screen says of what it's about, takes two lines, as Android's bars do, and
-     runs the way its own words do, where the app's language lines it up. */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  padding-block: 0.25rem;
-  unicode-bidi: plaintext;
-  text-align: left;
-}
-:is(.ui-screen > header > h1, .ui-dialog header h2):dir(rtl) {
-  text-align: right;
-}
-/* Where the window names the app above it, in its title bar's breadcrumb (`data-breadcrumb`, an app's own window on
-   a computer), the app's first screen, which has no Back, doesn't name it again: its bar keeps only what it does,
-   and with nothing to do, only what's kept clear at the top. A phone keeps it, as iOS's large titles. */
-:root[data-breadcrumb] .ui-screen > header:not(:has(> .back)) > h1 {
-  visibility: hidden;
-}
-:root[data-breadcrumb] .ui-screen > header:not(:has(> .back, > :not(h1))) {
-  min-height: var(--safe-top);
-}
-.ui-screen > header > .back {
-  /* Beside the list it came from, a screen has nowhere to go back to (the split's). */
-  display: var(--screen-back, grid);
-  flex: none;
-  place-content: center;
-  width: var(--control);
-  height: var(--control);
-  /* The arrow, not the button's edge, lines up with what's under it. */
-  margin-inline-start: calc((var(--icon) - var(--control)) / 2);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-}
-@media (hover: hover) and (pointer: fine) {
-  .ui-screen > header > .back:hover {
-    background: var(--muted);
-  }
-}
-/* An icon with no edge of its own at the end of the bar lines up with what's under it, as Back does. */
-.ui-screen > header > .ui-button[data-variant="ghost"][data-size="icon"]:last-child {
-  margin-inline-end: calc((var(--icon) - var(--control)) / 2);
-}
-.ui-screen > main {
-  display: grid;
-  /* What's in it is as wide as the screen at most, whatever it holds with nowhere to break. */
-  grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  gap: var(--gutter);
-  padding: 0.5rem calc(var(--gutter) + var(--safe-right)) calc(var(--gutter) + var(--safe-bottom)) calc(var(--gutter) + var(--safe-left));
-  /* Each part sizes itself by the room it has here, not by the window. */
-  container-type: inline-size;
-}
-.ui-section {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.5rem;
-  min-width: 0;
-}
-.ui-section > h2 {
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-  font-weight: var(--label-weight);
-  letter-spacing: normal;
-}
-
 /* A screen as it is now, as a remote desktop app shows one: as wide as its place, and as tall as fits under the bar
    with a line or two left under it. What it's of is drawn as big as fits, in the middle. */
 .ui-live-screen {
@@ -598,9 +485,13 @@ img {
   object-fit: contain;
   user-select: none;
 }
-.ui-live-screen > .view > .ui-state:not(.over) {
+/* What it shows in place of the screen: in its middle, on the view's grey. */
+.ui-live-screen > .view > .state {
   position: absolute;
   inset: 0;
+  display: grid;
+  place-content: center;
+  padding: var(--gutter);
   background: var(--muted);
 }
 /* Where what's typed on it goes: unseen, but focused, so a phone shows its keyboard. */
@@ -636,68 +527,6 @@ img {
 }
 .ui-live-screen > .bar > .ui-button:last-child {
   margin-inline-end: calc((var(--icon) - var(--control)) / 2);
-}
-
-/* A list and what it opens: beside it where there's room, pushed over it where there isn't. */
-.ui-split {
-  display: block;
-  height: 100dvh;
-  /* Its sides size themselves by the room it has, not by the window. */
-  container-type: inline-size;
-}
-.ui-split > .panes {
-  display: grid;
-  height: 100%;
-  /* A screen in it is as tall as its side. */
-  --screen-height: 100%;
-}
-.ui-split > .panes > :is(.list, .detail) {
-  grid-area: 1 / 1;
-  min-width: 0;
-  background: var(--background);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-/* Where there's no room for both, one shows at a time. The other keeps its place: it's hidden, not gone. */
-.ui-split > .panes > .list {
-  --row-current: none;
-}
-.ui-split > .panes > .detail, .ui-split > [data-open] > .list {
-  visibility: hidden;
-}
-.ui-split > [data-open] > .detail {
-  visibility: visible;
-}
-/* Where there is, the list keeps a readable width and what it opens has the rest. */
-@container (min-width: 48rem) {
-  .ui-split > .panes {
-    grid-template-columns: clamp(18rem, 38%, 24rem) 1fr;
-    /* Read by screen.jsx: side by side, nothing is pushed over anything. */
-    --beside: 1;
-  }
-  .ui-split > .panes > :is(.list, .detail) {
-    grid-area: auto;
-  }
-  .ui-split > .panes > .list {
-    --row-current: initial;
-    border-inline-end: 1px solid var(--border);
-  }
-  .ui-split > [data-open] > .list {
-    visibility: visible;
-  }
-  /* Beside the list it shows with nothing open, as the app's grey line saying what to pick, in its middle. */
-  .ui-split > .panes > .detail {
-    --screen-back: none;
-    visibility: visible;
-  }
-  .ui-split > .panes > .detail > .ui-state {
-    place-content: center;
-    justify-items: center;
-    max-width: none;
-    height: 100%;
-    padding: var(--gutter);
-    text-align: center;
-  }
 }
 
 /* What's over the page: a sheet, or an alert. */
@@ -890,221 +719,6 @@ img {
 .ui-dialog.alert footer .ui-button {
   flex: 1 1 calc(50% - 0.25rem);
   min-width: max-content;
-}
-
-/* An empty screen, what's coming, and a problem. */
-.ui-state {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  justify-items: start;
-  gap: 1rem;
-  max-width: var(--readable);
-  font-size: var(--text-base);
-}
-.ui-state .empty {
-  color: var(--muted-foreground);
-}
-.ui-state .skeleton {
-  justify-self: stretch;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--card);
-  opacity: 0;
-  animation: ui-late var(--move-settle) var(--ease-settle) 100ms forwards;
-}
-.ui-state .skeleton > div {
-  display: grid;
-  align-content: center;
-  gap: 0.5rem;
-  min-height: calc(var(--control) + 0.5rem);
-  padding: 0.75rem;
-}
-.ui-state .skeleton > div + div {
-  border-top: 1px solid var(--border);
-}
-.ui-state .skeleton i {
-  width: 40%;
-  height: 0.75rem;
-  border-radius: var(--radius-sm);
-  background: var(--muted);
-  animation: ui-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-.ui-state .skeleton i + i {
-  width: 70%;
-}
-@keyframes ui-late {
-  to { opacity: 1; }
-}
-@keyframes ui-pulse {
-  50% { opacity: 0.5; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ui-state .skeleton i {
-    animation: none;
-  }
-}
-.ui-state .problem {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  justify-self: stretch;
-  gap: 0.125rem 0.625rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  color: var(--destructive);
-  line-height: 1.4;
-}
-/* A state in the middle of its place: what's under way, or a problem with what fills it. */
-.ui-state.middle, .ui-live-screen > .view > .ui-state {
-  place-content: center;
-  justify-items: center;
-  max-width: none;
-  min-height: 100%;
-  padding: var(--gutter);
-  text-align: center;
-}
-.ui-state.middle .problem, .ui-live-screen > .view > .ui-state .problem {
-  justify-self: center;
-  max-width: var(--readable);
-  text-align: start;
-}
-/* On what's there now, dimmed, as a card. */
-.ui-state.over {
-  position: absolute;
-  inset: 0;
-  background: color-mix(in oklab, var(--background) 55%, transparent);
-}
-.ui-state .status {
-  display: grid;
-  justify-items: center;
-  gap: 0.5rem;
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-}
-.ui-state.over .status {
-  padding: 1rem 1.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-}
-.ui-state .status strong {
-  color: var(--foreground);
-  font-size: var(--text-base);
-}
-.ui-state .status p {
-  margin: 0;
-}
-.ui-state .steps {
-  display: grid;
-  gap: 0.75rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  text-align: start;
-}
-.ui-state .steps li {
-  display: grid;
-  grid-template-columns: var(--icon) minmax(0, 1fr);
-  gap: 0.625rem;
-  color: var(--muted-foreground);
-}
-.ui-state .steps li.now {
-  color: var(--foreground);
-}
-.ui-state .steps li > :first-child {
-  margin-top: 0.15em;
-}
-.ui-state .steps small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-}
-.ui-state .steps .next {
-  width: 0.625rem;
-  height: 0.625rem;
-  margin: 0.2em auto 0;
-  border: 1.5px solid var(--border);
-  border-radius: 50%;
-}
-.ui-state .problem.warn {
-  color: var(--warning);
-}
-.ui-state .problem > .ui-icon {
-  margin-top: 0.15em;
-}
-.ui-state .problem > :is(p, .action) {
-  grid-column: 2;
-}
-.ui-state .problem p {
-  opacity: 0.9;
-}
-/* Show Details: quiet, under the sentence, and what an agent reads of the problem once it's open. */
-.ui-state .problem > details {
-  grid-column: 2;
-  margin-top: 0.25rem;
-  color: var(--muted-foreground);
-}
-.ui-state .problem summary {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-footnote);
-  cursor: pointer;
-  list-style: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-.ui-state .problem summary::-webkit-details-marker {
-  display: none;
-}
-.ui-state .problem summary .ui-icon {
-  transition: rotate var(--move-quick) var(--ease-quick);
-}
-.ui-state .problem details[open] summary .ui-icon {
-  rotate: 90deg;
-}
-@media (hover: hover) and (pointer: fine) {
-  .ui-state .problem summary:hover {
-    color: var(--foreground);
-  }
-}
-.ui-state .problem .ui-details {
-  margin-top: 0.5rem;
-}
-/* The rest of a tool's error, as it was written, with Copy in its corner as a code block has. */
-.ui-details {
-  position: relative;
-}
-.ui-details pre {
-  min-height: var(--control);
-  max-height: 12rem;
-  margin: 0;
-  padding: 0.5rem;
-  padding-inline: 0.75rem var(--control);
-  overflow: auto;
-  border-radius: var(--radius-md);
-  background: var(--muted);
-  color: var(--foreground);
-  font: var(--text-footnote) / 1.45 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.ui-details .ui-button {
-  position: absolute;
-  top: 0;
-  inset-inline-end: 0;
-  color: var(--muted-foreground);
-}
-/* Its actions, the one that fixes it first, in a row that wraps where there's no room. */
-.ui-state .problem .action {
-  justify-self: start;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-  color: var(--foreground);
 }
 
 /* Asked for no motion: a plain swap everywhere. */
@@ -1545,6 +1159,13 @@ html[data-launcher] body {
 button.ui-strict-box:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+/* A page whose first part is drawn by the primitives is the window's height, as a native host's root is, and what's
+   in it scrolls itself (a screen, a split's sides). */
+body:has(> .ui-strict-box) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
 }
 .ui-strict-text {
   margin: 0;

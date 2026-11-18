@@ -42,17 +42,27 @@
   --grid-20: 5rem;
   --grid-24: 6rem;
   --grid-0-5: 0.125rem;
+  --grid-2-5: 0.625rem;
   --control: 2.25rem;
   --icon: 1rem;
+  --icon-inset: 0.625rem;
+  --bar: 3rem;
   --gutter: 1rem;
   --readable: 42rem;
   --hairline: 1px;
+  --column: 24rem;
+  --column-min: 18rem;
+  --excerpt: 12rem;
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+  --safe-left: 0px;
+  --safe-right: 0px;
   --sheet: 28rem;
   --alert: 22rem;
   --menu: 10rem;
-  --row: 2.75rem;
   --grabber: 0px;
   --grabber-gap: 0px;
+  --row: 2.75rem;
   --size-large: 1rem;
   --size-medium: 0.875rem;
   --size-small: 0.75rem;
@@ -77,6 +87,7 @@
   --label-weight: 550;
   --title-weight: 650;
   --large-title-tracking: -0.015em;
+  --title-tracking: -0.015em;
   --move-quick: 120ms;
   --ease-quick: cubic-bezier(0.22, 1, 0.36, 1);
   --move-settle: 200ms;
@@ -87,6 +98,8 @@
   --ease-spin: cubic-bezier(0, 0, 1, 1);
   --move-hold: 500ms;
   --ease-hold: cubic-bezier(0.22, 1, 0.36, 1);
+  --move-pulse: 2000ms;
+  --ease-pulse: cubic-bezier(0.4, 0, 0.6, 1);
   --foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
   --card: light-dark(oklch(1 0 0), oklch(0.205 0 0));
   --primary: light-dark(oklch(0.205 0 0), oklch(0.922 0 0));
@@ -148,9 +161,11 @@
   :root {
     --control: 2.75rem;
     --icon: 1.125rem;
-    --row: 3.25rem;
+    --icon-inset: 0.8125rem;
+    --bar: 3.5rem;
     --grabber: 0.25rem;
     --grabber-gap: 0.5rem;
+    --row: 3.25rem;
     --text-base: 1rem;
     --text-field: 1rem;
   }
@@ -160,6 +175,8 @@
     font: -apple-system-body;
     --control: 2.5882rem;
     --icon: 1.1176rem;
+    --icon-inset: 0.7353rem;
+    --bar: 3.3382rem;
     --gutter: 16px;
     --row: 3.0588rem;
     --size-large-title: 2rem;

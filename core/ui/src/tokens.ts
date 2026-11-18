@@ -221,7 +221,7 @@ const roles = {
 }
 
 /** The 4px grid, by its steps: `grid[3]` is 12px. */
-const grid = Object.fromEntries([0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
+const grid = Object.fromEntries([0.5, 1, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 2 | 2.5 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
 
 /** Sizes of text: large, medium and small, and a phone's large title. */
 const sizes = {
@@ -250,11 +250,37 @@ export const legacy = {
 export const tokens = {
   colour: named(roles, (key) => key),
   grid: named(grid, (key) => `grid-${key.replace(".", "-")}`),
-  length: named({ control: lengths.control, icon: lengths.icon, gutter: lengths.gutter, readable: lengths.readable, hairline: lengths.hairline, sheet: length(rem(28)), alert: length(rem(22)), menu: length(rem(10)),
+  length: named({
+    control: lengths.control,
+    icon: lengths.icon,
+    /** How far an icon sits inside the edge of a square button of it, which a button with no edge of its own at the
+     * end of a row pulls out by, so the icon lines up with what's under it: half of `control` less `icon`. */
+    iconInset: length({ default: rem(0.625), touch: rem(0.8125), phone: rem(12.5 / 17) }),
+    /** How tall a screen's bar is at least: a control's height and a little. */
+    bar: length({ default: rem(3), touch: rem(3.5), phone: rem(44 / 17 + 0.75) }),
+    gutter: lengths.gutter,
+    readable: lengths.readable,
+    hairline: lengths.hairline,
+    /** A split's list beside what it opens: its widest and its narrowest. */
+    column: length(rem(24)),
+    columnMin: length(rem(18)),
+    /** How tall a block of code grows before it scrolls. */
+    excerpt: length(rem(12)),
+    /** What the device keeps for itself at each edge of the window (a status bar, a notch, a home indicator), which
+     * the host sets as it changes: on the web the client says it (`safeAreaInsets`) and the bridge sets it. */
+    safeTop: length(px(0)),
+    safeBottom: length(px(0)),
+    safeLeft: length(px(0)),
+    safeRight: length(px(0)),
+    sheet: length(rem(28)),
+    alert: length(rem(22)),
+    menu: length(rem(10)),
     /** A sheet's grabber, which says under a finger that it can be pulled down, and is nothing under a mouse. */
+    grabber: length({ default: px(0), touch: rem(0.25) }),
+    grabberGap: length({ default: px(0), touch: rem(0.5) }),
     /** How tall a row in a list is at least: what's pressed, and a little room. */
     row: length({ default: rem(2.75), touch: rem(3.25), phone: rem(52 / 17) }),
-    grabber: length({ default: px(0), touch: rem(0.25) }), grabberGap: length({ default: px(0), touch: rem(0.5) }) }, (key) => key),
+  }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
   shadow: named({
@@ -271,13 +297,15 @@ export const tokens = {
   weight: named(weightRoles, (key) => `weight-${key}`),
   type: named({
     largeTitle: type(sizes.largeTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
+    /** A bar's title, which runs to a second line before it's cut. */
+    title: type(sizes.large, weights.title, { lineHeight: 1.3, tracking: -0.015 }),
     large: type(sizes.large, weights.label),
     medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),
     /** What's typed in a field: medium, but never under 16px under a finger, where an iPhone would zoom into it. */
     field: type(lengths.textField, weights.body),
   }, (key) => `type-${key}`),
-  motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]), hold: motion(500, out) }, (key) => `move-${key}`),
+  motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]), hold: motion(500, out), pulse: motion(2000, [0.4, 0, 0.6, 1]) }, (key) => `move-${key}`),
 }
 
 

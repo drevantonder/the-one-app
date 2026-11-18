@@ -1,10 +1,10 @@
 // Something to press, a count or word beside something, an icon and a spinner: written once in strict, on the
 // primitives (#primitives), the same on the DOM and on a native host.
-import { children, Show } from "solid-js"
+import { children, createContext, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Path, Text } from "#primitives"
 import { messages } from "./words.ts"
-import { styles, type Styles } from "./styles.ts"
+import { negative, styles, type Styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
 import type { Laid, Located } from "./strict/types/ui.d.ts"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
@@ -92,6 +92,7 @@ const look = styles({
   ghost: { backgroundColor: { hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
   destructive: { backgroundColor: tokens.colour.red, color: tokens.colour.onAccent },
   square: { width: tokens.length.control, paddingInline: 0, flexShrink: 0 },
+  pulled: { marginEnd: negative(tokens.length.iconInset) },
   disabled: { opacity: 0.5, cursor: "default" },
   /** A menu's button, while its menu is open: one with no fill of its own shows it's the one. */
   open: { backgroundColor: tokens.colour.quinaryLabel },
@@ -152,6 +153,10 @@ export interface ButtonProps {
   children?: JSX.Element
 }
 
+/** Whether what's in it ends a screen's bar, where an icon with no edge of its own lines up with what's under it, as
+ * Back does at the bar's start. */
+export const BarEnd = createContext(false)
+
 /// `<Button onClick={save}>Save</Button>`: something to press. `variant` says how much it matters: one `default`
 /// to a view, then `secondary`, `outline` and `ghost`, and `destructive` for what can't be undone. `size="icon"`
 /// is square, for an icon alone (`<Icon name="plus" />`), named by `aria-label`. `loading` shows it's working and
@@ -160,6 +165,7 @@ export function Button(props: ButtonProps) {
   const off = () => !!props.disabled || !!props.loading
   // What it says, made once: words in a text, or what it's given (an icon) as it is.
   const inside = children(() => props.children)
+  const end = useContext(BarEnd)
   return (
     <Box
       role="button"
@@ -171,7 +177,7 @@ export function Button(props: ButtonProps) {
       aria-disabled={off() ? "true" : undefined}
       aria-busy={props.loading ? "true" : undefined}
       onClick={(event: Located) => !off() && props.onClick?.(event)}
-      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
+      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, end && props.variant === "ghost" && props.size === "icon" && look.pulled, off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
     >
       <Show when={props.loading}>
         <Spinner />

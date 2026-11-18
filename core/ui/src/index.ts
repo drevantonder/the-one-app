@@ -40,7 +40,7 @@
 /// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
 /// there adds it there, with only what every host can draw (`protocol.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
-export { call, changed, client, component, connection, covers, direction, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
+export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { pace, share } from "./shared.ts"
 export { seen } from "./seen.ts"
 export { words } from "./words.ts"
@@ -50,7 +50,7 @@ export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea, useField 
 export { createListCollection } from "./collection.ts"
 export { Select } from "./select.tsx"
 export { List, Row } from "./list.tsx"
-export { go, Screen, Section, Split } from "./screen.tsx"
+export { Screen, Section, Split } from "./screen.tsx"
 export { LiveScreen } from "./live-screen.tsx"
 export { Menu } from "./menu.tsx"
 export { Tabs } from "./tabs.tsx"
