@@ -161,9 +161,9 @@ only that app, never another with access to it, and never for a password. The ap
 - `ready`: usable, which shows nothing: fine is silent. Every item starts there, and a password is always there.
 - `busy`, with a `message` ("Saving…"): something's under way, shown as a spinner and it.
 - `needs_action`, with a `message`, why ("Signed out on your phone"), and one `action`: its person has to act,
-  shown as a dot, why and a button. An action is a tool of the app's, called as its person, whose `url`, if it
-  gives one, opens in their browser (`%{label: "Sign In", tool: "sign_in", inputs: %{account: "+614..."}}`), or a
-  page of its client's (`%{label: "Sign In", page: "client/sign-in.html#+614..."}`).
+  shown as a dot, why and a button. The `action` is that button: a `label`, and either a `tool` of the app, called as
+  its person, whose `url`, if it gives one, opens in their browser (`%{label: "Sign In", tool: "sign_in", inputs:
+  %{account: "+614..."}}`), or a `page` of its client's (`%{label: "Sign In", page: "client/sign-in.html#+614..."}`).
 
 Two things are each app's to choose, and none chooses for another: whether its person is notified when its item
 needs them (`notifications`), and what it does when its item is deleted, restored or purged, which soft delete's hook
