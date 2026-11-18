@@ -1,27 +1,64 @@
-import { createMemo, For } from "solid-js"
-import { render } from "@solidjs/web"
-import { popover } from "./popover.ts"
-import { messages, readable, whole } from "./shared.ts"
+// A toast: one line about what just happened, at the foot of the window for a few seconds. Written once in strict, on
+// the primitives, the same on the DOM and on a native host: a layer over the window (#primitives' `Layer`), drawn
+// while there are toasts, so it's over whatever was open when the first came.
+import { createRoot, createSignal, For, Show } from "solid-js"
+import { Box, Layer, Text } from "#primitives"
+import { Button } from "./button.tsx"
 import { Sheet } from "./sheet.tsx"
 import { Details } from "./states.tsx"
-import { createRoot, createSignal, Show } from "solid-js"
-import type { GroupService, Options, Store } from "@zag-js/toast"
+import { messages, readable, whole } from "./words.ts"
+import { styles } from "./styles.ts"
+import { duration, tokens } from "./tokens.ts"
 
-// Ark UI's toast (ark-ui.com/docs/components/toast) has an app draw each toast. The UI library draws them itself, the
-// same in every app, so an app only says what happened: `toast`.
+const look = styles({
+  stack: {
+    position: "absolute",
+    start: 0,
+    end: 0,
+    bottom: tokens.length.safeBottom,
+    alignItems: "center",
+    gap: tokens.grid[2],
+    padding: tokens.length.gutter,
+  },
+  toast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.grid[3],
+    width: "100%",
+    maxWidth: tokens.length.column,
+    minHeight: tokens.grid[12],
+    paddingBlock: tokens.grid[1],
+    paddingStart: tokens.grid[4],
+    paddingEnd: tokens.grid[2],
+    borderRadius: tokens.radius.medium,
+    backgroundColor: tokens.colour.card,
+    color: tokens.colour.label,
+    font: tokens.type.medium,
+    boxShadow: tokens.shadow.window,
+    pointerEvents: "auto",
+    opacity: { default: 1, entering: 0 },
+    translateY: { default: 0, entering: tokens.grid[4] },
+    transitionProperty: ["opacity", "translateY"],
+    transition: tokens.motion.settle,
+  },
+  leaving: { opacity: 0 },
+  title: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+})
 
-/// Zag's toasts, loaded with the first toast; the toasts there are; and the one element of the page that shows
-/// them, from the first toast on.
-let zag: typeof import("./zag/toast.ts")
-let store: Store
-let host: HTMLDivElement
-/// Where on the page the toaster is: the page itself, or the open sheet or alert that's on top (sheet.jsx).
-let home: HTMLElement = document.body
+/** At most this many show at once; the oldest goes for a new one. */
+const MOST = 3
+/** How long a toast takes to fade as it goes. */
+const fading = duration(tokens.motion.settle)
 
-/// Moves toasts to `where`, or back to the page. They go on showing as they were.
-export function hold(where: HTMLElement = document.body): void {
-  home = where
-  if (host && host.parentNode !== home) home.append(host)
+type Toast = { id: number; title: string; action?: { label: string; run: () => void }; leaving?: boolean }
+
+const [toasts, setToasts] = createSignal<Toast[]>([])
+let made = 0
+let drawn = false
+
+const dismiss = (id: number) => {
+  setToasts((now) => now.map((one) => (one.id === id ? { ...one, leaving: true } : one)))
+  setTimeout(() => setToasts((now) => now.filter((one) => one.id !== id)), fading)
 }
 
 /// `toast("Deleted", { action: { label: "Undo", run: restore } })`: one line about what just happened, at the foot
@@ -31,43 +68,39 @@ export function hold(where: HTMLElement = document.body): void {
 export async function toast(text: string | Error, { action }: { action?: { label: string; run: () => void } } = {}): Promise<void> {
   const all = whole(text)
   if (all !== readable(all)) action ??= { label: messages.details, run: () => details(all) }
-  zag ??= await import("./zag/toast.ts")
-  if (!store) {
-    store = zag.createStore({ placement: "bottom", gap: 8, max: 3, offsets: "1rem" })
-    host = document.createElement("div")
-    host.className = "ui-toaster"
-    render(() => <Toaster />, host)
+  if (!drawn) {
+    drawn = true
+    createRoot(() => <Toaster />)
   }
-  if (host.parentNode !== home) home.append(host)
-  store.create({ title: readable(all), duration: action ? 8000 : 4000, action: action && { label: action.label, onClick: action.run } })
+  const id = ++made
+  const showing = toasts().filter((one) => !one.leaving)
+  if (showing.length >= MOST) dismiss(showing[0].id)
+  setToasts((now) => [...now, { id, title: readable(all), action }])
+  setTimeout(() => dismiss(id), action ? 8000 : 4000)
 }
 
 function Toaster() {
-  const service = zag.useMachine(zag.group.machine, { id: "ui-toaster", store })
-  const api = createMemo(() => zag.group.connect(service, zag.normalizeProps))
   return (
-    <div {...api().getGroupProps()} ref={popover(() => api().getCount() > 0)}>
-      <For each={api().getToasts()} keyed={(toast) => toast.id}>
-        {(toast, index) => <Toast toast={toast()} index={index()} parent={service} />}
-      </For>
-    </div>
-  )
-}
-
-function Toast(props: { toast: Options; index: number; parent: GroupService }) {
-  const service = zag.useMachine(zag.machine, () => ({ ...props.toast, index: props.index, parent: props.parent }))
-  const api = createMemo(() => zag.connect(service, zag.normalizeProps))
-  return (
-    <div class="ui-toast" {...api().getRootProps()}>
-      <span {...api().getGhostBeforeProps()} />
-      <p {...api().getTitleProps()}>{api().title}</p>
-      {props.toast.action && (
-        <button class="press ring reach" {...api().getActionTriggerProps()}>
-          {props.toast.action.label}
-        </button>
-      )}
-      <span {...api().getGhostAfterProps()} />
-    </div>
+    <Show when={toasts().length}>
+      <Layer>
+        <Box style={look.stack}>
+          <For each={toasts()} keyed={(one) => one.id}>
+            {(one) => (
+              <Box role="status" aria-live="polite" style={[look.toast, one().leaving && look.leaving]}>
+                <Text style={look.title}>{one().title}</Text>
+                <Show when={one().action}>
+                  {(action) => (
+                    <Button variant="ghost" onClick={() => (dismiss(one().id), action().run())}>
+                      {action().label}
+                    </Button>
+                  )}
+                </Show>
+              </Box>
+            )}
+          </For>
+        </Box>
+      </Layer>
+    </Show>
   )
 }
 
@@ -81,11 +114,11 @@ export function details(text: string): void {
     const [open, setOpen] = createSignal(false)
     createRoot(() => (
       <Sheet heading={messages.details} open={open()} onClose={() => setOpen(false)}>
-        <Show when={shown()} keyed>
+        <Show when={shown()}>
           {(text) => (
             <>
-              <p>{readable(text)}</p>
-              <Details text={text} />
+              <Text>{readable(text())}</Text>
+              <Details text={text()} />
             </>
           )}
         </Show>

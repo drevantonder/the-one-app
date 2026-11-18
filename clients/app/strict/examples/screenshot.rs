@@ -84,6 +84,8 @@ fn main() -> anyhow::Result<()> {
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
         Some(match (method, params["name"].as_str()) {
             ("tools/call", Some(tool)) => match answers.get(tool) {
+                // `{ "$error": "…" }` is the tool's refusal, as the scenes (core/ui/scenes.js) answer it.
+                Some(answer) if answer.get("$error").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": answer["$error"].as_str().unwrap_or_default()}]}}),
                 Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
                 None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
             },
