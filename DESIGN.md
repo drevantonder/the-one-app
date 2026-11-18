@@ -38,7 +38,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Each app is one of the computer's apps too, kept in step with what's installed: on a Mac in `~/Applications/The One App/`, which Spotlight and Launchpad find, its icon the app's own on macOS's icon grid; in Windows' Start menu; and in a Linux desktop's applications. Opening it opens that app's window, or brings it forward.
 - An app's window has nothing of its own but the app: "Updated · Reload", "<App> didn't open", Update Required and the Reconnecting banner show over it as they do over an app on a phone.
 - Closing an app's window ends it. Quitting The One App closes every app's window. Closing the Home Screen's window while an app's window is open puts it away; the Dock icon brings it back.
-- Every app's window has a way Home (18 Nov). On a Mac, no title band: "Nice quality apps get rid of that but still keep the traffic lights." The app runs to the window's top, its title kept for Mission Control, the Window menu and Cmd-Tab; the page keeps a title bar's height clear under the traffic lights, which drags the window and, double-clicked, zooms as the Mac is set. Just right of the traffic lights, a breadcrumb: The One App's ring and "Home", lighter, highlighted under the pointer, tooltip "Home Screen"; a muted "/"; then the app's own icon and name in semibold, which isn't a button. Home, and Window → Home Screen (⇧⌘H, as Finder's and Safari's Home), go to the Home Screen and leave the app's window open.
+- Every app's window has a way Home (18 Nov). On a Mac, no title band: "Nice quality apps get rid of that but still keep the traffic lights." The app runs to the window's top, its title kept for Mission Control, the Window menu and Cmd-Tab; the page keeps a title bar's height clear under the traffic lights, which drags the window and, double-clicked, zooms as the Mac is set. Just right of the traffic lights, a breadcrumb: The One App's ring and "Home", lighter, highlighted under the pointer, tooltip "Home Screen"; a muted "/"; then the app's own icon and name in semibold, which isn't a button. Home, and Window → Home Screen (⇧⌘H, as Finder's and Safari's Home), go to the Home Screen and leave the app's window open. Windows and Linux the same (18 Nov): on Windows the app runs to the top, the breadcrumb top left where the title was, and Windows' own minimize, maximize and close stay on the right, drawn by Windows, Snap Layouts on hover, as Edge, Teams and File Explorer have them; on Linux a GNOME header bar, as Files and Settings have, the breadcrumb at its start and the desktop's own window buttons on whichever side the person set.
 
 ## The rail (18 Nov)
 
@@ -126,7 +126,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 
 ## Desktop windows
 
-- A Mac app window has no title band, its traffic lights kept, and its breadcrumb beside them (App windows). Windows and Linux keep the system's bar, tinted.
+- An app window has no title band (App windows): the system's own window controls (a Mac's traffic lights, Windows' caption buttons, GTK's window buttons) sit over the page's top, which drags the window, with the breadcrumb after them.
 
 ## Git Repos
 

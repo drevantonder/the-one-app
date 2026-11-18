@@ -32,6 +32,8 @@ mod shortcuts;
 pub mod host;
 #[cfg(desktop)]
 mod hosts;
+#[cfg(desktop)]
+mod title_bar;
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
 /// the apps it uses, which are all at its own address, and nothing from anywhere else.

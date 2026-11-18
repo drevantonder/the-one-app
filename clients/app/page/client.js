@@ -1710,14 +1710,17 @@ function hear(told) {
 /// zoom). An app's own window has its breadcrumb there, just after the window's controls: Home, which brings the Home
 /// Screen forward and keeps this window open, as Window → Home Screen does (`host.rs`), then the app (`crumb`).
 const titleBar = byId("title-bar")
-/** @param {{ height: number, start: number }} at */
-function titled({ height, start }) {
+/** @param {import("./host").TitleBar} at */
+function titled({ height, start, end }) {
   document.documentElement.style.setProperty("--title-bar-height", `${height}px`)
   document.documentElement.style.setProperty("--title-bar-start", `${start}px`)
+  document.documentElement.style.setProperty("--title-bar-end", `${end}px`)
   document.documentElement.toggleAttribute("data-title-bar", true)
   titleBar.hidden = false
   byId("title-bar-nav").hidden = !own
   crumb()
+  // Open apps keep it clear too, as it changes.
+  placed()
 }
 /// The breadcrumb's last: this window's app, by its icon and name, once its apps are listed.
 function crumb() {
@@ -1728,17 +1731,24 @@ function crumb() {
   picture.toggleAttribute("hidden", !src)
   name.textContent = names.get(own.entrypoint) || own.name || ""
 }
-/// Where a double-click's second press was: moved from before it's let go, it's a drag, as on a Mac's title bar.
-let pressedAt = ""
+/// Where it was pressed, until the pointer moves far enough from there to drag the window, as a title bar's own does:
+/// a drag that started at the press would take the pointer from the page (a Linux window manager's does), and the
+/// second press of a double-click with it.
+/** @type {{ x: number, y: number } | undefined} */
+let pressedAt
 titleBar.addEventListener("mousedown", (event) => {
   if (event.button !== 0 || event.target !== titleBar) return
   event.preventDefault()
-  if (event.detail === 2) pressedAt = `${event.clientX},${event.clientY}`
-  else if (event.detail === 1) invoke("plugin:window|start_dragging")
+  pressedAt = event.detail === 1 ? { x: event.clientX, y: event.clientY } : undefined
+})
+titleBar.addEventListener("mousemove", (event) => {
+  if (!pressedAt || !(event.buttons & 1) || Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y) < 4) return
+  pressedAt = undefined
+  invoke("plugin:window|start_dragging")
 })
 titleBar.addEventListener("mouseup", (event) => {
-  if (event.button === 0 && event.detail === 2 && event.target === titleBar && pressedAt === `${event.clientX},${event.clientY}`) invoke("title_bar_double_click")
-  pressedAt = ""
+  pressedAt = undefined
+  if (event.button === 0 && event.detail === 2 && event.target === titleBar) invoke("title_bar_double_click")
 })
 /// Goes to the Home Screen from an app's own window, keeping it open: the breadcrumb's Home, as Window → Home Screen
 /// does (`host.rs`).
@@ -1751,6 +1761,7 @@ dress()
 shown.subscribe(draw)
 shown.start()
 await listen("session", ({ payload }) => hear(payload))
+await listen("title_bar", ({ payload }) => titled(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.

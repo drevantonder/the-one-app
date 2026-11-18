@@ -93,12 +93,18 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     let proxy = event_loop.create_proxy();
     let key = format!("{:016x}{:016x}", random(), random());
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
-    let to = channel(&home, opened.clone(), proxy.clone(), asked.clone())?;
+    // Where the window's title bar is over its page (`title_bar`), which it's told as it starts and as that changes.
+    let title_bar: Arc<Mutex<Option<crate::title_bar::Area>>> = Arc::default();
+    let to = channel(&home, opened.clone(), proxy.clone(), asked.clone(), title_bar.clone())?;
 
     let name = opened.entrypoint.split('/').next().unwrap_or_default().to_owned();
     #[cfg(target_os = "macos")]
     let menu = menu(&name, proxy.clone());
-    let window = WindowBuilder::new().with_title(&name).with_inner_size(tao::dpi::LogicalSize::new(1024.0, 720.0));
+    // A Linux window is shown once it has its header bar (`title_bar`).
+    let window = WindowBuilder::new()
+        .with_title(&name)
+        .with_inner_size(tao::dpi::LogicalSize::new(1024.0, 720.0))
+        .with_visible(cfg!(not(target_os = "linux")));
     // No title band, as the Home Screen's window has none (`titleBar`), the traffic lights kept.
     #[cfg(target_os = "macos")]
     let window = {
@@ -221,6 +227,27 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
         builder.build_gtk(window.default_vbox().expect("tao gives a window a box"))?
     };
 
+    let (area, told) = (title_bar.clone(), proxy.clone());
+    let title_bar_changed = move |changed: crate::title_bar::Area| {
+        *area.lock().expect("nothing panics holding it") = Some(changed);
+        let _ = told.send_event(Told::Run(format!("window.__ONE_HOST__.event(\"title_bar\", {})", Value::from(changed))));
+    };
+    #[cfg(windows)]
+    {
+        use tao::platform::windows::WindowExtWindows;
+        crate::title_bar::extend(window.hwnd(), title_bar_changed)?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewExtUnix;
+        crate::title_bar::header_bar(window.gtk_window().upcast_ref(), &webview.webview(), title_bar_changed);
+        window.set_visible(true);
+    }
+    #[cfg(target_os = "macos")]
+    title_bar_changed(crate::title_bar::MAC);
+
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         #[cfg(target_os = "macos")]
@@ -245,6 +272,12 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
                 use tao::platform::macos::WindowExtMacOS;
                 crate::hosts::double_clicked(window.ns_window())
             }
+            #[cfg(target_os = "linux")]
+            Event::UserEvent(Told::DoubleClick) => {
+                use gtk::prelude::*;
+                use tao::platform::unix::WindowExtUnix;
+                crate::title_bar::double_clicked(window.gtk_window().upcast_ref())
+            }
             Event::UserEvent(Told::Home) => {
                 // The Home Screen is The One App's, which comes in front only where this app lets it.
                 #[cfg(target_os = "macos")]
@@ -258,7 +291,13 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
 
 /// Connects to the app's window, starting it if it isn't running, says hello, and talks with it on a thread of its
 /// own. → where to send it a message.
-fn channel(home: &std::path::Path, opened: Opened, proxy: EventLoopProxy<Told>, asked: Arc<Mutex<HashMap<String, Asked>>>) -> anyhow::Result<UnboundedSender<Value>> {
+fn channel(
+    home: &std::path::Path,
+    opened: Opened,
+    proxy: EventLoopProxy<Told>,
+    asked: Arc<Mutex<HashMap<String, Asked>>>,
+    title_bar: Arc<Mutex<Option<crate::title_bar::Area>>>,
+) -> anyhow::Result<UnboundedSender<Value>> {
     let address = crate::hosts::address(home);
     let (to, mut out) = unbounded_channel::<Value>();
     let _ = to.send(json!({"hello": {"entrypoint": opened.entrypoint, "subject": opened.subject, "link": opened.link}}));
@@ -303,6 +342,9 @@ fn channel(home: &std::path::Path, opened: Opened, proxy: EventLoopProxy<Told>, 
                             if start {
                                 started["open"] = json!(opened.link);
                                 started["window"] = json!({"entrypoint": opened.entrypoint, "subject": opened.subject, "name": started["name"]});
+                                if let Some(area) = *title_bar.lock().expect("nothing panics holding it") {
+                                    started["titleBar"] = area.into();
+                                }
                             }
                             started
                         });

@@ -147,17 +147,22 @@ iframe {
 :root[data-title-bar] {
   --safe-top: max(env(safe-area-inset-top), var(--title-bar-height));
 }
+/* WebView2 drags a Windows window by it, and maximizes it double-clicked, as a title bar (`app-region`); a Mac's and
+   Linux's are dragged by client.js. */
 #title-bar {
   position: fixed;
   z-index: 5;
   inset: 0 0 auto;
   height: var(--safe-top);
+  app-region: drag;
 }
-/* What's just after the window's own controls, level with them, in an app's own window. */
+/* What's just after the window's own controls, level with them, in an app's own window, clear of those at its end. */
 #title-bar-nav {
   position: absolute;
   top: 50%;
   left: var(--title-bar-start);
+  max-width: calc(100% - var(--title-bar-start) - var(--title-bar-end, 0px));
+  overflow: hidden;
   display: flex;
   align-items: center;
   translate: 0 -50%;
@@ -188,6 +193,7 @@ iframe {
   padding: 0 0.375rem;
 }
 #home-screen {
+  app-region: no-drag;
   border: 0;
   border-radius: var(--radius-md);
   background: none;

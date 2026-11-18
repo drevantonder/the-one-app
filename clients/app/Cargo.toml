@@ -97,10 +97,10 @@ tauri-plugin-haptics = { version = "2.4", optional = true }
 resvg = { version = "0.47", default-features = false, optional = true }
 
 # Each app's shortcut in Windows' Start menu, made as the shell's own are (`IShellLinkW`), with its own AppUserModelID,
-# and its icon file.
+# and its icon file; and a window's title bar, with Windows' own caption buttons over the page (`title_bar`).
 [target.'cfg(windows)'.dependencies]
 ico = { version = "0.6", optional = true }
-windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"], optional = true }
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"], optional = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
