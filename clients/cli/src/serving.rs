@@ -569,7 +569,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
             *paired = Some(pair.clone());
         })?;
     }
-    let mut server = Command::from(command(release(&here.build(&pair.build))));
+    let mut server = Command::from(command(release(&here.started(&pair.build)?)));
     server
         .args(["eval", "OneCore.Release.serve()"])
         .env("ONE_SERVER_HOME", here.folder.join("home"))
@@ -1213,6 +1213,22 @@ impl Here {
     /// The folder of the build `build`.
     fn build(&self, build: &str) -> PathBuf {
         self.folder.join("builds").join(build)
+    }
+
+    /// Where the server is started from: its build's folder, but on Windows `current`, a junction to it. Windows
+    /// Firewall keeps what its person allowed by the path a program was started by, and the VM that holds the
+    /// server's socket is in its build's own folder, so each update would ask them again.
+    fn started(&self, build: &str) -> Result<PathBuf> {
+        #[cfg(windows)]
+        {
+            let current = self.folder.join("current");
+            // Removing a junction removes only it, never what it points to.
+            let _ = fs::remove_dir(&current);
+            junction::create(self.build(build), &current)?;
+            Ok(current)
+        }
+        #[cfg(not(windows))]
+        Ok(self.build(build))
     }
 
     /// Removes the builds and programs the record names as neither current, previous nor next, and the runtimes no
