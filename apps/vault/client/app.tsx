@@ -139,7 +139,9 @@ const whom = () => owners().find((owner) => owner.value === security().owner)?.w
 async function does(tool: string, inputs: object) {
   try {
     await call(tool, inputs, { subject: whose() })
-    again()
+    // Read again once what called this has done with it (closed its sheet): a refresh holds what changes while it
+    // reads, so a sheet closed after it would wait for it.
+    setTimeout(again)
     return true
   } catch (error) {
     toast(error as Error)
@@ -565,14 +567,19 @@ function FieldSheet() {
   })
   // A field's name is a word of letters, digits and _, as a tool's input names it.
   const named = () => /^[A-Za-z0-9_]+$/.test(field())
-  const ready = () => !!value() && (!!at()?.item || !!name().trim()) && (!!at()?.field || named())
+  const [busy, setBusy] = createSignal(false)
+  createEffect(at, () => void setBusy(false))
+  const ready = () => !busy() && !!value() && (!!at()?.item || !!name().trim()) && (!!at()?.field || named())
   const save = async () => {
     const { item, field: changing } = at()!
     const called = item?.name ?? name().trim()
     if (!item && contents().items.some((other) => other.name.toLowerCase() === called.toLowerCase())) return void toast(`There's an item named ${called} already.`)
     const inputs: Record<string, unknown> = { item: called, field: changing?.name ?? field(), value: value(), secret: changing ? changing.secret : secret() }
     if (!item) inputs.hosts = sites(hosts())
-    if (!(await does("vault_set", inputs))) return
+    setBusy(true)
+    const saved = await does("vault_set", inputs)
+    setBusy(false)
+    if (!saved) return
     shut()
     if (!item) setOpen(called)
   }
@@ -608,7 +615,7 @@ function FieldSheet() {
             <Input type="url" autocapitalize="none" autocorrect={false} spellcheck={false} value={hosts()} onInput={(event) => setHosts(event.currentTarget.value)} onAction={submit} />
           </Field>
         </Show>
-        <Button disabled={!ready()} onClick={save}>
+        <Button loading={busy()} disabled={!ready()} onClick={save}>
           Save
         </Button>
         <Show when={at()!.field}>
