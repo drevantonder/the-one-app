@@ -5,7 +5,8 @@ defmodule Vault.Access do
 
   An app with access to any item reaches its person's Vault as an editor, which a relation tuple says; this module is
   the one place that list changes, so the tuple is shared with an app as it gets access to its first item, and
-  taken back as it loses access to its last.
+  taken back as it loses access to its last. An app that's no longer installed loses its access where an item is read
+  (`prune/4`), so the list never names one that isn't there.
   """
 
   alias OneCore.{Apps, Artifact}
@@ -41,6 +42,22 @@ defmodule Vault.Access do
     changed = Store.change!(db, item, &Map.update!(&1, "access", fn access -> if on, do: Enum.uniq(access ++ [who]), else: access -- [who] end))
     if who != "agents", do: in_step(call, db, who, on)
     changed
+  end
+
+  @doc """
+  The item without access for an app that's no longer installed (`names`, by artifact, as `Vault.Items.names/1`), kept
+  so, and its tuple on the Vault taken back: where an item is read, as it's found.
+  """
+  def prune(call, db, item, names) do
+    gone = for who <- item["access"], who != "agents", not is_map_key(names, who), do: who
+
+    if gone == [] do
+      item
+    else
+      pruned = Store.change!(db, item, &Map.update!(&1, "access", fn access -> access -- gone end))
+      for who <- gone, do: share(call, "unshare", Artifact.name(db), who)
+      pruned
+    end
   end
 
   @doc "Keeps an app's tuple on someone's Vault as its access says: shared while it has access to an item."

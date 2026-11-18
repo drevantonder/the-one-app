@@ -39,7 +39,7 @@ defmodule Vault.Items do
 
     item =
       cond do
-        found -> Vault.Access.may!(upgraded(call, db, found), by)
+        found -> Vault.Access.may!(current(call, db, found, names(call)), by)
         made -> Store.create(call, db, name, made)
         true -> raise "There's no item named #{name} in the Vault."
       end
@@ -78,16 +78,19 @@ defmodule Vault.Items do
 
   @doc "The item named `name`, as it's kept now, or nil."
   def find(call, db, name) do
-    if found = Store.find(call, db, name), do: upgraded(call, db, found)
+    if found = Store.find(call, db, name), do: current(call, db, found, names(call))
   end
 
   def find!(call, db, name), do: find(call, db, name) || raise("There's no item named #{name} in the Vault.")
 
   @doc "Every item, as each is kept now."
   def all(call, db) do
-    items = Store.everything(call, db)
-    if Enum.all?(items, &Map.has_key?(&1, "kind")), do: items, else: Enum.map(items, &upgraded(call, db, &1))
+    names = names(call)
+    for item <- Store.everything(call, db), do: current(call, db, item, names)
   end
+
+  # An item as it's kept now: upgraded, and with no access for an app that's no longer installed (`Vault.Access.prune/4`).
+  defp current(call, db, item, names), do: Vault.Access.prune(call, db, upgraded(call, db, item), names)
 
   # A record kept before items had a kind, access and a status is kept as they are now, once: its kind is what its
   # type and its sign-in made it, and its app the one of its type, or the first that used it. Where an app couldn't
