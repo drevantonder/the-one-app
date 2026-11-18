@@ -69,7 +69,7 @@ defmodule Permissions do
         inputs: tuple,
         outputs: tuple
       },
-      %{name: "unshare", description: "Removes a relation tuple", inputs: tuple, outputs: tuple},
+      %{name: "unshare", description: "Removes a relation tuple, if it's there", inputs: tuple, outputs: tuple},
       %{
         name: "shared",
         read_only: true,
@@ -264,12 +264,8 @@ defmodule Permissions do
   def call("unshare", %{"artifact" => artifact, "relation" => relation, "who" => who}, call) do
     transaction(call, fn db ->
       shares!(db, call, artifact, relation)
-      removed = "delete from tuples where artifact = ? and relation = ? and who = ? returning who"
-
-      case query(db, removed, [artifact, relation, who]) do
-        [_] -> %{artifact: artifact, relation: relation, who: who}
-        [] -> raise "No tuple says #{who} is #{a(relation)} of #{artifact}. `shared` lists the ones there are."
-      end
+      query(db, "delete from tuples where artifact = ? and relation = ? and who = ?", [artifact, relation, who])
+      %{artifact: artifact, relation: relation, who: who}
     end)
   end
 

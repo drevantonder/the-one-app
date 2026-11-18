@@ -36,7 +36,7 @@ Its words:
 - `installer` of the network (or of a group) may install apps for it, as its owner does, and nothing more an owner
   may: `share --artifact network --relation installer --who users/carol`, which only an owner writes or removes.
   `users --artifact network --relation installer` lists who may, owners among them; anyone in the network sees it.
-- `share` writes a tuple and `unshare` removes one. An owner or an editor shares with viewers and editors and
+- `share` writes a tuple and `unshare` removes one, or finds it already gone. An owner or an editor shares with viewers and editors and
   adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
   and `check` says whether someone may reach it.
 - `forget` removes every tuple that names someone taken out of the network, so whoever joins by their name next
