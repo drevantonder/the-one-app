@@ -49,10 +49,15 @@ pub fn target() -> String {
     format!("{}-{}", env::consts::OS, env::consts::ARCH)
 }
 
+/// The protocols this build speaks with the network's other parts, from `oldest` to `newest` (`core/protocol.json`),
+/// which it says in each request: a server refuses one only where they speak none in common (`OneCore.Protocol`).
+pub static PROTOCOL: std::sync::LazyLock<Value> =
+    std::sync::LazyLock::new(|| serde_json::from_str(include_str!("../../protocol.json")).expect("core/protocol.json is JSON"));
+
 /// What a device says of itself as it asks for its token, which the network keeps so a list of its devices says
-/// which build each is: its build, its kind of machine and its name.
+/// which build each is: its build, the protocols it speaks, its kind of machine and its name.
 fn device_info() -> Value {
-    json!({"build": BUILD, "target": target(), "name": name()})
+    json!({"build": BUILD, "protocol": *PROTOCOL, "target": target(), "name": name()})
 }
 
 /// What servers and clients speak.
@@ -1539,14 +1544,15 @@ impl Client {
     }
 
     /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its attestation for the run's key,
-    /// and what the environment says, unless the request says otherwise, as one of a device's own does. It says this
-    /// build too, which a server talks with across one 0.minor, refusing one further with why (`OneCore.Mcp`), and
-    /// which client this is, as MCP's 2026-07-28 has each request say (`one-cli`, `one-app`), unless it's an MCP
+    /// and what the environment says, unless the request says otherwise, as one of a device's own does. It says the
+    /// protocols it speaks too, which a server refuses, saying why, only where it speaks none of them (`OneCore.Mcp`),
+    /// and this build, and which client this is, as MCP's 2026-07-28 has each request say (`one-cli`, `one-app`), unless it's an MCP
     /// client's own request that says which that is.
     fn say(&self, request: &mut Value) {
         for (says, value) in [("device", self.key.public().to_string()), ("attestation", self.link().attestation)] {
             request["params"]["_meta"][says] = json!(value);
         }
+        request["params"]["_meta"]["protocol"] = PROTOCOL.clone();
         request["params"]["_meta"]["version"] = json!(BUILD);
         let info = &mut request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"];
         if info.is_null() {
@@ -1885,21 +1891,18 @@ fn updates(message: &[u8]) -> bool {
         || (request["method"] == "tools/call" && ["builds", "download", "update"].contains(&tool))
 }
 
-/// Why a server refused this client, where it's for this client being on a version before the server's that doesn't
-/// talk with it: a server answers that -32022, with its own version, as MCP refuses a protocol version it doesn't speak.
-/// One behind this client, which is asked again once it's updated, isn't this client's to fix.
+/// Why a server refused this client, where it's for this client speaking only protocols older than the server's: a
+/// server answers that -32022, with the protocols it speaks, as MCP refuses a protocol version it doesn't speak. One
+/// behind this client, which is asked again once it's updated, isn't this client's to fix.
 fn left_behind(response: &[u8]) -> Option<String> {
     if response.len() > 16 << 10 {
         return None;
     }
     let response: Value = serde_json::from_slice(response).ok()?;
     let error = &response["error"];
-    let minor = |build: &str| -> Option<(u64, u64)> {
-        let mut parts = build.split(['.', '+']);
-        Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
-    };
-    let (ours, theirs) = (minor(BUILD)?, minor(error["data"]["version"].as_str()?)?);
-    (error["code"] == -32022 && ours < theirs).then(|| error["message"].as_str().unwrap_or("This app needs updating").to_owned())
+    let oldest = error["data"]["supported"]["oldest"].as_u64()?;
+    (error["code"] == -32022 && PROTOCOL["newest"].as_u64()? < oldest)
+        .then(|| error["message"].as_str().unwrap_or("This app needs updating").to_owned())
 }
 
 fn refused(response: &[u8]) -> Option<String> {
