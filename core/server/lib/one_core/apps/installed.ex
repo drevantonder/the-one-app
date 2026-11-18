@@ -45,27 +45,7 @@ defmodule OneCore.Apps.Installed do
   def read(owner) do
     case Bucket.read("#{owner}/#{@blob}") do
       {:ok, json, _tag} -> JSON.decode!(json)["apps"] || %{}
-      :absent -> copied(owner)
-    end
-  end
-
-  # What a server from before installs had state kept, `<owner>/installed`: each app's name with its artifact.
-  # It's copied once to the shape it has now, and the blob it was is left as it is.
-  defp copied(owner) do
-    case Bucket.read("#{owner}/installed") do
-      {:ok, json, _tag} ->
-        records = Map.new(JSON.decode!(json), fn {name, app} -> {name, %{"app" => app, "state" => "installed"}} end)
-
-        # Only a server acting for them writes what's theirs; another reads it as it is until one has.
-        if OneCore.Servers.here?(owner) do
-          Bucket.write("#{owner}/#{@blob}", JSON.encode!(%{apps: records}))
-          for {_name, record} <- records, do: marked(owner, record)
-        end
-
-        records
-
-      :absent ->
-        %{}
+      :absent -> %{}
     end
   end
 
@@ -260,7 +240,7 @@ defmodule OneCore.Apps.Installed do
       not (is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/) ->
         {:error, "An app's name is lowercase letters, digits and hyphens, starting with a letter"}
 
-      # A client finds the UI library where it finds an app's files, by this name (`OneCore.MCP`), and apps' icons
+      # A client finds the UI library where it finds an app's files, by this name (`OneCore.Mcp`), and apps' icons
       # by theirs (`OneCore.Apps.Icons`).
       name in ~w(ui icons) ->
         {:error, "#{name} is One Core's own, where clients find #{if name == "ui", do: "the UI library", else: "apps' icons"}: name the app something else"}

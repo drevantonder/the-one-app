@@ -92,7 +92,7 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 - A breaking release that apps' code can't run on (the plugin-to-app rename, 17 Nov) leaves sign-in not running on
   each server it reaches, so nobody is signed in there and nothing can be deployed to it: keep sign-in's new version
-  first with the new build's own `OneCore.Apps.Store.keep/6` on a server's machine (as the bucket is reached without
+  first with the new build's own `OneCore.Apps.Store.keep/8` on a server's machine (as the bucket is reached without
   the node) and restart that server.
 - Releasing everything when one app changed. A server release is minutes and restarts every server; an app is
   seconds.

@@ -4,7 +4,7 @@
 // `<name>.js`, with its exports, for another app's page to import: a component it draws. What every app shares (Solid,
 // Zag's Solid adapter and the UI library) is left out of it, and imported from the app `ui`, which the network serves
 // once, so every page and every module it imports, whichever app built it, shares one Solid; the import map a server
-// serves a page with names the same (`OneCore.MCP`), for what's imported by name as it runs. A page the edge serves
+// serves a page with names the same (`OneCore.Mcp`), for what's imported by name as it runs. A page the edge serves
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
 // exits with 1.
 import { existsSync, readdirSync, readFileSync } from "node:fs"

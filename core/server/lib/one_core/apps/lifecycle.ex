@@ -145,7 +145,7 @@ defmodule OneCore.Apps.Lifecycle do
   def install(owner, name, artifact, by) do
     doing({:install, owner, name}, owner, "install", fn task ->
       with :ok <- Installed.named(name),
-           {_number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no app #{artifact}"},
+           {_number, _code, _tag} <- Store.latest(artifact) || {:error, "There's no app named #{Path.basename(artifact)}"},
            %{} <- move(owner, name, {:install, artifact, by, task}) do
         case requirements(owner, name, artifact, by) do
           {:ok, also} -> with %{} = record <- installing(owner, name, artifact), do: Map.put(record, "also", also)
@@ -735,7 +735,7 @@ defmodule OneCore.Apps.Lifecycle do
     whose = Store.whose(artifact)
     name = Path.basename(artifact)
 
-    with {_number, code, _tag} <- Store.latest(artifact) || {:error, "There's no app #{artifact}"},
+    with {_number, code, _tag} <- Store.latest(artifact) || {:error, "There's no app named #{Path.basename(artifact)}"},
          {:ok, number, _warnings} <-
            Deploy.deploy(whose, name, Store.source(artifact, code), :stored, trusted, fn _ -> Apps.app(whose, name) == artifact end),
          do: {:ok, number}

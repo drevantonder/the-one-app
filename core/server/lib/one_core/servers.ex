@@ -172,7 +172,7 @@ defmodule OneCore.Servers do
   @doc """
   Tells the network's updater `said`, through its relay, `%{published: <the server build>}` or `%{now: true}`, or with
   none asks it, and gives what it says of the network's update (`OneCore.Release.network/0`): `{:ok, update}`, or
-  `{:ok, nil}` from an edge that has no updater yet, or `{:error, why}`.
+  `{:ok, nil}` from a server with no edge address, or `{:error, why}`.
   """
   def network(said \\ nil) do
     if at = Application.get_env(:one_core, :address) do
@@ -183,9 +183,6 @@ defmodule OneCore.Servers do
 
       case response.status do
         200 -> {:ok, response.body}
-        # An edge deployed before it had an updater, whose relay refuses what isn't its WebSocket (17 Nov: publishing
-        # to one failed for it): its servers take builds as they did then.
-        status when status in [404, 426] -> {:ok, nil}
         status -> {:error, "the edge said #{status}: #{inspect(response.body)}"}
       end
     else

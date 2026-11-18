@@ -37,7 +37,7 @@ defmodule OneCore.Apps.Deploy do
   @doc """
   Deploys an app for `owner` from its files by their paths: the app that `name` is for them is updated, for
   everyone who has it, and if there's none it's a new app of theirs, installed for them. Its app, if it has one, is
-  built first (`OneCore.Entrypoint`). `from` is the git repo its files came from, as `OneCore.Apps.Store.keep/6` takes
+  built first (`OneCore.Entrypoint`). `from` is the git repo its files came from, as `OneCore.Apps.Store.keep/8` takes
   it, and `trusted` whether it's trusted, where an untrusted app runs in a sandbox (`OneCore.Sandbox`), each as the
   version before had it if `:stored`. Gives its version's number and the compiler's warnings.
 

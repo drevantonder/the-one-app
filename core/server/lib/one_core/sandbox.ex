@@ -183,7 +183,7 @@ defmodule OneCore.Sandbox do
 
   @doc """
   Asks the VM of the app `name` among `versions`, the one whose own artifact is `owner`'s, what the app `server-debug` asks of it:
-  `request`, a map JSON holds, which its side of One Core answers (`OneCore.Sandbox.Child.Debug`). Gives what it
+  `request`, a map JSON holds, which its side of One Core answers (`priv/sandbox/child.ex`). Gives what it
   answered, or raises with why it didn't. Only a VM that's running is asked, unless `start` says to start one.
   """
   def debug(owner, versions, name, request, start \\ false) do

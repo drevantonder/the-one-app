@@ -7,7 +7,7 @@
 defmodule CodeReloader do
   @moduledoc """
   A server started with `--reloader <its node>` (`mix network`) asks it before it answers a client's request
-  (`OneCore.MCP`), so the request sees what changed in this checkout since the last:
+  (`OneCore.Mcp`), so the request sees what changed in this checkout since the last:
 
   - The Rust workspace, where a file of it changed, is built again as `mix compile` builds it (`nifs/1` in
     `core/server/mix.exs`): `one`, and the NIFs, of One Core and of this repo's apps, each put where it's loaded from.

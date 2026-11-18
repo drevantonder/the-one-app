@@ -1,7 +1,7 @@
 defmodule OneCore.Apps.Icons do
   @moduledoc """
   An app's icon as a client loads it over and over, as a Home Screen does: by an address named for what's in it,
-  `ui://icons/<sha256>/icon.<ext>`, which a client reads as it reads an app's files (`OneCore.MCP`) and keeps for
+  `ui://icons/<sha256>/icon.<ext>`, which a client reads as it reads an app's files (`OneCore.Mcp`) and keeps for
   good, rather than in every answer that shows it. Its bytes are kept in the bucket by that hash the first time this
   server gives its address, so any server reads it. An icon is what the version said it is (`OneCore.Apps.Version`),
   so its address gives whoever has it nothing they weren't given already.

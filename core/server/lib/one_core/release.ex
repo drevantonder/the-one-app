@@ -263,7 +263,7 @@ defmodule OneCore.Release do
     with {:ok, update} when update != nil <- Servers.network(%{now: true}) do
       await_network(update, System.monotonic_time(:millisecond) + @update_now)
     else
-      {:ok, nil} -> raise "This network's edge has no updater yet: deploy the edge from a build that has one."
+      {:ok, nil} -> raise "This server has no edge address, so there's no network update to ask for."
       {:error, why} -> raise "The network's updater wasn't told: #{why}"
     end
   after

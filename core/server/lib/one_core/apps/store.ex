@@ -84,9 +84,6 @@ defmodule OneCore.Apps.Store do
     end
   end
 
-  @doc "The hash of the files the app `artifact`'s latest version was deployed from, or `nil` if there's none."
-  def latest_source(artifact), do: about(artifact)["source"]
-
   @doc """
   What the app `artifact`'s latest version says of itself: its `number`, `code`, `source` and, where the files came
   from a git repo, `from`. Empty if there's no such app.

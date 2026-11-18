@@ -20,7 +20,7 @@ defmodule OneCore.Entrypoint do
 
   @doc """
   The UI library this server ships with, as it's built: its `files` by their paths, its `code`, which names them, and
-  its `skills`. A client is served its `client/` (`OneCore.MCP`), and agents its skills (`OneCore.Skills`).
+  its `skills`. A client is served its `client/` (`OneCore.Mcp`), and agents its skills (`OneCore.Skills`).
   """
   def library do
     with nil <- :persistent_term.get({__MODULE__, :library}, nil) do

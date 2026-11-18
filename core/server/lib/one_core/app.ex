@@ -404,7 +404,7 @@ defmodule OneCore.App do
     `client/package.json`'s `exports` (`{"exports": {"./profile": "./profile.tsx"}}`), each built as `client/<name>.js`
     with what it exports: a component another app draws, as the Vault draws an item of a type an app registers.
     Solid, `@zag-js/solid` and `ui` are the one copy every page and every module it imports shares, whichever app
-    built it, so signals and context work across apps; and every page is served with an import map (`OneCore.MCP`)
+    built it, so signals and context work across apps; and every page is served with an import map (`OneCore.Mcp`)
     that names them and `<app>/`, the client of its own app and of each app it requires, for what it imports by
     name as it runs.
 
