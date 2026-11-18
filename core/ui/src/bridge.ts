@@ -21,7 +21,7 @@ interface HostContext {
 }
 
 /** Whether this device reaches its network (`connection()`). */
-export type Connection = "connecting" | "online" | "offline"
+export type Connection = "connecting" | "online" | "offline" | "reconnecting"
 
 /** Who a call or an app is for, its subject: a group (`groups/family`), or `network`. Whoever the app is for, unless said. */
 export interface Subject {
@@ -73,7 +73,7 @@ const [connected, setConnected] = createSignal<Connection>("online")
 const [updatable, setUpdatable] = createSignal(false)
 
 /// `<Button disabled={connection() === "offline"}>Send</Button>`: whether this device reaches its network now, as it
-/// changes: `"online"`, `"connecting"` or `"offline"`. For what can't be done without it: what was answered stays
+/// changes: `"online"`, `"connecting"` as it opens, `"offline"`, or `"reconnecting"` once it has lost it. For what can't be done without it: what was answered stays
 /// shown either way, and the client says it's offline itself. A client that doesn't say is `"online"`.
 export const connection = () => (greet(), connected())
 

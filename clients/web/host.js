@@ -126,7 +126,7 @@ async function send() {
 let unanswered = 0
 
 /// The moves its connection makes, from each state, as the app's client has them (`Connection::moves_to`).
-const MOVES = { connecting: ["online", "offline"], offline: ["connecting"], online: ["offline"] }
+const MOVES = { connecting: ["online", "offline"], offline: ["reconnecting"], reconnecting: ["online", "offline"], online: ["offline"] }
 /// Moves its connection to `next`, if that's a move there is from where it is.
 /** @param {import("../app/page/host.js").Connection} next */
 function connected(next) {
@@ -143,8 +143,8 @@ function connected(next) {
 /// what it missed.
 /** @param {boolean} now */
 function answered(now) {
-  const lost = connection === "offline" || unanswered > 0
-  if (now) connected("connecting")
+  const lost = connection === "offline" || connection === "reconnecting"
+  if (now) connected("reconnecting")
   const was = connection
   connected(now ? "online" : "offline")
   if (was === connection) return
@@ -165,7 +165,7 @@ function tryAgain(now = false) {
   asking = setTimeout(
     () => {
       again = Math.min(again * 2, MOST)
-      connected("connecting")
+      connected("reconnecting")
       if (apps) mcp("ping").catch(() => {})
       else opening()
     },

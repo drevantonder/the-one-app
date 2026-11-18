@@ -235,18 +235,20 @@ impl std::fmt::Display for Session {
 /// Whether a client reaches its network, beside its session (`Session`): what every client shows, the app's window
 /// as it opens and as a banner over its apps, and the CLI and MCP as a line. Its network answers where what the
 /// client asks of it is answered: its address, while the device asks to be let in, and its servers from then on. It
-/// moves only as `moves_to` says, and only by its client's own steps (`Client::answered`, `reconnecting`).
+/// moves only as `moves_to` says, and only by its client's own steps (`Client::answered`, `reconnecting`). Whether it
+/// lost its network is which state it's in: asking again after it did is `Reconnecting`, never `Connecting`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Connection {
-    /// Asking, and not answered yet: as the client opens, and each time it tries again after its network didn't
-    /// answer.
+    /// Asking, and not answered yet, as the client opens.
     Connecting,
     /// Its network answered the last thing asked.
     Online,
     /// Its network didn't answer. It tries again by itself, sooner at first and then less often, and at once when
     /// its person tries again (`retry`).
     Offline,
+    /// Asking again after its network didn't answer, and not answered yet.
+    Reconnecting,
 }
 
 impl Connection {
@@ -256,9 +258,9 @@ impl Connection {
         matches!(
             (self, next),
             // It was answered, or wasn't.
-            (Connecting, Online | Offline)
+            (Connecting | Reconnecting, Online | Offline)
             // It tries again.
-            | (Offline, Connecting)
+            | (Offline, Reconnecting)
             // It lost its network.
             | (Online, Offline)
         )
@@ -269,6 +271,7 @@ impl std::fmt::Display for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Connecting => "Connecting to your network…",
+            Self::Reconnecting => "Reconnecting to your network…",
             Self::Online => "Online.",
             Self::Offline => "Can't reach your network. Check this device is online, then try again.",
         })
@@ -1258,7 +1261,7 @@ impl Client {
     /// until it's tried again (`reconnecting`), and an answer to it is a try that was answered.
     fn answered(&self, answered: bool) {
         if answered {
-            self.connection_moved(Connection::Connecting);
+            self.connection_moved(Connection::Reconnecting);
         }
         self.connection_moved(if answered { Connection::Online } else { Connection::Offline });
     }
@@ -1905,11 +1908,12 @@ async fn reconnecting(client: std::sync::Weak<Client>) {
     let Some((mut connection, tried)) = client.upgrade().map(|client| (client.connection(), client.again.clone())) else {
         return;
     };
-    let (mut again, mut lost) = (Duration::from_secs(1), false);
+    // Where it was when it last looked: answered after `Offline` or `Reconnecting`, it's back.
+    let (mut again, mut was) = (Duration::from_secs(1), *connection.borrow());
     loop {
         let now = *connection.borrow_and_update();
+        let before = std::mem::replace(&mut was, now);
         if now == Connection::Offline {
-            lost = true;
             tokio::select! {
                 _ = sleep(again) => {}
                 _ = tried.notified() => {}
@@ -1920,18 +1924,18 @@ async fn reconnecting(client: std::sync::Weak<Client>) {
             let session = client.session.borrow().clone();
             match session {
                 Session::Opening => {
-                    client.connection_moved(Connection::Connecting);
+                    client.connection_moved(Connection::Reconnecting);
                     client.admit(&session, None).await;
                 }
                 Session::SignedIn if client.watching.load(Ordering::Relaxed) => {
-                    client.connection_moved(Connection::Connecting);
+                    client.connection_moved(Connection::Reconnecting);
                     let _ = client.request("ping", json!({})).await;
                 }
                 _ => {}
             }
             continue;
         }
-        if now == Connection::Online && std::mem::take(&mut lost) {
+        if now == Connection::Online && matches!(before, Connection::Offline | Connection::Reconnecting) {
             again = Duration::from_secs(1);
             let Some(client) = client.upgrade() else { return };
             if client.watching.load(Ordering::Relaxed) {

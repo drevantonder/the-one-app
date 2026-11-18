@@ -73,7 +73,7 @@ export type Session =
   | { state: "signIn"; code?: { link: string; code: string }; why?: "denied" | "expired" | "removed" | null }
 
 /** Whether the client reaches its network, beside its session (`Connection` in core/client). */
-export type Connection = "connecting" | "online" | "offline"
+export type Connection = "connecting" | "online" | "offline" | "reconnecting"
 
 /** What the page is told of the device's session: the session, its place in the order the page hears them in, and while it's signing in, where the window goes. */
 export interface Told {
@@ -83,12 +83,11 @@ export interface Told {
 }
 
 /** What the window knows as it moves (`client.js`): the device's session and whether its network answers, as they
- * were last told, whether its network has not answered since the window opened, whether the launcher is loading,
- * whether an update for this device is ready, and what its state says. */
+ * were last told, whether the launcher is loading, whether an update for this device is ready, and what its state
+ * says. */
 export interface Context {
   told?: Told
   connection: Connection
-  lost: boolean
   starting: boolean
   updateReady: boolean
   /** What a `one:` link opens once the launcher has drawn: `<app>[/<page>][#<fragment>]`. */

@@ -458,7 +458,7 @@ const machine = setup({
     connection: assign(({ event, context }) => {
       if (event.type !== "connection") return {}
       for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { connection: event.connection } })
-      return { connection: event.connection, lost: context.lost || event.connection === "offline" }
+      return { connection: event.connection }
     }),
     updateReady: assign(({ event, context }) => {
       if (event.type !== "updateReady" || event.ready === context.updateReady) return {}
@@ -498,7 +498,7 @@ const machine = setup({
 }).createMachine({
   id: "window",
   initial: "opening",
-  context: { connection: "connecting", lost: false, starting: false, updateReady: false },
+  context: { connection: "connecting", starting: false, updateReady: false },
   entry: spawnChild("move", { id: "move" }),
   on: {
     show: { actions: "place" },
@@ -625,9 +625,9 @@ const onScreen = (view) => !document.hidden && shown.getSnapshot().hasTag("pages
 /// What the window says as it opens: the steps it takes to its person's home, the first of which says whether its
 /// network answers. With a launcher kept from before, it's starting that alone.
 /** @param {Context} context @returns {{ steps: string[], at: number, text?: string }} */
-function steps({ connection, lost, starting }) {
+function steps({ connection, starting }) {
   if (starting && connection !== "online") return { steps: ["Opening Home Screen"], at: 0 }
-  const reached = connection === "offline" || lost ? "Can't reach your network" : "Connecting to your network"
+  const reached = connection === "offline" || connection === "reconnecting" ? "Can't reach your network" : "Connecting to your network"
   const at = starting || connection === "online" ? 1 : 0
   return { steps: [reached, "Opening Home Screen"], at, text: at === 0 && reached !== "Connecting to your network" ? "Check this device is online." : undefined }
 }
@@ -704,13 +704,13 @@ function draw() {
   lastProblem = said
   notes()
   // Over the launcher: its network not answering, and trying again once it has lost it. Answering, nothing.
-  const banner = now.matches("launcher") && (context.connection === "offline" || (context.connection === "connecting" && context.lost))
+  const banner = now.matches("launcher") && (context.connection === "offline" || context.connection === "reconnecting")
   if (byId("banner").hidden === banner) {
     byId("banner").hidden = !banner
     placed()
   }
-  byId("banner-spinner").hidden = context.connection !== "connecting"
-  byId("banner-text").textContent = context.connection === "connecting" ? "Reconnecting…" : "Can't reach your network"
+  byId("banner-spinner").hidden = context.connection !== "reconnecting"
+  byId("banner-text").textContent = context.connection === "reconnecting" ? "Reconnecting…" : "Can't reach your network"
   byId("banner-retry").hidden = context.connection !== "offline"
 }
 
