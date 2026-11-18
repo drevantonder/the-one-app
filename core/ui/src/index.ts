@@ -18,6 +18,7 @@
 export { call, changed, client, connection, covers, haptic, leave, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey } from "./bridge.ts"
 export { pace, seen, share, words } from "./shared.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
+export { Badge } from "./badge.tsx"
 export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"
 export { NumberInput } from "./number-input.tsx"
 export { createListCollection } from "./collection.ts"

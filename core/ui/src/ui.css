@@ -253,6 +253,38 @@ img {
   width: var(--control);
   padding: 0;
 }
+/* A short count or word, as a pill: the red count of what waits, as on an iPhone's icons, is `destructive`. */
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 0.375rem;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: var(--text-footnote);
+  font-weight: var(--figure-weight);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ui-badge[data-variant="secondary"] {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+.ui-badge[data-variant="destructive"] {
+  background: var(--destructive);
+  color: white;
+}
+.ui-badge[data-variant="outline"] {
+  border-color: var(--border);
+  background: none;
+  color: var(--foreground);
+}
 /* A menu's button, while its menu is open: one with no fill of its own shows it's the one. */
 .ui-button[data-state="open"]:is([data-variant="outline"], [data-variant="ghost"]) {
   background: var(--accent);
