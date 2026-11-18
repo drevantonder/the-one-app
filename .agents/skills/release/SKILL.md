@@ -63,8 +63,8 @@ them, whatever they're on.
 | Docs, `tooling/`, `.agents/` | Nothing |
 
 Windows' builds, `server/windows-x86_64` and `one-cli/windows-x86_64`, are made on Linux like the others, and are
-built only for a network with a Windows server or device. They haven't yet run on a Windows PC: until
-one has been installed and updated as a server on one, a Windows PC isn't made a server of the live network.
+built only for a network with a Windows server or device. The owner's Surface is one, a server of the live network
+since 18 Nov.
 
 An app change that uses something new in `core/server/` says so in its `requires`, `"core" => ">= 0.16.0"`, and is
 deployed once every server is on that version.
