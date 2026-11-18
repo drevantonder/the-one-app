@@ -209,7 +209,7 @@ const pageMachine = setup({
 })
 
 /// What each of a move's two frames does over it, as keyframes from its start to its end, and how long it takes: an
-/// app opened from its icon (`icon`) grows out of it as an iPhone's does, cut to the icon's square and corners and
+/// app opened from its icon or widget (`icon`) grows out of it as an iPhone's does, cut to its shape and corners and
 /// showing itself over it in its first moments, as the launcher sinks back under it; going back, it shrinks back into
 /// it as the launcher comes forward, and is gone in its last moments. With no icon, it slides in over what was there
 /// from the end of the line, which moves back a quarter, and going back, back out. For whoever asked for less motion,
@@ -220,13 +220,15 @@ function moves(leaving, coming, back, icon) {
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return { upper: coming, ms: parseFloat(style.getPropertyValue("--move-settle")), parts: [[coming, [{ opacity: 0 }, { opacity: 1 }]]] }
   const [app, under] = back ? [leaving, coming] : [coming, leaving]
   if (icon) {
-    // The app's middle on the icon's, as small as the icon is wide, and its corners the icon's.
+    // The app's middle on the icon's, as small as covers it, cut to its shape, and its corners the icon's: an
+    // icon's are 22.5 % of it where it doesn't say.
     const { x, y, width, height } = app.frame.getBoundingClientRect()
-    const scale = icon.width / width
+    const scale = Math.max(icon.width / width, icon.height / height)
+    const radius = icon.radius ?? Math.min(icon.width, icon.height) * 0.225
     const small = {
       translate: `${icon.x + icon.width / 2 - (x + width / 2)}px ${icon.y + icon.height / 2 - (y + height / 2)}px`,
       scale: `${scale}`,
-      clipPath: `inset(${Math.max(0, (height - width) / 2)}px ${Math.max(0, (width - height) / 2)}px round ${(icon.width * 0.225) / scale}px)`,
+      clipPath: `inset(${(height - icon.height / scale) / 2}px ${(width - icon.width / scale) / 2}px round ${radius / scale}px)`,
     }
     const whole = { translate: "0px 0px", scale: "1", clipPath: "inset(0px 0px round 0px)" }
     const sunk = { scale: "0.92" }
@@ -919,7 +921,7 @@ function bar() {
 function within(frame, rect) {
   if (!rect || ![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) || !(rect.width > 0 && rect.height > 0)) return undefined
   const { x, y } = frame.getBoundingClientRect()
-  return { x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height }
+  return { x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height, radius: Number.isFinite(rect.radius) ? rect.radius : undefined }
 }
 
 /// The app that's open as `at` shows, or with none there, the launcher, at once.

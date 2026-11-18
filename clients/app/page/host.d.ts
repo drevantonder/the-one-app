@@ -20,12 +20,13 @@ export declare const setTheme: (theme: "light" | "dark" | null) => Promise<unkno
 /** A haptic, by iOS's name: an impact, a selection, or a notification's outcome. */
 export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"
 
-/** A place in a page, as `getBoundingClientRect` says it. */
+/** A place in a page, as `getBoundingClientRect` says it, and how round its corners are, where that's said. */
 export interface Rect {
   x: number
   y: number
   width: number
   height: number
+  radius?: number
 }
 
 /** An open app, as `client.js` keeps it. */
