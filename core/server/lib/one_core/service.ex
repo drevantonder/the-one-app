@@ -26,7 +26,9 @@ defmodule OneCore.Service do
   `server` is the key of the server to call it on. Left out, it's this server if the service runs here, and
   otherwise the first of `servers/2` that is up.
 
-  Raises with what went wrong: the function raised, no server runs the service, or the one that does isn't up.
+  Raises with what went wrong: the function raised, or no server runs the service. Where the servers that run it
+  aren't up, as a Mac that's asleep, it raises `OneCore.Call.Refused`: that's what was asked needing a device that's
+  off, not something failing.
   """
   def call(%Call{} = call, service, function, arguments \\ [], server \\ nil) when is_list(arguments) do
     app = whose(call, service)
@@ -42,6 +44,7 @@ defmodule OneCore.Service do
 
     case ask(servers, call.server, ask) do
       {:ok, response} -> response
+      {:off, why} -> raise Call.Refused, why
       {:error, why} -> raise why
     end
   end
@@ -179,7 +182,7 @@ defmodule OneCore.Service do
     case Servers.back(down) do
       nil ->
         why = Enum.map_join(down, ", ", &Server.error_message(:unreachable, &1))
-        {:error, "No server that runs #{app}'s #{service} is up: " <> why}
+        {:off, "No server that runs #{app}'s #{service} is up: " <> why}
 
       back ->
         ask([back], here, ask, down -- [back])
@@ -195,7 +198,7 @@ defmodule OneCore.Service do
       {:ok, %{"answer" => response}} -> {:ok, response}
       {:error, _code, why} -> {:error, why}
       :unreachable -> ask(servers, here, ask, down ++ [server])
-      :stopped -> {:error, Server.error_message(:stopped, server)}
+      :stopped -> {:off, Server.error_message(:stopped, server)}
     end
   end
 end

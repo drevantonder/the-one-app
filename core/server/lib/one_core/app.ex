@@ -77,10 +77,12 @@ defmodule OneCore.App do
   - `call/3` runs a tool with its inputs, a map with string keys. They're checked against the tool's `inputs`
     first, and a caller that left out what's required, or gave the wrong kind of thing, is told so. It returns the
     answer, a map JSON can hold, which is checked against its `outputs`: one that isn't what they say fails the
-    call, saying where. To refuse, raise, and the message is what the caller is told: its first paragraph in
-    plain words, for the person whose screen shows it, then after a blank line what an agent needs, such as which
-    tool to call next (`raise "You have no note called \#{name}.\\n\\nThe tool list lists them."`). Anything else
-    raised is a fault, which a person is told only went wrong.
+    call, saying where. To refuse, for what it was given or a device it needs being off, raise `OneCore.Call.Refused`,
+    and the message is what the caller is told: its first paragraph in plain words, for the person whose screen shows
+    it, then after a blank line what an agent needs, such as which tool to call next
+    (`raise OneCore.Call.Refused, "You have no note called \#{name}.\\n\\nThe tool list lists them."`). A refusal isn't
+    an error in Telemetry. To fail saying why, as a service it asked failing, `raise "..."` in the same words.
+    Anything else raised is a fault, which a person is told only went wrong.
   - Every tool says its `outputs`, and deploying one that doesn't is refused: an agent writing a script reads them as
     the type its call returns, so it uses the answer without calling first to see it. Say what's there as it is: each
     field's `type`, with `"null"` among them where it can be nil (`["string", "null"]`), a list's `items`, and a

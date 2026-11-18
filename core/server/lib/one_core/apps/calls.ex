@@ -89,7 +89,13 @@ defmodule OneCore.Apps.Calls do
       State.accepted(State.id(), &Tasks.made/1)
 
       observed(about, principal, fn ->
-        Apps.held(List.wrap(version), fn -> answered(tool, about, fun.(about["inputs"])) end)
+        Apps.held(List.wrap(version), fn ->
+          try do
+            answered(tool, about, fun.(about["inputs"]))
+          rescue
+            refused in Call.Refused -> {:refused, Exception.message(refused)}
+          end
+        end)
       end)
     else
       # A call refused is observed as refused, with why: what it was given is wrong, or who may or a hook said no.

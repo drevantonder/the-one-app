@@ -48,6 +48,17 @@ defmodule OneCore.Call do
 
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
+  defmodule Refused do
+    @moduledoc """
+    What a tool raises when what it was asked can't be done and nothing failed: what it was given is wrong in a way
+    its inputs' schema can't say (`raise OneCore.Call.Refused, "Too long: 619 bytes, limit 280"`), or the device it
+    needs is off, as a Mac that's asleep. Whoever asked is told the message, as for `raise "..."`, and the call's
+    outcome is `refused`, as one refused for its inputs before it ran: not an error, as OpenTelemetry has a
+    server's span for an RPC refused for its arguments.
+    """
+    defexception [:message]
+  end
+
   @doc """
   Which client asked for what this call is part of: `%{"device" => key, "web" => web, "name" => name, "title" =>
   title}`, the device it came from (`OneCore.User.device/2`), whose kind and name the apps that sign devices in keep;
