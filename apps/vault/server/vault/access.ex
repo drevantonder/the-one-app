@@ -30,6 +30,25 @@ defmodule Vault.Access do
     item
   end
 
+  @doc """
+  Raises unless the call is its person's own, made on a screen of theirs, the One App's or a browser's, where they
+  read what they're doing: what widens who may use a secret, or where it's sent, is theirs alone to do. An agent, `one`
+  in a terminal or an app's code asks with `request`, which they answer there.
+
+  A device's own connection says which client it is only as that client says (its MCP `clientInfo`): the One App says
+  `one-app`, a browser `one-web`, and `one` and `one mcp` their own or their agent's. Over the web an assistant is
+  known by the device it was let in as, whatever it says.
+  """
+  def person!(call, what) do
+    client = OneCore.Call.client(call) || %{}
+
+    on_screen =
+      call.caller == nil and client["name"] in ["one-app", "one-web"] and
+        not (client["web"] == true and Vault.SignIns.assistant(call, client["device"]))
+
+    on_screen || raise "#{what} is its person's to do, in Vault on their device, where an agent's vault_request asks them."
+  end
+
   @doc "Whoever an app is called by its name, as its person picks it: its artifact, or `\"agents\"`."
   def who!(_call, "agents"), do: "agents"
   def who!(call, app), do: Apps.app(call.subject, app) || Apps.app("network", app) || raise("There's no app named #{app}.")

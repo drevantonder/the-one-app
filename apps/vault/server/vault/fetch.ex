@@ -51,7 +51,8 @@ defmodule Vault.Fetch do
            receive_timeout: (request[:timeout] || 15) * 1000
          ) do
       {:ok, response} ->
-        blot = fn text -> Enum.reduce(secret, text, &String.replace(&2, fields[&1] || "\0", "[secret]")) end
+        blotted = secret |> Enum.flat_map(&forms(fields[&1])) |> Enum.uniq() |> Enum.sort_by(&(-byte_size(&1)))
+        blot = fn text -> Enum.reduce(blotted, text, &String.replace(&2, &1, "[secret]")) end
         headers = Map.new(response.headers, fn {name, values} -> {name, blot.(Enum.join(values, ", "))} end)
         %{status: response.status, headers: headers, body: blot.(response.body)}
 
@@ -65,6 +66,16 @@ defmodule Vault.Fetch do
     uri = URI.parse(url)
     site!(uri) in hosts or uri.host in hosts
   end
+
+  # A secret as a site may say it back: as it is, escaped in a JSON string, URL-encoded, or in base64, padded or
+  # not, standard or URL-safe.
+  defp forms(value) when is_binary(value) and value != "" do
+    json = String.slice(JSON.encode!(value), 1..-2//1)
+    base64 = [Base.encode64(value), Base.encode64(value, padding: false), Base.url_encode64(value), Base.url_encode64(value, padding: false)]
+    [value, json, URI.encode_www_form(value), URI.encode(value, &URI.char_unreserved?/1) | base64]
+  end
+
+  defp forms(_value), do: []
 
   # The fields a text names.
   defp named(text), do: for([_all, field] <- Regex.scan(~r/\{\{([A-Za-z0-9_]+)\}\}/, text), do: field)

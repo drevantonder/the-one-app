@@ -85,15 +85,16 @@ defmodule Vault.SignIns do
     said = client["title"] || client["name"]
 
     cond do
+      name = client["web"] && assistant(call, client["device"]) -> %{agent: name}
       client["name"] == "one-cli" -> %{cli: true}
       client["name"] in ["one-app", "one-web"] -> %{screen: "vault"}
-      name = client["web"] && assistant(call, client["device"]) -> %{agent: name}
       said -> %{agent: said}
       true -> %{screen: "vault"}
     end
   end
 
-  defp assistant(call, device) do
+  @doc "The name of the assistant `device` is, as its person let it in, or nil for any other device."
+  def assistant(call, device) do
     %{"devices" => devices} = Call.tool(call, "sign-in", "devices", %{})
     Enum.find_value(devices, &(&1["kind"] == "assistant" and &1["id"] == device and &1["name"]))
   end

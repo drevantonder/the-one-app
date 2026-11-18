@@ -45,22 +45,24 @@ with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) ke
   the status, headers and body. It goes only to one of the item's sites, and a secret the site says back is
   blotted out.
 - `set` keeps one field of an item, making a password if there's none by that name. Say `secret: false` for what
-  may be shown, as a username, and `hosts` for the sites its secrets go to, which are added to its own. The value is encrypted on the device you
+  may be shown, as a username, and `hosts` for the sites a new item's secrets go to; adding sites to an item that's
+  there is its person's, so ask with `request`, whose `hosts` they see as they allow it. The value is encrypted on the device you
   run on before it's sent, so `set` is for `one` or MCP on a device, as a plain tool. A script or `call` in code
   mode runs on a server, where nothing encrypts it, so a secret given there is refused: in code mode, and over the
   web, ask with `request` instead.
 - `access` gives an app (`who`, by its name) access to an item, or with `on: false` takes it away. An app with
   access uses it through the Vault's tools without seeing it, or, one with a service, is handed the secret itself,
-  which trusts its code with it. `who: "agents"` lets agents use it with `fetch`: that's the person's to decide, in
-  the Vault's app or by allowing a request, so ask with `request` and don't give it to yourself.
+  which trusts its code with it. `who: "agents"` lets agents use it with `fetch`. Giving access, to an app or to
+  agents, is the person's alone, in the Vault on their device: an agent asks with `request` (with `app` for an
+  app), and `access` refuses it. Taking access away is anyone's.
 - `grant` chooses the servers that open the Vault, from a device that holds its person's key (the skill
   `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
 - Someone's Vault is theirs alone: nobody asks for another user's, and the network's owner reads none. A group's
   or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owner's to choose servers for.
 - Deleting an item is soft delete's, as for anything an app made: `soft-delete delete --artifact` with its
   `artifact`, as `list` gives it, and it can be restored for 30 days. `remove_field` takes one field out of an item.
-- Deleting an item, switching an app on and choosing servers are a person's decisions. Do them when asked to,
-  and say what you did.
+- Deleting an item and choosing servers are a person's decisions. Do them when asked to, and say what you did.
+  Giving access, adding an item's sites and answering a request are theirs to do on their device, never yours.
 
 An app uses an account through this app's tools, which act for the app that calls them (its `caller`),
 and never sees a secret, so an untrusted app can use one too. It requires this app:

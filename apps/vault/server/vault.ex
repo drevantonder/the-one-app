@@ -201,7 +201,8 @@ defmodule Vault do
         Keeps a key, token or password someone pasted (or any field) in an item, making the item if there's none by
         that name. Nobody reads a secret back, not you either. When the person has the value, use `request`
         instead: never ask them to paste it into the chat. A secret is kept only as a plain tool on a device, which
-        encrypts it: in code mode, or over the web, use `request` for one they pasted too.
+        encrypts it: in code mode, or over the web, use `request` for one they pasted too. `hosts` are added to a
+        new item's; adding sites to one that's there is its person's, in the Vault, or by allowing a `request`.
         """,
         inputs: %{
           type: "object",
@@ -308,7 +309,8 @@ defmodule Vault do
         name: "answer",
         description: """
         Answers a request, as its person does on their own device: with one of their items, with new values, or by
-        declining. Allowing it switches the item on for whoever asked, and lets its secrets go to `hosts` too.
+        declining. Allowing it switches the item on for whoever asked, and lets its secrets go to `hosts` too. Only
+        its person answers, in the Vault on their device, never an agent.
         """,
         inputs: %{
           type: "object",
@@ -529,9 +531,9 @@ defmodule Vault do
         description: """
         Gives an app or your agents access to an item, or with `on` false takes it away. An app with access uses the
         item through the Vault's tools without seeing it, or, one with a service, is handed the secret itself, which
-        trusts its code with it. Whether agents may use one is its person's to decide, in the Vault's app or by allowing
-        a request: an agent asks with `request`, and doesn't give itself access. Called by an app's code, it takes the
-        app's own access away, as signing out does, and only that.
+        trusts its code with it. Giving access is its person's alone, in the Vault on their device: an agent asks with
+        `request`, which they allow there, and is refused here. Taking it away is anyone's. Called by an app's code, it
+        takes the app's own access away, as signing out does, and only that.
         """,
         inputs: %{
           type: "object",
@@ -859,14 +861,15 @@ defmodule Vault do
     %{items: items, requests: Requests.all(call, db, names), apps: use_it, types: Enum.map(types, &Map.delete(&1, :artifact))}
   end
 
-  # A person's own write of a field: into the item, or a new password where there's none. Websites given are added to
-  # its own, never put in their place.
+  # A write of a field: into the item, or a new password where there's none. Websites given are added to its own,
+  # never put in their place, and only by its person where it's there already.
   def call("set", %{"item" => name, "field" => field, "value" => value} = inputs, call) do
     db = Store.own(call)
 
     Store.quietly("Keeping #{field}", fn ->
       value = Store.encryption(call).secret(call, value)
       hosts = Map.get(inputs, "hosts", [])
+      new_hosts!(call, Items.find(call, db, name), hosts)
 
       Items.write!(call, db, name, Items.password(hosts), :person, fn record ->
         record |> Items.add_hosts(hosts) |> Items.put_field(field, value, Map.get(inputs, "secret", true))
@@ -888,6 +891,8 @@ defmodule Vault do
 
       if found && found["added"] == nil,
         do: raise("#{found["name"]} is in the Vault already, made by its person. Save to a new item, or ask them, with request.")
+
+      new_hosts!(call, found, Map.get(inputs, "hosts", []))
 
       {blob, key} = {"saving/#{Store.random(12)}", :crypto.strong_rand_bytes(32)}
       taken = Map.new(fields, fn {field, about} -> {field, Map.take(about, ~w(target json))} end)
@@ -947,9 +952,11 @@ defmodule Vault do
     %{item: name, who: Items.app_name(call, caller), on: false}
   end
 
+  # Taking access away is anyone's, and giving it is its person's.
   def call("access", %{"item" => name, "who" => who} = inputs, call) do
     db = Store.own(call)
     on = Map.get(inputs, "on", true)
+    if on, do: Access.person!(call, "Letting #{who} use #{name}")
     Access.switch(call, db, Items.find!(call, db, name), Access.who!(call, who), on)
     %{item: name, who: who, on: on}
   end
@@ -965,6 +972,7 @@ defmodule Vault do
   end
 
   def call("answer", %{"id" => id} = inputs, call) do
+    Access.person!(call, "Answering a request")
     db = Store.own(call)
 
     Store.quietly("Answering the request", fn ->
@@ -1019,6 +1027,12 @@ defmodule Vault do
         do: Fetch.request(request, SignIns.renewed(call, db, item, fields), secret, item["hosts"]),
         else: response
     end)
+  end
+
+  # Sites an item that's there doesn't send its secrets to yet are its person's to add.
+  defp new_hosts!(call, found, hosts) do
+    new = if found, do: Items.hosts!(hosts) -- found["hosts"], else: []
+    if new != [], do: Access.person!(call, "Sending #{found["name"]}'s secrets to #{Enum.join(new, ", ")}")
   end
 
   # The first thing someone's Vault lacks (`@readiness`), from their key and the servers that open it.
