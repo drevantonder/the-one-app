@@ -30,7 +30,7 @@ impl InputResolver for Encrypts {
                     None => return Ok(None),
                 },
                 ("artifact-keys", None) => artifact_keys(client, app, says, inputs, subject).await?,
-                ("passkey-keys", None) => passkey_keys(client, app, says, subject).await?,
+                ("passkey-keys", None) => passkey_keys(client, app, says, inputs, subject).await?,
                 _ => return Ok(None),
             };
             Ok(Some(filled))
@@ -152,32 +152,36 @@ async fn artifact_keys(
     Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots}).to_string())
 }
 
-/// The owner's key, encrypted to each of their passkeys that the app's tool an input names (`passkeys`) lists with a
-/// `prf_key` and doesn't say `unlocks` yet, by its credential ID, with the key it was encrypted to.
-async fn passkey_keys(client: &Client, app: &str, says: &Value, subject: Option<&str>) -> Result<String> {
+/// The owner's key, encrypted to the one passkey the input `passkey` names, which its person allowed, as the app's
+/// tool an input names (`passkeys`) lists it with a `prf_key`: by its credential ID, with the key it was encrypted to.
+/// Whoever uses a passkey it's encrypted to has the key, so it's never encrypted to one nobody named.
+async fn passkey_keys(
+    client: &Client,
+    app: &str,
+    says: &Value,
+    inputs: &Map<String, Value>,
+    subject: Option<&str>,
+) -> Result<String> {
+    let named = inputs.get("passkey").and_then(Value::as_str).context("say which passkey your person allowed")?;
     let tool = says["passkeys"].as_str().context("the input doesn't say which tool lists the passkeys")?;
     let listed = tool_for(client, &format!("{app}_{tool}"), json!({}), subject).await?;
-    let needed: Vec<(&str, &str, Vec<u8>)> = listed["passkeys"]
+    let passkey = listed["passkeys"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|passkey| passkey["unlocks"] != true)
-        .filter_map(|passkey| {
-            let (credential, prf_key) = (passkey["credential"].as_str()?, passkey["prf_key"].as_str()?);
-            let to = data_encoding::HEXLOWER.decode(prf_key.as_bytes()).ok().filter(|to| to.len() == 32)?;
-            Some((credential, prf_key, to))
-        })
-        .collect();
-    let mut keys = Map::new();
-    if needed.is_empty() {
-        return Ok(Value::Object(keys).to_string());
-    }
+        .find(|passkey| passkey["id"] == named)
+        .context("that isn't one of your passkeys")?;
+    let (Some(credential), Some(prf_key)) = (passkey["credential"].as_str(), passkey["prf_key"].as_str()) else {
+        bail!("That passkey hasn't said yet whether it can unlock your key. Use it once to sign in.")
+    };
+    let to = data_encoding::HEXLOWER
+        .decode(prf_key.as_bytes())
+        .ok()
+        .filter(|to| to.len() == 32)
+        .context("That passkey can't unlock your key on a new device.")?;
     let (key, owner) = owner_key_of(client, subject).await?;
-    for (credential, prf_key, to) in needed {
-        let sealed = to_passkey(&to, &format!("one/encryption/1/passkey\n{owner}\n{credential}"), key.as_slice())?;
-        keys.insert(credential.to_owned(), json!({"prf_key": prf_key, "key": BASE64.encode(&sealed)}));
-    }
-    Ok(Value::Object(keys).to_string())
+    let sealed = to_passkey(&to, &format!("one/encryption/1/passkey\n{owner}\n{credential}"), key.as_slice())?;
+    Ok(json!({credential: {"prf_key": prf_key, "key": BASE64.encode(&sealed)}}).to_string())
 }
 
 /// Encrypts `data` to a passkey's key, for what `about` says, as `cipher::seal` does to a machine's: HPKE (RFC 9180),
