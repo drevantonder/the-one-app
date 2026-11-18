@@ -95,7 +95,6 @@ defmodule OneCore.Apps.Version.Description do
         version
         | code: code,
           ui: Entrypoint.ui(files),
-          title: version.title || name,
           artifact: artifact,
           trusted: false
       }

@@ -17,7 +17,6 @@ defmodule OneCore.App.Manifest do
   @said [
     tools: [],
     entrypoints: [],
-    title: nil,
     icon: nil,
     widgets: [],
     hooks: [],
@@ -47,7 +46,6 @@ defmodule OneCore.App.Manifest do
     offers: 0,
     jobs: 0,
     schedule: 3,
-    title: 0,
     icon: 0,
     requires: 0,
     own: 0,
@@ -75,7 +73,6 @@ defmodule OneCore.App.Manifest do
                 ]
       @callback jobs() :: [%{tool: String.t(), every: pos_integer}]
       @callback schedule(OneCore.Call.t(), jobs :: [map], fire :: (map -> term)) :: term
-      @callback title() :: String.t()
       @callback icon() :: String.t()
       @callback requires() :: %{String.t() => String.t()}
       @callback own() :: :subject | :installed

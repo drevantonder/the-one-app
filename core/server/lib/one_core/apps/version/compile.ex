@@ -39,7 +39,7 @@ defmodule OneCore.Apps.Version.Compile do
         own: Map.reject(rest, fn {path, _} -> Version.client?(path) end)
       }
 
-      {:ok, %{version | code: Version.code(files), ui: Entrypoint.ui(files), title: version.title || name}, warnings,
+      {:ok, %{version | code: Version.code(files), ui: Entrypoint.ui(files), }, warnings,
        kept}
     end
   end

@@ -70,6 +70,7 @@ defmodule OneCore.Apps.Deploy do
 
         with :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
              :ok <- outputs(version),
+             :ok <- titled(version),
              :ok <- categorized(version),
              :ok <- icon(name, version),
              :ok <- if(install, do: fits(owner, name, version), else: :ok),
@@ -190,6 +191,15 @@ defmodule OneCore.Apps.Deploy do
         {:error, "#{Enum.join(missing, ", ")} don't say what they answer. #{@outputs}"}
     end
   end
+
+  # A person reads an app by its title, never by the name it's installed as.
+  defp titled(%{title: nil}),
+    do:
+      {:error,
+       "Its skill's metadata says no title, its name wherever a person reads it: `title: Hello`, beside its " <>
+         "subtitle and category (the skill building-apps)."}
+
+  defp titled(_version), do: :ok
 
   defp categorized(version) do
     case Version.listing(version).category do

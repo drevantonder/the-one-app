@@ -20,7 +20,6 @@ defmodule OneCore.Apps.Version.Checks do
     %{
       tools: tools,
       entrypoints: entrypoints,
-      title: title,
       icon: icon,
       widgets: widgets,
       exports: exports,
@@ -37,8 +36,8 @@ defmodule OneCore.Apps.Version.Checks do
            "Schema of an object, ui, if a tool has one, is a page of client/, and task_support, if it has one, is " <>
            ":optional or :required"}
 
-      not ((title == nil or is_binary(title)) and (icon == nil or is_binary(icon))) ->
-        {:error, "title/0 gives text, and icon/0 a file's path"}
+      not (icon == nil or is_binary(icon)) ->
+        {:error, "icon/0 gives a file's path"}
 
       not (is_list(entrypoints) and Enum.all?(entrypoints, &entrypoint?(&1, rest))) ->
         {:error,
@@ -50,10 +49,6 @@ defmodule OneCore.Apps.Version.Checks do
         {:error,
          "widgets/0 gives a list of %{tool: ..., sizes: [...]}: one of this app's tools that only reads, and the " <>
            "sizes it comes in, of #{Enum.join(@sizes, ", ")}, and a name of its own only where it isn't its app's title"}
-
-      Version.title(skills) == nil and title == nil and Enum.any?(entrypoints ++ widgets, &(&1[:name] == nil)) ->
-        {:error,
-         "An entrypoint or widget with no name of its own is called its app's title, which its skill's metadata says"}
 
       not (is_list(exports) and Enum.all?(exports, &is_binary/1)) ->
         {:error, "Its module's functions are said as a list of names"}
@@ -84,7 +79,7 @@ defmodule OneCore.Apps.Version.Checks do
       true ->
         tools = Enum.map(tools, &Version.schemas/1)
 
-        title = Version.title(skills) || title || Enum.find_value(entrypoints, & &1[:name])
+        title = Version.title(skills)
         version = version(under, app, tools, entrypoints, widgets, Enum.sort(services), rest, icon, title)
 
         with {:ok, jobs} <- jobs(jobs, tools),
