@@ -80,14 +80,12 @@ addEventListener("pagehide", () => setTheme(null))
 const safeArea = Object.assign(document.createElement("div"), { id: "safe-area" })
 document.body.append(safeArea)
 /// What of that an app's frame reaches, as MCP Apps tell an app (`safeAreaInsets`): its screen keeps clear of it,
-/// and what scrolls in it passes under it. The launcher's frame is kept clear of it, so it's told none.
+/// and what scrolls in it passes under it.
 /** @param {HTMLIFrameElement} frame */
 function insets(frame) {
   const safe = getComputedStyle(safeArea)
-  const style = getComputedStyle(frame)
   const at = frame.getBoundingClientRect()
-  const inside = (/** @type {string} */ edge) => parseFloat(style.getPropertyValue(`padding-${edge}`)) + parseFloat(style.getPropertyValue(`border-${edge}-width`))
-  const reach = (/** @type {string} */ edge, /** @type {number} */ from) => Math.max(0, Math.round(parseFloat(safe.getPropertyValue(`padding-${edge}`)) - from - inside(edge)))
+  const reach = (/** @type {string} */ edge, /** @type {number} */ from) => Math.max(0, Math.round(parseFloat(safe.getPropertyValue(`padding-${edge}`)) - from))
   return { top: reach("top", at.top), right: reach("right", innerWidth - at.right), bottom: reach("bottom", innerHeight - at.bottom), left: reach("left", at.left) }
 }
 /// Each app is told again as the window turns or its frame moves.
