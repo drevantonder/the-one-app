@@ -265,15 +265,42 @@ impl Tree {
 
     /// The semantic tree from `id`, as a screen reader and an agent read it: each node's role, name, value, states
     /// and actions. A plain group with nothing to say is left out, its children in its place, as AccessKit's
-    /// generic containers are, and so is what's `aria-hidden`.
+    /// generic containers are, and so is what's `aria-hidden`. While a modal (`aria-modal`) is shown, it's all that's
+    /// read: what's behind it is inert, as the DOM's is.
     pub fn semantics(&self, id: Id) -> Vec<Value> {
+        let mut path = Vec::new();
+        let held = self.modal(id, &mut path).then_some(path);
+        self.read(id, held.as_deref())
+    }
+
+    /// Whether there's a modal shown in `id`, the last one there putting the way to it, from `id`, in `path`.
+    fn modal(&self, id: Id, path: &mut Vec<Id>) -> bool {
+        let Some(node) = self.nodes.get(&id) else { return false };
+        if node.hidden() || node.str("aria-hidden") == Some("true") {
+            return false;
+        }
+        path.push(id);
+        if node.children.iter().rev().any(|child| self.modal(*child, path)) || node.str("aria-modal") == Some("true") {
+            return true;
+        }
+        path.pop();
+        false
+    }
+
+    /// The semantic tree from `id`, where `held` is the way to the modal shown, which only what's on it is read on.
+    fn read(&self, id: Id, held: Option<&[Id]>) -> Vec<Value> {
         let Some(node) = self.nodes.get(&id) else { return Vec::new() };
         if node.hidden() || node.str("aria-hidden") == Some("true") {
             return Vec::new();
         }
+        let held = match held {
+            Some([at, rest @ ..]) if *at == id => (!rest.is_empty()).then_some(rest),
+            Some(_) => return Vec::new(),
+            None => None,
+        };
         let text = matches!(node.kind, Kind::Text | Kind::RawText);
         let children: Vec<Value> =
-            if text { Vec::new() } else { node.children.iter().flat_map(|child| self.semantics(*child)).collect() };
+            if text { Vec::new() } else { node.children.iter().flat_map(|child| self.read(*child, held)).collect() };
         let role = node.str("role").map(str::to_owned).or_else(|| match node.kind {
             Kind::Text | Kind::RawText => Some("text".into()),
             Kind::Image if node.str("alt").is_some_and(|alt| !alt.is_empty()) => Some("img".into()),
@@ -349,9 +376,17 @@ impl Tree {
         vec![Value::Object(out)]
     }
 
-    /// What's written in `id`, its texts' words one after another: a button's name where it has no `aria-label`.
+    /// What's written in `id`, its texts' words one after another, as ARIA names something from what's in it: what
+    /// isn't read (`aria-hidden`, or not displayed) says nothing, and what's named (`aria-label`) says its name. A
+    /// button's name where it has no `aria-label`.
     fn label(&self, id: Id) -> String {
         let Some(node) = self.nodes.get(&id) else { return String::new() };
+        if node.hidden() || node.str("aria-hidden") == Some("true") {
+            return String::new();
+        }
+        if let Some(name) = node.str("aria-label") {
+            return name.to_owned();
+        }
         match node.kind {
             Kind::Text | Kind::RawText => self.text(id),
             _ => node.children.iter().map(|child| self.label(*child)).filter(|words| !words.is_empty()).collect::<Vec<_>>().join(" "),

@@ -115,6 +115,10 @@ pub struct Screen {
     /// (its host context's `containerDimensions` and `reducedMotion`).
     room: Size<f32>,
     told: Option<(Size<f32>, bool, Edges<f32>)>,
+    /// When what it draws first changed since the frame drawn last, on its clock: what moves as that changed sets off
+    /// then, as CSS's transitions do as a style changes, not when a frame next happens to be drawn, so a clock moved
+    /// on before a frame is drawn (a paused one, stepped) finds it where it's got to.
+    pub(super) changed: Option<f64>,
     asked: Option<Asked>,
     /// What has the keyboard.
     focused: Option<Id>,
@@ -194,6 +198,7 @@ impl Screen {
             insets,
             room,
             told: None,
+            changed: None,
             asked,
             focused: None,
             fields: HashMap::new(),
@@ -254,7 +259,16 @@ impl Screen {
 
     /// Tells the app what the person did to node `id`, and takes what it changed.
     pub fn event(&mut self, id: Id, name: &str, value: Option<String>) {
-        let event = json!({"id": id, "name": name, "value": value});
+        self.tell(id, name, json!({"value": value}));
+    }
+
+    /// Tells the app event `name` on node `id`, with what it says of it (`told`), when it happened on the clock the
+    /// app's own is, as every DOM event has its `timeStamp`, and takes what it changed.
+    pub(super) fn tell(&mut self, id: Id, name: &str, told: Value) {
+        let mut event = json!({"id": id, "name": name, "timeStamp": self.sandbox.clock().now()});
+        if let (Some(event), Value::Object(told)) = (event.as_object_mut(), told) {
+            event.extend(told);
+        }
         if let Err(error) = self.sandbox.send("event", &event) {
             self.threw(error);
         }
@@ -266,12 +280,7 @@ impl Screen {
     pub(crate) fn click(&mut self, id: Id, at: Option<Point<f32>>) {
         let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
         let at = at.unwrap_or(point(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0));
-        let event = json!({"id": id, "name": "click", "clientX": at.x, "clientY": at.y,
-            "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
-        if let Err(error) = self.sandbox.send("event", &event) {
-            self.threw(error);
-        }
-        self.pump();
+        self.tell(id, "click", json!({"clientX": at.x, "clientY": at.y, "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}}));
     }
 
     /// Tells the app a message from its client: an answer to what it asked (`Asked`), or a notification.
@@ -346,7 +355,7 @@ impl Screen {
                         match self.tree.apply([mutation]) {
                             Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = Some(error.to_string()),
                             Err(error) => self.threw(error),
-                            Ok(()) => {}
+                            Ok(()) => self.changed(),
                         }
                     }
                     Posted::Message(message) => {
@@ -419,6 +428,12 @@ impl Screen {
         json!({"top": self.insets.top, "right": self.insets.right, "bottom": self.insets.bottom, "left": self.insets.left})
     }
 
+    /// Notes that what it draws changed now, if nothing had since the frame drawn last.
+    fn changed(&mut self) {
+        let now = self.sandbox.clock().now();
+        self.changed.get_or_insert(now);
+    }
+
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         scene.clear();
@@ -459,6 +474,7 @@ impl Screen {
             wanted: Vec::new(),
             rects: Rects::new(),
             time: now,
+            since: self.changed.take().unwrap_or(now).min(now),
             transitions: &mut self.transitions,
             animating: false,
             fixed: Vec::new(),
@@ -545,6 +561,12 @@ impl Screen {
             self.focus(Some(modal));
             self.again = true;
         }
+        // What moved under a pointer that's still is what it's over now, as a browser finds again after layout.
+        if let Some(at) = self.pointer.filter(|_| !self.touch) {
+            let before = self.states.hovered.clone();
+            self.hover(at);
+            self.again |= self.states.hovered != before;
+        }
         // Where each node that listens for `layout` is, as its layout settles and whenever its size changes.
         let listening: Vec<(Id, Rect)> = self
             .tree
@@ -556,11 +578,7 @@ impl Screen {
             .collect();
         for (id, rect) in listening {
             self.laid_out.insert(id, rect);
-            let event = json!({"id": id, "name": "layout", "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}});
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            self.pump();
+            self.tell(id, "layout", json!({"rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}}));
             self.again = true;
         }
     }
@@ -582,6 +600,11 @@ impl Screen {
             chain.push(parent);
         }
         chain
+    }
+
+    /// What a press on `chain`, from the innermost out, reaches: the first in it that takes one.
+    fn pressed_in(&self, chain: &[Id]) -> Option<Id> {
+        chain.iter().copied().find(|id| self.placed(*id).is_some_and(|placed| placed.pressable))
     }
 
     /// The pointer's shape at `at`: what its style says, or a hand over what's pressed and a beam over an input.
@@ -609,44 +632,50 @@ impl Screen {
 
     /// A pointer event to each node in `chain` that listens for it, the innermost first, as the DOM's bubble.
     fn pointer_event(&mut self, chain: &[Id], name: &str, at: Point<f32>, button: u8, delta: Point<f32>) {
-        let time = self.sandbox.clock().now();
-        for id in chain {
-            if !self.tree.nodes.get(id).is_some_and(|node| node.listens(name)) {
+        for &id in chain {
+            if !self.tree.nodes.get(&id).is_some_and(|node| node.listens(name)) {
                 continue;
             }
-            let rect = self.rects.get(id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
-            let mut event = json!({
-                "id": id, "name": name, "timeStamp": time,
+            let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+            let mut told = json!({
                 "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": if self.touch { "touch" } else { "mouse" }, "button": button,
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
             if name == "wheel" {
-                event["deltaX"] = json!(delta.x);
-                event["deltaY"] = json!(delta.y);
+                told["deltaX"] = json!(delta.x);
+                told["deltaY"] = json!(delta.y);
             }
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            self.pump();
+            self.tell(id, name, told);
         }
     }
 
-    /// The pointer moved to `at`: what it's over is hovered, told as it comes and goes, and a press it holds is told
-    /// it moved.
-    pub fn pointer_moved(&mut self, at: Point<f32>) {
-        self.pointer = Some(at);
+    /// What the pointer at `at` is over is hovered, what it's left and what it's come into told so, as the DOM's
+    /// `pointerleave` and `pointerenter`. → what it's over, the innermost first.
+    fn hover(&mut self, at: Point<f32>) -> Vec<Id> {
         let chain = self.under(at);
         let mut hovered = chain.clone();
         hovered.reverse();
+        if hovered == self.states.hovered {
+            return chain;
+        }
         let left: Vec<Id> = self.states.hovered.iter().copied().filter(|id| !hovered.contains(id)).collect();
         let entered: Vec<Id> = hovered.iter().copied().filter(|id| !self.states.hovered.contains(id)).collect();
         self.states.hovered = hovered;
+        self.changed();
         for id in left.into_iter().rev() {
             self.pointer_event(&[id], "pointerleave", at, 0, point(0.0, 0.0));
         }
         for id in entered {
             self.pointer_event(&[id], "pointerenter", at, 0, point(0.0, 0.0));
         }
+        chain
+    }
+
+    /// The pointer moved to `at`: what it's over is hovered, told as it comes and goes, and a press it holds is told
+    /// it moved.
+    pub fn pointer_moved(&mut self, at: Point<f32>) {
+        self.pointer = Some(at);
+        let chain = self.hover(at);
         let target = match self.captured {
             Some(captured) => self.chain_from(captured),
             None => chain,
@@ -712,7 +741,7 @@ impl Screen {
         if button == 2 {
             return self.pointer_event(&chain, "contextmenu", at, button, point(0.0, 0.0));
         }
-        let pressed = chain.iter().copied().find(|id| self.placed(*id).is_some_and(|placed| placed.pressable));
+        let pressed = self.pressed_in(&chain);
         let input = pressed.filter(|id| self.fields.contains_key(id));
         if button == 1 {
             if let Some(input) = input.filter(|id| self.fields.get(id).is_some_and(|field| !field.secure && !field.readonly)) {
@@ -726,6 +755,7 @@ impl Screen {
             return;
         }
         self.states.pressed = pressed;
+        self.changed();
         self.states.focus_visible = false;
         self.focus(pressed);
         if let Some(input) = input {
@@ -815,11 +845,7 @@ impl Screen {
         }
         let scrolled = *now;
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("scroll")) {
-            let event = json!({"id": id, "name": "scroll", "scrollTop": scrolled.y, "scrollLeft": scrolled.x});
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            self.pump();
+            self.tell(id, "scroll", json!({"scrollTop": scrolled.y, "scrollLeft": scrolled.x}));
         }
         Some(id)
     }
@@ -830,6 +856,7 @@ impl Screen {
         if self.focused == id {
             return;
         }
+        self.changed();
         if let Some(input) = self.focused.filter(|focused| self.fields.contains_key(focused)) {
             self.edit(input, Field::blur);
         }
@@ -868,10 +895,7 @@ impl Screen {
         // A key goes to what has the keyboard and to each node it's in that listens, the innermost first.
         for listener in self.chain_from(id) {
             if self.tree.nodes.get(&listener).is_some_and(|node| node.listens("keydown")) {
-                if let Err(error) = self.sandbox.send("event", &key.event(listener)) {
-                    self.threw(error);
-                }
-                self.pump();
+                self.tell(listener, "keydown", key.told());
             }
         }
         // Escape empties a search field with something typed in it, as a browser's `type="search"` does.
@@ -908,11 +932,7 @@ impl Screen {
         if outcome.action && self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
             let node = &self.tree.nodes[&id];
             let action = node.str("action").unwrap_or(if node.is("multiline") { "newline" } else { "done" }).to_owned();
-            let event = json!({"id": id, "name": "action", "action": action});
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            self.pump();
+            self.tell(id, "action", json!({"action": action}));
         }
     }
 
@@ -994,11 +1014,7 @@ impl Screen {
         self.blink = self.sandbox.clock().now();
         let Some(value) = self.fields.get(&id).map(Field::value).filter(|value| *value != before) else { return };
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
-            let event = json!({"id": id, "name": "input", "editing": value, "value": value.text});
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            self.pump();
+            self.tell(id, "input", json!({"editing": value, "value": value.text}));
         }
     }
 
@@ -1166,6 +1182,8 @@ struct Painter<'a> {
     /// The time on the screen's clock, in milliseconds, for what moves by itself (`animationName`) and what's on its
     /// way somewhere (`transitions`), and whether anything did.
     time: f64,
+    /// When what changed in this frame changed, which what it sets moving sets off from.
+    since: f64,
     transitions: &'a mut transition::Transitions,
     animating: bool,
     /// What's placed in the window, laid out as the root's children, and the window.
@@ -1229,7 +1247,7 @@ impl Painter<'_> {
         let mut computed = style::of(node, state, self.conditions);
         // What's just been added starts from its `entering` state, to move from.
         let entering = (computed.transition.is_some() && self.transitions.entering(id)).then(|| style::of(node, State { entering: true, ..state }, self.conditions));
-        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.conditions.reduced_motion);
+        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();
         let text = match &node.styles {

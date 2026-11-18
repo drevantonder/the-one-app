@@ -168,9 +168,9 @@ impl Transitions {
     }
 
     /// Node `id`'s style as it's drawn at `now` (ms on the screen's clock): each property its transition names on its
-    /// way from where it was, or from `entering`'s value for a node just added, to `computed`'s. `reduced`: the person
-    /// asked for less motion.
-    pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, reduced: bool) {
+    /// way from where it was, or from `entering`'s value for a node just added, to `computed`'s, setting off when it
+    /// changed (`since`). `reduced`: the person asked for less motion.
+    pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, since: f64, reduced: bool) {
         self.drawing.insert(id);
         let Some(transition) = computed.transition.clone() else { return };
         for (property, moves) in PROPERTIES {
@@ -198,15 +198,16 @@ impl Transitions {
                 self.moving.remove(&key);
                 continue;
             }
-            set(computed, property, from);
-            self.moving.insert(key, Moving { from, to, start: now, duration: transition.duration, easing: transition.easing });
+            let moving = Moving { from, to, start: since, duration: transition.duration, easing: transition.easing };
+            set(computed, property, moving.at(now));
+            self.moving.insert(key, moving);
         }
         // Coming in, with less motion: what would have slid or grown in fades in instead.
         let moved_in = entering.is_some_and(|entering| PROPERTIES.iter().any(|(property, moves)| *moves && get(entering, property) != get(computed, property)));
         if reduced && moved_in && !self.moving.contains_key(&(id, "opacity")) {
-            let to = Value::Number(computed.look.opacity);
-            computed.look.opacity = 0.0;
-            self.moving.insert((id, "opacity"), Moving { from: Value::Number(0.0), to, start: now, duration: transition.duration, easing: transition.easing });
+            let moving = Moving { from: Value::Number(0.0), to: Value::Number(computed.look.opacity), start: since, duration: transition.duration, easing: transition.easing };
+            set(computed, "opacity", moving.at(now));
+            self.moving.insert((id, "opacity"), moving);
         }
     }
 

@@ -60,17 +60,34 @@ impl Screen {
                 found
             }
             "tap" => {
-                let target = if request.selects() {
-                    inspect::one(&self.tree, request)?
-                } else {
-                    let (x, y) = request.point().context("say what to tap: a node, by a selector, or a point, x and y")?;
-                    inspect::at(&self.tree, &self.rects, x, y).with_context(|| format!("nothing is drawn at {x}, {y}"))?
+                // As a test clicks: the point, or a node's middle where that reaches it as the pointer finds it
+                // there; the pointer moves there, goes down and comes up, as a mouse's does, so what takes it is what
+                // a person's press would reach. A node whose middle doesn't reach it (scrolled out of sight, or under
+                // something) is pressed itself, as it was asked for by name.
+                let at = match request.selects() {
+                    true => {
+                        let node = inspect::one(&self.tree, request)?;
+                        let at = self.rects.get(&node).map(|rect| rect.centre()).map(|(x, y)| crate::geometry::point(x, y));
+                        let reached = at.map(|at| self.under(at)).unwrap_or_default();
+                        if !reached.contains(&node) && (reached.is_empty() || self.pressed_in(&reached) != self.pressed_in(&self.chain_from(node))) {
+                            let tapped = self.press(node)?;
+                            return Ok(json!({"tapped": tapped, "editing": self.fields.get(&tapped).map(editing::Field::value)}));
+                        }
+                        at.expect("a node reached is drawn")
+                    }
+                    false => {
+                        let (x, y) = request.point().context("say what to tap: a node, by a selector, or a point, x and y")?;
+                        crate::geometry::point(x, y)
+                    }
                 };
-                let tapped = self.press(target)?;
-                // A point in an input puts its caret there, as a click does: `clicks` 2 selects a word, 3 its line.
-                if let Some((x, y)) = request.point().filter(|_| self.fields.contains_key(&tapped)) {
-                    let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u8;
-                    self.press_input(tapped, crate::geometry::point(x, y), clicks, request.bool("shift"));
+                let tapped = self.pressed_in(&self.under(at)).with_context(|| format!("nothing at {}, {} takes a press", at.x, at.y))?;
+                self.pointer_moved(at);
+                self.pointer_down(at, 0, request.bool("shift"));
+                self.pointer_up(at, 0);
+                // A point in an input: `clicks` 2 selects a word there, 3 its line.
+                let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u8;
+                if clicks > 1 && self.fields.contains_key(&tapped) {
+                    self.press_input(tapped, at, clicks, request.bool("shift"));
                 }
                 json!({"tapped": tapped, "editing": self.fields.get(&tapped).map(editing::Field::value)})
             }
@@ -181,7 +198,7 @@ impl Screen {
         if self.settling.is_empty() {
             return;
         }
-        let pending = inspect::pending(&self.unanswered, &self.sandbox.timers(), self.transitions.len());
+        let pending = inspect::pending(&self.unanswered, &self.sandbox.timers(), self.transitions.len(), self.changed.is_some());
         let settled = inspect::settled(&pending, self.sandbox.clock().paused());
         let now = Instant::now();
         let (told, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling).into_iter().partition(|(until, _)| settled || *until <= now);

@@ -65,11 +65,7 @@ impl Screen {
     /// `action`; if not, `next` and `previous` move the keyboard, as a browser's form does.
     pub fn action(&mut self, id: Id, action: &str) {
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
-            let event = json!({"id": id, "name": "action", "action": action});
-            if let Err(error) = self.sandbox.send("event", &event) {
-                self.threw(error);
-            }
-            return self.pump();
+            return self.tell(id, "action", json!({"action": action}));
         }
         let inputs = self.inputs();
         let at = inputs.iter().position(|input| *input == id);

@@ -21,10 +21,12 @@
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the
 //!   `file:line` of the JSX that made it, where its build says, and an input's `editing` state as the host has it.
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
-//! - `tap` (a selector, or a point) → `{tapped, editing}`: presses what's there, as a click or a finger does: an
-//!   input takes the keyboard, and what listens for `click` gets one. A point presses the topmost node under it that
-//!   does either, and in an input puts its caret there; `clicks` 2 selects the word there and 3 its line, and
-//!   `shift` extends the selection.
+//! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
+//!   presses there as a mouse does, so what takes it is what a person's press reaches, as the window drew it (what
+//!   doesn't take the pointer, `pointerEvents: "none"`, and what's clipped away are passed over): an input takes the
+//!   keyboard, its caret there, and what listens for `click` gets one. A node whose middle doesn't reach it, scrolled
+//!   out of sight or under something, is pressed itself. `clicks` 2 selects the word there and 3 its line, and `shift`
+//!   extends the selection.
 //! - `type` (`text`, and a selector but for `text`, or the input with the keyboard) → `{typed, value, editing}`: the
 //!   text typed into it, a character at a time, each an `input` event.
 //! - `ime` (`select`, a `[start, end]` in UTF-16 units, then `preedit`, with its `cursor` in UTF-16 units, or
@@ -42,8 +44,9 @@
 //! - `settle` (`deadline`, ms, 5000 unless given) → `{settled, ms, pending}`: waits until nothing's pending that ends
 //!   by itself, or the deadline, and says what still is: `request`s the app asked its client that aren't answered
 //!   (`method`, `tool`, `ms`), `timer`s (`in`, ms, and `every` for an interval, which never ends by itself so is
-//!   listed but not waited for), and `transition`s on their way (`properties`, how many). While the clock's paused
-//!   only requests are waited for.
+//!   listed but not waited for), `transition`s on their way (`properties`, how many), and a `frame` that's due as
+//!   what it draws changed, which what changed starts moving in. While the clock's paused only requests and frames
+//!   are waited for.
 
 use std::collections::HashMap;
 
@@ -223,21 +226,6 @@ pub fn one(tree: &Tree, request: &Request) -> anyhow::Result<Id> {
     })
 }
 
-/// The topmost node drawn at a point that takes a press: an input, or what listens for `click`, as a pointer's
-/// press reaches it, or the topmost node there if none does.
-pub fn at(tree: &Tree, rects: &Rects, x: f32, y: f32) -> Option<Id> {
-    let under: Vec<Id> = order(tree).into_iter().filter(|id| rects.get(id).is_some_and(|rect| rect.contains(x, y))).collect();
-    let top = *under.last()?;
-    let mut node = Some(top);
-    while let Some(id) = node {
-        if pressable(tree, id) {
-            return Some(id);
-        }
-        node = parent(tree, id).filter(|parent| *parent != 0);
-    }
-    Some(top)
-}
-
 /// Whether a press does something to it: it's an input, or it listens for `click` and isn't disabled.
 pub fn pressable(tree: &Tree, id: Id) -> bool {
     tree.nodes.get(&id).is_some_and(|node| {
@@ -332,8 +320,9 @@ pub struct Asked {
 }
 
 /// What's still pending, as `settle` lists it, from what the app asked and hasn't heard back, its timers
-/// (`Sandbox::timers`, each `{in, every?}`), and how many properties are on their way (`moving`).
-pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize) -> Vec<Value> {
+/// (`Sandbox::timers`, each `{in, every?}`), how many properties are on their way (`moving`), and whether what it draws
+/// changed since the frame drawn last (`changed`), so a frame is due, which what changed starts moving in.
+pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, changed: bool) -> Vec<Value> {
     let mut pending: Vec<Value> = asked
         .values()
         .map(|asked| json!({"kind": "request", "method": asked.method, "tool": asked.tool, "ms": asked.since.elapsed().as_millis() as u64}))
@@ -346,11 +335,14 @@ pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize) 
     if moving > 0 {
         pending.push(json!({"kind": "transition", "properties": moving}));
     }
+    if changed {
+        pending.push(json!({"kind": "frame"}));
+    }
     pending
 }
 
-/// Whether nothing's pending that ends by itself: no request unanswered, and, while the clock runs, no timer but
-/// intervals and nothing on its way.
+/// Whether nothing's pending that ends by itself: no request unanswered, no frame due, and, while the clock runs, no
+/// timer but intervals and nothing on its way.
 pub fn settled(pending: &[Value], paused: bool) -> bool {
     pending.iter().all(|pending| match pending["kind"].as_str() {
         Some("timer") => paused || pending.get("every").is_some_and(|every| !every.is_null()),
@@ -374,8 +366,8 @@ impl Key {
         Ok(Key { key: key.to_owned(), shift: request.bool("shift"), alt: request.bool("alt"), ctrl: request.bool("ctrl"), meta: request.bool("meta") })
     }
 
-    /// The `keydown` event of it, for node `id`.
-    pub fn event(&self, id: Id) -> Value {
-        json!({"id": id, "name": "keydown", "key": self.key, "shiftKey": self.shift, "altKey": self.alt, "ctrlKey": self.ctrl, "metaKey": self.meta})
+    /// What its `keydown` event says of it.
+    pub fn told(&self) -> Value {
+        json!({"key": self.key, "shiftKey": self.shift, "altKey": self.alt, "ctrlKey": self.ctrl, "metaKey": self.meta})
     }
 }
