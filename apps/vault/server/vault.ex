@@ -439,7 +439,7 @@ defmodule Vault do
         description: """
         For an app's code: says which of three states an item switched on for the app that calls this is in, for
         its person to see in the Vault: ready, which shows nothing; busy, with a `message` (Saving…); or
-        action_required, with `message`, why, and `action`, the one thing that fixes it: a tool of the app's, called
+        needs_action, with `message`, why, and `action`, the one thing that fixes it: a tool of the app's, called
         as its person, or a page of its client's.
         """,
         inputs: %{
