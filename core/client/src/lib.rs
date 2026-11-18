@@ -424,11 +424,10 @@ pub fn name() -> String {
 pub fn name() -> String {
     use jni::objects::{JObject, JString};
     let named = || -> jni::errors::Result<String> {
-        let android = ndk_context::android_context();
-        // Tauri's window on Android gives what it runs in to `ndk_context` as it starts.
-        let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }?;
+        let (vm, context) = android_context();
+        let vm = unsafe { jni::JavaVM::from_raw(vm.cast()) }?;
         let mut env = vm.attach_current_thread()?;
-        let activity = unsafe { JObject::from_raw(android.context().cast()) };
+        let context = unsafe { JObject::from_raw(context.cast()) };
         let text = |env: &mut jni::JNIEnv, string: JObject| -> jni::errors::Result<String> {
             if string.is_null() {
                 return Err(jni::errors::Error::NullPtr("nothing was said"));
@@ -437,7 +436,7 @@ pub fn name() -> String {
         };
         let set = (|| {
             let resolver =
-                env.call_method(&activity, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?.l()?;
+                env.call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])?.l()?;
             let setting = env.new_string("device_name")?;
             let get = "(Landroid/content/ContentResolver;Ljava/lang/String;)Ljava/lang/String;";
             let string = env
@@ -460,6 +459,35 @@ pub fn name() -> String {
     };
     named().unwrap_or_else(|_| "An Android phone".to_owned())
 }
+
+/// The app's Java VM and its application's context on Android, for native code that asks Android something through
+/// JNI: what the app's window gives `ndk_context` as it starts, or what the app gave `started_without_window` where it
+/// started for something else first, as a push that wakes it does. Each is valid until the process ends.
+#[cfg(target_os = "android")]
+pub fn android_context() -> (*mut std::ffi::c_void, *mut std::ffi::c_void) {
+    match WITHOUT_WINDOW.get() {
+        Some(&(vm, context)) => (vm as _, context as _),
+        None => {
+            let android = ndk_context::android_context();
+            (android.vm(), android.context())
+        }
+    }
+}
+
+/// Keeps the app's Java VM and its application's context, a global reference, where the app starts without its
+/// window: the window's runtime gives `ndk_context` its own as it starts, once, and refuses to if it was given one
+/// already, so this is kept apart from it.
+///
+/// # Safety
+///
+/// Both must stay valid until the process ends.
+#[cfg(target_os = "android")]
+pub unsafe fn started_without_window(vm: *mut std::ffi::c_void, context: *mut std::ffi::c_void) {
+    let _ = WITHOUT_WINDOW.set((vm as usize, context as usize));
+}
+
+#[cfg(target_os = "android")]
+static WITHOUT_WINDOW: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
 
 /// Why a device isn't in its network now, where it says: its person stopped it where they signed in, its code ended
 /// first, or it was in and was removed since. The app says it on the sign-in page it shows the next code on, told it

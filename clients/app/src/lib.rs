@@ -792,7 +792,7 @@ async fn opens(app: AppHandle) {
         )?;
         #[cfg(desktop)]
         let home = ::client::home()?;
-        Client::open(home, cli::resolvers(), computer_use_client::tools()).await
+        open(home).await
     };
     let client = match opened.await {
         Ok(client) => client,
@@ -803,7 +803,6 @@ async fn opens(app: AppHandle) {
         }
     };
     eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
-    client.service("app");
     // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
     // not the system still has the server to start (`cli::serving::settle`).
     #[cfg(desktop)]
@@ -891,6 +890,64 @@ async fn opens(app: AppHandle) {
     });
     client.watch(true).await;
     follows(app, client).await
+}
+
+/// The app's client, opened once for its process, kept in `home`: by its window as it opens, or before that by a push
+/// that woke it (`wake`), whose client the window then has.
+async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
+    static CLIENT: tokio::sync::OnceCell<Arc<Client>> = tokio::sync::OnceCell::const_new();
+    let open = || async {
+        let client = Client::open(home, cli::resolvers(), computer_use_client::tools()).await?;
+        client.service("app");
+        anyhow::Ok(client)
+    };
+    CLIENT.get_or_try_init(open).await.cloned()
+}
+
+/// Starts the app's client without its window, for Android's messaging service (`Notifications.kt`), which a push that
+/// wakes the phone starts, as a server asks its app something while it isn't running (Notifications' hook `wake`):
+/// it opens the client kept in `home`, the app's folder, as the window would, and says it's watching to each server,
+/// which the one that woke it waits for before it asks. It returns once it has, or couldn't, within the time Android
+/// gives a high-priority message, and the client stays for as long as the app's process does, as it would once its
+/// window was closed. `context` is the app's.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_client_Notifications_wake<'local>(
+    mut env: jni::JNIEnv<'local>,
+    _class: jni::objects::JClass<'local>,
+    context: jni::objects::JObject<'local>,
+    home: jni::objects::JString<'local>,
+) {
+    let started = Instant::now();
+    let mut given = || -> anyhow::Result<std::path::PathBuf> {
+        let application = env.call_method(&context, "getApplicationContext", "()Landroid/content/Context;", &[])?.l()?;
+        // Kept until the process ends, as what it gives native code has to be.
+        let application = env.new_global_ref(application)?;
+        let vm = env.get_java_vm()?.get_java_vm_pointer();
+        unsafe { ::client::started_without_window(vm.cast(), application.as_obj().as_raw().cast()) };
+        std::mem::forget(application);
+        Ok(String::from(env.get_string(&home)?).into())
+    };
+    let home = match given() {
+        Ok(home) => home,
+        Err(error) => return eprintln!("a push couldn't wake the app: {error:#}"),
+    };
+    // Android gives a high-priority message about 10 seconds before it may stop the process.
+    let woken = tauri::async_runtime::block_on(async {
+        let watching = async {
+            let client = open(home).await?;
+            let mut session = client.session();
+            session.wait_for(|session| !matches!(session, Session::Opening)).await?;
+            client.watch(true).await;
+            anyhow::Ok(())
+        };
+        tokio::time::timeout(std::time::Duration::from_secs(9), watching).await
+    });
+    match woken {
+        Ok(Ok(())) => eprintln!("a push woke the app in {} ms", started.elapsed().as_millis()),
+        Ok(Err(error)) => eprintln!("a push couldn't wake the app: {error:#}"),
+        Err(_) => eprintln!("a push didn't wake the app within 9 seconds"),
+    }
 }
 
 /// Has the window follow the client's session as it moves (`Session`). The window's own page draws each state but

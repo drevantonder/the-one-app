@@ -105,6 +105,7 @@ dependencies = [
  "encryption_client",
  "gtk",
  "ico",
+ "jni 0.21.1",
  "libc",
  "muda",
  "notifications_client",
@@ -806,7 +807,6 @@ dependencies = [
  "data-encoding",
  "futures-util",
  "jni 0.21.1",
- "ndk-context",
  "serde_json",
  "tokio",
 ]

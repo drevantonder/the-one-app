@@ -16,4 +16,3 @@ tokio.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 data-encoding = "2"
 jni = "0.21"
-ndk-context = "0.1"

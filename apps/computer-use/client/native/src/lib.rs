@@ -133,14 +133,14 @@ mod android {
     }
 
     /// Runs `run` with the service's class and the app, on this thread attached to the app's Java VM, and gives what
-    /// it threw as an error, with its message. Tauri's window on Android gives what it runs in to `ndk_context` as it
-    /// starts, and the class is loaded by the app's own class loader, as a thread of Rust's has the system's.
+    /// it threw as an error, with its message. The class is loaded by the app's own class loader, as a thread of
+    /// Rust's has the system's.
     fn with<T>(run: impl FnOnce(&mut JNIEnv, &JClass, &JObject) -> jni::errors::Result<T>) -> Result<T> {
         static CLASS: OnceLock<GlobalRef> = OnceLock::new();
-        let android = ndk_context::android_context();
-        let vm = unsafe { JavaVM::from_raw(android.vm().cast()) }?;
+        let (vm, context) = client::android_context();
+        let vm = unsafe { JavaVM::from_raw(vm.cast()) }?;
         let mut env = vm.attach_current_thread()?;
-        let context = unsafe { JObject::from_raw(android.context().cast()) };
+        let context = unsafe { JObject::from_raw(context.cast()) };
         let class = match CLASS.get() {
             Some(class) => class.clone(),
             None => {
