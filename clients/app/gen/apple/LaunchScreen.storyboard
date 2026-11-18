@@ -7,7 +7,7 @@
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
     <scenes>
-        <!--The mark in the middle, as the app's page draws it until home has (clients/app/page)-->
+        <!--The mark in the middle of the whole screen, where the app's page draws it until home has (clients/app/page)-->
         <scene sceneID="s0d-6b-0kx">
             <objects>
                 <viewController id="Y6W-OH-hqX" sceneMemberID="viewController">
@@ -26,8 +26,8 @@
                         <viewLayoutGuide key="safeArea" id="vDu-zF-Fre"/>
                         <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                         <constraints>
-                            <constraint firstItem="mRk-1m-aGe" firstAttribute="centerX" secondItem="vDu-zF-Fre" secondAttribute="centerX" id="mRk-cx-001"/>
-                            <constraint firstItem="mRk-1m-aGe" firstAttribute="centerY" secondItem="vDu-zF-Fre" secondAttribute="centerY" id="mRk-cy-001"/>
+                            <constraint firstItem="mRk-1m-aGe" firstAttribute="centerX" secondItem="5EZ-qb-Rvc" secondAttribute="centerX" id="mRk-cx-001"/>
+                            <constraint firstItem="mRk-1m-aGe" firstAttribute="centerY" secondItem="5EZ-qb-Rvc" secondAttribute="centerY" id="mRk-cy-001"/>
                         </constraints>
                     </view>
                 </viewController>
