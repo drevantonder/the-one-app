@@ -343,7 +343,11 @@ fn show(window: &Window, page: &mut Discarding<Page>) {
 }
 
 /// Puts the launcher away. Given back, the keyboard goes to the app that had it before, as a Mac hides an app.
-fn put_away(window: &Window, page: &mut Discarding<Page>, give_back: bool) {
+fn put_away(
+    window: &Window,
+    page: &mut Discarding<Page>,
+    #[cfg_attr(not(target_os = "macos"), expect(unused_variables))] give_back: bool,
+) {
     window.set_visible(false);
     page.shown(window, false);
     #[cfg(target_os = "macos")]
@@ -355,7 +359,6 @@ fn put_away(window: &Window, page: &mut Discarding<Page>, give_back: bool) {
             let () = objc2::msg_send![application, hide: nothing];
         }
     }
-    let _ = give_back;
 }
 
 /// The page's web view: its own files and its apps', what it asks (`hosts::command`), and the device's own browser for
@@ -440,7 +443,7 @@ impl crate::discard::Page for Page {
 /// The launcher's glass, the system's own material under its page, rounded: a Mac's Liquid Glass where it has it
 /// (macOS 26), and its window vibrancy before that, and Windows' Acrylic. Linux has none, so the page draws its own
 /// (`data-launcher`).
-fn glass(window: &Window) {
+fn glass(#[cfg_attr(target_os = "linux", expect(unused_variables))] window: &Window) {
     #[cfg(target_os = "macos")]
     unsafe {
         use objc2::runtime::{AnyClass, AnyObject};
@@ -485,10 +488,10 @@ fn glass(window: &Window) {
         use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
         let round = DWMWCP_ROUND;
         let window = windows::Win32::Foundation::HWND(window.hwnd() as _);
-        let _ = unsafe { DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&round).cast(), size_of_val(&round) as u32) };
+        if let Err(error) = unsafe { DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&round).cast(), size_of_val(&round) as u32) } {
+            eprintln!("the launcher has square corners: {error}");
+        }
     }
-    #[cfg(target_os = "linux")]
-    let _ = window;
 }
 
 /// A Mac's app comes in front, as a person summoned it.
@@ -540,12 +543,11 @@ fn shortcut(home: &std::path::Path) -> Option<global_hotkey::GlobalHotKeyManager
 
 /// Starts the app again on the build it was just updated to: the app windows that are open open again in it, and the
 /// launcher shows again if it was showing. Each app's window ends with this program's channel.
-fn restart(home: &std::path::Path, shown: bool) {
+fn restart(#[cfg_attr(not(unix), expect(unused_variables))] home: &std::path::Path, shown: bool) {
     let reopen = serde_json::to_string(&hosts::open_now()).unwrap_or_default();
     // The new program serves the channel at the same address.
     #[cfg(unix)]
     let _ = std::fs::remove_file(hosts::address(home));
-    let _ = home;
     // Linux names a program whose file was replaced while it ran `<its path> (deleted)`, and it's the new file that's
     // started.
     let program = std::env::var_os("ONE_PROGRAM").map(std::path::PathBuf::from).map_or_else(std::env::current_exe, Ok).map(|program| {
