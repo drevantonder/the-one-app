@@ -1222,22 +1222,31 @@ function HomeScreen(props: { owners: Owner[] }) {
   const pitch = () => root.clientWidth
   const stops = (owner: number) => untrack(screens)[owner]?.length || 1
   const homeEnd = (owner: number) => Math.max(0, untrack(() => homes(owner).length) - 1) * pitch()
+  /// Moves what moves the pages: none at all where they're where they're laid out, as a transformed box over the
+  /// glass is drawn on a layer of its own.
+  const put = (element: HTMLElement, x: number, y: number) => (element.style.translate = x || y ? `${x}px ${y}px` : "")
   /// The owners, up and down, and where each is across: one way along Home's screenfuls and on to the App Library,
   /// which the owner shown takes the sections past Home along, as the pager moves them.
   const down: Spring = spring((y) => {
-    main.style.translate = `0 ${-y}px`
+    put(main, 0, -y)
     roll(y / height())
     look()
+    layered()
     rested(down)
   })
   const across: Spring[] = []
   const sideways = (owner: number) =>
     (across[owner] ??= spring((x) => {
-      if (tracks[owner]) tracks[owner].style.translate = `${-Math.min(x, homeEnd(owner)) * rtl()}px 0`
-      if (owner === shownOwner()) sections.style.translate = `${-Math.max(0, x - homeEnd(owner)) * rtl()}px 0`
+      if (tracks[owner]) put(tracks[owner], -Math.min(x, homeEnd(owner)) * rtl(), 0)
+      if (owner === shownOwner()) put(sections, -Math.max(0, x - homeEnd(owner)) * rtl(), 0)
       look()
+      layered()
       rested(across[owner])
     }))
+  /// Whether the pages move, under a finger or a spring: only then are what moves them drawn on layers of their own
+  /// (`.moving`, home.css), each a window's worth of the device's memory, which still pages don't keep.
+  const layered = () =>
+    root.classList.toggle("moving", !!swipe?.axis || [down, ...across].some((one) => one && (one.value !== one.target || one.velocity !== 0)))
   /// What's carried, while it's dragged, and what it does once the pages under it come to rest.
   let carried: HTMLElement | undefined
   let settledUnder: (() => void) | undefined

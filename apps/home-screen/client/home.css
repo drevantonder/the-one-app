@@ -30,7 +30,6 @@ body {
   position: absolute;
   inset: 0;
   display: flex;
-  will-change: translate;
 }
 .home-section {
   position: relative;
@@ -42,7 +41,6 @@ body {
 .owners {
   position: absolute;
   inset: 0;
-  will-change: translate;
   touch-action: none;
 }
 .owner {
@@ -59,6 +57,10 @@ body {
 .track {
   display: flex;
   height: 100%;
+}
+/* What moves the pages is drawn on a layer of its own only while they move: a layer is a window's worth of memory, and
+   still pages are drawn with the rest. */
+.home.moving :is(.sections, .owners, .track) {
   will-change: translate;
 }
 .page::-webkit-scrollbar {
