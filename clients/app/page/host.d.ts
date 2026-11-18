@@ -116,7 +116,7 @@ export type Shown =
 
 /** What moves the window (`client.js`). */
 export type Moved =
-  | Extract<Shown, { type: "show" | "popped" }>
+  | Extract<Shown, { type: "show" | "popped" | "grab" | "drag" | "release" }>
   | { type: "session"; told: Told }
   | { type: "connection"; connection: Connection }
   | { type: "listed" }

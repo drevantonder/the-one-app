@@ -266,15 +266,15 @@ function moves(leaving, coming, back, icon) {
 ///         │                                   grab: │       │ release: p → 1 if far or flicked, else → 0,
 ///         │                                  caught │       │ and the window's history follows it
 ///         │                              where p is ▼       │
-///         │   grab [back leads somewhere,      ┌───────────┐
-///         └──────── nothing over the app] ───► │ tracking  │  drag(p): drawn there
-///                                              └───────────┘
+///         │   grab [back leads somewhere: an   ┌───────────┐
+///         │   app at its first screen, with    │ tracking  │  drag(p): drawn there
+///         └──────── nothing over it] ────────► └───────────┘
 ///
 ///     freeze, from any: still, where it was going, which is always where the window's history is.
 ///     show, while tracking: as while playing, the finger keeping it unless it goes somewhere else.
 ///     popped(to), drawn already by the device: still at `to`, with nothing drawn; while playing toward it, nothing.
 ///
-/// Gestures will send `grab`, `drag` and `release`; nothing does yet.
+/// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`).
 /** @typedef {{ from: View, to: View, upper: View, parts: Animation[], p: number, target: number, velocity: number, stiffness: number }} Move */
 /** @param {Move} move */
 const toward = (move) => (move.target === 1 ? move.to : move.from)
@@ -315,7 +315,7 @@ const moveMachine = setup({
     here: ({ event }) => "to" in event && event.to === front,
     there: ({ context, event }) => "to" in event && !!context.move && event.to === toward(context.move),
     returning: ({ context, event }) => "to" in event && !!context.move && event.to === (context.move.target === 1 ? context.move.from : context.move.to),
-    backs: () => depth > 0 && !front?.over,
+    backs: () => depth > 0 && front?.first === true && !front.over,
   },
   actions: {
     // The frame coming is seen and takes taps from the start, over or under the one going, and its page is told
@@ -429,6 +429,8 @@ const pages = (window) => Object.keys(window.getSnapshot()?.children ?? {}).filt
 const loaded = (event) => /** @type {Extract<Moved, { type: "load" }>} */ (event).view
 /** @param {Moved} event */
 const paged = (event) => /** @type {Extract<Moved, { type: "page" }>} */ (event)
+/// A finger taking the window's move, moving it and letting go, while it shows apps.
+const fingers = /** @type {const} */ ({ grab: { actions: "move" }, drag: { actions: "move" }, release: { actions: "move" } })
 const machine = setup({
   types: /** @type {{ context: Context, events: Moved }} */ ({}),
   actors: {
@@ -518,6 +520,7 @@ const machine = setup({
       entry: [assign({ starting: false }), "list", "seen"],
       on: {
         show: { actions: "move" },
+        ...fingers,
         session: [{ guard: "signIn", target: "sign_in", actions: "told" }, { actions: ["told", "list"] }],
         connection: [{ guard: "online", actions: ["connection", "list"] }, { actions: "connection" }],
         listed: { guard: "waiting", actions: [assign({ starting: true }), "start"] },
@@ -533,7 +536,7 @@ const machine = setup({
     launcher: {
       tags: "pages",
       entry: ["listen", "follow", "seen"],
-      on: { show: { actions: "move" }, update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
+      on: { show: { actions: "move" }, ...fingers, update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
     },
     // A launcher installed meanwhile, as by an agent, is listed as its network says something changed.
     no_launcher: {
@@ -544,13 +547,13 @@ const machine = setup({
     app_store: {
       tags: "pages",
       entry: ["openAppStore", "seen"],
-      on: { show: { actions: "move" }, listed: "opening", tooOld: "needs_updating" },
+      on: { show: { actions: "move" }, ...fingers, listed: "opening", tooOld: "needs_updating" },
     },
     // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
     launcher_failed: {
       tags: "pages",
       entry: "seen",
-      on: { show: { actions: "move" }, retry: "opening", drawn: { guard: "launcher", target: "launcher" }, tooOld: "needs_updating" },
+      on: { show: { actions: "move" }, ...fingers, retry: "opening", drawn: { guard: "launcher", target: "launcher" }, tooOld: "needs_updating" },
     },
     // Update Required: Update on a computer, and everywhere, Try Again, as the window comes back on screen, and
     // as its network answers again.
@@ -604,6 +607,8 @@ const page = (view, event) => on({ type: "page", key: view.key, paged: event })
 const pageOf = (view) => /** @type {import("xstate").SnapshotFrom<typeof pageMachine> | undefined} */ (shown.getSnapshot().children[view.key]?.getSnapshot())
 // The window hidden, every page is off screen; shown again, the one in front is on screen.
 document.addEventListener("visibilitychange", () => on({ type: document.hidden ? "away" : "seen" }))
+/// Where the window's move is now.
+const moving = () => /** @type {import("xstate").SnapshotFrom<typeof moveMachine> | undefined} */ (shown.getSnapshot().children.move?.getSnapshot())
 /// Whether an app's page is in front of its person: the window's answer, the one showing while it shows apps, in a
 /// window that's on screen.
 /** @param {View} view @returns {boolean} */
@@ -943,7 +948,9 @@ function layer(at) {
 
 /// Whether the device's own back and forward gestures are on: an iPhone's swipe in from the edge, a trackpad's swipe.
 /// They go through this window's history, so they're off while something is open over the app that's showing, as a
-/// phone's are under a sheet, and its Back or Escape shuts that first.
+/// phone's are under a sheet, and its Back or Escape shuts that first. At an app's first screen a computer's swipe is
+/// the window's own (`wheel`), which takes the app home as its Back does, so the web view's, which would slide a
+/// picture of what's under it, is off there too.
 let swiping = true
 /// Whether back has anything to go back from: an app over the launcher, or something open over the app that's
 /// showing. Where it hasn't, Android shows going home as its back gesture is made (`MainActivity`).
@@ -951,13 +958,86 @@ let swiping = true
 let backs
 function gestures() {
   const view = showing(here())
-  const on = !view?.over
+  const on = !view?.over && (phone || !home())
   if (on !== swiping) invoke("navigation_gestures", { on })
   swiping = on
   const back = !on || (!!view && view.entrypoint !== launcher)
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
 }
+/// Whether back from what's showing takes an app home: it's at its first screen, with nothing open over it.
+const home = () => depth > 0 && front?.first === true && !front.over
+
+/// A trackpad's two-finger swipe sideways, as each frame tells of its wheel (`src/initialization-script.js`), the
+/// way a browser's swipe between pages goes back: at an app's first screen, swiping back takes it home, the move
+/// following the fingers, and as they lift it carries on if it's past halfway or flicked, and otherwise springs
+/// back. Once they've lifted, the wheel moves on by itself only ever slower (momentum), which is left alone; a quicker
+/// move is the fingers again, which catch the move where it is. Up and down is never taken, nor a swipe that scrolls
+/// something of the app's own that way, or one while the app has its own screens to go back to, whose web view's
+/// swipe it is.
+/** @type {{ x: number, y: number, at: number, from: number, p: number, velocity: number, speed: number, slowing: number, began: number, own: boolean, taken?: boolean, lifted?: boolean } | undefined} */
+let swipe
+/// How long the wheel is still before the fingers are taken to have lifted: it says nothing while they're still.
+const LIFTED = 150
+let lifting = 0
+/** @type {unknown} */
+let released
+/** @param {{ x: number, y: number, at: number, own: boolean }} moved */
+function wheel({ x, y, at, own }) {
+  clearTimeout(lifting)
+  lifting = setTimeout(() => {
+    lift()
+    swipe = undefined
+  }, LIFTED)
+  const speed = Math.abs(x) + Math.abs(y)
+  // A move quicker than the one before, by more than a wheel's moves wander, is the fingers'.
+  const quicker = !!swipe && speed > swipe.speed * 1.15
+  if (swipe?.lifted && !quicker) return void Object.assign(swipe, { speed, at })
+  if (!swipe || swipe.lifted) swipe = { x: 0, y: 0, at, from: 0, p: 0, velocity: 0, speed, slowing: 0, began: speed, own: false }
+  // Slowing over several moves, never quicker, from a swipe's speed, is what's left once the fingers lift.
+  if (quicker) Object.assign(swipe, { slowing: 0, began: speed })
+  else swipe.slowing += 1
+  swipe.speed = speed
+  swipe.x += x
+  swipe.y += y
+  swipe.own ||= own
+  const end = getComputedStyle(document.documentElement).direction === "rtl" ? -1 : 1
+  if (swipe.taken === undefined) {
+    // Too little yet to say which way it goes.
+    if (Math.abs(swipe.x) + Math.abs(swipe.y) < 10) return
+    const move = moving()
+    // A move the fingers let go of is caught where it is, as long as it's still going.
+    const caught = !!released && move?.matches("playing") === true && move.context.move === released
+    swipe.taken = false
+    if (Math.abs(swipe.x) <= Math.abs(swipe.y) || swipe.own || !(caught || (swipe.x * end < 0 && home()))) return
+    on({ type: "grab" })
+    swipe.taken = moving()?.matches("tracking") === true
+    swipe.from = swipe.p = move?.context.move?.p ?? 0
+    swipe.at = at
+  }
+  if (!swipe.taken) return
+  if (swipe.slowing >= 6 && swipe.began >= 4 && speed <= swipe.began * 0.8) return lift()
+  const p = swipe.from - (swipe.x * end) / innerWidth
+  const dt = (at - swipe.at) / 1000
+  if (dt > 0) swipe.velocity = 0.6 * ((p - swipe.p) / dt) + 0.4 * swipe.velocity
+  swipe.p = p
+  swipe.at = at
+  on({ type: "drag", p: Math.min(1, Math.max(0, p)) })
+}
+/// The fingers have lifted: a move they took is let go, as fast as it was going.
+function lift() {
+  if (!swipe) return
+  if (swipe.taken) {
+    on({ type: "release", velocity: swipe.velocity })
+    released = moving()?.context.move
+  }
+  swipe.taken = false
+  swipe.lifted = true
+}
+addEventListener("message", ({ data }) => {
+  if (data?.method === "notifications/one/wheel") wheel(data.params)
+})
+
 /// The app that's open as `at`, or with none there, the one under every other: the launcher, or while there's none,
 /// the App Store.
 /** @param {string | null} at */
