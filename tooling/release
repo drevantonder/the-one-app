@@ -256,7 +256,7 @@ for name in "${mine[@]}"; do
       gh run download "${run##*/}" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
       { echo "$name wasn't built on GitHub: gh run view ${run##*/} --log-failed" >&2 && exit 1; }) &
     clients+=($!)
-  elif [[ $name == *windows-* ]]; then
+  elif [[ $name == one/windows-* || $name == one-cli/windows-* ]]; then
     windows+=("$name")
   elif [[ $name == one/* || $name == one-cli/* ]]; then
     client "$name" &
