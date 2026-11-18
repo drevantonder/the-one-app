@@ -74,7 +74,7 @@ defmodule Vault do
   def jobs, do: [%{tool: "expire", every: 3600}]
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", subject: "user", runtime_version: 3}]
+  def entrypoints, do: [%{page: "client/index.html", subject: "user", runtime_version: 4}]
 
   @impl true
   def tools do

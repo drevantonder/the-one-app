@@ -1,8 +1,8 @@
 // A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
-import { children, createContext, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
+import { children, createContext, createEffect, createMemo, createSignal, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
-import { direction, reducedMotion, touch } from "#bridge"
+import { direction, reducedMotion, touch, viewport } from "#bridge"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { Choose } from "./collect.ts"
 import { messages } from "./words.ts"
@@ -91,6 +91,16 @@ const slot = (node: JSX.Element, state: State, to?: number): Slot => {
 /** Whether a row is an option of a listbox, which its list's slot is for it. */
 const InListbox = createContext(false)
 
+/** What a list tells each row in it: whether it's drawn, by the node the row is, as the part of the list it's in comes
+ * near the window and goes from it. */
+type Drawing = Map<unknown, (drawn: boolean) => void>
+const Drawing = createContext<Drawing>()
+
+/** How many rows a list draws or doesn't together, and how tall a row not drawn yet is held, until one is: a row's on
+ * a computer. */
+const CHUNK = 8
+const ROW = 38
+
 /** A listbox: which of its rows is chosen, and what's typed in that drives it. */
 export interface Listbox {
   /** The list's id, which the field's `aria-controls` names. */
@@ -152,9 +162,16 @@ export function createListbox({ onOpen }: { onOpen?: (index: number) => void } =
 /// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
 /// row added to a list that has some opens up where it goes, and one taken out closes up, the rest making room or
 /// closing the gap, at the settle pace; for whoever asked for less motion a new row fades in and one taken out just
-/// goes. A list that changes in any other way (filled, a row changed for another) just shows what it's given.
+/// goes. A list that changes in any other way (filled, a row changed for another) just shows what it's given. A long
+/// list draws only its rows near the window, as React Native's FlatList and UIKit's table views do: 16 at a time, as
+/// they come near it, the rest held at the height they were, or a row's, until they do.
 export function List(props: { listbox?: Listbox; label?: string; children?: JSX.Element }) {
-  const rows = children(() => <InListbox value={!!props.listbox}>{props.children}</InListbox>)
+  const drawing: Drawing = new Map()
+  const rows = children(() => (
+    <Drawing value={drawing}>
+      <InListbox value={!!props.listbox}>{props.children}</InListbox>
+    </Drawing>
+  ))
   const [slots, setSlots] = createSignal<Slot[]>([])
   createEffect(() => slots().filter((one) => one.state() !== "going").length, (count) => void (props.listbox && insides.get(props.listbox)!.rows(count)))
   createEffect(
@@ -168,7 +185,8 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
       // First filled, or some gone and some come (a row changed, another list's rows): a plain swap.
       const plain = !before.length || (gone.length > 0 && come.length > 0)
       const still = reducedMotion()
-      const made: Slot[] = next.map((node) => before.find((one) => one.node === node) ?? slot(node, plain ? "there" : "coming", plain || still ? undefined : 0))
+      const was = new Map(before.map((one) => [one.node, one]))
+      const made: Slot[] = next.map((node) => was.get(node) ?? slot(node, plain ? "there" : "coming", plain || still ? undefined : 0))
       // What's going keeps its place, before the row that followed it, until it's closed up.
       if (!plain && !still)
         for (const one of gone) {
@@ -190,13 +208,30 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
       setTimeout(() => (one.setState("there"), one.setTo(undefined)), settle)
     }
     if (one.state() !== "going") one.height = height
+    tall = height
   }
-  return (
-    <Show when={slots().length}>
-      <Box role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, !touch() && look.flat]}>
-        <Box style={[look.rows, !touch() && look.flatRows]}>
-          <For each={slots()}>
-            {(one, at) => (
+  let tall = ROW
+  /// Each part of the list, by where it starts: drawn as it comes near the window (those that fill it at once), and
+  /// held at its height while it's far from it; the one chosen in a listbox stays drawn.
+  const chunks = createMemo(() => Array.from({ length: Math.ceil(slots().length / CHUNK) }, (_, at) => at * CHUNK))
+  const Chunk = (chunk: { start: number }) => {
+    const mine = () => slots().slice(chunk.start, chunk.start + CHUNK)
+    const [near, setNear] = createSignal(chunk.start < Math.ceil(viewport().height / 32))
+    const chosen = () => !!props.listbox && Math.floor(props.listbox.chosen() / CHUNK) * CHUNK === chunk.start
+    const drawn = () => near() || chosen()
+    createEffect(
+      () => [drawn(), mine()] as const,
+      ([now, ones]) => ones.forEach((one) => drawing.get(one.node)?.(now)),
+    )
+    return (
+      <Box onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && { height: mine().reduce((sum, one) => sum + (one.height ?? tall), 0) }]}>
+        <Show when={drawn()}>
+          <For each={mine()}>{(one, at) => slotted(one, () => chunk.start + at())}</For>
+        </Show>
+      </Box>
+    )
+  }
+  const slotted = (one: Slot, at: () => number) => (
               <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }]}>
                 <Show
                   when={props.listbox}
@@ -216,8 +251,12 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
                   )}
                 </Show>
               </Box>
-            )}
-          </For>
+  )
+  return (
+    <Show when={slots().length}>
+      <Box role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, !touch() && look.flat]}>
+        <Box style={[look.rows, !touch() && look.flatRows]}>
+          <For each={chunks()}>{(start) => <Chunk start={start} />}</For>
         </Box>
       </Box>
     </Show>
@@ -239,7 +278,26 @@ const SHOWN = 88
 /// that would leave the words narrower than a menu goes under them. A ⋯ `Menu` in its `end` opens on a long press or a
 /// right-click on the row too, and its `destructive` item (Delete, Remove) shows as a finger swipes the row toward
 /// its start, as a phone's lists do: pressed, or swiped most of the way, it's done.
-export function Row(props: {
+export function Row(props: RowProps): JSX.Element {
+  // In a list, its part of the list draws it as it comes near the window (`List`); until then, and once it's far from
+  // it again, it's an empty box, made in a moment however long the list. The one open beside the list is always drawn.
+  const drawing = useContext(Drawing)
+  if (!drawing) return <Drawn {...props} />
+  const [drawn, setDrawn] = createSignal(false)
+  // The node it is, as its list has it, by which the list draws it.
+  const [row] = children(() => (
+    <Box>
+      <Show when={drawn() || props.current}>
+        <Drawn {...props} />
+      </Show>
+    </Box>
+  )).toArray()
+  drawing.set(row, setDrawn)
+  onCleanup(() => drawing.delete(row))
+  return row
+}
+
+type RowProps = {
   heading?: JSX.Element
   text?: JSX.Element
   start?: JSX.Element
@@ -248,7 +306,10 @@ export function Row(props: {
   current?: boolean
   control?: JSX.Element
   action?: JSX.Element
-}) {
+}
+
+/// A row, drawn.
+function Drawn(props: RowProps) {
   const [menu, setMenu] = createSignal<Menu>()
   // How far aside the row is, and whether it's on its way somewhere by itself.
   const [swiped, setSwiped] = createSignal(0)

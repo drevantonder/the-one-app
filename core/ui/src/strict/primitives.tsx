@@ -8,7 +8,7 @@ import { tellDrawn } from "../bridge.ts"
 import { layer } from "./layer.ts"
 import type { Ice, Props, TextInputAction, Version1Style } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
-import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
+import type { Intersected, Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
 import { web, type Styles } from "../styles.ts"
 
 /// `<Layer modal>…</Layer>`: what's drawn over the whole window, over the page and every layer before it, as a
@@ -267,6 +267,9 @@ interface Listens extends Semantics {
   onWheel?: (event: Wheeled) => void
   /** Told where it's drawn as it's laid out, and each time that changes, as React Native's `onLayout`. */
   onLayout?: (event: Laid) => void
+  /** Told whether it's near the window, as it's first laid out and each time that changes, as an
+   * `IntersectionObserver` with a `rootMargin` of 50% tells. */
+  onIntersection?: (event: Intersected) => void
   /** Has the keyboard as it's drawn, and again each time it's set. */
   autofocus?: boolean
 }
@@ -287,7 +290,7 @@ const chosen = new Set(["option"])
 /// `option`, …) it's something to press, which the keyboard reaches too; any other `role` and `aria-…` say what it is
 /// to a screen reader and to an agent, as ARIA has them. A page moved by hand listens to its pointers too (`follows`).
 export function Box(props: BoxProps) {
-  const own = omit(props, "style", "children", "autofocus", "onLayout", ...moved)
+  const own = omit(props, "style", "children", "autofocus", "onLayout", "onIntersection", ...moved)
   const moves = movable(props)
   const button = () => !!props.role && pressed.has(props.role) && !!props.onClick
   return (
@@ -324,13 +327,19 @@ export function Scroll(props: ScrollProps) {
   )
 }
 
-/// A box's keyboard and layout: it takes the keyboard each time its `autofocus` is set, and is told where it's drawn
-/// as that changes (`onLayout`).
+/// A box's keyboard and layout: it takes the keyboard each time its `autofocus` is set, is told where it's drawn as
+/// that changes (`onLayout`), and whether it's near the window (`onIntersection`), within half the window of what
+/// shows of it, whatever scrolls it (`scrollMargin`, where the browser has it).
 function watched(element: HTMLElement, props: BoxProps) {
   createEffect(
     () => !!props.autofocus,
     (focus) => void (focus && queueMicrotask(() => element.focus({ preventScroll: false }))),
   )
+  if (props.onIntersection) {
+    const near = new IntersectionObserver((entries) => props.onIntersection?.({ isIntersecting: entries.at(-1)!.isIntersecting }), { rootMargin: "50%", scrollMargin: "50%" } as IntersectionObserverInit)
+    near.observe(element)
+    onCleanup(() => near.disconnect())
+  }
   if (!props.onLayout) return
   // A box moves as well as grows: as it's resized, and as the window is, which moves what's pinned to its foot.
   const report = () => props.onLayout?.({ currentTarget: element })

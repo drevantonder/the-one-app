@@ -63,6 +63,10 @@ export type Keyed = {
 }
 
 /** What a `Scroll` scrolling is told: how far it's scrolled. */
+/** Whether a box is near the window: within half the window's size of what shows of it. */
+export type Intersected = {
+  isIntersecting: boolean
+}
 export type Scrolled = {
   currentTarget: { scrollTop: number; scrollLeft: number }
 }
@@ -86,6 +90,9 @@ export type BoxProps = Semantics & {
   onWheel?: (event: Wheeled) => void
   /** Told where it's drawn as it's laid out, and each time that changes, as React Native's `onLayout`. */
   onLayout?: (event: Laid) => void
+  /** Told whether it's near the window, as it's first laid out and each time that changes, as an
+   * `IntersectionObserver` with a `rootMargin` of 50% tells: what draws only what's near what shows does it by this. */
+  onIntersection?: (event: Intersected) => void
   /** Has the keyboard as it's drawn, and again each time it's set. */
   autofocus?: boolean
   children?: Element

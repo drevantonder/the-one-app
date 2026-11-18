@@ -19,7 +19,7 @@
 /// everywhere else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its
 /// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
 /// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the runtime version it needs:
-/// `%{page: "client/index.html", runtime_version: 3}`. It's written with the UI library alone: its components and the primitives,
+/// `%{page: "client/index.html", runtime_version: 4}`. It's written with the UI library alone: its components and the primitives,
 /// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape), `EditableText` (bare text to
 /// type, which `Input` draws in a field's box) and `Video` (a screen's live video, which `LiveScreen` draws), each styled by
 /// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from

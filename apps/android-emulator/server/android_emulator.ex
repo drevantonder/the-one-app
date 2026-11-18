@@ -55,7 +55,7 @@ defmodule AndroidEmulator do
       %{
         page: "client/index.html",
         subject: "user",
-        runtime_version: 3
+        runtime_version: 4
       }
     ]
 

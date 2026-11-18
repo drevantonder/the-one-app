@@ -22,8 +22,9 @@
 // until it's written on the tables.
 
 /** The runtime version: what the host's side of the renderer is, which a host says it has, an entrypoint names
- * (`runtime_version`), and the tables say they need. 3 made each mutation and event a direct call. */
-export const RUNTIME_VERSION = 3
+ * (`runtime_version`), and the tables say they need. 3 made each mutation and event a direct call, 4 added
+ * `intersection`. */
+export const RUNTIME_VERSION = 4
 
 /** A node, as the host knows it. `0` is the root, which the host makes: an app's window, or its frame. */
 export type Id = number
@@ -108,6 +109,8 @@ export interface Event {
   /** How far a `scroll` has scrolled, in CSS pixels, with `scroll`. */
   scrollTop?: number
   scrollLeft?: number
+  /** `intersection`'s: whether it's near the window now. */
+  isIntersecting?: boolean
   /** When it happened, in milliseconds on the host's own clock, which `requestAnimationFrame` is on too. */
   timeStamp?: number
   /** A pointer's, `contextmenu`'s and `click`'s: where it is in the window, in CSS pixels. */
@@ -148,7 +151,7 @@ export interface Rect {
  * action key is pressed (a keyboard's Enter, or a phone's Done, Go, Next, Search or Send). A host offers them as
  * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
  * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
-export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | Moved | Streamed
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | "intersection" | Moved | Streamed
 
 /** What a `video` tells its page of its stream: `offer`, `state` and `size`. */
 export type Streamed = "offer" | "state" | "size"
@@ -279,6 +282,9 @@ export interface Props {
   onScroll?: true
   /** Told where it's drawn (`rect`) as it's laid out and each time that changes, as React Native's `onLayout`. */
   onLayout?: true
+  /** Told whether it's near the window (within half the window's size of what shows of it, as an
+   * `IntersectionObserver` with a `rootMargin` of 50% says) as it's first laid out and whenever that changes. */
+  onIntersection?: true
   onPointerDown?: true
   onPointerMove?: true
   onPointerUp?: true

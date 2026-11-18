@@ -379,7 +379,7 @@ defmodule OneCore.App do
     Devices counts the devices waiting to sign in as them (`badge: "waiting"`). A Home Screen asks it again whenever
     something changed, so it only reads what the app keeps.
   - An entrypoint may say its `runtime_version`, the runtime version its page needs of a native host
-    (`core/ui/src/strict/renderer.ts`, `runtime_version: 3`): its page is in strict mode (the UI library's skill), so a
+    (`core/ui/src/strict/renderer.ts`, `runtime_version: 4`): its page is in strict mode (the UI library's skill), so a
     native host that has that version draws it itself, and an older host, or a browser, opens it as any other page.
   - An app's settings are in Settings, where it adds a section, or a group in another's page, by the hook
     `settings.sections`, with the component that draws it, as Settings' skill says.
