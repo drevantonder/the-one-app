@@ -59,12 +59,6 @@ defmodule OneCore.Search do
     end
   end
 
-  @doc """
-  Makes the cache of each index `run/6` ranks by, one for each set of tools, the apps running they're from and the
-  build. Whatever calls this owns it.
-  """
-  def keep, do: Cache.new(__MODULE__)
-
   @doc "Lets go of every index, as the apps running change."
   def invalidate, do: Cache.invalidate(__MODULE__)
 

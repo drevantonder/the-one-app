@@ -15,6 +15,8 @@ defmodule OneCore.Application do
     OneCore.Redact.install()
     # What it logs that's a warning or worse is exported with its spans and metrics (`OneCore.Otlp`).
     OneCore.Otlp.start()
+    # What every server caches (`OneCore.Cache`), which this process, the application's, keeps.
+    OneCore.Cache.table()
 
     # A server that couldn't reach the bucket may have missed being told something meanwhile: once it can, it looks again.
     OneCore.Bucket.Fuse.install(&Server.reconnected/0)

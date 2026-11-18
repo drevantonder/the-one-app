@@ -184,8 +184,6 @@ defmodule OneCore.Services do
 
   @impl true
   def init(nil) do
-    Servers.keep()
-
     {:ok, Map.new(here(), &{&1, :starting}), nil,
      for(service <- here(), do: {:next_event, :internal, {:start, service}})}
   end

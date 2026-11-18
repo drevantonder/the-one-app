@@ -246,16 +246,13 @@ defmodule OneCore.Skills do
     end
   end
 
-  @doc """
-  Makes the cache of the skills each set of apps running has, and of their files, which never change, since a
-  version's files are named by their hash (`code`). Whatever calls this owns it.
-  """
-  def keep, do: Cache.new(__MODULE__)
-
   @doc "Lets go of what's kept, as the apps running change."
   def invalidate, do: Cache.invalidate(__MODULE__)
 
-  @doc "A file of the version `code` of the app `artifact`, as `OneCore.Apps.Store.file/3` gives it, read once."
+  @doc """
+  A file of the version `code` of the app `artifact`, as `OneCore.Apps.Store.file/3` gives it, read once: it never
+  changes, since a version's files are named by their hash.
+  """
   def file(artifact, code, path) do
     Cache.fetch(__MODULE__, {:file, artifact, code, path}, fn ->
       case Store.file(artifact, code, path) do

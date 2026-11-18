@@ -231,9 +231,6 @@ defmodule OneCore.Apps.Installed do
     :ok
   end
 
-  @doc "Makes the cache of who's said to keep their own data with an app (`subject/3`), owned by whatever calls it."
-  def keep, do: Cache.new(__MODULE__)
-
   @doc "Whether `name` is one an app is installed by: `:ok`, or `{:error, why}`."
   def named(name) do
     cond do

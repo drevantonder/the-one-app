@@ -265,9 +265,6 @@ defmodule OneCore.Apps do
   @impl true
   def init(nil) do
     Hooks.keep()
-    Installed.keep()
-    Search.keep()
-    Skills.keep()
     {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}, syncs: %{}}, {:continue, :start}}
   end
 

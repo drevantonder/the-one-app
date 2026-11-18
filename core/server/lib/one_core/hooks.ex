@@ -87,11 +87,8 @@ defmodule OneCore.Hooks do
   # Where what each of `cached/0` answered is cached.
   @caches %{"reach" => __MODULE__.Reach, "device" => __MODULE__.Device}
 
-  @doc "Makes where which apps hook into what is kept, and what was decided. Whatever calls this owns them."
-  def keep do
-    :ets.new(__MODULE__, [:named_table, read_concurrency: true])
-    Enum.each(Map.values(@caches), &Cache.new/1)
-  end
+  @doc "Makes where which apps hook into what is kept. Whatever calls this owns it."
+  def keep, do: :ets.new(__MODULE__, [:named_table, read_concurrency: true])
 
   @doc "The hooks whose answers a server caches."
   def cached, do: Map.keys(@caches)

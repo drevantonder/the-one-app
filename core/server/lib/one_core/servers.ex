@@ -469,9 +469,6 @@ defmodule OneCore.Servers do
   @doc "Invalidates everything cached here, so that it's read again when next asked for."
   def invalidate, do: Cache.invalidate(__MODULE__)
 
-  @doc "Makes the cache of what's read. Whatever calls this owns it, and it goes when that ends."
-  def keep, do: Cache.new(__MODULE__)
-
   @doc "What `read` gives for `what`, cached until it's invalidated."
   def cached(what, read), do: Cache.fetch(__MODULE__, what, fn -> {:commit, read.()} end)
 
