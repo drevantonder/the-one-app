@@ -8573,12 +8573,14 @@ dependencies = [
  "gpui_platform",
  "gpui_wgpu",
  "image",
+ "raw-window-handle",
  "rquickjs",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "url",
  "wuff",
+ "x11rb",
 ]
 
 [[package]]

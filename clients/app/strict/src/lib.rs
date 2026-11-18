@@ -12,7 +12,7 @@ mod view;
 pub use {gpui, gpui_platform};
 pub use style::colour;
 pub use view::{Asked, FONT, Screen, add_fonts, bind_keys};
-pub use view::inspected::Reply;
+pub use view::inspected::{Reply, snap};
 
 /// The version of the strict protocol this host speaks. An entrypoint that names another opens in a web view.
 pub const VERSION: u32 = 1;

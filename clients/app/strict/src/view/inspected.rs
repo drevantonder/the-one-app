@@ -205,3 +205,41 @@ impl Screen {
         }
     }
 }
+
+/// The window as drawn, for the inspector's `snap`, read back from the X server, as GPUI reads back only a headless
+/// window's (its own renderer's offscreen frame will take its place). A Wayland window can't be read back by its app.
+pub fn snap(window: &Window) -> anyhow::Result<Value> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let drawable = match HasWindowHandle::window_handle(window).map_err(|error| anyhow::anyhow!("{error}"))?.as_raw() {
+        RawWindowHandle::Xcb(handle) => handle.window.get(),
+        RawWindowHandle::Xlib(handle) => handle.window as u32,
+        _ => bail!("only a window on X11 is snapped yet: this one isn't (run it with WAYLAND_DISPLAY unset)"),
+    };
+    snap_x11(drawable)
+}
+
+#[cfg(target_os = "linux")]
+fn snap_x11(drawable: u32) -> anyhow::Result<Value> {
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat};
+    let (connection, _) = x11rb::connect(None)?;
+    let geometry = connection.get_geometry(drawable)?.reply()?;
+    let (width, height) = (u32::from(geometry.width), u32::from(geometry.height));
+    let image = connection.get_image(ImageFormat::Z_PIXMAP, drawable, 0, 0, geometry.width, geometry.height, !0)?.reply()?;
+    let bytes = (width * height * 4) as usize;
+    if image.data.len() < bytes {
+        bail!("the X server gave {} bytes of a {width}x{height} window, not 32 bits a pixel", image.data.len());
+    }
+    // BGRX, as a 24-bit depth window's pixels are little-endian on every machine this runs on.
+    let rgba: Vec<u8> = image.data[..bytes].chunks_exact(4).flat_map(|pixel| [pixel[2], pixel[1], pixel[0], 255]).collect();
+    let picture = image::RgbaImage::from_raw(width, height, rgba).context("its pixels don't fill it")?;
+    let mut png = Vec::new();
+    picture.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+    let _ = connection.flush();
+    Ok(json!({"png": data_encoding::BASE64.encode(&png), "width": width, "height": height}))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn snap_x11(_: u32) -> anyhow::Result<Value> {
+    bail!("only a window on X11 is snapped yet")
+}

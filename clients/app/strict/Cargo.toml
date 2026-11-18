@@ -9,7 +9,7 @@ license.workspace = true
 # behind and has no headless rendering. `headless` draws a window offscreen to a PNG (`examples/screenshot.rs`), with
 # GPUI's own headless context, which is test support.
 [features]
-headless = ["gpui/test-support", "gpui_platform/test-support", "dep:gpui_wgpu", "dep:image"]
+headless = ["gpui/test-support", "gpui_platform/test-support", "dep:gpui_wgpu"]
 
 [dependencies]
 anyhow.workspace = true
@@ -25,9 +25,13 @@ url = "2"
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which GPUI's text systems read as TTF.
 wuff = "0.2"
 data-encoding = "2"
-image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+# The inspector's `snap`, a PNG.
+image = { version = "0.25", default-features = false, features = ["png"] }
+raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# The inspector's `snap` of a window on X11, read back from the X server: GPUI reads back only a headless window.
+x11rb = "0.13"
 gpui_wgpu = { git = "https://github.com/zed-industries/zed", rev = "1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a", optional = true }
 
 [[example]]

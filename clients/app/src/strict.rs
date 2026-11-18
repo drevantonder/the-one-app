@@ -7,6 +7,10 @@
 //! its client, which an MCP App asks its host (JSON-RPC). What a web view's window page answers itself
 //! (`respond` in page/client.js) is answered here: `ui/initialize`, `ping` and `one/client`'s Colour Mode; the rest
 //! is the client's, as from the app (`request`).
+//!
+//! Each window serves the inspector's protocol (`strict::inspect`) on a socket of its own beside the app's window's
+//! (`socket`), which the app's client offers the network as the Inspector app's tools of this device (`Inspector`), so
+//! an agent anywhere in the network reads and drives a strict window as it would one of its own.
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -36,11 +40,13 @@ enum Asked {
     Start(mpsc::Sender<Value>),
 }
 
-/// What the window hears from the app's window, on its own thread.
+/// What the window hears from the app's window, and from the inspector's clients, on threads of their own.
 enum Heard {
     /// The answer to what the app asked: its JSON-RPC id, and the result or the error.
     Answer(Value, Result<Value, Value>),
     Event(String, Value),
+    /// An inspector's request, and where its answer goes.
+    Inspect(strict::inspect::Request, tokio::sync::oneshot::Sender<Value>),
     Quit,
 }
 
@@ -140,6 +146,10 @@ fn window(
 ) -> anyhow::Result<ExitCode> {
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let (heard_to, heard) = unbounded_channel::<Heard>();
+    let socket = socket(home, std::process::id());
+    if let Err(error) = inspector(&socket, heard_to.clone()) {
+        eprintln!("{entrypoint}'s inspector didn't start: {error:#}");
+    }
     let to = channel(address, entrypoint, subject, link, asked.clone(), heard_to)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
 
@@ -168,7 +178,14 @@ fn window(
 
     // Its name, as the app's window knows it from its shortcut.
     let name = start["name"].as_str().map_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned(), str::to_owned);
-    let state = Arc::new(Mutex::new(State { chosen, trusted: page.trusted, entrypoint: entrypoint.to_owned(), view, next: 0 }));
+    let state = Arc::new(Mutex::new(State {
+        chosen,
+        trusted: page.trusted,
+        entrypoint: entrypoint.to_owned(),
+        subject: subject.map(str::to_owned),
+        view,
+        next: 0,
+    }));
     let (class, to_window) = (class.to_owned(), to.clone());
     let entrypoint_app = entrypoint.split('/').next().unwrap_or_default().to_owned();
     let application = strict::gpui_platform::application();
@@ -212,6 +229,7 @@ fn window(
         });
         hear(heard, handle, state, cx);
     });
+    let _ = std::fs::remove_file(&socket);
     Ok(ExitCode::SUCCESS)
 }
 
@@ -223,6 +241,7 @@ struct State {
     chosen: Option<String>,
     trusted: bool,
     entrypoint: String,
+    subject: Option<String>,
     view: String,
     next: u64,
 }
@@ -334,6 +353,7 @@ fn hear(mut heard: UnboundedReceiver<Heard>, handle: gpui::WindowHandle<strict::
                     "open" => window.activate_window(),
                     _ => {}
                 },
+                Heard::Inspect(request, answer) => inspect(request, answer, &state, window),
                 Heard::Quit => {}
             });
             if quit {
@@ -401,4 +421,172 @@ fn channel(
         let _ = ended.send(Heard::Quit);
     });
     Ok(to)
+}
+
+/// Where window `pid` of the client in `home` serves the inspector: beside the app's window's channel (`hosts`), named
+/// after it.
+fn socket(home: &std::path::Path, pid: u32) -> std::path::PathBuf {
+    let address = crate::hosts::address(home);
+    std::path::PathBuf::from(format!("{}-inspect-{pid}.sock", address.trim_end_matches(".sock")))
+}
+
+/// The inspector sockets of the client in `home`'s strict windows, by each window's process.
+fn sockets(home: &std::path::Path) -> Vec<(u32, std::path::PathBuf)> {
+    let sample = socket(home, 0);
+    let (Some(folder), Some(name)) = (sample.parent(), sample.file_name().and_then(|name| name.to_str())) else { return Vec::new() };
+    let prefix = name.trim_end_matches("0.sock").to_owned();
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    entries
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let pid = path.file_name()?.to_str()?.strip_prefix(&prefix)?.strip_suffix(".sock")?.parse().ok()?;
+            Some((pid, path))
+        })
+        .collect()
+}
+
+/// Serves the inspector's protocol on `socket`, only to this user, each request answered by the window (`inspect`)
+/// on a thread of its own, one connection's in the order asked.
+fn inspector(socket: &std::path::Path, heard: UnboundedSender<Heard>) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::remove_file(socket);
+    let listener = std::os::unix::net::UnixListener::bind(socket)?;
+    std::fs::set_permissions(socket, std::fs::Permissions::from_mode(0o600))?;
+    listener.set_nonblocking(true)?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_io().build()?;
+    std::thread::spawn(move || {
+        runtime.block_on(async move {
+            let Ok(listener) = tokio::net::UnixListener::from_std(listener) else { return };
+            while let Ok((stream, _)) = listener.accept().await {
+                let heard = heard.clone();
+                tokio::spawn(async move {
+                    let (read, mut write) = stream.into_split();
+                    let mut lines = BufReader::new(read).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let answer = match strict::inspect::Request::parse(&line) {
+                            Err(refused) => refused,
+                            Ok(request) => {
+                                let id = request.id.clone();
+                                let (answer_to, answer) = tokio::sync::oneshot::channel();
+                                if heard.send(Heard::Inspect(request, answer_to)).is_err() {
+                                    return;
+                                }
+                                answer.await.unwrap_or_else(|_| strict::inspect::answer(&id, Err(anyhow::anyhow!("the window closed"))))
+                            }
+                        };
+                        if write.write_all(format!("{answer}\n").as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        })
+    });
+    Ok(())
+}
+
+/// Answers an inspector's request once the window has drawn what changed last, as the protocol's rects are where the
+/// last frame put each node: after the frame that's next, and the one after it, since a frame's callbacks run before
+/// it's drawn.
+fn inspect(request: strict::inspect::Request, answer: tokio::sync::oneshot::Sender<Value>, state: &Arc<Mutex<State>>, window: &mut gpui::Window) {
+    let (entrypoint, subject) = {
+        let state = state.lock().expect("nothing panics holding it");
+        (state.entrypoint.clone(), state.subject.clone())
+    };
+    window.refresh();
+    window.on_next_frame(move |window, _| {
+        window.on_next_frame(move |window, cx| {
+            let Some(Some(screen)) = window.root::<strict::Screen>() else { return };
+            if request.op == "snap" {
+                let _ = answer.send(strict::inspect::answer(&request.id, strict::snap(window)));
+                return;
+            }
+            let op = request.op.clone();
+            let reply: strict::Reply = Box::new(move |mut answered: Value| {
+                if op == "window" && answered.get("result").is_some() {
+                    answered["result"]["entrypoint"] = json!(entrypoint);
+                    answered["result"]["subject"] = json!(subject);
+                    answered["result"]["window"] = json!(std::process::id());
+                }
+                let _ = answer.send(answered);
+            });
+            screen.update(cx, |screen, cx| screen.inspect(request, reply, window, cx));
+        });
+    });
+}
+
+/// The Inspector app's tools of this device: its strict windows, each by its process (`window`), through their
+/// sockets (`socket`), as the network asks them of the app's client (`client::DeviceTools`).
+pub struct Inspector(pub std::path::PathBuf);
+
+impl ::client::DeviceTools for Inspector {
+    fn app(&self) -> &'static str {
+        "inspector"
+    }
+
+    fn call<'a>(&'a self, tool: &'a str, arguments: Value) -> std::pin::Pin<Box<dyn Future<Output = anyhow::Result<Value>> + Send + 'a>> {
+        Box::pin(async move {
+            let result = match tool {
+                "windows" => {
+                    let mut windows = Vec::new();
+                    for (pid, path) in sockets(&self.0) {
+                        match ask(&path, json!({"v": strict::inspect::VERSION, "id": 1, "op": "window"})).await {
+                            Ok(window) => windows.push(window),
+                            // Its process ended without taking its socket away.
+                            Err(_) if !std::path::Path::new(&format!("/proc/{pid}")).exists() => drop(std::fs::remove_file(&path)),
+                            Err(_) => {}
+                        }
+                    }
+                    let windows = json!({"device": ::client::name(), "windows": windows});
+                    return Ok(json!({"content": [{"type": "text", "text": windows.to_string()}], "structuredContent": windows}));
+                }
+                _ => {
+                    let mut request = match arguments {
+                        Value::Object(inputs) => inputs,
+                        _ => Default::default(),
+                    };
+                    let open = sockets(&self.0);
+                    let path = match request.remove("window").and_then(|window| window.as_u64()) {
+                        Some(pid) => open.into_iter().find(|(open, _)| u64::from(*open) == pid).map(|(_, path)| path),
+                        None if open.len() == 1 => open.into_iter().next().map(|(_, path)| path),
+                        None => None,
+                    };
+                    let Some(path) = path else {
+                        return Ok(refused("Say which strict window, by the `window` that `windows` lists: none or more than one is open here, or that one isn't."));
+                    };
+                    request.remove("device");
+                    request.insert("v".into(), json!(strict::inspect::VERSION));
+                    request.insert("id".into(), json!(1));
+                    request.insert("op".into(), json!(tool));
+                    ask(&path, Value::Object(request)).await
+                }
+            };
+            Ok(match result {
+                Err(error) => refused(&format!("{error:#}")),
+                Ok(result) if tool == "snap" => json!({
+                    "content": [{"type": "image", "mimeType": "image/png", "data": result["png"]}],
+                    "structuredContent": {"width": result["width"], "height": result["height"]},
+                }),
+                Ok(result) => json!({"content": [{"type": "text", "text": result.to_string()}], "structuredContent": result}),
+            })
+        })
+    }
+}
+
+/// A tool's result that says why it didn't.
+fn refused(why: &str) -> Value {
+    json!({"isError": true, "content": [{"type": "text", "text": why}]})
+}
+
+/// Asks a strict window's inspector one request, on a connection of its own. → its result.
+async fn ask(socket: &std::path::Path, request: Value) -> anyhow::Result<Value> {
+    let stream = tokio::net::UnixStream::connect(socket).await?;
+    let (read, mut write) = stream.into_split();
+    write.write_all(format!("{request}\n").as_bytes()).await?;
+    let line = BufReader::new(read).lines().next_line().await?.ok_or_else(|| anyhow::anyhow!("the window closed"))?;
+    let mut answer: Value = serde_json::from_str(&line)?;
+    match answer.get("error") {
+        Some(error) => anyhow::bail!("{}", error.as_str().unwrap_or_default()),
+        None => Ok(answer["result"].take()),
+    }
 }

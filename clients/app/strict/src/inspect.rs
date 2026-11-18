@@ -23,8 +23,8 @@
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
 //! - `tap` (a selector, or a point) → `{tapped}`: presses what's there, as a click or a finger does: an input takes
 //!   the keyboard, and what listens for `click` gets one. A point presses the topmost node under it that does either.
-//! - `type` (`text`, and a selector, or the input with the keyboard) → `{typed, value}`: the text typed into it, a
-//!   character at a time, each an `input` event.
+//! - `type` (`text`, and a selector but for `text`, or the input with the keyboard) → `{typed, value}`: the text typed
+//!   into it, a character at a time, each an `input` event.
 //! - `key` (`key`, as the DOM's `KeyboardEvent.key` names it: `Enter`, `Escape`, `Tab`, `Backspace`, `a`; and
 //!   `shift`, `alt`, `ctrl`, `meta`) → `{node}`: pressed where the keyboard is. Tab moves it, Enter and Space press
 //!   what has it, and what listens for `keydown` hears it.
@@ -46,6 +46,9 @@ use crate::tree::{Id, Kind, Tree};
 
 /// The inspector protocol's version, which every request names.
 pub const VERSION: u64 = 1;
+
+/// The inputs that select a node.
+const SELECTOR: [&str; 5] = ["node", "role", "name", "text", "key"];
 
 /// A rectangle, in CSS pixels from the window's top left.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -115,9 +118,19 @@ impl Request {
         self.inputs.get(name).and_then(Value::as_bool).unwrap_or(false)
     }
 
+    /// The inputs that select a node: all of `SELECTOR` but for `type`, whose `text` is what's typed.
+    fn selector(&self) -> impl Iterator<Item = &'static str> + '_ {
+        SELECTOR.into_iter().filter(|input| !(self.op == "type" && *input == "text"))
+    }
+
     /// Whether it names a node, by a selector.
     pub fn selects(&self) -> bool {
-        ["node", "role", "name", "text", "key"].iter().any(|input| self.inputs.contains_key(*input))
+        self.selector().any(|input| self.inputs.contains_key(input))
+    }
+
+    /// One of its selector's inputs.
+    fn wants(&self, name: &str) -> Option<&str> {
+        self.selector().any(|input| input == name).then(|| self.str(name)).flatten()
     }
 
     /// The point it names, if it names one.
@@ -175,7 +188,7 @@ pub fn parent(tree: &Tree, id: Id) -> Option<Id> {
 /// The nodes the request's selector matches, in the tree's order.
 pub fn select(tree: &Tree, request: &Request) -> Vec<Id> {
     let described = semantics(tree);
-    let want = |name: &str| request.str(name);
+    let want = |name: &str| request.wants(name);
     let text = want("text").map(str::to_lowercase);
     order(tree)
         .into_iter()

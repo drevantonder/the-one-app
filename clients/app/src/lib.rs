@@ -961,7 +961,12 @@ async fn opens() {
 async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
     static CLIENT: tokio::sync::OnceCell<Arc<Client>> = tokio::sync::OnceCell::const_new();
     let open = || async {
-        let client = Client::open(home, cli::resolvers(), computer_use_client::tools()).await?;
+        #[allow(unused_mut)]
+        let mut tools = computer_use_client::tools();
+        // A strict window's inspector, which is this program's own.
+        #[cfg(all(desktop, target_os = "linux"))]
+        tools.push(Arc::new(strict::Inspector(home.clone())));
+        let client = Client::open(home, cli::resolvers(), tools).await?;
         client.service("app");
         anyhow::Ok(client)
     };
