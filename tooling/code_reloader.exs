@@ -43,15 +43,18 @@ defmodule CodeReloader do
   @impl GenServer
   def handle_call({:serving, server}, _from, %{core: nil} = state) do
     copy(state)
-    handle_call({:serving, server}, nil, %{state | rust: rust(), core: core(), ui: ui(), apps: apps()})
+    rust = rust()
+    handle_call({:serving, server}, nil, %{state | rust: rust, core: core(rust), ui: ui(), apps: apps()})
   end
 
   def handle_call({:serving, server}, _from, state), do: {:reply, :ok, %{state | servers: [server | state.servers]}}
 
   # What failed is the request's answer, and the next request tries again.
   def handle_call({:reload, server}, _from, state) do
-    with {:ok, state} <- built(rust(), state),
-         {:ok, state} <- reloaded(core(), state),
+    rust = rust()
+
+    with {:ok, state} <- built(rust, state),
+         {:ok, state} <- reloaded(core(rust), state),
          {:ok, state} <- ui_built(ui(), state),
          {:ok, state} <- deployed(apps(), server, state) do
       {:reply, :ok, state}
@@ -181,14 +184,12 @@ defmodule CodeReloader do
 
   # What the Rust workspace, One Core's code and the UI library are built from, and what each app is deployed from, by
   # each file's contents: a file's time is only to the second, and hashing them all takes no longer than reading their
-  # times. One Core's is its NIFs too, as they're built.
+  # times. One Core's is its NIFs too, by the Rust they're built from: the NIFs themselves are over 100 MB in a debug
+  # build, more with each build loaded beside the one before, and reading them before every request made each take a
+  # second once a page asked a few at once.
   defp rust, do: hashes(tracked(["*.rs", "*Cargo.toml", "Cargo.lock", ".cargo"]))
 
-  defp core,
-    do:
-      hashes(
-        Path.wildcard(Path.join(@root, "core/server/lib/**/*.ex")) ++ Path.wildcard(Path.join(@build, "priv/native/*"))
-      )
+  defp core(rust), do: {hashes(Path.wildcard(Path.join(@root, "core/server/lib/**/*.ex"))), rust}
 
   defp ui, do: hashes(tracked(["core/ui"]))
 
