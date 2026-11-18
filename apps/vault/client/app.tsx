@@ -6,10 +6,9 @@
 // your agents and each app, switched here. One of a type with a component is drawn by its own app. Deleting one is
 // soft delete's. Security is everything about the key that keeps it. What's missing before the Vault works shows as
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
+// It's written in strict mode (the UI library's skill), so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
-import { Dynamic, render } from "@solidjs/web"
-import "./app.css"
-import { Badge, Button, call, changed, Checkbox, confirm, covers, createListCollection, Empty, Field, go, Input, List, open as opening, Problem, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
+import { Alert, Badge, Box, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Image, Input, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey } from "ui"
 
 /** A field of an item: a secret one has no value here. */
 interface ItemField {
@@ -156,7 +155,8 @@ const label = (name: string) =>
     .join(" ")
 /// A few things in a sentence: "api.github.com and github.com".
 const listed = (things: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(things)
-const sites = (typed: unknown) => String(typed ?? "").split(/[\s,]+/).filter(Boolean)
+/// The websites typed, which are any case: a phone may have started one with a capital.
+const sites = (typed: string) => typed.toLowerCase().split(/[\s,]+/).filter(Boolean)
 /// Where an item a save from a browser made came from: "On Andre's Mac, from console.cloud.google.com".
 const whence = (added: NonNullable<Item["added"]>) => `${added.by ? `On ${added.by}, from` : "From"} ${added.from}`
 /// An item's type, if it's of one, and its name as a person reads it: "Personal", not "Chrome profile: Personal".
@@ -192,57 +192,39 @@ async function act(action: Action, app: string, inputs: Record<string, unknown> 
 }
 /// A type's name as a menu or a heading says it: "Chrome Profile".
 const titled = (name: string) => name.replace(/(^|\s)\S/g, (first) => first.toUpperCase())
-/// A component an app exports (client/package.json), beside the Vault's page, where a client serves each app's.
-const component = (type: ItemType) => import(/* @vite-ignore */ new URL(`../../${type.app}/client/${type.component}.js`, document.baseURI).href)
 
-/// Whether the sidebar is beside the rest, as on a computer, or the first screen, as on a phone.
-const wide = matchMedia("(min-width: 40rem)")
-const [beside, setBeside] = createSignal(wide.matches)
-wide.addEventListener("change", (event) => setBeside(event.matches))
-/// Where you are: what the sidebar picked, All where it's beside the rest, or nothing yet on a phone.
-const [picked, setPicked] = createSignal<Place>()
-const place = () => picked() ?? (beside() ? "all" : undefined)
+/// Where you are, as the sidebar picks it, All until it does; whether it's been tapped into, which on a phone shows
+/// it over the sidebar, a step the device's back goes back from (the outer Split's).
+const [place, setPlace] = createSignal<Place>("all")
+const [entered, setEntered] = createSignal(false)
 /// The item open beside the list, by its name; the sheet open over the page; and the request asked about.
 const [open, setOpen] = createSignal<string>()
 const [sheet, setSheet] = createSignal<Sheet>()
 const [asking, setAsking] = createSignal<Request>()
 const shut = () => setSheet()
 
-/// Goes to a place in the sidebar. On a phone it's tapped into, a step the device's back goes back from.
+/// Goes to a place in the sidebar.
 function enter(to: Place) {
   setOpen()
-  if (beside()) return void setPicked(to)
-  go(() => setPicked(to))
-  history.pushState({ ...history.state, vault: to }, "")
+  setPlace(to)
+  setEntered(true)
 }
-addEventListener("popstate", () => {
-  const to = history.state?.vault as Place | undefined
-  if (!beside() && to !== picked()) go(() => setPicked(to), { back: true })
-})
-const leave = () => history.back()
 
-/// A link to a request, `one:vault#request=<id>`, as a request's own link (`/vault/request?id=`) leads to: its alert,
-/// once the Vault has listed it. It's followed once, and the address forgets it, so the same link is followed again.
-const [linked, setLinked] = createSignal<string>()
-function follow() {
-  const id = new URLSearchParams(location.hash.slice(1)).get("request")
-  if (!id) return
-  history.replaceState(history.state, "", location.pathname + location.search)
-  setLinked(id)
-}
-follow()
-addEventListener("hashchange", follow)
+/// An app's icon, or an item's picture, at the start of its row: its flat tile, as on the Home Screen.
+const tile = { width: 32, height: 32, borderRadius: "md" } as const
 
-/// An item's picture at the start of its row: its app's icon, or its first letter on a colour its name picks.
+/// An item's picture at the start of its row: its app's icon, or its first letter on a colour its name picks, as
+/// Passwords' tiles are.
 function Tile(props: { item: Item }) {
-  const icon = () => typeOf(props.item)?.icon
-  // The golden angle apart for each letter, so names that start alike still differ.
-  const hue = () => Math.round([...shown(props.item)].reduce((sum, letter, at) => sum + letter.codePointAt(0)! * (at + 1) * 137.508, 0) % 360)
-  return (
-    <Show when={icon()} fallback={<span class="tile" style={{ "--hue": hue() }} aria-hidden="true">{shown(props.item).trim()[0]?.toUpperCase() ?? "?"}</span>}>
-      <img class="logo" src={icon()!} alt="" />
-    </Show>
-  )
+  const letter = () => {
+    const name = shown(props.item)
+    // The golden angle apart for each letter, so names that start alike still differ.
+    const hue = Math.round([...name].reduce((sum, letter, at) => sum + letter.codePointAt(0)! * (at + 1) * 137.508, 0) % 360)
+    const first = (name.trim()[0]?.toUpperCase() ?? "?").replace(/[<>&"]/, (character) => `&#${character.codePointAt(0)};`)
+    const drawn = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" style="fill:oklch(0.55 0.13 ${hue})"/><text x="16" y="16" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#fff">${first}</text></svg>`
+    return `data:image/svg+xml,${encodeURIComponent(drawn)}`
+  }
+  return <Image src={typeOf(props.item)?.icon ?? letter()} alt="" style={tile} />
 }
 
 /// Asks a trusted device to let this one hold the key.
@@ -315,7 +297,8 @@ function Readiness() {
 /// The sidebar: the kinds of item, each with how many; Requests while something waits; Security; Recently Deleted.
 function Sidebar() {
   const count = (to: Place) => contents().items.filter((item) => to === "all" || placeOf(item) === to).length
-  const at = (to: Place) => beside() && place() === to
+  // Where the sidebar is the first screen, nothing in it is current (the Split's).
+  const at = (to: Place) => place() === to
   const kinds = (): { to: Place; label: string }[] => [
     { to: "all", label: "All" },
     { to: "passwords", label: "Passwords & Keys" },
@@ -326,13 +309,13 @@ function Sidebar() {
     <Screen heading="Vault">
       <Whose />
       <List>
-        <For each={kinds()}>{(kind) => <Row heading={kind.label} end={<span class="count">{count(kind.to)}</span>} current={at(kind.to)} onClick={() => enter(kind.to)} />}</For>
+        <For each={kinds()}>{(kind) => <Row heading={kind.label} end={<Text style={{ color: "muted-foreground" }}>{count(kind.to)}</Text>} current={at(kind.to)} onClick={() => enter(kind.to)} />}</For>
         <Show when={waiting().length}>
           <Row heading="Requests" end={<Badge variant="destructive" aria-label={`${waiting().length} waiting`}>{waiting().length}</Badge>} current={at("requests")} onClick={() => enter("requests")} />
         </Show>
       </List>
       <List>
-        <Row heading="Security" end={security().readiness !== "ready" ? <span class="dot" aria-label="Needs you" /> : undefined} current={at("security")} onClick={() => enter("security")} />
+        <Row heading="Security" end={security().readiness !== "ready" ? <Box role="img" aria-label="Needs you" style={dot} /> : undefined} current={at("security")} onClick={() => enter("security")} />
         <Row heading="Recently Deleted" onClick={() => opening("soft-delete", { subject: whose() })} />
       </List>
     </Screen>
@@ -341,7 +324,7 @@ function Sidebar() {
 
 /// Which Vault shows, where its person owns more than their own.
 function Whose() {
-  const collection = createMemo(() => createListCollection({ items: owners() }))
+  const collection = createMemo(() => createListCollection({ items: owners().map(({ value, label }) => ({ value, label })) }))
   const pick = ({ value }: { value: string[] }) => {
     setOpen()
     setSheet()
@@ -383,7 +366,7 @@ function Items(props: { place: Place }) {
       onClose={() => setOpen()}
       detail={<Show when={item()} fallback={<Show when={found().length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Detail item={item()} />}</Show>}
     >
-      <Screen heading={headingOf(props.place)} back={!beside()} onBack={leave} action={<Show when={addable()}><Button onClick={add}>Add</Button></Show>}>
+      <Screen heading={headingOf(props.place)} back action={<Show when={addable()}><Button onClick={add}>Add</Button></Show>}>
         <Readiness />
         <Show when={security().servers.length}>
           <Search placeholder="Search" aria-label={`Search ${headingOf(props.place)}`} value={words()} onInput={(event) => setWords(event.currentTarget.value)} />
@@ -414,7 +397,7 @@ function Summary(props: { item: Item }) {
   const type = () => typeOf(props.item)
   const drawn = createMemo(() => {
     const it = type()
-    return it?.trusted && it.component ? component(it).then((module) => module.Summary) : undefined
+    return it?.trusted && it.component ? component(it.app, it.component).then((module) => module.Summary) : undefined
   })
   const plain = () => {
     const it = type()
@@ -425,8 +408,8 @@ function Summary(props: { item: Item }) {
   return (
     <Errored fallback={plain()}>
       <Loading fallback={plain()}>
-        <Show when={drawn()} fallback={plain()}>
-          {(drawn) => <Dynamic component={drawn()} item={shown(props.item)} subject={whose()} />}
+        <Show when={drawn()} keyed fallback={plain()}>
+          {(Drawn) => <Drawn item={shown(props.item)} subject={whose()} />}
         </Show>
       </Loading>
     </Errored>
@@ -462,8 +445,12 @@ function Detail(props: { item: Item }) {
 
 /// An item of a type with a component, drawn by its app's own, in this page, with what the Vault's page may do.
 function Drawn(props: { type: ItemType; item: Item }) {
-  const drawn = createMemo(() => component(props.type).then((module) => module.default))
-  return <Dynamic component={drawn()} item={shown(props.item)} subject={whose()} open={(name: string) => setOpen(props.type.prefix + name)} close={() => setOpen()} />
+  const drawn = createMemo(() => component(props.type.app, props.type.component!).then((module) => module.default))
+  return (
+    <Show when={drawn()} keyed>
+      {(Drawn) => <Drawn item={shown(props.item)} subject={whose()} open={(name: string) => setOpen(props.type.prefix + name)} close={() => setOpen()} />}
+    </Show>
+  )
 }
 
 /// One item: its details, its websites, and who has access, each switched here. Then Delete Item.
@@ -472,14 +459,17 @@ function ItemScreen(props: { item: Item }) {
   // Deleting it is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
   // Access that wouldn't switch is said under the list, and the switch stays as it is stored.
   const [problem, setProblem] = createSignal<{ heading: string; text: Error }>()
-  const switchAccess = async (who: string, title: string, input: HTMLInputElement) => {
-    const on = input.checked
+  // How a switch was switched, until what's stored says so too, or it wouldn't switch and goes back.
+  const [switched, setSwitched] = createSignal<Record<string, boolean>>({})
+  const has = (who: string) => switched()[who] ?? item().access.includes(who)
+  const switchAccess = async (who: string, title: string, on: boolean) => {
+    setSwitched((all) => ({ ...all, [who]: on }))
     setProblem()
     try {
       await call("vault_access", { item: item().name, who, on }, { subject: whose() })
       again()
     } catch (error) {
-      input.checked = !on
+      setSwitched(({ [who]: _, ...rest }) => rest)
       setProblem({ heading: `Couldn't switch ${title} ${on ? "on" : "off"}`, text: error as Error })
     }
   }
@@ -490,25 +480,27 @@ function ItemScreen(props: { item: Item }) {
   return (
     <Screen
       heading={
-        <span class="titled">
+        <Box style={{ flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 }}>
           <Tile item={item()} />
-          {shown(item())}
-        </span>
+          <Text>{shown(item())}</Text>
+        </Box>
       }
       back
     >
       <Show when={item().status}>
         {(status) => (
-          <div class="atop">
-            <Line status={status()} />
+          <Box style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
+              <Line status={status()} />
+            </Box>
             <Fix item={item()} />
-          </div>
+          </Box>
         )}
       </Show>
       <Section heading="Details">
         <List>
           <For each={item().fields}>
-            {(field) => <Row heading={label(field.name)} end={<span class={{ value: true, dots: field.secret }}>{field.secret ? "••••••••" : field.value}</span>} onClick={() => setSheet({ kind: "field", item: item(), field })} />}
+            {(field) => <Row heading={label(field.name)} end={<Text style={field.secret ? { color: "muted-foreground" } : undefined}>{field.secret ? "••••••••" : field.value}</Text>} onClick={() => setSheet({ kind: "field", item: item(), field })} />}
           </For>
           <Show when={item().added}>{(added) => <Row heading="Added by an agent" text={whence(added())} />}</Show>
         </List>
@@ -528,13 +520,13 @@ function ItemScreen(props: { item: Item }) {
           <Row
             heading="Your agents"
             text="Use it, never see it"
-            end={<Switch aria-label="Your agents" checked={item().access.includes("agents")} onChange={(event) => switchAccess("agents", "Your agents", event.currentTarget)} />}
+            end={<Switch aria-label="Your agents" checked={has("agents")} onChange={(event) => switchAccess("agents", "Your agents", event.currentTarget.checked)} />}
           />
           <For each={contents().apps}>
             {(app) => (
               <Row
                 heading={app.title}
-                end={<Switch aria-label={app.title} checked={item().access.includes(app.name)} onChange={(event) => switchAccess(app.name, app.title, event.currentTarget)} />}
+                end={<Switch aria-label={app.title} checked={has(app.name)} onChange={(event) => switchAccess(app.name, app.title, event.currentTarget.checked)} />}
               />
             )}
           </For>
@@ -558,19 +550,31 @@ function FieldSheet() {
     return open?.kind === "field" ? open : undefined
   }
   const [secret, setSecret] = createSignal(true)
-  // Each time it opens, a new field starts secret.
-  createEffect(at, (now) => void (now && setSecret(true)))
-  const save = async (event: SubmitEvent) => {
-    event.preventDefault()
-    const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement)) as Record<string, string>
-    const { item, field } = at()!
-    const name = item?.name ?? typed.item.trim()
-    if (!item && contents().items.some((other) => other.name.toLowerCase() === name.toLowerCase())) return void toast(`There's an item named ${name} already.`)
-    const inputs: Record<string, unknown> = { item: name, field: field?.name ?? typed.field, value: typed.value, secret: field ? field.secret : secret() }
-    if (!item) inputs.hosts = sites(typed.hosts)
+  const [name, setName] = createSignal("")
+  const [field, setField] = createSignal("")
+  const [value, setValue] = createSignal("")
+  const [hosts, setHosts] = createSignal("")
+  // Each time it opens, it starts empty, or with the field's value, and a new field starts secret.
+  createEffect(at, (now) => {
+    if (!now) return
+    setSecret(true)
+    setName("")
+    setField("")
+    setValue(now.field?.value ?? "")
+    setHosts("")
+  })
+  // A field's name is a word of letters, digits and _, as a tool's input names it.
+  const named = () => /^[A-Za-z0-9_]+$/.test(field())
+  const ready = () => !!value() && (!!at()?.item || !!name().trim()) && (!!at()?.field || named())
+  const save = async () => {
+    const { item, field: changing } = at()!
+    const called = item?.name ?? name().trim()
+    if (!item && contents().items.some((other) => other.name.toLowerCase() === called.toLowerCase())) return void toast(`There's an item named ${called} already.`)
+    const inputs: Record<string, unknown> = { item: called, field: changing?.name ?? field(), value: value(), secret: changing ? changing.secret : secret() }
+    if (!item) inputs.hosts = sites(hosts())
     if (!(await does("vault_set", inputs))) return
     shut()
-    if (!item) setOpen(name)
+    if (!item) setOpen(called)
   }
   const remove = async () => {
     const { item, field } = at() as { item: Item; field: ItemField }
@@ -581,35 +585,35 @@ function FieldSheet() {
   return (
     <Sheet heading={at()?.field ? label(at()!.field!.name) : at()?.item ? "Add Field" : "Add Item"} open={!!at()} onClose={shut}>
       <Show when={at()}>
-        <form onSubmit={save}>
-          <Show when={!at()!.item}>
-            <Field label="Name">
-              <Input name="item" placeholder="GitHub" required autofocus />
-            </Field>
-          </Show>
-          <Show when={!at()!.field}>
-            <Field label="Field">
-              <Input name="field" placeholder="token" pattern="[A-Za-z0-9_]+" autocapitalize="none" spellcheck={false} required />
-            </Field>
-          </Show>
-          <Field label={at()!.field ? "New value" : "Value"} hint={hidden() ? "It's encrypted on this device, and never shown again." : undefined}>
-            <Input name="value" type={hidden() ? "password" : "text"} value={at()!.field?.value ?? ""} autocomplete="off" spellcheck={false} required autofocus={!!at()!.item} />
+        <Show when={!at()!.item}>
+          <Field label="Name">
+            <Input placeholder="GitHub" required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} />
           </Field>
-          <Show when={!at()!.field}>
-            <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.currentTarget.checked)} />
-          </Show>
-          <Show when={!at()!.item}>
-            <Field label="Websites" hint="Where its secrets may be sent, like api.github.com.">
-              <Input name="hosts" autocapitalize="none" spellcheck={false} />
-            </Field>
-          </Show>
-          <Button type="submit">Save</Button>
-          <Show when={at()!.field}>
-            <Button variant="ghost" onClick={remove}>
-              Delete Field
-            </Button>
-          </Show>
-        </form>
+        </Show>
+        <Show when={!at()!.field}>
+          <Field label="Field" error={field() && !named() ? "Only letters, digits and _." : undefined}>
+            <Input placeholder="token" required value={field()} onInput={(event) => setField(event.currentTarget.value)} />
+          </Field>
+        </Show>
+        <Field label={at()!.field ? "New value" : "Value"} hint={hidden() ? "It's encrypted on this device, and never shown again." : undefined}>
+          <Input type={hidden() ? "password" : "text"} required autofocus={!!at()!.item} value={value()} onInput={(event) => setValue(event.currentTarget.value)} />
+        </Field>
+        <Show when={!at()!.field}>
+          <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.currentTarget.checked)} />
+        </Show>
+        <Show when={!at()!.item}>
+          <Field label="Websites" hint="Where its secrets may be sent, like api.github.com.">
+            <Input value={hosts()} onInput={(event) => setHosts(event.currentTarget.value)} />
+          </Field>
+        </Show>
+        <Button disabled={!ready()} onClick={save}>
+          Save
+        </Button>
+        <Show when={at()!.field}>
+          <Button variant="ghost" onClick={remove}>
+            Delete Field
+          </Button>
+        </Show>
       </Show>
     </Sheet>
   )
@@ -629,7 +633,7 @@ function AddSheet() {
     <Sheet heading={section() ? `Add ${titled(section()!.replace(/s$/, ""))}` : ""} open={!!section()} onClose={shut}>
       <List>
         <For each={types()} keyed={(type) => type.id}>
-          {(type) => <Row start={<img class="logo" src={type().icon ?? ""} alt="" />} heading={titled(type().name)} onClick={() => (shut(), create(type()))} />}
+          {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={tile} />} heading={titled(type().name)} onClick={() => (shut(), create(type()))} />}
         </For>
       </List>
     </Sheet>
@@ -642,27 +646,28 @@ function CreateSheet() {
     const open = sheet()
     return open?.kind === "create" ? open.type : undefined
   }
+  const [name, setName] = createSignal("")
   const [busy, setBusy] = createSignal(false)
-  const make = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
-    event.preventDefault()
-    const name = String(new FormData(event.currentTarget).get("name")).trim()
+  createEffect(type, (now) => void (now && setName("")))
+  const make = async () => {
     const made = type()!
+    const called = name().trim()
     setBusy(true)
-    const done = await act(made.create!, made.app, { name })
+    const done = await act(made.create!, made.app, { name: called })
     setBusy(false)
     if (done) {
       shut()
-      setOpen(made.prefix + name)
+      setOpen(made.prefix + called)
     }
   }
   return (
     <Sheet heading={type() ? `Add ${titled(type()!.name)}` : ""} open={!!type()} onClose={shut}>
-      <form onSubmit={make}>
-        <Field label="Name">
-          <Input name="name" required autofocus />
-        </Field>
-        <Button type="submit" loading={busy()}>Add</Button>
-      </form>
+      <Field label="Name">
+        <Input required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} />
+      </Field>
+      <Button loading={busy()} disabled={!name().trim()} onClick={make}>
+        Add
+      </Button>
     </Sheet>
   )
 }
@@ -675,7 +680,7 @@ const wanted = (request: Request) => (request.fields.some((field) => field.secre
 /// The requests waiting, each opening its alert again, as iOS keeps a place to answer a prompt later.
 function Requests() {
   return (
-    <Screen heading="Requests" back={!beside()} onBack={leave}>
+    <Screen heading="Requests" back>
       <Show when={waiting().length} fallback={<Empty>Nothing's waiting.</Empty>}>
         <List>
           <For each={waiting()}>{(request) => <Row heading={`${asker(request)} wants ${request.title}`} text={request.why ?? undefined} onClick={() => setAsking(request)} />}</For>
@@ -688,11 +693,8 @@ function Requests() {
 /// A request, as a system's permission prompt asks: "<who> wants to use a key", why, where it's sent, which item, and
 /// Don't Allow or Allow. Only plain items are offered, as a password manager offers logins: one an app keeps (a Chrome
 /// profile) is that app's. The one named as the request is comes first and is chosen, so Allow is one tap; with none,
-/// New Item is, and its fields are typed here. It's the UI library's alert, drawn by the app, since `confirm` asks only
-/// a question.
+/// New Item is, and its fields are typed here. It's the UI library's `Alert`, since `confirm` asks only a question.
 function RequestAlert() {
-  let dialog!: HTMLDialogElement
-  let uncover: (() => void) | undefined
   const request = asking
   const named = (item: Item) => item.name.toLowerCase() === request()!.title.toLowerCase()
   const fits = () =>
@@ -702,19 +704,19 @@ function RequestAlert() {
           .sort((a, b) => Number(named(b)) - Number(named(a)))
       : []
   const [chosen, setChosen] = createSignal<string>()
+  const [typed, setTyped] = createSignal<Record<string, string>>({})
   const [problem, setProblem] = createSignal<string>()
   const [busy, setBusy] = createSignal(false)
   const item = () => chosen() ?? fits()[0]?.name ?? ""
   const options = createMemo(() => createListCollection({ items: [...fits().map((item) => ({ value: item.name, label: item.name })), { value: "", label: "New Item" }] }))
+  // Each request asked about starts with nothing chosen or typed.
   createEffect(
-    () => !!request(),
+    () => request()?.id,
     (now) => {
-      if (now && !dialog.open) {
-        setChosen()
-        setProblem()
-        dialog.showModal()
-        uncover = covers(() => dialog.close())
-      } else if (!now && dialog.open) dialog.close()
+      if (!now) return
+      setChosen()
+      setTyped({})
+      setProblem()
     },
   )
   const answer = async (inputs: object) => {
@@ -723,60 +725,63 @@ function RequestAlert() {
     try {
       await call("vault_answer", { id: request()!.id, ...inputs }, { subject: whose() })
       again()
-      dialog.close()
+      setAsking()
     } catch (error) {
       setProblem((error as Error).message)
     } finally {
       setBusy(false)
     }
   }
-  const allow = (event: SubmitEvent) => {
-    event.preventDefault()
-    const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement))
-    return answer(item() ? { item: item() } : { values: JSON.stringify(Object.fromEntries(request()!.fields.map(({ name }) => [name, typed[name]]))) })
-  }
+  const filled = () => !!item() || request()!.fields.every(({ name }) => typed()[name])
+  const allow = () => answer(item() ? { item: item() } : { values: JSON.stringify(Object.fromEntries(request()!.fields.map(({ name }) => [name, typed()[name]]))) })
   const where = () => {
     const hosts = request()!.hosts
     const sent = hosts.length ? `Sent only to ${listed(hosts)}` : "Sent to no new website"
     return request()!.app ? `${sent}.` : `${sent}, and ${request()!.by ?? "the agent"} never sees it.`
   }
   return (
-    <dialog ref={dialog} class="ui-dialog alert request" role="alertdialog" aria-labelledby="request-heading" onClose={() => (uncover?.(), setAsking())}>
+    <Alert
+      heading={request() ? `${asker(request()!)} wants to use ${wanted(request()!)}` : ""}
+      text={request() ? `${request()!.why ? `${request()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}${where()}` : undefined}
+      open={!!request()}
+      onClose={() => setAsking()}
+      action={
+        <>
+          <Button variant="outline" disabled={busy()} onClick={() => answer({ decline: true })}>
+            Don't Allow
+          </Button>
+          <Button loading={busy()} disabled={!request() || !filled()} onClick={allow}>
+            Allow
+          </Button>
+        </>
+      }
+    >
       <Show when={request()}>
-        <form class="panel" onSubmit={allow}>
-          <h2 id="request-heading">{`${asker(request()!)} wants to use ${wanted(request()!)}`}</h2>
-          <p>
-            {request()!.why ? `${request()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
-            {where()}
-          </p>
-          <Field label={request()!.title}>
-            <Select.Root collection={options()} value={[item()]} onValueChange={({ value }: { value: string[] }) => setChosen(value[0] ?? "")} />
-          </Field>
-          <Show when={!item()}>
-            <For each={request()!.fields}>
-              {(field, at) => (
-                <Field label={label(field.name)}>
-                  <Input name={field.name} type={field.secret === false ? "text" : "password"} autocomplete={field.secret === false ? "off" : "new-password"} spellcheck={false} required autofocus={at() === 0} />
-                </Field>
-              )}
-            </For>
-          </Show>
-          <Show when={problem()}>
-            <p class="problem" role="alert">
-              {problem()}
-            </p>
-          </Show>
-          <footer>
-            <Button variant="outline" type="button" disabled={busy()} onClick={() => answer({ decline: true })}>
-              Don't Allow
-            </Button>
-            <Button type="submit" loading={busy()}>
-              Allow
-            </Button>
-          </footer>
-        </form>
+        <Field label={request()!.title}>
+          <Select.Root collection={options()} value={[item()]} onValueChange={({ value }) => setChosen(value[0] ?? "")} />
+        </Field>
+        <Show when={!item()}>
+          <For each={request()!.fields}>
+            {(field, at) => (
+              <Field label={label(field.name)}>
+                <Input
+                  type={field.secret === false ? "text" : "password"}
+                  required
+                  autofocus={at() === 0}
+                  value={typed()[field.name] ?? ""}
+                  onInput={(event) => setTyped((all) => ({ ...all, [field.name]: event.currentTarget.value }))}
+                />
+              </Field>
+            )}
+          </For>
+        </Show>
+        <Show when={problem()}>
+          <Text role="alert" style={{ color: "destructive" }}>
+            {problem()}
+          </Text>
+        </Show>
       </Show>
-    </dialog>
+    </Alert>
   )
 }
 
@@ -790,7 +795,7 @@ function SecurityScreen() {
     return does("vault_grant", { servers: on ? [...servers, server] : servers })
   }
   return (
-    <Screen heading="Security" back={!beside()} onBack={leave}>
+    <Screen heading="Security" back>
       <Readiness />
       <Show when={security().readiness !== "not_set_up"}>
         <Section heading="Trusted Devices">
@@ -835,7 +840,7 @@ function SecurityScreen() {
           </Section>
         </Show>
         <Section heading="Servers">
-          <p class="about">{`A server that can open ${whom()} Vault runs what uses its secrets.${security().holds ? "" : " Choosing them takes a trusted device."}`}</p>
+          <Text style={{ color: "muted-foreground" }}>{`A server that can open ${whom()} Vault runs what uses its secrets.${security().holds ? "" : " Choosing them takes a trusted device."}`}</Text>
           <List>
             <For each={security().may}>
               {(server) => (
@@ -853,16 +858,19 @@ function SecurityScreen() {
   )
 }
 
+/// A dot that says something needs its person.
+const dot = { width: 8, height: 8, flexShrink: 0, borderRadius: "full", backgroundColor: "warning" } as const
+
 /// What its app says an item is in, in a row's grey line or atop its screen: a spinner and what's under way, or a
 /// dot and why. Ready is nothing: fine is silent.
 function Line(props: { status: Status }) {
   return (
-    <span class="state">
-      <Show when={props.status.state === "busy"} fallback={<span class="dot" aria-hidden="true" />}>
+    <Box style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Show when={props.status.state === "busy"} fallback={<Box aria-hidden="true" style={dot} />}>
         <Spinner />
       </Show>
-      <span class="message">{props.status.message}</span>
-    </span>
+      <Text style={{ flexShrink: 1, minWidth: 0 }}>{props.status.message}</Text>
+    </Box>
   )
 }
 
@@ -887,6 +895,13 @@ function Fix(props: { item: Item }) {
 const fixable = (item: Item) => item.status?.state === "needs_action" && !!item.status.action
 
 function Vault() {
+  // A link to a request, `one:vault#request=<id>`, as a request's own link (`/vault/request?id=`) leads to: its alert,
+  // once the Vault has listed it.
+  const [linked, setLinked] = createSignal<string>()
+  createEffect(link, (to) => {
+    const id = to && /(?:^|&)request=([^&]*)/.exec(to)?.[1]
+    if (id) setLinked(decodeURIComponent(id))
+  })
   createEffect(
     () => linked() && waiting().find(({ id }) => id === linked()),
     (request) => {
@@ -896,13 +911,15 @@ function Vault() {
       else toast("That request isn't waiting any more.")
     },
   )
+  // The sidebar, then what it picked: on a phone one at a time, the sidebar first, as Passwords on iPhone; on a
+  // computer side by side, what it picked splitting the rest into the list and the item where there's room (Items'
+  // Split), so three columns, or two where it's narrow.
   return (
     <>
-      <div class="vault" data-place={place() ? "" : undefined}>
-        <nav class="sidebar" aria-label="Vault">
-          <Sidebar />
-        </nav>
-        <div class="content">
+      <Split
+        open={entered()}
+        onClose={() => setEntered(false)}
+        detail={
           <Choose>
             <Match when={place() === "security"}>
               <SecurityScreen />
@@ -916,8 +933,10 @@ function Vault() {
               </Show>
             </Match>
           </Choose>
-        </div>
-      </div>
+        }
+      >
+        <Sidebar />
+      </Split>
       <FieldSheet />
       <CreateSheet />
       <AddSheet />
@@ -926,13 +945,10 @@ function Vault() {
   )
 }
 
-render(
-  () => (
-    <Errored fallback={(error) => <Problem heading="Can't show your Vault" text={error() as Error} />}>
-      <Loading fallback={<Skeleton rows={4} />}>
-        <Vault />
-      </Loading>
-    </Errored>
-  ),
-  document.body,
-)
+render(() => (
+  <Errored fallback={(error) => <Problem heading="Can't show your Vault" text={error() as Error} />}>
+    <Loading fallback={<Skeleton rows={4} />}>
+      <Vault />
+    </Loading>
+  </Errored>
+))
