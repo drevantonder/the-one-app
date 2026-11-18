@@ -82,9 +82,9 @@ class MainActivity : TauriActivity() {
         behind = message.data == "true"
         gate?.pass()
       }
-      // Where the rail's handle is on the window's right edge (`rail` in client.js), in the page's pixels, which
-      // Android's back gesture leaves to it, so a finger there takes the handle; the rest of the edge is still back.
-      // Android leaves an app at most 200 dp of each edge, which the handle is shorter than.
+      // Where the rail's line is on the window's right edge (`rail` in client.js), in the page's pixels, which
+      // Android's back gesture leaves to it, so a finger there pulls the line; the rest of the edge is still back.
+      // Android leaves an app at most 200 dp of each edge, which the line is shorter than.
       WebViewCompat.addWebMessageListener(webView, "androidEdge", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
         val scale = resources.displayMetrics.density
         val at = message.data.orEmpty().split(",").mapNotNull { it.toFloatOrNull()?.times(scale)?.toInt() }

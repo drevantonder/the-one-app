@@ -105,14 +105,15 @@ export interface Context {
 
 /** What moves the window's move between its launcher and its apps (`client.js`'s `moveMachine`): an app to show,
  * coming back or going on, and the icon it comes out of or goes back into; one the device has already drawn the move
- * to; the spring at rest; the window covering every app; and a finger taking the move, moving it and letting go, at
- * `velocity`, in moves a second, and `end`, where it ends when the device's gesture decided that itself. */
+ * to; the spring at rest; the window covering every app; and a finger taking the move, back or with `home` all the
+ * way to the Home Screen (the rail's line), moving it and letting go, at `velocity`, in moves a second, and `end`,
+ * where it ends when the gesture decided that itself. */
 export type Shown =
   | { type: "show"; to: View; back: boolean; icon?: Rect; tapped: number }
   | { type: "popped"; to: View; tapped: number }
   | { type: "settled" }
   | { type: "freeze" }
-  | { type: "grab" }
+  | { type: "grab"; home?: boolean }
   | { type: "drag"; p: number }
   | { type: "release"; velocity: number; end?: 0 | 1 }
 
@@ -233,7 +234,7 @@ declare global {
   var androidHaptic: { postMessage(message: string): void } | undefined
   /** Where Android's app opens its own Settings page, `accessibility` or `app` (`MainActivity`). */
   var androidSettings: { postMessage(message: string): void } | undefined
-  /** Where Android's app hears where the rail's handle is, `left,top,right,bottom` in the page's pixels, or "" while
+  /** Where Android's app hears where the rail's line is, `left,top,right,bottom` in the page's pixels, or "" while
    * it's not there, which its back gesture leaves to it (`MainActivity`). */
   var androidEdge: { postMessage(message: string): void } | undefined
   /** Where Android's app puts an app on the device's home screen, its shortcut as JSON (`MainActivity`). */

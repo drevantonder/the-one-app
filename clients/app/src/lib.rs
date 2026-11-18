@@ -493,37 +493,43 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
     views.client.report(json!({"name": "one.client.open.duration", "value": ms, "attributes": {"one.view": view}}));
 }
 
-/// Turns the device's own back and forward gestures on, or off: an iPhone's swipe in from the edge, which follows the
-/// finger as a pop does, a Mac's two-finger swipe, and a Linux touchpad's. They go back and forward through the window's
-/// history, as its Back buttons do, and its page has them off while something is open over the app that's showing,
-/// which they'd go back behind, and at an app's first screen, where the swipe takes the app home (`home`): an
-/// iPhone's swipe in from the edge there is the window's own (`edge`), and a computer's is its page's. A web view has
-/// them off unless it's asked; Android's has none, and its back is `MainActivity`'s.
+/// Turns the device's own back and forward gestures on, or off: an iPhone's swipe in from the left edge, a Mac's
+/// two-finger swipe, and a Linux touchpad's. They go back and forward through the window's history, as its Back buttons
+/// do, and its page has them off while something is open over the app that's showing, which they'd go back behind, and
+/// at an app's first screen, where the swipe takes the app home (`home`), which a computer's page does itself. An
+/// iPhone's is always the window's own (`edge`): WebKit's would go forward from the right edge too, where the rail's
+/// line is. A web view has them off unless it's asked; Android's has none, and its back is `MainActivity`'s.
 #[tauri::command]
 fn navigation_gestures(window: tauri::WebviewWindow, on: bool, home: bool) -> Result<(), String> {
     #[cfg(target_os = "ios")]
-    edge::take(home);
+    {
+        let _ = window;
+        edge::take(on || home);
+        Ok(())
+    }
     #[cfg(not(target_os = "ios"))]
-    let _ = home;
-    window
-        .with_webview(move |webview| {
-            // It's the window's WKWebView, which Tauri hands over on the main thread, where it's used.
-            #[cfg(target_vendor = "apple")]
-            unsafe {
-                let view = &*webview.inner().cast::<objc2::runtime::AnyObject>();
-                let () = objc2::msg_send![view, setAllowsBackForwardNavigationGestures: on];
-            }
-            #[cfg(target_os = "linux")]
-            {
-                use webkit2gtk::{SettingsExt, WebViewExt};
-                if let Some(settings) = webview.inner().settings() {
-                    settings.set_enable_back_forward_navigation_gestures(on)
+    {
+        let _ = home;
+        window
+            .with_webview(move |webview| {
+                // It's the window's WKWebView, which Tauri hands over on the main thread, where it's used.
+                #[cfg(target_os = "macos")]
+                unsafe {
+                    let view = &*webview.inner().cast::<objc2::runtime::AnyObject>();
+                    let () = objc2::msg_send![view, setAllowsBackForwardNavigationGestures: on];
                 }
-            }
-            #[cfg(any(windows, target_os = "android"))]
-            let _ = (webview, on);
-        })
-        .map_err(|error| error.to_string())
+                #[cfg(target_os = "linux")]
+                {
+                    use webkit2gtk::{SettingsExt, WebViewExt};
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_enable_back_forward_navigation_gestures(on)
+                    }
+                }
+                #[cfg(any(windows, target_os = "android"))]
+                let _ = (webview, on);
+            })
+            .map_err(|error| error.to_string())
+    }
 }
 
 /// Shows or hides an iPhone's status bar, as the app that's showing asks: its Home Screen hides it while it's edited, as
@@ -646,11 +652,10 @@ mod status_bar {
     }
 }
 
-/// An iPhone's swipe in from the left edge, at an app's first screen, takes it home as its Back does: the page's move
+/// An iPhone's swipe in from the left edge goes back as its Back does: at an app's first screen, the page's move home
 /// follows the finger as far across the window as it's come (`grab`, `drag` and `release` in client.js), as a pop
-/// does, and let go, it carries on if it's past halfway or flicked, and otherwise springs back. It's on only where the
-/// page says the swipe takes an app home (`navigation_gestures`); deeper in an app, the web view's own swipe goes back
-/// through the app's screens.
+/// does, and let go, it carries on if it's past halfway or flicked, and otherwise springs back; deeper in, let go far
+/// enough, it goes back a screen. It's on wherever the page says back has somewhere to go (`navigation_gestures`).
 #[cfg(target_os = "ios")]
 mod edge {
     use std::cell::OnceCell;

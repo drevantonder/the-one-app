@@ -33,10 +33,10 @@ An app's own words are defined in that app's `SKILL.md`.
   get one for having accounts.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
-- **Rail**: what's above every app, its way back to the Home Screen and over to the apps used lately on the device.
-  On a wide window it's a thin sidebar on the left, always there, as Teams', Slack's and Discord's app rails are;
-  elsewhere it's a handle on the right edge, always there too, that a finger brings it in from as a panel, as
-  Samsung's Edge panels are.
+- **Rail**: what's above every app, its way back to the Home Screen. On a wide window it's a thin sidebar on the left,
+  always there, with the apps used lately on the device, as Teams', Slack's and Discord's app rails are; on a phone,
+  or a tablet held upright, it's a home line on the right edge over an app, iOS's home indicator on its side, which a
+  finger pulls in to go home.
 - **App window**: on a computer (Mac, Windows, Linux), an app open in a window of its own, in a process of its own,
   which the system lists as that app: its own name and icon in the Dock or taskbar, in Cmd-Tab or Alt-Tab, and on a
   Mac its own menu bar, as Safari's web apps are. It asks the network through the app's window, which keeps the Home
