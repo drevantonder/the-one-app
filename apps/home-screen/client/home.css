@@ -216,25 +216,6 @@ body {
   text-align: center;
 }
 
-/* What scrolls under the status bar and the top row softens into the background there, as iOS 26's scroll edge
-   does, a little past the row, so nothing under the clock or the row is read through it. It's at the top of a page
-   that scrolls, staying there, and takes no room. */
-.page.scrolls::before {
-  content: "";
-  position: sticky;
-  z-index: 1;
-  top: 0;
-  display: block;
-  height: calc(var(--safe-top, 0px) + var(--top-row) + 1rem);
-  margin: 0 calc(-1 * var(--page-inline, 0px)) calc(-1 * (var(--safe-top, 0px) + var(--top-row) + 1rem));
-  background: linear-gradient(var(--background) var(--safe-top, 0px), color-mix(in oklab, var(--background) 85%, transparent) calc(100% - 1.5rem), transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  -webkit-mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
-  mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
-  pointer-events: none;
-}
-
 /* The App Library's search, in the top row as the owner pill is on Home, as tall and in the same glass, and staying
    there as what's under it scrolls. */
 .library .shelf > .ui-search:first-child {

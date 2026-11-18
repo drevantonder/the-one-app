@@ -225,8 +225,8 @@
 /* As an app of its own, its screens start under the status bar and a top row, drawn as the Home Screen's is: Back at
    the row's start, round, in Liquid Glass, where it goes back a screen, or on the first, closes the App Store; the
    Marketplace's search in the row beside it, with no title; and a screen's name small in its middle (an app's page
-   fades its name in once the big one has scrolled away, above). What scrolls under the clock and the row softens into
-   the background there, as iOS 26's scroll edge does. Its controls are a computer's own size under a pointer and a
+   fades its name in once the big one has scrolled away, above). What scrolls under the clock and the row goes under
+   them with nothing laid over it, as under iOS 26's. Its controls are a computer's own size under a pointer and a
    fingertip under a finger, as the Home Screen's are. */
 .app-store {
   --bar: 2rem;
@@ -235,21 +235,6 @@
   --glass: color-mix(in oklab, var(--popover) 66%, transparent);
   --rim: inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent), inset 0 1px 0 color-mix(in oklab, white 30%, transparent);
 
-  &::before {
-    content: "";
-    position: sticky;
-    z-index: 1;
-    top: 0;
-    display: block;
-    height: calc(var(--top-bar) + 1rem);
-    margin-bottom: calc(-1 * (var(--top-bar) + 1rem));
-    background: linear-gradient(var(--background) var(--safe-top, 0px), color-mix(in oklab, var(--background) 85%, transparent) calc(100% - 1.5rem), transparent);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
-    -webkit-mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
-    mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
-    pointer-events: none;
-  }
   .ui-screen > header {
     min-height: 0;
     height: 0;
